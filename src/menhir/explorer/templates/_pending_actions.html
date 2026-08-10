@@ -1,0 +1,28 @@
+{% if pending_actions %}
+<div class="list">
+  {% for action in pending_actions %}
+  <div class="row-card">
+    <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+      <div>
+        <strong class="row-card-title">{{ action.action }}</strong>
+        <div class="row-card-code">{{ action.node_uuid }}</div>
+      </div>
+      <div style="text-align:right">
+        <span class="badge {% if action.attempts > 1 %}failed{% else %}enriching{% endif %}">
+          attempts: {{ action.attempts }}
+        </span>
+      </div>
+    </div>
+    <div class="meta" style="margin-top:0.35rem">
+      Created: <span class="utc-time" data-utc="{{ action.created_at }}">{{ action.created_at[:19] | replace("T", " ")
+        }}</span><br>
+      {% if action.failure_reason %}
+      <span style="color:var(--failed)">Failed: {{ action.failure_reason }}</span>
+      {% endif %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<p class="muted-empty">No pending LLM tasks.</p>
+{% endif %}

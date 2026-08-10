@@ -1,0 +1,25 @@
+mcp:
+  groups:
+    ingest:
+      ids: [mcp.tool.add_memory, mcp.tool.add_memory_and_track]
+    processing:
+      ids: [mcp.tool.get_enrichment_status, mcp.tool.watch_enrichment, mcp.tool.get_episode_trace, mcp.tool.list_enrichment_queue, mcp.tool.repair_stale_enrichment, mcp.tool.force_reenrich, mcp.tool.force_release_enrichment_lease]
+    conflicts:
+      ids: [mcp.tool.list_conflicts, mcp.tool.resolve_conflict, mcp.tool.scan_for_conflicts, mcp.tool.run_llm_conflict_review, mcp.tool.requeue_conflicts_for_llm_review]
+    recall:
+      ids: [mcp.tool.read_flagged_memories, mcp.tool.recall_context_memories, mcp.tool.recall_memories]
+    context:
+      ids: [mcp.tool.build_context]
+    stats:
+      ids: [mcp.tool.get_memory_stats]
+    feedback:
+      # Self-reported recall usefulness (R8 agent_inference grade; dashboard signal only,
+      # never feeds memory heat/promotion). Surfaced in the explorer Feature Usage page.
+      ids: [mcp.tool.rate_recall]
+    operator:
+      ids: [mcp.tool.force_scheduler_takeover, mcp.tool.flag_memory, mcp.tool.delete_memory, mcp.tool.recover_orphans]
+  resources:
+    system:
+      ids: [mcp.resource.system.dependency_health, mcp.resource.system.metadata, mcp.resource.system.lifecycle_trace, mcp.resource.system.processing_queue]
+    memory:
+      ids: [mcp.resource.memory.recent, mcp.resource.memory.node, mcp.resource.memory.scope, mcp.resource.memory.search, mcp.resource.memory.type]

@@ -1,0 +1,3320 @@
+[
+  {
+    "fixture": "lme-830ce83f",
+    "config": "baseline",
+    "trial": 9,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 6114.68,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "User's friend Rachel has moved back to the suburbs again.",
+      "User's friend Rachel has moved back to the suburbs again."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "config": "baseline",
+    "trial": 4,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4421.85,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries.",
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.75
+    },
+    "proposition_success": false
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "config": "update_aware",
+    "trial": 5,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4626.67,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries.",
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.75
+    },
+    "proposition_success": false
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "config": "update_aware_lookup",
+    "trial": 4,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3818.3,
+    "known_entities_used": [
+      "boundaries"
+    ],
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries.",
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.75
+    },
+    "proposition_success": false
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "config": "update_aware",
+    "trial": 2,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4182.2,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries.",
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.75
+    },
+    "proposition_success": false
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "config": "update_aware_lookup",
+    "trial": 0,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3879.8,
+    "known_entities_used": [
+      "user",
+      "Rachel",
+      "Miami Beach"
+    ],
+    "mentions": [
+      "user",
+      "Rachel",
+      "Miami Beach",
+      "suburbs"
+    ],
+    "propositions": [
+      "Rachel just moved back to the suburbs again.",
+      "Rachel just moved back to the suburbs again."
+    ],
+    "gold_scores": {
+      "mention_recall": 1.0,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "config": "update_aware",
+    "trial": 3,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4169.57,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries.",
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.75
+    },
+    "proposition_success": false
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "config": "baseline",
+    "trial": 7,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4125.27,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries.",
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.75
+    },
+    "proposition_success": false
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "config": "update_aware",
+    "trial": 6,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4092.42,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries.",
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.75
+    },
+    "proposition_success": false
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "config": "baseline_lookup",
+    "trial": 9,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3870.01,
+    "known_entities_used": [
+      "boundaries"
+    ],
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries.",
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.75
+    },
+    "proposition_success": false
+  },
+  {
+    "fixture": "lme-852ce960",
+    "config": "baseline",
+    "trial": 7,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4156.81,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Wells Fargo"
+    ],
+    "propositions": [
+      "User received a pre-approval for $400,000 from Wells Fargo.",
+      "User received a pre-approval for $400,000 from Wells Fargo."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-852ce960",
+    "config": "update_aware_lookup",
+    "trial": 9,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4061.9,
+    "known_entities_used": [
+      "home",
+      "user"
+    ],
+    "mentions": [
+      "user",
+      "Wells Fargo"
+    ],
+    "propositions": [
+      "User was pre-approved for a $400,000 loan from Wells Fargo.",
+      "User was pre-approved for a $400,000 loan from Wells Fargo."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "config": "baseline",
+    "trial": 8,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4226.71,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries.",
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.75
+    },
+    "proposition_success": false
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "config": "update_aware_lookup",
+    "trial": 2,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4189.9,
+    "known_entities_used": [
+      "user",
+      "Rachel",
+      "Miami Beach"
+    ],
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "Rachel has moved back to the suburbs again.",
+      "Rachel has moved back to the suburbs again."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "config": "update_aware",
+    "trial": 6,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4253.36,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "Rachel has moved back to the suburbs again.",
+      "Rachel has moved back to the suburbs again."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-852ce960",
+    "config": "baseline_lookup",
+    "trial": 2,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4066.08,
+    "known_entities_used": [
+      "home",
+      "user"
+    ],
+    "mentions": [
+      "user",
+      "Wells Fargo"
+    ],
+    "propositions": [
+      "User received a pre-approval for $400,000 from Wells Fargo.",
+      "User received a pre-approval for $400,000 from Wells Fargo."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "config": "baseline",
+    "trial": 2,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3749.81,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries.",
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.75
+    },
+    "proposition_success": false
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "config": "update_aware",
+    "trial": 7,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4214.98,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries.",
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.75
+    },
+    "proposition_success": false
+  },
+  {
+    "fixture": "lme-852ce960",
+    "config": "update_aware",
+    "trial": 1,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4108.89,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Wells Fargo"
+    ],
+    "propositions": [
+      "User got pre-approved for $400,000 from Wells Fargo",
+      "User got pre-approved for $400,000 from Wells Fargo"
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-852ce960",
+    "config": "baseline_lookup",
+    "trial": 8,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4068.41,
+    "known_entities_used": [
+      "home",
+      "user"
+    ],
+    "mentions": [
+      "user",
+      "Wells Fargo"
+    ],
+    "propositions": [
+      "User was pre-approved for a $400,000 loan from Wells Fargo.",
+      "User was pre-approved for a $400,000 loan from Wells Fargo."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "config": "baseline",
+    "trial": 8,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3944.07,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "Rachel has moved back to the suburbs again.",
+      "Rachel has moved back to the suburbs again."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-852ce960",
+    "config": "baseline_lookup",
+    "trial": 1,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4315.65,
+    "known_entities_used": [
+      "home",
+      "user"
+    ],
+    "mentions": [
+      "user",
+      "Wells Fargo"
+    ],
+    "propositions": [
+      "User received a pre-approval for $400,000 from Wells Fargo.",
+      "User received a pre-approval for $400,000 from Wells Fargo."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "config": "update_aware",
+    "trial": 8,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3727.3,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries.",
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.75
+    },
+    "proposition_success": false
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "config": "baseline_lookup",
+    "trial": 8,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4827.6,
+    "known_entities_used": [
+      "boundaries"
+    ],
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week",
+      "user sees Dr. Smith every week"
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "config": "baseline",
+    "trial": 7,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3954.43,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "User's friend Rachel has moved back to the suburbs again.",
+      "User's friend Rachel has moved back to the suburbs again."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "config": "baseline",
+    "trial": 1,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3961.08,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "Rachel is friends with the user.",
+      "Rachel is friends with the user."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.75
+    },
+    "proposition_success": false
+  },
+  {
+    "fixture": "lme-852ce960",
+    "config": "update_aware_lookup",
+    "trial": 8,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4022.08,
+    "known_entities_used": [
+      "home",
+      "user"
+    ],
+    "mentions": [
+      "user",
+      "Wells Fargo"
+    ],
+    "propositions": [
+      "User received a pre-approval for $400,000 from Wells Fargo.",
+      "User received a pre-approval for $400,000 from Wells Fargo."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-852ce960",
+    "config": "update_aware_lookup",
+    "trial": 0,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4397.36,
+    "known_entities_used": [
+      "home",
+      "user"
+    ],
+    "mentions": [
+      "user",
+      "Wells Fargo"
+    ],
+    "propositions": [
+      "User got pre-approved for $400,000 from Wells Fargo.",
+      "User got pre-approved for $400,000 from Wells Fargo."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "config": "baseline_lookup",
+    "trial": 6,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 5058.35,
+    "known_entities_used": [
+      "user",
+      "Rachel",
+      "Miami Beach"
+    ],
+    "mentions": [
+      "user",
+      "Rachel",
+      "Miami Beach"
+    ],
+    "propositions": [
+      "Rachel has moved back to the suburbs again, and user is thinking of somewhere not too far from a major city, implying a connection to Miami Beach.",
+      "Rachel has moved back to the suburbs again, and user is thinking of somewhere not too far from a major city, implying a connection to Miami Beach."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.3333333333333333,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.6
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "config": "baseline",
+    "trial": 0,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 10570.12,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week",
+      "user sees Dr. Smith every week"
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "config": "baseline_lookup",
+    "trial": 1,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 6689.44,
+    "known_entities_used": [
+      "user",
+      "Rachel",
+      "Miami Beach"
+    ],
+    "mentions": [
+      "user",
+      "Rachel",
+      "Miami Beach"
+    ],
+    "propositions": [
+      "Rachel is friends with the user.",
+      "Rachel is friends with the user."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.3333333333333333,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.8
+    },
+    "proposition_success": false
+  },
+  {
+    "fixture": "lme-852ce960",
+    "config": "update_aware",
+    "trial": 2,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4348.98,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Wells Fargo"
+    ],
+    "propositions": [
+      "User got pre-approved for $400,000 from Wells Fargo.",
+      "User got pre-approved for $400,000 from Wells Fargo."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-852ce960",
+    "config": "baseline",
+    "trial": 1,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4396.91,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Wells Fargo"
+    ],
+    "propositions": [
+      "User received pre-approval for $400,000 from Wells Fargo.",
+      "User received pre-approval for $400,000 from Wells Fargo."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-852ce960",
+    "config": "update_aware",
+    "trial": 0,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3910.08,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Wells Fargo"
+    ],
+    "propositions": [
+      "User received a pre-approval for $400,000 from Wells Fargo.",
+      "User received a pre-approval for $400,000 from Wells Fargo."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-852ce960",
+    "config": "baseline_lookup",
+    "trial": 6,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4101.66,
+    "known_entities_used": [
+      "home",
+      "user"
+    ],
+    "mentions": [
+      "user",
+      "Wells Fargo"
+    ],
+    "propositions": [
+      "User received pre-approval for $400,000 from Wells Fargo.",
+      "User received pre-approval for $400,000 from Wells Fargo."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "config": "update_aware_lookup",
+    "trial": 9,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3969.07,
+    "known_entities_used": [
+      "user",
+      "Rachel",
+      "Miami Beach"
+    ],
+    "mentions": [
+      "user",
+      "Rachel",
+      "Miami Beach"
+    ],
+    "propositions": [
+      "Rachel is friends with the user.",
+      "Rachel is friends with the user."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.3333333333333333,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.8
+    },
+    "proposition_success": false
+  },
+  {
+    "fixture": "lme-852ce960",
+    "config": "baseline_lookup",
+    "trial": 7,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4127.53,
+    "known_entities_used": [
+      "home",
+      "user"
+    ],
+    "mentions": [
+      "user",
+      "Wells Fargo"
+    ],
+    "propositions": [
+      "User received a pre-approval for $400,000 from Wells Fargo.",
+      "User received a pre-approval for $400,000 from Wells Fargo."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "config": "update_aware_lookup",
+    "trial": 4,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4120.9,
+    "known_entities_used": [
+      "user",
+      "Rachel",
+      "Miami Beach"
+    ],
+    "mentions": [
+      "user",
+      "Rachel",
+      "Miami Beach"
+    ],
+    "propositions": [
+      "Rachel has been to Miami Beach before.",
+      "Rachel has been to Miami Beach before."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.3333333333333333,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.8
+    },
+    "proposition_success": false
+  },
+  {
+    "fixture": "lme-852ce960",
+    "config": "baseline_lookup",
+    "trial": 0,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3781.65,
+    "known_entities_used": [
+      "home",
+      "user"
+    ],
+    "mentions": [
+      "user",
+      "Wells Fargo"
+    ],
+    "propositions": [
+      "User got pre-approved for $400,000 from Wells Fargo",
+      "User got pre-approved for $400,000 from Wells Fargo"
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "config": "update_aware_lookup",
+    "trial": 8,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3949.09,
+    "known_entities_used": [
+      "user",
+      "Rachel",
+      "Miami Beach"
+    ],
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "Rachel has moved back to the suburbs again.",
+      "Rachel has moved back to the suburbs again."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-852ce960",
+    "config": "update_aware",
+    "trial": 9,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4110.23,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Wells Fargo"
+    ],
+    "propositions": [
+      "user got pre-approved for $400,000 from Wells Fargo",
+      "user got pre-approved for $400,000 from Wells Fargo"
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-852ce960",
+    "config": "update_aware",
+    "trial": 5,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4161.79,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Wells Fargo"
+    ],
+    "propositions": [
+      "User was pre-approved for a $400,000 loan from Wells Fargo.",
+      "User was pre-approved for a $400,000 loan from Wells Fargo."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-852ce960",
+    "config": "update_aware_lookup",
+    "trial": 6,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 5005.33,
+    "known_entities_used": [
+      "home",
+      "user"
+    ],
+    "mentions": [
+      "user",
+      "Wells Fargo"
+    ],
+    "propositions": [
+      "User got pre-approved for $400,000 from Wells Fargo.",
+      "User got pre-approved for $400,000 from Wells Fargo."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "config": "baseline_lookup",
+    "trial": 2,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3799.03,
+    "known_entities_used": [
+      "user",
+      "Rachel",
+      "Miami Beach"
+    ],
+    "mentions": [
+      "user",
+      "Rachel",
+      "Miami Beach"
+    ],
+    "propositions": [
+      "Rachel is friends with the user.",
+      "Rachel is friends with the user."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.3333333333333333,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.8
+    },
+    "proposition_success": false
+  },
+  {
+    "fixture": "lme-852ce960",
+    "config": "baseline_lookup",
+    "trial": 3,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4115.97,
+    "known_entities_used": [
+      "home",
+      "user"
+    ],
+    "mentions": [
+      "user",
+      "Wells Fargo"
+    ],
+    "propositions": [
+      "User received a pre-approval for $400,000 from Wells Fargo.",
+      "User received a pre-approval for $400,000 from Wells Fargo."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-852ce960",
+    "config": "baseline_lookup",
+    "trial": 5,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4382.32,
+    "known_entities_used": [
+      "home",
+      "user"
+    ],
+    "mentions": [
+      "user",
+      "Wells Fargo"
+    ],
+    "propositions": [
+      "User received a pre-approval for $400,000 from Wells Fargo.",
+      "User received a pre-approval for $400,000 from Wells Fargo."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "config": "baseline_lookup",
+    "trial": 3,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4612.83,
+    "known_entities_used": [
+      "user",
+      "Rachel",
+      "Miami Beach"
+    ],
+    "mentions": [
+      "user",
+      "Rachel",
+      "Miami Beach"
+    ],
+    "propositions": [
+      "Rachel just moved back to the suburbs again, which is near Miami Beach.",
+      "Rachel just moved back to the suburbs again, which is near Miami Beach."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.3333333333333333,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.6
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-852ce960",
+    "config": "baseline",
+    "trial": 0,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3724.64,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Wells Fargo"
+    ],
+    "propositions": [
+      "User was pre-approved for a $400,000 loan from Wells Fargo.",
+      "User was pre-approved for a $400,000 loan from Wells Fargo."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "config": "update_aware",
+    "trial": 9,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 5876.18,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries.",
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.75
+    },
+    "proposition_success": false
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "config": "update_aware_lookup",
+    "trial": 2,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3639.15,
+    "known_entities_used": [
+      "boundaries"
+    ],
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week",
+      "user sees Dr. Smith every week"
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "config": "baseline_lookup",
+    "trial": 4,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4807.45,
+    "known_entities_used": [
+      "user",
+      "Rachel",
+      "Miami Beach"
+    ],
+    "mentions": [
+      "user",
+      "Rachel",
+      "Miami Beach"
+    ],
+    "propositions": [
+      "Rachel has moved back to the suburbs again, which is near Miami Beach.",
+      "Rachel has moved back to the suburbs again, which is near Miami Beach."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.3333333333333333,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.6
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "config": "baseline",
+    "trial": 6,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4074.07,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "Rachel has moved back to the suburbs again.",
+      "Rachel has moved back to the suburbs again."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-852ce960",
+    "config": "update_aware",
+    "trial": 6,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3949.85,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Wells Fargo"
+    ],
+    "propositions": [
+      "User was pre-approved for a $400,000 loan from Wells Fargo.",
+      "User was pre-approved for a $400,000 loan from Wells Fargo."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "config": "update_aware",
+    "trial": 0,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3695.24,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries.",
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.75
+    },
+    "proposition_success": false
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "config": "update_aware",
+    "trial": 8,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3767.79,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "Rachel just moved back to the suburbs again.",
+      "Rachel just moved back to the suburbs again."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-852ce960",
+    "config": "baseline",
+    "trial": 9,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4080.97,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Wells Fargo"
+    ],
+    "propositions": [
+      "user got pre-approved for $400,000 from Wells Fargo",
+      "user got pre-approved for $400,000 from Wells Fargo"
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "config": "update_aware_lookup",
+    "trial": 8,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3633.68,
+    "known_entities_used": [
+      "boundaries"
+    ],
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries.",
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.75
+    },
+    "proposition_success": false
+  },
+  {
+    "fixture": "lme-852ce960",
+    "config": "baseline",
+    "trial": 2,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4090.27,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Wells Fargo"
+    ],
+    "propositions": [
+      "User received a pre-approval for $400,000 from Wells Fargo.",
+      "User received a pre-approval for $400,000 from Wells Fargo."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "config": "baseline",
+    "trial": 2,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3953.64,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "User's friend Rachel has moved back to the suburbs again.",
+      "User's friend Rachel has moved back to the suburbs again."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "config": "baseline_lookup",
+    "trial": 3,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3824.59,
+    "known_entities_used": [
+      "boundaries"
+    ],
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries.",
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.75
+    },
+    "proposition_success": false
+  },
+  {
+    "fixture": "lme-852ce960",
+    "config": "update_aware_lookup",
+    "trial": 2,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3949.94,
+    "known_entities_used": [
+      "home",
+      "user"
+    ],
+    "mentions": [
+      "user",
+      "Wells Fargo"
+    ],
+    "propositions": [
+      "User received a pre-approval for $400,000 from Wells Fargo.",
+      "User received a pre-approval for $400,000 from Wells Fargo."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-852ce960",
+    "config": "update_aware_lookup",
+    "trial": 3,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3948.11,
+    "known_entities_used": [
+      "home",
+      "user"
+    ],
+    "mentions": [
+      "user",
+      "Wells Fargo"
+    ],
+    "propositions": [
+      "User got pre-approved for $400,000 from Wells Fargo",
+      "User got pre-approved for $400,000 from Wells Fargo"
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "config": "update_aware_lookup",
+    "trial": 6,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4416.15,
+    "known_entities_used": [
+      "user",
+      "Rachel",
+      "Miami Beach"
+    ],
+    "mentions": [
+      "user",
+      "Rachel",
+      "Miami Beach"
+    ],
+    "propositions": [
+      "Rachel has moved back to the suburbs again, which is near Miami Beach.",
+      "Rachel has moved back to the suburbs again, which is near Miami Beach."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.3333333333333333,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.6
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-852ce960",
+    "config": "baseline",
+    "trial": 6,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3919.7,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Wells Fargo"
+    ],
+    "propositions": [
+      "User was pre-approved for a $400,000 loan from Wells Fargo.",
+      "User was pre-approved for a $400,000 loan from Wells Fargo."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "config": "update_aware_lookup",
+    "trial": 7,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3813.88,
+    "known_entities_used": [
+      "user",
+      "Rachel",
+      "Miami Beach"
+    ],
+    "mentions": [
+      "user",
+      "Rachel",
+      "Miami Beach"
+    ],
+    "propositions": [
+      "Rachel is friends with the user.",
+      "Rachel is friends with the user."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.3333333333333333,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.8
+    },
+    "proposition_success": false
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "config": "update_aware",
+    "trial": 0,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 5372.4,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "Rachel actually just moved back to the suburbs again.",
+      "Rachel actually just moved back to the suburbs again."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-852ce960",
+    "config": "update_aware_lookup",
+    "trial": 4,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3990.78,
+    "known_entities_used": [
+      "home",
+      "user"
+    ],
+    "mentions": [
+      "user",
+      "Wells Fargo"
+    ],
+    "propositions": [
+      "User got pre-approved for $400,000 from Wells Fargo",
+      "User got pre-approved for $400,000 from Wells Fargo"
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "config": "update_aware",
+    "trial": 5,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3658.93,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "User's friend Rachel has moved back to the suburbs again.",
+      "User's friend Rachel has moved back to the suburbs again."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-852ce960",
+    "config": "update_aware",
+    "trial": 8,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3849.79,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Wells Fargo"
+    ],
+    "propositions": [
+      "User received a pre-approval for $400,000 from Wells Fargo.",
+      "User received a pre-approval for $400,000 from Wells Fargo."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "config": "baseline",
+    "trial": 5,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4533.3,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "User's friend Rachel has moved back to the suburbs again.",
+      "User's friend Rachel has moved back to the suburbs again."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "config": "update_aware_lookup",
+    "trial": 3,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3973.03,
+    "known_entities_used": [
+      "user",
+      "Rachel",
+      "Miami Beach"
+    ],
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "Rachel has moved back to the suburbs again.",
+      "Rachel has moved back to the suburbs again."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-852ce960",
+    "config": "baseline",
+    "trial": 4,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4051.06,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Wells Fargo"
+    ],
+    "propositions": [
+      "User received a pre-approval for $400,000 from Wells Fargo.",
+      "User received a pre-approval for $400,000 from Wells Fargo."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-852ce960",
+    "config": "baseline",
+    "trial": 5,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4319.34,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Wells Fargo"
+    ],
+    "propositions": [
+      "User got pre-approved for $400,000 from Wells Fargo",
+      "User got pre-approved for $400,000 from Wells Fargo"
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "config": "update_aware",
+    "trial": 2,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3367.87,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "Rachel is friends with the user.",
+      "Rachel is friends with the user."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.75
+    },
+    "proposition_success": false
+  },
+  {
+    "fixture": "lme-852ce960",
+    "config": "baseline",
+    "trial": 8,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3795.48,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Wells Fargo"
+    ],
+    "propositions": [
+      "User received a pre-approval for $400,000 from Wells Fargo.",
+      "User received a pre-approval for $400,000 from Wells Fargo."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "config": "baseline_lookup",
+    "trial": 1,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3876.2,
+    "known_entities_used": [
+      "boundaries"
+    ],
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries.",
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.75
+    },
+    "proposition_success": false
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "config": "update_aware_lookup",
+    "trial": 0,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4441.97,
+    "known_entities_used": [
+      "boundaries"
+    ],
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries.",
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "config": "update_aware_lookup",
+    "trial": 9,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3968.39,
+    "known_entities_used": [
+      "boundaries"
+    ],
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries.",
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.75
+    },
+    "proposition_success": false
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "config": "baseline_lookup",
+    "trial": 0,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3969.85,
+    "known_entities_used": [
+      "boundaries"
+    ],
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries.",
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.75
+    },
+    "proposition_success": false
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "config": "update_aware",
+    "trial": 9,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4145.0,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "User's friend Rachel has moved back to the suburbs again.",
+      "User's friend Rachel has moved back to the suburbs again."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "config": "baseline",
+    "trial": 5,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3870.91,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries.",
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.75
+    },
+    "proposition_success": false
+  },
+  {
+    "fixture": "lme-852ce960",
+    "config": "baseline",
+    "trial": 3,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3885.09,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Wells Fargo"
+    ],
+    "propositions": [
+      "User was pre-approved for a $400,000 loan from Wells Fargo.",
+      "User was pre-approved for a $400,000 loan from Wells Fargo."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "config": "baseline_lookup",
+    "trial": 4,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3901.71,
+    "known_entities_used": [
+      "boundaries"
+    ],
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries.",
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.75
+    },
+    "proposition_success": false
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "config": "baseline_lookup",
+    "trial": 0,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3729.37,
+    "known_entities_used": [
+      "user",
+      "Rachel",
+      "Miami Beach"
+    ],
+    "mentions": [
+      "user",
+      "Rachel",
+      "Miami Beach"
+    ],
+    "propositions": [
+      "Rachel is friends with the user.",
+      "Rachel is friends with the user."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.3333333333333333,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.8
+    },
+    "proposition_success": false
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "config": "baseline",
+    "trial": 0,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4113.83,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "User's friend Rachel has moved back to the suburbs again.",
+      "User's friend Rachel has moved back to the suburbs again."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "config": "update_aware_lookup",
+    "trial": 5,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3806.07,
+    "known_entities_used": [
+      "boundaries"
+    ],
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week",
+      "user sees Dr. Smith every week"
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "config": "baseline_lookup",
+    "trial": 5,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3656.17,
+    "known_entities_used": [
+      "boundaries"
+    ],
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries.",
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.75
+    },
+    "proposition_success": false
+  },
+  {
+    "fixture": "lme-852ce960",
+    "config": "update_aware",
+    "trial": 7,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4008.95,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Wells Fargo"
+    ],
+    "propositions": [
+      "User received a pre-approval for $400,000 from Wells Fargo.",
+      "User received a pre-approval for $400,000 from Wells Fargo."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "config": "update_aware_lookup",
+    "trial": 3,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3964.17,
+    "known_entities_used": [
+      "boundaries"
+    ],
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week",
+      "user sees Dr. Smith every week"
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-852ce960",
+    "config": "update_aware",
+    "trial": 3,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4560.51,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Wells Fargo"
+    ],
+    "propositions": [
+      "User got pre-approved for $400,000 from Wells Fargo.",
+      "User got pre-approved for $400,000 from Wells Fargo."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "config": "baseline_lookup",
+    "trial": 7,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 5171.21,
+    "known_entities_used": [
+      "boundaries"
+    ],
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries.",
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.75
+    },
+    "proposition_success": false
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "config": "baseline",
+    "trial": 9,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4202.14,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries.",
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.75
+    },
+    "proposition_success": false
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "config": "baseline",
+    "trial": 3,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3774.44,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries.",
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.75
+    },
+    "proposition_success": false
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "config": "update_aware",
+    "trial": 1,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4608.85,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries.",
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.75
+    },
+    "proposition_success": false
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "config": "baseline_lookup",
+    "trial": 5,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4521.48,
+    "known_entities_used": [
+      "user",
+      "Rachel",
+      "Miami Beach"
+    ],
+    "mentions": [
+      "user",
+      "Rachel",
+      "Miami Beach"
+    ],
+    "propositions": [
+      "Rachel has moved back to the suburbs again, and user is thinking of somewhere not too far from a major city like Miami Beach.",
+      "Rachel has moved back to the suburbs again, and user is thinking of somewhere not too far from a major city like Miami Beach."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.3333333333333333,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.6
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-852ce960",
+    "config": "update_aware_lookup",
+    "trial": 1,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4632.87,
+    "known_entities_used": [
+      "home",
+      "user"
+    ],
+    "mentions": [
+      "user",
+      "Wells Fargo"
+    ],
+    "propositions": [
+      "User received a pre-approval for $400,000 from Wells Fargo.",
+      "User received a pre-approval for $400,000 from Wells Fargo."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "config": "baseline_lookup",
+    "trial": 2,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 8023.99,
+    "known_entities_used": [
+      "boundaries"
+    ],
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week",
+      "user sees Dr. Smith every week"
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-852ce960",
+    "config": "update_aware_lookup",
+    "trial": 7,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4569.18,
+    "known_entities_used": [
+      "home",
+      "user"
+    ],
+    "mentions": [
+      "user",
+      "Wells Fargo"
+    ],
+    "propositions": [
+      "User received a pre-approval for $400,000 from Wells Fargo.",
+      "User received a pre-approval for $400,000 from Wells Fargo."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-852ce960",
+    "config": "baseline_lookup",
+    "trial": 4,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4447.77,
+    "known_entities_used": [
+      "home",
+      "user"
+    ],
+    "mentions": [
+      "user",
+      "Wells Fargo"
+    ],
+    "propositions": [
+      "User received a pre-approval for $400,000 from Wells Fargo.",
+      "User received a pre-approval for $400,000 from Wells Fargo."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "config": "baseline_lookup",
+    "trial": 9,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3908.12,
+    "known_entities_used": [
+      "user",
+      "Rachel",
+      "Miami Beach"
+    ],
+    "mentions": [
+      "user",
+      "Rachel",
+      "Miami Beach"
+    ],
+    "propositions": [
+      "Rachel is friends with the user.",
+      "Rachel is friends with the user."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.3333333333333333,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.8
+    },
+    "proposition_success": false
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "config": "baseline_lookup",
+    "trial": 7,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4058.94,
+    "known_entities_used": [
+      "user",
+      "Rachel",
+      "Miami Beach"
+    ],
+    "mentions": [
+      "user",
+      "Rachel",
+      "Miami Beach"
+    ],
+    "propositions": [
+      "Rachel has moved back to the suburbs again, and user is thinking of somewhere not too far from a major city like Miami Beach.",
+      "Rachel has moved back to the suburbs again, and user is thinking of somewhere not too far from a major city like Miami Beach."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.3333333333333333,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.6
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "config": "baseline_lookup",
+    "trial": 6,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3712.32,
+    "known_entities_used": [
+      "boundaries"
+    ],
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week",
+      "user sees Dr. Smith every week"
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "config": "update_aware_lookup",
+    "trial": 7,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3586.61,
+    "known_entities_used": [
+      "boundaries"
+    ],
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week",
+      "user sees Dr. Smith every week"
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "config": "baseline",
+    "trial": 4,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3681.45,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "User's friend Rachel has moved back to the suburbs again.",
+      "User's friend Rachel has moved back to the suburbs again."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-852ce960",
+    "config": "update_aware",
+    "trial": 4,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3725.62,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Wells Fargo"
+    ],
+    "propositions": [
+      "User was pre-approved for a $400,000 loan from Wells Fargo.",
+      "User was pre-approved for a $400,000 loan from Wells Fargo."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-852ce960",
+    "config": "update_aware_lookup",
+    "trial": 5,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4560.67,
+    "known_entities_used": [
+      "home",
+      "user"
+    ],
+    "mentions": [
+      "user",
+      "Wells Fargo"
+    ],
+    "propositions": [
+      "User got pre-approved for a $400,000 loan from Wells Fargo.",
+      "User got pre-approved for a $400,000 loan from Wells Fargo."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "config": "update_aware",
+    "trial": 1,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3652.76,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "User's friend Rachel has moved back to the suburbs again.",
+      "User's friend Rachel has moved back to the suburbs again."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-852ce960",
+    "config": "baseline_lookup",
+    "trial": 9,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 5139.78,
+    "known_entities_used": [
+      "home",
+      "user"
+    ],
+    "mentions": [
+      "user",
+      "Wells Fargo"
+    ],
+    "propositions": [
+      "User received a pre-approval for $400,000 from Wells Fargo.",
+      "User received a pre-approval for $400,000 from Wells Fargo."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "config": "update_aware_lookup",
+    "trial": 1,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 5596.92,
+    "known_entities_used": [
+      "boundaries"
+    ],
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries.",
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.75
+    },
+    "proposition_success": false
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "config": "baseline",
+    "trial": 6,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3582.77,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries.",
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.75
+    },
+    "proposition_success": false
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "config": "update_aware",
+    "trial": 3,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4121.93,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "Rachel has moved back to the suburbs again.",
+      "Rachel has moved back to the suburbs again."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "config": "update_aware_lookup",
+    "trial": 6,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3809.73,
+    "known_entities_used": [
+      "boundaries"
+    ],
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week",
+      "user sees Dr. Smith every week"
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "config": "update_aware",
+    "trial": 7,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4001.45,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "Rachel actually just moved back to the suburbs again",
+      "Rachel actually just moved back to the suburbs again"
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "config": "baseline_lookup",
+    "trial": 8,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4208.42,
+    "known_entities_used": [
+      "user",
+      "Rachel",
+      "Miami Beach"
+    ],
+    "mentions": [
+      "user",
+      "Rachel",
+      "Miami Beach"
+    ],
+    "propositions": [
+      "Rachel has moved back to the suburbs again, and user is thinking of somewhere not too far from a major city like Miami Beach.",
+      "Rachel has moved back to the suburbs again, and user is thinking of somewhere not too far from a major city like Miami Beach."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.3333333333333333,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.6
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "config": "update_aware_lookup",
+    "trial": 1,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3912.46,
+    "known_entities_used": [
+      "user",
+      "Rachel",
+      "Miami Beach"
+    ],
+    "mentions": [
+      "user",
+      "Rachel",
+      "Miami Beach"
+    ],
+    "propositions": [
+      "Rachel is friends with the user.",
+      "Rachel is friends with the user."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.3333333333333333,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.8
+    },
+    "proposition_success": false
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "config": "update_aware_lookup",
+    "trial": 5,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 5105.72,
+    "known_entities_used": [
+      "user",
+      "Rachel",
+      "Miami Beach"
+    ],
+    "mentions": [
+      "user",
+      "Rachel",
+      "Miami Beach"
+    ],
+    "propositions": [
+      "Rachel has moved back to the suburbs again, and user is thinking of somewhere not too far from a major city like Miami Beach.",
+      "Rachel has moved back to the suburbs again, and user is thinking of somewhere not too far from a major city like Miami Beach."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.3333333333333333,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.6
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "config": "update_aware",
+    "trial": 4,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4058.37,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries.",
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.75
+    },
+    "proposition_success": false
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "config": "baseline",
+    "trial": 3,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3655.15,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "User is friends with Rachel.",
+      "User is friends with Rachel."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.75
+    },
+    "proposition_success": false
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "config": "update_aware",
+    "trial": 4,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3456.67,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "Rachel has moved back to the suburbs again.",
+      "Rachel has moved back to the suburbs again."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "config": "baseline",
+    "trial": 1,
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3780.82,
+    "known_entities_used": [],
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries.",
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.75
+    },
+    "proposition_success": false
+  }
+]

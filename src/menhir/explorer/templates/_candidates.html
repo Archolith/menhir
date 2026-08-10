@@ -1,0 +1,55 @@
+{% if candidates %}
+<div class="list">
+  {% for row in candidates %}
+  <div class="row-card">
+    <div class="candidate-header">
+      <strong>{{ row.name or row.uuid }}</strong>
+      {% if row.source %}
+      <div class="meta">{{ row.source }}</div>
+      {% endif %}
+      <div class="badge-row">
+        {% if row.label %}
+        <span class="badge candidate">{{ row.label }}</span>
+        {% endif %}
+        {% if row.kind %}
+        <span class="badge">{{ row.kind }}</span>
+        {% endif %}
+        {% if row.type %}
+        <span class="badge">{{ row.type }}</span>
+        {% endif %}
+      </div>
+    </div>
+    {% if row.cluster_id %}
+    <div class="candidate-meta">Cluster: {{ row.cluster_id }}</div>
+    {% endif %}
+    {% if row.evidence_strength %}
+    <div class="candidate-meta">Evidence: {{ row.evidence_strength }}</div>
+    {% endif %}
+    {% if row.distinct_sessions %}
+    <div class="candidate-meta">Sessions: {{ row.distinct_sessions }}</div>
+    {% endif %}
+    {% if row.last_seen %}
+    <div class="candidate-meta utc-time" data-utc="{{ row.last_seen }}">{{ row.last_seen }}</div>
+    {% endif %}
+    {% if row.content %}
+    <div class="candidate-content">{{ row.content[:200] }}{% if row.content|length > 200 %}...{% endif %}</div>
+    {% endif %}
+    {% if row.notes %}
+    <div class="candidate-notes">
+      {% if row.notes is iterable and row.notes is not string %}
+      Notes: {{ row.notes|join(", ") }}
+      {% else %}
+      Notes: {{ row.notes }}
+      {% endif %}
+    </div>
+    {% endif %}
+    <div class="candidate-actions">
+      <button class="btn-approve" data-uuid="{{ row.uuid }}" data-action="approve">Approve</button>
+      <button class="btn-reject" data-uuid="{{ row.uuid }}" data-action="reject">Reject</button>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<p class="muted-empty">No candidate entities awaiting review.</p>
+{% endif %}

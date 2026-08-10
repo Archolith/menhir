@@ -1,0 +1,20 @@
+retry_policy:
+  retryable:
+    action: Requeue while attempt budget remains.
+    examples:
+      - lease expired or stale worker recovery
+      - scheduler-managed llama stall or transient endpoint failure
+      - context window overflow routed through the oversized-request classifier
+  manual_review:
+    action: Stop automatic retries and require operator inspection.
+    examples:
+      - malformed Graphiti JSON output
+      - schema or validation drift in model output
+  terminal:
+    action: Fail immediately without automatic retry.
+    examples:
+      - oversized episode rejected by preflight guard
+      - explicit operator-abort or non-retryable policy rejection
+  notes:
+    - Final classification is implemented in code; this file is a compact operator-facing summary.
+    - Retry policy interacts with attempt caps and stale-lease recovery rules on episode rows.

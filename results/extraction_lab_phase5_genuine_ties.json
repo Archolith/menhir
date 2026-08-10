@@ -1,0 +1,242 @@
+[
+  {
+    "scenario_id": "2_message_content_favors_one",
+    "trial": 9,
+    "selected_id": "c3",
+    "llm_calls": 1,
+    "acceptable": true,
+    "reasoning": "[2 eligible after filter] The candidate fact directly relates to Rachel's move to the suburbs, providing context for the CURRENT MESSAGE."
+  },
+  {
+    "scenario_id": "2_message_content_favors_one",
+    "trial": 4,
+    "selected_id": "c3",
+    "llm_calls": 1,
+    "acceptable": true,
+    "reasoning": "[2 eligible after filter] The candidate fact directly relates to Rachel's move to the suburbs, providing context for the CURRENT MESSAGE."
+  },
+  {
+    "scenario_id": "2_message_content_favors_one",
+    "trial": 0,
+    "selected_id": "c3",
+    "llm_calls": 1,
+    "acceptable": true,
+    "reasoning": "[2 eligible after filter] The candidate fact directly relates to Rachel's move to the suburbs, providing context for the CURRENT MESSAGE."
+  },
+  {
+    "scenario_id": "3_exact_worked_example",
+    "trial": 6,
+    "selected_id": null,
+    "llm_calls": 1,
+    "acceptable": true,
+    "reasoning": "[2 eligible after filter] No candidate fact discusses Rachel's move back to the suburbs, only her previous residences."
+  },
+  {
+    "scenario_id": "3_exact_worked_example",
+    "trial": 2,
+    "selected_id": null,
+    "llm_calls": 1,
+    "acceptable": true,
+    "reasoning": "[2 eligible after filter] No candidate fact discusses Rachel's move back to the suburbs, only her previous residences."
+  },
+  {
+    "scenario_id": "1_symmetric_no_signal",
+    "trial": 6,
+    "selected_id": "c1",
+    "llm_calls": 1,
+    "acceptable": true,
+    "reasoning": "[2 eligible after filter] The current message indicates that Rachel has moved back to the suburbs, which contradicts the candidate fact that she signed a lease downtown. This prior context is relevant for understanding the change in Rachel's living situation."
+  },
+  {
+    "scenario_id": "1_symmetric_no_signal",
+    "trial": 5,
+    "selected_id": "c1",
+    "llm_calls": 1,
+    "acceptable": true,
+    "reasoning": "[2 eligible after filter] The current message indicates that Rachel has moved back to the suburbs, which contradicts the candidate fact that she signed a lease downtown. This prior context is relevant for understanding the change in Rachel's living situation."
+  },
+  {
+    "scenario_id": "2_message_content_favors_one",
+    "trial": 2,
+    "selected_id": "c3",
+    "llm_calls": 1,
+    "acceptable": true,
+    "reasoning": "[2 eligible after filter] The candidate fact directly relates to Rachel's move to the suburbs, providing context for the CURRENT MESSAGE."
+  },
+  {
+    "scenario_id": "2_message_content_favors_one",
+    "trial": 1,
+    "selected_id": "c3",
+    "llm_calls": 1,
+    "acceptable": true,
+    "reasoning": "[2 eligible after filter] The candidate fact directly relates to Rachel's move to the suburbs, providing context for the CURRENT MESSAGE."
+  },
+  {
+    "scenario_id": "2_message_content_favors_one",
+    "trial": 5,
+    "selected_id": "c3",
+    "llm_calls": 1,
+    "acceptable": true,
+    "reasoning": "[2 eligible after filter] The candidate fact directly relates to Rachel's move to the suburbs, providing context for the CURRENT MESSAGE."
+  },
+  {
+    "scenario_id": "1_symmetric_no_signal",
+    "trial": 9,
+    "selected_id": "c1",
+    "llm_calls": 1,
+    "acceptable": true,
+    "reasoning": "[2 eligible after filter] The current message indicates that Rachel moved back to the suburbs, which contradicts the candidate fact that she signed a lease downtown. This context is relevant for understanding the change in Rachel's living situation."
+  },
+  {
+    "scenario_id": "3_exact_worked_example",
+    "trial": 5,
+    "selected_id": null,
+    "llm_calls": 1,
+    "acceptable": true,
+    "reasoning": "[2 eligible after filter] No candidate fact specifically addresses Rachel's recent move back to the suburbs."
+  },
+  {
+    "scenario_id": "3_exact_worked_example",
+    "trial": 9,
+    "selected_id": null,
+    "llm_calls": 1,
+    "acceptable": true,
+    "reasoning": "[2 eligible after filter] No candidate fact specifically addresses Rachel's recent move back to the suburbs."
+  },
+  {
+    "scenario_id": "3_exact_worked_example",
+    "trial": 1,
+    "selected_id": null,
+    "llm_calls": 1,
+    "acceptable": true,
+    "reasoning": "[2 eligible after filter] No candidate fact specifically addresses Rachel's recent move back to the suburbs."
+  },
+  {
+    "scenario_id": "2_message_content_favors_one",
+    "trial": 6,
+    "selected_id": "c3",
+    "llm_calls": 1,
+    "acceptable": true,
+    "reasoning": "[2 eligible after filter] The candidate fact directly relates to Rachel's move to the suburbs, providing context for the CURRENT MESSAGE."
+  },
+  {
+    "scenario_id": "3_exact_worked_example",
+    "trial": 7,
+    "selected_id": null,
+    "llm_calls": 1,
+    "acceptable": true,
+    "reasoning": "[2 eligible after filter] No candidate fact discusses Rachel's move back to the suburbs, only her previous residences."
+  },
+  {
+    "scenario_id": "1_symmetric_no_signal",
+    "trial": 1,
+    "selected_id": "c1",
+    "llm_calls": 1,
+    "acceptable": true,
+    "reasoning": "[2 eligible after filter] The current message indicates that Rachel moved back to the suburbs, which contradicts the candidate fact that she signed a lease downtown. This context is relevant for understanding the change in Rachel's living situation."
+  },
+  {
+    "scenario_id": "2_message_content_favors_one",
+    "trial": 3,
+    "selected_id": "c3",
+    "llm_calls": 1,
+    "acceptable": true,
+    "reasoning": "[2 eligible after filter] The candidate fact directly relates to Rachel's move to the suburbs, providing context for the CURRENT MESSAGE."
+  },
+  {
+    "scenario_id": "2_message_content_favors_one",
+    "trial": 8,
+    "selected_id": "c3",
+    "llm_calls": 1,
+    "acceptable": true,
+    "reasoning": "[2 eligible after filter] The candidate fact is directly related to Rachel's move to the suburbs, which is the same subject and specific topic as the current message."
+  },
+  {
+    "scenario_id": "1_symmetric_no_signal",
+    "trial": 2,
+    "selected_id": "c1",
+    "llm_calls": 1,
+    "acceptable": true,
+    "reasoning": "[2 eligible after filter] The current message indicates that Rachel has moved back to the suburbs, which contradicts the candidate fact that she signed a lease downtown. This prior context is relevant for understanding the change in Rachel's living situation."
+  },
+  {
+    "scenario_id": "2_message_content_favors_one",
+    "trial": 7,
+    "selected_id": "c3",
+    "llm_calls": 1,
+    "acceptable": true,
+    "reasoning": "[2 eligible after filter] The candidate fact directly relates to Rachel's move to the suburbs, providing context for the CURRENT MESSAGE."
+  },
+  {
+    "scenario_id": "3_exact_worked_example",
+    "trial": 8,
+    "selected_id": null,
+    "llm_calls": 1,
+    "acceptable": true,
+    "reasoning": "[2 eligible after filter] No candidate fact discusses Rachel's move back to the suburbs, only her previous residences."
+  },
+  {
+    "scenario_id": "1_symmetric_no_signal",
+    "trial": 4,
+    "selected_id": "c1",
+    "llm_calls": 1,
+    "acceptable": true,
+    "reasoning": "[2 eligible after filter] The current message indicates that Rachel has moved back to the suburbs, which contradicts the candidate fact that she signed a lease downtown. This context is relevant for understanding the change in Rachel's living situation."
+  },
+  {
+    "scenario_id": "3_exact_worked_example",
+    "trial": 4,
+    "selected_id": null,
+    "llm_calls": 1,
+    "acceptable": true,
+    "reasoning": "[2 eligible after filter] No candidate fact discusses Rachel's move back to the suburbs, only her previous residences."
+  },
+  {
+    "scenario_id": "1_symmetric_no_signal",
+    "trial": 7,
+    "selected_id": "c1",
+    "llm_calls": 1,
+    "acceptable": true,
+    "reasoning": "[2 eligible after filter] The current message indicates that Rachel moved back to the suburbs, which contradicts the candidate fact that she signed a lease downtown. This context is relevant for understanding the change in Rachel's living situation."
+  },
+  {
+    "scenario_id": "1_symmetric_no_signal",
+    "trial": 8,
+    "selected_id": "c1",
+    "llm_calls": 1,
+    "acceptable": true,
+    "reasoning": "[2 eligible after filter] The current message indicates that Rachel moved back to the suburbs, which contradicts the candidate fact that she signed a lease downtown. This context is relevant for understanding the change in Rachel's living situation."
+  },
+  {
+    "scenario_id": "3_exact_worked_example",
+    "trial": 3,
+    "selected_id": null,
+    "llm_calls": 1,
+    "acceptable": true,
+    "reasoning": "[2 eligible after filter] No candidate fact discusses Rachel's move back to the suburbs, only her previous residences."
+  },
+  {
+    "scenario_id": "1_symmetric_no_signal",
+    "trial": 0,
+    "selected_id": "c1",
+    "llm_calls": 1,
+    "acceptable": true,
+    "reasoning": "[2 eligible after filter] The current message indicates that Rachel moved back to the suburbs, which contradicts the candidate fact that she signed a lease downtown. This context is relevant for understanding the change in Rachel's living situation."
+  },
+  {
+    "scenario_id": "1_symmetric_no_signal",
+    "trial": 3,
+    "selected_id": "c1",
+    "llm_calls": 1,
+    "acceptable": true,
+    "reasoning": "[2 eligible after filter] The current message indicates that Rachel moved back to the suburbs, which contradicts the candidate fact that she signed a lease downtown. This context is relevant for understanding the change in Rachel's living situation."
+  },
+  {
+    "scenario_id": "3_exact_worked_example",
+    "trial": 0,
+    "selected_id": null,
+    "llm_calls": 1,
+    "acceptable": true,
+    "reasoning": "[2 eligible after filter] No candidate fact discusses Rachel's move back to the suburbs, only her previous residences."
+  }
+]

@@ -1,0 +1,86 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+
+# Environment
+.env
+.env.backup-*
+.env.bak*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Test/cache
+.pytest_cache/
+pytest_output.txt
+htmlcov/
+.coverage
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Runtime logs and server state
+logs/
+.server.pid
+.watchdog.pid
+
+# Local runtime/test scratch
+.agent/backups/
+# Graph dumps land here (scripts/export_graph_backup.py defaults to <repo>/backups).
+# These contain real memory content -- entity text, episode bodies, anything the
+# operator ever stored -- so they must never be committed, whatever the directory
+# is named.
+backups/
+*.jsonl.gz
+.agent/mcp_telemetry.db
+.agent/mcp_telemetry.db-*
+.agent/test_tmp/
+.agent/tmp/
+.agent/*.stdout.log
+.agent/*.stderr.log
+.qwen/*.orig
+.tmp_pytest/
+.tmp_pytest_cache/
+.pytest_tmp/
+pytest-cache-files-*/
+src/uvicorn_*_log.txt
+
+# Full-deployment secrets (never commit)
+deploy/.env.deploy
+coverage.xml
+
+# Chromium/Edge profile debris. Something launched a browser with this repo root as its
+# user-data-dir and dumped a 17MB profile next to src/. Ignored so it cannot be committed
+# by accident, and so `git status` stays readable if it happens again.
+Crashpad/
+CrashpadMetrics*.pma
+Default/
+GPUPersistentCache/
+GrShaderCache/
+ShaderCache/
+SmartScreen/
+Safe Browsing/
+Nurturing/
+Ad Blocking/
+component_crx_cache/
+FirstLaunchAfterInstallation
+Last Browser
+Last Version
+Local State
+Variations
+VariationsRuntimeSeedV2
+VariationsSafeSeedV2
+VariationsSeedV2
+first_party_sets.db
+first_party_sets.db-journal

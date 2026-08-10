@@ -1,0 +1,29 @@
+{% if queued_episodes %}
+<div class="list">
+  {% for ep in queued_episodes %}
+  <div class="row-card">
+    <button data-node-uuid="{{ ep.uuid }}">
+      <div class="meta" style="margin-bottom:0.25rem">Queued: <span class="utc-time" data-utc="{{ ep.queued_at }}">{{ ep.queued_at }}</span></div>
+      <div class="meta">
+        Stage: {{ ep.processing_stage or "unknown" }} |
+        Progress: {{ "%.1f"|format(ep.processing_progress or 0) }}% |
+        Steps: {{ ep.processing_steps_completed or 0 }}/{{ ep.processing_steps_total or 0 }} |
+        LLM Tasks: {{ ep.processing_llm_tasks_attempt or 0 }} (total {{ ep.processing_llm_tasks_total or 0 }})
+      </div>
+      <div class="meta" style="margin-bottom:0.25rem">Last LLM Task: <span class="utc-time" data-utc="{{
+          ep.processing_llm_last_task_at }}">{{ ep.processing_llm_last_task_at or "none" }}</span></div>
+      <div class="meta" style="margin-bottom:0.25rem">Heartbeat: <span class="utc-time" data-utc="{{ ep.processing_heartbeat_at }}">{{
+          ep.processing_heartbeat_at or "no-heartbeat" }}</span></div>
+      <div class="row-card-content-header">{{ ep.preview }}</div>
+      <div class="meta episode-name-toggle">Name: {{ ep.name }}</div>
+      <div class="badge-row">
+        <span class="badge {{ ep.processing_state.lower() }}">{{ ep.processing_state }}</span>
+        <span class="badge">Attempt {{ ep.processing_attempts }}</span>
+      </div>
+    </button>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<p class="muted-empty">Enrichment queue is empty.</p>
+{% endif %}

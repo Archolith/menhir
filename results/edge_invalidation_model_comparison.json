@@ -1,0 +1,199 @@
+{
+  "trials_per_model": 20,
+  "temperature": 0,
+  "new_facts": [
+    "Rachel moved back to the suburbs",
+    "Rachel just moved back to the suburbs again.",
+    "Rachel moved back to the suburbs again."
+  ],
+  "invalidation_candidate": "Rachel lives in Chicago.",
+  "models": [
+    {
+      "model": "gpt-4.1",
+      "detection_count": 20,
+      "detection_rate": 1.0,
+      "trials": [
+        {
+          "trial": 0,
+          "new_fact": "Rachel moved back to the suburbs",
+          "detected": true,
+          "contradicted": [
+            0
+          ],
+          "duplicated": []
+        },
+        {
+          "trial": 1,
+          "new_fact": "Rachel just moved back to the suburbs again.",
+          "detected": true,
+          "contradicted": [
+            0
+          ],
+          "duplicated": []
+        },
+        {
+          "trial": 2,
+          "new_fact": "Rachel moved back to the suburbs again.",
+          "detected": true,
+          "contradicted": [
+            0
+          ],
+          "duplicated": []
+        },
+        {
+          "trial": 3,
+          "new_fact": "Rachel moved back to the suburbs",
+          "detected": true,
+          "contradicted": [
+            0
+          ],
+          "duplicated": []
+        },
+        {
+          "trial": 4,
+          "new_fact": "Rachel just moved back to the suburbs again.",
+          "detected": true,
+          "contradicted": [
+            0
+          ],
+          "duplicated": []
+        },
+        {
+          "trial": 5,
+          "new_fact": "Rachel moved back to the suburbs again.",
+          "detected": true,
+          "contradicted": [
+            0
+          ],
+          "duplicated": []
+        },
+        {
+          "trial": 6,
+          "new_fact": "Rachel moved back to the suburbs",
+          "detected": true,
+          "contradicted": [
+            0
+          ],
+          "duplicated": []
+        },
+        {
+          "trial": 7,
+          "new_fact": "Rachel just moved back to the suburbs again.",
+          "detected": true,
+          "contradicted": [
+            0
+          ],
+          "duplicated": []
+        },
+        {
+          "trial": 8,
+          "new_fact": "Rachel moved back to the suburbs again.",
+          "detected": true,
+          "contradicted": [
+            0
+          ],
+          "duplicated": []
+        },
+        {
+          "trial": 9,
+          "new_fact": "Rachel moved back to the suburbs",
+          "detected": true,
+          "contradicted": [
+            0
+          ],
+          "duplicated": []
+        },
+        {
+          "trial": 10,
+          "new_fact": "Rachel just moved back to the suburbs again.",
+          "detected": true,
+          "contradicted": [
+            0
+          ],
+          "duplicated": []
+        },
+        {
+          "trial": 11,
+          "new_fact": "Rachel moved back to the suburbs again.",
+          "detected": true,
+          "contradicted": [
+            0
+          ],
+          "duplicated": []
+        },
+        {
+          "trial": 12,
+          "new_fact": "Rachel moved back to the suburbs",
+          "detected": true,
+          "contradicted": [
+            0
+          ],
+          "duplicated": []
+        },
+        {
+          "trial": 13,
+          "new_fact": "Rachel just moved back to the suburbs again.",
+          "detected": true,
+          "contradicted": [
+            0
+          ],
+          "duplicated": []
+        },
+        {
+          "trial": 14,
+          "new_fact": "Rachel moved back to the suburbs again.",
+          "detected": true,
+          "contradicted": [
+            0
+          ],
+          "duplicated": []
+        },
+        {
+          "trial": 15,
+          "new_fact": "Rachel moved back to the suburbs",
+          "detected": true,
+          "contradicted": [
+            0
+          ],
+          "duplicated": []
+        },
+        {
+          "trial": 16,
+          "new_fact": "Rachel just moved back to the suburbs again.",
+          "detected": true,
+          "contradicted": [
+            0
+          ],
+          "duplicated": []
+        },
+        {
+          "trial": 17,
+          "new_fact": "Rachel moved back to the suburbs again.",
+          "detected": true,
+          "contradicted": [
+            0
+          ],
+          "duplicated": []
+        },
+        {
+          "trial": 18,
+          "new_fact": "Rachel moved back to the suburbs",
+          "detected": true,
+          "contradicted": [
+            0
+          ],
+          "duplicated": []
+        },
+        {
+          "trial": 19,
+          "new_fact": "Rachel just moved back to the suburbs again.",
+          "detected": true,
+          "contradicted": [
+            0
+          ],
+          "duplicated": []
+        }
+      ]
+    }
+  ]
+}

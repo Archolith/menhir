@@ -1,0 +1,266 @@
+"""Safety tests for the combined recall-hygiene migration."""
+
+from __future__ import annotations
+
+import importlib.util
+import json
+from argparse import Namespace
+from pathlib import Path
+from typing import Any
+
+
+SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "migrate_flagged_bootstrap_scope.py"
+SPEC = importlib.util.spec_from_file_location("migrate_flagged_bootstrap_scope", SCRIPT)
+assert SPEC and SPEC.loader
+MODULE = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(MODULE)
+
+
+def _header(rows: list[dict[str, Any]], *, uri: str = "bolt://test") -> dict[str, Any]:
+    return {
+        "kind": MODULE.MANIFEST_KIND,
+        "version": MODULE.MANIFEST_VERSION,
+        "source_uri": uri,
+        "candidate_count": len(rows),
+        "expected_graph_fingerprint": MODULE.hashlib.sha256(
+            "|".join(str(row.get("fingerprint") or "") for row in rows).encode("utf-8")
+        ).hexdigest(),
+    }
+
+
+def _base_row(uuid: str, **overrides: Any) -> dict[str, Any]:
+    row: dict[str, Any] = {
+        "uuid": uuid,
+        "labels": ["Entity"],
+        "name": uuid,
+        "content": "semantic content",
+        "source": "codex",
+        "group_id": "default",
+        "namespace": "default",
+        "user_flagged": True,
+        "bootstrap_scope": None,
+        "structure_role": None,
+        "anchor_projects": [],
+        "anchor_paths": [],
+    }
+    row.update(overrides)
+    return row
+
+
+def _manifest_row(row: dict[str, Any], **targets: Any) -> dict[str, Any]:
+    classified = MODULE._classify_candidate(row)
+    manifest = MODULE._manifest_candidate(classified)
+    manifest.update(targets)
+    return manifest
+
+
+def test_fingerprint_covers_role_scope_and_partition_state() -> None:
+    row = _base_row("u1")
+
+    assert MODULE.fingerprint(row) != MODULE.fingerprint({**row, "structure_role": "file"})
+    assert MODULE.fingerprint(row) != MODULE.fingerprint({**row, "bootstrap_scope": "general"})
+    assert MODULE.fingerprint(row) != MODULE.fingerprint({**row, "namespace": "archolith"})
+    assert MODULE.fingerprint(row) != MODULE.fingerprint({**row, "group_id": "archolith"})
+
+
+def test_candidate_classification_separates_structure_from_bootstrap_scope() -> None:
+    legacy = MODULE._classify_candidate(
+        _base_row(
+            "s1",
+            content="Directory: src/legacy",
+            source="codex,project-scan",
+            user_flagged=False,
+        )
+    )
+    bootstrap = MODULE._classify_candidate(_base_row("b1"))
+
+    assert legacy["candidate_kind"] == MODULE.LEGACY_STRUCTURE_CANDIDATE
+    assert legacy["proposed_structure_role"] == "directory"
+    assert bootstrap["candidate_kind"] == MODULE.BOOTSTRAP_CANDIDATE
+    assert bootstrap["proposed_structure_role"] is None
+
+
+def test_manifest_validation_normalizes_reviewed_targets() -> None:
+    structure = _manifest_row(
+        _base_row(
+            "s1",
+            content="File: src/example.py",
+            source="project-scan",
+            user_flagged=True,
+        ),
+        target_structure_role=" FILE ",
+    )
+    bootstrap = _manifest_row(
+        _base_row("b1"), target_bootstrap_scope=" Workspace: Archolith "
+    )
+    rows = [structure, bootstrap]
+
+    problems = MODULE.validate_manifest(_header(rows), rows, uri="bolt://test", max_rows=2)
+
+    assert problems == []
+    assert structure["target_structure_role"] == "file"
+    assert structure["target_bootstrap_scope"] is None
+    assert bootstrap["target_bootstrap_scope"] == "workspace:archolith"
+
+
+def test_manifest_requires_explicit_review_for_both_candidate_kinds() -> None:
+    structure = _manifest_row(
+        _base_row(
+            "s1",
+            content="Project: legacy",
+            source="project-scan",
+            user_flagged=False,
+        )
+    )
+    bootstrap = _manifest_row(_base_row("b1"))
+    rows = [structure, bootstrap]
+
+    problems = MODULE.validate_manifest(_header(rows), rows, uri="bolt://test", max_rows=2)
+
+    assert any("s1: target_structure_role must be explicitly reviewed" in item for item in problems)
+    assert any("b1: target_bootstrap_scope must be explicitly reviewed" in item for item in problems)
+
+
+def test_manifest_rejects_partition_mismatch_duplicate_and_wrong_version() -> None:
+    row = _manifest_row(_base_row("b1"), target_bootstrap_scope="general")
+    duplicate = dict(row)
+    header = _header([row, duplicate], uri="bolt://other")
+    header["version"] = 1
+
+    problems = MODULE.validate_manifest(
+        header, [row, duplicate], uri="bolt://test", max_rows=2
+    )
+
+    assert any("version" in item for item in problems)
+    assert any("source_uri" in item for item in problems)
+    assert any("unique" in item for item in problems)
+
+
+def test_default_bound_covers_planned_legacy_corpus() -> None:
+    assert MODULE.DEFAULT_LIMIT >= 751
+
+
+def test_candidate_query_covers_legacy_structure_cleanup_and_semantic_pins() -> None:
+    class Repo:
+        query = ""
+
+        def execute(self, query, params):  # noqa: ANN001
+            self.query = query
+            assert params == {"limit": 11}
+            return []
+
+    repo = Repo()
+
+    assert MODULE._candidates(repo, limit=10) == []
+    assert "n.structure_role IS NULL" in repo.query
+    assert "n.structure_role IS NOT NULL" in repo.query
+    assert "coalesce(n.user_flagged, false)" in repo.query
+    assert "coalesce(n.source, '') CONTAINS 'project-scan'" in repo.query
+    assert "'directory:'" in repo.query
+    assert "'file:'" in repo.query
+    assert "'project:'" in repo.query
+
+
+def test_evaluation_rejects_namespace_or_group_drift_after_target_is_applied() -> None:
+    row = _manifest_row(_base_row("b1"), target_bootstrap_scope="general")
+    assert MODULE.validate_manifest(_header([row]), [row], uri="bolt://test", max_rows=1) == []
+    applied = {**_base_row("b1"), "bootstrap_scope": "general"}
+    applied["namespace"] = "changed"
+
+    pending, unchanged, missing, drift = MODULE._evaluate_manifest({"b1": applied}, [row])
+
+    assert pending == []
+    assert unchanged == []
+    assert missing == []
+    assert drift == ["b1: preserved fields changed since plan"]
+
+
+class _StatefulRepo:
+    def __init__(self, rows: list[dict[str, Any]]) -> None:
+        self.rows = {str(row["uuid"]): dict(row) for row in rows}
+        self.write_calls = 0
+
+    def _candidate_rows(self) -> list[dict[str, Any]]:
+        result = []
+        for row in self.rows.values():
+            role = MODULE.infer_legacy_structure_role(row)
+            if role is not None:
+                if row.get("structure_role") is None or bool(row.get("user_flagged")) or row.get(
+                    "bootstrap_scope"
+                ) is not None:
+                    result.append(dict(row))
+            elif bool(row.get("user_flagged")) and row.get("bootstrap_scope") is None:
+                result.append(dict(row))
+        return sorted(result, key=lambda item: str(item["uuid"]))
+
+    def execute(self, query, params):  # noqa: ANN001
+        if "MATCH (n) WHERE n.uuid IN $uuids" in query:
+            return [dict(self.rows[uuid]) for uuid in params["uuids"] if uuid in self.rows]
+        if "UNWIND $rows AS row" in query:
+            self.write_calls += 1
+            for target in params["rows"]:
+                self.rows[str(target["uuid"])].update(target)
+            return [{"updated": len(params["rows"])}]
+        rows = self._candidate_rows()
+        return rows[: int(params["limit"])]
+
+
+def test_combined_plan_apply_verify_preserves_partitions(tmp_path: Path) -> None:
+    structure = _base_row(
+        "s1",
+        content="Directory: src/legacy",
+        source="project-scan",
+        user_flagged=True,
+        bootstrap_scope="general",
+        namespace="archolith",
+        group_id="archolith",
+    )
+    bootstrap = _base_row(
+        "b1", namespace="default", group_id="default", user_flagged=True
+    )
+    repo = _StatefulRepo([structure, bootstrap])
+    manifest_path = tmp_path / "recall-hygiene.jsonl"
+    backup_path = tmp_path / "backup.jsonl.gz"
+    backup_path.write_bytes(b"logical-backup")
+
+    assert MODULE.cmd_plan(
+        repo,
+        "bolt://test",
+        Namespace(limit=10, out=str(manifest_path)),
+    ) == 0
+    payload = [json.loads(line) for line in manifest_path.read_text(encoding="utf-8").splitlines()]
+    for row in payload[1:]:
+        if row["candidate_kind"] == MODULE.LEGACY_STRUCTURE_CANDIDATE:
+            row["target_structure_role"] = "directory"
+        else:
+            row["target_bootstrap_scope"] = "workspace:archolith"
+    manifest_path.write_text(
+        "".join(json.dumps(row, sort_keys=True) + "\n" for row in payload),
+        encoding="utf-8",
+    )
+    args = Namespace(
+        manifest=str(manifest_path),
+        backup=str(backup_path),
+        max_rows=10,
+        batch_size=10,
+        yes=False,
+    )
+
+    assert MODULE.cmd_apply(repo, "bolt://test", args) == 0
+    assert repo.write_calls == 0
+    args.yes = True
+    assert MODULE.cmd_apply(repo, "bolt://test", args) == 0
+    assert repo.write_calls == 1
+    assert repo.rows["s1"]["structure_role"] == "directory"
+    assert repo.rows["s1"]["user_flagged"] is False
+    assert repo.rows["s1"]["bootstrap_scope"] is None
+    assert repo.rows["s1"]["namespace"] == "archolith"
+    assert repo.rows["s1"]["group_id"] == "archolith"
+    assert repo.rows["b1"]["bootstrap_scope"] == "workspace:archolith"
+    assert repo.rows["b1"]["namespace"] == "default"
+    assert repo.rows["b1"]["group_id"] == "default"
+    assert MODULE.cmd_verify(
+        repo,
+        "bolt://test",
+        Namespace(manifest=str(manifest_path), limit=10),
+    ) == 0

@@ -1,0 +1,20 @@
+# Throwaway Neo4j for LongMemEval Mode-B benchmarks ONLY.
+# Isolated from dev/prod: distinct container name, ports, volume, and creds.
+# Never point a benchmark at the real (remote) menhir Neo4j.
+#   Bring up:  docker compose -f docker-compose.benchmark.yml up -d
+#   Tear down: docker compose -f docker-compose.benchmark.yml down -v
+services:
+  neo4j-bench:
+    image: neo4j:5-community
+    container_name: menhir-bench-neo4j
+    environment:
+      NEO4J_AUTH: neo4j/benchthrowaway # gitleaks:allow — local benchmark credential
+      NEO4J_PLUGINS: '["apoc"]'
+    ports:
+      - "7475:7474"   # Browser UI (distinct from dev 7474)
+      - "7688:7687"   # Bolt protocol (distinct from dev 7687)
+    volumes:
+      - menhir_bench_neo4j_data:/data
+
+volumes:
+  menhir_bench_neo4j_data:

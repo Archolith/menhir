@@ -1,0 +1,141 @@
+name: tests
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  offline-tests:
+    runs-on: ubuntu-latest
+    # Hard ceiling independent of pytest-timeout's per-test guard: if the known
+    # suite-hang issue (2026-07-11 SSOT review) isn't actually being caught by
+    # pytest-timeout under this runner/xdist combination, the job fails instead
+    # of running indefinitely and burning Actions minutes.
+    timeout-minutes: 15
+    steps:
+      - name: Checkout menhir
+        uses: actions/checkout@v4
+        with:
+          path: menhir
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: menhir/pyproject.toml
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ./menhir pytest pytest-asyncio pytest-xdist pytest-timeout
+
+      # No -m filter, deliberately. This previously ran `-m unit`, which selected only
+      # 3,127 of 5,921 collected tests; the online job selects 174 more. The remaining
+      # 2,623 carry neither marker and so ran in NO job -- including all 55 auth
+      # middleware tests covering bearer auth, OAuth identity gating, and loopback
+      # guards. A rename in b436d67 broke three of those tests and CI stayed green,
+      # which is how the gap was found.
+      #
+      # A filter is unnecessary here: conftest.pytest_collection_modifyitems already
+      # skips `online` tests unless --run-online is passed, so a plain run covers
+      # everything offline and skips the live-stack tests on its own. Measured at
+      # 5,741 passed / 180 skipped in 3m41s, well inside the 15 minute ceiling.
+      #
+      # Do not reintroduce `-m unit` to speed this up. Any test added without an
+      # explicit marker silently stops running, and the failure mode is invisible:
+      # the job still reports green.
+      #
+      # Running serial (no -n auto/--dist) for now: xdist has a known failure mode
+      # where a crashed worker hangs the whole run instead of failing fast (see
+      # 2026-07-12 diagnostic history in git log), so parallelism stays off pending
+      # a separate, deliberate re-test. pytest-timeout (configured in pytest.ini,
+      # 60s per test) is the safety net for any single hanging test.
+      #
+      # Known remaining issue (2026-07-12): tests/test_llm_compression.py::
+      # TestCompressContentUnit::test_returns_llm_summary (and likely the related
+      # TestDecayLLMWiring failures in the same file) has a separate, unfixed hang
+      # in the LLM chat-completion retry/backoff path -- tracked as a follow-up, not
+      # yet root-caused. This run may still fail/timeout on that file.
+      - name: Run offline tests
+        working-directory: menhir
+        run: pytest -v
+
+  # The unit job cannot see the behaviour this project actually depends on: supersession under
+  # the real uniqueness constraint, provenance edges, TurnEvidence grounding and deletion repair
+  # are all `online` and were therefore never run by CI. The offline scalar-View suite drives
+  # supersession through a FakeNeo4j with no `scalar_state_view_current_key_unique` constraint,
+  # so it reported supersession as working while production silently failed -- a green unit run
+  # is not evidence for these paths. This job runs them against a real, throwaway Neo4j.
+  online-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      neo4j:
+        image: neo4j:5-community
+        env:
+          NEO4J_AUTH: neo4j/testpassword
+          NEO4J_PLUGINS: '["apoc"]'
+          NEO4J_server_memory_heap_max__size: 512m
+        ports:
+          # 7688 mirrors docker-compose.test.yml, so the URI matches local runs exactly.
+          - 7688:7687
+        options: >-
+          --health-cmd "wget -qO- http://localhost:7474 || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - name: Checkout menhir
+        uses: actions/checkout@v4
+        with:
+          path: menhir
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: menhir/pyproject.toml
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ./menhir pytest pytest-asyncio pytest-xdist pytest-timeout
+
+      # A missing test Neo4j makes `test_neo4j_repo` SKIP, not fail -- so a broken service
+      # container would leave this job GREEN while running nothing at all. Prove connectivity
+      # before pytest, so a skip can never be caused by an unreachable database.
+      - name: Verify test Neo4j is reachable
+        working-directory: menhir
+        run: |
+          python - <<'PY'
+          from neo4j import GraphDatabase
+          drv = GraphDatabase.driver("bolt://localhost:7688", auth=("neo4j", "testpassword"))
+          drv.verify_connectivity()
+          with drv.session() as s:
+              print("neo4j ok:", s.run("RETURN 1 AS ok").single()["ok"])
+          drv.close()
+          PY
+
+      # SCOPE: every graph-backed online test, selected by marker rather than by filename.
+      #
+      # This job supplies Neo4j and NOTHING ELSE -- no LLM, no embedder. `needs_llm` marks the
+      # online tests that cannot cope with that, so a new *_live.py file is picked up here
+      # AUTOMATICALLY instead of being silently missed by a hand-maintained list.
+      #
+      # Only two things carry `needs_llm`, and only because they cannot skip themselves:
+      # TestCompressContentLive (HANGS in chat-completion retry/backoff until pytest-timeout
+      # kills the run) and test_m0_retrieval_baseline (drives real graphiti search lanes). Every
+      # other LLM-dependent online test has a working skip-guard and skips cleanly here.
+      #
+      # Verified locally against a stock neo4j:5-community: 127 passed, 20 skipped, 0 failed.
+      - name: Run online tests (graph-backed)
+        working-directory: menhir
+        env:
+          MENHIR_TEST_NEO4J_URI: bolt://localhost:7688
+          MENHIR_TEST_NEO4J_USER: neo4j
+          MENHIR_TEST_NEO4J_PASSWORD: testpassword
+          MENHIR_TEST_NEO4J_DATABASE: neo4j
+        run: pytest -m "online and not needs_llm" --run-online -v -rs

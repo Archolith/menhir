@@ -1,0 +1,86 @@
+"""Regression coverage for immutable OAuth/HTTP settings snapshots."""
+
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+import pytest
+
+from menhir.api.oauth import build_oauth_config
+from menhir.api.oauth_authorize import _bad_request
+from menhir.api.oauth_rate_limit import client_ip
+from menhir.config import MemorySettings
+
+pytestmark = pytest.mark.unit
+
+
+def test_explicit_empty_snapshot_value_does_not_fall_through_to_env(monkeypatch):
+    monkeypatch.setenv("MENHIR_PUBLIC_BASE_URL", "https://late-change.example")
+    settings = MemorySettings(oauth_public_base_url="")
+
+    assert build_oauth_config(settings).public_base_url == ""
+
+
+def test_from_env_captures_oauth_and_http_settings(monkeypatch, tmp_path):
+    monkeypatch.setenv("MENHIR_OAUTH_AS_ENABLED", "true")
+    monkeypatch.setenv("MENHIR_PUBLIC_BASE_URL", "https://memory.example.com")
+    monkeypatch.setenv("MENHIR_OAUTH_AS_DIR", str(tmp_path))
+    monkeypatch.setenv("MENHIR_OAUTH_AS_ACCESS_TTL_S", "900")
+    monkeypatch.setenv("MENHIR_OAUTH_AS_REGISTER_RATE", "7")
+    monkeypatch.setenv("MENHIR_TRUSTED_PROXY", "yes")
+    monkeypatch.setenv("MENHIR_TRUSTED_PROXY_PEERS", "127.0.0.1,10.0.0.2")
+    monkeypatch.setenv("MENHIR_CORS_ORIGINS", "https://one.example, https://two.example")
+
+    settings = MemorySettings.from_env()
+
+    assert settings.oauth_as_enabled is True
+    assert settings.oauth_as_access_ttl_s == 900
+    assert settings.oauth_as_register_rate == 7
+    assert settings.oauth_as_dir == str(tmp_path)
+    assert settings.trusted_proxy is True
+    assert settings.trusted_proxy_peers == ("127.0.0.1", "10.0.0.2")
+    assert settings.cors_origins == ("https://one.example", "https://two.example")
+
+
+def test_embedded_as_rejects_plain_http_public_url():
+    with pytest.raises(ValueError, match="must use HTTPS"):
+        MemorySettings(
+            oauth_as_enabled=True,
+            oauth_public_base_url="http://memory.example.com",
+        )
+
+
+def test_embedded_as_requires_public_url():
+    with pytest.raises(ValueError, match="is required"):
+        MemorySettings(oauth_as_enabled=True)
+
+
+def test_embedded_as_allows_loopback_http_for_local_development():
+    settings = MemorySettings(
+        oauth_as_enabled=True,
+        oauth_public_base_url="http://127.0.0.1:8100",
+    )
+
+    assert settings.oauth_as_enabled is True
+
+
+def test_untrusted_peer_cannot_supply_forwarded_rate_limit_identity():
+    request = SimpleNamespace(
+        client=SimpleNamespace(host="203.0.113.10"),
+        headers={"x-forwarded-for": "198.51.100.20"},
+    )
+    settings = SimpleNamespace(
+        trusted_proxy=True,
+        trusted_proxy_peers=("127.0.0.1",),
+    )
+
+    assert client_ip(request, settings) == "203.0.113.10"
+
+
+def test_consent_html_security_headers_are_fail_closed():
+    response = _bad_request("invalid")
+
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["x-frame-options"] == "DENY"
+    assert "frame-ancestors 'none'" in response.headers["content-security-policy"]
+    assert response.headers["referrer-policy"] == "no-referrer"

@@ -1,0 +1,235 @@
+{% extends 'base.html' %}
+
+{% block title %}Run {{ run.run_id }} · Benchmark Tasks{% endblock %}
+{% block body_class %}bench-run-page{% endblock %}
+
+{% block app_main %}
+<main class='bench-shell'>
+  <nav class='bench-breadcrumb'>
+    <a href='/explorer/recall-lab'>Recall Lab</a>
+    <span>›</span>
+    <a href='/explorer/recall-lab/bench-runs'>Benchmark Tasks</a>
+    <span>›</span>
+    <span>{{ run.run_id }}</span>
+  </nav>
+
+  <section class='run-hero'>
+    <div>
+      <div class='bench-kicker'>BENCHMARK RUN</div>
+      <h1>{{ run.label }}</h1>
+    </div>
+    <div class='run-source-badge'>
+      {% if run.is_active %}
+      <span class='source-badge active-cfg'>ACTIVE CONFIGURED</span>
+      {% elif run.live_graph_source_run_id %}
+      <span class='source-badge live'>HISTORICAL SCORE + LIVE SOURCE</span>
+      {% else %}
+      <span class='source-badge artifact'>ARTIFACT-ONLY</span>
+      {% endif %}
+    </div>
+  </section>
+
+  {% if run.is_active %}
+  <div class='info-banner'>ACTIVE CONFIGURED — Live graph projection becomes available when you open a task.</div>
+  {% elif run.live_graph_source_run_id %}
+  <div class='info-banner'>HISTORICAL SCORE + LIVE SOURCE GRAPH — Scores remain frozen to this run; task graph data is read live from {{ run.live_graph_source_run_id }}.</div>
+  {% else %}
+  <div class='warning-banner'>ARTIFACT-ONLY: This run's graph data is not available. Only manifest and checkpoint data are shown.</div>
+  {% endif %}
+
+  <div class='run-metadata'>
+    <div class='meta-card'><span class='meta-label'>Variant</span><span class='meta-value'>{{ run.variant }}</span></div>
+    <div class='meta-card'><span class='meta-label'>Arm</span><span class='meta-value'>{{ run.arm or '—' }}</span></div>
+    <div class='meta-card'><span class='meta-label'>Model</span><span class='meta-value'>{{ run.model or '—' }}</span></div>
+    <div class='meta-card'><span class='meta-label'>Started</span><span class='meta-value'>{{ run.started_at[:16] if run.started_at else '—' }}</span></div>
+    <div class='meta-card'><span class='meta-label'>Attempts</span><span class='meta-value'>{{ run.attempts }}</span></div>
+    <div class='meta-card'><span class='meta-label'>Resumed</span><span class='meta-value'>{{ 'Yes' if run.resumed else 'No' }}</span></div>
+    <div class='meta-card'><span class='meta-label'>Noncanonical</span><span class='meta-value'>{{ 'Yes' if run.noncanonical else 'No' }}</span></div>
+    <div class='meta-card'><span class='meta-label'>Harness exit</span><span class='meta-value'>{{ run.harness_exit if run.harness_exit is not none else '—' }}</span></div>
+    <div class='meta-card'><span class='meta-label'>Menhir commit</span><span class='meta-value meta-mono'>{{ run.menhir_commit[:12] if run.menhir_commit else '—' }}</span></div>
+    <div class='meta-card'><span class='meta-label'>Bench commit</span><span class='meta-value meta-mono'>{{ run.bench_commit[:12] if run.bench_commit else '—' }}</span></div>
+  </div>
+
+  {% if run.phases %}
+  <section class='phases-section'>
+    <h2>Phases</h2>
+    <table><thead><tr><th>Phase</th><th>Status</th><th>Completed</th></tr></thead>
+      <tbody>{% for phase in run.phases %}
+        <tr><td>{{ phase.phase }}</td><td><span class='phase-{{ phase.status }}'>{{ phase.status }}</span></td><td>{{ phase.completed_at[:16] if phase.completed_at else '—' }}</td></tr>
+      {% endfor %}</tbody>
+    </table>
+  </section>
+  {% endif %}
+
+  {% if run.arms %}
+  <section class='arm-scores'>
+    <h2>Arm scores</h2>
+    <table><thead><tr><th>Arm</th><th>Completed</th><th>Correct</th><th>Score</th></tr></thead>
+      <tbody>{% for arm_name, arm_data in run.arms | dictsort %}
+        <tr><td>{{ arm_name }}</td><td>{{ arm_data.n }}</td><td>{{ arm_data.correct }}</td><td>{{ (arm_data.correct / arm_data.n * 100) | round(1) if arm_data.n else '—' }}%</td></tr>
+      {% endfor %}</tbody>
+    </table>
+  </section>
+  {% endif %}
+
+  <section class='task-list'>
+    <h2>Tasks <span class='muted'>({{ run.total_items }})</span></h2>
+
+    <div class='outcome-filters' role='group' aria-label='Filter tasks by outcome'>
+      <a href='?outcome=all' class='outcome-filter' data-outcome='all' role='button' aria-pressed='{{ "true" if outcome == "all" else "false" }}'>All <span class='count'>({{ outcome_counts.total if outcome_counts else run.total_items }})</span></a>
+      <a href='?outcome=failed' class='outcome-filter' data-outcome='failed' role='button' aria-pressed='{{ "true" if outcome == "failed" else "false" }}'>Failed <span class='count'>({{ outcome_counts.failed if outcome_counts else 0 }})</span></a>
+      <a href='?outcome=passed' class='outcome-filter' data-outcome='passed' role='button' aria-pressed='{{ "true" if outcome == "passed" else "false" }}'>Passed <span class='count'>({{ outcome_counts.passed if outcome_counts else 0 }})</span></a>
+      <a href='?outcome=unscored' class='outcome-filter' data-outcome='unscored' role='button' aria-pressed='{{ "true" if outcome == "unscored" else "false" }}'>Not scored <span class='count'>({{ outcome_counts.unscored if outcome_counts else 0 }})</span></a>
+    </div>
+
+    <div id='task-count-message' class='muted' aria-live='polite'></div>
+
+    {% if run.tasks %}
+    <div id='task-grid' class='task-grid'>
+      {% for task in run.tasks %}
+      {% set ns = task.namespace %}
+      {% set oc = task.primary_outcome or "NOT SCORED" %}
+      <a href='/explorer/recall-lab/bench-runs/{{ run.run_id }}/tasks/{{ ns }}?outcome={{ outcome }}' class='task-card' data-outcome='{{ oc }}' data-status='{{ "ready" if task.ready else "pending" }}'>
+        <div class='task-card-head'>
+          <span class='task-id'>{{ task.question_id }}</span>
+          <span class='task-type'>{{ task.question_type }}</span>
+          <span class='outcome-pill {{ "passed" if oc == "PASSED" else "failed" if oc == "FAILED" else "unscored" }}'>{{ oc }}</span>
+        </div>
+        <div class='task-card-meta'>
+          <span>{{ task.turns }} turns</span>
+          {% for score in task.scores[:3] %}
+          <span class='score-chip {{ "pass" if score.correct else "fail" }}'>{{ score.arm }}</span>
+          {% endfor %}
+        </div>
+        <div class='task-card-footer'>
+          {% if task.scalar_views %}<span class='badge persistent'>{{ task.scalar_views }} scalar views</span>{% endif %}
+          {% if task.typed_assertions %}<span class='badge'>{{ task.typed_assertions }} assertions</span>{% endif %}
+          {% if task.graph_available is true %}<span class='source-badge live'>LIVE</span>{% elif run.live_graph_source_run_id %}<span class='source-badge active-cfg'>LIVE SOURCE</span>{% endif %}
+        </div>
+      </a>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class='empty-state'><p>No tasks found in this run.</p></div>
+    {% endif %}
+  </section>
+</main>
+
+<script>
+(function() {
+  var grid = document.getElementById('task-grid');
+  if (!grid) return;
+  var cards = Array.from(grid.querySelectorAll('.task-card'));
+  var msg = document.getElementById('task-count-message');
+  var filterBar = document.querySelector('.outcome-filters');
+  if (!filterBar) return;
+  var filterLinks = filterBar.querySelectorAll('.outcome-filter');
+
+  function cardOutcome(card) {
+    var raw = card.getAttribute('data-outcome');
+    if (raw === 'PASSED') return 'passed';
+    if (raw === 'FAILED') return 'failed';
+    return 'unscored';
+  }
+
+  function updateView(outcome, pushHistory) {
+    var visible = 0;
+    var total = cards.length;
+    cards.forEach(function(card) {
+      var match = outcome === 'all' || cardOutcome(card) === outcome;
+      card.hidden = !match;
+      if (match) visible++;
+    });
+    if (msg) msg.textContent = 'Showing ' + visible + ' of ' + total + ' tasks';
+    filterLinks.forEach(function(link) {
+      var pressed = link.getAttribute('data-outcome') === outcome ? 'true' : 'false';
+      link.setAttribute('aria-pressed', pressed);
+      link.href = '?outcome=' + link.getAttribute('data-outcome');
+    });
+    // Update every task-card href to carry this outcome
+    cards.forEach(function(card) {
+      var href = card.getAttribute('href');
+      if (href) {
+        var base = href.split('?')[0];
+        card.setAttribute('href', base + '?outcome=' + outcome);
+      }
+    });
+    if (pushHistory) {
+      var url = new URL(location.href);
+      url.searchParams.set('outcome', outcome);
+      history.replaceState(null, '', url.toString());
+    }
+  }
+
+  function onFilterClick(e) {
+    e.preventDefault();
+    var outcome = this.getAttribute('data-outcome');
+    updateView(outcome, true);
+  }
+
+  filterLinks.forEach(function(link) {
+    link.addEventListener('click', onFilterClick);
+  });
+
+  // Sanitize initial URL value
+  var params = new URLSearchParams(location.search);
+  var initial = params.get('outcome') || 'all';
+  var valid = ['all', 'failed', 'passed', 'unscored'];
+  if (valid.indexOf(initial) === -1) initial = 'all';
+  updateView(initial, false);
+})();
+</script>
+{% endblock %}
+
+{% block extra_head %}
+<style>
+.bench-shell { max-width: 960px; margin: 0 auto; padding: 2rem 1.5rem; box-sizing: border-box; width: 100%; flex: 1; overflow-y: auto; }
+.bench-breadcrumb { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 1.5rem; font-size: 0.85rem; flex-wrap: wrap; }
+.bench-breadcrumb a { color: var(--accent); text-decoration: none; }
+.bench-breadcrumb a:hover { text-decoration: underline; }
+.bench-breadcrumb span { color: var(--text-muted); }
+.run-hero { display: flex; justify-content: space-between; align-items: start; gap: 1rem; margin-bottom: 1rem; }
+.run-hero h1 { margin: 0; font-size: 1.5rem; }
+.run-source-badge { flex-shrink: 0; }
+.source-badge { font-size: 0.65rem; padding: 0.25rem 0.6rem; border-radius: 6px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
+.source-badge.live { color: #10b981; background: rgba(16,185,129,0.15); }
+.source-badge.artifact { color: #f59e0b; background: rgba(245,158,11,0.15); }
+.source-badge.active-cfg { color: #58a6ff; background: rgba(88,166,255,0.15); }
+.warning-banner { background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.2); border-radius: 8px; padding: 0.75rem 1rem; margin-bottom: 1rem; font-size: 0.85rem; color: #f59e0b; }
+.info-banner { background: rgba(56,189,248,0.1); border: 1px solid rgba(56,189,248,0.2); border-radius: 8px; padding: 0.75rem 1rem; margin-bottom: 1rem; font-size: 0.85rem; color: var(--accent); }
+.run-metadata { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 0.6rem; margin-bottom: 1.5rem; }
+.meta-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 0.65rem; }
+.meta-label { display: block; font-size: 0.65rem; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.05em; margin-bottom: 0.2rem; }
+.meta-value { font-size: 0.85rem; font-weight: 600; }
+.meta-mono { font-family: ui-monospace, monospace; font-size: 0.8rem; }
+.phases-section, .arm-scores { margin-bottom: 1.5rem; }
+.phases-section h2, .arm-scores h2, .task-list h2 { font-size: 1rem; margin-bottom: 0.75rem; }
+.phases-section table, .arm-scores table { width: 100%; border-collapse: collapse; }
+.phases-section th, .phases-section td, .arm-scores th, .arm-scores td { padding: 0.4rem 0.75rem; text-align: left; border-bottom: 1px solid var(--border); font-size: 0.85rem; }
+.phases-section th, .arm-scores th { font-size: 0.7rem; text-transform: uppercase; color: var(--text-muted); font-weight: 400; }
+.task-grid { display: flex; flex-direction: column; gap: 0.6rem; }
+.task-card { display: block; background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 1rem; text-decoration: none; color: inherit; transition: all 0.2s; }
+.task-card:hover { border-color: var(--accent); }
+.task-card[data-outcome="FAILED"] { border-left: 4px solid #ef4444; }
+.task-card[data-outcome="PASSED"] { border-left: 4px solid #10b981; }
+.task-card[data-outcome="NOT SCORED"] { border-left: 4px solid #8b949e; }
+.task-card[hidden] { display: none !important; }
+.task-card-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem; gap: 0.4rem; flex-wrap: wrap; }
+.task-id { font-weight: 600; font-size: 0.9rem; }
+.task-type { font-size: 0.7rem; color: var(--accent); background: rgba(56,189,248,0.1); padding: 0.15rem 0.5rem; border-radius: 4px; }
+.outcome-pill { font-size: 0.65rem; padding: 0.2rem 0.55rem; border-radius: 6px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; margin-left: auto; white-space: nowrap; }
+.outcome-pill.passed { color: #10b981; background: rgba(16,185,129,0.15); }
+.outcome-pill.failed { color: #ef4444; background: rgba(239,68,68,0.15); }
+.outcome-pill.unscored { color: #8b949e; background: rgba(139,148,158,0.15); }
+.task-card-meta { display: flex; gap: 0.5rem; align-items: center; font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.4rem; }
+.score-chip { font-size: 0.65rem; padding: 0.15rem 0.4rem; border-radius: 4px; font-weight: 600; }
+.score-chip.pass { color: #10b981; background: rgba(16,185,129,0.1); }
+.score-chip.fail { color: #ef4444; background: rgba(239,68,68,0.1); }
+.task-card-footer { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.outcome-filters { display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap; }
+.outcome-filter { font-size: 0.8rem; padding: 0.4rem 0.75rem; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-card); color: var(--text-main); text-decoration: none; cursor: pointer; transition: all 0.2s; }
+.outcome-filter:hover { border-color: var(--accent); }
+.outcome-filter .count { color: var(--text-muted); font-size: 0.75rem; }
+.outcome-filter[aria-pressed="true"] { border-color: var(--accent); background: rgba(56,189,248,0.1); }
+</style>
+{% endblock %}

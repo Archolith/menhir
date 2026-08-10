@@ -1,0 +1,18 @@
+{% if flagged %}
+<div class="list">
+  {% for row in flagged %}
+  <div class="row-card">
+    <button data-node-uuid="{{ row.uuid }}">
+      <strong>{{ row.name }}</strong>
+      <div class="meta">{{ row.labels|join(", ") }}</div>
+      <div class="badge-row">
+        <span class="badge flagged">flagged</span>
+        <span class="badge {{ (row.scope or 'unknown')|lower }}">{{ row.scope or "unknown" }}</span>
+      </div>
+    </button>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<p class="muted-empty">No explicitly flagged nodes.</p>
+{% endif %}

@@ -1,0 +1,1006 @@
+{
+  "model": "gpt-4.1-nano",
+  "trials_per_condition": 40,
+  "conditions": [
+    {
+      "condition": "temp0.0\u00d7stock",
+      "temperature": 0.0,
+      "prompt_variant": "stock",
+      "total_trials": 40,
+      "merge_count": 0,
+      "merge_rate": 0.0,
+      "trials": [
+        {
+          "trial": 0,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 1,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 2,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 3,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 4,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 5,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 6,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 7,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 8,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 9,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 10,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 11,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 12,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 13,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 14,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 15,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 16,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 17,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 18,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 19,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 20,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 21,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 22,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 23,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 24,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 25,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 26,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 27,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 28,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 29,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 30,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 31,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 32,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 33,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 34,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 35,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 36,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 37,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 38,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 39,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        }
+      ]
+    },
+    {
+      "condition": "temp0.0\u00d7patched",
+      "temperature": 0.0,
+      "prompt_variant": "patched",
+      "total_trials": 40,
+      "merge_count": 0,
+      "merge_rate": 0.0,
+      "trials": [
+        {
+          "trial": 0,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 1,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 2,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 3,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 4,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 5,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 6,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 7,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 8,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 9,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 10,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 11,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 12,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 13,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 14,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 15,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 16,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 17,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 18,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 19,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 20,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 21,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 22,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 23,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 24,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 25,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 26,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 27,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 28,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 29,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 30,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 31,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 32,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 33,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 34,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 35,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 36,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 37,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 38,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 39,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        }
+      ]
+    },
+    {
+      "condition": "temp1.0\u00d7stock",
+      "temperature": 1.0,
+      "prompt_variant": "stock",
+      "total_trials": 40,
+      "merge_count": 3,
+      "merge_rate": 0.075,
+      "trials": [
+        {
+          "trial": 0,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 1,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 2,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 3,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 4,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 5,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 6,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 7,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 8,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 9,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 10,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 11,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 12,
+          "suburb_merged": true,
+          "duplicate_candidate_id": 0,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 13,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 14,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 15,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 16,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 17,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 18,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 19,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 20,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 21,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 22,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 23,
+          "suburb_merged": true,
+          "duplicate_candidate_id": 0,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 24,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 25,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 26,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 27,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 28,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 29,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 30,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 31,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 32,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 33,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 34,
+          "suburb_merged": true,
+          "duplicate_candidate_id": 0,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 35,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 36,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 37,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 38,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 39,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        }
+      ]
+    },
+    {
+      "condition": "temp1.0\u00d7patched",
+      "temperature": 1.0,
+      "prompt_variant": "patched",
+      "total_trials": 40,
+      "merge_count": 0,
+      "merge_rate": 0.0,
+      "trials": [
+        {
+          "trial": 0,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 1,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 2,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 3,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 4,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 5,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 6,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 7,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 8,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 9,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 10,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 11,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 12,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 13,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 14,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 15,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 16,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 17,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 18,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 19,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 20,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 21,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 22,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 23,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 24,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 25,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 26,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 27,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 28,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 29,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 30,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 31,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 32,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 33,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 34,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 35,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 36,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 37,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 38,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        },
+        {
+          "trial": 39,
+          "suburb_merged": false,
+          "duplicate_candidate_id": -1,
+          "resolved_name": "the suburbs"
+        }
+      ]
+    }
+  ]
+}

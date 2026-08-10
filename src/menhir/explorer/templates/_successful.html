@@ -1,0 +1,26 @@
+﻿{% if successful_episodes %}
+<div class="list">
+  {% for ep in successful_episodes %}
+  <div class="row-card" style="border-left: 4px solid var(--success)">
+    <button data-node-uuid="{{ ep.uuid }}">
+      <div class="meta" style="margin-bottom:0.25rem">Completed: <span class="utc-time" data-utc="{{ ep.completed_at }}">{{ ep.completed_at }}</span></div>
+      
+      <div class="row-card-content-header">{{ ep.preview }}</div>
+      <div class="meta episode-name-toggle">Name: {{ ep.name }}</div>
+      
+      <div class="meta" style="font-size:0.7rem; margin-top:0.25rem; opacity:0.8">
+        {{ ep.processing_stage }} | {{ "%.0f"|format(ep.processing_progress or 0) }}% complete
+      </div>
+
+      <div class="badge-row">
+        <span class="badge recovered">SUCCESS</span>
+        <span class="badge">Attempt {{ ep.processing_attempts }}</span>
+        <span class="badge session row-card-code">{{ ep.session_id }}</span>
+      </div>
+    </button>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<p class="muted-empty">No successful enrichments yet.</p>
+{% endif %}

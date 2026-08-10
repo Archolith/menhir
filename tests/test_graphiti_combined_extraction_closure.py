@@ -1,0 +1,1207 @@
+"""Tests for combined-extraction endpoint closure, payload sanitation, and collapse detection.
+
+Covers the menhir-side remediation of the ScalarStateView ingestion/provenance defect:
+Graphiti's combined extractor dropped edges whose endpoints were absent from the extracted
+entity set (then orphan-pruned the survivors), and rejected a whole payload for one malformed
+row. These patches close missing endpoints and drop only malformed rows BEFORE resolution,
+and surface a genuine collapse as a retryable failure instead of a masked empty-extraction
+success.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from datetime import datetime, timezone
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
+import pytest
+
+pytest.importorskip("graphiti_core")
+
+import graphiti_core.utils.maintenance.combined_extraction as ce  # noqa: E402
+import menhir.infrastructure.graphiti_extraction_patches as extraction_patches  # noqa: E402
+import menhir.infrastructure.graphiti_patches as patches  # noqa: E402
+import menhir.services.enrichment_steps as steps  # noqa: E402
+from menhir.services.enrichment_failures import classify_enrichment_failure  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _install_and_reset() -> None:
+    patches._patch_graphiti_combined_extraction_models()
+    patches.clear_extraction_receipt()
+    yield
+    patches.clear_extraction_receipt()
+
+
+def _build(payload: dict) -> object:
+    return ce.CombinedExtraction(**payload)
+
+
+def test_missing_source_endpoint_is_synthesized() -> None:
+    """Acceptance #1: Alice's coins + Alice->OWNS->Alice's coins yields two nodes and one edge."""
+    patches.begin_extraction_receipt("ep1", "user: Alice owns 37 coins.")
+    obj = _build(
+        {
+            "extracted_entities": [{"name": "Alice's coins", "entity_type_id": 0}],
+            "edges": [
+                {
+                    "source_entity_name": "Alice",
+                    "target_entity_name": "Alice's coins",
+                    "relation_type": "OWNS",
+                    "fact": "Alice owns 37 coins",
+                    "episode_indices": [0],
+                }
+            ],
+        }
+    )
+    names = sorted(e.name for e in obj.extracted_entities)
+    assert names == ["Alice", "Alice's coins"]
+    assert len(obj.edges) == 1
+    receipt = patches.get_extraction_receipt()
+    assert receipt.endpoints_synthesized == 1
+    assert receipt.raw_entity_count == 1
+    assert receipt.raw_edge_count == 1
+
+
+def test_missing_target_endpoint_is_synthesized() -> None:
+    """Acceptance #2: closure is symmetric for a missing target endpoint."""
+    patches.begin_extraction_receipt("ep2", "user: Alice wrote the novel.")
+    obj = _build(
+        {
+            "extracted_entities": [{"name": "Alice", "entity_type_id": 0}],
+            "edges": [
+                {
+                    "source_entity_name": "Alice",
+                    "target_entity_name": "the novel",
+                    "relation_type": "WROTE",
+                    "fact": "Alice wrote the novel",
+                    "episode_indices": [0],
+                }
+            ],
+        }
+    )
+    assert sorted(e.name for e in obj.extracted_entities) == ["Alice", "the novel"]
+    assert len(obj.edges) == 1
+    assert patches.get_extraction_receipt().endpoints_synthesized == 1
+
+
+def test_case_and_whitespace_equivalent_endpoint_does_not_duplicate() -> None:
+    """Acceptance #3: a case/whitespace variant of an existing entity is not synthesized twice."""
+    patches.begin_extraction_receipt("ep3", "user: alice knows Alice.")
+    obj = _build(
+        {
+            "extracted_entities": [{"name": "Alice", "entity_type_id": 0}],
+            "edges": [
+                {
+                    "source_entity_name": "  alice ",
+                    "target_entity_name": "Alice",
+                    "relation_type": "KNOWS",
+                    "fact": "alice knows Alice",
+                    "episode_indices": [0],
+                }
+            ],
+        }
+    )
+    assert len(obj.extracted_entities) == 1
+    assert patches.get_extraction_receipt().endpoints_synthesized == 0
+
+
+def test_synthesized_endpoint_gets_generic_entity_type() -> None:
+    """Acceptance #4: synthesized endpoints use entity_type_id=-1 (generic Entity), not 0."""
+    patches.begin_extraction_receipt("ep4", "user: Alice owns 37 coins.")
+    obj = _build(
+        {
+            "extracted_entities": [{"name": "Alice's coins", "entity_type_id": 0}],
+            "edges": [
+                {
+                    "source_entity_name": "Alice",
+                    "target_entity_name": "Alice's coins",
+                    "relation_type": "OWNS",
+                    "fact": "Alice owns 37 coins",
+                    "episode_indices": [0],
+                }
+            ],
+        }
+    )
+    alice = next(e for e in obj.extracted_entities if e.name == "Alice")
+    assert alice.entity_type_id == -1
+
+
+def _one_edge_from(pronoun: str, episode_text: str):
+    patches.begin_extraction_receipt("ep5", episode_text)
+    return _build(
+        {
+            "extracted_entities": [{"name": "coins", "entity_type_id": 0}],
+            "edges": [
+                {
+                    "source_entity_name": pronoun,
+                    "target_entity_name": "coins",
+                    "relation_type": "OWNS",
+                    "fact": f"{pronoun} own coins",
+                    "episode_indices": [0],
+                }
+            ],
+        }
+    )
+
+
+@pytest.mark.parametrize("pronoun", ["you", "we", "they", "he", "she", "it"])
+def test_ambiguous_pronoun_endpoints_are_not_synthesized(pronoun: str) -> None:
+    """Acceptance #5 (unchanged): genuinely ambiguous pronouns are never minted as identities."""
+    obj = _one_edge_from(pronoun, f"user: {pronoun} own 37 coins.")
+    assert all(e.name.lower() != pronoun.lower() for e in obj.extracted_entities)
+    assert patches.get_extraction_receipt().endpoints_synthesized == 0
+
+
+@pytest.mark.parametrize("label", ["user", "the user", "I", "me", "my"])
+def test_self_endpoints_bind_to_the_canonical_self_entity(label: str) -> None:
+    """Self labels on a USER turn resolve to one canonical `user` node instead of being refused.
+
+    This REPLACES the half of the old acceptance #5 that also refused these. Refusing them was
+    destroying the user's own facts: gpt-4o-mini emits the speaker as the literal token `user` on
+    every turn, so each such edge lost an endpoint, graphiti dropped it, and then orphan-pruned
+    every node those edges would have connected -- collapsing the episode to zero
+    (CombinedExtractionCollapsedError). Measured on the cc5ded98 smoke: 5 of 6 user turns.
+    """
+    obj = _one_edge_from(label, f"user: {label} own 37 coins.")
+    names = {e.name.lower() for e in obj.extracted_entities}
+    assert "user" in names, f"{label!r} should bind to the canonical self entity"
+    edge = obj.edges[0]
+    assert edge.source_entity_name.lower() == "user", "the edge endpoint must be rewritten too"
+
+
+@pytest.mark.parametrize("label", ["I", "me", "my"])
+def test_first_person_on_an_assistant_turn_is_not_bound_to_the_user(label: str) -> None:
+    """On an assistant turn `I` is the MODEL, so binding it to the human would misattribute.
+
+    `user`/`the user` still bind on an assistant turn (the model narrating the human); only
+    first-person is role-gated.
+    """
+    obj = _one_edge_from(label, f"assistant: {label} am an AI trained on data.")
+    assert all(e.name.lower() != "user" for e in obj.extracted_entities)
+
+
+@pytest.mark.parametrize("label", ["user", "the user", "I", "me", "my"])
+def test_no_self_binding_on_assistant_turns(label: str) -> None:
+    """`user -> X` on an assistant turn is ECHO of the user's own turn -- do not mint a duplicate.
+
+    On cc5ded98 the same fact appeared twice: turn 8 (user, first-hand) and turn 9 (assistant,
+    paraphrased). Binding on assistant turns stores the second-hand copy alongside the original.
+    Entity-to-entity facts on assistant turns are unaffected -- only the self-anchored echo is
+    dropped -- so `single-session-assistant` answers (a recommended restaurant, etc.) still land.
+    """
+    obj = _one_edge_from(label, f"assistant: {label} own 37 coins.")
+    assert all(e.name.lower() != "user" for e in obj.extracted_entities)
+
+
+@pytest.mark.parametrize(
+    "raw,malformed,suppressed,expected",
+    [
+        (4, 0, 4, True),    # pure echo: every usable edge suppressed by policy
+        (4, 0, 0, False),   # REAL collapse: nothing suppressed -- must stay retryable
+        (4, 0, 2, False),   # partial echo: real edges were also lost -- still a collapse
+        (0, 0, 0, False),   # genuinely empty extraction, handled by the existing path
+        (4, 1, 3, True),    # echo accounts for every edge that survived malformed-dropping
+        (4, 4, 0, False),   # all malformed, no echo -- not a policy decision
+    ],
+)
+def test_policy_empty_never_masks_a_real_collapse(
+    raw: int, malformed: int, suppressed: int, expected: bool
+) -> None:
+    """The success path must open ONLY when policy explains every lost edge.
+
+    If this predicate is too permissive it silently converts real data loss into reported success --
+    exactly the failure mode that hid this bug for a week (collapse counted as zero-extraction
+    success). The `suppressed=0` row is the one that matters.
+    """
+    receipt = patches.CombinedExtractionReceipt(
+        raw_edge_count=raw,
+        malformed_edges_dropped=malformed,
+        self_echo_edges_suppressed=suppressed,
+    )
+    assert patches.is_policy_empty_extraction(receipt) is expected
+
+
+def test_assistant_turn_entity_to_entity_facts_still_survive() -> None:
+    """The exclusion must be surgical: a recommendation on an assistant turn is still ingested."""
+    patches.begin_extraction_receipt("ep9", "assistant: Roscioli is a great Italian restaurant.")
+    obj = _build(
+        {
+            "extracted_entities": [
+                {"name": "Roscioli", "entity_type_id": 0},
+                {"name": "Italian restaurant", "entity_type_id": 0},
+            ],
+            "edges": [
+                {
+                    "source_entity_name": "Roscioli",
+                    "target_entity_name": "Italian restaurant",
+                    "relation_type": "IS_A",
+                    "fact": "Roscioli is an Italian restaurant",
+                    "episode_indices": [0],
+                }
+            ],
+        }
+    )
+    names = {e.name.lower() for e in obj.extracted_entities}
+    assert {"roscioli", "italian restaurant"} <= names
+    assert len(obj.edges) == 1
+
+
+@pytest.mark.parametrize(
+    "name", ["Alice", "Bob", "Sarah", "my car", "my wife", "my dog", "Alice's coins"])
+def test_named_and_owned_entities_are_never_folded_into_the_user(name: str) -> None:
+    """Self-binding must match ONLY bare self tokens -- never a person or an owned object.
+
+    Folding `Alice` or `my car` into the canonical `user` node would silently merge distinct
+    identities and attribute their properties to the human, which is far worse than the collapse
+    the binding fixes. Mirrors the typed-scalar prompt's own rule that `my car is red` has
+    subject `my car`, NOT `user`.
+    """
+    obj = _one_edge_from(name, f"user: {name} owns 37 coins.")
+    names = {e.name.lower() for e in obj.extracted_entities}
+    assert name.lower() in names, f"{name!r} must survive as its own entity"
+    assert obj.edges[0].source_entity_name.lower() == name.lower(), "endpoint must not be rewritten"
+
+
+def test_endpoint_absent_from_episode_text_is_not_synthesized() -> None:
+    """A non-pronoun name that does not appear in the episode text is not synthesized."""
+    patches.begin_extraction_receipt("ep6", "user: Alice owns 37 coins.")
+    obj = _build(
+        {
+            "extracted_entities": [{"name": "Alice's coins", "entity_type_id": 0}],
+            "edges": [
+                {
+                    "source_entity_name": "Bob",  # not present in episode text
+                    "target_entity_name": "Alice's coins",
+                    "relation_type": "GAVE",
+                    "fact": "Bob gave the coins",
+                    "episode_indices": [0],
+                }
+            ],
+        }
+    )
+    assert all(e.name != "Bob" for e in obj.extracted_entities)
+    assert patches.get_extraction_receipt().endpoints_synthesized == 0
+
+
+@pytest.mark.asyncio
+async def test_endpoint_grounded_in_previous_episode_context_is_synthesized(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A resolved pronoun antecedent may close an endpoint omitted from the entity list.
+
+    Regression for the LongMemEval turn "She moved to Chicago.": the combined extractor used
+    its previous-episode context to resolve "She" to Rachel, returned the valid Rachel->Chicago
+    edge, but omitted Rachel from ``extracted_entities``. Refusing every name absent from the
+    current sentence dropped the edge and then orphan-pruned Chicago, deterministically collapsing
+    both the main episode and its evidence projection.
+    """
+    patches.begin_extraction_receipt("ep-context", "user: She moved to Chicago.")
+
+    async def fake_extract_nodes_and_edges(*args, **kwargs):
+        obj = _build(
+            {
+                "extracted_entities": [{"name": "Chicago", "entity_type_id": 0}],
+                "edges": [
+                    {
+                        "source_entity_name": "Rachel",
+                        "target_entity_name": "Chicago",
+                        "relation_type": "LIVES_IN",
+                        "fact": "Rachel moved to Chicago.",
+                        "episode_indices": [0],
+                    }
+                ],
+            }
+        )
+        return obj.extracted_entities, obj.edges, {}
+
+    monkeypatch.setattr(ce, "extract_nodes_and_edges", fake_extract_nodes_and_edges)
+    nodes, edges, _ = await extraction_patches._run_graphiti_combined_extraction(
+        clients=object(),
+        episode=SimpleNamespace(uuid="ep-context"),
+        previous_episodes=[
+            SimpleNamespace(content="The user is planning to visit her friend Rachel.")
+        ],
+        entity_types=None,
+        excluded_entity_types=None,
+        custom_extraction_instructions=None,
+    )
+
+    assert sorted(node.name for node in nodes) == ["Chicago", "Rachel"]
+    assert len(edges) == 1
+    receipt = patches.get_extraction_receipt()
+    assert receipt.previous_episode_texts == (
+        "The user is planning to visit her friend Rachel.",
+    )
+    assert receipt.endpoints_synthesized == 1
+    assert receipt.orphan_nodes_dropped == 0
+
+
+@pytest.mark.asyncio
+async def test_exact_app_turn_gets_one_relationless_repair(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The live 5/5 gpt-4o-mini miss gets a focused repair instead of terminal attempt one.
+
+    Exact failed LongMemEval evidence atom from namespace ``lme-d7c942c3``. The production model
+    returned one entity (``new app``) and zero edges on five isolated temperature-zero trials even
+    though the sentence explicitly states ``user USES new app``.
+    """
+    turn = "I'm actually using a new app I recently downloaded."
+    patches.begin_extraction_receipt("ep-exact-app", turn, source_description="user")
+    calls: list[str] = []
+    edge = object()
+
+    async def fake_extract_nodes_and_edges(*args, **kwargs):
+        calls.append(kwargs["custom_extraction_instructions"])
+        receipt = patches.get_extraction_receipt()
+        if len(calls) == 1:
+            receipt.raw_entity_count = 1
+            receipt.raw_edge_count = 0
+            return [], [], {}
+        receipt.raw_entity_count = 2
+        receipt.raw_edge_count = 1
+        return [SimpleNamespace(name="user"), SimpleNamespace(name="new app")], [edge], {}
+
+    monkeypatch.setattr(ce, "extract_nodes_and_edges", fake_extract_nodes_and_edges)
+    nodes, edges, _ = await extraction_patches._run_graphiti_combined_extraction(
+        clients=object(),
+        episode=SimpleNamespace(uuid="ep-exact-app"),
+        previous_episodes=[],
+        entity_types=None,
+        excluded_entity_types=None,
+        custom_extraction_instructions="CALLER CONTRACT",
+    )
+
+    assert len(calls) == 2
+    assert "CALLER CONTRACT" in calls[0]
+    assert turn in calls[0]
+    assert "CORRECTIVE RE-EXTRACTION" not in calls[0]
+    assert "CORRECTIVE RE-EXTRACTION" in calls[1]
+    assert [node.name for node in nodes] == ["user", "new app"]
+    assert edges == [edge]
+    receipt = patches.get_extraction_receipt()
+    assert receipt.source_description == "user"
+    assert receipt.relationless_repair_attempted is True
+    assert receipt.relationless_repair_succeeded is True
+    assert receipt.relationless_initial_entity_count == 1
+    assert receipt.relationless_initial_edge_count == 0
+
+
+@pytest.mark.asyncio
+async def test_exact_parental_leave_interest_turn_gets_relationless_repair(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The stopped LME turn explicitly states informational intent toward two companies."""
+    turn = (
+        "I'd like to know more about the parental leave policies at these companies. "
+        "Can you tell me more about the policies at Goldman Sachs and Accenture?"
+    )
+    patches.begin_extraction_receipt("ep-parental-leave-interest", turn, source_description="user")
+    calls: list[str] = []
+
+    async def fake_extract_nodes_and_edges(*args, **kwargs):
+        calls.append(kwargs["custom_extraction_instructions"])
+        if len(calls) == 1:
+            obj = _build(
+                {
+                    "extracted_entities": [
+                        {"name": "user", "entity_type_id": 0},
+                        {"name": "Goldman Sachs", "entity_type_id": 0},
+                        {"name": "Accenture", "entity_type_id": 0},
+                    ],
+                    "edges": [],
+                }
+            )
+            return obj.extracted_entities, obj.edges, {}
+        obj = _build(
+            {
+                "extracted_entities": [
+                    {"name": "user", "entity_type_id": 0},
+                    {"name": "Goldman Sachs", "entity_type_id": 0},
+                    {"name": "Accenture", "entity_type_id": 0},
+                ],
+                "edges": [
+                    {
+                        "source_entity_name": "user",
+                        "target_entity_name": "Goldman Sachs",
+                        "relation_type": "WANTS_TO_KNOW_MORE_ABOUT",
+                        "fact": "The user wants to know more about Goldman Sachs parental leave policies.",
+                        "episode_indices": [0],
+                    },
+                    {
+                        "source_entity_name": "user",
+                        "target_entity_name": "Accenture",
+                        "relation_type": "WANTS_TO_KNOW_MORE_ABOUT",
+                        "fact": "The user wants to know more about Accenture parental leave policies.",
+                        "episode_indices": [0],
+                    },
+                ],
+            }
+        )
+        return obj.extracted_entities, obj.edges, {}
+
+    monkeypatch.setattr(ce, "extract_nodes_and_edges", fake_extract_nodes_and_edges)
+    nodes, edges, _ = await extraction_patches._run_graphiti_combined_extraction(
+        clients=object(),
+        episode=SimpleNamespace(uuid="ep-parental-leave-interest"),
+        previous_episodes=[],
+        entity_types=None,
+        excluded_entity_types=None,
+        custom_extraction_instructions=None,
+    )
+
+    assert len(calls) == 2
+    for instructions in calls:
+        normalized = " ".join(instructions.split())
+        assert "I'd like to know more about X" in normalized
+        assert "WANTS_TO_KNOW_MORE_ABOUT" in normalized
+        assert "Can you tell me about X?" in normalized
+    assert sorted(node.name for node in nodes) == ["Accenture", "Goldman Sachs", "user"]
+    assert [edge.relation_type for edge in edges] == [
+        "WANTS_TO_KNOW_MORE_ABOUT",
+        "WANTS_TO_KNOW_MORE_ABOUT",
+    ]
+    receipt = patches.get_extraction_receipt()
+    assert receipt.relationless_repair_attempted is True
+    assert receipt.relationless_repair_succeeded is True
+    assert receipt.relationless_initial_entity_count == 3
+    assert receipt.relationless_initial_edge_count == 0
+
+
+@pytest.mark.asyncio
+async def test_bare_information_question_contract_does_not_infer_interest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A question without an explicit first-person interest remains an intentional empty result."""
+    turn = "Can you tell me about parental leave policies at Accenture?"
+    patches.begin_extraction_receipt("ep-bare-information-question", turn, source_description="user")
+    calls: list[str] = []
+
+    async def fake_extract_nodes_and_edges(*args, **kwargs):
+        calls.append(kwargs["custom_extraction_instructions"])
+        obj = _build({"extracted_entities": [], "edges": []})
+        return obj.extracted_entities, obj.edges, {}
+
+    monkeypatch.setattr(ce, "extract_nodes_and_edges", fake_extract_nodes_and_edges)
+    nodes, edges, _ = await extraction_patches._run_graphiti_combined_extraction(
+        clients=object(),
+        episode=SimpleNamespace(uuid="ep-bare-information-question"),
+        previous_episodes=[],
+        entity_types=None,
+        excluded_entity_types=None,
+        custom_extraction_instructions=None,
+    )
+
+    assert len(calls) == 1
+    normalized = " ".join(calls[0].split())
+    assert "Can you tell me about X?" in normalized
+    assert "does not by itself assert durable interest" in normalized
+    assert nodes == []
+    assert edges == []
+    assert patches.get_extraction_receipt().relationless_repair_attempted is False
+
+
+@pytest.mark.asyncio
+async def test_bare_numeric_reply_repairs_with_adjacent_transcript_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression for the stopped LongMemEval business-card episode.
+
+    The current turn carries a selection but not its noun. Graphiti's ordinary previous episodes
+    omit the context-only assistant turn, so the first pass returned ``user`` + ``100`` and no edge.
+    Only the already-budgeted corrective pass may load the adjacent raw transcript, and endpoints
+    emitted from that context must pass the same grounding guard as ordinary previous episodes.
+    """
+
+    current = "user: I think 100 is a good starting point."
+    context_loads = 0
+
+    def load_context() -> tuple[str, ...]:
+        nonlocal context_loads
+        context_loads += 1
+        return (
+            "user: I need to order more business cards. Do you think 100 or 200 is a good amount?",
+            "assistant: Starting with 100 business cards sounds reasonable.",
+        )
+
+    patches.begin_extraction_receipt(
+        "24bd4f72-0b8e-4b03-abeb-074b72250b8b",
+        current,
+        source_description="user",
+        relationless_repair_context_loader=load_context,
+    )
+    calls: list[str] = []
+    previous_contexts: list[list[str]] = []
+
+    async def fake_extract_nodes_and_edges(*args, **kwargs):
+        calls.append(kwargs["custom_extraction_instructions"])
+        previous_contexts.append([item.content for item in args[2]])
+        if len(calls) == 1:
+            obj = _build(
+                {
+                    "extracted_entities": [
+                        {"name": "user", "entity_type_id": 0},
+                        {"name": "100", "entity_type_id": 0},
+                    ],
+                    "edges": [],
+                }
+            )
+            return obj.extracted_entities, obj.edges, {}
+        obj = _build(
+            {
+                "extracted_entities": [{"name": "user", "entity_type_id": 0}],
+                "edges": [
+                    {
+                        "source_entity_name": "user",
+                        "target_entity_name": "business cards",
+                        "relation_type": "PLANS_ORDER_QUANTITY",
+                        "fact": "The user selected 100 as the starting business-card order quantity.",
+                        "episode_indices": [0],
+                    }
+                ],
+            }
+        )
+        return obj.extracted_entities, obj.edges, {}
+
+    monkeypatch.setattr(ce, "extract_nodes_and_edges", fake_extract_nodes_and_edges)
+    nodes, edges, _ = await extraction_patches._run_graphiti_combined_extraction(
+        clients=object(),
+        episode=SimpleNamespace(uuid="24bd4f72-0b8e-4b03-abeb-074b72250b8b"),
+        previous_episodes=[],
+        entity_types=None,
+        excluded_entity_types=None,
+        custom_extraction_instructions=None,
+    )
+
+    assert len(calls) == 2
+    assert context_loads == 1
+    assert "ADJACENT TRANSCRIPT CONTEXT" not in calls[0]
+    assert previous_contexts[0] == []
+    assert previous_contexts[1] == [
+        "user: I need to order more business cards. Do you think 100 or 200 is a good amount?",
+        "assistant: Starting with 100 business cards sounds reasonable.",
+    ]
+    assert "I need to order more business cards" not in calls[1]
+    assert "Starting with 100 business cards" not in calls[1]
+    assert "ADJACENT TRANSCRIPT CONTEXT" in calls[1]
+    assert (
+        "Emit relationships only for claims or choices made in CURRENT MESSAGES"
+        in " ".join(calls[1].split())
+    )
+    assert sorted(node.name for node in nodes) == ["business cards", "user"]
+    assert len(edges) == 1
+    receipt = patches.get_extraction_receipt()
+    assert receipt.relationless_repair_succeeded is True
+    assert receipt.relationless_repair_context_texts == (
+        "user: I need to order more business cards. Do you think 100 or 200 is a good amount?",
+        "assistant: Starting with 100 business cards sounds reasonable.",
+    )
+    assert receipt.endpoints_synthesized == 1
+
+
+@pytest.mark.asyncio
+async def test_context_assisted_repair_suppresses_a_preceding_claim_copied_into_thanks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Native context must resolve the current turn, never become the current turn's content."""
+
+    current = "user: Thanks for the advice."
+    patches.begin_extraction_receipt(
+        "ep-context-copy-control",
+        current,
+        source_description="user",
+        relationless_repair_context_loader=lambda: (
+            "user: I need to order more business cards.",
+            "assistant: Starting with 100 business cards sounds reasonable.",
+        ),
+    )
+    calls = 0
+
+    async def fake_extract_nodes_and_edges(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            obj = _build(
+                {
+                    "extracted_entities": [{"name": "user", "entity_type_id": 0}],
+                    "edges": [],
+                }
+            )
+            return obj.extracted_entities, obj.edges, {}
+        obj = _build(
+            {
+                "extracted_entities": [
+                    {"name": "user", "entity_type_id": 0},
+                    {"name": "business cards", "entity_type_id": 0},
+                ],
+                "edges": [
+                    {
+                        "source_entity_name": "user",
+                        "target_entity_name": "business cards",
+                        "relation_type": "NEEDS_TO_ORDER",
+                        "fact": "The user needs to order more business cards.",
+                        "episode_indices": [0],
+                    }
+                ],
+            }
+        )
+        # Graphiti drops orphan entities after the sanitizer removes the only edge.
+        return [], obj.edges, {}
+
+    monkeypatch.setattr(ce, "extract_nodes_and_edges", fake_extract_nodes_and_edges)
+    nodes, edges, _ = await extraction_patches._run_graphiti_combined_extraction(
+        clients=object(),
+        episode=SimpleNamespace(uuid="ep-context-copy-control"),
+        previous_episodes=[],
+        entity_types=None,
+        excluded_entity_types=None,
+        custom_extraction_instructions=None,
+    )
+
+    assert calls == 2
+    assert nodes == []
+    assert edges == []
+    receipt = patches.get_extraction_receipt()
+    assert receipt.context_unsupported_edges_suppressed == 1
+    assert receipt.relationless_repair_succeeded is False
+    assert receipt.initial_self_only_entities is True
+    assert patches.is_policy_empty_extraction(receipt) is True
+
+
+@pytest.mark.asyncio
+async def test_relationless_repair_is_bounded_to_one_extra_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A repair returning empty stays visibly failed; it never loops or erases the first underflow."""
+    patches.begin_extraction_receipt(
+        "ep-still-relationless",
+        "A phrase with one entity but no grounded relationship.",
+    )
+    calls = 0
+
+    async def fake_extract_nodes_and_edges(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        receipt = patches.get_extraction_receipt()
+        receipt.raw_entity_count = 1 if calls == 1 else 0
+        receipt.raw_edge_count = 0
+        return [], [], {}
+
+    monkeypatch.setattr(ce, "extract_nodes_and_edges", fake_extract_nodes_and_edges)
+    nodes, edges, _ = await extraction_patches._run_graphiti_combined_extraction(
+        clients=object(),
+        episode=SimpleNamespace(uuid="ep-still-relationless"),
+        previous_episodes=[],
+        entity_types=None,
+        excluded_entity_types=None,
+        custom_extraction_instructions=None,
+    )
+
+    assert calls == 2
+    assert nodes == []
+    assert edges == []
+    receipt = patches.get_extraction_receipt()
+    assert receipt.relationless_repair_attempted is True
+    assert receipt.relationless_repair_succeeded is False
+    assert receipt.raw_entity_count == 1
+    assert receipt.raw_edge_count == 0
+
+
+@pytest.mark.asyncio
+async def test_relationship_bearing_first_pass_does_not_pay_for_repair(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The common successful path stays one call; repair cost is paid only on underflow."""
+    context_loads = 0
+
+    def load_context() -> tuple[str, ...]:
+        nonlocal context_loads
+        context_loads += 1
+        return ("assistant: irrelevant",)
+
+    patches.begin_extraction_receipt(
+        "ep-complete",
+        "user: I use a grocery list app.",
+        relationless_repair_context_loader=load_context,
+    )
+    calls = 0
+    edge = object()
+
+    async def fake_extract_nodes_and_edges(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        receipt = patches.get_extraction_receipt()
+        receipt.raw_entity_count = 2
+        receipt.raw_edge_count = 1
+        return [SimpleNamespace(name="user"), SimpleNamespace(name="grocery list app")], [edge], {}
+
+    monkeypatch.setattr(ce, "extract_nodes_and_edges", fake_extract_nodes_and_edges)
+    _, edges, _ = await extraction_patches._run_graphiti_combined_extraction(
+        clients=object(),
+        episode=SimpleNamespace(uuid="ep-complete"),
+        previous_episodes=[],
+        entity_types=None,
+        excluded_entity_types=None,
+        custom_extraction_instructions=None,
+    )
+
+    assert calls == 1
+    assert context_loads == 0
+    assert edges == [edge]
+    assert patches.get_extraction_receipt().relationless_repair_attempted is False
+
+
+@pytest.mark.asyncio
+async def test_assistant_self_only_relationless_is_policy_empty_without_repair(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Generic assistant boilerplate must not fail a namespace or pay for a futile repair."""
+    turn = (
+        "assistant: I'd be happy to help you prioritize your work tasks. "
+        "Can you please share the tasks you need to prioritize?"
+    )
+    patches.begin_extraction_receipt("ep-assistant-boilerplate", turn)
+    calls = 0
+
+    async def fake_extract_nodes_and_edges(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        receipt = patches.get_extraction_receipt()
+        receipt.raw_entity_count = 1
+        receipt.raw_edge_count = 0
+        receipt.assistant_self_only_relationless = True
+        return [], [], {}
+
+    monkeypatch.setattr(ce, "extract_nodes_and_edges", fake_extract_nodes_and_edges)
+    nodes, edges, _ = await extraction_patches._run_graphiti_combined_extraction(
+        clients=object(),
+        episode=SimpleNamespace(uuid="ep-assistant-boilerplate"),
+        previous_episodes=[],
+        entity_types=None,
+        excluded_entity_types=None,
+        custom_extraction_instructions=None,
+    )
+
+    assert calls == 1
+    assert nodes == []
+    assert edges == []
+    receipt = patches.get_extraction_receipt()
+    assert receipt.relationless_repair_attempted is False
+    assert patches.is_policy_empty_extraction(receipt) is True
+
+
+def test_assistant_self_only_payload_sets_policy_receipt() -> None:
+    """The sanitizer recognizes the exact live response shape before the wrapper decides."""
+    receipt = patches.begin_extraction_receipt(
+        "ep-assistant-boilerplate-payload",
+        "assistant: Can you please share the tasks you need to prioritize?",
+    )
+    _build(
+        {
+            "extracted_entities": [{"name": "user", "entity_type_id": 0}],
+            "edges": [],
+        }
+    )
+
+    assert receipt.assistant_self_only_relationless is True
+    assert patches.is_policy_empty_extraction(receipt) is True
+
+
+def test_assistant_self_only_policy_does_not_mask_nonself_relationless_content() -> None:
+    """Only canonical self labels qualify; a named entity with a missed relation still fails."""
+    receipt = patches.begin_extraction_receipt(
+        "ep-assistant-recommendation",
+        "assistant: You should try Roscioli.",
+    )
+    _build(
+        {
+            "extracted_entities": [{"name": "Roscioli", "entity_type_id": 0}],
+            "edges": [],
+        }
+    )
+
+    assert receipt.assistant_self_only_relationless is False
+    assert patches.is_policy_empty_extraction(receipt) is False
+
+
+def test_assistant_self_only_policy_never_applies_to_user_turn() -> None:
+    """A first-hand user turn with a missed predicate must still take the repair/failure path."""
+    receipt = patches.begin_extraction_receipt(
+        "ep-user-self-only",
+        "user: I'm actually using a new app I recently downloaded.",
+    )
+    _build(
+        {
+            "extracted_entities": [{"name": "user", "entity_type_id": 0}],
+            "edges": [],
+        }
+    )
+
+    assert receipt.assistant_self_only_relationless is False
+    assert patches.is_policy_empty_extraction(receipt) is False
+
+
+async def _run_two_pass_extraction(
+    monkeypatch: pytest.MonkeyPatch,
+    episode_key: str,
+    payloads: list[dict],
+) -> int:
+    """Drive the real wrapper + sanitizer over a scripted sequence of raw model payloads.
+
+    Each payload goes through `CombinedExtraction`, so the receipt's per-pass self-only flags are
+    written by production code rather than set by the test -- the point under test is precisely
+    WHICH pass each flag records.
+    """
+    calls = 0
+
+    async def fake_extract_nodes_and_edges(*args, **kwargs):
+        nonlocal calls
+        _build(payloads[min(calls, len(payloads) - 1)])
+        calls += 1
+        return [], [], {}
+
+    monkeypatch.setattr(ce, "extract_nodes_and_edges", fake_extract_nodes_and_edges)
+    await extraction_patches._run_graphiti_combined_extraction(
+        clients=object(),
+        episode=SimpleNamespace(uuid=episode_key),
+        previous_episodes=[],
+        entity_types=None,
+        excluded_entity_types=None,
+        custom_extraction_instructions=None,
+    )
+    return calls
+
+
+@pytest.mark.asyncio
+async def test_self_only_repair_does_not_mask_a_content_bearing_first_pass(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A repair that degrades to `user` must not convert the first pass's content into success.
+
+    The first pass extracted `Seattle` -- real content that resolution then persisted nowhere. If
+    the policy-empty guard reads only the LAST pass's shape, the repair's `{"name": "user"}`
+    silently relabels that loss as an intentional no-op and the fact is gone with no failure to
+    retry or investigate. Both passes must independently be self-only.
+    """
+    patches.begin_extraction_receipt("ep-initial-content", "user: I moved to Seattle last month.")
+    calls = await _run_two_pass_extraction(
+        monkeypatch,
+        "ep-initial-content",
+        [
+            {"extracted_entities": [{"name": "Seattle", "entity_type_id": 0}], "edges": []},
+            {"extracted_entities": [{"name": "user", "entity_type_id": 0}], "edges": []},
+        ],
+    )
+
+    assert calls == 2, "the content-bearing relationless first pass still earns its one repair"
+    receipt = patches.get_extraction_receipt()
+    assert receipt.relationless_repair_attempted is True
+    assert receipt.relationless_repair_succeeded is False
+    assert patches.is_policy_empty_extraction(receipt) is False
+    assert receipt.initial_self_only_entities is False
+    assert receipt.repair_self_only_entities is True
+
+
+@pytest.mark.asyncio
+async def test_both_passes_self_only_is_an_intentional_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two passes agreeing on `user` with zero edges is the real no-op this guard exists for.
+
+    An evidence projection of "Thanks again for your help!" bypasses the adaptive segmenter and
+    correctly extracts only the canonical self label. Failing it would burn the retry budget on an
+    outcome that is right and cannot change.
+    """
+    patches.begin_extraction_receipt("ep-thanks", "user: Thanks again for your help!")
+    self_only = {"extracted_entities": [{"name": "user", "entity_type_id": 0}], "edges": []}
+    calls = await _run_two_pass_extraction(monkeypatch, "ep-thanks", [self_only, self_only])
+
+    assert calls == 2
+    receipt = patches.get_extraction_receipt()
+    assert receipt.relationless_repair_attempted is True
+    assert receipt.relationless_repair_succeeded is False
+    assert patches.is_policy_empty_extraction(receipt) is True
+    assert receipt.initial_self_only_entities is True
+    assert receipt.repair_self_only_entities is True
+
+
+def test_malformed_edge_dropped_valid_sibling_survives() -> None:
+    """Acceptance #6: one edge missing target is dropped; the valid sibling still builds."""
+    patches.begin_extraction_receipt("ep7", "user: Bob works at Acme and owns a bike.")
+    obj = _build(
+        {
+            "extracted_entities": [
+                {"name": "Bob", "entity_type_id": 0},
+                {"name": "Acme", "entity_type_id": 0},
+                {"name": "bike", "entity_type_id": 0},
+            ],
+            "edges": [
+                {
+                    "source_entity_name": "Bob",
+                    "relation_type": "WORKS_AT",
+                    "fact": "Bob works at Acme",
+                    "episode_indices": [0],
+                },  # missing target_entity_name -> drop this row only
+                {
+                    "source_entity_name": "Bob",
+                    "target_entity_name": "bike",
+                    "relation_type": "OWNS",
+                    "fact": "Bob owns a bike",
+                    "episode_indices": [0],
+                },
+            ],
+        }
+    )
+    assert len(obj.edges) == 1
+    assert patches.get_extraction_receipt().malformed_edges_dropped == 1
+
+
+def test_no_active_receipt_passes_payload_through_unchanged() -> None:
+    """Scoping: with no active receipt the validator must not alter other callers' payloads.
+
+    A malformed edge (missing target) still raises upstream ValidationError, proving the
+    hardening did not run outside Menhir's forced single-episode path.
+    """
+    patches.clear_extraction_receipt()
+    with pytest.raises(Exception):
+        _build(
+            {
+                "extracted_entities": [{"name": "X", "entity_type_id": 0}],
+                "edges": [{"source_entity_name": "A", "relation_type": "R", "fact": "f"}],
+            }
+        )
+
+
+@pytest.mark.asyncio
+async def test_receipts_are_isolated_between_concurrent_tasks() -> None:
+    """Acceptance #9: concurrent episode tasks do not share receipt state."""
+
+    async def run_one(key: str, entity: str) -> tuple[str, int]:
+        patches.begin_extraction_receipt(key, f"user: {entity} owns coins.")
+        await asyncio.sleep(0)
+        _build(
+            {
+                "extracted_entities": [{"name": f"{entity}'s coins", "entity_type_id": 0}],
+                "edges": [
+                    {
+                        "source_entity_name": entity,
+                        "target_entity_name": f"{entity}'s coins",
+                        "relation_type": "OWNS",
+                        "fact": f"{entity} owns coins",
+                        "episode_indices": [0],
+                    }
+                ],
+            }
+        )
+        await asyncio.sleep(0)
+        receipt = patches.get_extraction_receipt()
+        return receipt.episode_key, receipt.endpoints_synthesized
+
+    (key_a, synth_a), (key_b, synth_b) = await asyncio.gather(
+        run_one("alice", "Alice"), run_one("bob", "Bob")
+    )
+    assert key_a == "alice" and key_b == "bob"
+    assert synth_a == 1 and synth_b == 1
+
+
+# ---------------------------------------------------------------------------
+# Collapse detection in stamp_and_finalize (raw payload nonempty, final zero)
+# ---------------------------------------------------------------------------
+
+
+def test_collapse_error_is_classified_retryable() -> None:
+    """Acceptance #7: a collapse is an explicit retryable failure, not empty success."""
+    exc = steps.CombinedExtractionCollapsedError(
+        "combined_extraction_collapsed episode_id=x raw_entities=1 raw_edges=1 "
+        "resolved_nodes=0 resolved_edges=0"
+    )
+    assert classify_enrichment_failure(exc, error_type=type(exc).__name__) == "retryable"
+
+
+def _fake_ctx() -> SimpleNamespace:
+    adapter = MagicMock()
+    adapter.mark_episode_ready.return_value = False  # short-circuit the empty-success path
+    return SimpleNamespace(
+        graph_adapter=adapter,
+        episode_uuid="ep-collapse",
+        worker_id="worker-1",
+        processing_steps_total=3,
+        started=0.0,
+        claimed={},
+    )
+
+
+def _empty_graphiti_result() -> SimpleNamespace:
+    return SimpleNamespace(
+        episode=SimpleNamespace(uuid="ep-collapse"),
+        nodes=[],
+        edges=[],
+        episodic_edges=[],
+    )
+
+
+@pytest.mark.asyncio
+async def test_stamp_and_finalize_raises_collapse_when_raw_nonempty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Raw extraction non-empty but zero persisted -> CombinedExtractionCollapsedError."""
+    monkeypatch.setattr(steps, "still_owns_episode", lambda *a, **k: True)
+    ctx = _fake_ctx()
+    receipt = patches.begin_extraction_receipt("ep-collapse", "user: Alice owns 37 coins.")
+    receipt.raw_entity_count = 1
+    receipt.raw_edge_count = 1
+
+    with pytest.raises(steps.CombinedExtractionCollapsedError):
+        await steps.stamp_and_finalize(ctx, _empty_graphiti_result())
+
+    # Receipt is consumed exactly once.
+    assert patches.get_extraction_receipt() is None
+    ctx.graph_adapter.mark_episode_ready.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_stamp_and_finalize_treats_genuinely_empty_as_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Acceptance #8: raw extraction empty stays an empty-extraction success (no collapse)."""
+    monkeypatch.setattr(steps, "still_owns_episode", lambda *a, **k: True)
+    ctx = _fake_ctx()
+    patches.begin_extraction_receipt("ep-collapse", "user: ok thanks")  # raw counts stay 0
+
+    # mark_episode_ready returns False -> the empty-success branch returns early without
+    # raising. The point is simply that no collapse error is raised for a truly empty payload.
+    await steps.stamp_and_finalize(ctx, _empty_graphiti_result())
+    ctx.graph_adapter.mark_episode_ready.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Real add_episode_with_timeout task boundary (asyncio.wait_for copies context)
+# ---------------------------------------------------------------------------
+
+
+def _add_episode_kwargs() -> dict:
+    return dict(
+        name="ep",
+        episode_body="user: Alice owns 37 coins.",
+        source_description="claude-code",
+        reference_time=datetime.now(timezone.utc),
+        episode_uuid="ep-boundary",
+    )
+
+
+@pytest.mark.asyncio
+async def test_receipt_survives_the_waitfor_task_boundary() -> None:
+    """P1 regression: receipt begun in the PARENT is visible after asyncio.wait_for.
+
+    add_episode_with_timeout runs graphiti_client.add_episode inside asyncio.wait_for,
+    which schedules it as a separate Task with a COPIED context. The receipt must be
+    created in the parent task (in add_episode_with_timeout, before wait_for) so the
+    child inherits and mutates the SAME object and the parent reads the mutation back.
+    """
+    patches.clear_extraction_receipt()
+
+    class FakeClient:
+        async def add_episode(self, **kwargs) -> str:
+            # Simulates the sanitizer running inside Graphiti's child task: the child
+            # must see the parent's receipt object and mutate it in place.
+            receipt = patches.get_extraction_receipt()
+            assert receipt is not None, "child task did not inherit the parent receipt"
+            receipt.raw_entity_count = 3
+            receipt.raw_edge_count = 2
+            return "graphiti-result"
+
+    result = await steps.add_episode_with_timeout(
+        FakeClient(), timeout_s=5.0, **_add_episode_kwargs()
+    )
+    assert result == "graphiti-result"
+
+    # Parent task (this one) must observe the child's mutation.
+    receipt = patches.get_extraction_receipt()
+    assert receipt is not None
+    assert receipt.raw_entity_count == 3
+    assert receipt.raw_edge_count == 2
+    patches.clear_extraction_receipt()
+
+
+@pytest.mark.asyncio
+async def test_receipt_cleared_when_add_episode_raises() -> None:
+    """Failure cleanup: a raising add_episode leaves no stale receipt in a reused task."""
+    patches.clear_extraction_receipt()
+
+    class FailingClient:
+        async def add_episode(self, **kwargs) -> str:
+            raise RuntimeError("boom")
+
+    with pytest.raises(RuntimeError):
+        await steps.add_episode_with_timeout(
+            FailingClient(), timeout_s=5.0, **_add_episode_kwargs()
+        )
+    assert patches.get_extraction_receipt() is None
+
+
+@pytest.mark.asyncio
+async def test_receipt_cleared_on_timeout() -> None:
+    """Failure cleanup: a timed-out add_episode leaves no stale receipt."""
+    patches.clear_extraction_receipt()
+
+    class SlowClient:
+        async def add_episode(self, **kwargs) -> str:
+            await asyncio.sleep(1.0)
+            return "never"
+
+    with pytest.raises(TimeoutError):
+        await steps.add_episode_with_timeout(
+            SlowClient(), timeout_s=0.05, **_add_episode_kwargs()
+        )
+    assert patches.get_extraction_receipt() is None
+
+
+@pytest.mark.asyncio
+async def test_relationless_extraction_after_bounded_repair_is_non_retryable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """After the in-call repair is exhausted, scheduler retries would only repeat paid work.
+
+    The first entity-without-edge response is no longer assumed correct or deterministic. The
+    combined-extraction wrapper repairs it once. Only a second relationless response reaches this
+    terminal visibility path.
+    """
+    monkeypatch.setattr(steps, "still_owns_episode", lambda *a, **k: True)
+    ctx = _fake_ctx()
+    receipt = patches.begin_extraction_receipt("ep-collapse", "user: some names")
+    receipt.raw_entity_count = 7
+    receipt.raw_edge_count = 0
+    receipt.orphan_nodes_dropped = 7
+    receipt.relationless_repair_attempted = True
+
+    with pytest.raises(steps.CombinedExtractionCollapsedError) as exc:
+        await steps.stamp_and_finalize(ctx, _empty_graphiti_result())
+
+    message = str(exc.value)
+    assert message.startswith("relationless_extraction ")
+    assert "retryable=false" in message
+    assert "raw_entities=7" in message
+    assert "relationless_repair_attempted=true" in message
+    ctx.graph_adapter.mark_episode_ready.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_a_real_linkage_collapse_is_still_reported_as_retryable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The inverse shape (edges present, endpoints lost) IS a linkage failure and must keep its
+    original classification -- the relationless carve-out must not swallow it."""
+    monkeypatch.setattr(steps, "still_owns_episode", lambda *a, **k: True)
+    ctx = _fake_ctx()
+    receipt = patches.begin_extraction_receipt("ep-collapse", "user: something")
+    receipt.raw_entity_count = 0
+    receipt.raw_edge_count = 1
+
+    with pytest.raises(steps.CombinedExtractionCollapsedError) as exc:
+        await steps.stamp_and_finalize(ctx, _empty_graphiti_result())
+
+    message = str(exc.value)
+    assert message.startswith("combined_extraction_collapsed ")
+    assert "retryable=true" in message

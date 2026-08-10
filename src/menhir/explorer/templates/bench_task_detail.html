@@ -1,0 +1,692 @@
+{% extends 'base.html' %}
+
+{% block title %}Task {{ task.question_id }} · Benchmark Tasks{% endblock %}
+{% block body_class %}bench-task-page{% endblock %}
+
+{% block app_main %}
+<main class='bench-shell'>
+  <nav class='bench-breadcrumb'>
+    <a href='/explorer/recall-lab'>Recall Lab</a>
+    <span>›</span>
+    <a href='/explorer/recall-lab/bench-runs'>Benchmark Tasks</a>
+    <span>›</span>
+    <a href='/explorer/recall-lab/bench-runs/{{ task.run_id }}'>{{ task.run_id[:40] }}</a>
+    <span>›</span>
+    <span>{{ task.namespace }}</span>
+  </nav>
+
+  <section class='task-hero'>
+    <div>
+      <div class='bench-kicker'>BENCHMARK TASK</div>
+      <div class='task-type-badge'>{{ task.question_type }}</div>
+      <h1>{{ task.question }}</h1>
+      <div class='task-meta-line'>
+        <span class='task-id-label'>{{ task.question_id }}</span>
+        <span>{{ task.namespace }}</span>
+      </div>
+    </div>
+    <div class='task-badges'>
+      <span class='outcome-pill {{ "passed" if task.primary_outcome == "PASSED" else "failed" if task.primary_outcome == "FAILED" else "unscored" }}'>{{ task.primary_outcome or "NOT SCORED" }}</span>
+      <span class='source-badge {{ "live" if task.graph_available is true else "active-cfg" if task.graph_source_run_id else "artifact" }}'>{% if task.graph_available is true and task.historical_score_with_live_graph %}HISTORICAL SCORE + LIVE SOURCE{% elif task.graph_available is true %}LIVE BENCHMARK GRAPH{% elif task.graph_source_run_id and not task.is_active %}LIVE SOURCE CONFIGURED{% elif task.is_active %}ACTIVE CONFIGURED{% else %}ARTIFACT-ONLY{% endif %}</span>
+    </div>
+  </section>
+
+  {% set oc = task.primary_outcome or "NOT SCORED" %}
+  <nav class='task-nav' aria-label='Task navigation within {{ nav_label }}'>
+    {% if prev_task %}<a href='/explorer/recall-lab/bench-runs/{{ task.run_id }}/tasks/{{ prev_task }}?outcome={{ outcome }}' class='nav-link' rel='prev'>← Previous {{ nav_label }}</a>{% else %}<span class='nav-link disabled'>← Previous {{ nav_label }}</span>{% endif %}
+    <span class='nav-position'>{{ nav_label }} {{ nav_position }} of {{ nav_total }}</span>
+    {% if next_task %}<a href='/explorer/recall-lab/bench-runs/{{ task.run_id }}/tasks/{{ next_task }}?outcome={{ outcome }}' class='nav-link' rel='next'>Next {{ nav_label }} →</a>{% else %}<span class='nav-link disabled'>Next {{ nav_label }} →</span>{% endif %}
+  </nav>
+
+  {% if task.source_warning %}
+  <div class='{% if task.graph_available is true %}info-banner{% else %}warning-banner{% endif %}'>{{ task.source_warning }}</div>
+  {% endif %}
+
+  <div class='task-metadata'>
+    <div class='meta-card'><span class='meta-label'>Run</span><span class='meta-value'>{{ task.run_label }}</span></div>
+    <div class='meta-card'><span class='meta-label'>Variant</span><span class='meta-value'>{{ task.run_variant }}</span></div>
+    <div class='meta-card'><span class='meta-label'>Arm</span><span class='meta-value'>{{ task.run_arm or '—' }}</span></div>
+    <div class='meta-card'><span class='meta-label'>Turns</span><span class='meta-value'>{{ task.turns }}</span></div>
+    <div class='meta-card'><span class='meta-label'>Assertions</span><span class='meta-value'>{{ task.typed_assertions }}</span></div>
+    <div class='meta-card'><span class='meta-label'>Scalar views</span><span class='meta-value'>{{ task.scalar_views }}</span></div>
+    <div class='meta-card'><span class='meta-label'>Turn evidence</span><span class='meta-value'>{{ task.turn_evidence }}</span></div>
+    <div class='meta-card'><span class='meta-label'>LLM calls</span><span class='meta-value'>{{ task.scalar_llm_calls }}</span></div>
+    <div class='meta-card'><span class='meta-label'>Consolidated</span><span class='meta-value'>{{ 'Yes' if task.scalar_consolidated else 'No' }}</span></div>
+    <div class='meta-card'><span class='meta-label'>Ready</span><span class='meta-value'>{{ 'Yes' if task.ready else 'No' }}</span></div>
+    <div class='meta-card'><span class='meta-label'>Failed</span><span class='meta-value'>{{ task.failed_remaining }}</span></div>
+    <div class='meta-card'><span class='meta-label'>Attempts</span><span class='meta-value'>{{ task.attempts }}</span></div>
+  </div>
+
+  <nav class='task-tabs' role='tablist' aria-label='Task detail sections'>
+    <a id='tab-turns' class='task-tab active' role='tab' href='#turns' aria-controls='turns' aria-selected='true'>Turns</a>
+    <a id='tab-assertions' class='task-tab' role='tab' href='#assertions' aria-controls='assertions' aria-selected='false' tabindex='-1'>Assertions</a>
+    <a id='tab-scalar-roles' class='task-tab' role='tab' href='#scalar-roles' aria-controls='scalar-roles' aria-selected='false' tabindex='-1'>Scalar Roles</a>
+    <a id='tab-scalar-state' class='task-tab' role='tab' href='#scalar-state' aria-controls='scalar-state' aria-selected='false' tabindex='-1'>Scalar State</a>
+    <a id='tab-scalar-history' class='task-tab' role='tab' href='#scalar-history' aria-controls='scalar-history' aria-selected='false' tabindex='-1'>Scalar History</a>
+    <a id='tab-event-history' class='task-tab' role='tab' href='#event-history' aria-controls='event-history' aria-selected='false' tabindex='-1'>Event History</a>
+    <a id='tab-memory' class='task-tab' role='tab' href='#memory' aria-controls='memory' aria-selected='false' tabindex='-1'>Memory</a>
+    <a id='tab-recall-packet' class='task-tab' role='tab' href='#recall-packet' aria-controls='recall-packet' aria-selected='false' tabindex='-1'>Recall Packet</a>
+    <a id='tab-answer-path' class='task-tab' role='tab' href='#answer-path' aria-controls='answer-path' aria-selected='false' tabindex='-1'>Answer Path</a>
+  </nav>
+
+  {% if task.live_graph %}
+  <section class='live-section'>
+    <h2>Live Graph Projection</h2>
+
+    {% if task.live_graph.audit_pass_id %}
+    <div class='audit-badge'>Audit pass: {{ task.live_graph.audit_pass_id }}</div>
+    {% endif %}
+    {% if task.live_graph.audit_warning %}
+    <div class='warning-banner'>{{ task.live_graph.audit_warning }}</div>
+    {% endif %}
+
+    <section id='turns' class='graph-block task-tab-section' tabindex='-1'>
+      <h3>TurnEvidence <span class='count'>({{ task.live_graph.evidence | length }})</span></h3>
+      {% if task.live_graph.evidence %}
+      <div class='turn-stream'>
+      {% for turn in task.live_graph.evidence %}
+      <article class='evidence-card role-{{ turn.role | lower }}'>
+        <div class='evidence-meta'>
+          <span class='evidence-role'>{{ turn.role }}</span>
+          <span class='muted'>{{ turn.occurred_at[:16] if turn.occurred_at else '—' }}</span>
+          <span class='muted'>ingested {{ turn.recorded_at[:16] if turn.recorded_at else '—' }}</span>
+        </div>
+        <div class='evidence-text'>{{ turn.text }}</div>
+        {% if turn.founds %}
+        <div class='evidence-founds'>FOUNDS assertions: {{ turn.founds | join(', ') }}</div>
+        {% endif %}
+      </article>
+      {% endfor %}
+      </div>
+      {% else %}
+      <div class='tab-empty'>No turn evidence is available for this task.</div>
+      {% endif %}
+    </section>
+
+    <section id='assertions' class='graph-block task-tab-section' tabindex='-1'>
+      <h3>TypedAssertions <span class='count'>({{ task.live_graph.assertions | length }})</span></h3>
+      {% if task.live_graph.assertions %}
+      {% for a in task.live_graph.assertions %}
+      <article class='assertion-card {{ "fold-blocked" if a.fold_outcome and (a.fold_outcome.state.status in ["abstained","expired","not_folded","write_failed"] or a.fold_outcome.history.status in ["abstained","not_folded","write_failed"]) }}'>
+        <div class='assertion-summary'><b>{{ a.subject }}</b> → <b>{{ a.attribute }}</b> = <strong>{{ a.value }}{{ ' ' + a.unit if a.unit }}</strong></div>
+        <div class='assertion-meta'>
+          <span>{{ a.operation }}</span>
+          <span>{{ a.value_kind }}</span>
+          <span>{{ a.evidence_tier }}</span>
+          {% if a.binding_pending %}<span class='badge warn'>binding pending</span>{% endif %}
+        </div>
+        <div class='assertion-quote'>“{{ a.stated_span }}”</div>
+        {% if a.source_quote %}
+        <div class='assertion-source'><span class='field-label'>Source turn</span><blockquote>“{{ a.source_quote }}”</blockquote></div>
+        {% endif %}
+        {% if a.fold_outcome %}
+        <div class='fold-outcomes'>
+          <div class='fold-badge {{ a.fold_outcome.state.status }}'><b>state</b> {{ a.fold_outcome.state.status }}{% if a.fold_outcome.state.reason %}: {{ a.fold_outcome.state.reason }}{% endif %}</div>
+          <div class='fold-badge {{ a.fold_outcome.history.status }}'><b>history</b> {{ a.fold_outcome.history.status }}{% if a.fold_outcome.history.reason %}: {{ a.fold_outcome.history.reason }}{% endif %}</div>
+        </div>
+        {% endif %}
+        <div class='muted'>world {{ a.valid_at[:16] if a.valid_at else '—' }} · learned {{ a.learned_at[:16] if a.learned_at else '—' }}</div>
+      </article>
+      {% endfor %}
+      {% else %}
+      <div class='tab-empty'>No typed assertions were extracted for this task.</div>
+      {% endif %}
+    </section>
+
+    <section id='scalar-roles' class='graph-block task-tab-section' tabindex='-1'>
+      <div class='section-heading-row'>
+        <div>
+          <div class='bench-kicker'>SCALAR ROLE MAP</div>
+          <h3>Three different jobs — not interchangeable</h3>
+        </div>
+        <p class='section-intro'>Start here when a result looks wrong. Each view answers a different kind of question and has a different authority level.</p>
+      </div>
+      <div class='scalar-role-grid'>
+        {% for role in task.live_graph.scalar_roles %}
+        <a class='scalar-role-card {{ role.id }}' href='#{{ role.id }}'>
+          <div class='scalar-role-topline'>
+            <span class='scalar-role-system'>{{ role.system_name }}</span>
+            <span class='scalar-role-status {{ role.status }}'>{{ role.count }} view{{ '' if role.count == 1 else 's' }}</span>
+          </div>
+          <strong>{{ role.name }}</strong>
+          <span class='scalar-role-question'>{{ role.answers }}</span>
+          <span class='scalar-role-purpose'>{{ role.role }}</span>
+          {% if role.id == 'event-history' and role.assertion_count %}<span class='muted'>{{ role.assertion_count }} grounded event assertion{{ '' if role.assertion_count == 1 else 's' }}</span>{% endif %}
+        </a>
+        {% endfor %}
+      </div>
+      <div class='role-legend'>
+        <span><b>Absolute</b> sets a value.</span>
+        <span><b>Delta</b> changes a prior value.</span>
+        <span><b>Event</b> records an occurrence; it does not claim current ownership or state.</span>
+      </div>
+    </section>
+
+    <section id='scalar-state' class='graph-block task-tab-section' tabindex='-1'>
+      <div class='scalar-section-title'><div><span class='scalar-role-system'>CURRENT SCALAR</span><h3>ScalarState Views <span class='count'>({{ task.live_graph.views | length }})</span></h3></div><p>Authoritative answer to <b>“What is true now?”</b> It folds absolute values and deltas into one current value per slot.</p></div>
+      {% if task.live_graph.views %}
+      {% for v in task.live_graph.views %}
+      <article class='view-card'>
+        <div class='view-state'>{{ 'CURRENT' if v.current else 'SUPERSEDED' }}</div>
+        <div class='view-value'>{{ v.display or v.value }}{{ ' ' + v.unit if v.unit }}</div>
+        <div><b>{{ v.subject }}</b> · {{ v.attribute }}{{ ' · ' + v.scope if v.scope }}</div>
+        {% if v.summary %}<p>{{ v.summary }}</p>{% endif %}
+        <div class='chips'><span>{{ v.value_kind }}</span><span class='derivation-badge {{ v.derivation }}'>{{ v.derivation }} derivation</span><span>{{ v.effective_tier or '—' }} tier</span><span>{{ v.contributor_ids | length }} contributors</span></div>
+        <div class='muted'>valid {{ v.valid_at[:16] if v.valid_at else '—' }}</div>
+      </article>
+      {% endfor %}
+      {% else %}
+      <div class='tab-empty'>No scalar-state view was materialized for this task.</div>
+      {% endif %}
+    </section>
+
+    <section id='scalar-history' class='graph-block task-tab-section' tabindex='-1'>
+      <div class='scalar-section-title'><div><span class='scalar-role-system'>CHANGE SCALAR</span><h3>ScalarHistory Views <span class='count'>({{ task.live_graph.history_views | length }})</span></h3></div><p>Advisory answer to <b>“How did the value change?”</b> It preserves the ordered absolute and delta observations without replacing current-state authority.</p></div>
+      {% if task.live_graph.history_views %}
+      {% for hv in task.live_graph.history_views %}
+      <article class='view-card advisory'>
+        <div class='view-state'>ADVISORY HISTORY</div>
+        <div><b>{{ hv.subject }}</b> · {{ hv.attribute }}</div>
+        <div class='chips'><span>{{ hv.entry_count or 0 }} entries</span><span class='derivation-badge {{ hv.derivation }}'>{{ hv.derivation }} derivation</span>
+          {% if hv.op_counts %}<span>{% for k, v in hv.op_counts.items() %}{{ v }} {{ k }}{% if not loop.last %}, {% endif %}{% endfor %}</span>{% endif %}
+        </div>
+        {% if hv.entries %}
+        <table class='history-table'>
+          <thead><tr><th>source time</th><th>operation</th><th>value</th><th>stated span</th></tr></thead>
+          <tbody>
+            {% for entry in hv.entries %}
+            <tr><td>{{ entry.valid_at[:16] if entry.valid_at else '—' }}</td><td>{{ entry.operation }}</td><td>{{ entry.value }}</td><td>{{ entry.stated_span }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% endif %}
+        <div class='muted'>{{ hv.first_valid_at[:16] if hv.first_valid_at else '—' }} to {{ hv.last_valid_at[:16] if hv.last_valid_at else '—' }}</div>
+      </article>
+      {% endfor %}
+      {% else %}
+      <div class='tab-empty'>No scalar-history view was materialized for this task.</div>
+      {% endif %}
+    </section>
+
+    <section id='event-history' class='graph-block task-tab-section' tabindex='-1'>
+      <div class='scalar-section-title'><div><span class='scalar-role-system'>EVENT SCALAR</span><h3>EventHistory Views <span class='count'>({{ task.live_graph.event_views | length }})</span></h3></div><p>Query-specific answer to <b>“What happened latest or immediately before it?”</b> Events stay separate occurrences; this view never implies current ownership.</p></div>
+      {% if task.live_graph.event_views %}
+      {% for ev in task.live_graph.event_views %}
+      <article class='view-card event'>
+        <div class='view-state'>ORDERED OCCURRENCES</div>
+        <div><b>{{ ev.subject }}</b> · {{ ev.predicate }}{% if ev.domain %} · {{ ev.domain }}{% endif %}</div>
+        <div class='chips'><span>{{ ev.entry_count or (ev.entries | length) }} occurrences</span><span class='derivation-badge event'>event derivation</span><span>{{ ev.contributor_ids | length }} contributors</span></div>
+        {% if ev.entries %}
+        <table class='history-table event-history-table'>
+          <thead><tr><th>source time</th><th>occurrence</th><th>grounding quote</th></tr></thead>
+          <tbody>
+            {% for entry in ev.entries %}
+            <tr><td>{{ entry.when[:16] if entry.when else '—' }}</td><td>{{ entry.what }}{% if entry.object_key %} <span class='muted'>({{ entry.object_key }})</span>{% endif %}</td><td>“{{ entry.quote }}”</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% endif %}
+      </article>
+      {% endfor %}
+      {% else %}
+      <div class='tab-empty'>No event-history view was materialized for this task. That can be correct when the conversation contains state or numeric changes but no admitted completed occurrence.</div>
+      {% endif %}
+
+      {% if task.live_graph.event_assertions %}
+      <details class='event-assertion-details'>
+        <summary>Grounded event assertions ({{ task.live_graph.event_assertions | length }})</summary>
+        {% for event in task.live_graph.event_assertions %}
+        <article class='assertion-card event-assertion {{ "superseded" if event.superseded else "" }}'>
+          <div class='assertion-summary'><b>{{ event.subject }}</b> → <b>{{ event.predicate }}</b> → <strong>{{ event.object_display }}</strong></div>
+          <div class='assertion-meta'><span>{{ event.domain or 'general' }}</span><span>{{ event.evidence_tier }}</span><span>{{ event.time_basis }}</span>{% if event.binding_pending %}<span class='badge warn'>binding pending</span>{% endif %}{% if event.superseded %}<span class='badge warn'>superseded version</span>{% endif %}</div>
+          <div class='assertion-quote'>“{{ event.stated_span }}”</div>
+          <div class='muted'>happened {{ event.valid_at[:16] if event.valid_at else '—' }} · learned {{ event.learned_at[:16] if event.learned_at else '—' }}</div>
+        </article>
+        {% endfor %}
+      </details>
+      {% endif %}
+    </section>
+
+    <section id='memory' class='graph-block task-tab-section' tabindex='-1'>
+      <h3>Memory</h3>
+      {% if task.live_graph.facts %}
+      <h4>Relationship Facts <span class='count'>({{ task.live_graph.facts | length }})</span></h4>
+      {% for fact in task.live_graph.facts %}
+      <div class='fact-row'><b>{{ fact.subject }}</b> → <span class='rel'>{{ fact.relation }}</span> → <b>{{ fact.object }}</b><span class='muted'> — {{ fact.fact }}</span></div>
+      {% endfor %}
+      {% endif %}
+
+    {% if task.live_graph.memory_inventory %}
+      <h4>Memory Inventory <span class='count'>({{ task.live_graph.memory_inventory | length }})</span></h4>
+      {% for item in task.live_graph.memory_inventory %}
+      <div class='inventory-row'>
+        {% if item.memory_type == 'view' %}
+        <span class='inv-kind view-badge'>VIEW</span>
+        <span>{{ item.view_kind }}</span>
+        <span class='derivation-badge {{ item.derivation }}'>{{ item.derivation }}</span>
+        <span><b>{{ item.subject }}</b> · {{ item.attribute }}</span>
+        <span>= {{ item.value }}</span>
+        {% if item.current %}<span class='badge persistent'>current</span>{% endif %}
+        {% else %}
+        <span class='inv-kind content-badge'>CONTENT</span>
+        <span><b>{{ item.subject }}</b> → {{ item.relation }} → <b>{{ item.object }}</b></span>
+        {% endif %}
+      </div>
+      {% endfor %}
+    {% endif %}
+    {% if not task.live_graph.facts and not task.live_graph.memory_inventory %}
+      <div class='tab-empty'>No relationship facts or memory inventory are available for this task.</div>
+    {% endif %}
+    </section>
+
+    <section id='recall-packet' class='graph-block task-tab-section' tabindex='-1'>
+      <div class='section-heading-row'>
+        <div>
+          <div class='bench-kicker'>INSPECTION-ONLY PROTOTYPE</div>
+          <h3>Typed Recall Packet</h3>
+        </div>
+        <p class='section-intro'>A deterministic presentation of the existing graph. It does not change production recall, ranking, ingestion, or answers.</p>
+      </div>
+      {% if task.live_graph.recall_packet %}
+      <div class='packet-meta'>
+        <span>{{ task.live_graph.recall_packet.version }}</span>
+        <span>production recall changed: <b>no</b></span>
+      </div>
+      <div class='packet-view-toggle' role='group' aria-label='Recall packet display format'>
+        <button type='button' class='packet-view-button active' data-packet-view='pretty' aria-pressed='true'>Pretty</button>
+        <button type='button' class='packet-view-button' data-packet-view='raw' aria-pressed='false'>Raw LLM packet</button>
+      </div>
+      <div id='packet-view-pretty' class='packet-view-panel packet-sections'>
+        {% for section in task.live_graph.recall_packet.sections %}
+        <article class='packet-section packet-{{ section.id }}'>
+          <div class='packet-section-heading'>
+            <strong>{{ section.label }}</strong>
+            <span>{{ section.entries | length }}</span>
+          </div>
+          <p>{{ section.role }}</p>
+          {% if section.entries %}
+          {% for entry in section.entries %}
+          <div class='packet-entry'>
+            <div class='packet-entry-topline'>
+              <span class='inv-kind {{ "view-badge" if entry.kind != "content" else "content-badge" }}'>{{ entry.kind }}</span>
+              <span class='packet-authority authority-{{ entry.authority }}'>{{ entry.authority }}</span>
+              {% if entry.derivation %}<span class='derivation-badge {{ entry.derivation }}'>{{ entry.derivation }}</span>{% endif %}
+            </div>
+            <div class='packet-value'><b>{{ entry.subject }}</b>{% if entry.attribute %} · {{ entry.attribute }}{% endif %}{% if entry.scope %} · {{ entry.scope }}{% endif %} = <strong>{{ entry.value or entry.content }}{% if entry.unit %} {{ entry.unit }}{% endif %}</strong></div>
+            {% if entry.content and entry.content != entry.value %}<div class='packet-content'>{{ entry.content }}</div>{% endif %}
+            {% if entry.source_quote %}<blockquote>“{{ entry.source_quote }}”</blockquote>{% endif %}
+            <div class='muted'>world {{ entry.valid_at or 'unknown' }} · learned {{ entry.learned_at or 'unknown' }}{% if entry.source_ids %} · sources {{ entry.source_ids | join(', ') }}{% endif %}</div>
+          </div>
+          {% endfor %}
+          {% else %}
+          <div class='packet-empty'>none</div>
+          {% endif %}
+        </article>
+        {% endfor %}
+      </div>
+      <div id='packet-view-raw' class='packet-view-panel packet-raw' hidden>
+        <div class='info-banner'>This is the exact text emitted by the prototype formatter for a future LLM context packet. Production recall does not receive it yet.</div>
+        <pre>{{ task.live_graph.recall_packet.text }}</pre>
+        <details class='packet-debug-output'>
+          <summary>Debug structured packet (not sent to the LLM)</summary>
+          <pre>{{ task.live_graph.recall_packet | tojson(indent=2) }}</pre>
+        </details>
+      </div>
+      {% else %}
+      <div class='tab-empty'>The typed packet could not be built from this live graph.</div>
+      {% endif %}
+    </section>
+  </section>
+  {% else %}
+  <section class='live-section unavailable'>
+    <section id='turns' class='graph-block task-tab-section' tabindex='-1'><h3>TurnEvidence</h3><div class='tab-empty'>Live graph data is unavailable for this run.</div></section>
+    <section id='assertions' class='graph-block task-tab-section' tabindex='-1'><h3>TypedAssertions</h3><div class='tab-empty'>Live graph data is unavailable for this run.</div></section>
+    <section id='scalar-roles' class='graph-block task-tab-section' tabindex='-1'><h3>Scalar Roles</h3><div class='scalar-role-grid'><div class='scalar-role-card scalar-state'><span class='scalar-role-system'>Scalar State</span><strong>Current Scalar</strong><span>What is true now?</span></div><div class='scalar-role-card scalar-history'><span class='scalar-role-system'>Scalar History</span><strong>Change Scalar</strong><span>How did the value change?</span></div><div class='scalar-role-card event-history'><span class='scalar-role-system'>Event History</span><strong>Event Scalar</strong><span>What happened latest or immediately before it?</span></div></div><div class='tab-empty'>Role definitions are available, but live graph counts and contents are unavailable for this run.</div></section>
+    <section id='scalar-state' class='graph-block task-tab-section' tabindex='-1'><h3>ScalarState Views</h3><div class='tab-empty'>Live graph data is unavailable for this run.</div></section>
+    <section id='scalar-history' class='graph-block task-tab-section' tabindex='-1'><h3>ScalarHistory Views</h3><div class='tab-empty'>Live graph data is unavailable for this run.</div></section>
+    <section id='event-history' class='graph-block task-tab-section' tabindex='-1'><h3>EventHistory Views</h3><div class='tab-empty'>Live graph data is unavailable for this run.</div></section>
+    <section id='memory' class='graph-block task-tab-section' tabindex='-1'><h3>Memory</h3><div class='tab-empty'>Live graph data is unavailable for this run.</div></section>
+    <section id='recall-packet' class='graph-block task-tab-section' tabindex='-1'><h3>Typed Recall Packet</h3><div class='tab-empty'>Live graph data is unavailable, so the inspection packet cannot be built.</div></section>
+  </section>
+  {% endif %}
+
+  <section id='answer-path' class='answer-path-section task-tab-section' tabindex='-1'>
+    <h2>Answer Path</h2>
+    <div class='answer-section'>
+      <h3>Gold Answer</h3>
+      <div class='answer-block'>{{ task.answer }}</div>
+    </div>
+
+    {% if task.scores %}
+    <div class='scores-section'>
+      <h3>Scores</h3>
+      <table>
+        <thead><tr><th>Arm</th><th>Correct</th><th>Score</th><th>In</th><th>Out</th></tr></thead>
+        <tbody>
+          {% for score in task.scores %}
+          <tr class='{{ "score-pass" if score.correct else "score-fail" }}'>
+            <td>{{ score.arm }}</td><td>{{ '✓' if score.correct else '✗' }}</td>
+            <td>{{ score.score }}</td><td>{{ score.input_tokens }}</td><td>{{ score.output_tokens }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <div class='response-details'>
+        {% for score in task.scores %}
+        <details class='response-card'>
+          <summary>{{ score.arm }} response</summary>
+          <div class='response-body'>
+            <div class='response-field'><span class='field-label'>Model answer</span><pre>{{ score.response_text }}</pre></div>
+            <div class='response-field'><span class='field-label'>Recalled memory</span><pre>{{ score.recalled or '—' }}</pre></div>
+            <div class='response-field'><span class='field-label'>Gold answer</span><pre>{{ task.answer }}</pre></div>
+          </div>
+        </details>
+        {% endfor %}
+      </div>
+    </div>
+    {% else %}
+    <div class='tab-empty'>No scored answer path is available for this task.</div>
+    {% endif %}
+  </section>
+
+  <nav class='task-nav' aria-label='Task navigation within {{ nav_label }}'>
+    {% if prev_task %}<a href='/explorer/recall-lab/bench-runs/{{ task.run_id }}/tasks/{{ prev_task }}?outcome={{ outcome }}' class='nav-link' rel='prev'>← Previous {{ nav_label }}</a>{% else %}<span class='nav-link disabled'>← Previous {{ nav_label }}</span>{% endif %}
+    <span class='nav-position'>{{ nav_label }} {{ nav_position }} of {{ nav_total }}</span>
+    {% if next_task %}<a href='/explorer/recall-lab/bench-runs/{{ task.run_id }}/tasks/{{ next_task }}?outcome={{ outcome }}' class='nav-link' rel='next'>Next {{ nav_label }} →</a>{% else %}<span class='nav-link disabled'>Next {{ nav_label }} →</span>{% endif %}
+  </nav>
+  <div class='task-footer'>
+    <a href='/explorer/recall-lab/bench-runs/{{ task.run_id }}?outcome={{ outcome }}' class='back-link'>← Back to run</a>
+  </div>
+</main>
+{% endblock %}
+
+{% block extra_head %}
+<style>
+.bench-shell { max-width: 960px; margin: 0 auto; padding: 2rem 1.5rem; box-sizing: border-box; width: 100%; flex: 1; overflow-y: auto; scroll-behavior: smooth; }
+.bench-breadcrumb { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 1.5rem; font-size: 0.85rem; flex-wrap: wrap; }
+.bench-breadcrumb a { color: var(--accent); text-decoration: none; }
+.bench-breadcrumb a:hover { text-decoration: underline; }
+.bench-breadcrumb span { color: var(--text-muted); }
+.task-hero { display: flex; justify-content: space-between; align-items: start; gap: 1rem; margin-bottom: 1rem; }
+.task-hero h1 { margin: 0.5rem 0; font-size: 1.3rem; line-height: 1.5; }
+.task-type-badge { display: inline-block; font-size: 0.7rem; color: var(--accent); background: rgba(56,189,248,0.1); padding: 0.2rem 0.6rem; border-radius: 4px; }
+.task-meta-line { display: flex; gap: 0.75rem; font-size: 0.8rem; color: var(--text-muted); }
+.task-id-label { font-family: ui-monospace, monospace; }
+.source-badge { font-size: 0.65rem; padding: 0.25rem 0.6rem; border-radius: 6px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
+.source-badge.live { color: #10b981; background: rgba(16,185,129,0.15); }
+.source-badge.artifact { color: #f59e0b; background: rgba(245,158,11,0.15); }
+.source-badge.active-cfg { color: #58a6ff; background: rgba(88,166,255,0.15); }
+.warning-banner { background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.2); border-radius: 8px; padding: 0.75rem 1rem; margin-bottom: 1rem; font-size: 0.85rem; color: #f59e0b; }
+.info-banner { background: rgba(56,189,248,0.1); border: 1px solid rgba(56,189,248,0.2); border-radius: 8px; padding: 0.75rem 1rem; margin-bottom: 1rem; font-size: 0.85rem; color: var(--accent); }
+.task-metadata { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 0.5rem; margin-bottom: 1.5rem; }
+.meta-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 0.6rem; }
+.meta-label { display: block; font-size: 0.6rem; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.05em; margin-bottom: 0.15rem; }
+.meta-value { font-size: 0.8rem; font-weight: 600; }
+.task-tabs { position: sticky; top: 0; z-index: 30; display: flex; gap: 0.25rem; margin: 0 0 1.5rem; padding: 0.4rem; overflow-x: auto; overscroll-behavior-inline: contain; scrollbar-width: thin; border: 1px solid var(--border); border-radius: 10px; background: rgba(15,23,42,0.96); box-shadow: 0 12px 32px rgba(2,6,23,0.42); backdrop-filter: blur(12px); }
+.task-tab { min-height: 44px; padding: 0 0.8rem; flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; border: 1px solid transparent; border-radius: 7px; color: var(--text-muted); text-decoration: none; font-size: 0.78rem; font-weight: 650; white-space: nowrap; transition: color 0.15s, background 0.15s, border-color 0.15s; }
+.task-tab:hover { color: var(--text-main); background: rgba(148,163,184,0.08); }
+.task-tab.active { color: var(--accent); border-color: rgba(56,189,248,0.34); background: rgba(56,189,248,0.12); }
+.task-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.task-tab-section[hidden] { display: none; }
+.task-tab-section:focus { outline: none; }
+.task-tab-section:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 8px; }
+.tab-empty { padding: 1rem; border: 1px dashed var(--border); border-radius: 8px; color: var(--text-muted); font-size: 0.82rem; background: rgba(15,23,42,0.35); }
+.turn-stream { display: flex; flex-direction: column; gap: 0.8rem; }
+.turn-stream .evidence-card { width: min(82%, 760px); margin-bottom: 0; }
+.turn-stream .evidence-card.role-user { align-self: flex-end; border-color: rgba(56,189,248,0.38); border-bottom-right-radius: 3px; background: rgba(14,116,144,0.12); }
+.turn-stream .evidence-card.role-assistant { align-self: flex-start; border-color: rgba(167,139,250,0.32); border-bottom-left-radius: 3px; background: rgba(88,28,135,0.11); }
+.turn-stream .evidence-card.role-user .evidence-meta { justify-content: flex-end; }
+.turn-stream .evidence-card:not(.role-user):not(.role-assistant) { align-self: center; width: min(90%, 820px); }
+.answer-section { margin-bottom: 1.5rem; }
+.answer-section h3 { font-size: 0.85rem; margin-bottom: 0.5rem; color: var(--text-muted); }
+.answer-block { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; font-size: 0.9rem; line-height: 1.6; }
+.answer-path-section { margin-bottom: 1.5rem; }
+.answer-path-section > h2 { font-size: 1rem; margin-bottom: 0.75rem; }
+.scores-section { margin-bottom: 1.5rem; }
+.scores-section h3, .live-section h2 { font-size: 1rem; margin-bottom: 0.75rem; }
+.scores-section table { width: 100%; border-collapse: collapse; margin-bottom: 1rem; }
+.scores-section th, .scores-section td { padding: 0.4rem 0.75rem; text-align: left; border-bottom: 1px solid var(--border); font-size: 0.85rem; }
+.scores-section th { font-size: 0.7rem; text-transform: uppercase; color: var(--text-muted); font-weight: 400; }
+.score-pass td:first-child { border-left: 3px solid #10b981; }
+.score-fail td:first-child { border-left: 3px solid #ef4444; }
+.response-details { display: flex; flex-direction: column; gap: 0.5rem; }
+.response-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem 1rem; }
+.response-card summary { cursor: pointer; font-weight: 600; }
+.response-body { margin-top: 0.75rem; }
+.response-field { margin-bottom: 0.75rem; }
+.field-label { display: block; font-size: 0.7rem; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.05em; margin-bottom: 0.25rem; }
+.response-field pre, .assertion-quote { background: rgba(0,0,0,0.2); border-radius: 6px; padding: 0.75rem; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 0.8rem; max-height: 300px; overflow: auto; }
+.live-section { margin-bottom: 1.5rem; }
+.graph-block { margin-bottom: 1.5rem; }
+.graph-block h3 { font-size: 0.9rem; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem; }
+.graph-block h3 .count { font-size: 0.75rem; color: var(--text-muted); font-weight: 400; }
+.graph-block h4 { margin: 1rem 0 0.5rem; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); }
+.graph-block h4:first-of-type { margin-top: 0.5rem; }
+.graph-block h4 .count { font-size: 0.7rem; font-weight: 400; }
+.section-heading-row, .scalar-section-title { display: flex; justify-content: space-between; align-items: end; gap: 1.25rem; margin-bottom: 0.75rem; }
+.section-heading-row h3, .scalar-section-title h3 { margin: 0.2rem 0 0; }
+.section-intro, .scalar-section-title p { max-width: 520px; margin: 0; color: var(--text-muted); font-size: 0.78rem; line-height: 1.5; }
+.scalar-role-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.75rem; }
+.scalar-role-card { min-height: 142px; display: flex; flex-direction: column; gap: 0.45rem; padding: 0.9rem; border: 1px solid var(--border); border-top-width: 3px; border-radius: 10px; background: var(--bg-card); color: var(--text-main); text-decoration: none; }
+.scalar-role-card:hover { border-color: var(--accent); background: rgba(56,189,248,0.05); }
+.scalar-role-card.scalar-state { border-top-color: #10b981; }
+.scalar-role-card.scalar-history { border-top-color: #f59e0b; }
+.scalar-role-card.event-history { border-top-color: #a78bfa; }
+.scalar-role-card strong { font-size: 1rem; }
+.scalar-role-topline { display: flex; justify-content: space-between; gap: 0.5rem; align-items: center; }
+.scalar-role-system { color: var(--text-muted); font-size: 0.62rem; font-weight: 750; letter-spacing: 0.08em; text-transform: uppercase; }
+.scalar-role-status { padding: 0.15rem 0.4rem; border-radius: 999px; font-size: 0.62rem; font-weight: 700; }
+.scalar-role-status.available { color: #10b981; background: rgba(16,185,129,0.12); }
+.scalar-role-status.empty { color: var(--text-muted); background: rgba(148,163,184,0.1); }
+.scalar-role-question { color: var(--text-main); font-size: 0.82rem; line-height: 1.35; }
+.scalar-role-purpose { color: var(--text-muted); font-size: 0.72rem; line-height: 1.35; }
+.role-legend { display: flex; gap: 0.6rem; flex-wrap: wrap; margin-top: 0.75rem; }
+.role-legend span { padding: 0.35rem 0.55rem; border-radius: 6px; background: rgba(148,163,184,0.08); color: var(--text-muted); font-size: 0.7rem; }
+.packet-meta { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.75rem; font-size: 0.7rem; color: var(--text-muted); }
+.packet-meta span { padding: 0.25rem 0.5rem; border: 1px solid var(--border); border-radius: 999px; }
+.packet-view-toggle { display: inline-flex; gap: 0.2rem; margin-bottom: 0.85rem; padding: 0.25rem; border: 1px solid var(--border); border-radius: 8px; background: rgba(15,23,42,0.5); }
+.packet-view-button { min-height: 34px; padding: 0 0.7rem; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--text-muted); font: inherit; font-size: 0.74rem; font-weight: 650; cursor: pointer; }
+.packet-view-button:hover { color: var(--text-main); background: rgba(148,163,184,0.08); }
+.packet-view-button.active { color: var(--accent); border-color: rgba(56,189,248,0.34); background: rgba(56,189,248,0.12); }
+.packet-view-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.packet-view-panel[hidden] { display: none; }
+.packet-sections { display: grid; gap: 0.75rem; }
+.packet-section { border: 1px solid var(--border); border-left: 3px solid #64748b; border-radius: 9px; padding: 0.8rem; background: rgba(15,23,42,0.35); }
+.packet-current_state { border-left-color: #10b981; }
+.packet-change_history { border-left-color: #f59e0b; }
+.packet-completed_events { border-left-color: #a78bfa; }
+.packet-section-heading { display: flex; justify-content: space-between; gap: 1rem; align-items: center; }
+.packet-section-heading > span { min-width: 1.5rem; text-align: center; padding: 0.12rem 0.4rem; border-radius: 999px; background: rgba(148,163,184,0.12); color: var(--text-muted); font-size: 0.68rem; }
+.packet-section > p { margin: 0.25rem 0 0.65rem; color: var(--text-muted); font-size: 0.72rem; }
+.packet-entry { padding: 0.65rem 0; border-top: 1px solid var(--border); }
+.packet-entry-topline { display: flex; gap: 0.35rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.35rem; }
+.packet-authority { padding: 0.15rem 0.4rem; border-radius: 4px; font-size: 0.62rem; font-weight: 700; color: var(--text-muted); background: rgba(148,163,184,0.1); }
+.authority-current { color: #10b981; background: rgba(16,185,129,0.1); }
+.authority-advisory { color: #f59e0b; background: rgba(245,158,11,0.1); }
+.authority-completed { color: #a78bfa; background: rgba(167,139,250,0.12); }
+.packet-value { font-size: 0.83rem; line-height: 1.45; }
+.packet-content { margin-top: 0.25rem; color: var(--text-muted); font-size: 0.78rem; }
+.packet-entry blockquote { margin: 0.45rem 0; padding-left: 0.65rem; border-left: 2px solid var(--border); color: #94a3b8; font-size: 0.78rem; }
+.packet-empty { color: var(--text-muted); font-size: 0.75rem; }
+.packet-raw > pre, .packet-debug-output pre { margin: 0.65rem 0 0; padding: 0.9rem; max-height: 560px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid var(--border); border-radius: 7px; background: rgba(0,0,0,0.26); color: #dbeafe; font-size: 0.74rem; line-height: 1.55; }
+.packet-debug-output { margin-top: 0.75rem; border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem; }
+.packet-debug-output summary { cursor: pointer; font-size: 0.76rem; font-weight: 650; color: var(--text-muted); }
+.audit-badge { display: inline-block; font-size: 0.7rem; color: var(--accent); background: rgba(56,189,248,0.1); padding: 0.2rem 0.6rem; border-radius: 4px; margin-bottom: 0.75rem; }
+.evidence-card, .assertion-card, .view-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem 1rem; margin-bottom: 0.5rem; }
+.evidence-meta { display: flex; gap: 0.75rem; font-size: 0.75rem; margin-bottom: 0.35rem; }
+.evidence-role { font-weight: 600; text-transform: uppercase; font-size: 0.65rem; color: var(--accent); }
+.evidence-text { font-size: 0.85rem; line-height: 1.5; }
+.evidence-founds { font-size: 0.7rem; color: var(--text-muted); margin-top: 0.35rem; }
+.assertion-summary { font-size: 0.9rem; margin-bottom: 0.35rem; }
+.assertion-meta { display: flex; gap: 0.5rem; font-size: 0.7rem; color: var(--text-muted); margin-bottom: 0.35rem; flex-wrap: wrap; }
+.assertion-quote { font-size: 0.8rem; color: #94a3b8; font-style: italic; margin-bottom: 0.35rem; }
+.assertion-source { margin-top: 0.5rem; }
+.assertion-source blockquote { margin: 0.25rem 0; padding: 0.5rem; background: rgba(0,0,0,0.15); border-radius: 4px; font-size: 0.8rem; border-left: 3px solid var(--border); }
+.fold-outcomes { display: flex; gap: 0.5rem; margin: 0.35rem 0; flex-wrap: wrap; }
+.fold-badge { font-size: 0.65rem; padding: 0.2rem 0.5rem; border-radius: 4px; font-weight: 600; }
+.fold-badge.current { color: #10b981; background: rgba(16,185,129,0.1); }
+.fold-badge.recorded { color: #58a6ff; background: rgba(88,166,255,0.1); }
+.fold-badge.historical { color: #8b949e; background: rgba(139,148,158,0.1); }
+.fold-badge.superseded { color: #d29922; background: rgba(210,153,34,0.1); }
+.fold-badge.not_materialized { color: #8b949e; background: rgba(139,148,158,0.1); }
+.fold-badge.abstained { color: #f59e0b; background: rgba(245,158,11,0.1); }
+.fold-badge.expired { color: #f59e0b; background: rgba(245,158,11,0.1); }
+.fold-badge.not_folded { color: #ef4444; background: rgba(239,68,68,0.1); }
+.fold-badge.write_failed { color: #ef4444; background: rgba(239,68,68,0.1); }
+.fold-blocked { border-left: 3px solid #f59e0b; }
+.view-card { }
+.view-state { font-size: 0.65rem; text-transform: uppercase; font-weight: 700; margin-bottom: 0.25rem; color: var(--accent); }
+.view-card.advisory .view-state { color: #f59e0b; }
+.view-card.event { border-left: 3px solid #a78bfa; }
+.view-card.event .view-state { color: #a78bfa; }
+.view-value { font-size: 1.1rem; font-weight: 700; margin-bottom: 0.25rem; }
+.chips { display: flex; gap: 0.4rem; font-size: 0.7rem; color: var(--text-muted); flex-wrap: wrap; margin: 0.35rem 0; }
+.history-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; margin: 0.5rem 0; }
+.history-table th, .history-table td { padding: 0.3rem 0.5rem; text-align: left; border-bottom: 1px solid var(--border); }
+.history-table th { font-size: 0.65rem; text-transform: uppercase; color: var(--text-muted); font-weight: 400; }
+.fact-row { padding: 0.4rem 0; border-bottom: 1px solid var(--border); font-size: 0.85rem; }
+.fact-row .rel { color: var(--accent); font-size: 0.75rem; }
+.inventory-row { padding: 0.4rem 0; border-bottom: 1px solid var(--border); font-size: 0.85rem; display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+.inv-kind { font-size: 0.6rem; padding: 0.15rem 0.4rem; border-radius: 4px; font-weight: 700; }
+.view-badge { color: #58a6ff; background: rgba(88,166,255,0.1); }
+.content-badge { color: #10b981; background: rgba(16,185,129,0.1); }
+.derivation-badge { font-size: 0.6rem; padding: 0.15rem 0.4rem; border-radius: 4px; font-weight: 700; }
+.derivation-badge.absolute { color: #10b981; background: rgba(16,185,129,0.1); }
+.derivation-badge.delta { color: #f59e0b; background: rgba(245,158,11,0.1); }
+.derivation-badge.mixed { color: #58a6ff; background: rgba(88,166,255,0.1); }
+.derivation-badge.unknown { color: #8b949e; background: rgba(139,148,158,0.1); }
+.derivation-badge.event { color: #a78bfa; background: rgba(167,139,250,0.12); }
+.event-assertion-details { margin-top: 0.75rem; border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem; }
+.event-assertion-details summary { cursor: pointer; font-size: 0.78rem; font-weight: 650; }
+.event-assertion-details[open] summary { margin-bottom: 0.75rem; }
+.event-assertion.superseded { opacity: 0.72; }
+.badge.warn { color: #f59e0b; background: rgba(245,158,11,0.1); }
+.task-footer { margin-top: 2rem; }
+.back-link { color: var(--accent); text-decoration: none; font-size: 0.9rem; }
+.back-link:hover { text-decoration: underline; }
+.task-nav { display: flex; gap: 1rem; margin: 1rem 0; flex-wrap: wrap; }
+.nav-link, .nav-link.disabled { font-size: 0.85rem; padding: 0.35rem 0.75rem; border: 1px solid var(--border); border-radius: 8px; transition: all 0.2s; }
+.nav-link { color: var(--accent); text-decoration: none; }
+.nav-link:hover { border-color: var(--accent); background: rgba(56,189,248,0.05); }
+.nav-link.disabled { color: var(--text-muted); cursor: default; opacity: 0.5; }
+.nav-position { font-size: 0.85rem; color: var(--text-muted); padding: 0.35rem 0; }
+.task-badges { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+@media (max-width: 700px) {
+  .bench-shell { padding: 1.25rem 0.85rem; }
+  .task-tabs { margin-inline: -0.35rem; border-radius: 8px; }
+  .task-tab { padding-inline: 0.7rem; }
+  .turn-stream .evidence-card { width: 92%; }
+  .scalar-role-grid { grid-template-columns: 1fr; }
+  .section-heading-row, .scalar-section-title { align-items: start; flex-direction: column; gap: 0.35rem; }
+  .history-table { display: block; overflow-x: auto; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bench-shell { scroll-behavior: auto; }
+  .task-tab { transition: none; }
+}
+</style>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(() => {
+  const shell = document.querySelector('.bench-shell');
+  const tabBar = document.querySelector('.task-tabs');
+  if (!shell || !tabBar) return;
+
+  const tabs = Array.from(tabBar.querySelectorAll('.task-tab'));
+  const sections = tabs
+    .map((tab) => document.querySelector(tab.getAttribute('href')))
+    .filter(Boolean);
+  if (!sections.length) return;
+
+  const liveSection = document.querySelector('.live-section');
+  const answerPath = document.querySelector('#answer-path');
+  const packetViewButtons = Array.from(document.querySelectorAll('.packet-view-button'));
+  const packetViewPanels = Array.from(document.querySelectorAll('.packet-view-panel'));
+
+  packetViewButtons.forEach((button) => {
+    button.addEventListener('click', () => {
+      const requestedView = button.dataset.packetView;
+      packetViewButtons.forEach((candidate) => {
+        const active = candidate === button;
+        candidate.classList.toggle('active', active);
+        candidate.setAttribute('aria-pressed', String(active));
+      });
+      packetViewPanels.forEach((panel) => {
+        panel.hidden = panel.id !== `packet-view-${requestedView}`;
+      });
+    });
+  });
+
+  tabs.forEach((tab) => {
+    const section = document.querySelector(tab.getAttribute('href'));
+    if (!section) return;
+    section.setAttribute('role', 'tabpanel');
+    section.setAttribute('aria-labelledby', tab.id);
+  });
+
+  const activate = (sectionId, updateHash = true) => {
+    const preservedScrollTop = shell.scrollTop;
+    const activeSection = sections.find((section) => section.id === sectionId) || sections[0];
+    const showingAnswerPath = activeSection === answerPath;
+
+    if (liveSection) liveSection.hidden = showingAnswerPath;
+    tabs.forEach((tab) => {
+      const active = tab.getAttribute('href') === `#${activeSection.id}`;
+      tab.classList.toggle('active', active);
+      tab.setAttribute('aria-selected', String(active));
+      tab.tabIndex = active ? 0 : -1;
+    });
+
+    sections.forEach((section) => {
+      section.hidden = section !== activeSection;
+    });
+
+    if (updateHash) {
+      const url = new URL(window.location.href);
+      url.hash = activeSection.id;
+      window.history.replaceState(null, '', url);
+    }
+    shell.scrollTop = preservedScrollTop;
+    window.requestAnimationFrame(() => {
+      shell.scrollTop = preservedScrollTop;
+    });
+  };
+
+  tabs.forEach((tab, index) => {
+    tab.addEventListener('click', (event) => {
+      const section = document.querySelector(tab.getAttribute('href'));
+      if (!section) return;
+      event.preventDefault();
+      activate(section.id);
+    });
+
+    tab.addEventListener('keydown', (event) => {
+      let targetIndex = null;
+      if (event.key === 'ArrowRight') targetIndex = (index + 1) % tabs.length;
+      if (event.key === 'ArrowLeft') targetIndex = (index - 1 + tabs.length) % tabs.length;
+      if (event.key === 'Home') targetIndex = 0;
+      if (event.key === 'End') targetIndex = tabs.length - 1;
+      if (targetIndex === null) return;
+      event.preventDefault();
+      const targetTab = tabs[targetIndex];
+      const targetSection = document.querySelector(targetTab.getAttribute('href'));
+      if (!targetSection) return;
+      activate(targetSection.id);
+      targetTab.focus();
+    });
+  });
+
+  const initialSection = window.location.hash
+    ? document.querySelector(window.location.hash)
+    : sections[0];
+  activate(initialSection && sections.includes(initialSection) ? initialSection.id : sections[0].id, false);
+
+  window.addEventListener('hashchange', () => {
+    const section = document.querySelector(window.location.hash);
+    if (section && sections.includes(section)) activate(section.id, false);
+  });
+})();
+</script>
+{% endblock %}

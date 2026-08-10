@@ -1,0 +1,72 @@
+[
+  {
+    "id": "m0-q001",
+    "query": "What did we work on in the yawn.rip project recently?",
+    "intent": "knowledge",
+    "expected_keywords": ["yawn.rip", "project", "recent"],
+    "notes": "Confirms knowledge-style retrieval prioritizes semantic relevance."
+  },
+  {
+    "id": "m0-q002",
+    "query": "What changed most recently in my workflow last week?",
+    "intent": "recent",
+    "expected_keywords": ["workflow", "recent", "recently"],
+    "notes": "Exercises recency weighting."
+  },
+  {
+    "id": "m0-q003",
+    "query": "Show me related memories around cth.mcp.memory design decisions.",
+    "intent": "connected",
+    "expected_keywords": ["cth.mcp.memory", "design", "related"],
+    "notes": "Expects structural adjacency behavior."
+  },
+  {
+    "id": "m0-q004",
+    "query": "Any contradictions between my preferences and recent behavior?",
+    "intent": "conflict",
+    "expected_keywords": ["contradict", "preference", "version"],
+    "notes": "Ensures conflict surface remains explicit."
+  },
+  {
+    "id": "m0-q005",
+    "query": "What are the most important decisions from last month?",
+    "intent": "knowledge",
+    "expected_keywords": ["important", "decision", "month"],
+    "notes": "Checks prominence/importance signal in ranking logic."
+  },
+  {
+    "id": "m0-q006",
+    "query": "What should I compress or archive first?",
+    "intent": "recent",
+    "expected_keywords": ["compress", "lifecycle", "staleness"],
+    "notes": "Lifecycle policy sanity query."
+  },
+  {
+    "id": "m0-q007",
+    "query": "What memories were created in this session?",
+    "intent": "knowledge",
+    "expected_keywords": ["session", "created", "scope"],
+    "notes": "Session scoping visibility check."
+  },
+  {
+    "id": "m0-q008",
+    "query": "Did we resolve the last conflict group?",
+    "intent": "conflict",
+    "expected_keywords": ["conflict", "resolved", "group"],
+    "notes": "Validates conflict lifecycle observability."
+  },
+  {
+    "id": "m0-q009",
+    "query": "Show me emotionally relevant memories for this project.",
+    "intent": "emotional",
+    "expected_keywords": ["emotional", "project", "relevant"],
+    "notes": "Keeps emotional query path tracked as deferred primary mode."
+  },
+  {
+    "id": "m0-q010",
+    "query": "Summarize what I was explicitly told to remember.",
+    "intent": "knowledge",
+    "expected_keywords": ["remember", "explicit", "flag"],
+    "notes": "Explicit-flagging path for consolidation retention."
+  }
+]

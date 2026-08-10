@@ -1,0 +1,26 @@
+# Normalize line endings: store LF in the repo, check out LF on all platforms.
+# Prevents the CRLF<->LF churn warnings on generated/data files.
+* text=auto eol=lf
+
+# Explicit text files
+*.py    text eol=lf
+*.md    text eol=lf
+*.json  text eol=lf
+*.toml  text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.cfg   text eol=lf
+*.ini   text eol=lf
+*.txt   text eol=lf
+*.sh    text eol=lf
+uv.lock text eol=lf
+
+# Binary assets (never touch line endings)
+*.png   binary
+*.gif   binary
+*.jpg   binary
+*.jpeg  binary
+*.ico   binary
+*.pdf   binary
+*.woff  binary
+*.woff2 binary

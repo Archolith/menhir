@@ -1,0 +1,17 @@
+{
+  "_comment": "Hook Center file-event registration for Claude Code (.claude/settings.local.json) AND Codex (hooks.json) -- both share the PostToolUse shape, so the same command works. Register on the file tools; the host pipes the tool event JSON to menhir_file_event.py on stdin, which normalizes it to a file_changed event and POSTs to /api/tool-events. Fail-open: never blocks the tool, uploads no file content. Use absolute paths (any Python 3; the script is stdlib-only). Set MENHIR_TOOL_EVENTS_URL if menhir is not on the default :8090.",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/path/to/menhir/.venv/Scripts/python.exe /path/to/menhir/scripts/hooks/menhir_file_event.py",
+            "timeout": 8
+          }
+        ]
+      }
+    ]
+  }
+}

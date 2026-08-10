@@ -1,0 +1,3392 @@
+[
+  {
+    "fixture_qid": "lme-852ce960",
+    "trial": 9,
+    "predicted_subject": "user",
+    "predicted_facet": "Mortgage",
+    "predicted_state_family": "Pre-approval amount",
+    "num_hypotheses": 2,
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "top_only_chain": [
+      {
+        "scenario_id": "lme-852ce960_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ],
+    "ranked_chain": [
+      {
+        "scenario_id": "lme-852ce960_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "fixture_qid": "lme-852ce960",
+    "trial": 4,
+    "predicted_subject": "user",
+    "predicted_facet": "Mortgage",
+    "predicted_state_family": "Pre-approval amount",
+    "num_hypotheses": 2,
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "top_only_chain": [
+      {
+        "scenario_id": "lme-852ce960_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ],
+    "ranked_chain": [
+      {
+        "scenario_id": "lme-852ce960_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "fixture_qid": "lme-852ce960",
+    "trial": 0,
+    "predicted_subject": "user",
+    "predicted_facet": "Mortgage",
+    "predicted_state_family": "Pre-approval amount",
+    "num_hypotheses": 2,
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "top_only_chain": [
+      {
+        "scenario_id": "lme-852ce960_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ],
+    "ranked_chain": [
+      {
+        "scenario_id": "lme-852ce960_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "fixture_qid": "lme-2698e78f",
+    "trial": 6,
+    "predicted_subject": "Dr. Smith",
+    "predicted_facet": "Therapy schedule",
+    "predicted_state_family": "Session frequency",
+    "num_hypotheses": 2,
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "top_only_chain": [
+      {
+        "scenario_id": "lme-2698e78f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ],
+    "ranked_chain": [
+      {
+        "scenario_id": "lme-2698e78f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "fixture_qid": "lme-2698e78f",
+    "trial": 2,
+    "predicted_subject": "Dr. Smith",
+    "predicted_facet": "Therapy schedule",
+    "predicted_state_family": "Session frequency",
+    "num_hypotheses": 2,
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "top_only_chain": [
+      {
+        "scenario_id": "lme-2698e78f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ],
+    "ranked_chain": [
+      {
+        "scenario_id": "lme-2698e78f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "fixture_qid": "lme-830ce83f",
+    "trial": 6,
+    "predicted_subject": "Rachel",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Current residence",
+    "num_hypotheses": 1,
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "top_only_chain": [
+      {
+        "scenario_id": "lme-830ce83f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ],
+    "ranked_chain": [
+      {
+        "scenario_id": "lme-830ce83f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "fixture_qid": "lme-830ce83f",
+    "trial": 5,
+    "predicted_subject": "Rachel",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Current residence",
+    "num_hypotheses": 1,
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "top_only_chain": [
+      {
+        "scenario_id": "lme-830ce83f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ],
+    "ranked_chain": [
+      {
+        "scenario_id": "lme-830ce83f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "fixture_qid": "lme-852ce960",
+    "trial": 2,
+    "predicted_subject": "user",
+    "predicted_facet": "Mortgage",
+    "predicted_state_family": "Pre-approval amount",
+    "num_hypotheses": 2,
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "top_only_chain": [
+      {
+        "scenario_id": "lme-852ce960_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ],
+    "ranked_chain": [
+      {
+        "scenario_id": "lme-852ce960_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "fixture_qid": "lme-852ce960",
+    "trial": 1,
+    "predicted_subject": "user",
+    "predicted_facet": "Mortgage",
+    "predicted_state_family": "Pre-approval amount",
+    "num_hypotheses": 2,
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "top_only_chain": [
+      {
+        "scenario_id": "lme-852ce960_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ],
+    "ranked_chain": [
+      {
+        "scenario_id": "lme-852ce960_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "fixture_qid": "lme-852ce960",
+    "trial": 5,
+    "predicted_subject": "user",
+    "predicted_facet": "Mortgage",
+    "predicted_state_family": "Pre-approval amount",
+    "num_hypotheses": 2,
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "top_only_chain": [
+      {
+        "scenario_id": "lme-852ce960_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ],
+    "ranked_chain": [
+      {
+        "scenario_id": "lme-852ce960_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "fixture_qid": "lme-830ce83f",
+    "trial": 9,
+    "predicted_subject": "Rachel",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Current residence",
+    "num_hypotheses": 1,
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "top_only_chain": [
+      {
+        "scenario_id": "lme-830ce83f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ],
+    "ranked_chain": [
+      {
+        "scenario_id": "lme-830ce83f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "fixture_qid": "lme-2698e78f",
+    "trial": 5,
+    "predicted_subject": "Dr. Smith",
+    "predicted_facet": "Therapy schedule",
+    "predicted_state_family": "Session frequency",
+    "num_hypotheses": 2,
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "top_only_chain": [
+      {
+        "scenario_id": "lme-2698e78f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ],
+    "ranked_chain": [
+      {
+        "scenario_id": "lme-2698e78f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "fixture_qid": "lme-2698e78f",
+    "trial": 9,
+    "predicted_subject": "Dr. Smith",
+    "predicted_facet": "Therapy schedule",
+    "predicted_state_family": "Session frequency",
+    "num_hypotheses": 2,
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "top_only_chain": [
+      {
+        "scenario_id": "lme-2698e78f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ],
+    "ranked_chain": [
+      {
+        "scenario_id": "lme-2698e78f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "fixture_qid": "lme-2698e78f",
+    "trial": 1,
+    "predicted_subject": "Dr. Smith",
+    "predicted_facet": "Therapy schedule",
+    "predicted_state_family": "Session frequency",
+    "num_hypotheses": 2,
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "top_only_chain": [
+      {
+        "scenario_id": "lme-2698e78f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ],
+    "ranked_chain": [
+      {
+        "scenario_id": "lme-2698e78f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "fixture_qid": "lme-852ce960",
+    "trial": 6,
+    "predicted_subject": "user",
+    "predicted_facet": "Mortgage",
+    "predicted_state_family": "Pre-approval amount",
+    "num_hypotheses": 2,
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "top_only_chain": [
+      {
+        "scenario_id": "lme-852ce960_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ],
+    "ranked_chain": [
+      {
+        "scenario_id": "lme-852ce960_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "fixture_qid": "lme-2698e78f",
+    "trial": 7,
+    "predicted_subject": "Dr. Smith",
+    "predicted_facet": "Therapy schedule",
+    "predicted_state_family": "Session frequency",
+    "num_hypotheses": 2,
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "top_only_chain": [
+      {
+        "scenario_id": "lme-2698e78f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ],
+    "ranked_chain": [
+      {
+        "scenario_id": "lme-2698e78f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "fixture_qid": "lme-830ce83f",
+    "trial": 1,
+    "predicted_subject": "Rachel",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Current residence",
+    "num_hypotheses": 1,
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "top_only_chain": [
+      {
+        "scenario_id": "lme-830ce83f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ],
+    "ranked_chain": [
+      {
+        "scenario_id": "lme-830ce83f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "fixture_qid": "lme-852ce960",
+    "trial": 3,
+    "predicted_subject": "user",
+    "predicted_facet": "Mortgage",
+    "predicted_state_family": "Pre-approval amount",
+    "num_hypotheses": 2,
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "top_only_chain": [
+      {
+        "scenario_id": "lme-852ce960_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ],
+    "ranked_chain": [
+      {
+        "scenario_id": "lme-852ce960_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "fixture_qid": "lme-852ce960",
+    "trial": 8,
+    "predicted_subject": "user",
+    "predicted_facet": "Mortgage",
+    "predicted_state_family": "Pre-approval amount",
+    "num_hypotheses": 2,
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "top_only_chain": [
+      {
+        "scenario_id": "lme-852ce960_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ],
+    "ranked_chain": [
+      {
+        "scenario_id": "lme-852ce960_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "fixture_qid": "lme-830ce83f",
+    "trial": 2,
+    "predicted_subject": "Rachel",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Current residence",
+    "num_hypotheses": 1,
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "top_only_chain": [
+      {
+        "scenario_id": "lme-830ce83f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ],
+    "ranked_chain": [
+      {
+        "scenario_id": "lme-830ce83f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "fixture_qid": "lme-852ce960",
+    "trial": 7,
+    "predicted_subject": "user",
+    "predicted_facet": "Mortgage",
+    "predicted_state_family": "Pre-approval amount",
+    "num_hypotheses": 2,
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "top_only_chain": [
+      {
+        "scenario_id": "lme-852ce960_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ],
+    "ranked_chain": [
+      {
+        "scenario_id": "lme-852ce960_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "fixture_qid": "lme-2698e78f",
+    "trial": 8,
+    "predicted_subject": "Dr. Smith",
+    "predicted_facet": "Therapy schedule",
+    "predicted_state_family": "Session frequency",
+    "num_hypotheses": 2,
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "top_only_chain": [
+      {
+        "scenario_id": "lme-2698e78f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ],
+    "ranked_chain": [
+      {
+        "scenario_id": "lme-2698e78f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "fixture_qid": "lme-830ce83f",
+    "trial": 4,
+    "predicted_subject": "Rachel",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Current residence",
+    "num_hypotheses": 1,
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "top_only_chain": [
+      {
+        "scenario_id": "lme-830ce83f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ],
+    "ranked_chain": [
+      {
+        "scenario_id": "lme-830ce83f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "fixture_qid": "lme-2698e78f",
+    "trial": 4,
+    "predicted_subject": "Dr. Smith",
+    "predicted_facet": "Therapy schedule",
+    "predicted_state_family": "Session frequency",
+    "num_hypotheses": 2,
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "top_only_chain": [
+      {
+        "scenario_id": "lme-2698e78f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ],
+    "ranked_chain": [
+      {
+        "scenario_id": "lme-2698e78f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "fixture_qid": "lme-830ce83f",
+    "trial": 7,
+    "predicted_subject": "Rachel",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Current residence",
+    "num_hypotheses": 1,
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "top_only_chain": [
+      {
+        "scenario_id": "lme-830ce83f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ],
+    "ranked_chain": [
+      {
+        "scenario_id": "lme-830ce83f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "fixture_qid": "lme-830ce83f",
+    "trial": 8,
+    "predicted_subject": "Rachel",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Current residence",
+    "num_hypotheses": 1,
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "top_only_chain": [
+      {
+        "scenario_id": "lme-830ce83f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ],
+    "ranked_chain": [
+      {
+        "scenario_id": "lme-830ce83f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "fixture_qid": "lme-2698e78f",
+    "trial": 3,
+    "predicted_subject": "Dr. Smith",
+    "predicted_facet": "Therapy schedule",
+    "predicted_state_family": "Session frequency",
+    "num_hypotheses": 2,
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "top_only_chain": [
+      {
+        "scenario_id": "lme-2698e78f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ],
+    "ranked_chain": [
+      {
+        "scenario_id": "lme-2698e78f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "fixture_qid": "lme-830ce83f",
+    "trial": 0,
+    "predicted_subject": "Rachel",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Current residence",
+    "num_hypotheses": 1,
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "top_only_chain": [
+      {
+        "scenario_id": "lme-830ce83f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ],
+    "ranked_chain": [
+      {
+        "scenario_id": "lme-830ce83f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "fixture_qid": "lme-830ce83f",
+    "trial": 3,
+    "predicted_subject": "Rachel",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Current residence",
+    "num_hypotheses": 1,
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "top_only_chain": [
+      {
+        "scenario_id": "lme-830ce83f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ],
+    "ranked_chain": [
+      {
+        "scenario_id": "lme-830ce83f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "fixture_qid": "lme-2698e78f",
+    "trial": 0,
+    "predicted_subject": "Dr. Smith",
+    "predicted_facet": "Therapy schedule",
+    "predicted_state_family": "Session frequency",
+    "num_hypotheses": 2,
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "top_only_chain": [
+      {
+        "scenario_id": "lme-2698e78f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ],
+    "ranked_chain": [
+      {
+        "scenario_id": "lme-2698e78f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  }
+]

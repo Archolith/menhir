@@ -1,0 +1,24 @@
+﻿{% if episodes %}
+<div class="list">
+  {% for episode in episodes %}
+  <div class="row-card">
+    <button data-node-uuid="{{ episode.uuid }}">
+      <div class="meta" style="margin-bottom:0.25rem">
+        <span class="utc-time" data-utc="{{ episode.created_at }}">{{ episode.created_at or "unknown time" }}</span>
+      </div>
+      <div class="row-card-content-header">{{ episode.preview or "No content available" }}</div>
+      <div class="meta episode-name-toggle">Name: {{ episode.name }}</div>
+      <div class="badge-row">
+        <span class="badge session row-card-code">{{ episode.session_id or "no-session" }}</span>
+        {% if episode.nodes_touched or episode.edges_touched %}
+        <span class="badge persistent">{{ episode.nodes_touched }}n / {{ episode.edges_touched }}e</span>
+        {% endif %}
+        <span class="badge">{{ episode.source or "unknown-source" }}</span>
+      </div>
+    </button>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<p class="muted-empty">No episodic anchors found yet.</p>
+{% endif %}

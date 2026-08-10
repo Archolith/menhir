@@ -1,0 +1,89 @@
+﻿<div class="stack">
+  <div class="detail-grid">
+    <div class="detail-box"><strong>Name</strong>
+      <div>{{ detail.name }}</div>
+    </div>
+    <div class="detail-box"><strong>Labels</strong>
+      <div>{{ detail.labels|join(", ") }}</div>
+    </div>
+    <div class="detail-box"><strong>Scope</strong>
+      <div>{{ detail.scope or "unknown" }}</div>
+    </div>
+    <div class="detail-box"><strong>Session</strong>
+      <div>{{ detail.session_id or "none" }}</div>
+    </div>
+    <div class="detail-box"><strong>Source</strong>
+      <div>{{ detail.source or "unknown" }}</div>
+    </div>
+    <div class="detail-box"><strong>Created</strong>
+      <div class="meta"><span class="utc-time" data-utc="{{ detail.created_at }}">{{ detail.created_at }}</span></div>
+    </div>
+  </div>
+
+  {% if "Entity" in detail.labels %}
+  <div class="detail-box" style="border-top: 1px solid var(--border); padding-top: 1rem;">
+    <strong>Entity Summary</strong>
+    <div style="font-size: 0.9rem; line-height: 1.6; margin-top: 0.5rem; color: var(--text-main)">{{ detail.summary or "No summary available." }}</div>
+  </div>
+  {% endif %}
+
+  <div class="detail-box" style="border-top: 1px solid var(--border); padding-top: 1rem;">
+    <strong>Intelligence & Stats</strong>
+    <div class="badge-row">
+      {% if detail.user_flagged %}<span class="badge failed">user_flagged</span>{% endif %}
+      {% if detail.freshness %}<span class="badge persistent">Freshness: {{ detail.freshness }}</span>{% endif %}
+      {% if detail.sharpness %}<span class="badge session">Sharpness: {{ "%.2f"|format(detail.sharpness) }}</span>{% endif %}
+      {% if detail.nodes_touched or detail.edges_touched %}
+      <span class="badge promoted">{{ detail.nodes_touched or 0 }} nodes / {{ detail.edges_touched or 0 }} edges touched</span>
+      {% endif %}
+    </div>
+    {% if detail.emotions %}
+    <div class="meta" style="margin-top: 0.5rem">Emotions: {{ detail.emotions|tojson }}</div>
+    {% endif %}
+  </div>
+
+  <div class="detail-box" style="border-top: 1px solid var(--border); padding-top: 1rem;">
+    <strong>Raw Content</strong>
+    <div style="font-size: 0.85rem; line-height: 1.6; color: var(--text-muted); background: rgba(0,0,0,0.2); padding: 0.75rem; border-radius: 8px;">
+      {{ detail.content or "No raw content." }}
+    </div>
+  </div>
+
+  <div class="detail-box">
+    <strong>Neighbors</strong>
+    {% if detail.neighbors %}
+    <div class="list">
+      {% for neighbor in detail.neighbors %}
+      <div class="row-card">
+        <button data-node-uuid="{{ neighbor.uuid }}">
+          <strong>{{ neighbor.name }}</strong>
+          <div class="meta">{{ neighbor.rel_type }} | {{ neighbor.labels|join(", ") }}</div>
+          <div class="badge-row"><span class="badge {{ (neighbor.scope or 'unknown')|lower }}">{{ neighbor.scope or "unknown" }}</span></div>
+        </button>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="muted-empty">No direct neighbors found.</p>
+    {% endif %}
+  </div>
+
+  <div class="detail-box">
+    <strong>Provenance (Episodes)</strong>
+    {% if detail.episodes %}
+    <div class="list">
+      {% for episode in detail.episodes %}
+      <div class="row-card">
+        <button data-node-uuid="{{ episode.uuid }}">
+          <strong>{{ episode.name }}</strong>
+          <div class="meta"><span class="utc-time" data-utc="{{ episode.created_at }}">{{ episode.created_at }}</span></div>
+          <div class="meta">{{ episode.session_id or "no-session" }}</div>
+        </button>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="muted-empty">No linked episodes found.</p>
+    {% endif %}
+  </div>
+</div>

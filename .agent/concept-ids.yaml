@@ -1,0 +1,343 @@
+runtime:
+  runtime.overview:
+    owner: architecture.md
+    meaning: Service purpose and core loop
+  runtime.stack:
+    owner: architecture.md
+    meaning: Runtime stack and major dependencies
+  runtime.ops:
+    owner: architecture.md
+    meaning: Current operational direction, queue behavior, scheduler ownership
+  runtime.packages:
+    owner: architecture.md
+    meaning: Package ownership and code layout
+  runtime.shape:
+    owner: architecture.md
+    meaning: Current runtime bootstrap and ingest shape
+  runtime.providers:
+    owner: architecture.md
+    meaning: Provider constraints and Graphiti/backend wiring
+  runtime.flow:
+    owner: architecture.md
+    meaning: System-level ingest and recall flow
+  runtime.turn_evidence_capture:
+    owner: architecture.md
+    meaning: Selective turn-evidence capture flow — hook triage to :TurnEvidence to Phase 3 (ADR 0001)
+  runtime.dependencies:
+    owner: architecture.md
+    meaning: External services, env wiring, startup dependencies
+  runtime.storage:
+    owner: architecture.md
+    meaning: Neo4j and SQLite sidecar storage behavior
+  runtime.roadmap:
+    owner: architecture.md
+    meaning: Current delivery state and next direction
+memory:
+  memory.overview:
+    owner: memory-design.md
+    meaning: Design intent and document scope
+  memory.principles:
+    owner: memory-design.md
+    meaning: Core design principles and guiding constraints
+  memory.stack:
+    owner: memory-foundations.md
+    meaning: Baseline stack assumptions behind the design
+  memory.policy.graph:
+    owner: memory-design.md
+    meaning: Graph-first memory structure and episode-anchor semantics
+  memory.policy.scoring:
+    owner: memory-design.md
+    meaning: Retrieval scoring and candidate generation
+  memory.policy.types:
+    owner: memory-design.md
+    meaning: Memory type system and content expectations
+  memory.policy.emotion:
+    owner: memory-design.md
+    meaning: Emotional quotient model and fields
+  memory.policy.edges:
+    owner: memory-design.md
+    meaning: Edge metadata and edge lifecycle policy
+  memory.policy.scope:
+    owner: memory-design.md
+    meaning: Session/persistent/promoted scope policy
+  memory.policy.lifecycle:
+    owner: memory-design.md
+    meaning: Freshness, compression, rehydration, contradiction handling
+  memory.design.responsibilities:
+    owner: memory-design.md
+    meaning: Explainability, user involvement, budget control
+  memory.design.promotion:
+    owner: memory-design.md
+    meaning: Promotion from memory to reusable skill/hook behavior
+  memory.design.query:
+    owner: memory-design.md
+    meaning: Query construction direction and retrieval shaping
+  memory.design.ingest:
+    owner: memory-design.md
+    meaning: Entity extraction, resolution, and episode-centered ingest policy
+  memory.design.temporal:
+    owner: memory-design.md
+    meaning: Deferred temporal-awareness design
+  memory.design.freeform_queries:
+    owner: memory-design.md
+    meaning: Deferred agent-authored graph query model
+  memory.backlog.open_questions:
+    owner: memory-design.md
+    meaning: Unresolved design questions
+  memory.backlog.weak_spots:
+    owner: memory-design.md
+    meaning: Reliability, retrieval, and product gaps
+  memory.backlog.community:
+    owner: memory-design.md
+    meaning: Community-derived priority signals
+  memory.backlog.external_eval:
+    owner: memory-design.md
+    meaning: Outside projects to adopt, test, or reject
+  memory.backlog.code_graph:
+    owner: memory-design.md
+    meaning: Code-graph companion direction
+model:
+  model.primitives:
+    owner: data_models.md
+    meaning: Index of the four general modeling primitives new features should check against
+  model.declarative_resolution:
+    owner: data_models.md
+    meaning: Author declaration stored verbatim, resolved separately to durable identity, retained on failure
+  model.owned_record:
+    owner: data_models.md
+    meaning: Owned Record pattern - subordinate object with no independent semantic identity, destroyed with its owner
+  model.embodiment_invariant:
+    owner: data_models.md
+    meaning: Identity, embodiment and locator are three distinct concepts that must never collapse
+  model.operational_vs_semantic:
+    owner: data_models.md
+    meaning: Operational objects do not infer semantics; semantic objects explicitly describe them
+  model.entity:
+    owner: data_models.md
+    meaning: Durable memory-node field contract
+  model.episode:
+    owner: data_models.md
+    meaning: Episode-anchor and processing-row contract
+  model.turn_evidence:
+    owner: data_models.md
+    meaning: Selective :TurnEvidence raw-evidence node contract (ADR 0001)
+  model.edge:
+    owner: data_models.md
+    meaning: Edge field contract
+  model.conflict:
+    owner: data_models.md
+    meaning: Conflict grouping and resolution fields
+  model.domain.session:
+    owner: data_models.md
+    meaning: MemorySession contract
+  model.domain.ingest_result:
+    owner: data_models.md
+    meaning: IngestResult contract
+  model.config:
+    owner: data_models.md
+    meaning: Runtime config and payload contract
+  model.tests:
+    owner: data_models.md
+    meaning: Validated test-path contract
+  model.todo:
+    owner: data_models.md
+    meaning: Persistent :Todo node schema and edge semantics
+mcp:
+  mcp.group.ingest:
+    owner: endpoints.md
+    meaning: Ingest and queueing tool group
+  mcp.group.processing:
+    owner: endpoints.md
+    meaning: Processing and queue-debug tool group
+  mcp.group.conflicts:
+    owner: endpoints.md
+    meaning: Conflict review tool group
+  mcp.group.recall:
+    owner: endpoints.md
+    meaning: Recall and bootstrap tool group
+  mcp.group.operator:
+    owner: endpoints.md
+    meaning: Operator and direct mutation tool group
+  mcp.tool.add_memory:
+    owner: endpoints.md
+    meaning: Queue one memory for enrichment
+  mcp.tool.add_memory_and_track:
+    owner: endpoints.md
+    meaning: Queue one memory and watch it to completion
+  mcp.tool.get_enrichment_status:
+    owner: endpoints.md
+    meaning: Read current processing state for one episode
+  mcp.tool.watch_enrichment:
+    owner: endpoints.md
+    meaning: Stream delta-oriented enrichment updates
+  mcp.tool.get_episode_trace:
+    owner: endpoints.md
+    meaning: Join queue state with sidecar trace history
+  mcp.tool.list_enrichment_queue:
+    owner: endpoints.md
+    meaning: List queue rows for inspection
+  mcp.tool.repair_stale_enrichment:
+    owner: endpoints.md
+    meaning: Inspect and optionally repair stale enrichment
+  mcp.tool.list_conflicts:
+    owner: endpoints.md
+    meaning: List grouped conflicts
+  mcp.tool.resolve_conflict:
+    owner: endpoints.md
+    meaning: Apply conflict resolution
+  mcp.tool.force_scheduler_takeover:
+    owner: endpoints.md
+    meaning: Force scheduler lease takeover
+  mcp.tool.read_flagged_memories:
+    owner: endpoints.md
+    meaning: Read flagged bootstrap memory
+  mcp.tool.recall_context_memories:
+    owner: endpoints.md
+    meaning: Read relevant and recent startup context
+  mcp.tool.recall_memories:
+    owner: endpoints.md
+    meaning: Semantic recall over durable memory
+  mcp.tool.flag_memory:
+    owner: endpoints.md
+    meaning: Permanently flag one memory
+  mcp.tool.delete_memory:
+    owner: endpoints.md
+    meaning: Delete one memory and its relationships
+  mcp.tool.delete_namespace:
+    owner: endpoints.md
+    meaning: Tear down a throwaway/eval namespace silo, gated by node count
+  mcp.tool.ingest_project:
+    owner: endpoints.md
+    meaning: Scan a project directory and ingest its deterministic structure
+  mcp.tool.ingest_document:
+    owner: endpoints.md
+    meaning: Ingest a single document or text file
+  mcp.tool.add_candidate:
+    owner: endpoints.md
+    meaning: Stage a low-trust memory/friction candidate for human review
+  mcp.tool.force_reenrich:
+    owner: endpoints.md
+    meaning: Force a failed episode back into enrichment
+  mcp.tool.force_release_enrichment_lease:
+    owner: endpoints.md
+    meaning: Force-release one ENRICHING episode lease
+  mcp.tool.get_provenance:
+    owner: endpoints.md
+    meaning: Show a node's source episodes and evidence anchors
+  mcp.tool.scan_for_conflicts:
+    owner: endpoints.md
+    meaning: Scan for contradiction candidates
+  mcp.tool.run_llm_conflict_review:
+    owner: endpoints.md
+    meaning: Run LLM-adjudicated review over pending conflicts
+  mcp.tool.requeue_conflicts_for_llm_review:
+    owner: endpoints.md
+    meaning: Requeue resolved conflicts for another LLM review pass
+  mcp.tool.pause_scheduler:
+    owner: endpoints.md
+    meaning: Stop the maintenance scheduler loop
+  mcp.tool.resume_scheduler:
+    owner: endpoints.md
+    meaning: Restart the maintenance scheduler loop after a pause
+  mcp.tool.unflag_memory:
+    owner: endpoints.md
+    meaning: Remove the permanent-retention flag from a memory node
+  mcp.tool.promote_memory:
+    owner: endpoints.md
+    meaning: Promote a PERSISTENT memory to PROMOTED ground truth
+  mcp.tool.close_memory:
+    owner: endpoints.md
+    meaning: Mark a TEMPORAL memory as completed
+  mcp.tool.recover_orphans:
+    owner: endpoints.md
+    meaning: Recover orphaned SESSION nodes from crashed/abandoned sessions
+  mcp.tool.add_todo:
+    owner: endpoints.md
+    meaning: Create a persistent TODO item
+  mcp.tool.list_todos:
+    owner: endpoints.md
+    meaning: List TODO items filtered by status
+  mcp.tool.get_todo:
+    owner: endpoints.md
+    meaning: Read one TODO in full, including content list_todos truncates
+  mcp.tool.get_artifact:
+    owner: endpoints.md
+    meaning: Read one work artifact in full, with embodiments, locations and shape verdict
+  mcp.tool.list_artifacts:
+    owner: endpoints.md
+    meaning: List work artifacts filtered by type, status, or namespace
+  mcp.tool.list_artifact_questions:
+    owner: endpoints.md
+    meaning: List open, answered, or deferred design questions recorded on artifacts
+  mcp.tool.get_artifact_relationships:
+    owner: endpoints.md
+    meaning: Show an artifact's declared relationships, subjects, and referenced todos
+  mcp.tool.link_artifacts:
+    owner: endpoints.md
+    meaning: Declare that one artifact reviews, implements, or informs another
+  mcp.tool.supersede_artifact:
+    owner: endpoints.md
+    meaning: Record that one artifact supersedes another, moving edge and status together
+  mcp.tool.transition_artifact:
+    owner: endpoints.md
+    meaning: Move a work artifact to a new lifecycle status if the transition is legal
+  mcp.tool.close_todo:
+    owner: endpoints.md
+    meaning: Mark a TODO as closed
+  mcp.tool.close_stale_todos:
+    owner: endpoints.md
+    meaning: Close TODO items open past an age threshold
+  mcp.tool.build_context:
+    owner: endpoints.md
+    meaning: Build a token-budget-limited context string from recalled memories
+  mcp.tool.get_client_context:
+    owner: endpoints.md
+    meaning: Return caller identity and elapsed time since last memory access
+  mcp.tool.query_structure:
+    owner: endpoints.md
+    meaning: Query the structural code graph
+  mcp.tool.rate_recall:
+    owner: endpoints.md
+    meaning: Self-reported usefulness feedback for a prior recall
+  mcp.tool.get_memory_stats:
+    owner: endpoints.md
+    meaning: Operational health summary for the memory system
+  mcp.tool.view_entropy:
+    owner: endpoints.md
+    meaning: D0 view-reachability probe for current Views
+  mcp.tool.mint_client:
+    owner: endpoints.md
+    meaning: Mint a new per-client token
+  mcp.tool.list_clients:
+    owner: endpoints.md
+    meaning: List registered (non-revoked) per-client tokens
+  mcp.tool.revoke_client:
+    owner: endpoints.md
+    meaning: Revoke a client token by client_id
+  mcp.resource.system.dependency_health:
+    owner: endpoints.md
+    meaning: Lightweight dependency checks
+  mcp.resource.system.metadata:
+    owner: endpoints.md
+    meaning: Runtime metadata and graph counts
+  mcp.resource.memory.recent:
+    owner: endpoints.md
+    meaning: Recent memory view
+  mcp.resource.system.lifecycle_trace:
+    owner: endpoints.md
+    meaning: Runtime lifecycle/debug events
+  mcp.resource.system.processing_queue:
+    owner: endpoints.md
+    meaning: Machine-readable processing queue snapshot
+  mcp.resource.memory.node:
+    owner: endpoints.md
+    meaning: Resolve a node by UUID
+  mcp.resource.memory.scope:
+    owner: endpoints.md
+    meaning: List nodes by scope
+  mcp.resource.memory.search:
+    owner: endpoints.md
+    meaning: Search memories by natural-language term
+  mcp.resource.memory.type:
+    owner: endpoints.md
+    meaning: List nodes by memory type

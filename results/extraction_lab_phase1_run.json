@@ -1,0 +1,3664 @@
+[
+  {
+    "fixture_index": 0,
+    "current_message": "Rachel actually just moved back to the suburbs again.",
+    "result": {
+      "current_message": "Rachel actually just moved back to the suburbs again.",
+      "arms": [
+        {
+          "id": "baseline",
+          "label": "Baseline (production prompt, unmodified)",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 4409.15,
+          "tuning": {
+            "prompt_variant": "baseline",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Rachel",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "f56c6391-f3da-42df-af61-0c6b5f5b8439"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 1.0,
+            "proposition_recall": 0.0,
+            "proposition_precision": 0.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "minus_when_in_doubt",
+          "label": "Condition 2: minus 'When in doubt, do NOT extract'",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2459.48,
+          "tuning": {
+            "prompt_variant": "minus_when_in_doubt",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Rachel",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "0011cb2b-5e13-4860-bd02-158e90e0b74e"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 1.0,
+            "proposition_recall": 0.0,
+            "proposition_precision": 0.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "minimal_recall_patch",
+          "label": "Condition 3: Minimal Recall Patch",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2705.99,
+          "tuning": {
+            "prompt_variant": "minimal_recall_patch",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Rachel",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "b423a4c9-a587-415a-bdb6-39d4382700f6"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 1.0,
+            "proposition_recall": 0.0,
+            "proposition_precision": 0.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "mention_first",
+          "label": "Condition 4: Mention-First",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2533.58,
+          "tuning": {
+            "prompt_variant": "mention_first",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Rachel",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "3031e52e-d6d3-4a46-9342-6b3b245255d0"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 1.0,
+            "proposition_recall": 0.0,
+            "proposition_precision": 0.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "update_aware",
+          "label": "Condition 5: Update-Aware",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 4126.62,
+          "tuning": {
+            "prompt_variant": "update_aware",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Rachel",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "09824ef2-150a-4307-a029-75d8a6dc440c"
+              },
+              {
+                "text": "suburbs",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "9a499c00-dc86-405e-863c-8d87a8c35ca7"
+              }
+            ],
+            "propositions": [
+              {
+                "fact": "Rachel moved back to the suburbs again.",
+                "source_uuid": "09824ef2-150a-4307-a029-75d8a6dc440c",
+                "target_uuid": "9a499c00-dc86-405e-863c-8d87a8c35ca7",
+                "uuid": "12ae9785-efbc-47ea-b609-319a3a0818aa"
+              },
+              {
+                "fact": "Rachel moved back to the suburbs again.",
+                "source_uuid": "09824ef2-150a-4307-a029-75d8a6dc440c",
+                "target_uuid": "9a499c00-dc86-405e-863c-8d87a8c35ca7",
+                "uuid": "12ae9785-efbc-47ea-b609-319a3a0818aa"
+              }
+            ]
+          },
+          "gold_scores": {
+            "mention_recall": 1.0,
+            "mention_precision": 1.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 0.5,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.25
+          },
+          "degraded": false
+        },
+        {
+          "id": "proposition_first",
+          "label": "Condition 6: Proposition-First",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2237.87,
+          "tuning": {
+            "prompt_variant": "proposition_first",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Rachel",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "fc7c5f9f-6b27-483f-b2ee-422699dd01ad"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 1.0,
+            "proposition_recall": 0.0,
+            "proposition_precision": 0.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "mention_first_update_aware",
+          "label": "Condition 7: Mention-First + Update-Aware",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2262.62,
+          "tuning": {
+            "prompt_variant": "mention_first_update_aware",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Rachel",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "0ae1fe73-d2d1-4184-b41e-d5210cf803e1"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 1.0,
+            "proposition_recall": 0.0,
+            "proposition_precision": 0.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "proposition_first_structured",
+          "label": "Condition 8: Proposition-First + Structured Uncertainty",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2348.88,
+          "tuning": {
+            "prompt_variant": "proposition_first_structured",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Rachel",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "208a193a-40b7-46d0-b840-f1ca4c0819bf"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 1.0,
+            "proposition_recall": 0.0,
+            "proposition_precision": 0.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        }
+      ]
+    }
+  },
+  {
+    "fixture_index": 1,
+    "current_message": "She actually moved back to the suburbs again.",
+    "result": {
+      "current_message": "She actually moved back to the suburbs again.",
+      "arms": [
+        {
+          "id": "baseline",
+          "label": "Baseline (production prompt, unmodified)",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2427.98,
+          "tuning": {
+            "prompt_variant": "baseline",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "She",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "ef50b074-6246-4681-9d3f-8517a4f4cc19"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.0,
+            "mention_precision": 0.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 1.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 1.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "minus_when_in_doubt",
+          "label": "Condition 2: minus 'When in doubt, do NOT extract'",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2272.0,
+          "tuning": {
+            "prompt_variant": "minus_when_in_doubt",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "She",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "90591d2a-07a9-4f75-8e46-75264f6eeb34"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.0,
+            "mention_precision": 0.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 1.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 1.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "minimal_recall_patch",
+          "label": "Condition 3: Minimal Recall Patch",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2757.77,
+          "tuning": {
+            "prompt_variant": "minimal_recall_patch",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "She",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "56f76191-bee2-451b-a31a-af05be703892"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.0,
+            "mention_precision": 0.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 1.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 1.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "mention_first",
+          "label": "Condition 4: Mention-First",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 3742.83,
+          "tuning": {
+            "prompt_variant": "mention_first",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "She",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "e7946acb-fa09-4e4c-b9a3-bee80195844f"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.0,
+            "mention_precision": 0.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 1.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 1.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "update_aware",
+          "label": "Condition 5: Update-Aware",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2984.62,
+          "tuning": {
+            "prompt_variant": "update_aware",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "She",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "3465952b-2c60-4345-8c39-cf96e70a9505"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.0,
+            "mention_precision": 0.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 1.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 1.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "proposition_first",
+          "label": "Condition 6: Proposition-First",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2309.32,
+          "tuning": {
+            "prompt_variant": "proposition_first",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "She",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "67d5d3dc-9e91-4c13-b327-94f05d62ae79"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.0,
+            "mention_precision": 0.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 1.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 1.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "mention_first_update_aware",
+          "label": "Condition 7: Mention-First + Update-Aware",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 1900.89,
+          "tuning": {
+            "prompt_variant": "mention_first_update_aware",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "She",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "ebdd776c-d250-469e-827a-b7e1d52e109d"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.0,
+            "mention_precision": 0.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 1.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 1.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "proposition_first_structured",
+          "label": "Condition 8: Proposition-First + Structured Uncertainty",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2136.1,
+          "tuning": {
+            "prompt_variant": "proposition_first_structured",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "She",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "9cade01c-994f-43e4-9497-0ce42738fe93"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.0,
+            "mention_precision": 0.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 1.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 1.0
+          },
+          "degraded": false
+        }
+      ]
+    }
+  },
+  {
+    "fixture_index": 2,
+    "current_message": "David is living downtown now.",
+    "result": {
+      "current_message": "David is living downtown now.",
+      "arms": [
+        {
+          "id": "baseline",
+          "label": "Baseline (production prompt, unmodified)",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2234.34,
+          "tuning": {
+            "prompt_variant": "baseline",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "David",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "aa4028d0-0ce3-4010-896e-985103210fc2"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 1.0,
+            "proposition_recall": 0.0,
+            "proposition_precision": 0.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "minus_when_in_doubt",
+          "label": "Condition 2: minus 'When in doubt, do NOT extract'",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2462.3,
+          "tuning": {
+            "prompt_variant": "minus_when_in_doubt",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "David",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "60a57f2a-a044-4d0a-8510-ee266d7a55a3"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 1.0,
+            "proposition_recall": 0.0,
+            "proposition_precision": 0.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "minimal_recall_patch",
+          "label": "Condition 3: Minimal Recall Patch",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2242.36,
+          "tuning": {
+            "prompt_variant": "minimal_recall_patch",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "David",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "68615b93-2941-4a88-877a-16eb526cd841"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 1.0,
+            "proposition_recall": 0.0,
+            "proposition_precision": 0.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "mention_first",
+          "label": "Condition 4: Mention-First",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2183.93,
+          "tuning": {
+            "prompt_variant": "mention_first",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "David",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "92383b5a-8790-4780-b20d-4d3095711876"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 1.0,
+            "proposition_recall": 0.0,
+            "proposition_precision": 0.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "update_aware",
+          "label": "Condition 5: Update-Aware",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2406.21,
+          "tuning": {
+            "prompt_variant": "update_aware",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "David",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "92d94468-6f57-4771-9cc7-ac6f5abc3336"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 1.0,
+            "proposition_recall": 0.0,
+            "proposition_precision": 0.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "proposition_first",
+          "label": "Condition 6: Proposition-First",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2720.01,
+          "tuning": {
+            "prompt_variant": "proposition_first",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "David",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "b6ea2872-18f0-4e75-8aad-086a3f6fc9db"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 1.0,
+            "proposition_recall": 0.0,
+            "proposition_precision": 0.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "mention_first_update_aware",
+          "label": "Condition 7: Mention-First + Update-Aware",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2185.54,
+          "tuning": {
+            "prompt_variant": "mention_first_update_aware",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "David",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "f49f4c1a-9bb8-4891-bb70-2f7743ca9fcc"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 1.0,
+            "proposition_recall": 0.0,
+            "proposition_precision": 0.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "proposition_first_structured",
+          "label": "Condition 8: Proposition-First + Structured Uncertainty",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2237.88,
+          "tuning": {
+            "prompt_variant": "proposition_first_structured",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "David",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "16c146d7-e600-4460-9352-27db2a28a673"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 1.0,
+            "proposition_recall": 0.0,
+            "proposition_precision": 0.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        }
+      ]
+    }
+  },
+  {
+    "fixture_index": 3,
+    "current_message": "Actually, I spent $400,000, not $350,000.",
+    "result": {
+      "current_message": "Actually, I spent $400,000, not $350,000.",
+      "arms": [
+        {
+          "id": "baseline",
+          "label": "Baseline (production prompt, unmodified)",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2623.69,
+          "tuning": {
+            "prompt_variant": "baseline",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "$400,000",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "5efce497-43fb-4b69-8280-3f519667cb30"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.3333333333333333,
+            "mention_precision": 1.0,
+            "proposition_recall": 0.0,
+            "proposition_precision": 0.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "minus_when_in_doubt",
+          "label": "Condition 2: minus 'When in doubt, do NOT extract'",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2394.18,
+          "tuning": {
+            "prompt_variant": "minus_when_in_doubt",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "$400,000",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "e7fffa6c-238b-449f-ba4e-37c684a4b865"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.3333333333333333,
+            "mention_precision": 1.0,
+            "proposition_recall": 0.0,
+            "proposition_precision": 0.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "minimal_recall_patch",
+          "label": "Condition 3: Minimal Recall Patch",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2263.17,
+          "tuning": {
+            "prompt_variant": "minimal_recall_patch",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "$400,000",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "b7c5abaf-5617-41d0-b727-0bbbd22c43ea"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.3333333333333333,
+            "mention_precision": 1.0,
+            "proposition_recall": 0.0,
+            "proposition_precision": 0.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "mention_first",
+          "label": "Condition 4: Mention-First",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2930.29,
+          "tuning": {
+            "prompt_variant": "mention_first",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "$400,000",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "b3f54fc0-c6ad-44ba-b946-709f7309d5f5"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.3333333333333333,
+            "mention_precision": 1.0,
+            "proposition_recall": 0.0,
+            "proposition_precision": 0.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "update_aware",
+          "label": "Condition 5: Update-Aware",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2409.73,
+          "tuning": {
+            "prompt_variant": "update_aware",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "$400,000",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "459f3695-3cb3-40c5-b651-8daeeeff5fec"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.3333333333333333,
+            "mention_precision": 1.0,
+            "proposition_recall": 0.0,
+            "proposition_precision": 0.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "proposition_first",
+          "label": "Condition 6: Proposition-First",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2987.69,
+          "tuning": {
+            "prompt_variant": "proposition_first",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "$400,000",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "b14f36d4-6ccd-4aec-bbfc-cd8b6ffe4f4b"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.3333333333333333,
+            "mention_precision": 1.0,
+            "proposition_recall": 0.0,
+            "proposition_precision": 0.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "mention_first_update_aware",
+          "label": "Condition 7: Mention-First + Update-Aware",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2832.3,
+          "tuning": {
+            "prompt_variant": "mention_first_update_aware",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "$400,000",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "192287eb-7342-4681-8a37-609450a4790b"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.3333333333333333,
+            "mention_precision": 1.0,
+            "proposition_recall": 0.0,
+            "proposition_precision": 0.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "proposition_first_structured",
+          "label": "Condition 8: Proposition-First + Structured Uncertainty",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2543.2,
+          "tuning": {
+            "prompt_variant": "proposition_first_structured",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "$400,000",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "97804121-a988-4de1-a986-280a4065436f"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.3333333333333333,
+            "mention_precision": 1.0,
+            "proposition_recall": 0.0,
+            "proposition_precision": 0.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        }
+      ]
+    }
+  },
+  {
+    "fixture_index": 4,
+    "current_message": "Maya no longer works at Google; she joined Microsoft.",
+    "result": {
+      "current_message": "Maya no longer works at Google; she joined Microsoft.",
+      "arms": [
+        {
+          "id": "baseline",
+          "label": "Baseline (production prompt, unmodified)",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 5323.68,
+          "tuning": {
+            "prompt_variant": "baseline",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Maya",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "4c913c07-d693-416c-b527-5eb231006aea"
+              },
+              {
+                "text": "Google",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "716a8ebc-eaf2-4b86-a6f9-da2d88714111"
+              },
+              {
+                "text": "Microsoft",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "2c6e7643-6ed7-4bc6-8839-3753ba6b06d9"
+              }
+            ],
+            "propositions": [
+              {
+                "fact": "Maya no longer works at Google.",
+                "source_uuid": "4c913c07-d693-416c-b527-5eb231006aea",
+                "target_uuid": "716a8ebc-eaf2-4b86-a6f9-da2d88714111",
+                "uuid": "eecf2add-0246-40e9-bc6f-00b6a8c2ac8f"
+              },
+              {
+                "fact": "Maya joined Microsoft.",
+                "source_uuid": "4c913c07-d693-416c-b527-5eb231006aea",
+                "target_uuid": "2c6e7643-6ed7-4bc6-8839-3753ba6b06d9",
+                "uuid": "2e14c39e-8f59-409f-beed-e2dd9ec1280e"
+              },
+              {
+                "fact": "Maya no longer works at Google.",
+                "source_uuid": "4c913c07-d693-416c-b527-5eb231006aea",
+                "target_uuid": "716a8ebc-eaf2-4b86-a6f9-da2d88714111",
+                "uuid": "eecf2add-0246-40e9-bc6f-00b6a8c2ac8f"
+              },
+              {
+                "fact": "Maya joined Microsoft.",
+                "source_uuid": "4c913c07-d693-416c-b527-5eb231006aea",
+                "target_uuid": "2c6e7643-6ed7-4bc6-8839-3753ba6b06d9",
+                "uuid": "2e14c39e-8f59-409f-beed-e2dd9ec1280e"
+              }
+            ]
+          },
+          "gold_scores": {
+            "mention_recall": 1.0,
+            "mention_precision": 1.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 0.5,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.2857142857142857
+          },
+          "degraded": false
+        },
+        {
+          "id": "minus_when_in_doubt",
+          "label": "Condition 2: minus 'When in doubt, do NOT extract'",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 4612.57,
+          "tuning": {
+            "prompt_variant": "minus_when_in_doubt",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Maya",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "58eff3ac-4953-4b12-b04a-4040f587bc41"
+              },
+              {
+                "text": "Google",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "7c85727d-f3a8-47d3-a8d4-c2738148fff3"
+              },
+              {
+                "text": "Microsoft",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "fa05c850-b971-4e53-84c7-6d97ad7310da"
+              }
+            ],
+            "propositions": [
+              {
+                "fact": "Maya no longer works at Google.",
+                "source_uuid": "58eff3ac-4953-4b12-b04a-4040f587bc41",
+                "target_uuid": "7c85727d-f3a8-47d3-a8d4-c2738148fff3",
+                "uuid": "478e8fdd-71d6-4560-a908-6bc3e917ac6f"
+              },
+              {
+                "fact": "Maya joined Microsoft.",
+                "source_uuid": "58eff3ac-4953-4b12-b04a-4040f587bc41",
+                "target_uuid": "fa05c850-b971-4e53-84c7-6d97ad7310da",
+                "uuid": "f371b41d-2597-41a1-a7c7-bf2f1d6dcd81"
+              },
+              {
+                "fact": "Maya no longer works at Google.",
+                "source_uuid": "58eff3ac-4953-4b12-b04a-4040f587bc41",
+                "target_uuid": "7c85727d-f3a8-47d3-a8d4-c2738148fff3",
+                "uuid": "478e8fdd-71d6-4560-a908-6bc3e917ac6f"
+              },
+              {
+                "fact": "Maya joined Microsoft.",
+                "source_uuid": "58eff3ac-4953-4b12-b04a-4040f587bc41",
+                "target_uuid": "fa05c850-b971-4e53-84c7-6d97ad7310da",
+                "uuid": "f371b41d-2597-41a1-a7c7-bf2f1d6dcd81"
+              }
+            ]
+          },
+          "gold_scores": {
+            "mention_recall": 1.0,
+            "mention_precision": 1.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 0.5,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.2857142857142857
+          },
+          "degraded": false
+        },
+        {
+          "id": "minimal_recall_patch",
+          "label": "Condition 3: Minimal Recall Patch",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 4770.41,
+          "tuning": {
+            "prompt_variant": "minimal_recall_patch",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Maya",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "c76531a7-579d-4e65-ad2e-19aabe1ad49a"
+              },
+              {
+                "text": "Google",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "bb5e8ae3-feb5-4fac-b8c1-89392c845807"
+              },
+              {
+                "text": "Microsoft",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "52b8bc9e-768f-4fe9-aa17-3961f635e910"
+              }
+            ],
+            "propositions": [
+              {
+                "fact": "Maya no longer works at Google.",
+                "source_uuid": "c76531a7-579d-4e65-ad2e-19aabe1ad49a",
+                "target_uuid": "bb5e8ae3-feb5-4fac-b8c1-89392c845807",
+                "uuid": "6b44ad61-7918-4834-9cbf-6060611b6395"
+              },
+              {
+                "fact": "Maya joined Microsoft.",
+                "source_uuid": "c76531a7-579d-4e65-ad2e-19aabe1ad49a",
+                "target_uuid": "52b8bc9e-768f-4fe9-aa17-3961f635e910",
+                "uuid": "00da23c0-b99a-4d92-b4a0-84796bd3954a"
+              },
+              {
+                "fact": "Maya no longer works at Google.",
+                "source_uuid": "c76531a7-579d-4e65-ad2e-19aabe1ad49a",
+                "target_uuid": "bb5e8ae3-feb5-4fac-b8c1-89392c845807",
+                "uuid": "6b44ad61-7918-4834-9cbf-6060611b6395"
+              },
+              {
+                "fact": "Maya joined Microsoft.",
+                "source_uuid": "c76531a7-579d-4e65-ad2e-19aabe1ad49a",
+                "target_uuid": "52b8bc9e-768f-4fe9-aa17-3961f635e910",
+                "uuid": "00da23c0-b99a-4d92-b4a0-84796bd3954a"
+              }
+            ]
+          },
+          "gold_scores": {
+            "mention_recall": 1.0,
+            "mention_precision": 1.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 0.5,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.2857142857142857
+          },
+          "degraded": false
+        },
+        {
+          "id": "mention_first",
+          "label": "Condition 4: Mention-First",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 4100.11,
+          "tuning": {
+            "prompt_variant": "mention_first",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Maya",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "f47bd7c0-ad41-4d2f-a3c6-99572ae54466"
+              },
+              {
+                "text": "Google",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "ed0e2530-125b-468e-9e9b-2351822a0312"
+              },
+              {
+                "text": "Microsoft",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "430d11e0-e64c-4ba5-8f0a-b1a969d52da7"
+              }
+            ],
+            "propositions": [
+              {
+                "fact": "Maya no longer works at Google.",
+                "source_uuid": "f47bd7c0-ad41-4d2f-a3c6-99572ae54466",
+                "target_uuid": "ed0e2530-125b-468e-9e9b-2351822a0312",
+                "uuid": "d54bccd1-aa45-4a31-bad6-af53cc5d56a7"
+              },
+              {
+                "fact": "Maya joined Microsoft.",
+                "source_uuid": "f47bd7c0-ad41-4d2f-a3c6-99572ae54466",
+                "target_uuid": "430d11e0-e64c-4ba5-8f0a-b1a969d52da7",
+                "uuid": "b06c0f46-47bf-4c9f-a027-f55d9a2a3061"
+              },
+              {
+                "fact": "Maya no longer works at Google.",
+                "source_uuid": "f47bd7c0-ad41-4d2f-a3c6-99572ae54466",
+                "target_uuid": "ed0e2530-125b-468e-9e9b-2351822a0312",
+                "uuid": "d54bccd1-aa45-4a31-bad6-af53cc5d56a7"
+              },
+              {
+                "fact": "Maya joined Microsoft.",
+                "source_uuid": "f47bd7c0-ad41-4d2f-a3c6-99572ae54466",
+                "target_uuid": "430d11e0-e64c-4ba5-8f0a-b1a969d52da7",
+                "uuid": "b06c0f46-47bf-4c9f-a027-f55d9a2a3061"
+              }
+            ]
+          },
+          "gold_scores": {
+            "mention_recall": 1.0,
+            "mention_precision": 1.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 0.5,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.2857142857142857
+          },
+          "degraded": false
+        },
+        {
+          "id": "update_aware",
+          "label": "Condition 5: Update-Aware",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 4861.74,
+          "tuning": {
+            "prompt_variant": "update_aware",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Maya",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "e9c4305b-d69d-4ace-ae7f-2119cd610449"
+              },
+              {
+                "text": "Google",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "ccd44528-0f41-49cf-86f0-bb2de544f177"
+              },
+              {
+                "text": "Microsoft",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "a788fb64-5e31-4b3a-82a2-fc0d11ec824c"
+              }
+            ],
+            "propositions": [
+              {
+                "fact": "Maya no longer works at Google.",
+                "source_uuid": "e9c4305b-d69d-4ace-ae7f-2119cd610449",
+                "target_uuid": "ccd44528-0f41-49cf-86f0-bb2de544f177",
+                "uuid": "6a58caa1-cb14-457a-8013-8edb0ef563d9"
+              },
+              {
+                "fact": "Maya joined Microsoft.",
+                "source_uuid": "e9c4305b-d69d-4ace-ae7f-2119cd610449",
+                "target_uuid": "a788fb64-5e31-4b3a-82a2-fc0d11ec824c",
+                "uuid": "1d8f2db7-c02a-4186-9dec-c42468d93215"
+              },
+              {
+                "fact": "Maya no longer works at Google.",
+                "source_uuid": "e9c4305b-d69d-4ace-ae7f-2119cd610449",
+                "target_uuid": "ccd44528-0f41-49cf-86f0-bb2de544f177",
+                "uuid": "6a58caa1-cb14-457a-8013-8edb0ef563d9"
+              },
+              {
+                "fact": "Maya joined Microsoft.",
+                "source_uuid": "e9c4305b-d69d-4ace-ae7f-2119cd610449",
+                "target_uuid": "a788fb64-5e31-4b3a-82a2-fc0d11ec824c",
+                "uuid": "1d8f2db7-c02a-4186-9dec-c42468d93215"
+              }
+            ]
+          },
+          "gold_scores": {
+            "mention_recall": 1.0,
+            "mention_precision": 1.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 0.5,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.2857142857142857
+          },
+          "degraded": false
+        },
+        {
+          "id": "proposition_first",
+          "label": "Condition 6: Proposition-First",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 5369.41,
+          "tuning": {
+            "prompt_variant": "proposition_first",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Maya",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "f6aa5cd4-d383-4061-9d6a-225905eac29a"
+              },
+              {
+                "text": "Google",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "6d16acb2-9a51-420d-bbec-6a08cc59430a"
+              },
+              {
+                "text": "Microsoft",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "6c1420f9-1444-4933-af3f-bf5c9ebb581e"
+              }
+            ],
+            "propositions": [
+              {
+                "fact": "Maya no longer works at Google.",
+                "source_uuid": "f6aa5cd4-d383-4061-9d6a-225905eac29a",
+                "target_uuid": "6d16acb2-9a51-420d-bbec-6a08cc59430a",
+                "uuid": "002ed5b0-99ec-4516-b1ac-cf39400d094a"
+              },
+              {
+                "fact": "Maya joined Microsoft.",
+                "source_uuid": "f6aa5cd4-d383-4061-9d6a-225905eac29a",
+                "target_uuid": "6c1420f9-1444-4933-af3f-bf5c9ebb581e",
+                "uuid": "5da257e5-372d-4e02-8dd4-19214fada96f"
+              },
+              {
+                "fact": "Maya no longer works at Google.",
+                "source_uuid": "f6aa5cd4-d383-4061-9d6a-225905eac29a",
+                "target_uuid": "6d16acb2-9a51-420d-bbec-6a08cc59430a",
+                "uuid": "002ed5b0-99ec-4516-b1ac-cf39400d094a"
+              },
+              {
+                "fact": "Maya joined Microsoft.",
+                "source_uuid": "f6aa5cd4-d383-4061-9d6a-225905eac29a",
+                "target_uuid": "6c1420f9-1444-4933-af3f-bf5c9ebb581e",
+                "uuid": "5da257e5-372d-4e02-8dd4-19214fada96f"
+              }
+            ]
+          },
+          "gold_scores": {
+            "mention_recall": 1.0,
+            "mention_precision": 1.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 0.5,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.2857142857142857
+          },
+          "degraded": false
+        },
+        {
+          "id": "mention_first_update_aware",
+          "label": "Condition 7: Mention-First + Update-Aware",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 4079.86,
+          "tuning": {
+            "prompt_variant": "mention_first_update_aware",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Maya",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "a6adc742-9e5b-4bbd-8af5-24a82cede822"
+              },
+              {
+                "text": "Google",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "3d2e5870-1c7b-4bbd-abdc-592ae562ac89"
+              },
+              {
+                "text": "Microsoft",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "9926b45d-0349-43f3-a971-ae21776086e1"
+              }
+            ],
+            "propositions": [
+              {
+                "fact": "Maya no longer works at Google.",
+                "source_uuid": "a6adc742-9e5b-4bbd-8af5-24a82cede822",
+                "target_uuid": "3d2e5870-1c7b-4bbd-abdc-592ae562ac89",
+                "uuid": "0a2080d0-dd6e-4ed3-a2df-4a37efb099eb"
+              },
+              {
+                "fact": "Maya joined Microsoft.",
+                "source_uuid": "a6adc742-9e5b-4bbd-8af5-24a82cede822",
+                "target_uuid": "9926b45d-0349-43f3-a971-ae21776086e1",
+                "uuid": "d116196c-8057-4850-91ca-84ecbb512a62"
+              },
+              {
+                "fact": "Maya no longer works at Google.",
+                "source_uuid": "a6adc742-9e5b-4bbd-8af5-24a82cede822",
+                "target_uuid": "3d2e5870-1c7b-4bbd-abdc-592ae562ac89",
+                "uuid": "0a2080d0-dd6e-4ed3-a2df-4a37efb099eb"
+              },
+              {
+                "fact": "Maya joined Microsoft.",
+                "source_uuid": "a6adc742-9e5b-4bbd-8af5-24a82cede822",
+                "target_uuid": "9926b45d-0349-43f3-a971-ae21776086e1",
+                "uuid": "d116196c-8057-4850-91ca-84ecbb512a62"
+              }
+            ]
+          },
+          "gold_scores": {
+            "mention_recall": 1.0,
+            "mention_precision": 1.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 0.5,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.2857142857142857
+          },
+          "degraded": false
+        },
+        {
+          "id": "proposition_first_structured",
+          "label": "Condition 8: Proposition-First + Structured Uncertainty",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 4304.14,
+          "tuning": {
+            "prompt_variant": "proposition_first_structured",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Maya",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "6076e48d-e9e3-4d3e-bf38-ebb6e1f8e187"
+              },
+              {
+                "text": "Google",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "8cbe1faa-e5cf-4847-a9fb-e33aac3e6583"
+              },
+              {
+                "text": "Microsoft",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "25e2408b-d1fa-44cd-9892-ea320eaa01f9"
+              }
+            ],
+            "propositions": [
+              {
+                "fact": "Maya no longer works at Google.",
+                "source_uuid": "6076e48d-e9e3-4d3e-bf38-ebb6e1f8e187",
+                "target_uuid": "8cbe1faa-e5cf-4847-a9fb-e33aac3e6583",
+                "uuid": "05cb84d6-50ea-4776-9d50-1cef57b03d46"
+              },
+              {
+                "fact": "Maya joined Microsoft.",
+                "source_uuid": "6076e48d-e9e3-4d3e-bf38-ebb6e1f8e187",
+                "target_uuid": "25e2408b-d1fa-44cd-9892-ea320eaa01f9",
+                "uuid": "6813f87c-6cf0-45bd-8f61-68de69f4b7a1"
+              },
+              {
+                "fact": "Maya no longer works at Google.",
+                "source_uuid": "6076e48d-e9e3-4d3e-bf38-ebb6e1f8e187",
+                "target_uuid": "8cbe1faa-e5cf-4847-a9fb-e33aac3e6583",
+                "uuid": "05cb84d6-50ea-4776-9d50-1cef57b03d46"
+              },
+              {
+                "fact": "Maya joined Microsoft.",
+                "source_uuid": "6076e48d-e9e3-4d3e-bf38-ebb6e1f8e187",
+                "target_uuid": "25e2408b-d1fa-44cd-9892-ea320eaa01f9",
+                "uuid": "6813f87c-6cf0-45bd-8f61-68de69f4b7a1"
+              }
+            ]
+          },
+          "gold_scores": {
+            "mention_recall": 1.0,
+            "mention_precision": 1.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 0.5,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.2857142857142857
+          },
+          "degraded": false
+        }
+      ]
+    }
+  },
+  {
+    "fixture_index": 5,
+    "current_message": "Moving is really stressful and confusing.",
+    "result": {
+      "current_message": "Moving is really stressful and confusing.",
+      "arms": [
+        {
+          "id": "baseline",
+          "label": "Baseline (production prompt, unmodified)",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2139.5,
+          "tuning": {
+            "prompt_variant": "baseline",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Moving",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "ca7e10e4-d7b9-463c-9f9b-65acbbfc1dc6"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.0,
+            "mention_precision": 0.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 1.0,
+            "update_capture_rate": 1.0,
+            "unsupported_inference_rate": 1.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "minus_when_in_doubt",
+          "label": "Condition 2: minus 'When in doubt, do NOT extract'",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 1494.89,
+          "tuning": {
+            "prompt_variant": "minus_when_in_doubt",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Moving",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "6c7938d3-6748-4b36-a789-bca960248a99"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.0,
+            "mention_precision": 0.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 1.0,
+            "update_capture_rate": 1.0,
+            "unsupported_inference_rate": 1.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "minimal_recall_patch",
+          "label": "Condition 3: Minimal Recall Patch",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 1335.3,
+          "tuning": {
+            "prompt_variant": "minimal_recall_patch",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Moving",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "3f8b5d73-dc38-4172-a9e3-4d8db21e71bb"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.0,
+            "mention_precision": 0.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 1.0,
+            "update_capture_rate": 1.0,
+            "unsupported_inference_rate": 1.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "mention_first",
+          "label": "Condition 4: Mention-First",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 1416.57,
+          "tuning": {
+            "prompt_variant": "mention_first",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Moving",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "bbb5bb9e-9349-4d96-a39c-d88c5f1ccd3b"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.0,
+            "mention_precision": 0.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 1.0,
+            "update_capture_rate": 1.0,
+            "unsupported_inference_rate": 1.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "update_aware",
+          "label": "Condition 5: Update-Aware",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 1307.66,
+          "tuning": {
+            "prompt_variant": "update_aware",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Moving",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "3a663585-52e7-4f56-98be-ac6f225f8c4d"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.0,
+            "mention_precision": 0.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 1.0,
+            "update_capture_rate": 1.0,
+            "unsupported_inference_rate": 1.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "proposition_first",
+          "label": "Condition 6: Proposition-First",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 1296.2,
+          "tuning": {
+            "prompt_variant": "proposition_first",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Moving",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "18a2bf8e-511c-4edb-a9dd-86a467e6de69"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.0,
+            "mention_precision": 0.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 1.0,
+            "update_capture_rate": 1.0,
+            "unsupported_inference_rate": 1.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "mention_first_update_aware",
+          "label": "Condition 7: Mention-First + Update-Aware",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 1355.93,
+          "tuning": {
+            "prompt_variant": "mention_first_update_aware",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Moving",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "2ecc2850-13eb-4465-b63c-b1556e861cdb"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.0,
+            "mention_precision": 0.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 1.0,
+            "update_capture_rate": 1.0,
+            "unsupported_inference_rate": 1.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "proposition_first_structured",
+          "label": "Condition 8: Proposition-First + Structured Uncertainty",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 1516.81,
+          "tuning": {
+            "prompt_variant": "proposition_first_structured",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Moving",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "46a140c6-9f3b-4e8a-95dc-2bfd7b91b7ce"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.0,
+            "mention_precision": 0.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 1.0,
+            "update_capture_rate": 1.0,
+            "unsupported_inference_rate": 1.0
+          },
+          "degraded": false
+        }
+      ]
+    }
+  },
+  {
+    "fixture_index": 6,
+    "current_message": "Rachel has been packing boxes all week.",
+    "result": {
+      "current_message": "Rachel has been packing boxes all week.",
+      "arms": [
+        {
+          "id": "baseline",
+          "label": "Baseline (production prompt, unmodified)",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2447.66,
+          "tuning": {
+            "prompt_variant": "baseline",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Rachel",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "7aaf643b-14a1-44e2-b950-2e1ac09e8b23"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 1.0,
+            "mention_precision": 1.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 1.0,
+            "update_capture_rate": 1.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "minus_when_in_doubt",
+          "label": "Condition 2: minus 'When in doubt, do NOT extract'",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2394.78,
+          "tuning": {
+            "prompt_variant": "minus_when_in_doubt",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Rachel",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "f9eafed2-b8cc-4702-8a1e-674bdb2361de"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 1.0,
+            "mention_precision": 1.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 1.0,
+            "update_capture_rate": 1.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "minimal_recall_patch",
+          "label": "Condition 3: Minimal Recall Patch",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2146.8,
+          "tuning": {
+            "prompt_variant": "minimal_recall_patch",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Rachel",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "a8dcf779-5b01-42dd-abe0-1b8174c43860"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 1.0,
+            "mention_precision": 1.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 1.0,
+            "update_capture_rate": 1.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "mention_first",
+          "label": "Condition 4: Mention-First",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2253.82,
+          "tuning": {
+            "prompt_variant": "mention_first",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Rachel",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "3796c0ca-3f56-4310-82f4-8fdbb8bad8f7"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 1.0,
+            "mention_precision": 1.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 1.0,
+            "update_capture_rate": 1.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "update_aware",
+          "label": "Condition 5: Update-Aware",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 1302.78,
+          "tuning": {
+            "prompt_variant": "update_aware",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Rachel",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "10b80440-635a-43eb-8a1e-ec3881798a6a"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 1.0,
+            "mention_precision": 1.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 1.0,
+            "update_capture_rate": 1.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "proposition_first",
+          "label": "Condition 6: Proposition-First",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2153.25,
+          "tuning": {
+            "prompt_variant": "proposition_first",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Rachel",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "38684554-874c-4950-b887-c8f88bb11267"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 1.0,
+            "mention_precision": 1.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 1.0,
+            "update_capture_rate": 1.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "mention_first_update_aware",
+          "label": "Condition 7: Mention-First + Update-Aware",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2320.18,
+          "tuning": {
+            "prompt_variant": "mention_first_update_aware",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Rachel",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "1e2be011-5b32-43b9-a7ad-550ef1d9306f"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 1.0,
+            "mention_precision": 1.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 1.0,
+            "update_capture_rate": 1.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "proposition_first_structured",
+          "label": "Condition 8: Proposition-First + Structured Uncertainty",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2257.3,
+          "tuning": {
+            "prompt_variant": "proposition_first_structured",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Rachel",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "2964a464-e665-4e4a-915f-a877bf60e76d"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 1.0,
+            "mention_precision": 1.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 1.0,
+            "update_capture_rate": 1.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        }
+      ]
+    }
+  },
+  {
+    "fixture_index": 7,
+    "current_message": "user: Miami Beach sounds fun, but I've been there before. I'm thinking of somewhere more relaxed. My friend Rachel actually just moved back to the suburbs again, so I was thinking of somewhere not too far from a major city. Any suggestions?",
+    "result": {
+      "current_message": "user: Miami Beach sounds fun, but I've been there before. I'm thinking of somewhere more relaxed. My friend Rachel actually just moved back to the suburbs again, so I was thinking of somewhere not too far from a major city. Any suggestions?",
+      "arms": [
+        {
+          "id": "baseline",
+          "label": "Baseline (production prompt, unmodified)",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 4592.0,
+          "tuning": {
+            "prompt_variant": "baseline",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "user",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "0a262aad-54fa-4e20-b8ca-b3119fcdc6d7"
+              },
+              {
+                "text": "Rachel",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "7cbad2df-850b-4bc4-9539-8d69b2370118"
+              }
+            ],
+            "propositions": [
+              {
+                "fact": "Rachel has moved back to the suburbs again.",
+                "source_uuid": "0a262aad-54fa-4e20-b8ca-b3119fcdc6d7",
+                "target_uuid": "7cbad2df-850b-4bc4-9539-8d69b2370118",
+                "uuid": "cd6b3d44-caea-4a8b-9a47-a730971e69c7"
+              },
+              {
+                "fact": "Rachel has moved back to the suburbs again.",
+                "source_uuid": "0a262aad-54fa-4e20-b8ca-b3119fcdc6d7",
+                "target_uuid": "7cbad2df-850b-4bc4-9539-8d69b2370118",
+                "uuid": "cd6b3d44-caea-4a8b-9a47-a730971e69c7"
+              }
+            ]
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 0.5,
+            "proposition_recall": 1.0,
+            "proposition_precision": 0.5,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.5
+          },
+          "degraded": false
+        },
+        {
+          "id": "minus_when_in_doubt",
+          "label": "Condition 2: minus 'When in doubt, do NOT extract'",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 4313.21,
+          "tuning": {
+            "prompt_variant": "minus_when_in_doubt",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "user",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "e2094bf6-0d14-4146-8b89-a9fe3210c085"
+              },
+              {
+                "text": "Rachel",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "d5e2815c-6a63-4ab3-be92-2ec10ed197ce"
+              }
+            ],
+            "propositions": [
+              {
+                "fact": "Rachel has moved back to the suburbs again.",
+                "source_uuid": "e2094bf6-0d14-4146-8b89-a9fe3210c085",
+                "target_uuid": "d5e2815c-6a63-4ab3-be92-2ec10ed197ce",
+                "uuid": "89abcdda-9312-472c-86fd-b62f2a8c9f47"
+              },
+              {
+                "fact": "Rachel has moved back to the suburbs again.",
+                "source_uuid": "e2094bf6-0d14-4146-8b89-a9fe3210c085",
+                "target_uuid": "d5e2815c-6a63-4ab3-be92-2ec10ed197ce",
+                "uuid": "89abcdda-9312-472c-86fd-b62f2a8c9f47"
+              }
+            ]
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 0.5,
+            "proposition_recall": 1.0,
+            "proposition_precision": 0.5,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.5
+          },
+          "degraded": false
+        },
+        {
+          "id": "minimal_recall_patch",
+          "label": "Condition 3: Minimal Recall Patch",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 3704.8,
+          "tuning": {
+            "prompt_variant": "minimal_recall_patch",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "user",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "4e97da10-1328-4857-b6c6-03fca8e5e8fe"
+              },
+              {
+                "text": "Rachel",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "fd0ba78c-417f-4db0-94e5-593fbdae1c30"
+              }
+            ],
+            "propositions": [
+              {
+                "fact": "Rachel has moved back to the suburbs again.",
+                "source_uuid": "4e97da10-1328-4857-b6c6-03fca8e5e8fe",
+                "target_uuid": "fd0ba78c-417f-4db0-94e5-593fbdae1c30",
+                "uuid": "c200f727-9973-4cdd-a0c1-48d617550796"
+              },
+              {
+                "fact": "Rachel has moved back to the suburbs again.",
+                "source_uuid": "4e97da10-1328-4857-b6c6-03fca8e5e8fe",
+                "target_uuid": "fd0ba78c-417f-4db0-94e5-593fbdae1c30",
+                "uuid": "c200f727-9973-4cdd-a0c1-48d617550796"
+              }
+            ]
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 0.5,
+            "proposition_recall": 1.0,
+            "proposition_precision": 0.5,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.5
+          },
+          "degraded": false
+        },
+        {
+          "id": "mention_first",
+          "label": "Condition 4: Mention-First",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2223.8,
+          "tuning": {
+            "prompt_variant": "mention_first",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Rachel",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "11f86e0b-5c6b-4b5a-9d86-c6bd23402b95"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 1.0,
+            "proposition_recall": 0.0,
+            "proposition_precision": 0.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "update_aware",
+          "label": "Condition 5: Update-Aware",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 3909.08,
+          "tuning": {
+            "prompt_variant": "update_aware",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "user",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "bc9159c3-8507-4529-a245-78715d87d5ea"
+              },
+              {
+                "text": "Rachel",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "18e7245d-0c02-4985-878f-254161d3b675"
+              }
+            ],
+            "propositions": [
+              {
+                "fact": "Rachel has moved back to the suburbs again.",
+                "source_uuid": "bc9159c3-8507-4529-a245-78715d87d5ea",
+                "target_uuid": "18e7245d-0c02-4985-878f-254161d3b675",
+                "uuid": "a9c61510-80cd-4af8-916d-5858ac500e48"
+              },
+              {
+                "fact": "Rachel has moved back to the suburbs again.",
+                "source_uuid": "bc9159c3-8507-4529-a245-78715d87d5ea",
+                "target_uuid": "18e7245d-0c02-4985-878f-254161d3b675",
+                "uuid": "a9c61510-80cd-4af8-916d-5858ac500e48"
+              }
+            ]
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 0.5,
+            "proposition_recall": 1.0,
+            "proposition_precision": 0.5,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.5
+          },
+          "degraded": false
+        },
+        {
+          "id": "proposition_first",
+          "label": "Condition 6: Proposition-First",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2351.02,
+          "tuning": {
+            "prompt_variant": "proposition_first",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Rachel",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "905078be-f6ac-40b1-a751-d808f28b13ac"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 1.0,
+            "proposition_recall": 0.0,
+            "proposition_precision": 0.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "mention_first_update_aware",
+          "label": "Condition 7: Mention-First + Update-Aware",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 4285.58,
+          "tuning": {
+            "prompt_variant": "mention_first_update_aware",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "user",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "185f1dc7-1309-4bcb-8824-ed2d50f49d70"
+              },
+              {
+                "text": "Rachel",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "c9f02077-ac4e-4bf6-a7e5-8629cc32b62e"
+              }
+            ],
+            "propositions": [
+              {
+                "fact": "Rachel recently moved back to the suburbs.",
+                "source_uuid": "c9f02077-ac4e-4bf6-a7e5-8629cc32b62e",
+                "target_uuid": "185f1dc7-1309-4bcb-8824-ed2d50f49d70",
+                "uuid": "c6d44b79-abf0-4b5c-8cf8-7b9652c6f2a8"
+              },
+              {
+                "fact": "Rachel recently moved back to the suburbs.",
+                "source_uuid": "c9f02077-ac4e-4bf6-a7e5-8629cc32b62e",
+                "target_uuid": "185f1dc7-1309-4bcb-8824-ed2d50f49d70",
+                "uuid": "c6d44b79-abf0-4b5c-8cf8-7b9652c6f2a8"
+              }
+            ]
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 0.5,
+            "proposition_recall": 1.0,
+            "proposition_precision": 0.5,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.5
+          },
+          "degraded": false
+        },
+        {
+          "id": "proposition_first_structured",
+          "label": "Condition 8: Proposition-First + Structured Uncertainty",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 4703.1,
+          "tuning": {
+            "prompt_variant": "proposition_first_structured",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "user",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "f55f5226-c264-4d20-aee6-fa0c1f80904c"
+              },
+              {
+                "text": "Rachel",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "58b340a0-bc85-44da-960a-8382872eb036"
+              }
+            ],
+            "propositions": [
+              {
+                "fact": "Rachel has moved back to the suburbs again.",
+                "source_uuid": "f55f5226-c264-4d20-aee6-fa0c1f80904c",
+                "target_uuid": "58b340a0-bc85-44da-960a-8382872eb036",
+                "uuid": "46ad814b-1cc8-498b-97d8-618238340648"
+              },
+              {
+                "fact": "Rachel has moved back to the suburbs again.",
+                "source_uuid": "f55f5226-c264-4d20-aee6-fa0c1f80904c",
+                "target_uuid": "58b340a0-bc85-44da-960a-8382872eb036",
+                "uuid": "46ad814b-1cc8-498b-97d8-618238340648"
+              }
+            ]
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 0.5,
+            "proposition_recall": 1.0,
+            "proposition_precision": 0.5,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.5
+          },
+          "degraded": false
+        }
+      ]
+    }
+  },
+  {
+    "fixture_index": 8,
+    "current_message": "user: I'm planning to move into my new home soon and I need to set up cable and TV services. Can you recommend some providers in my area and their prices? By the way, I'm really looking forward to finally owning a home, it's been a long process, but it'll be worth it to have a backyard like the one I'll have - remember when I got pre-approved for $400,000 from Wells Fargo?",
+    "result": {
+      "current_message": "user: I'm planning to move into my new home soon and I need to set up cable and TV services. Can you recommend some providers in my area and their prices? By the way, I'm really looking forward to finally owning a home, it's been a long process, but it'll be worth it to have a backyard like the one I'll have - remember when I got pre-approved for $400,000 from Wells Fargo?",
+      "arms": [
+        {
+          "id": "baseline",
+          "label": "Baseline (production prompt, unmodified)",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 4554.89,
+          "tuning": {
+            "prompt_variant": "baseline",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "user",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "5ec56c02-3b4f-443d-b231-6602f624947d"
+              },
+              {
+                "text": "Wells Fargo",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "32ef710c-25b1-4133-b027-fbce0083afb5"
+              }
+            ],
+            "propositions": [
+              {
+                "fact": "User got pre-approved for $400,000 from Wells Fargo.",
+                "source_uuid": "5ec56c02-3b4f-443d-b231-6602f624947d",
+                "target_uuid": "32ef710c-25b1-4133-b027-fbce0083afb5",
+                "uuid": "851c20bd-d3e5-49f7-99cf-5dada2ddb2ea"
+              },
+              {
+                "fact": "User got pre-approved for $400,000 from Wells Fargo.",
+                "source_uuid": "5ec56c02-3b4f-443d-b231-6602f624947d",
+                "target_uuid": "32ef710c-25b1-4133-b027-fbce0083afb5",
+                "uuid": "851c20bd-d3e5-49f7-99cf-5dada2ddb2ea"
+              }
+            ]
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 0.5,
+            "proposition_recall": 1.0,
+            "proposition_precision": 0.5,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.5
+          },
+          "degraded": false
+        },
+        {
+          "id": "minus_when_in_doubt",
+          "label": "Condition 2: minus 'When in doubt, do NOT extract'",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 4398.81,
+          "tuning": {
+            "prompt_variant": "minus_when_in_doubt",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "user",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "90b7f0e1-69ac-4310-8358-d0a843a3d5df"
+              },
+              {
+                "text": "Wells Fargo",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "832cafd6-41c4-4911-8bd5-af39206a189d"
+              }
+            ],
+            "propositions": [
+              {
+                "fact": "User got pre-approved for $400,000 from Wells Fargo.",
+                "source_uuid": "90b7f0e1-69ac-4310-8358-d0a843a3d5df",
+                "target_uuid": "832cafd6-41c4-4911-8bd5-af39206a189d",
+                "uuid": "d0aab2a3-66a5-4a92-9187-35d4db20d206"
+              },
+              {
+                "fact": "User got pre-approved for $400,000 from Wells Fargo.",
+                "source_uuid": "90b7f0e1-69ac-4310-8358-d0a843a3d5df",
+                "target_uuid": "832cafd6-41c4-4911-8bd5-af39206a189d",
+                "uuid": "d0aab2a3-66a5-4a92-9187-35d4db20d206"
+              }
+            ]
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 0.5,
+            "proposition_recall": 1.0,
+            "proposition_precision": 0.5,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.5
+          },
+          "degraded": false
+        },
+        {
+          "id": "minimal_recall_patch",
+          "label": "Condition 3: Minimal Recall Patch",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 4867.11,
+          "tuning": {
+            "prompt_variant": "minimal_recall_patch",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "user",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "0e41eae0-a725-411c-b958-107a9c94dfe9"
+              },
+              {
+                "text": "Wells Fargo",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "b0cedb69-7157-442d-9c18-673b5a7db354"
+              }
+            ],
+            "propositions": [
+              {
+                "fact": "User got pre-approved for $400,000 from Wells Fargo.",
+                "source_uuid": "0e41eae0-a725-411c-b958-107a9c94dfe9",
+                "target_uuid": "b0cedb69-7157-442d-9c18-673b5a7db354",
+                "uuid": "571d8552-a004-4144-bffe-c305795cb333"
+              },
+              {
+                "fact": "User got pre-approved for $400,000 from Wells Fargo.",
+                "source_uuid": "0e41eae0-a725-411c-b958-107a9c94dfe9",
+                "target_uuid": "b0cedb69-7157-442d-9c18-673b5a7db354",
+                "uuid": "571d8552-a004-4144-bffe-c305795cb333"
+              }
+            ]
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 0.5,
+            "proposition_recall": 1.0,
+            "proposition_precision": 0.5,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.5
+          },
+          "degraded": false
+        },
+        {
+          "id": "mention_first",
+          "label": "Condition 4: Mention-First",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 4133.03,
+          "tuning": {
+            "prompt_variant": "mention_first",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "user",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "958f0619-b9a2-40b1-be08-5d81a4fd729c"
+              },
+              {
+                "text": "Wells Fargo",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "7da77fb7-034a-4576-b859-a98e96bcedeb"
+              }
+            ],
+            "propositions": [
+              {
+                "fact": "user got pre-approved for $400,000 from Wells Fargo",
+                "source_uuid": "958f0619-b9a2-40b1-be08-5d81a4fd729c",
+                "target_uuid": "7da77fb7-034a-4576-b859-a98e96bcedeb",
+                "uuid": "d59ccc98-50ff-4f24-b684-ba76bb1a271e"
+              },
+              {
+                "fact": "user got pre-approved for $400,000 from Wells Fargo",
+                "source_uuid": "958f0619-b9a2-40b1-be08-5d81a4fd729c",
+                "target_uuid": "7da77fb7-034a-4576-b859-a98e96bcedeb",
+                "uuid": "d59ccc98-50ff-4f24-b684-ba76bb1a271e"
+              }
+            ]
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 0.5,
+            "proposition_recall": 1.0,
+            "proposition_precision": 0.5,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.5
+          },
+          "degraded": false
+        },
+        {
+          "id": "update_aware",
+          "label": "Condition 5: Update-Aware",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 4115.32,
+          "tuning": {
+            "prompt_variant": "update_aware",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "user",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "323fde13-9d26-4165-9985-866f57f0c413"
+              },
+              {
+                "text": "Wells Fargo",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "32584e3a-4755-4c77-b9b0-877a58d9e8c3"
+              }
+            ],
+            "propositions": [
+              {
+                "fact": "User got pre-approved for $400,000 from Wells Fargo.",
+                "source_uuid": "323fde13-9d26-4165-9985-866f57f0c413",
+                "target_uuid": "32584e3a-4755-4c77-b9b0-877a58d9e8c3",
+                "uuid": "1a4aef33-0bce-4222-bc68-ef862c81216a"
+              },
+              {
+                "fact": "User got pre-approved for $400,000 from Wells Fargo.",
+                "source_uuid": "323fde13-9d26-4165-9985-866f57f0c413",
+                "target_uuid": "32584e3a-4755-4c77-b9b0-877a58d9e8c3",
+                "uuid": "1a4aef33-0bce-4222-bc68-ef862c81216a"
+              }
+            ]
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 0.5,
+            "proposition_recall": 1.0,
+            "proposition_precision": 0.5,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.5
+          },
+          "degraded": false
+        },
+        {
+          "id": "proposition_first",
+          "label": "Condition 6: Proposition-First",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 4173.91,
+          "tuning": {
+            "prompt_variant": "proposition_first",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "user",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "bd4dc4ca-c17e-4783-8dc8-d73ee77265b8"
+              },
+              {
+                "text": "Wells Fargo",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "45e1bbd3-b00f-4910-bd70-68a97afb6781"
+              }
+            ],
+            "propositions": [
+              {
+                "fact": "User got pre-approved for $400,000 from Wells Fargo.",
+                "source_uuid": "bd4dc4ca-c17e-4783-8dc8-d73ee77265b8",
+                "target_uuid": "45e1bbd3-b00f-4910-bd70-68a97afb6781",
+                "uuid": "a384eb25-62e6-46e5-9540-f2a7fbba5362"
+              },
+              {
+                "fact": "User got pre-approved for $400,000 from Wells Fargo.",
+                "source_uuid": "bd4dc4ca-c17e-4783-8dc8-d73ee77265b8",
+                "target_uuid": "45e1bbd3-b00f-4910-bd70-68a97afb6781",
+                "uuid": "a384eb25-62e6-46e5-9540-f2a7fbba5362"
+              }
+            ]
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 0.5,
+            "proposition_recall": 1.0,
+            "proposition_precision": 0.5,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.5
+          },
+          "degraded": false
+        },
+        {
+          "id": "mention_first_update_aware",
+          "label": "Condition 7: Mention-First + Update-Aware",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 4018.13,
+          "tuning": {
+            "prompt_variant": "mention_first_update_aware",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "user",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "4468a16c-53a3-4b15-85a9-7a3087a1afd2"
+              },
+              {
+                "text": "Wells Fargo",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "1c7445be-728e-4deb-8e43-701aacb684af"
+              }
+            ],
+            "propositions": [
+              {
+                "fact": "User got pre-approved for $400,000 from Wells Fargo.",
+                "source_uuid": "4468a16c-53a3-4b15-85a9-7a3087a1afd2",
+                "target_uuid": "1c7445be-728e-4deb-8e43-701aacb684af",
+                "uuid": "0f48f41a-bd17-44ce-8916-2d0bfc237667"
+              },
+              {
+                "fact": "User got pre-approved for $400,000 from Wells Fargo.",
+                "source_uuid": "4468a16c-53a3-4b15-85a9-7a3087a1afd2",
+                "target_uuid": "1c7445be-728e-4deb-8e43-701aacb684af",
+                "uuid": "0f48f41a-bd17-44ce-8916-2d0bfc237667"
+              }
+            ]
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 0.5,
+            "proposition_recall": 1.0,
+            "proposition_precision": 0.5,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.5
+          },
+          "degraded": false
+        },
+        {
+          "id": "proposition_first_structured",
+          "label": "Condition 8: Proposition-First + Structured Uncertainty",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 4001.97,
+          "tuning": {
+            "prompt_variant": "proposition_first_structured",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "user",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "ee440d7d-bd03-461c-b430-a5e636201fc4"
+              },
+              {
+                "text": "Wells Fargo",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "159b62ce-8245-48e7-8513-4f8c08c4f63f"
+              }
+            ],
+            "propositions": [
+              {
+                "fact": "User got pre-approved for $400,000 from Wells Fargo.",
+                "source_uuid": "ee440d7d-bd03-461c-b430-a5e636201fc4",
+                "target_uuid": "159b62ce-8245-48e7-8513-4f8c08c4f63f",
+                "uuid": "c1e16168-93eb-4bc1-920d-bfd106cf1542"
+              },
+              {
+                "fact": "User got pre-approved for $400,000 from Wells Fargo.",
+                "source_uuid": "ee440d7d-bd03-461c-b430-a5e636201fc4",
+                "target_uuid": "159b62ce-8245-48e7-8513-4f8c08c4f63f",
+                "uuid": "c1e16168-93eb-4bc1-920d-bfd106cf1542"
+              }
+            ]
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 0.5,
+            "proposition_recall": 1.0,
+            "proposition_precision": 0.5,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.5
+          },
+          "degraded": false
+        }
+      ]
+    }
+  },
+  {
+    "fixture_index": 9,
+    "current_message": "user: I see what you're doing here, but I think it's a bit too structured for me. I'd rather have some flexibility in my schedule. Can you help me come up with a more general plan to prioritize my tasks and set boundaries, rather than a strict schedule? And by the way, speaking of boundaries, I see Dr. Smith every week, and she's been helping me work on this stuff.",
+    "result": {
+      "current_message": "user: I see what you're doing here, but I think it's a bit too structured for me. I'd rather have some flexibility in my schedule. Can you help me come up with a more general plan to prioritize my tasks and set boundaries, rather than a strict schedule? And by the way, speaking of boundaries, I see Dr. Smith every week, and she's been helping me work on this stuff.",
+      "arms": [
+        {
+          "id": "baseline",
+          "label": "Baseline (production prompt, unmodified)",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 4573.23,
+          "tuning": {
+            "prompt_variant": "baseline",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "user",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "2b5cea7a-35cf-4b60-a83d-5769d94fbc31"
+              },
+              {
+                "text": "Dr. Smith",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "7598990d-f6de-43dd-8ad2-95d04e7ebae5"
+              }
+            ],
+            "propositions": [
+              {
+                "fact": "user sees Dr. Smith every week for help with setting boundaries",
+                "source_uuid": "2b5cea7a-35cf-4b60-a83d-5769d94fbc31",
+                "target_uuid": "7598990d-f6de-43dd-8ad2-95d04e7ebae5",
+                "uuid": "ffd1c910-a120-4335-b52e-788af88d7bc4"
+              },
+              {
+                "fact": "user sees Dr. Smith every week for help with setting boundaries",
+                "source_uuid": "2b5cea7a-35cf-4b60-a83d-5769d94fbc31",
+                "target_uuid": "7598990d-f6de-43dd-8ad2-95d04e7ebae5",
+                "uuid": "ffd1c910-a120-4335-b52e-788af88d7bc4"
+              }
+            ]
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 0.5,
+            "proposition_recall": 0.0,
+            "proposition_precision": 0.0,
+            "update_capture_rate": 1.0,
+            "unsupported_inference_rate": 0.75
+          },
+          "degraded": false
+        },
+        {
+          "id": "minus_when_in_doubt",
+          "label": "Condition 2: minus 'When in doubt, do NOT extract'",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 3860.54,
+          "tuning": {
+            "prompt_variant": "minus_when_in_doubt",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "user",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "e15002c2-a937-452a-aabe-a8f8c7e84fdd"
+              },
+              {
+                "text": "Dr. Smith",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "26d4b8af-4612-4c65-a761-be4dddf78d15"
+              }
+            ],
+            "propositions": [
+              {
+                "fact": "user sees Dr. Smith every week for help with setting boundaries",
+                "source_uuid": "e15002c2-a937-452a-aabe-a8f8c7e84fdd",
+                "target_uuid": "26d4b8af-4612-4c65-a761-be4dddf78d15",
+                "uuid": "5de0b78a-1eec-4062-8208-58a271bc9a1f"
+              },
+              {
+                "fact": "user sees Dr. Smith every week for help with setting boundaries",
+                "source_uuid": "e15002c2-a937-452a-aabe-a8f8c7e84fdd",
+                "target_uuid": "26d4b8af-4612-4c65-a761-be4dddf78d15",
+                "uuid": "5de0b78a-1eec-4062-8208-58a271bc9a1f"
+              }
+            ]
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 0.5,
+            "proposition_recall": 1.0,
+            "proposition_precision": 0.5,
+            "update_capture_rate": 1.0,
+            "unsupported_inference_rate": 0.5
+          },
+          "degraded": false
+        },
+        {
+          "id": "minimal_recall_patch",
+          "label": "Condition 3: Minimal Recall Patch",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 4732.2,
+          "tuning": {
+            "prompt_variant": "minimal_recall_patch",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "user",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "5bd5f298-c49d-4685-9207-ec0c04b19091"
+              },
+              {
+                "text": "Dr. Smith",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "4742e6ac-95db-4982-b7b5-2b648789111c"
+              }
+            ],
+            "propositions": [
+              {
+                "fact": "user sees Dr. Smith every week for help with setting boundaries",
+                "source_uuid": "5bd5f298-c49d-4685-9207-ec0c04b19091",
+                "target_uuid": "4742e6ac-95db-4982-b7b5-2b648789111c",
+                "uuid": "79441704-0657-4266-ac1e-5d9a277cfd88"
+              },
+              {
+                "fact": "user sees Dr. Smith every week for help with setting boundaries",
+                "source_uuid": "5bd5f298-c49d-4685-9207-ec0c04b19091",
+                "target_uuid": "4742e6ac-95db-4982-b7b5-2b648789111c",
+                "uuid": "79441704-0657-4266-ac1e-5d9a277cfd88"
+              }
+            ]
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 0.5,
+            "proposition_recall": 1.0,
+            "proposition_precision": 0.5,
+            "update_capture_rate": 1.0,
+            "unsupported_inference_rate": 0.5
+          },
+          "degraded": false
+        },
+        {
+          "id": "mention_first",
+          "label": "Condition 4: Mention-First",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 4638.81,
+          "tuning": {
+            "prompt_variant": "mention_first",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "user",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "dbe04056-108b-4349-a713-7bb2bb60df0a"
+              },
+              {
+                "text": "Dr. Smith",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "11b549ff-fe08-48f8-b271-7a8ea0fa5c54"
+              }
+            ],
+            "propositions": [
+              {
+                "fact": "user sees Dr. Smith every week for help with setting boundaries",
+                "source_uuid": "dbe04056-108b-4349-a713-7bb2bb60df0a",
+                "target_uuid": "11b549ff-fe08-48f8-b271-7a8ea0fa5c54",
+                "uuid": "61c868ad-ff4e-44d8-be9a-5668a8f89b8f"
+              },
+              {
+                "fact": "user sees Dr. Smith every week for help with setting boundaries",
+                "source_uuid": "dbe04056-108b-4349-a713-7bb2bb60df0a",
+                "target_uuid": "11b549ff-fe08-48f8-b271-7a8ea0fa5c54",
+                "uuid": "61c868ad-ff4e-44d8-be9a-5668a8f89b8f"
+              }
+            ]
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 0.5,
+            "proposition_recall": 1.0,
+            "proposition_precision": 0.5,
+            "update_capture_rate": 1.0,
+            "unsupported_inference_rate": 0.5
+          },
+          "degraded": false
+        },
+        {
+          "id": "update_aware",
+          "label": "Condition 5: Update-Aware",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 4106.91,
+          "tuning": {
+            "prompt_variant": "update_aware",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "user",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "038af216-c34a-4e3e-a8b1-bb3a38542005"
+              },
+              {
+                "text": "Dr. Smith",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "786dcaad-aff5-4fc8-986c-b3ec485809b1"
+              }
+            ],
+            "propositions": [
+              {
+                "fact": "user sees Dr. Smith every week for help with setting boundaries",
+                "source_uuid": "038af216-c34a-4e3e-a8b1-bb3a38542005",
+                "target_uuid": "786dcaad-aff5-4fc8-986c-b3ec485809b1",
+                "uuid": "e9655c1d-f04d-45b7-8497-4872115baf24"
+              },
+              {
+                "fact": "user sees Dr. Smith every week for help with setting boundaries",
+                "source_uuid": "038af216-c34a-4e3e-a8b1-bb3a38542005",
+                "target_uuid": "786dcaad-aff5-4fc8-986c-b3ec485809b1",
+                "uuid": "e9655c1d-f04d-45b7-8497-4872115baf24"
+              }
+            ]
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 0.5,
+            "proposition_recall": 1.0,
+            "proposition_precision": 0.5,
+            "update_capture_rate": 1.0,
+            "unsupported_inference_rate": 0.5
+          },
+          "degraded": false
+        },
+        {
+          "id": "proposition_first",
+          "label": "Condition 6: Proposition-First",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 3967.98,
+          "tuning": {
+            "prompt_variant": "proposition_first",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "user",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "0e01e8a1-ac4a-43d9-819b-7eec2aeb0d7e"
+              },
+              {
+                "text": "Dr. Smith",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "bcb572be-ac69-4331-ae18-528d00617eaa"
+              }
+            ],
+            "propositions": [
+              {
+                "fact": "user sees Dr. Smith every week for help with setting boundaries",
+                "source_uuid": "0e01e8a1-ac4a-43d9-819b-7eec2aeb0d7e",
+                "target_uuid": "bcb572be-ac69-4331-ae18-528d00617eaa",
+                "uuid": "60d5ed48-83e6-4417-8505-979001275123"
+              },
+              {
+                "fact": "user sees Dr. Smith every week for help with setting boundaries",
+                "source_uuid": "0e01e8a1-ac4a-43d9-819b-7eec2aeb0d7e",
+                "target_uuid": "bcb572be-ac69-4331-ae18-528d00617eaa",
+                "uuid": "60d5ed48-83e6-4417-8505-979001275123"
+              }
+            ]
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 0.5,
+            "proposition_recall": 1.0,
+            "proposition_precision": 0.5,
+            "update_capture_rate": 1.0,
+            "unsupported_inference_rate": 0.5
+          },
+          "degraded": false
+        },
+        {
+          "id": "mention_first_update_aware",
+          "label": "Condition 7: Mention-First + Update-Aware",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 4326.95,
+          "tuning": {
+            "prompt_variant": "mention_first_update_aware",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "user",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "00e829a3-8634-4150-b40e-ad636628db35"
+              },
+              {
+                "text": "Dr. Smith",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "b7b9bc53-03e4-4af5-8cde-b467b55b6e1f"
+              }
+            ],
+            "propositions": [
+              {
+                "fact": "user sees Dr. Smith every week and she's been helping user work on setting boundaries.",
+                "source_uuid": "00e829a3-8634-4150-b40e-ad636628db35",
+                "target_uuid": "b7b9bc53-03e4-4af5-8cde-b467b55b6e1f",
+                "uuid": "a01450c5-229c-4107-b53f-409981d24905"
+              },
+              {
+                "fact": "user sees Dr. Smith every week and she's been helping user work on setting boundaries.",
+                "source_uuid": "00e829a3-8634-4150-b40e-ad636628db35",
+                "target_uuid": "b7b9bc53-03e4-4af5-8cde-b467b55b6e1f",
+                "uuid": "a01450c5-229c-4107-b53f-409981d24905"
+              }
+            ]
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 0.5,
+            "proposition_recall": 0.0,
+            "proposition_precision": 0.0,
+            "update_capture_rate": 1.0,
+            "unsupported_inference_rate": 0.75
+          },
+          "degraded": false
+        },
+        {
+          "id": "proposition_first_structured",
+          "label": "Condition 8: Proposition-First + Structured Uncertainty",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 3569.82,
+          "tuning": {
+            "prompt_variant": "proposition_first_structured",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "user",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "df42531f-d029-40b9-9010-b3cfa1243c13"
+              },
+              {
+                "text": "Dr. Smith",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "de20f855-67c0-4259-891c-7041ad998697"
+              }
+            ],
+            "propositions": [
+              {
+                "fact": "user sees Dr. Smith every week for help with setting boundaries",
+                "source_uuid": "df42531f-d029-40b9-9010-b3cfa1243c13",
+                "target_uuid": "de20f855-67c0-4259-891c-7041ad998697",
+                "uuid": "476234b3-31cb-4144-b769-ef13906b2902"
+              },
+              {
+                "fact": "user sees Dr. Smith every week for help with setting boundaries",
+                "source_uuid": "df42531f-d029-40b9-9010-b3cfa1243c13",
+                "target_uuid": "de20f855-67c0-4259-891c-7041ad998697",
+                "uuid": "476234b3-31cb-4144-b769-ef13906b2902"
+              }
+            ]
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 0.5,
+            "proposition_recall": 1.0,
+            "proposition_precision": 0.5,
+            "update_capture_rate": 1.0,
+            "unsupported_inference_rate": 0.5
+          },
+          "degraded": false
+        }
+      ]
+    }
+  }
+]

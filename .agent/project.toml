@@ -1,0 +1,26 @@
+[project]
+id = "memory"
+name = "menhir"
+display_name = "MCP Memory"
+package = "menhir"
+port = 8090
+fastmcp_name = "menhir"
+vps_remote_path = ""
+description = "Neo4j-backed memory system for agent context persistence"
+stack = "python"
+
+[paths]
+source = "src/menhir"
+scripts = "scripts"
+tests = "tests"
+
+[dependencies]
+python = ">=3.11"
+neo4j = true
+sqlite = true
+
+[mcp]
+enabled = true
+gateway = "scripts/run_mcp_gateway.py"
+explorer = true
+explorer_port = 8090

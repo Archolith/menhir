@@ -1,0 +1,6146 @@
+[
+  {
+    "approach": "graph_lookup_only",
+    "fixture_qid": "lme-830ce83f",
+    "trial": 0,
+    "predicted_subject": "user",
+    "predicted_facet": null,
+    "predicted_state_family": null,
+    "subject_correct": false,
+    "facet_correct": false,
+    "state_family_correct": false,
+    "all_fields_correct": false,
+    "reasoning": "real graph substring match against lme-830ce83f: ['user', 'Rachel', 'Miami Beach']",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-830ce83f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "oracle",
+    "fixture_qid": "lme-830ce83f",
+    "trial": 0,
+    "predicted_subject": "Rachel",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Current residence",
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "all_fields_correct": true,
+    "reasoning": "ground truth",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-830ce83f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "graph_lookup_only",
+    "fixture_qid": "lme-852ce960",
+    "trial": 0,
+    "predicted_subject": "home",
+    "predicted_facet": null,
+    "predicted_state_family": null,
+    "subject_correct": false,
+    "facet_correct": false,
+    "state_family_correct": false,
+    "all_fields_correct": false,
+    "reasoning": "real graph substring match against lme-852ce960: ['home', 'user']",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-852ce960_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "oracle",
+    "fixture_qid": "lme-852ce960",
+    "trial": 0,
+    "predicted_subject": "user",
+    "predicted_facet": "Mortgage",
+    "predicted_state_family": "Pre-approval amount",
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "all_fields_correct": true,
+    "reasoning": "ground truth",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-852ce960_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "graph_lookup_only",
+    "fixture_qid": "lme-2698e78f",
+    "trial": 0,
+    "predicted_subject": "boundaries",
+    "predicted_facet": null,
+    "predicted_state_family": null,
+    "subject_correct": false,
+    "facet_correct": false,
+    "state_family_correct": false,
+    "all_fields_correct": false,
+    "reasoning": "real graph substring match against lme-2698e78f: ['boundaries']",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-2698e78f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "oracle",
+    "fixture_qid": "lme-2698e78f",
+    "trial": 0,
+    "predicted_subject": "Dr. Smith",
+    "predicted_facet": "Therapy schedule",
+    "predicted_state_family": "Session frequency",
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "all_fields_correct": true,
+    "reasoning": "ground truth",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-2698e78f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "hybrid_rules_then_llm",
+    "fixture_qid": "lme-852ce960",
+    "trial": 8,
+    "predicted_subject": "user",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Housing preferences",
+    "subject_correct": true,
+    "facet_correct": false,
+    "state_family_correct": false,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=1] rules: facet='Housing' subject='user' | The user is discussing their excitement about moving into a new home and the features they are looking forward to, which relates to their housing preferences.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-852ce960_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "two_stage",
+    "fixture_qid": "lme-830ce83f",
+    "trial": 0,
+    "predicted_subject": "user",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Housing preferences",
+    "subject_correct": false,
+    "facet_correct": true,
+    "state_family_correct": false,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=2] stage1: The message is discussing the user's thoughts and plans regarding travel and location preferences. | stage2: The user is discussing their preferences for a location to visit, indicating a desire for a more relaxed environment and proximity to a major city.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-830ce83f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "two_stage",
+    "fixture_qid": "lme-852ce960",
+    "trial": 2,
+    "predicted_subject": "user",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Current residence",
+    "subject_correct": true,
+    "facet_correct": false,
+    "state_family_correct": false,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=2] stage1: The message is primarily about the user's plans and experiences related to moving into a new home. | stage2: The user discusses moving into a new home and setting up services, which relates to their current residence.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-852ce960_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "llm_ontology",
+    "fixture_qid": "lme-830ce83f",
+    "trial": 1,
+    "predicted_subject": "Rachel",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Current residence",
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "all_fields_correct": true,
+    "reasoning": "[llm_calls=1] The message discusses Rachel's recent move back to the suburbs, which relates to her current residence.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-830ce83f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "two_stage",
+    "fixture_qid": "lme-2698e78f",
+    "trial": 2,
+    "predicted_subject": "user",
+    "predicted_facet": "Therapy schedule",
+    "predicted_state_family": "Session frequency",
+    "subject_correct": false,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=2] stage1: The message is primarily about the user's preferences and experiences regarding scheduling and boundaries. | stage2: The user discusses their weekly sessions with Dr. Smith, indicating a focus on the frequency of therapy.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-2698e78f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "llm_ontology",
+    "fixture_qid": "lme-2698e78f",
+    "trial": 6,
+    "predicted_subject": "user",
+    "predicted_facet": "Therapy schedule",
+    "predicted_state_family": "Session frequency",
+    "subject_correct": false,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=1] The message discusses the user's therapy sessions with Dr. Smith, specifically mentioning the frequency of those sessions.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-2698e78f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "two_stage",
+    "fixture_qid": "lme-830ce83f",
+    "trial": 5,
+    "predicted_subject": "user",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Housing preferences",
+    "subject_correct": false,
+    "facet_correct": true,
+    "state_family_correct": false,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=2] stage1: The message is primarily about the user's thoughts and preferences regarding travel and location. | stage2: The user is discussing their preferences for a location to visit, indicating a desire for a more relaxed environment and proximity to a major city.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-830ce83f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "hybrid_rules_then_llm",
+    "fixture_qid": "lme-830ce83f",
+    "trial": 6,
+    "predicted_subject": "Rachel",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Housing preferences",
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": false,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=1] rules: facet='Housing' subject='Rachel' | The user is expressing a desire for a more relaxed location and is considering proximity to a major city, which relates to their housing preferences.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-830ce83f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c2",
+        "correct": false,
+        "is_decoy_selection": true
+      },
+      {
+        "scenario_id": "lme-830ce83f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "two_stage",
+    "fixture_qid": "lme-852ce960",
+    "trial": 0,
+    "predicted_subject": "user",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Current residence",
+    "subject_correct": true,
+    "facet_correct": false,
+    "state_family_correct": false,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=2] stage1: The message is primarily about the user's plans and experiences related to moving into a new home. | stage2: The user discusses moving into a new home and setting up services, which relates to their current residence.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-852ce960_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "llm_ontology",
+    "fixture_qid": "lme-852ce960",
+    "trial": 2,
+    "predicted_subject": "user",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Current residence",
+    "subject_correct": true,
+    "facet_correct": false,
+    "state_family_correct": false,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=1] The message discusses the user's plans to move into a new home and mentions the pre-approval for a mortgage, which relates to their current residence.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-852ce960_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "two_stage",
+    "fixture_qid": "lme-852ce960",
+    "trial": 5,
+    "predicted_subject": "user",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Current residence",
+    "subject_correct": true,
+    "facet_correct": false,
+    "state_family_correct": false,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=2] stage1: The message is primarily about the user's plans and experiences related to moving into a new home. | stage2: The user discusses moving into a new home and setting up services, indicating a focus on their current residence.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-852ce960_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "two_stage",
+    "fixture_qid": "lme-852ce960",
+    "trial": 7,
+    "predicted_subject": "user",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Current residence",
+    "subject_correct": true,
+    "facet_correct": false,
+    "state_family_correct": false,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=2] stage1: The message is primarily about the user's plans and experiences related to moving into a new home. | stage2: The user discusses moving into a new home and setting up services, indicating a focus on their current residence.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-852ce960_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "llm_ontology",
+    "fixture_qid": "lme-2698e78f",
+    "trial": 7,
+    "predicted_subject": "user",
+    "predicted_facet": "Therapy schedule",
+    "predicted_state_family": "Session frequency",
+    "subject_correct": false,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=1] The message discusses the user's therapy sessions with Dr. Smith, specifically mentioning the frequency of those sessions.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-2698e78f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "two_stage",
+    "fixture_qid": "lme-830ce83f",
+    "trial": 9,
+    "predicted_subject": "user",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Housing preferences",
+    "subject_correct": false,
+    "facet_correct": true,
+    "state_family_correct": false,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=2] stage1: The message is primarily about the user's thoughts and preferences regarding travel and location. | stage2: The user is discussing their preferences for a more relaxed location to live, indicating a focus on housing choices.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-830ce83f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "hybrid_rules_then_llm",
+    "fixture_qid": "lme-852ce960",
+    "trial": 9,
+    "predicted_subject": "user",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Housing preferences",
+    "subject_correct": true,
+    "facet_correct": false,
+    "state_family_correct": false,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=1] rules: facet='Housing' subject='user' | The user is discussing their excitement about moving into a new home and the features they are looking forward to, which relates to their preferences regarding housing.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-852ce960_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "hybrid_rules_then_llm",
+    "fixture_qid": "lme-852ce960",
+    "trial": 5,
+    "predicted_subject": "user",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Housing preferences",
+    "subject_correct": true,
+    "facet_correct": false,
+    "state_family_correct": false,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=1] rules: facet='Housing' subject='user' | The user is discussing their excitement about moving into a new home and mentions specific features they are looking forward to, indicating their preferences regarding housing.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-852ce960_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "llm_ontology",
+    "fixture_qid": "lme-2698e78f",
+    "trial": 2,
+    "predicted_subject": "user",
+    "predicted_facet": "Therapy schedule",
+    "predicted_state_family": "Session frequency",
+    "subject_correct": false,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=1] The message discusses the user's therapy sessions with Dr. Smith, specifically mentioning the frequency of those sessions.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-2698e78f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "two_stage",
+    "fixture_qid": "lme-2698e78f",
+    "trial": 0,
+    "predicted_subject": "user",
+    "predicted_facet": "Therapy schedule",
+    "predicted_state_family": "Session frequency",
+    "subject_correct": false,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=2] stage1: The message is primarily about the user's preferences and experiences regarding scheduling and boundaries. | stage2: The user discusses their weekly sessions with Dr. Smith, indicating a focus on the frequency of therapy.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-2698e78f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "hybrid_rules_then_llm",
+    "fixture_qid": "lme-852ce960",
+    "trial": 1,
+    "predicted_subject": "user",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Housing preferences",
+    "subject_correct": true,
+    "facet_correct": false,
+    "state_family_correct": false,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=1] rules: facet='Housing' subject='user' | The user is discussing their excitement about moving into a new home and the features they are looking forward to, which relates to their preferences regarding housing.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-852ce960_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "hybrid_rules_then_llm",
+    "fixture_qid": "lme-852ce960",
+    "trial": 6,
+    "predicted_subject": "user",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Housing preferences",
+    "subject_correct": true,
+    "facet_correct": false,
+    "state_family_correct": false,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=1] rules: facet='Housing' subject='user' | The user is discussing their excitement about moving into a new home and the features they are looking forward to, which relates to their housing preferences.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-852ce960_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "two_stage",
+    "fixture_qid": "lme-852ce960",
+    "trial": 9,
+    "predicted_subject": "user",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Current residence",
+    "subject_correct": true,
+    "facet_correct": false,
+    "state_family_correct": false,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=2] stage1: The message is primarily about the user's plans and experiences related to moving into a new home. | stage2: The user discusses moving into a new home and setting up services, indicating a focus on their current residence.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-852ce960_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "hybrid_rules_then_llm",
+    "fixture_qid": "lme-2698e78f",
+    "trial": 5,
+    "predicted_subject": "Dr. Smith",
+    "predicted_facet": "Therapy schedule",
+    "predicted_state_family": "Session frequency",
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "all_fields_correct": true,
+    "reasoning": "[llm_calls=1] rules: facet='Therapy schedule' subject='Dr. Smith' | The user mentions seeing Dr. Smith every week, indicating a focus on the frequency of therapy sessions.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-2698e78f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "two_stage",
+    "fixture_qid": "lme-2698e78f",
+    "trial": 9,
+    "predicted_subject": "user",
+    "predicted_facet": "Therapy schedule",
+    "predicted_state_family": "Session frequency",
+    "subject_correct": false,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=2] stage1: The message is primarily about the user's preferences and experiences regarding scheduling and boundaries. | stage2: The user discusses their weekly sessions with Dr. Smith, indicating a focus on the frequency of therapy.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-2698e78f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "llm_ontology",
+    "fixture_qid": "lme-2698e78f",
+    "trial": 3,
+    "predicted_subject": "user",
+    "predicted_facet": "Therapy schedule",
+    "predicted_state_family": "Session frequency",
+    "subject_correct": false,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=1] The message discusses the user's therapy sessions with Dr. Smith, specifically mentioning the frequency of those sessions.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-2698e78f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "llm_ontology",
+    "fixture_qid": "lme-852ce960",
+    "trial": 3,
+    "predicted_subject": "user",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Current residence",
+    "subject_correct": true,
+    "facet_correct": false,
+    "state_family_correct": false,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=1] The message discusses the user's plans to move into a new home and mentions the pre-approval for a mortgage, which relates to their current residence.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-852ce960_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "llm_ontology",
+    "fixture_qid": "lme-830ce83f",
+    "trial": 8,
+    "predicted_subject": "Rachel",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Current residence",
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "all_fields_correct": true,
+    "reasoning": "[llm_calls=1] The message discusses Rachel's recent move back to the suburbs, which relates to her current residence.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-830ce83f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "llm_ontology",
+    "fixture_qid": "lme-852ce960",
+    "trial": 7,
+    "predicted_subject": "user",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Current residence",
+    "subject_correct": true,
+    "facet_correct": false,
+    "state_family_correct": false,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=1] The message discusses the user's plans to move into a new home and mentions the pre-approval for a mortgage, which relates to their current residence.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-852ce960_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "two_stage",
+    "fixture_qid": "lme-2698e78f",
+    "trial": 1,
+    "predicted_subject": "user",
+    "predicted_facet": "Therapy schedule",
+    "predicted_state_family": "Session frequency",
+    "subject_correct": false,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=2] stage1: The message is primarily about the user's preferences and experiences regarding scheduling and boundaries. | stage2: The user discusses their weekly sessions with Dr. Smith, indicating a focus on the frequency of therapy.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-2698e78f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "llm_ontology",
+    "fixture_qid": "lme-852ce960",
+    "trial": 0,
+    "predicted_subject": "user",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Current residence",
+    "subject_correct": true,
+    "facet_correct": false,
+    "state_family_correct": false,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=1] The message discusses the user's plans to move into a new home and mentions the pre-approval for a mortgage, which relates to their current residence.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-852ce960_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "two_stage",
+    "fixture_qid": "lme-852ce960",
+    "trial": 3,
+    "predicted_subject": "user",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Current residence",
+    "subject_correct": true,
+    "facet_correct": false,
+    "state_family_correct": false,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=2] stage1: The message is primarily about the user's plans and experiences related to moving into a new home. | stage2: The user discusses moving into a new home and setting up services, indicating a focus on their current residence.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-852ce960_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "llm_ontology",
+    "fixture_qid": "lme-2698e78f",
+    "trial": 1,
+    "predicted_subject": "user",
+    "predicted_facet": "Therapy schedule",
+    "predicted_state_family": "Session frequency",
+    "subject_correct": false,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=1] The message discusses the user's therapy sessions with Dr. Smith, specifically mentioning the frequency of those sessions.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-2698e78f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "two_stage",
+    "fixture_qid": "lme-852ce960",
+    "trial": 1,
+    "predicted_subject": "user",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Current residence",
+    "subject_correct": true,
+    "facet_correct": false,
+    "state_family_correct": false,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=2] stage1: The message is primarily about the user's plans and experiences related to moving into a new home. | stage2: The user discusses moving into a new home and setting up services, indicating a focus on their current residence.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-852ce960_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "llm_ontology",
+    "fixture_qid": "lme-852ce960",
+    "trial": 9,
+    "predicted_subject": "user",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Current residence",
+    "subject_correct": true,
+    "facet_correct": false,
+    "state_family_correct": false,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=1] The message discusses the user's plans to move into a new home and mentions the pre-approval for a mortgage, which relates to their current residence.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-852ce960_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "hybrid_rules_then_llm",
+    "fixture_qid": "lme-2698e78f",
+    "trial": 8,
+    "predicted_subject": "Dr. Smith",
+    "predicted_facet": "Therapy schedule",
+    "predicted_state_family": "Session frequency",
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "all_fields_correct": true,
+    "reasoning": "[llm_calls=1] rules: facet='Therapy schedule' subject='Dr. Smith' | The user mentions seeing Dr. Smith every week, indicating a focus on the frequency of therapy sessions rather than the topics discussed.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-2698e78f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "two_stage",
+    "fixture_qid": "lme-852ce960",
+    "trial": 6,
+    "predicted_subject": "user",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Current residence",
+    "subject_correct": true,
+    "facet_correct": false,
+    "state_family_correct": false,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=2] stage1: The message is primarily about the user's plans and experiences related to moving into a new home. | stage2: The user discusses moving into a new home and setting up services, indicating a focus on their current residence.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-852ce960_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "two_stage",
+    "fixture_qid": "lme-2698e78f",
+    "trial": 7,
+    "predicted_subject": "user",
+    "predicted_facet": "Therapy schedule",
+    "predicted_state_family": "Session frequency",
+    "subject_correct": false,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=2] stage1: The message is primarily about the user's preferences and experiences regarding scheduling and boundaries. | stage2: The user discusses their weekly sessions with Dr. Smith, indicating a focus on the frequency of therapy.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-2698e78f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "two_stage",
+    "fixture_qid": "lme-830ce83f",
+    "trial": 2,
+    "predicted_subject": "user",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Housing preferences",
+    "subject_correct": false,
+    "facet_correct": true,
+    "state_family_correct": false,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=2] stage1: The message is primarily about the user's thoughts and preferences regarding travel and location. | stage2: The user is discussing their preferences for a more relaxed location to live, indicating a focus on housing choices.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-830ce83f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "llm_ontology",
+    "fixture_qid": "lme-852ce960",
+    "trial": 6,
+    "predicted_subject": "user",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Current residence",
+    "subject_correct": true,
+    "facet_correct": false,
+    "state_family_correct": false,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=1] The message discusses the user's plans to move into a new home and mentions the pre-approval for a mortgage, which relates to their current residence.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-852ce960_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "hybrid_rules_then_llm",
+    "fixture_qid": "lme-830ce83f",
+    "trial": 3,
+    "predicted_subject": "Rachel",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Housing preferences",
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": false,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=1] rules: facet='Housing' subject='Rachel' | The user is expressing a desire for a more relaxed location and considering proximity to a major city, which relates to their housing preferences.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-830ce83f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c2",
+        "correct": false,
+        "is_decoy_selection": true
+      },
+      {
+        "scenario_id": "lme-830ce83f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "two_stage",
+    "fixture_qid": "lme-830ce83f",
+    "trial": 8,
+    "predicted_subject": "user",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Housing preferences",
+    "subject_correct": false,
+    "facet_correct": true,
+    "state_family_correct": false,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=2] stage1: The message is discussing the user's thoughts and plans regarding travel and location preferences. | stage2: The user is discussing their preferences for a location to visit, indicating a desire for a more relaxed environment and proximity to a major city.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-830ce83f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "llm_ontology",
+    "fixture_qid": "lme-2698e78f",
+    "trial": 5,
+    "predicted_subject": "user",
+    "predicted_facet": "Therapy schedule",
+    "predicted_state_family": "Session frequency",
+    "subject_correct": false,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=1] The message discusses the user's therapy sessions with Dr. Smith, specifically mentioning the frequency of those sessions.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-2698e78f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "llm_ontology",
+    "fixture_qid": "lme-2698e78f",
+    "trial": 8,
+    "predicted_subject": "user",
+    "predicted_facet": "Therapy schedule",
+    "predicted_state_family": "Session frequency",
+    "subject_correct": false,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=1] The message discusses the user's therapy sessions with Dr. Smith, indicating a regular frequency.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-2698e78f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "hybrid_rules_then_llm",
+    "fixture_qid": "lme-852ce960",
+    "trial": 2,
+    "predicted_subject": "user",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Housing preferences",
+    "subject_correct": true,
+    "facet_correct": false,
+    "state_family_correct": false,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=1] rules: facet='Housing' subject='user' | The user is discussing their excitement about moving into a new home and the features they are looking forward to, which relates to their housing preferences.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-852ce960_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "llm_ontology",
+    "fixture_qid": "lme-830ce83f",
+    "trial": 7,
+    "predicted_subject": "Rachel",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Current residence",
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "all_fields_correct": true,
+    "reasoning": "[llm_calls=1] The message discusses the current residence of the user's friend Rachel, indicating she has moved back to the suburbs.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-830ce83f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "llm_ontology",
+    "fixture_qid": "lme-852ce960",
+    "trial": 4,
+    "predicted_subject": "user",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Current residence",
+    "subject_correct": true,
+    "facet_correct": false,
+    "state_family_correct": false,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=1] The message discusses the user's plans to move into a new home and mentions the pre-approval for a mortgage, which relates to their current residence.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-852ce960_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "two_stage",
+    "fixture_qid": "lme-2698e78f",
+    "trial": 3,
+    "predicted_subject": "user",
+    "predicted_facet": "Therapy schedule",
+    "predicted_state_family": "Session frequency",
+    "subject_correct": false,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=2] stage1: The message is primarily about the user's preferences and experiences regarding scheduling and boundaries. | stage2: The user discusses their weekly sessions with Dr. Smith, indicating a focus on the frequency of therapy.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-2698e78f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "llm_ontology",
+    "fixture_qid": "lme-830ce83f",
+    "trial": 2,
+    "predicted_subject": "Rachel",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Current residence",
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "all_fields_correct": true,
+    "reasoning": "[llm_calls=1] The message discusses Rachel's recent move back to the suburbs, which relates to her current residence.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-830ce83f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "two_stage",
+    "fixture_qid": "lme-830ce83f",
+    "trial": 6,
+    "predicted_subject": "user",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Housing preferences",
+    "subject_correct": false,
+    "facet_correct": true,
+    "state_family_correct": false,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=2] stage1: The message is primarily about the user's thoughts and preferences regarding travel and location. | stage2: The user is discussing their preferences for a more relaxed location to live, indicating a focus on housing choices.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-830ce83f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "llm_ontology",
+    "fixture_qid": "lme-852ce960",
+    "trial": 8,
+    "predicted_subject": "user",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Current residence",
+    "subject_correct": true,
+    "facet_correct": false,
+    "state_family_correct": false,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=1] The message discusses the user's plans to move into a new home and mentions the pre-approval for a mortgage, which relates to their current residence.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-852ce960_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "hybrid_rules_then_llm",
+    "fixture_qid": "lme-852ce960",
+    "trial": 0,
+    "predicted_subject": "user",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Housing preferences",
+    "subject_correct": true,
+    "facet_correct": false,
+    "state_family_correct": false,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=1] rules: facet='Housing' subject='user' | The user is discussing their excitement about moving into a new home and the features they are looking forward to, which relates to their housing preferences.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-852ce960_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "hybrid_rules_then_llm",
+    "fixture_qid": "lme-830ce83f",
+    "trial": 2,
+    "predicted_subject": "Rachel",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Housing preferences",
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": false,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=1] rules: facet='Housing' subject='Rachel' | The user is expressing a desire for a more relaxed location and is considering proximity to a major city, which relates to their housing preferences.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-830ce83f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c2",
+        "correct": false,
+        "is_decoy_selection": true
+      },
+      {
+        "scenario_id": "lme-830ce83f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "two_stage",
+    "fixture_qid": "lme-2698e78f",
+    "trial": 8,
+    "predicted_subject": "user",
+    "predicted_facet": "Therapy schedule",
+    "predicted_state_family": "Session frequency",
+    "subject_correct": false,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=2] stage1: The message is primarily about the user's preferences and experiences regarding scheduling and boundaries. | stage2: The user discusses their weekly sessions with Dr. Smith, indicating a focus on the frequency of therapy.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-2698e78f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "hybrid_rules_then_llm",
+    "fixture_qid": "lme-830ce83f",
+    "trial": 4,
+    "predicted_subject": "Rachel",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Housing preferences",
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": false,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=1] rules: facet='Housing' subject='Rachel' | The user is expressing a desire for a more relaxed location and is considering proximity to a major city, which relates to their housing preferences.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-830ce83f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c2",
+        "correct": false,
+        "is_decoy_selection": true
+      },
+      {
+        "scenario_id": "lme-830ce83f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "llm_ontology",
+    "fixture_qid": "lme-830ce83f",
+    "trial": 5,
+    "predicted_subject": "Rachel",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Current residence",
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "all_fields_correct": true,
+    "reasoning": "[llm_calls=1] The message discusses the current residence of the user's friend Rachel, indicating she has moved back to the suburbs.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-830ce83f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "llm_ontology",
+    "fixture_qid": "lme-830ce83f",
+    "trial": 6,
+    "predicted_subject": "Rachel",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Current residence",
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "all_fields_correct": true,
+    "reasoning": "[llm_calls=1] The message discusses Rachel's recent move back to the suburbs, which relates to her current residence.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-830ce83f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "llm_ontology",
+    "fixture_qid": "lme-2698e78f",
+    "trial": 0,
+    "predicted_subject": "user",
+    "predicted_facet": "Therapy schedule",
+    "predicted_state_family": "Session frequency",
+    "subject_correct": false,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=1] The message discusses the user's therapy sessions with Dr. Smith, specifically mentioning the frequency of those sessions.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-2698e78f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "two_stage",
+    "fixture_qid": "lme-852ce960",
+    "trial": 8,
+    "predicted_subject": "user",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Current residence",
+    "subject_correct": true,
+    "facet_correct": false,
+    "state_family_correct": false,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=2] stage1: The message is primarily about the user's plans and experiences related to moving into a new home. | stage2: The user discusses moving into a new home and setting up services, indicating a focus on their current residence.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-852ce960_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "hybrid_rules_then_llm",
+    "fixture_qid": "lme-2698e78f",
+    "trial": 2,
+    "predicted_subject": "Dr. Smith",
+    "predicted_facet": "Therapy schedule",
+    "predicted_state_family": "Session frequency",
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "all_fields_correct": true,
+    "reasoning": "[llm_calls=1] rules: facet='Therapy schedule' subject='Dr. Smith' | The user mentions seeing Dr. Smith every week, indicating a regular session frequency related to their therapy.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-2698e78f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "llm_ontology",
+    "fixture_qid": "lme-830ce83f",
+    "trial": 9,
+    "predicted_subject": "Rachel",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Current residence",
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "all_fields_correct": true,
+    "reasoning": "[llm_calls=1] The message discusses the current residence of the user's friend Rachel, indicating she has moved back to the suburbs.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-830ce83f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "hybrid_rules_then_llm",
+    "fixture_qid": "lme-2698e78f",
+    "trial": 3,
+    "predicted_subject": "Dr. Smith",
+    "predicted_facet": "Therapy schedule",
+    "predicted_state_family": "Session frequency",
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "all_fields_correct": true,
+    "reasoning": "[llm_calls=1] rules: facet='Therapy schedule' subject='Dr. Smith' | The user mentions seeing Dr. Smith every week, indicating a focus on the frequency of therapy sessions rather than the topics discussed.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-2698e78f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "hybrid_rules_then_llm",
+    "fixture_qid": "lme-830ce83f",
+    "trial": 1,
+    "predicted_subject": "Rachel",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Housing preferences",
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": false,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=1] rules: facet='Housing' subject='Rachel' | The user is expressing a desire for a more relaxed location and is considering proximity to a major city, which relates to their housing preferences.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-830ce83f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c2",
+        "correct": false,
+        "is_decoy_selection": true
+      },
+      {
+        "scenario_id": "lme-830ce83f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "two_stage",
+    "fixture_qid": "lme-2698e78f",
+    "trial": 4,
+    "predicted_subject": "user",
+    "predicted_facet": "Therapy schedule",
+    "predicted_state_family": "Session frequency",
+    "subject_correct": false,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=2] stage1: The message is primarily discussing the user's preferences and experiences regarding scheduling and boundaries. | stage2: The user discusses their weekly sessions with Dr. Smith, indicating a focus on the frequency of therapy.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-2698e78f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "two_stage",
+    "fixture_qid": "lme-852ce960",
+    "trial": 4,
+    "predicted_subject": "user",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Current residence",
+    "subject_correct": true,
+    "facet_correct": false,
+    "state_family_correct": false,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=2] stage1: The message is primarily about the user's plans and experiences related to moving into a new home. | stage2: The user discusses moving into a new home and setting up services, which relates to their current residence.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-852ce960_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "hybrid_rules_then_llm",
+    "fixture_qid": "lme-830ce83f",
+    "trial": 0,
+    "predicted_subject": "Rachel",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Housing preferences",
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": false,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=1] rules: facet='Housing' subject='Rachel' | The user is expressing a desire for a more relaxed location and is considering proximity to a major city, which relates to their housing preferences.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-830ce83f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c2",
+        "correct": false,
+        "is_decoy_selection": true
+      },
+      {
+        "scenario_id": "lme-830ce83f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "llm_ontology",
+    "fixture_qid": "lme-830ce83f",
+    "trial": 0,
+    "predicted_subject": "Rachel",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Current residence",
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "all_fields_correct": true,
+    "reasoning": "[llm_calls=1] The message discusses Rachel's recent move back to the suburbs, which relates to her current residence.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-830ce83f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "hybrid_rules_then_llm",
+    "fixture_qid": "lme-2698e78f",
+    "trial": 6,
+    "predicted_subject": "Dr. Smith",
+    "predicted_facet": "Therapy schedule",
+    "predicted_state_family": "Session frequency",
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "all_fields_correct": true,
+    "reasoning": "[llm_calls=1] rules: facet='Therapy schedule' subject='Dr. Smith' | The user mentions seeing Dr. Smith every week, indicating a focus on the frequency of therapy sessions rather than the topics discussed.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-2698e78f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "hybrid_rules_then_llm",
+    "fixture_qid": "lme-852ce960",
+    "trial": 7,
+    "predicted_subject": "user",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Housing preferences",
+    "subject_correct": true,
+    "facet_correct": false,
+    "state_family_correct": false,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=1] rules: facet='Housing' subject='user' | The user is discussing their excitement about moving into a new home and mentions specific features they are looking forward to, indicating their preferences regarding housing.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-852ce960_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "hybrid_rules_then_llm",
+    "fixture_qid": "lme-2698e78f",
+    "trial": 4,
+    "predicted_subject": "Dr. Smith",
+    "predicted_facet": "Therapy schedule",
+    "predicted_state_family": "Session frequency",
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "all_fields_correct": true,
+    "reasoning": "[llm_calls=1] rules: facet='Therapy schedule' subject='Dr. Smith' | The user mentions seeing Dr. Smith every week, which relates to the frequency of therapy sessions.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-2698e78f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "hybrid_rules_then_llm",
+    "fixture_qid": "lme-852ce960",
+    "trial": 3,
+    "predicted_subject": "user",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Housing preferences",
+    "subject_correct": true,
+    "facet_correct": false,
+    "state_family_correct": false,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=1] rules: facet='Housing' subject='user' | The user is discussing their excitement about moving into a new home and mentions specific features they are looking forward to, indicating their preferences regarding housing.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-852ce960_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "hybrid_rules_then_llm",
+    "fixture_qid": "lme-2698e78f",
+    "trial": 9,
+    "predicted_subject": "Dr. Smith",
+    "predicted_facet": "Therapy schedule",
+    "predicted_state_family": "Session frequency",
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "all_fields_correct": true,
+    "reasoning": "[llm_calls=1] rules: facet='Therapy schedule' subject='Dr. Smith' | The user mentions seeing Dr. Smith every week, indicating a focus on the frequency of therapy sessions rather than the content of discussions.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-2698e78f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "hybrid_rules_then_llm",
+    "fixture_qid": "lme-830ce83f",
+    "trial": 5,
+    "predicted_subject": "Rachel",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Housing preferences",
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": false,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=1] rules: facet='Housing' subject='Rachel' | The user is expressing a desire for a more relaxed location and is considering proximity to a major city, which relates to their housing preferences.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-830ce83f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c2",
+        "correct": false,
+        "is_decoy_selection": true
+      },
+      {
+        "scenario_id": "lme-830ce83f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "two_stage",
+    "fixture_qid": "lme-2698e78f",
+    "trial": 6,
+    "predicted_subject": "user",
+    "predicted_facet": "Therapy schedule",
+    "predicted_state_family": "Session frequency",
+    "subject_correct": false,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=2] stage1: The message is primarily about the user's preferences and experiences regarding scheduling and boundaries. | stage2: The user discusses their weekly sessions with Dr. Smith, indicating a focus on the frequency of therapy.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-2698e78f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "llm_ontology",
+    "fixture_qid": "lme-2698e78f",
+    "trial": 4,
+    "predicted_subject": "user",
+    "predicted_facet": "Therapy schedule",
+    "predicted_state_family": "Session frequency",
+    "subject_correct": false,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=1] The message discusses the user's weekly sessions with Dr. Smith, which relates to the frequency of therapy.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-2698e78f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "hybrid_rules_then_llm",
+    "fixture_qid": "lme-830ce83f",
+    "trial": 9,
+    "predicted_subject": "Rachel",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Housing preferences",
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": false,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=1] rules: facet='Housing' subject='Rachel' | The user is expressing a desire for a more relaxed location and is considering proximity to a major city, which relates to their housing preferences.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-830ce83f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c2",
+        "correct": false,
+        "is_decoy_selection": true
+      },
+      {
+        "scenario_id": "lme-830ce83f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "hybrid_rules_then_llm",
+    "fixture_qid": "lme-830ce83f",
+    "trial": 7,
+    "predicted_subject": "Rachel",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Housing preferences",
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": false,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=1] rules: facet='Housing' subject='Rachel' | The user is expressing a desire for a more relaxed location and is considering proximity to a major city, which relates to their housing preferences.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-830ce83f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c2",
+        "correct": false,
+        "is_decoy_selection": true
+      },
+      {
+        "scenario_id": "lme-830ce83f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "hybrid_rules_then_llm",
+    "fixture_qid": "lme-2698e78f",
+    "trial": 0,
+    "predicted_subject": "Dr. Smith",
+    "predicted_facet": "Therapy schedule",
+    "predicted_state_family": "Session frequency",
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "all_fields_correct": true,
+    "reasoning": "[llm_calls=1] rules: facet='Therapy schedule' subject='Dr. Smith' | The user mentions seeing Dr. Smith every week, which relates to the frequency of therapy sessions.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-2698e78f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "hybrid_rules_then_llm",
+    "fixture_qid": "lme-2698e78f",
+    "trial": 7,
+    "predicted_subject": "Dr. Smith",
+    "predicted_facet": "Therapy schedule",
+    "predicted_state_family": "Session frequency",
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "all_fields_correct": true,
+    "reasoning": "[llm_calls=1] rules: facet='Therapy schedule' subject='Dr. Smith' | The user mentions seeing Dr. Smith every week, indicating a focus on the frequency of therapy sessions rather than the content of discussions.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-2698e78f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "llm_ontology",
+    "fixture_qid": "lme-830ce83f",
+    "trial": 4,
+    "predicted_subject": "Rachel",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Current residence",
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "all_fields_correct": true,
+    "reasoning": "[llm_calls=1] The message discusses Rachel's recent move back to the suburbs, which relates to her current residence.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-830ce83f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "hybrid_rules_then_llm",
+    "fixture_qid": "lme-852ce960",
+    "trial": 4,
+    "predicted_subject": "user",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Housing preferences",
+    "subject_correct": true,
+    "facet_correct": false,
+    "state_family_correct": false,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=1] rules: facet='Housing' subject='user' | The user is discussing their excitement about moving into a new home and the features they are looking forward to, which relates to their housing preferences.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-852ce960_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "two_stage",
+    "fixture_qid": "lme-2698e78f",
+    "trial": 5,
+    "predicted_subject": "user",
+    "predicted_facet": "Therapy schedule",
+    "predicted_state_family": "Session frequency",
+    "subject_correct": false,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=2] stage1: The message is primarily about the user's preferences and experiences regarding scheduling and boundaries. | stage2: The user discusses their weekly sessions with Dr. Smith, indicating a focus on the frequency of therapy.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-2698e78f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "two_stage",
+    "fixture_qid": "lme-830ce83f",
+    "trial": 1,
+    "predicted_subject": "user",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Housing preferences",
+    "subject_correct": false,
+    "facet_correct": true,
+    "state_family_correct": false,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=2] stage1: The message is discussing the user's thoughts and plans regarding travel and location preferences. | stage2: The user is discussing their preferences for a location to visit, indicating a desire for a more relaxed environment and proximity to a major city, which relates to housing preferences.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-830ce83f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "llm_ontology",
+    "fixture_qid": "lme-2698e78f",
+    "trial": 9,
+    "predicted_subject": "user",
+    "predicted_facet": "Therapy schedule",
+    "predicted_state_family": "Session frequency",
+    "subject_correct": false,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=1] The message discusses the user's therapy sessions with Dr. Smith, specifically mentioning the frequency of those sessions.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-2698e78f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "two_stage",
+    "fixture_qid": "lme-830ce83f",
+    "trial": 3,
+    "predicted_subject": "user",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Housing preferences",
+    "subject_correct": false,
+    "facet_correct": true,
+    "state_family_correct": false,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=2] stage1: The message is primarily about the user's thoughts and preferences regarding travel and location. | stage2: The user is discussing their preferences for a more relaxed location to live, indicating a focus on housing choices.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-830ce83f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "two_stage",
+    "fixture_qid": "lme-830ce83f",
+    "trial": 7,
+    "predicted_subject": "Rachel",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Current residence",
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "all_fields_correct": true,
+    "reasoning": "[llm_calls=2] stage1: The message discusses the user's friend Rachel who has moved back to the suburbs. | stage2: The message discusses Rachel's recent move back to the suburbs, which relates to her current housing situation.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-830ce83f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "hybrid_rules_then_llm",
+    "fixture_qid": "lme-830ce83f",
+    "trial": 8,
+    "predicted_subject": "Rachel",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Housing preferences",
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": false,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=1] rules: facet='Housing' subject='Rachel' | The user is expressing a desire for a more relaxed location and is considering proximity to a major city, which relates to their housing preferences.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-830ce83f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c2",
+        "correct": false,
+        "is_decoy_selection": true
+      },
+      {
+        "scenario_id": "lme-830ce83f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "llm_ontology",
+    "fixture_qid": "lme-852ce960",
+    "trial": 1,
+    "predicted_subject": "user",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Current residence",
+    "subject_correct": true,
+    "facet_correct": false,
+    "state_family_correct": false,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=1] The message discusses the user's plans to move into a new home and mentions the pre-approval for a mortgage, which relates to their current residence.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-852ce960_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "llm_ontology",
+    "fixture_qid": "lme-852ce960",
+    "trial": 5,
+    "predicted_subject": "user",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Current residence",
+    "subject_correct": true,
+    "facet_correct": false,
+    "state_family_correct": false,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=1] The message discusses the user's plans to move into a new home and mentions the pre-approval for a mortgage, which relates to their current residence.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-852ce960_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-852ce960_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "llm_ontology",
+    "fixture_qid": "lme-830ce83f",
+    "trial": 3,
+    "predicted_subject": "Rachel",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Current residence",
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "all_fields_correct": true,
+    "reasoning": "[llm_calls=1] The message discusses Rachel's recent move back to the suburbs, which relates to her current residence.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-830ce83f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "two_stage",
+    "fixture_qid": "lme-830ce83f",
+    "trial": 4,
+    "predicted_subject": "user",
+    "predicted_facet": "Housing",
+    "predicted_state_family": "Housing preferences",
+    "subject_correct": false,
+    "facet_correct": true,
+    "state_family_correct": false,
+    "all_fields_correct": false,
+    "reasoning": "[llm_calls=2] stage1: The message is primarily about the user's thoughts and plans regarding travel and location preferences. | stage2: The user is discussing their preferences for a location to visit, indicating a desire for a more relaxed environment and proximity to a major city, which relates to housing preferences.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-830ce83f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": null,
+        "correct": false,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-830ce83f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  },
+  {
+    "approach": "hybrid_rules_then_llm",
+    "fixture_qid": "lme-2698e78f",
+    "trial": 1,
+    "predicted_subject": "Dr. Smith",
+    "predicted_facet": "Therapy schedule",
+    "predicted_state_family": "Session frequency",
+    "subject_correct": true,
+    "facet_correct": true,
+    "state_family_correct": true,
+    "all_fields_correct": true,
+    "reasoning": "[llm_calls=1] rules: facet='Therapy schedule' subject='Dr. Smith' | The user mentions seeing Dr. Smith every week, indicating a regular session frequency, which aligns with the therapy schedule facet.",
+    "downstream_chain": [
+      {
+        "scenario_id": "lme-2698e78f_1_one_correct",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_2_wrong_state_family",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_3_wrong_scope",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_4_stale_vs_current",
+        "correct_candidate_id": "c1",
+        "selected_id": "c1",
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_5_near_neighbor_decoys_only",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_6_no_subject_match",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      },
+      {
+        "scenario_id": "lme-2698e78f_7_missing_metadata",
+        "correct_candidate_id": null,
+        "selected_id": null,
+        "correct": true,
+        "is_decoy_selection": false
+      }
+    ]
+  }
+]

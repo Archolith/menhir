@@ -1,0 +1,20 @@
+{% if sessions %}
+<div class="list">
+  {% for session in sessions %}
+  <div class="row-card">
+    <button data-session-id="{{ session.session_id }}">
+      <div class="meta" style="margin-bottom:0.25rem">
+        Last activity: <span class="utc-time" data-utc="{{ session.last_seen }}">{{ session.last_seen }}</span>
+      </div>
+      <strong class="row-card-title">Session: {{ session.session_id }}</strong>
+      <div class="badge-row">
+        <span class="badge persistent">{{ session.node_count }} nodes</span>
+        <span class="badge session">{{ session.episode_count }} episodes</span>
+      </div>
+    </button>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<p class="muted-empty">No active sessions found.</p>
+{% endif %}

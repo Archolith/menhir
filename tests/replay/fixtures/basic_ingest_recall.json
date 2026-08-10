@@ -1,0 +1,38 @@
+{
+  "scenario": "basic_ingest_and_recall",
+  "description": "Ingest 2 memories, consolidate, then recall by query",
+  "session_id": "replay-session-001",
+  "steps": [
+    {
+      "action": "ingest",
+      "text": "The user prefers dark mode in all editors",
+      "source": "replay-test",
+      "expect": {
+        "status": "INGESTED",
+        "nodes_touched_min": 1
+      }
+    },
+    {
+      "action": "ingest",
+      "text": "The user uses VS Code with vim keybindings",
+      "source": "replay-test",
+      "expect": {
+        "status": "INGESTED"
+      }
+    },
+    {
+      "action": "consolidate_session",
+      "expect": {
+        "promoted_min": 0,
+        "deleted_max": 10
+      }
+    },
+    {
+      "action": "recall",
+      "query": "editor preferences",
+      "expect": {
+        "results_count_min": 0
+      }
+    }
+  ]
+}

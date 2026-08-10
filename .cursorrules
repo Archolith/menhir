@@ -1,0 +1,10 @@
+Before writing or modifying any code, read all files in the `.agent/` directory.
+
+Start with `.agent/README.md` for maintenance rules and project overview, then read:
+- `.agent/architecture.md` — package map, patterns, tech stack, env vars
+- `.agent/data_models.md` — entities, DTOs, and repository reference
+- `.agent/workflows/code_conventions.md` — formatting and style rules you must follow
+
+Check `.agent/workflows/` for any task-specific runbook before performing operational actions.
+
+If there is a conflict between the code and the `.agent` docs, call it out and ask for clarification before proceeding.

@@ -1,0 +1,67 @@
+{% extends 'base.html' %}
+
+{% block sidebar_main %}
+  <div class='panel-section'>
+    <h3>Recent Episodes <span class='row-card-code'>{{ episodes|length }}</span></h3>
+    <div id='episodes-panel'>{% include '_episodes.html' %}</div>
+  </div>
+  <div class='panel-section' style='margin-top:2rem'>
+    <h3>Recent Sessions <span class='row-card-code'>{{ sessions|length }}</span></h3>
+    <div id='sessions-panel'>{% include '_sessions.html' %}</div>
+  </div>
+  <div class='panel-section' style='margin-top:2rem'>
+    <h3>Flagged Nodes <span class='row-card-code'>{{ flagged|length }}</span></h3>
+    <div id='flagged-panel'>{% include '_flagged.html' %}</div>
+  </div>
+  <div class='panel-section' style='margin-top:2rem'>
+    <h3>Candidates (review) <span class='row-card-code'>{{ candidates|length }}</span></h3>
+    <div id='candidates-panel'>{% include '_candidates.html' %}</div>
+  </div>
+{% endblock %}
+
+{% block sidebar_system %}
+  <div class='panel-section'>
+    <h3>Enrichment Queue <span class='row-card-code'>{{ queued_episodes|length }}</span></h3>
+    <div id='queue-panel'>{% include '_queue.html' %}</div>
+  </div>
+  <div class='panel-section collapsed'>
+    <h3>Successful Enrichments <span class='row-card-code'>{{ successful_episodes|length }}</span></h3>
+    <div id='successful-panel'>{% include '_successful.html' %}</div>
+  </div>
+  <div class='panel-section collapsed'>
+    <h3>Recovered Enrichments <span class='row-card-code'>{{ recovered_episodes|length }}</span></h3>
+    <div id='recovered-panel'>{% include '_recovered.html' %}</div>
+  </div>
+  <div class='panel-section'>
+    <h3>Pending LLM Tasks <span class='row-card-code'>{{ pending_actions|length }}</span></h3>
+    <div id='pending-actions-panel'>{% include '_pending_actions.html' %}</div>
+  </div>
+  <div class='panel-section collapsed'>
+    <h3>Failed Enrichments <span class='row-card-code'>{{ failed_episodes|length }}</span></h3>
+    <div id='failed-panel'>{% include '_failed.html' %}</div>
+  </div>
+  <div class='panel-section collapsed'>
+    <h3>Background Ops</h3>
+    <div id='mcp-events-panel'>{% include '_mcp_events.html' %}</div>
+  </div>
+{% endblock %}
+
+{% block sidebar_entities %}
+  <div class='panel-section'>
+    <h3>Entity Search</h3>
+    <form id='entity-search-form' class='search-input-wrapper'>
+      <input id='query' name='query' type='search' placeholder='Search entities by name or summary...' value=''>
+    </form>
+    <div id='entity-results'>{% include '_entities.html' %}</div>
+  </div>
+{% endblock %}
+
+{% block canvas_overlay %}
+  <div style='position:absolute; bottom:1rem; left:1rem; display:flex; gap:0.5rem; z-index:10'>
+    <select id='graph-depth' style='width:auto; padding:0.25rem 0.5rem; background:rgba(15,23,42,0.8); border:1px solid var(--border); color:white; border-radius:4px; font-size:0.7rem'>
+      <option value='1' selected>1 hop</option>
+      <option value='2'>2 hops</option>
+    </select>
+    <button onclick='cy.fit()' style='background:rgba(15,23,42,0.8); border:1px solid var(--border); color:white; border-radius:4px; padding:0.25rem 0.5rem; cursor:pointer; font-size:0.7rem; font-weight:700'>FIT</button>
+  </div>
+{% endblock %}

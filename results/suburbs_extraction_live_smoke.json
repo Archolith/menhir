@@ -1,0 +1,276 @@
+{
+  "generated_at": "2026-07-16T18:00:53.527716+00:00",
+  "namespace": "suburbs-fix-smoke-39250415dffb",
+  "model": "gpt-4o-mini",
+  "ingests": [
+    {
+      "index": 0,
+      "episode": "user: My friend Rachel lives in Chicago.",
+      "status": "ingested",
+      "episode_id": "7f2defdb-8668-4df3-a47a-24e209b2ec69",
+      "nodes_touched": 3,
+      "edges_touched": 3
+    },
+    {
+      "index": 1,
+      "episode": "user: Thanks for the information. Turn 0.",
+      "status": "ingested",
+      "episode_id": "4e9f0110-16c3-41f9-95da-b8d5999756e2",
+      "nodes_touched": 0,
+      "edges_touched": 0
+    },
+    {
+      "index": 2,
+      "episode": "user: Thanks for the information. Turn 1.",
+      "status": "ingested",
+      "episode_id": "ec6c9fbb-d7a8-4c47-aff1-bf7a22930c57",
+      "nodes_touched": 0,
+      "edges_touched": 0
+    },
+    {
+      "index": 3,
+      "episode": "user: Thanks for the information. Turn 2.",
+      "status": "ingested",
+      "episode_id": "c88f0c43-3a76-4fbe-8f63-a8b564527627",
+      "nodes_touched": 0,
+      "edges_touched": 0
+    },
+    {
+      "index": 4,
+      "episode": "user: Thanks for the information. Turn 3.",
+      "status": "ingested",
+      "episode_id": "dd6e5f10-3226-418b-90cd-f3849654ebb1",
+      "nodes_touched": 0,
+      "edges_touched": 0
+    },
+    {
+      "index": 5,
+      "episode": "user: Thanks for the information. Turn 4.",
+      "status": "ingested",
+      "episode_id": "7d3ec752-7490-46a4-a991-0b9323cf7483",
+      "nodes_touched": 0,
+      "edges_touched": 0
+    },
+    {
+      "index": 6,
+      "episode": "user: Thanks for the information. Turn 5.",
+      "status": "ingested",
+      "episode_id": "209f23f1-d388-4900-9717-0e5dd562f4f4",
+      "nodes_touched": 0,
+      "edges_touched": 0
+    },
+    {
+      "index": 7,
+      "episode": "user: Thanks for the information. Turn 6.",
+      "status": "ingested",
+      "episode_id": "77fa13cb-6f67-4ab7-b906-c38af5e64f3e",
+      "nodes_touched": 0,
+      "edges_touched": 0
+    },
+    {
+      "index": 8,
+      "episode": "user: Thanks for the information. Turn 7.",
+      "status": "ingested",
+      "episode_id": "a43e2348-e694-4b0f-be91-bef5ac0b4933",
+      "nodes_touched": 0,
+      "edges_touched": 0
+    },
+    {
+      "index": 9,
+      "episode": "user: Thanks for the information. Turn 8.",
+      "status": "ingested",
+      "episode_id": "5204481b-fc9e-4066-9c6a-4b1a1203c514",
+      "nodes_touched": 0,
+      "edges_touched": 0
+    },
+    {
+      "index": 10,
+      "episode": "user: Thanks for the information. Turn 9.",
+      "status": "ingested",
+      "episode_id": "b34a86e5-8e32-4d75-97c9-abfd4abed90b",
+      "nodes_touched": 0,
+      "edges_touched": 0
+    },
+    {
+      "index": 11,
+      "episode": "user: Thanks for the information. Turn 10.",
+      "status": "ingested",
+      "episode_id": "a8043c49-cb1a-45ba-aec4-963db1c4cdec",
+      "nodes_touched": 0,
+      "edges_touched": 0
+    },
+    {
+      "index": 12,
+      "episode": "user: Thanks for the information. Turn 11.",
+      "status": "ingested",
+      "episode_id": "89fe137a-89ac-4800-bb92-1b74dbf22b62",
+      "nodes_touched": 0,
+      "edges_touched": 0
+    },
+    {
+      "index": 13,
+      "episode": "user: Rachel actually just moved back to the suburbs again.",
+      "status": "ingested",
+      "episode_id": "02b96361-37b2-433f-a3ae-9a06f1010ed9",
+      "nodes_touched": 3,
+      "edges_touched": 4
+    }
+  ],
+  "suburb_entities": [
+    {
+      "uuid": "44613fcd-326d-477f-932b-e4e373bd2882",
+      "name": "the suburbs"
+    }
+  ],
+  "suburb_edges": [
+    {
+      "source": "Rachel",
+      "target": "the suburbs",
+      "fact": "Rachel moved back to the suburbs again.",
+      "valid_at": "2026-07-16T18:01:23.000000000+00:00",
+      "invalid_at": null,
+      "expired_at": null
+    }
+  ],
+  "chicago_edges": [
+    {
+      "fact": "Rachel lives in Chicago.",
+      "valid_at": "2026-07-16T18:00:54.000000000+00:00",
+      "invalid_at": "2026-07-16T18:01:23.000000000+00:00",
+      "expired_at": "2026-07-16T18:01:29.980692000+00:00"
+    }
+  ],
+  "recall_results": [
+    {
+      "uuid": "0dcf26fe-7f31-428b-bfc2-84d5e04dfc11",
+      "name": "Rachel",
+      "content": "Rachel lives in Chicago.\nRachel moved back to the suburbs again.",
+      "scope": "SESSION",
+      "memory_type": "SEMANTIC",
+      "final_score": 2.29999596562386,
+      "breakdown": {
+        "semantic_similarity": 2.0,
+        "adjacency_bonus": 1.0,
+        "recency_bonus": 0.9999596562386,
+        "prominence_bonus": 0.0,
+        "conflict_bonus": 0.0,
+        "type_boost": 0.0,
+        "preset": "knowledge",
+        "alpha": 0.2,
+        "beta": 0.1,
+        "gamma": 0.1,
+        "delta": 0.0
+      },
+      "retrieval_score": 2.0,
+      "retrieval_score_kind": "graphiti_rrf",
+      "warden_label": null,
+      "temporal_facts": [
+        {
+          "fact": "Rachel moved back to the suburbs again.",
+          "valid_at": "2026-07-16T18:01:23Z",
+          "invalid_at": null,
+          "created_at": "2026-07-16T18:01:25.771474Z",
+          "expired_at": null,
+          "is_current_belief": true,
+          "temporal_role": "current_belief"
+        }
+      ],
+      "is_superseded_view": false,
+      "view_kind": null,
+      "stale_anchor_info": {
+        "stale_anchor": false
+      }
+    },
+    {
+      "uuid": "44613fcd-326d-477f-932b-e4e373bd2882",
+      "name": "the suburbs",
+      "content": "Rachel moved back to the suburbs again.",
+      "scope": "SESSION",
+      "memory_type": "SEMANTIC",
+      "final_score": 1.1166659091749753,
+      "breakdown": {
+        "semantic_similarity": 0.8333333333333333,
+        "adjacency_bonus": 0.9166666666666666,
+        "recency_bonus": 0.9999924250830879,
+        "prominence_bonus": 0.0,
+        "conflict_bonus": 0.0,
+        "type_boost": 0.0,
+        "preset": "knowledge",
+        "alpha": 0.2,
+        "beta": 0.1,
+        "gamma": 0.1,
+        "delta": 0.0
+      },
+      "retrieval_score": 0.8333333333333333,
+      "retrieval_score_kind": "graphiti_rrf",
+      "warden_label": null,
+      "temporal_facts": [
+        {
+          "fact": null,
+          "valid_at": null,
+          "invalid_at": null,
+          "created_at": "2026-07-16T18:01:31.628Z",
+          "expired_at": null,
+          "is_current_belief": true,
+          "temporal_role": "current_belief"
+        },
+        {
+          "fact": "Rachel moved back to the suburbs again.",
+          "valid_at": "2026-07-16T18:01:23Z",
+          "invalid_at": null,
+          "created_at": "2026-07-16T18:01:25.771474Z",
+          "expired_at": null,
+          "is_current_belief": true,
+          "temporal_role": "current_belief"
+        }
+      ],
+      "is_superseded_view": false,
+      "view_kind": null,
+      "stale_anchor_info": {
+        "stale_anchor": false
+      }
+    },
+    {
+      "uuid": "441cf88c-bf03-4d92-a879-3b961595100e",
+      "name": "Chicago",
+      "content": "Rachel lives in Chicago.",
+      "scope": "SESSION",
+      "memory_type": "SEMANTIC",
+      "final_score": 1.1166626322905266,
+      "breakdown": {
+        "semantic_similarity": 0.8333333333333333,
+        "adjacency_bonus": 0.9166666666666665,
+        "recency_bonus": 0.9999596562386,
+        "prominence_bonus": 0.0,
+        "conflict_bonus": 0.0,
+        "type_boost": 0.0,
+        "preset": "knowledge",
+        "alpha": 0.2,
+        "beta": 0.1,
+        "gamma": 0.1,
+        "delta": 0.0
+      },
+      "retrieval_score": 0.8333333333333333,
+      "retrieval_score_kind": "graphiti_rrf",
+      "warden_label": null,
+      "temporal_facts": [
+        {
+          "fact": null,
+          "valid_at": null,
+          "invalid_at": null,
+          "created_at": "2026-07-16T18:01:31.628Z",
+          "expired_at": null,
+          "is_current_belief": true,
+          "temporal_role": "current_belief"
+        }
+      ],
+      "is_superseded_view": false,
+      "view_kind": null,
+      "stale_anchor_info": {
+        "stale_anchor": false
+      }
+    }
+  ],
+  "recall_search_error": null,
+  "cleanup_remaining_nodes": 0
+}

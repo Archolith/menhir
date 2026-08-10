@@ -1,0 +1,83 @@
+{% extends 'base.html' %}
+
+{% block title %}Extraction Lab · Menhir{% endblock %}
+{% block body_class %}extraction-lab-page{% endblock %}
+
+{% block extra_head %}
+  <link rel='stylesheet' href='/explorer/static/recall-lab.css'>
+{% endblock %}
+
+{% block app_main %}
+<main class='lab-shell'>
+  <section class='lab-hero'>
+    <div>
+      <div class='lab-kicker'>EXTRACTION WORKBENCH</div>
+      <h1>Extraction Lab</h1>
+      <p>Test entity extraction and proposition recall against prompt variants. Measure mention/proposition recall/precision against gold ground truth.</p>
+    </div>
+    <div class='safety-card'>
+      <span class='safety-dot'></span>
+      Pure read
+      <small>No graph writes. Read-only extraction tracing against production client pipeline.</small>
+    </div>
+  </section>
+
+  <form id='extraction-lab-form' class='lab-form'>
+    <section class='query-panel'>
+      <label for='lab-message'>Current Message <span class='label-hint'>the message to extract from</span></label>
+      <textarea id='lab-message' rows='4' maxlength='2000' required placeholder='Rachel actually just moved back to the suburbs again.'></textarea>
+
+      <div class='section-heading'>
+        <div>
+          <h3>Previous Episodes (Context)</h3>
+          <p>Optional prior episodes that will be considered during extraction (respecting context_episode_count limit).</p>
+        </div>
+        <button id='add-episode' type='button' class='secondary-button'>+ Add episode</button>
+      </div>
+      <section id='episodes-editor' class='episodes-editor'></section>
+
+      <div class='section-heading'>
+        <div>
+          <h3>Gold Ground Truth</h3>
+          <p>Expected extraction results (for scoring).</p>
+        </div>
+      </div>
+      <div class='gold-panel'>
+        <label>Expected mentions <span class='label-hint'>one per line</span>
+          <textarea id='lab-gold-mentions' rows='3' maxlength='1000' placeholder='Rachel&#10;suburbs'></textarea>
+        </label>
+        <label>Expected propositions <span class='label-hint'>one per line</span>
+          <textarea id='lab-gold-propositions' rows='3' maxlength='1000' placeholder='Rachel moved to or currently resides in the suburbs'></textarea>
+        </label>
+        <label>Update language markers <span class='label-hint'>one per line</span>
+          <textarea id='lab-gold-updates' rows='2' maxlength='500' placeholder='actually&#10;moved back&#10;again'></textarea>
+        </label>
+      </div>
+    </section>
+
+    <div class='section-heading'>
+      <div>
+        <h2>Experiment arms</h2>
+        <p>Every enabled arm receives the same message, episodes, and gold criteria.</p>
+      </div>
+      <button id='add-arm' type='button' class='secondary-button'>+ Add arm</button>
+    </div>
+    <section id='arms-editor' class='arms-editor'></section>
+
+    <div class='run-bar'>
+      <div id='lab-status' aria-live='polite'>Ready.</div>
+      <button id='run-lab' type='submit' class='run-button'>Run extraction</button>
+    </div>
+  </form>
+
+  <section id='lab-results' class='lab-results' aria-live='polite'>
+    <div class='empty-state'>Results will appear here in comparable columns.</div>
+  </section>
+</main>
+
+<script id='extraction-lab-privacy' type='application/json'>{{ privacy_redact|tojson }}</script>
+{% endblock %}
+
+{% block extra_scripts %}
+  <script src='/explorer/static/extraction-lab.js'></script>
+{% endblock %}

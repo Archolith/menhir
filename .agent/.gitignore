@@ -1,0 +1,4 @@
+test_tmp/
+mcp_telemetry.db
+mcp_telemetry.db-*
+*.log

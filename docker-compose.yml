@@ -1,0 +1,15 @@
+services:
+  neo4j:
+    image: neo4j:5-community
+    container_name: menhir-neo4j
+    environment:
+      NEO4J_AUTH: neo4j/password
+      NEO4J_PLUGINS: '["apoc"]'
+    ports:
+      - "7474:7474"   # Browser UI
+      - "7687:7687"   # Bolt protocol
+    volumes:
+      - neo4j_data:/data
+
+volumes:
+  neo4j_data:

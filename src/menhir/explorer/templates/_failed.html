@@ -1,0 +1,26 @@
+{% if failed_episodes %}
+<div class="list">
+  {% for ep in failed_episodes %}
+  <div class="row-card" style="border-left: 4px solid var(--failed)">
+    <button data-node-uuid="{{ ep.uuid }}">
+      <div class="meta" style="margin-bottom:0.25rem">Failed: <span class="utc-time" data-utc="{{ ep.failed_at }}">{{ ep.failed_at }}</span></div>
+      
+      <!-- Error Message First -->
+      <div style="background:rgba(239, 68, 68, 0.1); color:var(--failed); padding:0.5rem; border-radius:6px; font-family:ui-monospace, monospace; font-size:0.75rem; border:1px solid rgba(239, 68, 68, 0.2); margin-bottom:0.5rem">
+        {{ ep.processing_error }}
+      </div>
+
+      <div class="row-card-content-header">{{ ep.preview }}</div>
+      <div class="meta episode-name-toggle">Name: {{ ep.name }}</div>
+      <div class="badge-row">
+        <span class="badge failed">FAILED</span>
+        <span class="badge">Attempt {{ ep.processing_attempts }}</span>
+        <span class="badge session row-card-code">{{ ep.session_id }}</span>
+      </div>
+    </button>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<p class="muted-empty">No recent enrichment failures.</p>
+{% endif %}

@@ -1,0 +1,109 @@
+{
+  "summary": {
+    "test_cases": 3,
+    "scored": 3,
+    "true_positive_preserved": 1,
+    "clean": 1,
+    "boundaries_rejected": 3,
+    "boundaries_cases": 3
+  },
+  "results": [
+    {
+      "fixture_qid": "lme-830ce83f",
+      "raw_response": "{\"message\":{\"subject\":\"Rachel\",\"slot\":\"current residence\",\"new_value\":\"suburbs\",\"evidence\":\"my friend Rachel actually just moved back to the suburbs again\"},\"candidates\":[{\"id\":\"lme-830ce83f_cand3\",\"subject\":\"Rachel\",\"slot\":\"current residence\",\"old_value\":\"unknown\",\"same_slot\":true,\"evidence\":\"Rachel mentioned something about her living situation changing.\"}],\"selected_candidate_ids\":[\"lme-830ce83f_cand3\"]}",
+      "selected_ids": [
+        "lme-830ce83f_cand3"
+      ],
+      "true_positive_preserved": false,
+      "any_negative_selected": true,
+      "boundaries_selected": false,
+      "parsed_audit": {
+        "message": {
+          "subject": "Rachel",
+          "slot": "current residence",
+          "new_value": "suburbs",
+          "evidence": "my friend Rachel actually just moved back to the suburbs again"
+        },
+        "candidates": [
+          {
+            "id": "lme-830ce83f_cand3",
+            "subject": "Rachel",
+            "slot": "current residence",
+            "old_value": "unknown",
+            "same_slot": true,
+            "evidence": "Rachel mentioned something about her living situation changing."
+          }
+        ],
+        "selected_candidate_ids": [
+          "lme-830ce83f_cand3"
+        ]
+      }
+    },
+    {
+      "fixture_qid": "lme-852ce960",
+      "raw_response": "{\"message\": {\"subject\": \"user\", \"slot\": \"pre-approval amount\", \"new_value\": \"$400,000\", \"evidence\": \"remember when I got pre-approved for $400,000 from Wells Fargo?\"}, \"candidates\": [{\"id\": \"lme-852ce960_cand2\", \"subject\": \"user\", \"slot\": \"pre-approval amount\", \"old_value\": \"$325,000\", \"same_slot\": true, \"evidence\": \"The user was initially pre-approved for a $325,000 mortgage from Wells Fargo.\"}, {\"id\": \"lme-852ce960_cand4\", \"subject\": \"user\", \"slot\": \"pre-approval amount\", \"old_value\": \"$350,000\", \"same_slot\": true, \"evidence\": \"The user was previously pre-approved for a $350,000 mortgage from Wells Fargo.\"}], \"selected_candidate_ids\": []}",
+      "selected_ids": [],
+      "true_positive_preserved": false,
+      "any_negative_selected": false,
+      "boundaries_selected": false,
+      "parsed_audit": {
+        "message": {
+          "subject": "user",
+          "slot": "pre-approval amount",
+          "new_value": "$400,000",
+          "evidence": "remember when I got pre-approved for $400,000 from Wells Fargo?"
+        },
+        "candidates": [
+          {
+            "id": "lme-852ce960_cand2",
+            "subject": "user",
+            "slot": "pre-approval amount",
+            "old_value": "$325,000",
+            "same_slot": true,
+            "evidence": "The user was initially pre-approved for a $325,000 mortgage from Wells Fargo."
+          },
+          {
+            "id": "lme-852ce960_cand4",
+            "subject": "user",
+            "slot": "pre-approval amount",
+            "old_value": "$350,000",
+            "same_slot": true,
+            "evidence": "The user was previously pre-approved for a $350,000 mortgage from Wells Fargo."
+          }
+        ],
+        "selected_candidate_ids": []
+      }
+    },
+    {
+      "fixture_qid": "lme-2698e78f",
+      "raw_response": "{\"message\":{\"subject\":\"user\",\"slot\":\"session frequency\",\"new_value\":\"every week\",\"evidence\":\"I see Dr. Smith every week\"},\"candidates\":[{\"id\":\"lme-2698e78f_cand6\",\"subject\":\"user\",\"slot\":\"session frequency\",\"old_value\":\"every two weeks\",\"same_slot\":true,\"evidence\":\"the user previously said their therapy sessions with Dr. Smith are every two weeks\"}],\"selected_candidate_ids\":[\"lme-2698e78f_cand6\"]}",
+      "selected_ids": [
+        "lme-2698e78f_cand6"
+      ],
+      "true_positive_preserved": true,
+      "any_negative_selected": false,
+      "boundaries_selected": false,
+      "parsed_audit": {
+        "message": {
+          "subject": "user",
+          "slot": "session frequency",
+          "new_value": "every week",
+          "evidence": "I see Dr. Smith every week"
+        },
+        "candidates": [
+          {
+            "id": "lme-2698e78f_cand6",
+            "subject": "user",
+            "slot": "session frequency",
+            "old_value": "every two weeks",
+            "same_slot": true,
+            "evidence": "the user previously said their therapy sessions with Dr. Smith are every two weeks"
+          }
+        ],
+        "selected_candidate_ids": [
+          "lme-2698e78f_cand6"
+        ]
+      }
+    }
+  ]
+}

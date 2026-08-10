@@ -1,0 +1,23 @@
+episode_processing:
+  states:
+    PENDING:
+      meaning: Episode anchor exists and is waiting to be claimed for enrichment.
+      next: [ENRICHING, FAILED]
+    ENRICHING:
+      meaning: A worker owns the lease and is actively processing the episode.
+      next: [READY, FAILED, PENDING]
+    READY:
+      meaning: Enrichment completed and the episode has a resolved graph result.
+      next: []
+    FAILED:
+      meaning: Enrichment ended unsuccessfully or was made terminal by policy.
+      next: [PENDING]
+  common_stages:
+    queued: Waiting to be claimed.
+    graphiti_extracting: Graphiti extraction request is in flight or being watched.
+    stamping: Policy metadata is being applied to touched graph records.
+    rehydrating: Previously compressed nodes are being expanded after ingest.
+    finalizing: Final counters and terminal state are being written.
+  notes:
+    - READY and FAILED are terminal for a single attempt, not necessarily for the row forever.
+    - Exhausted rows should fail instead of being reset to dead PENDING.

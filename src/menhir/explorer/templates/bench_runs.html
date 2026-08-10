@@ -1,0 +1,113 @@
+{% extends 'base.html' %}
+
+{% block title %}Benchmark Tasks · yawn.memory{% endblock %}
+{% block body_class %}bench-runs-page{% endblock %}
+
+{% block app_main %}
+<main class='bench-shell'>
+  <section class='bench-hero'>
+    <div>
+      <div class='bench-kicker'>BENCHMARK TASKS</div>
+      <h1>LongMemEval Run Browser</h1>
+      <p>Browse LME benchmark runs, inspect per-task scores, and (for the active run) view live graph projections.</p>
+    </div>
+    <div class='contract-badge'>
+      <span class='contract-dot'></span>
+      bench-inspection/v1
+      <small>Read-only artifact explorer</small>
+    </div>
+  </section>
+
+  {% if runs %}
+  <div class='run-list'>
+    {% for run in runs %}
+    <a href='/explorer/recall-lab/bench-runs/{{ run.run_id }}' class='run-card'>
+      <div class='run-card-head'>
+        <h3>{{ run.label }}</h3>
+        {% if run.is_active %}
+        <span class='source-badge active-cfg'>ACTIVE</span>
+        {% elif run.live_graph_source_run_id %}
+        <span class='source-badge live'>LIVE SOURCE</span>
+        {% else %}
+        <span class='source-badge artifact'>ARTIFACT</span>
+        {% endif %}
+      </div>
+      <div class='run-card-meta'>
+        <span>variant: {{ run.variant }}</span>
+        <span>{{ run.completed_items }}/{{ run.total_items }} items</span>
+        {% if run.started_at %}
+        <span>{{ run.started_at[:10] }}</span>
+        {% endif %}
+      </div>
+      {% if run.source_warning %}
+      <div class='source-note'>{{ run.source_warning }}</div>
+      {% endif %}
+    </a>
+    {% endfor %}
+  </div>
+  {% elif configured is false %}
+  <div class='empty-state'>
+    <p>Benchmark catalog is not configured.</p>
+    <p class='muted'>Set MENHIR_BENCH_RESULTS_ROOT to point at the archolith-bench results directory.</p>
+  </div>
+  {% else %}
+  <div class='empty-state'>
+    <p>No benchmark runs found.</p>
+    <p class='muted'>The results directory does not contain any run data.</p>
+  </div>
+  {% endif %}
+</main>
+{% endblock %}
+
+{% block extra_head %}
+<style>
+.bench-shell {
+  max-width: 960px; margin: 0 auto; padding: 2rem 1.5rem;
+  box-sizing: border-box; width: 100%; flex: 1; overflow-y: auto;
+}
+.bench-hero {
+  display: flex; justify-content: space-between; align-items: start;
+  gap: 2rem; margin-bottom: 2rem;
+}
+.bench-hero h1 { font-size: 1.75rem; margin: 0 0 0.5rem; }
+.bench-kicker {
+  color: var(--accent); font-size: 0.75rem;
+  text-transform: uppercase; letter-spacing: 0.1em; font-weight: 700; margin-bottom: 0.25rem;
+}
+.contract-badge {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: 8px; padding: 0.75rem 1rem; text-align: center;
+  font-size: 0.8rem; color: var(--accent); font-weight: 700; white-space: nowrap;
+}
+.contract-badge small {
+  display: block; color: var(--text-muted); font-weight: 400; font-size: 0.7rem; margin-top: 0.25rem;
+}
+.contract-dot {
+  display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--accent); margin-right: 0.5rem; vertical-align: middle;
+}
+.run-list { display: flex; flex-direction: column; gap: 0.75rem; }
+.run-card {
+  display: block; background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: 12px; padding: 1.25rem; text-decoration: none; color: inherit;
+  transition: all 0.25s;
+}
+.run-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+.run-card-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
+.run-card-head h3 { margin: 0; font-size: 1.1rem; }
+.run-card-meta { display: flex; gap: 1rem; font-size: 0.8rem; color: var(--text-muted); }
+.source-badge {
+  font-size: 0.65rem; padding: 0.25rem 0.6rem; border-radius: 6px;
+  font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+}
+.source-badge.live { color: #10b981; background: rgba(16,185,129,0.15); }
+.source-badge.artifact { color: #f59e0b; background: rgba(245,158,11,0.15); }
+.source-badge.active-cfg { color: #58a6ff; background: rgba(88,166,255,0.15); }
+.source-note {
+  margin-top: 0.5rem; font-size: 0.75rem; color: var(--text-muted);
+  padding: 0.4rem 0.6rem; background: rgba(245,158,11,0.08);
+  border-radius: 6px; border: 1px solid rgba(245,158,11,0.15);
+}
+.empty-state { text-align: center; padding: 4rem 2rem; color: var(--text-muted); }
+</style>
+{% endblock %}

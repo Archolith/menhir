@@ -1,0 +1,20 @@
+{% if recovered_episodes %}
+<div class="list">
+  {% for ep in recovered_episodes %}
+  <div class="row-card" style="border-left: 4px solid var(--persistent)">
+    <button data-node-uuid="{{ ep.uuid }}">
+      <div class="meta" style="margin-bottom:0.25rem">Recovered: <span class="utc-time" data-utc="{{ ep.recovered_at }}">{{ ep.recovered_at }}</span></div>
+      <div class="row-card-content-header">{{ ep.preview }}</div>
+      <div class="meta episode-name-toggle">Name: {{ ep.name }}</div>
+      <div class="badge-row">
+        <span class="badge recovered">RECOVERED</span>
+        <span class="badge">Attempts: {{ ep.processing_attempts }}</span>
+        <span class="badge session row-card-code">{{ ep.session_id }}</span>
+      </div>
+    </button>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<p class="muted-empty">No recovered enrichments yet.</p>
+{% endif %}

@@ -1,0 +1,37 @@
+{
+  "scenario": "session_consolidation",
+  "description": "Ingest memories then consolidate — verify scope transitions",
+  "session_id": "replay-session-002",
+  "steps": [
+    {
+      "action": "ingest",
+      "text": "The project uses Python 3.12 with asyncio",
+      "source": "replay-test",
+      "expect": {
+        "status": "INGESTED"
+      }
+    },
+    {
+      "action": "ingest",
+      "text": "Neo4j is the graph database backend",
+      "source": "replay-test",
+      "expect": {
+        "status": "INGESTED"
+      }
+    },
+    {
+      "action": "consolidate_session",
+      "expect": {
+        "promoted_min": 0,
+        "conflicts_detected_min": 0
+      }
+    },
+    {
+      "action": "recover_orphans",
+      "max_age_hours": 0.001,
+      "expect": {
+        "promoted_min": 0
+      }
+    }
+  ]
+}

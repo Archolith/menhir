@@ -1,0 +1,99 @@
+{% extends 'base.html' %}
+
+{% block title %}Recall Lab · yawn.memory{% endblock %}
+{% block body_class %}recall-lab-page{% endblock %}
+
+{% block extra_head %}
+  <link rel='stylesheet' href='/explorer/static/recall-lab.css'>
+{% endblock %}
+
+{% block app_main %}
+<main class='lab-shell'>
+  <section class='lab-hero'>
+    <div>
+      <div class='lab-kicker'>RETRIEVAL WORKBENCH</div>
+      <h1>Recall Lab</h1>
+      <p>Run one or many queries through production, A, B, and C. Compare the ranked memories yourself or let a blinded LLM judge them.</p>
+    </div>
+    <div class='safety-card'>
+      <span class='safety-dot'></span>
+      Pure read
+      <small>No access touches, edge reinforcement, or rehydration scheduling.</small>
+    </div>
+  </section>
+
+  <form id='recall-lab-form' class='lab-form'>
+    <section class='query-panel'>
+      <label for='lab-query'>Queries <span class='label-hint'>one per line</span></label>
+      <textarea id='lab-query' rows='5' maxlength='20000' required placeholder='yawn.rip vps&#10;menhir content embeddings&#10;home-media deployment'></textarea>
+      <div class='shared-controls'>
+        <label>Preset
+          <select id='lab-preset'>
+            <option value='knowledge'>knowledge</option>
+            <option value='recent'>recent</option>
+            <option value='connected'>connected</option>
+            <option value='emotional'>emotional</option>
+            <option value='conflict'>conflict</option>
+          </select>
+        </label>
+        <label>Namespace
+          <input id='lab-namespace' maxlength='200' placeholder='all visible groups'>
+        </label>
+        <label>Results
+          <input id='lab-limit' type='number' min='1' max='50' value='10'>
+        </label>
+        <label>Candidates
+          <input id='lab-candidate-k' type='number' min='1' max='200' value='50'>
+        </label>
+      </div>
+      <div class='shared-switches'>
+        <label><input id='lab-include-session' type='checkbox'> Include session memories</label>
+        <label><input id='lab-include-superseded' type='checkbox'> Include superseded views</label>
+        <label><input id='lab-include-invalidated' type='checkbox'> Include invalidated facts</label>
+        <label><input id='lab-judge' type='checkbox' checked> Blinded LLM judge</label>
+        <label>Judge passes
+          <select id='lab-judge-passes'>
+            <option value='1'>1 · faster</option>
+            <option value='2' selected>2 · stability check</option>
+          </select>
+        </label>
+      </div>
+    </section>
+
+    <div class='section-heading'>
+      <div>
+        <h2>Experiment arms</h2>
+        <p>Every enabled arm receives the same query and shared controls.</p>
+      </div>
+      <button id='add-arm' type='button' class='secondary-button'>+ Add arm</button>
+    </div>
+    <section id='arms-editor' class='arms-editor'></section>
+
+    <div class='run-bar'>
+      <div id='lab-status' aria-live='polite'>Ready.</div>
+      <button id='run-lab' type='submit' class='run-button'>Run experiment</button>
+    </div>
+  </form>
+
+  <section id='lab-results' class='lab-results' aria-live='polite'>
+    <div class='empty-state'>Results will appear here in comparable columns.</div>
+  </section>
+
+  <section class='lab-history-panel'>
+    <div class='section-heading'>
+      <div>
+        <h2>Saved runs</h2>
+        <p>Durable experiment history from this Menhir instance.</p>
+      </div>
+      <button id='refresh-history' type='button' class='secondary-button'>Refresh</button>
+    </div>
+    <div id='lab-history'><div class='empty-state'>Loading saved runs…</div></div>
+  </section>
+</main>
+
+<script id='recall-lab-defaults' type='application/json'>{{ default_arms|tojson }}</script>
+{% endblock %}
+
+{% block extra_scripts %}
+  <script src='/explorer/static/recall-lab.js'></script>
+{% endblock %}

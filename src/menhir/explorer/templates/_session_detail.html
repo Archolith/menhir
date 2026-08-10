@@ -1,0 +1,25 @@
+<div class="stack">
+  <div class="detail-grid">
+    <div class="detail-box"><strong>Session ID</strong><div class="meta">{{ session.session_id }}</div></div>
+    <div class="detail-box"><strong>Node Count</strong><div>{{ session.node_count }}</div></div>
+    <div class="detail-box"><strong>Episode Count</strong><div>{{ session.episode_count }}</div></div>
+  </div>
+
+  <div class="detail-box">
+    <strong>Session Nodes</strong>
+    <div class="list">
+      {% for node in session.nodes %}
+      <div class="row-card">
+        <button data-node-uuid="{{ node.uuid }}">
+          <strong>{{ node.name }}</strong>
+          <div class="meta">{{ node.labels|join(", ") }}</div>
+          <div class="badge-row">
+            <span class="badge {{ (node.scope or 'unknown')|lower }}">{{ node.scope or "unknown" }}</span>
+            <span class="badge">{{ node.source or "unknown" }}</span>
+          </div>
+        </button>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>

@@ -1,0 +1,1035 @@
+[
+  {
+    "trial": 1,
+    "namespace": "grounding-trace-1ac123ef",
+    "model": "gpt-4o-mini",
+    "temperature": 0,
+    "raw_extracted_entities": [
+      "Rachel",
+      "the suburbs"
+    ],
+    "raw_extracted_edges": [
+      {
+        "source": "Rachel",
+        "target": "the suburbs",
+        "fact": "Rachel moved back to the suburbs."
+      }
+    ],
+    "orphaned_entities": [],
+    "dedup_decisions": [
+      {
+        "extracted": "Rachel",
+        "resolved_to": "Rachel",
+        "was_merged": true
+      },
+      {
+        "extracted": "the suburbs",
+        "resolved_to": "the suburbs",
+        "was_merged": false
+      }
+    ],
+    "uuid_map": {
+      "b2af761e-4bea-465e-84d4-7828ecf1917f": "a3a9a0b5-e89f-4a33-a666-1d6475c66c27",
+      "8b39b10c-c213-405d-9f90-2649761912ab": "8b39b10c-c213-405d-9f90-2649761912ab"
+    },
+    "edge_traces": [],
+    "invalidation_traces": [
+      {
+        "new_fact": "Rachel lives in Chicago.",
+        "new_src": "a3a9a0b5-e89f-4a33-a666-1d6475c66c27",
+        "new_tgt": "4af08995-dbec-4c87-b544-55e489e03a8d",
+        "related_edges": [],
+        "invalidation_candidates": [],
+        "chicago_in_candidates": false,
+        "invalidated_facts": [],
+        "resolved_fact": "Rachel lives in Chicago.",
+        "resolved_expired": false
+      },
+      {
+        "new_fact": "Rachel moved back to the suburbs.",
+        "new_src": "a3a9a0b5-e89f-4a33-a666-1d6475c66c27",
+        "new_tgt": "8b39b10c-c213-405d-9f90-2649761912ab",
+        "related_edges": [],
+        "invalidation_candidates": [
+          {
+            "idx": 0,
+            "fact": "Rachel lives in Chicago.",
+            "src": "a3a9a0b5-e89f-4a33-a666-1d6475c66c27",
+            "tgt": "4af08995-dbec-4c87-b544-55e489e03a8d",
+            "expired": false
+          }
+        ],
+        "chicago_in_candidates": true,
+        "llm_response": {
+          "duplicate_facts": [],
+          "contradicted_facts": [
+            0
+          ]
+        },
+        "prompt_snippet": "\nNEVER mark facts as duplicates if they have key differences, particularly around numeric values, dates, or key qualifiers.\n\nIMPORTANT constraints:\n- duplicate_facts: ONLY idx values from EXISTING FACTS (NEVER include FACT INVALIDATION CANDIDATES)\n- contradicted_facts: idx values from EITHER list (EXISTING FACTS or FACT INVALIDATION CANDIDATES)\n- The idx values are continuous across both lists (INVALIDATION CANDIDATES start where EXISTING FACTS end)\n\n<EXISTING FACTS>\n[]\n</EXISTING FACTS>\n\n<FACT ",
+        "invalidated_facts": [
+          {
+            "fact": "Rachel lives in Chicago.",
+            "src": "a3a9a0b5-e89f-4a33-a666-1d6475c66c27",
+            "tgt": "4af08995-dbec-4c87-b544-55e489e03a8d"
+          }
+        ],
+        "resolved_fact": "Rachel moved back to the suburbs.",
+        "resolved_expired": false
+      }
+    ],
+    "final_entities": [
+      "Chicago",
+      "Rachel",
+      "the suburbs"
+    ],
+    "final_edges": [
+      {
+        "src": "Rachel",
+        "tgt": "the suburbs",
+        "fact": "Rachel moved back to the suburbs.",
+        "expired": false
+      },
+      {
+        "src": "Rachel",
+        "tgt": "Chicago",
+        "fact": "Rachel lives in Chicago.",
+        "expired": true
+      }
+    ],
+    "suburb_entity_exists": true,
+    "suburb_edge_correct": true,
+    "chicago_edge_expired": true,
+    "verdict": "PASS"
+  },
+  {
+    "trial": 2,
+    "namespace": "grounding-trace-336ee934",
+    "model": "gpt-4o-mini",
+    "temperature": 0,
+    "raw_extracted_entities": [
+      "Rachel",
+      "the suburbs"
+    ],
+    "raw_extracted_edges": [
+      {
+        "source": "Rachel",
+        "target": "the suburbs",
+        "fact": "Rachel moved back to the suburbs."
+      }
+    ],
+    "orphaned_entities": [],
+    "dedup_decisions": [
+      {
+        "extracted": "Rachel",
+        "resolved_to": "Rachel",
+        "was_merged": true
+      },
+      {
+        "extracted": "the suburbs",
+        "resolved_to": "the suburbs",
+        "was_merged": false
+      }
+    ],
+    "uuid_map": {
+      "a1ca59bd-33b1-4f7f-9d57-001ade3916bd": "56a53a40-052c-49db-87d0-888dc819a600",
+      "191df714-ffb1-4dc9-a874-b015488c5693": "191df714-ffb1-4dc9-a874-b015488c5693"
+    },
+    "edge_traces": [],
+    "invalidation_traces": [
+      {
+        "new_fact": "Rachel lives in Chicago.",
+        "new_src": "56a53a40-052c-49db-87d0-888dc819a600",
+        "new_tgt": "ab8f1579-13c2-4a57-8234-95165b6c5c30",
+        "related_edges": [],
+        "invalidation_candidates": [],
+        "chicago_in_candidates": false,
+        "invalidated_facts": [],
+        "resolved_fact": "Rachel lives in Chicago.",
+        "resolved_expired": false
+      },
+      {
+        "new_fact": "Rachel moved back to the suburbs.",
+        "new_src": "56a53a40-052c-49db-87d0-888dc819a600",
+        "new_tgt": "191df714-ffb1-4dc9-a874-b015488c5693",
+        "related_edges": [],
+        "invalidation_candidates": [
+          {
+            "idx": 0,
+            "fact": "Rachel lives in Chicago.",
+            "src": "56a53a40-052c-49db-87d0-888dc819a600",
+            "tgt": "ab8f1579-13c2-4a57-8234-95165b6c5c30",
+            "expired": false
+          }
+        ],
+        "chicago_in_candidates": true,
+        "llm_response": {
+          "duplicate_facts": [],
+          "contradicted_facts": [
+            0
+          ]
+        },
+        "prompt_snippet": "\nNEVER mark facts as duplicates if they have key differences, particularly around numeric values, dates, or key qualifiers.\n\nIMPORTANT constraints:\n- duplicate_facts: ONLY idx values from EXISTING FACTS (NEVER include FACT INVALIDATION CANDIDATES)\n- contradicted_facts: idx values from EITHER list (EXISTING FACTS or FACT INVALIDATION CANDIDATES)\n- The idx values are continuous across both lists (INVALIDATION CANDIDATES start where EXISTING FACTS end)\n\n<EXISTING FACTS>\n[]\n</EXISTING FACTS>\n\n<FACT ",
+        "invalidated_facts": [
+          {
+            "fact": "Rachel lives in Chicago.",
+            "src": "56a53a40-052c-49db-87d0-888dc819a600",
+            "tgt": "ab8f1579-13c2-4a57-8234-95165b6c5c30"
+          }
+        ],
+        "resolved_fact": "Rachel moved back to the suburbs.",
+        "resolved_expired": false
+      }
+    ],
+    "final_entities": [
+      "Chicago",
+      "Rachel",
+      "the suburbs"
+    ],
+    "final_edges": [
+      {
+        "src": "Rachel",
+        "tgt": "the suburbs",
+        "fact": "Rachel moved back to the suburbs.",
+        "expired": false
+      },
+      {
+        "src": "Rachel",
+        "tgt": "Chicago",
+        "fact": "Rachel lives in Chicago.",
+        "expired": true
+      }
+    ],
+    "suburb_entity_exists": true,
+    "suburb_edge_correct": true,
+    "chicago_edge_expired": true,
+    "verdict": "PASS"
+  },
+  {
+    "trial": 3,
+    "namespace": "grounding-trace-e00176d9",
+    "model": "gpt-4o-mini",
+    "temperature": 0,
+    "raw_extracted_entities": [
+      "Rachel",
+      "the suburbs"
+    ],
+    "raw_extracted_edges": [
+      {
+        "source": "Rachel",
+        "target": "the suburbs",
+        "fact": "Rachel moved back to the suburbs."
+      }
+    ],
+    "orphaned_entities": [],
+    "dedup_decisions": [
+      {
+        "extracted": "Rachel",
+        "resolved_to": "Rachel",
+        "was_merged": true
+      },
+      {
+        "extracted": "the suburbs",
+        "resolved_to": "the suburbs",
+        "was_merged": false
+      }
+    ],
+    "uuid_map": {
+      "3ab88560-7336-4990-9d12-041fee1a2450": "7f7464dc-637f-4d17-93ab-d80b17f802bb",
+      "a690bbf9-dbbb-4150-96eb-06c53679f8ae": "a690bbf9-dbbb-4150-96eb-06c53679f8ae"
+    },
+    "edge_traces": [],
+    "invalidation_traces": [
+      {
+        "new_fact": "Rachel lives in Chicago.",
+        "new_src": "7f7464dc-637f-4d17-93ab-d80b17f802bb",
+        "new_tgt": "e5a65875-2aa4-4db8-9946-d7ae895734da",
+        "related_edges": [],
+        "invalidation_candidates": [],
+        "chicago_in_candidates": false,
+        "invalidated_facts": [],
+        "resolved_fact": "Rachel lives in Chicago.",
+        "resolved_expired": false
+      },
+      {
+        "new_fact": "Rachel moved back to the suburbs.",
+        "new_src": "7f7464dc-637f-4d17-93ab-d80b17f802bb",
+        "new_tgt": "a690bbf9-dbbb-4150-96eb-06c53679f8ae",
+        "related_edges": [],
+        "invalidation_candidates": [
+          {
+            "idx": 0,
+            "fact": "Rachel lives in Chicago.",
+            "src": "7f7464dc-637f-4d17-93ab-d80b17f802bb",
+            "tgt": "e5a65875-2aa4-4db8-9946-d7ae895734da",
+            "expired": false
+          }
+        ],
+        "chicago_in_candidates": true,
+        "llm_response": {
+          "duplicate_facts": [],
+          "contradicted_facts": [
+            0
+          ]
+        },
+        "prompt_snippet": "\nNEVER mark facts as duplicates if they have key differences, particularly around numeric values, dates, or key qualifiers.\n\nIMPORTANT constraints:\n- duplicate_facts: ONLY idx values from EXISTING FACTS (NEVER include FACT INVALIDATION CANDIDATES)\n- contradicted_facts: idx values from EITHER list (EXISTING FACTS or FACT INVALIDATION CANDIDATES)\n- The idx values are continuous across both lists (INVALIDATION CANDIDATES start where EXISTING FACTS end)\n\n<EXISTING FACTS>\n[]\n</EXISTING FACTS>\n\n<FACT ",
+        "invalidated_facts": [
+          {
+            "fact": "Rachel lives in Chicago.",
+            "src": "7f7464dc-637f-4d17-93ab-d80b17f802bb",
+            "tgt": "e5a65875-2aa4-4db8-9946-d7ae895734da"
+          }
+        ],
+        "resolved_fact": "Rachel moved back to the suburbs.",
+        "resolved_expired": false
+      }
+    ],
+    "final_entities": [
+      "Chicago",
+      "Rachel",
+      "the suburbs"
+    ],
+    "final_edges": [
+      {
+        "src": "Rachel",
+        "tgt": "the suburbs",
+        "fact": "Rachel moved back to the suburbs.",
+        "expired": false
+      },
+      {
+        "src": "Rachel",
+        "tgt": "Chicago",
+        "fact": "Rachel lives in Chicago.",
+        "expired": true
+      }
+    ],
+    "suburb_entity_exists": true,
+    "suburb_edge_correct": true,
+    "chicago_edge_expired": true,
+    "verdict": "PASS"
+  },
+  {
+    "trial": 4,
+    "namespace": "grounding-trace-1a3bcd01",
+    "model": "gpt-4o-mini",
+    "temperature": 0,
+    "raw_extracted_entities": [
+      "Rachel",
+      "the suburbs"
+    ],
+    "raw_extracted_edges": [
+      {
+        "source": "Rachel",
+        "target": "the suburbs",
+        "fact": "Rachel has moved back to the suburbs."
+      }
+    ],
+    "orphaned_entities": [],
+    "dedup_decisions": [
+      {
+        "extracted": "Rachel",
+        "resolved_to": "Rachel",
+        "was_merged": true
+      },
+      {
+        "extracted": "the suburbs",
+        "resolved_to": "the suburbs",
+        "was_merged": false
+      }
+    ],
+    "uuid_map": {
+      "f7f23945-72bf-4d2a-ae72-4644613548ee": "8cf3e63f-bb68-4216-9955-d16c123ca1a0",
+      "d930394e-afbf-4c27-bb2e-fc5f08a1ec80": "d930394e-afbf-4c27-bb2e-fc5f08a1ec80"
+    },
+    "edge_traces": [],
+    "invalidation_traces": [
+      {
+        "new_fact": "Rachel lives in Chicago.",
+        "new_src": "8cf3e63f-bb68-4216-9955-d16c123ca1a0",
+        "new_tgt": "c5f66779-bb81-488b-9620-58f4fded4d22",
+        "related_edges": [],
+        "invalidation_candidates": [],
+        "chicago_in_candidates": false,
+        "invalidated_facts": [],
+        "resolved_fact": "Rachel lives in Chicago.",
+        "resolved_expired": false
+      },
+      {
+        "new_fact": "Rachel has moved back to the suburbs.",
+        "new_src": "8cf3e63f-bb68-4216-9955-d16c123ca1a0",
+        "new_tgt": "d930394e-afbf-4c27-bb2e-fc5f08a1ec80",
+        "related_edges": [],
+        "invalidation_candidates": [
+          {
+            "idx": 0,
+            "fact": "Rachel lives in Chicago.",
+            "src": "8cf3e63f-bb68-4216-9955-d16c123ca1a0",
+            "tgt": "c5f66779-bb81-488b-9620-58f4fded4d22",
+            "expired": false
+          }
+        ],
+        "chicago_in_candidates": true,
+        "llm_response": {
+          "duplicate_facts": [],
+          "contradicted_facts": [
+            0
+          ]
+        },
+        "prompt_snippet": "\nNEVER mark facts as duplicates if they have key differences, particularly around numeric values, dates, or key qualifiers.\n\nIMPORTANT constraints:\n- duplicate_facts: ONLY idx values from EXISTING FACTS (NEVER include FACT INVALIDATION CANDIDATES)\n- contradicted_facts: idx values from EITHER list (EXISTING FACTS or FACT INVALIDATION CANDIDATES)\n- The idx values are continuous across both lists (INVALIDATION CANDIDATES start where EXISTING FACTS end)\n\n<EXISTING FACTS>\n[]\n</EXISTING FACTS>\n\n<FACT ",
+        "invalidated_facts": [
+          {
+            "fact": "Rachel lives in Chicago.",
+            "src": "8cf3e63f-bb68-4216-9955-d16c123ca1a0",
+            "tgt": "c5f66779-bb81-488b-9620-58f4fded4d22"
+          }
+        ],
+        "resolved_fact": "Rachel has moved back to the suburbs.",
+        "resolved_expired": false
+      }
+    ],
+    "final_entities": [
+      "Chicago",
+      "Rachel",
+      "the suburbs"
+    ],
+    "final_edges": [
+      {
+        "src": "Rachel",
+        "tgt": "the suburbs",
+        "fact": "Rachel has moved back to the suburbs.",
+        "expired": false
+      },
+      {
+        "src": "Rachel",
+        "tgt": "Chicago",
+        "fact": "Rachel lives in Chicago.",
+        "expired": true
+      }
+    ],
+    "suburb_entity_exists": true,
+    "suburb_edge_correct": true,
+    "chicago_edge_expired": true,
+    "verdict": "PASS"
+  },
+  {
+    "trial": 5,
+    "namespace": "grounding-trace-d6f48d9c",
+    "model": "gpt-4o-mini",
+    "temperature": 0,
+    "raw_extracted_entities": [
+      "Rachel",
+      "the suburbs"
+    ],
+    "raw_extracted_edges": [
+      {
+        "source": "Rachel",
+        "target": "the suburbs",
+        "fact": "Rachel moved back to the suburbs."
+      }
+    ],
+    "orphaned_entities": [],
+    "dedup_decisions": [
+      {
+        "extracted": "Rachel",
+        "resolved_to": "Rachel",
+        "was_merged": true
+      },
+      {
+        "extracted": "the suburbs",
+        "resolved_to": "the suburbs",
+        "was_merged": false
+      }
+    ],
+    "uuid_map": {
+      "b4d18f59-824f-4377-a68a-672179359899": "1297cd35-0800-416d-9eae-4fdf96c90a92",
+      "729c7772-24cb-40f8-af5c-a3ebed46c157": "729c7772-24cb-40f8-af5c-a3ebed46c157"
+    },
+    "edge_traces": [],
+    "invalidation_traces": [
+      {
+        "new_fact": "Rachel lives in Chicago.",
+        "new_src": "1297cd35-0800-416d-9eae-4fdf96c90a92",
+        "new_tgt": "0b8a8a9e-3e16-4488-8e46-c98352b72b85",
+        "related_edges": [],
+        "invalidation_candidates": [],
+        "chicago_in_candidates": false,
+        "invalidated_facts": [],
+        "resolved_fact": "Rachel lives in Chicago.",
+        "resolved_expired": false
+      },
+      {
+        "new_fact": "Rachel moved back to the suburbs.",
+        "new_src": "1297cd35-0800-416d-9eae-4fdf96c90a92",
+        "new_tgt": "729c7772-24cb-40f8-af5c-a3ebed46c157",
+        "related_edges": [],
+        "invalidation_candidates": [
+          {
+            "idx": 0,
+            "fact": "Rachel lives in Chicago.",
+            "src": "1297cd35-0800-416d-9eae-4fdf96c90a92",
+            "tgt": "0b8a8a9e-3e16-4488-8e46-c98352b72b85",
+            "expired": false
+          }
+        ],
+        "chicago_in_candidates": true,
+        "llm_response": {
+          "duplicate_facts": [],
+          "contradicted_facts": [
+            0
+          ]
+        },
+        "prompt_snippet": "\nNEVER mark facts as duplicates if they have key differences, particularly around numeric values, dates, or key qualifiers.\n\nIMPORTANT constraints:\n- duplicate_facts: ONLY idx values from EXISTING FACTS (NEVER include FACT INVALIDATION CANDIDATES)\n- contradicted_facts: idx values from EITHER list (EXISTING FACTS or FACT INVALIDATION CANDIDATES)\n- The idx values are continuous across both lists (INVALIDATION CANDIDATES start where EXISTING FACTS end)\n\n<EXISTING FACTS>\n[]\n</EXISTING FACTS>\n\n<FACT ",
+        "invalidated_facts": [
+          {
+            "fact": "Rachel lives in Chicago.",
+            "src": "1297cd35-0800-416d-9eae-4fdf96c90a92",
+            "tgt": "0b8a8a9e-3e16-4488-8e46-c98352b72b85"
+          }
+        ],
+        "resolved_fact": "Rachel moved back to the suburbs.",
+        "resolved_expired": false
+      }
+    ],
+    "final_entities": [
+      "Chicago",
+      "Rachel",
+      "the suburbs"
+    ],
+    "final_edges": [
+      {
+        "src": "Rachel",
+        "tgt": "the suburbs",
+        "fact": "Rachel moved back to the suburbs.",
+        "expired": false
+      },
+      {
+        "src": "Rachel",
+        "tgt": "Chicago",
+        "fact": "Rachel lives in Chicago.",
+        "expired": true
+      }
+    ],
+    "suburb_entity_exists": true,
+    "suburb_edge_correct": true,
+    "chicago_edge_expired": true,
+    "verdict": "PASS"
+  },
+  {
+    "trial": 6,
+    "namespace": "grounding-trace-ba95f56b",
+    "model": "gpt-4o-mini",
+    "temperature": 0,
+    "raw_extracted_entities": [
+      "Rachel",
+      "the suburbs"
+    ],
+    "raw_extracted_edges": [
+      {
+        "source": "Rachel",
+        "target": "the suburbs",
+        "fact": "Rachel moved back to the suburbs."
+      }
+    ],
+    "orphaned_entities": [],
+    "dedup_decisions": [
+      {
+        "extracted": "Rachel",
+        "resolved_to": "Rachel",
+        "was_merged": true
+      },
+      {
+        "extracted": "the suburbs",
+        "resolved_to": "the suburbs",
+        "was_merged": false
+      }
+    ],
+    "uuid_map": {
+      "14e864a9-0641-48fe-8621-ff2c7e3ad89b": "fce7e64a-5a58-48a0-819a-20cd740ebaf0",
+      "970f23b6-d995-43f7-9656-94444538fdac": "970f23b6-d995-43f7-9656-94444538fdac"
+    },
+    "edge_traces": [],
+    "invalidation_traces": [
+      {
+        "new_fact": "Rachel lives in Chicago.",
+        "new_src": "fce7e64a-5a58-48a0-819a-20cd740ebaf0",
+        "new_tgt": "86bb76a5-9709-4f54-a560-cdacf43069e1",
+        "related_edges": [],
+        "invalidation_candidates": [],
+        "chicago_in_candidates": false,
+        "invalidated_facts": [],
+        "resolved_fact": "Rachel lives in Chicago.",
+        "resolved_expired": false
+      },
+      {
+        "new_fact": "Rachel moved back to the suburbs.",
+        "new_src": "fce7e64a-5a58-48a0-819a-20cd740ebaf0",
+        "new_tgt": "970f23b6-d995-43f7-9656-94444538fdac",
+        "related_edges": [],
+        "invalidation_candidates": [
+          {
+            "idx": 0,
+            "fact": "Rachel lives in Chicago.",
+            "src": "fce7e64a-5a58-48a0-819a-20cd740ebaf0",
+            "tgt": "86bb76a5-9709-4f54-a560-cdacf43069e1",
+            "expired": false
+          }
+        ],
+        "chicago_in_candidates": true,
+        "llm_response": {
+          "duplicate_facts": [],
+          "contradicted_facts": [
+            0
+          ]
+        },
+        "prompt_snippet": "\nNEVER mark facts as duplicates if they have key differences, particularly around numeric values, dates, or key qualifiers.\n\nIMPORTANT constraints:\n- duplicate_facts: ONLY idx values from EXISTING FACTS (NEVER include FACT INVALIDATION CANDIDATES)\n- contradicted_facts: idx values from EITHER list (EXISTING FACTS or FACT INVALIDATION CANDIDATES)\n- The idx values are continuous across both lists (INVALIDATION CANDIDATES start where EXISTING FACTS end)\n\n<EXISTING FACTS>\n[]\n</EXISTING FACTS>\n\n<FACT ",
+        "invalidated_facts": [
+          {
+            "fact": "Rachel lives in Chicago.",
+            "src": "fce7e64a-5a58-48a0-819a-20cd740ebaf0",
+            "tgt": "86bb76a5-9709-4f54-a560-cdacf43069e1"
+          }
+        ],
+        "resolved_fact": "Rachel moved back to the suburbs.",
+        "resolved_expired": false
+      }
+    ],
+    "final_entities": [
+      "Chicago",
+      "Rachel",
+      "the suburbs"
+    ],
+    "final_edges": [
+      {
+        "src": "Rachel",
+        "tgt": "the suburbs",
+        "fact": "Rachel moved back to the suburbs.",
+        "expired": false
+      },
+      {
+        "src": "Rachel",
+        "tgt": "Chicago",
+        "fact": "Rachel lives in Chicago.",
+        "expired": true
+      }
+    ],
+    "suburb_entity_exists": true,
+    "suburb_edge_correct": true,
+    "chicago_edge_expired": true,
+    "verdict": "PASS"
+  },
+  {
+    "trial": 7,
+    "namespace": "grounding-trace-fe4e0b10",
+    "model": "gpt-4o-mini",
+    "temperature": 0,
+    "raw_extracted_entities": [
+      "Rachel",
+      "the suburbs"
+    ],
+    "raw_extracted_edges": [
+      {
+        "source": "Rachel",
+        "target": "the suburbs",
+        "fact": "Rachel moved back to the suburbs."
+      }
+    ],
+    "orphaned_entities": [],
+    "dedup_decisions": [
+      {
+        "extracted": "Rachel",
+        "resolved_to": "Rachel",
+        "was_merged": true
+      },
+      {
+        "extracted": "the suburbs",
+        "resolved_to": "the suburbs",
+        "was_merged": false
+      }
+    ],
+    "uuid_map": {
+      "cd9bdb27-d825-4157-8236-654abef218df": "323e0ff7-286b-4bf3-97f3-ea4eb69b05b2",
+      "f33ef8b6-bc71-4504-a332-bb5b02ba4b72": "f33ef8b6-bc71-4504-a332-bb5b02ba4b72"
+    },
+    "edge_traces": [],
+    "invalidation_traces": [
+      {
+        "new_fact": "Rachel lives in Chicago.",
+        "new_src": "323e0ff7-286b-4bf3-97f3-ea4eb69b05b2",
+        "new_tgt": "466b7c4a-afdc-4cca-b6c4-f313604cb728",
+        "related_edges": [],
+        "invalidation_candidates": [],
+        "chicago_in_candidates": false,
+        "invalidated_facts": [],
+        "resolved_fact": "Rachel lives in Chicago.",
+        "resolved_expired": false
+      },
+      {
+        "new_fact": "Rachel moved back to the suburbs.",
+        "new_src": "323e0ff7-286b-4bf3-97f3-ea4eb69b05b2",
+        "new_tgt": "f33ef8b6-bc71-4504-a332-bb5b02ba4b72",
+        "related_edges": [],
+        "invalidation_candidates": [
+          {
+            "idx": 0,
+            "fact": "Rachel lives in Chicago.",
+            "src": "323e0ff7-286b-4bf3-97f3-ea4eb69b05b2",
+            "tgt": "466b7c4a-afdc-4cca-b6c4-f313604cb728",
+            "expired": false
+          }
+        ],
+        "chicago_in_candidates": true,
+        "llm_response": {
+          "duplicate_facts": [],
+          "contradicted_facts": [
+            0
+          ]
+        },
+        "prompt_snippet": "\nNEVER mark facts as duplicates if they have key differences, particularly around numeric values, dates, or key qualifiers.\n\nIMPORTANT constraints:\n- duplicate_facts: ONLY idx values from EXISTING FACTS (NEVER include FACT INVALIDATION CANDIDATES)\n- contradicted_facts: idx values from EITHER list (EXISTING FACTS or FACT INVALIDATION CANDIDATES)\n- The idx values are continuous across both lists (INVALIDATION CANDIDATES start where EXISTING FACTS end)\n\n<EXISTING FACTS>\n[]\n</EXISTING FACTS>\n\n<FACT ",
+        "invalidated_facts": [
+          {
+            "fact": "Rachel lives in Chicago.",
+            "src": "323e0ff7-286b-4bf3-97f3-ea4eb69b05b2",
+            "tgt": "466b7c4a-afdc-4cca-b6c4-f313604cb728"
+          }
+        ],
+        "resolved_fact": "Rachel moved back to the suburbs.",
+        "resolved_expired": false
+      }
+    ],
+    "final_entities": [
+      "Chicago",
+      "Rachel",
+      "the suburbs"
+    ],
+    "final_edges": [
+      {
+        "src": "Rachel",
+        "tgt": "the suburbs",
+        "fact": "Rachel moved back to the suburbs.",
+        "expired": false
+      },
+      {
+        "src": "Rachel",
+        "tgt": "Chicago",
+        "fact": "Rachel lives in Chicago.",
+        "expired": true
+      }
+    ],
+    "suburb_entity_exists": true,
+    "suburb_edge_correct": true,
+    "chicago_edge_expired": true,
+    "verdict": "PASS"
+  },
+  {
+    "trial": 8,
+    "namespace": "grounding-trace-148cb65d",
+    "model": "gpt-4o-mini",
+    "temperature": 0,
+    "raw_extracted_entities": [
+      "Rachel",
+      "the suburbs"
+    ],
+    "raw_extracted_edges": [
+      {
+        "source": "Rachel",
+        "target": "the suburbs",
+        "fact": "Rachel moved back to the suburbs."
+      }
+    ],
+    "orphaned_entities": [],
+    "dedup_decisions": [
+      {
+        "extracted": "Rachel",
+        "resolved_to": "Rachel",
+        "was_merged": true
+      },
+      {
+        "extracted": "the suburbs",
+        "resolved_to": "the suburbs",
+        "was_merged": false
+      }
+    ],
+    "uuid_map": {
+      "17130b7d-d7de-4f96-8f61-5b599c11614e": "ffe5b0b3-92e5-43d7-8cd3-aa36644bae1e",
+      "d10976bf-182c-4a28-bf51-425fc881013e": "d10976bf-182c-4a28-bf51-425fc881013e"
+    },
+    "edge_traces": [],
+    "invalidation_traces": [
+      {
+        "new_fact": "Rachel lives in Chicago.",
+        "new_src": "ffe5b0b3-92e5-43d7-8cd3-aa36644bae1e",
+        "new_tgt": "5f2d5776-93c0-4eed-ac09-314bed28b989",
+        "related_edges": [],
+        "invalidation_candidates": [],
+        "chicago_in_candidates": false,
+        "invalidated_facts": [],
+        "resolved_fact": "Rachel lives in Chicago.",
+        "resolved_expired": false
+      },
+      {
+        "new_fact": "Rachel moved back to the suburbs.",
+        "new_src": "ffe5b0b3-92e5-43d7-8cd3-aa36644bae1e",
+        "new_tgt": "d10976bf-182c-4a28-bf51-425fc881013e",
+        "related_edges": [],
+        "invalidation_candidates": [
+          {
+            "idx": 0,
+            "fact": "Rachel lives in Chicago.",
+            "src": "ffe5b0b3-92e5-43d7-8cd3-aa36644bae1e",
+            "tgt": "5f2d5776-93c0-4eed-ac09-314bed28b989",
+            "expired": false
+          }
+        ],
+        "chicago_in_candidates": true,
+        "llm_response": {
+          "duplicate_facts": [],
+          "contradicted_facts": [
+            0
+          ]
+        },
+        "prompt_snippet": "\nNEVER mark facts as duplicates if they have key differences, particularly around numeric values, dates, or key qualifiers.\n\nIMPORTANT constraints:\n- duplicate_facts: ONLY idx values from EXISTING FACTS (NEVER include FACT INVALIDATION CANDIDATES)\n- contradicted_facts: idx values from EITHER list (EXISTING FACTS or FACT INVALIDATION CANDIDATES)\n- The idx values are continuous across both lists (INVALIDATION CANDIDATES start where EXISTING FACTS end)\n\n<EXISTING FACTS>\n[]\n</EXISTING FACTS>\n\n<FACT ",
+        "invalidated_facts": [
+          {
+            "fact": "Rachel lives in Chicago.",
+            "src": "ffe5b0b3-92e5-43d7-8cd3-aa36644bae1e",
+            "tgt": "5f2d5776-93c0-4eed-ac09-314bed28b989"
+          }
+        ],
+        "resolved_fact": "Rachel moved back to the suburbs.",
+        "resolved_expired": false
+      }
+    ],
+    "final_entities": [
+      "Chicago",
+      "Rachel",
+      "the suburbs"
+    ],
+    "final_edges": [
+      {
+        "src": "Rachel",
+        "tgt": "the suburbs",
+        "fact": "Rachel moved back to the suburbs.",
+        "expired": false
+      },
+      {
+        "src": "Rachel",
+        "tgt": "Chicago",
+        "fact": "Rachel lives in Chicago.",
+        "expired": true
+      }
+    ],
+    "suburb_entity_exists": true,
+    "suburb_edge_correct": true,
+    "chicago_edge_expired": true,
+    "verdict": "PASS"
+  },
+  {
+    "trial": 9,
+    "namespace": "grounding-trace-900af946",
+    "model": "gpt-4o-mini",
+    "temperature": 0,
+    "raw_extracted_entities": [
+      "Rachel",
+      "the suburbs",
+      "major city"
+    ],
+    "raw_extracted_edges": [
+      {
+        "source": "Rachel",
+        "target": "the suburbs",
+        "fact": "Rachel just moved back to the suburbs."
+      }
+    ],
+    "orphaned_entities": [
+      "major city"
+    ],
+    "dedup_decisions": [
+      {
+        "extracted": "Rachel",
+        "resolved_to": "Rachel",
+        "was_merged": true
+      },
+      {
+        "extracted": "the suburbs",
+        "resolved_to": "the suburbs",
+        "was_merged": false
+      }
+    ],
+    "uuid_map": {
+      "0c5255d2-8e04-41b7-97cb-6060dba75b5e": "3f824e30-6f39-4063-b30f-decf091909ab",
+      "00646b7b-ca32-42e9-9754-93a7797cecf1": "00646b7b-ca32-42e9-9754-93a7797cecf1"
+    },
+    "edge_traces": [],
+    "invalidation_traces": [
+      {
+        "new_fact": "Rachel lives in Chicago.",
+        "new_src": "3f824e30-6f39-4063-b30f-decf091909ab",
+        "new_tgt": "709b8b04-0210-42db-9310-aa6b633f76d2",
+        "related_edges": [],
+        "invalidation_candidates": [],
+        "chicago_in_candidates": false,
+        "invalidated_facts": [],
+        "resolved_fact": "Rachel lives in Chicago.",
+        "resolved_expired": false
+      },
+      {
+        "new_fact": "Rachel just moved back to the suburbs.",
+        "new_src": "3f824e30-6f39-4063-b30f-decf091909ab",
+        "new_tgt": "00646b7b-ca32-42e9-9754-93a7797cecf1",
+        "related_edges": [],
+        "invalidation_candidates": [
+          {
+            "idx": 0,
+            "fact": "Rachel lives in Chicago.",
+            "src": "3f824e30-6f39-4063-b30f-decf091909ab",
+            "tgt": "709b8b04-0210-42db-9310-aa6b633f76d2",
+            "expired": false
+          }
+        ],
+        "chicago_in_candidates": true,
+        "llm_response": {
+          "duplicate_facts": [],
+          "contradicted_facts": [
+            0
+          ]
+        },
+        "prompt_snippet": "\nNEVER mark facts as duplicates if they have key differences, particularly around numeric values, dates, or key qualifiers.\n\nIMPORTANT constraints:\n- duplicate_facts: ONLY idx values from EXISTING FACTS (NEVER include FACT INVALIDATION CANDIDATES)\n- contradicted_facts: idx values from EITHER list (EXISTING FACTS or FACT INVALIDATION CANDIDATES)\n- The idx values are continuous across both lists (INVALIDATION CANDIDATES start where EXISTING FACTS end)\n\n<EXISTING FACTS>\n[]\n</EXISTING FACTS>\n\n<FACT ",
+        "invalidated_facts": [
+          {
+            "fact": "Rachel lives in Chicago.",
+            "src": "3f824e30-6f39-4063-b30f-decf091909ab",
+            "tgt": "709b8b04-0210-42db-9310-aa6b633f76d2"
+          }
+        ],
+        "resolved_fact": "Rachel just moved back to the suburbs.",
+        "resolved_expired": false
+      }
+    ],
+    "final_entities": [
+      "Chicago",
+      "Rachel",
+      "the suburbs"
+    ],
+    "final_edges": [
+      {
+        "src": "Rachel",
+        "tgt": "the suburbs",
+        "fact": "Rachel just moved back to the suburbs.",
+        "expired": false
+      },
+      {
+        "src": "Rachel",
+        "tgt": "Chicago",
+        "fact": "Rachel lives in Chicago.",
+        "expired": true
+      }
+    ],
+    "suburb_entity_exists": true,
+    "suburb_edge_correct": true,
+    "chicago_edge_expired": true,
+    "verdict": "PASS"
+  },
+  {
+    "trial": 10,
+    "namespace": "grounding-trace-f756627a",
+    "model": "gpt-4o-mini",
+    "temperature": 0,
+    "raw_extracted_entities": [
+      "Rachel",
+      "the suburbs"
+    ],
+    "raw_extracted_edges": [
+      {
+        "source": "Rachel",
+        "target": "the suburbs",
+        "fact": "Rachel just moved back to the suburbs."
+      }
+    ],
+    "orphaned_entities": [],
+    "dedup_decisions": [
+      {
+        "extracted": "Rachel",
+        "resolved_to": "Rachel",
+        "was_merged": true
+      },
+      {
+        "extracted": "the suburbs",
+        "resolved_to": "the suburbs",
+        "was_merged": false
+      }
+    ],
+    "uuid_map": {
+      "655b57b6-baf9-4247-b268-d6f3bc5777ed": "dc6ec594-4e4a-46a6-996c-fdefd93b48e5",
+      "4a8e7d55-32e5-4537-8464-c385a497ac32": "4a8e7d55-32e5-4537-8464-c385a497ac32"
+    },
+    "edge_traces": [],
+    "invalidation_traces": [
+      {
+        "new_fact": "Rachel lives in Chicago.",
+        "new_src": "dc6ec594-4e4a-46a6-996c-fdefd93b48e5",
+        "new_tgt": "7c718c1b-146a-4ce0-9bb5-edfb18d98aad",
+        "related_edges": [],
+        "invalidation_candidates": [],
+        "chicago_in_candidates": false,
+        "invalidated_facts": [],
+        "resolved_fact": "Rachel lives in Chicago.",
+        "resolved_expired": false
+      },
+      {
+        "new_fact": "Rachel just moved back to the suburbs.",
+        "new_src": "dc6ec594-4e4a-46a6-996c-fdefd93b48e5",
+        "new_tgt": "4a8e7d55-32e5-4537-8464-c385a497ac32",
+        "related_edges": [],
+        "invalidation_candidates": [
+          {
+            "idx": 0,
+            "fact": "Rachel lives in Chicago.",
+            "src": "dc6ec594-4e4a-46a6-996c-fdefd93b48e5",
+            "tgt": "7c718c1b-146a-4ce0-9bb5-edfb18d98aad",
+            "expired": false
+          }
+        ],
+        "chicago_in_candidates": true,
+        "llm_response": {
+          "duplicate_facts": [],
+          "contradicted_facts": [
+            0
+          ]
+        },
+        "prompt_snippet": "\nNEVER mark facts as duplicates if they have key differences, particularly around numeric values, dates, or key qualifiers.\n\nIMPORTANT constraints:\n- duplicate_facts: ONLY idx values from EXISTING FACTS (NEVER include FACT INVALIDATION CANDIDATES)\n- contradicted_facts: idx values from EITHER list (EXISTING FACTS or FACT INVALIDATION CANDIDATES)\n- The idx values are continuous across both lists (INVALIDATION CANDIDATES start where EXISTING FACTS end)\n\n<EXISTING FACTS>\n[]\n</EXISTING FACTS>\n\n<FACT ",
+        "invalidated_facts": [
+          {
+            "fact": "Rachel lives in Chicago.",
+            "src": "dc6ec594-4e4a-46a6-996c-fdefd93b48e5",
+            "tgt": "7c718c1b-146a-4ce0-9bb5-edfb18d98aad"
+          }
+        ],
+        "resolved_fact": "Rachel just moved back to the suburbs.",
+        "resolved_expired": false
+      }
+    ],
+    "final_entities": [
+      "Chicago",
+      "Rachel",
+      "the suburbs"
+    ],
+    "final_edges": [
+      {
+        "src": "Rachel",
+        "tgt": "the suburbs",
+        "fact": "Rachel just moved back to the suburbs.",
+        "expired": false
+      },
+      {
+        "src": "Rachel",
+        "tgt": "Chicago",
+        "fact": "Rachel lives in Chicago.",
+        "expired": true
+      }
+    ],
+    "suburb_entity_exists": true,
+    "suburb_edge_correct": true,
+    "chicago_edge_expired": true,
+    "verdict": "PASS"
+  }
+]

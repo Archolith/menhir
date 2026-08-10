@@ -1,0 +1,2845 @@
+[
+  {
+    "fixture_index": 0,
+    "current_message": "Rachel actually just moved back to the suburbs again.",
+    "result": {
+      "current_message": "Rachel actually just moved back to the suburbs again.",
+      "arms": [
+        {
+          "id": "baseline",
+          "label": "Baseline (production prompt, unmodified)",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 3146.65,
+          "tuning": {
+            "prompt_variant": "baseline",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Rachel",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "14722803-290d-4036-945b-b4ef5c9f302f"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 1.0,
+            "proposition_recall": 0.0,
+            "proposition_precision": 0.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "update_aware",
+          "label": "Condition 5: Update-Aware",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 3942.6,
+          "tuning": {
+            "prompt_variant": "update_aware",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Rachel",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "4b5ec3ea-45e7-4c3e-af59-86ab63071e91"
+              },
+              {
+                "text": "suburbs",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "d3251963-bdfd-4417-8fbc-96d15fd3fd2e"
+              }
+            ],
+            "propositions": [
+              {
+                "fact": "Rachel actually just moved back to the suburbs again.",
+                "source_uuid": "4b5ec3ea-45e7-4c3e-af59-86ab63071e91",
+                "target_uuid": "d3251963-bdfd-4417-8fbc-96d15fd3fd2e",
+                "uuid": "769bcd53-f54b-4ccf-aaed-a5466153a9b2"
+              },
+              {
+                "fact": "Rachel actually just moved back to the suburbs again.",
+                "source_uuid": "4b5ec3ea-45e7-4c3e-af59-86ab63071e91",
+                "target_uuid": "d3251963-bdfd-4417-8fbc-96d15fd3fd2e",
+                "uuid": "769bcd53-f54b-4ccf-aaed-a5466153a9b2"
+              }
+            ]
+          },
+          "gold_scores": {
+            "mention_recall": 1.0,
+            "mention_precision": 1.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 0.5,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.25
+          },
+          "degraded": false
+        }
+      ]
+    }
+  },
+  {
+    "fixture_index": 1,
+    "current_message": "She actually moved back to the suburbs again.",
+    "result": {
+      "current_message": "She actually moved back to the suburbs again.",
+      "arms": [
+        {
+          "id": "baseline",
+          "label": "Baseline (production prompt, unmodified)",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2358.69,
+          "tuning": {
+            "prompt_variant": "baseline",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "She",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "587dfb02-cc31-4082-8380-08fc01d2d3c5"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.0,
+            "mention_precision": 0.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 1.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 1.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "update_aware",
+          "label": "Condition 5: Update-Aware",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2019.7,
+          "tuning": {
+            "prompt_variant": "update_aware",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "She",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "94fc4a63-916d-463d-86bf-3711dea2fe00"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.0,
+            "mention_precision": 0.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 1.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 1.0
+          },
+          "degraded": false
+        }
+      ]
+    }
+  },
+  {
+    "fixture_index": 2,
+    "current_message": "David is living downtown now.",
+    "result": {
+      "current_message": "David is living downtown now.",
+      "arms": [
+        {
+          "id": "baseline",
+          "label": "Baseline (production prompt, unmodified)",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2483.39,
+          "tuning": {
+            "prompt_variant": "baseline",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "David",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "35f49fe9-4b53-4e95-84f3-d1df2fe789a9"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 1.0,
+            "proposition_recall": 0.0,
+            "proposition_precision": 0.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "update_aware",
+          "label": "Condition 5: Update-Aware",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2511.02,
+          "tuning": {
+            "prompt_variant": "update_aware",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "David",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "380d3750-aeee-4003-885e-080d41e50f87"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 1.0,
+            "proposition_recall": 0.0,
+            "proposition_precision": 0.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        }
+      ]
+    }
+  },
+  {
+    "fixture_index": 3,
+    "current_message": "Actually, I spent $400,000, not $350,000.",
+    "result": {
+      "current_message": "Actually, I spent $400,000, not $350,000.",
+      "arms": [
+        {
+          "id": "baseline",
+          "label": "Baseline (production prompt, unmodified)",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2693.99,
+          "tuning": {
+            "prompt_variant": "baseline",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "$400,000",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "99d4436f-3d8e-4773-9328-db65e448b850"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.3333333333333333,
+            "mention_precision": 1.0,
+            "proposition_recall": 0.0,
+            "proposition_precision": 0.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "update_aware",
+          "label": "Condition 5: Update-Aware",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2287.02,
+          "tuning": {
+            "prompt_variant": "update_aware",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "$400,000",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "2d9eb206-0be9-45d3-85f6-baf3edd54eac"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.3333333333333333,
+            "mention_precision": 1.0,
+            "proposition_recall": 0.0,
+            "proposition_precision": 0.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        }
+      ]
+    }
+  },
+  {
+    "fixture_index": 4,
+    "current_message": "Maya no longer works at Google; she joined Microsoft.",
+    "result": {
+      "current_message": "Maya no longer works at Google; she joined Microsoft.",
+      "arms": [
+        {
+          "id": "baseline",
+          "label": "Baseline (production prompt, unmodified)",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 4819.95,
+          "tuning": {
+            "prompt_variant": "baseline",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Maya",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "65ea1bf4-484c-478e-b16f-2e501647fb1f"
+              },
+              {
+                "text": "Google",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "b2ab9947-0019-440e-911c-9baa2628033a"
+              },
+              {
+                "text": "Microsoft",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "010440da-55c3-4b90-95c1-8e670d109db9"
+              }
+            ],
+            "propositions": [
+              {
+                "fact": "Maya no longer works at Google.",
+                "source_uuid": "65ea1bf4-484c-478e-b16f-2e501647fb1f",
+                "target_uuid": "b2ab9947-0019-440e-911c-9baa2628033a",
+                "uuid": "55247f45-8445-41be-b14d-9d1076857351"
+              },
+              {
+                "fact": "Maya joined Microsoft.",
+                "source_uuid": "65ea1bf4-484c-478e-b16f-2e501647fb1f",
+                "target_uuid": "010440da-55c3-4b90-95c1-8e670d109db9",
+                "uuid": "cc082d8b-b05f-4f4a-87f3-2525f43f980d"
+              },
+              {
+                "fact": "Maya no longer works at Google.",
+                "source_uuid": "65ea1bf4-484c-478e-b16f-2e501647fb1f",
+                "target_uuid": "b2ab9947-0019-440e-911c-9baa2628033a",
+                "uuid": "55247f45-8445-41be-b14d-9d1076857351"
+              },
+              {
+                "fact": "Maya joined Microsoft.",
+                "source_uuid": "65ea1bf4-484c-478e-b16f-2e501647fb1f",
+                "target_uuid": "010440da-55c3-4b90-95c1-8e670d109db9",
+                "uuid": "cc082d8b-b05f-4f4a-87f3-2525f43f980d"
+              }
+            ]
+          },
+          "gold_scores": {
+            "mention_recall": 1.0,
+            "mention_precision": 1.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 0.5,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.2857142857142857
+          },
+          "degraded": false
+        },
+        {
+          "id": "update_aware",
+          "label": "Condition 5: Update-Aware",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 4567.91,
+          "tuning": {
+            "prompt_variant": "update_aware",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Maya",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "9244eb5e-95df-4d86-a77a-3bd00dcd4609"
+              },
+              {
+                "text": "Google",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "dd438505-4413-492a-af19-4caad9c52aa2"
+              },
+              {
+                "text": "Microsoft",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "01c632c9-62ed-48ea-8271-e48845f8a0e6"
+              }
+            ],
+            "propositions": [
+              {
+                "fact": "Maya no longer works at Google.",
+                "source_uuid": "9244eb5e-95df-4d86-a77a-3bd00dcd4609",
+                "target_uuid": "dd438505-4413-492a-af19-4caad9c52aa2",
+                "uuid": "65b1d63c-81ac-4cdf-b79e-d395330ef6a9"
+              },
+              {
+                "fact": "Maya joined Microsoft.",
+                "source_uuid": "9244eb5e-95df-4d86-a77a-3bd00dcd4609",
+                "target_uuid": "01c632c9-62ed-48ea-8271-e48845f8a0e6",
+                "uuid": "3a08742a-34e3-43e5-b917-f66c95667024"
+              },
+              {
+                "fact": "Maya no longer works at Google.",
+                "source_uuid": "9244eb5e-95df-4d86-a77a-3bd00dcd4609",
+                "target_uuid": "dd438505-4413-492a-af19-4caad9c52aa2",
+                "uuid": "65b1d63c-81ac-4cdf-b79e-d395330ef6a9"
+              },
+              {
+                "fact": "Maya joined Microsoft.",
+                "source_uuid": "9244eb5e-95df-4d86-a77a-3bd00dcd4609",
+                "target_uuid": "01c632c9-62ed-48ea-8271-e48845f8a0e6",
+                "uuid": "3a08742a-34e3-43e5-b917-f66c95667024"
+              }
+            ]
+          },
+          "gold_scores": {
+            "mention_recall": 1.0,
+            "mention_precision": 1.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 0.5,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.2857142857142857
+          },
+          "degraded": false
+        }
+      ]
+    }
+  },
+  {
+    "fixture_index": 5,
+    "current_message": "Moving is really stressful and confusing.",
+    "result": {
+      "current_message": "Moving is really stressful and confusing.",
+      "arms": [
+        {
+          "id": "baseline",
+          "label": "Baseline (production prompt, unmodified)",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 1436.33,
+          "tuning": {
+            "prompt_variant": "baseline",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Moving",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "b83eb4c1-a115-46a9-b9ca-207acd6ed938"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.0,
+            "mention_precision": 0.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 1.0,
+            "update_capture_rate": 1.0,
+            "unsupported_inference_rate": 1.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "update_aware",
+          "label": "Condition 5: Update-Aware",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 1628.28,
+          "tuning": {
+            "prompt_variant": "update_aware",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Moving",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "5a315253-79ac-45b0-ba4e-6896f4bfd4b1"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.0,
+            "mention_precision": 0.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 1.0,
+            "update_capture_rate": 1.0,
+            "unsupported_inference_rate": 1.0
+          },
+          "degraded": false
+        }
+      ]
+    }
+  },
+  {
+    "fixture_index": 6,
+    "current_message": "Rachel has been packing boxes all week.",
+    "result": {
+      "current_message": "Rachel has been packing boxes all week.",
+      "arms": [
+        {
+          "id": "baseline",
+          "label": "Baseline (production prompt, unmodified)",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 1415.61,
+          "tuning": {
+            "prompt_variant": "baseline",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Rachel",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "6eb2063c-8b08-47c6-88e5-b3233f7e6782"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 1.0,
+            "mention_precision": 1.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 1.0,
+            "update_capture_rate": 1.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "update_aware",
+          "label": "Condition 5: Update-Aware",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2011.31,
+          "tuning": {
+            "prompt_variant": "update_aware",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Rachel",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "f5936f03-a281-433f-9dfa-4944b6ab452d"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 1.0,
+            "mention_precision": 1.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 1.0,
+            "update_capture_rate": 1.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        }
+      ]
+    }
+  },
+  {
+    "fixture_index": 7,
+    "current_message": "user: Miami Beach sounds fun, but I've been there before. I'm thinking of somewhere more relaxed. My friend Rachel actually just moved back to the suburbs again, so I was thinking of somewhere not too far from a major city. Any suggestions?",
+    "result": {
+      "current_message": "user: Miami Beach sounds fun, but I've been there before. I'm thinking of somewhere more relaxed. My friend Rachel actually just moved back to the suburbs again, so I was thinking of somewhere not too far from a major city. Any suggestions?",
+      "arms": [
+        {
+          "id": "baseline",
+          "label": "Baseline (production prompt, unmodified)",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 4275.66,
+          "tuning": {
+            "prompt_variant": "baseline",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "user",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "0a5010e3-86fc-4faf-a1c9-2bd0f62ebfbe"
+              },
+              {
+                "text": "Rachel",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "18585ddf-e793-463f-a66c-a63d42259657"
+              }
+            ],
+            "propositions": [
+              {
+                "fact": "User's friend Rachel has moved back to the suburbs again.",
+                "source_uuid": "0a5010e3-86fc-4faf-a1c9-2bd0f62ebfbe",
+                "target_uuid": "18585ddf-e793-463f-a66c-a63d42259657",
+                "uuid": "d1c67bae-914c-423e-ae7f-15f765acb091"
+              },
+              {
+                "fact": "User's friend Rachel has moved back to the suburbs again.",
+                "source_uuid": "0a5010e3-86fc-4faf-a1c9-2bd0f62ebfbe",
+                "target_uuid": "18585ddf-e793-463f-a66c-a63d42259657",
+                "uuid": "d1c67bae-914c-423e-ae7f-15f765acb091"
+              }
+            ]
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 0.5,
+            "proposition_recall": 1.0,
+            "proposition_precision": 0.5,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.5
+          },
+          "degraded": false
+        },
+        {
+          "id": "update_aware",
+          "label": "Condition 5: Update-Aware",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 4402.76,
+          "tuning": {
+            "prompt_variant": "update_aware",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "user",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "761f10c5-9219-4147-8075-a96622730203"
+              },
+              {
+                "text": "Rachel",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "2cb5af16-bffb-4cb4-959a-f102d6a32b8a"
+              }
+            ],
+            "propositions": [
+              {
+                "fact": "User's friend Rachel has moved back to the suburbs again.",
+                "source_uuid": "761f10c5-9219-4147-8075-a96622730203",
+                "target_uuid": "2cb5af16-bffb-4cb4-959a-f102d6a32b8a",
+                "uuid": "315f1979-ef95-457a-9cf2-5002d94b1d0b"
+              },
+              {
+                "fact": "User's friend Rachel has moved back to the suburbs again.",
+                "source_uuid": "761f10c5-9219-4147-8075-a96622730203",
+                "target_uuid": "2cb5af16-bffb-4cb4-959a-f102d6a32b8a",
+                "uuid": "315f1979-ef95-457a-9cf2-5002d94b1d0b"
+              }
+            ]
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 0.5,
+            "proposition_recall": 1.0,
+            "proposition_precision": 0.5,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.5
+          },
+          "degraded": false
+        }
+      ]
+    }
+  },
+  {
+    "fixture_index": 8,
+    "current_message": "user: I'm planning to move into my new home soon and I need to set up cable and TV services. Can you recommend some providers in my area and their prices? By the way, I'm really looking forward to finally owning a home, it's been a long process, but it'll be worth it to have a backyard like the one I'll have - remember when I got pre-approved for $400,000 from Wells Fargo?",
+    "result": {
+      "current_message": "user: I'm planning to move into my new home soon and I need to set up cable and TV services. Can you recommend some providers in my area and their prices? By the way, I'm really looking forward to finally owning a home, it's been a long process, but it'll be worth it to have a backyard like the one I'll have - remember when I got pre-approved for $400,000 from Wells Fargo?",
+      "arms": [
+        {
+          "id": "baseline",
+          "label": "Baseline (production prompt, unmodified)",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 4303.98,
+          "tuning": {
+            "prompt_variant": "baseline",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "user",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "25f4a386-b965-4ccd-90b1-e352d9e2d3b0"
+              },
+              {
+                "text": "Wells Fargo",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "68ae7326-0acb-4b9c-815e-49419da1e9e1"
+              }
+            ],
+            "propositions": [
+              {
+                "fact": "User got pre-approved for $400,000 from Wells Fargo.",
+                "source_uuid": "25f4a386-b965-4ccd-90b1-e352d9e2d3b0",
+                "target_uuid": "68ae7326-0acb-4b9c-815e-49419da1e9e1",
+                "uuid": "0a6c3326-5f7b-494b-b5ea-3a0060d49561"
+              },
+              {
+                "fact": "User got pre-approved for $400,000 from Wells Fargo.",
+                "source_uuid": "25f4a386-b965-4ccd-90b1-e352d9e2d3b0",
+                "target_uuid": "68ae7326-0acb-4b9c-815e-49419da1e9e1",
+                "uuid": "0a6c3326-5f7b-494b-b5ea-3a0060d49561"
+              }
+            ]
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 0.5,
+            "proposition_recall": 1.0,
+            "proposition_precision": 0.5,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.5
+          },
+          "degraded": false
+        },
+        {
+          "id": "update_aware",
+          "label": "Condition 5: Update-Aware",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 4225.21,
+          "tuning": {
+            "prompt_variant": "update_aware",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "user",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "3cad169b-f5d7-49b4-b75e-b258bc5c1b41"
+              },
+              {
+                "text": "Wells Fargo",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "d99fbe6f-bced-408a-baf8-3e8967521c23"
+              }
+            ],
+            "propositions": [
+              {
+                "fact": "User got pre-approved for $400,000 from Wells Fargo.",
+                "source_uuid": "3cad169b-f5d7-49b4-b75e-b258bc5c1b41",
+                "target_uuid": "d99fbe6f-bced-408a-baf8-3e8967521c23",
+                "uuid": "0bfc35e4-e63a-4847-bcb1-845b11a4415a"
+              },
+              {
+                "fact": "User got pre-approved for $400,000 from Wells Fargo.",
+                "source_uuid": "3cad169b-f5d7-49b4-b75e-b258bc5c1b41",
+                "target_uuid": "d99fbe6f-bced-408a-baf8-3e8967521c23",
+                "uuid": "0bfc35e4-e63a-4847-bcb1-845b11a4415a"
+              }
+            ]
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 0.5,
+            "proposition_recall": 1.0,
+            "proposition_precision": 0.5,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.5
+          },
+          "degraded": false
+        }
+      ]
+    }
+  },
+  {
+    "fixture_index": 9,
+    "current_message": "user: I see what you're doing here, but I think it's a bit too structured for me. I'd rather have some flexibility in my schedule. Can you help me come up with a more general plan to prioritize my tasks and set boundaries, rather than a strict schedule? And by the way, speaking of boundaries, I see Dr. Smith every week, and she's been helping me work on this stuff.",
+    "result": {
+      "current_message": "user: I see what you're doing here, but I think it's a bit too structured for me. I'd rather have some flexibility in my schedule. Can you help me come up with a more general plan to prioritize my tasks and set boundaries, rather than a strict schedule? And by the way, speaking of boundaries, I see Dr. Smith every week, and she's been helping me work on this stuff.",
+      "arms": [
+        {
+          "id": "baseline",
+          "label": "Baseline (production prompt, unmodified)",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 4739.47,
+          "tuning": {
+            "prompt_variant": "baseline",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "user",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "1e920ce0-6fc0-42c5-91b9-8aa191c10c99"
+              },
+              {
+                "text": "Dr. Smith",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "bf9ae083-63c8-4fec-9bc5-db841d955bba"
+              }
+            ],
+            "propositions": [
+              {
+                "fact": "user sees Dr. Smith every week for help with setting boundaries",
+                "source_uuid": "1e920ce0-6fc0-42c5-91b9-8aa191c10c99",
+                "target_uuid": "bf9ae083-63c8-4fec-9bc5-db841d955bba",
+                "uuid": "c770e773-582e-4cd0-aa38-d820924dfbcd"
+              },
+              {
+                "fact": "user sees Dr. Smith every week for help with setting boundaries",
+                "source_uuid": "1e920ce0-6fc0-42c5-91b9-8aa191c10c99",
+                "target_uuid": "bf9ae083-63c8-4fec-9bc5-db841d955bba",
+                "uuid": "c770e773-582e-4cd0-aa38-d820924dfbcd"
+              }
+            ]
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 0.5,
+            "proposition_recall": 1.0,
+            "proposition_precision": 0.5,
+            "update_capture_rate": 1.0,
+            "unsupported_inference_rate": 0.5
+          },
+          "degraded": false
+        },
+        {
+          "id": "update_aware",
+          "label": "Condition 5: Update-Aware",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 3517.2,
+          "tuning": {
+            "prompt_variant": "update_aware",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "user",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "34a26371-9dc3-4242-8361-9b0f5c966535"
+              },
+              {
+                "text": "Dr. Smith",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "50686003-258e-4bdb-8017-4fd1e38b1a01"
+              }
+            ],
+            "propositions": [
+              {
+                "fact": "user sees Dr. Smith every week for help with setting boundaries",
+                "source_uuid": "34a26371-9dc3-4242-8361-9b0f5c966535",
+                "target_uuid": "50686003-258e-4bdb-8017-4fd1e38b1a01",
+                "uuid": "026d5c40-1daa-4aef-b6d4-6c8218c6f7fa"
+              },
+              {
+                "fact": "user sees Dr. Smith every week for help with setting boundaries",
+                "source_uuid": "34a26371-9dc3-4242-8361-9b0f5c966535",
+                "target_uuid": "50686003-258e-4bdb-8017-4fd1e38b1a01",
+                "uuid": "026d5c40-1daa-4aef-b6d4-6c8218c6f7fa"
+              }
+            ]
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 0.5,
+            "proposition_recall": 1.0,
+            "proposition_precision": 0.5,
+            "update_capture_rate": 1.0,
+            "unsupported_inference_rate": 0.5
+          },
+          "degraded": false
+        }
+      ]
+    }
+  },
+  {
+    "fixture_index": 10,
+    "current_message": "Marcus actually just switched back to the night shift again.",
+    "result": {
+      "current_message": "Marcus actually just switched back to the night shift again.",
+      "arms": [
+        {
+          "id": "baseline",
+          "label": "Baseline (production prompt, unmodified)",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 3057.77,
+          "tuning": {
+            "prompt_variant": "baseline",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Marcus",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "9e821a63-5983-46b8-8461-c2b1cb3914de"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 1.0,
+            "proposition_recall": 0.0,
+            "proposition_precision": 0.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "update_aware",
+          "label": "Condition 5: Update-Aware",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2232.17,
+          "tuning": {
+            "prompt_variant": "update_aware",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Marcus",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "f3f6d073-5ed5-44e4-919d-aef0f2ba8079"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 1.0,
+            "proposition_recall": 0.0,
+            "proposition_precision": 0.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        }
+      ]
+    }
+  },
+  {
+    "fixture_index": 11,
+    "current_message": "Priya actually just moved back in with her parents again.",
+    "result": {
+      "current_message": "Priya actually just moved back in with her parents again.",
+      "arms": [
+        {
+          "id": "baseline",
+          "label": "Baseline (production prompt, unmodified)",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2438.41,
+          "tuning": {
+            "prompt_variant": "baseline",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Priya",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "d6939e84-61aa-4032-b134-7011e55d1995"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 1.0,
+            "proposition_recall": 0.0,
+            "proposition_precision": 0.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "update_aware",
+          "label": "Condition 5: Update-Aware",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2694.31,
+          "tuning": {
+            "prompt_variant": "update_aware",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Priya",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "3850fb2a-be89-4973-89c8-95f3cd8f9bc6"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 1.0,
+            "proposition_recall": 0.0,
+            "proposition_precision": 0.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        }
+      ]
+    }
+  },
+  {
+    "fixture_index": 12,
+    "current_message": "Devon actually just switched back to the day shift again.",
+    "result": {
+      "current_message": "Devon actually just switched back to the day shift again.",
+      "arms": [
+        {
+          "id": "baseline",
+          "label": "Baseline (production prompt, unmodified)",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2267.69,
+          "tuning": {
+            "prompt_variant": "baseline",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Devon",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "a1a4d8cc-6a20-4317-8ed0-8f05772c11b6"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 1.0,
+            "proposition_recall": 0.0,
+            "proposition_precision": 0.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "update_aware",
+          "label": "Condition 5: Update-Aware",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2013.61,
+          "tuning": {
+            "prompt_variant": "update_aware",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Devon",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "1dc3271a-bd45-4efe-9947-832ee712405d"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 1.0,
+            "proposition_recall": 0.0,
+            "proposition_precision": 0.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        }
+      ]
+    }
+  },
+  {
+    "fixture_index": 13,
+    "current_message": "Elena actually just went back to freelancing again.",
+    "result": {
+      "current_message": "Elena actually just went back to freelancing again.",
+      "arms": [
+        {
+          "id": "baseline",
+          "label": "Baseline (production prompt, unmodified)",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2887.26,
+          "tuning": {
+            "prompt_variant": "baseline",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Elena",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "53568370-3a4d-4520-b307-638c5f88b06c"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 1.0,
+            "proposition_recall": 0.0,
+            "proposition_precision": 0.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "update_aware",
+          "label": "Condition 5: Update-Aware",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 1920.71,
+          "tuning": {
+            "prompt_variant": "update_aware",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Elena",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "30340d45-06a6-4935-aa53-de2cc5537f85"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 1.0,
+            "proposition_recall": 0.0,
+            "proposition_precision": 0.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        }
+      ]
+    }
+  },
+  {
+    "fixture_index": 14,
+    "current_message": "Tom actually just switched back to the old apartment again.",
+    "result": {
+      "current_message": "Tom actually just switched back to the old apartment again.",
+      "arms": [
+        {
+          "id": "baseline",
+          "label": "Baseline (production prompt, unmodified)",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2437.07,
+          "tuning": {
+            "prompt_variant": "baseline",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Tom",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "ef28c67a-89f5-4cac-b23c-94d486d819ac"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 1.0,
+            "proposition_recall": 0.0,
+            "proposition_precision": 0.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "update_aware",
+          "label": "Condition 5: Update-Aware",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2155.42,
+          "tuning": {
+            "prompt_variant": "update_aware",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Tom",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "78c64001-839c-4958-9741-f3ff03a5ced9"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 1.0,
+            "proposition_recall": 0.0,
+            "proposition_precision": 0.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        }
+      ]
+    }
+  },
+  {
+    "fixture_index": 15,
+    "current_message": "He actually just switched back to the night shift again.",
+    "result": {
+      "current_message": "He actually just switched back to the night shift again.",
+      "arms": [
+        {
+          "id": "baseline",
+          "label": "Baseline (production prompt, unmodified)",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2595.23,
+          "tuning": {
+            "prompt_variant": "baseline",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "He",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "d8d063d4-4c60-4a30-9a19-231a08c1d298"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.0,
+            "mention_precision": 0.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 1.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 1.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "update_aware",
+          "label": "Condition 5: Update-Aware",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 1955.91,
+          "tuning": {
+            "prompt_variant": "update_aware",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "He",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "53117943-02f9-44e0-9bea-aa8ce9433dec"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.0,
+            "mention_precision": 0.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 1.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 1.0
+          },
+          "degraded": false
+        }
+      ]
+    }
+  },
+  {
+    "fixture_index": 16,
+    "current_message": "They actually just moved back in with their parents again.",
+    "result": {
+      "current_message": "They actually just moved back in with their parents again.",
+      "arms": [
+        {
+          "id": "baseline",
+          "label": "Baseline (production prompt, unmodified)",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2254.69,
+          "tuning": {
+            "prompt_variant": "baseline",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "They",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "ef1f4850-937a-482b-b309-b7b3663839dd"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.0,
+            "mention_precision": 0.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 1.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 1.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "update_aware",
+          "label": "Condition 5: Update-Aware",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2296.48,
+          "tuning": {
+            "prompt_variant": "update_aware",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "They",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "4155f21b-456c-4f33-8689-cb2ac7a1f652"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.0,
+            "mention_precision": 0.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 1.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 1.0
+          },
+          "degraded": false
+        }
+      ]
+    }
+  },
+  {
+    "fixture_index": 17,
+    "current_message": "She actually just went back to freelancing again.",
+    "result": {
+      "current_message": "She actually just went back to freelancing again.",
+      "arms": [
+        {
+          "id": "baseline",
+          "label": "Baseline (production prompt, unmodified)",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2304.77,
+          "tuning": {
+            "prompt_variant": "baseline",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "She",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "610db749-f21b-41e2-866f-004f82e0cc38"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.0,
+            "mention_precision": 0.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 1.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 1.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "update_aware",
+          "label": "Condition 5: Update-Aware",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2479.47,
+          "tuning": {
+            "prompt_variant": "update_aware",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "She",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "6a37ec79-0ca3-4035-a263-7702c4f682ff"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.0,
+            "mention_precision": 0.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 1.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 1.0
+          },
+          "degraded": false
+        }
+      ]
+    }
+  },
+  {
+    "fixture_index": 18,
+    "current_message": "Sofia is living uptown now.",
+    "result": {
+      "current_message": "Sofia is living uptown now.",
+      "arms": [
+        {
+          "id": "baseline",
+          "label": "Baseline (production prompt, unmodified)",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2361.12,
+          "tuning": {
+            "prompt_variant": "baseline",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Sofia",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "a1a921bc-5658-4c09-bff4-9dba029e29e9"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 1.0,
+            "proposition_recall": 0.0,
+            "proposition_precision": 0.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "update_aware",
+          "label": "Condition 5: Update-Aware",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2062.09,
+          "tuning": {
+            "prompt_variant": "update_aware",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Sofia",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "ec58f9b9-c516-4b7e-9c18-bc0480f3d485"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 1.0,
+            "proposition_recall": 0.0,
+            "proposition_precision": 0.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        }
+      ]
+    }
+  },
+  {
+    "fixture_index": 19,
+    "current_message": "Andre is working out of the west side office now.",
+    "result": {
+      "current_message": "Andre is working out of the west side office now.",
+      "arms": [
+        {
+          "id": "baseline",
+          "label": "Baseline (production prompt, unmodified)",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2480.96,
+          "tuning": {
+            "prompt_variant": "baseline",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Andre",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "179d28c5-44be-4267-9d35-913da9fd7f48"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 1.0,
+            "proposition_recall": 0.0,
+            "proposition_precision": 0.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "update_aware",
+          "label": "Condition 5: Update-Aware",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2086.17,
+          "tuning": {
+            "prompt_variant": "update_aware",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Andre",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "f2788a2e-44df-4896-b372-9a8764f48216"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 1.0,
+            "proposition_recall": 0.0,
+            "proposition_precision": 0.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        }
+      ]
+    }
+  },
+  {
+    "fixture_index": 20,
+    "current_message": "Lena is staying at her sister's place now.",
+    "result": {
+      "current_message": "Lena is staying at her sister's place now.",
+      "arms": [
+        {
+          "id": "baseline",
+          "label": "Baseline (production prompt, unmodified)",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 4174.73,
+          "tuning": {
+            "prompt_variant": "baseline",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Lena",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "3c3e43e0-d49f-4ee0-af94-69a40344d4e3"
+              },
+              {
+                "text": "Lena's sister",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "03750f23-1c0f-48ba-8c54-065376aeb342"
+              }
+            ],
+            "propositions": [
+              {
+                "fact": "Lena is staying at her sister's place",
+                "source_uuid": "3c3e43e0-d49f-4ee0-af94-69a40344d4e3",
+                "target_uuid": "03750f23-1c0f-48ba-8c54-065376aeb342",
+                "uuid": "3afe3194-70de-4f70-83cc-2e006500968b"
+              },
+              {
+                "fact": "Lena is staying at her sister's place",
+                "source_uuid": "3c3e43e0-d49f-4ee0-af94-69a40344d4e3",
+                "target_uuid": "03750f23-1c0f-48ba-8c54-065376aeb342",
+                "uuid": "3afe3194-70de-4f70-83cc-2e006500968b"
+              }
+            ]
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 0.5,
+            "proposition_recall": 1.0,
+            "proposition_precision": 0.5,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.5
+          },
+          "degraded": false
+        },
+        {
+          "id": "update_aware",
+          "label": "Condition 5: Update-Aware",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 4040.37,
+          "tuning": {
+            "prompt_variant": "update_aware",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Lena",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "080882bb-00b4-4df4-8dc4-c1c0a2185ae4"
+              },
+              {
+                "text": "Lena's sister",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "ca38729a-2aa1-43e8-8cb3-bc20bf2b6c27"
+              }
+            ],
+            "propositions": [
+              {
+                "fact": "Lena is staying at her sister's place",
+                "source_uuid": "080882bb-00b4-4df4-8dc4-c1c0a2185ae4",
+                "target_uuid": "ca38729a-2aa1-43e8-8cb3-bc20bf2b6c27",
+                "uuid": "a17d73f5-fbd4-49c6-8c48-3aef618572e0"
+              },
+              {
+                "fact": "Lena is staying at her sister's place",
+                "source_uuid": "080882bb-00b4-4df4-8dc4-c1c0a2185ae4",
+                "target_uuid": "ca38729a-2aa1-43e8-8cb3-bc20bf2b6c27",
+                "uuid": "a17d73f5-fbd4-49c6-8c48-3aef618572e0"
+              }
+            ]
+          },
+          "gold_scores": {
+            "mention_recall": 0.5,
+            "mention_precision": 0.5,
+            "proposition_recall": 1.0,
+            "proposition_precision": 0.5,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.5
+          },
+          "degraded": false
+        }
+      ]
+    }
+  },
+  {
+    "fixture_index": 21,
+    "current_message": "Actually, I paid $2,800 for the repair, not $2,200.",
+    "result": {
+      "current_message": "Actually, I paid $2,800 for the repair, not $2,200.",
+      "arms": [
+        {
+          "id": "baseline",
+          "label": "Baseline (production prompt, unmodified)",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2779.57,
+          "tuning": {
+            "prompt_variant": "baseline",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "$2,800",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "9090fcc2-5f48-4e84-a533-4922a380dcf9"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.3333333333333333,
+            "mention_precision": 1.0,
+            "proposition_recall": 0.0,
+            "proposition_precision": 0.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "update_aware",
+          "label": "Condition 5: Update-Aware",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2765.86,
+          "tuning": {
+            "prompt_variant": "update_aware",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "$2,800",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "13b225cf-337c-4b76-8fa6-f6d8e2f6f373"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.3333333333333333,
+            "mention_precision": 1.0,
+            "proposition_recall": 0.0,
+            "proposition_precision": 0.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        }
+      ]
+    }
+  },
+  {
+    "fixture_index": 22,
+    "current_message": "Actually, my rent is $1,950, not $1,700.",
+    "result": {
+      "current_message": "Actually, my rent is $1,950, not $1,700.",
+      "arms": [
+        {
+          "id": "baseline",
+          "label": "Baseline (production prompt, unmodified)",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2626.92,
+          "tuning": {
+            "prompt_variant": "baseline",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "$1,950",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "b3fa3c2a-8522-4c71-b811-8a85db42f92d"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.3333333333333333,
+            "mention_precision": 1.0,
+            "proposition_recall": 0.0,
+            "proposition_precision": 0.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "update_aware",
+          "label": "Condition 5: Update-Aware",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2314.48,
+          "tuning": {
+            "prompt_variant": "update_aware",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "$1,950",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "e9cb4713-8392-4a91-83d4-d843454897fb"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.3333333333333333,
+            "mention_precision": 1.0,
+            "proposition_recall": 0.0,
+            "proposition_precision": 0.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        }
+      ]
+    }
+  },
+  {
+    "fixture_index": 23,
+    "current_message": "Actually, the quote came in at $6,500, not $5,000.",
+    "result": {
+      "current_message": "Actually, the quote came in at $6,500, not $5,000.",
+      "arms": [
+        {
+          "id": "baseline",
+          "label": "Baseline (production prompt, unmodified)",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2849.69,
+          "tuning": {
+            "prompt_variant": "baseline",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "$6,500",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "9923e937-c79c-4f64-aac9-e2bda4294041"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.3333333333333333,
+            "mention_precision": 1.0,
+            "proposition_recall": 0.0,
+            "proposition_precision": 0.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "update_aware",
+          "label": "Condition 5: Update-Aware",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2827.69,
+          "tuning": {
+            "prompt_variant": "update_aware",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "$6,500",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "f5c1519e-459e-408b-897d-3c1e384616a5"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.3333333333333333,
+            "mention_precision": 1.0,
+            "proposition_recall": 0.0,
+            "proposition_precision": 0.0,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        }
+      ]
+    }
+  },
+  {
+    "fixture_index": 24,
+    "current_message": "Priya no longer works at Meta; she joined Anthropic.",
+    "result": {
+      "current_message": "Priya no longer works at Meta; she joined Anthropic.",
+      "arms": [
+        {
+          "id": "baseline",
+          "label": "Baseline (production prompt, unmodified)",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 5207.17,
+          "tuning": {
+            "prompt_variant": "baseline",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Priya",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "3faa8b0d-361c-4e1e-9d0f-ad0541b33a4b"
+              },
+              {
+                "text": "Meta",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "13b0e843-eef2-4ad9-92d9-1bb8de82e796"
+              },
+              {
+                "text": "Anthropic",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "ddbbd3c3-5faa-4293-b0ab-a784d41a2eb9"
+              }
+            ],
+            "propositions": [
+              {
+                "fact": "Priya no longer works at Meta.",
+                "source_uuid": "3faa8b0d-361c-4e1e-9d0f-ad0541b33a4b",
+                "target_uuid": "13b0e843-eef2-4ad9-92d9-1bb8de82e796",
+                "uuid": "ac27f6f2-c5c6-4360-af84-65151026f646"
+              },
+              {
+                "fact": "Priya joined Anthropic.",
+                "source_uuid": "3faa8b0d-361c-4e1e-9d0f-ad0541b33a4b",
+                "target_uuid": "ddbbd3c3-5faa-4293-b0ab-a784d41a2eb9",
+                "uuid": "f3df4a95-ab7f-4222-a8be-d490c78c6552"
+              },
+              {
+                "fact": "Priya no longer works at Meta.",
+                "source_uuid": "3faa8b0d-361c-4e1e-9d0f-ad0541b33a4b",
+                "target_uuid": "13b0e843-eef2-4ad9-92d9-1bb8de82e796",
+                "uuid": "ac27f6f2-c5c6-4360-af84-65151026f646"
+              },
+              {
+                "fact": "Priya joined Anthropic.",
+                "source_uuid": "3faa8b0d-361c-4e1e-9d0f-ad0541b33a4b",
+                "target_uuid": "ddbbd3c3-5faa-4293-b0ab-a784d41a2eb9",
+                "uuid": "f3df4a95-ab7f-4222-a8be-d490c78c6552"
+              }
+            ]
+          },
+          "gold_scores": {
+            "mention_recall": 1.0,
+            "mention_precision": 1.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 0.5,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.2857142857142857
+          },
+          "degraded": false
+        },
+        {
+          "id": "update_aware",
+          "label": "Condition 5: Update-Aware",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 5367.43,
+          "tuning": {
+            "prompt_variant": "update_aware",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Priya",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "3a451a53-56ad-4fa5-80b4-77ec45a6fd7b"
+              },
+              {
+                "text": "Meta",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "f46b4d0d-1706-4cb9-8fd1-4b59485d261f"
+              },
+              {
+                "text": "Anthropic",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "35884c96-3ba9-47ab-b7bb-dd0c407b9470"
+              }
+            ],
+            "propositions": [
+              {
+                "fact": "Priya no longer works at Meta.",
+                "source_uuid": "3a451a53-56ad-4fa5-80b4-77ec45a6fd7b",
+                "target_uuid": "f46b4d0d-1706-4cb9-8fd1-4b59485d261f",
+                "uuid": "b6881b5f-9296-4fdf-a903-8fab90bb8ffa"
+              },
+              {
+                "fact": "Priya joined Anthropic.",
+                "source_uuid": "3a451a53-56ad-4fa5-80b4-77ec45a6fd7b",
+                "target_uuid": "35884c96-3ba9-47ab-b7bb-dd0c407b9470",
+                "uuid": "55825c1b-36c4-4dbf-ad65-222a76f162b0"
+              },
+              {
+                "fact": "Priya no longer works at Meta.",
+                "source_uuid": "3a451a53-56ad-4fa5-80b4-77ec45a6fd7b",
+                "target_uuid": "f46b4d0d-1706-4cb9-8fd1-4b59485d261f",
+                "uuid": "b6881b5f-9296-4fdf-a903-8fab90bb8ffa"
+              },
+              {
+                "fact": "Priya joined Anthropic.",
+                "source_uuid": "3a451a53-56ad-4fa5-80b4-77ec45a6fd7b",
+                "target_uuid": "35884c96-3ba9-47ab-b7bb-dd0c407b9470",
+                "uuid": "55825c1b-36c4-4dbf-ad65-222a76f162b0"
+              }
+            ]
+          },
+          "gold_scores": {
+            "mention_recall": 1.0,
+            "mention_precision": 1.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 0.5,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.2857142857142857
+          },
+          "degraded": false
+        }
+      ]
+    }
+  },
+  {
+    "fixture_index": 25,
+    "current_message": "Devon no longer trains at Gold's Gym; he joined the community rec center.",
+    "result": {
+      "current_message": "Devon no longer trains at Gold's Gym; he joined the community rec center.",
+      "arms": [
+        {
+          "id": "baseline",
+          "label": "Baseline (production prompt, unmodified)",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 6010.37,
+          "tuning": {
+            "prompt_variant": "baseline",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Devon",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "783b5f36-08a0-4b60-bd3d-9084212abc30"
+              },
+              {
+                "text": "Gold's Gym",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "029922cf-64e0-49a4-a0a8-ed8eb2c5ae9b"
+              },
+              {
+                "text": "community rec center",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "e6b1ef22-16c4-4c9f-9b4c-4f3728ef4df4"
+              }
+            ],
+            "propositions": [
+              {
+                "fact": "Devon no longer trains at Gold's Gym.",
+                "source_uuid": "783b5f36-08a0-4b60-bd3d-9084212abc30",
+                "target_uuid": "029922cf-64e0-49a4-a0a8-ed8eb2c5ae9b",
+                "uuid": "79f269e6-b267-48c7-bb84-27df2eb8316f"
+              },
+              {
+                "fact": "Devon joined the community rec center.",
+                "source_uuid": "783b5f36-08a0-4b60-bd3d-9084212abc30",
+                "target_uuid": "e6b1ef22-16c4-4c9f-9b4c-4f3728ef4df4",
+                "uuid": "a9bb42b6-91dd-4117-88e6-833ae895e4b9"
+              },
+              {
+                "fact": "Devon no longer trains at Gold's Gym.",
+                "source_uuid": "783b5f36-08a0-4b60-bd3d-9084212abc30",
+                "target_uuid": "029922cf-64e0-49a4-a0a8-ed8eb2c5ae9b",
+                "uuid": "79f269e6-b267-48c7-bb84-27df2eb8316f"
+              },
+              {
+                "fact": "Devon joined the community rec center.",
+                "source_uuid": "783b5f36-08a0-4b60-bd3d-9084212abc30",
+                "target_uuid": "e6b1ef22-16c4-4c9f-9b4c-4f3728ef4df4",
+                "uuid": "a9bb42b6-91dd-4117-88e6-833ae895e4b9"
+              }
+            ]
+          },
+          "gold_scores": {
+            "mention_recall": 1.0,
+            "mention_precision": 1.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 0.5,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.2857142857142857
+          },
+          "degraded": false
+        },
+        {
+          "id": "update_aware",
+          "label": "Condition 5: Update-Aware",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 5240.21,
+          "tuning": {
+            "prompt_variant": "update_aware",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Devon",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "9baee737-5afb-4729-973f-fa81a151ce6f"
+              },
+              {
+                "text": "Gold's Gym",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "f378b700-e313-43ad-b855-439e625728d6"
+              },
+              {
+                "text": "community rec center",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "93526220-eb40-4873-8d22-a94f5bca292f"
+              }
+            ],
+            "propositions": [
+              {
+                "fact": "Devon no longer trains at Gold's Gym.",
+                "source_uuid": "9baee737-5afb-4729-973f-fa81a151ce6f",
+                "target_uuid": "f378b700-e313-43ad-b855-439e625728d6",
+                "uuid": "eabbfa92-d1bc-41ee-8d49-58b1db55f61a"
+              },
+              {
+                "fact": "Devon joined the community rec center.",
+                "source_uuid": "9baee737-5afb-4729-973f-fa81a151ce6f",
+                "target_uuid": "93526220-eb40-4873-8d22-a94f5bca292f",
+                "uuid": "bf67a025-61ee-4ffb-846e-bc216d8c6dbf"
+              },
+              {
+                "fact": "Devon no longer trains at Gold's Gym.",
+                "source_uuid": "9baee737-5afb-4729-973f-fa81a151ce6f",
+                "target_uuid": "f378b700-e313-43ad-b855-439e625728d6",
+                "uuid": "eabbfa92-d1bc-41ee-8d49-58b1db55f61a"
+              },
+              {
+                "fact": "Devon joined the community rec center.",
+                "source_uuid": "9baee737-5afb-4729-973f-fa81a151ce6f",
+                "target_uuid": "93526220-eb40-4873-8d22-a94f5bca292f",
+                "uuid": "bf67a025-61ee-4ffb-846e-bc216d8c6dbf"
+              }
+            ]
+          },
+          "gold_scores": {
+            "mention_recall": 1.0,
+            "mention_precision": 1.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 0.5,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.2857142857142857
+          },
+          "degraded": false
+        }
+      ]
+    }
+  },
+  {
+    "fixture_index": 26,
+    "current_message": "Elena no longer banks with Chase; she switched to a local credit union.",
+    "result": {
+      "current_message": "Elena no longer banks with Chase; she switched to a local credit union.",
+      "arms": [
+        {
+          "id": "baseline",
+          "label": "Baseline (production prompt, unmodified)",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 4851.53,
+          "tuning": {
+            "prompt_variant": "baseline",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Elena",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "6fb6bbaf-d6bb-4324-af85-f6263e3b74f7"
+              },
+              {
+                "text": "Chase",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "4e64495e-7d37-41f1-9bb7-023694abaa5c"
+              }
+            ],
+            "propositions": [
+              {
+                "fact": "Elena no longer banks with Chase.",
+                "source_uuid": "6fb6bbaf-d6bb-4324-af85-f6263e3b74f7",
+                "target_uuid": "4e64495e-7d37-41f1-9bb7-023694abaa5c",
+                "uuid": "c3d999c2-3f13-4fba-a57e-dd096aeb9111"
+              },
+              {
+                "fact": "Elena no longer banks with Chase.",
+                "source_uuid": "6fb6bbaf-d6bb-4324-af85-f6263e3b74f7",
+                "target_uuid": "4e64495e-7d37-41f1-9bb7-023694abaa5c",
+                "uuid": "c3d999c2-3f13-4fba-a57e-dd096aeb9111"
+              }
+            ]
+          },
+          "gold_scores": {
+            "mention_recall": 0.6666666666666666,
+            "mention_precision": 1.0,
+            "proposition_recall": 0.5,
+            "proposition_precision": 0.5,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.25
+          },
+          "degraded": false
+        },
+        {
+          "id": "update_aware",
+          "label": "Condition 5: Update-Aware",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 6054.87,
+          "tuning": {
+            "prompt_variant": "update_aware",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Elena",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "42fd158d-6c1e-4949-91fd-662b68bf3650"
+              },
+              {
+                "text": "Chase",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "d6e03879-736a-4aaa-9a27-542032870429"
+              },
+              {
+                "text": "local credit union",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "6b8a438a-2488-40e3-84a3-2d971bfce2fb"
+              }
+            ],
+            "propositions": [
+              {
+                "fact": "Elena no longer banks with Chase.",
+                "source_uuid": "42fd158d-6c1e-4949-91fd-662b68bf3650",
+                "target_uuid": "d6e03879-736a-4aaa-9a27-542032870429",
+                "uuid": "1422ffcb-6204-4947-8797-1b531f68a618"
+              },
+              {
+                "fact": "Elena switched to a local credit union.",
+                "source_uuid": "42fd158d-6c1e-4949-91fd-662b68bf3650",
+                "target_uuid": "6b8a438a-2488-40e3-84a3-2d971bfce2fb",
+                "uuid": "5053b0e2-b501-4f47-ad2b-28656eab8581"
+              },
+              {
+                "fact": "Elena no longer banks with Chase.",
+                "source_uuid": "42fd158d-6c1e-4949-91fd-662b68bf3650",
+                "target_uuid": "d6e03879-736a-4aaa-9a27-542032870429",
+                "uuid": "1422ffcb-6204-4947-8797-1b531f68a618"
+              },
+              {
+                "fact": "Elena switched to a local credit union.",
+                "source_uuid": "42fd158d-6c1e-4949-91fd-662b68bf3650",
+                "target_uuid": "6b8a438a-2488-40e3-84a3-2d971bfce2fb",
+                "uuid": "5053b0e2-b501-4f47-ad2b-28656eab8581"
+              }
+            ]
+          },
+          "gold_scores": {
+            "mention_recall": 1.0,
+            "mention_precision": 1.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 0.5,
+            "update_capture_rate": 0.0,
+            "unsupported_inference_rate": 0.2857142857142857
+          },
+          "degraded": false
+        }
+      ]
+    }
+  },
+  {
+    "fixture_index": 27,
+    "current_message": "Job hunting is exhausting and demoralizing.",
+    "result": {
+      "current_message": "Job hunting is exhausting and demoralizing.",
+      "arms": [
+        {
+          "id": "baseline",
+          "label": "Baseline (production prompt, unmodified)",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2214.09,
+          "tuning": {
+            "prompt_variant": "baseline",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Job hunting",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "01ef0d1f-a61f-42d4-872b-0019253f97cb"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.0,
+            "mention_precision": 0.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 1.0,
+            "update_capture_rate": 1.0,
+            "unsupported_inference_rate": 1.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "update_aware",
+          "label": "Condition 5: Update-Aware",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 1264.29,
+          "tuning": {
+            "prompt_variant": "update_aware",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Job hunting",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "efd48b01-4401-4a45-9815-960e4135e76f"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.0,
+            "mention_precision": 0.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 1.0,
+            "update_capture_rate": 1.0,
+            "unsupported_inference_rate": 1.0
+          },
+          "degraded": false
+        }
+      ]
+    }
+  },
+  {
+    "fixture_index": 28,
+    "current_message": "Renovating a house is a lot more stressful than people expect.",
+    "result": {
+      "current_message": "Renovating a house is a lot more stressful than people expect.",
+      "arms": [
+        {
+          "id": "baseline",
+          "label": "Baseline (production prompt, unmodified)",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2375.12,
+          "tuning": {
+            "prompt_variant": "baseline",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Renovating a house",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "ba4cf01e-e7e8-41ba-b143-0674694a2d87"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.0,
+            "mention_precision": 0.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 1.0,
+            "update_capture_rate": 1.0,
+            "unsupported_inference_rate": 1.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "update_aware",
+          "label": "Condition 5: Update-Aware",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 1639.43,
+          "tuning": {
+            "prompt_variant": "update_aware",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Renovating a house",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "6aafe2f5-81f7-4562-95fa-da789b443b04"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 0.0,
+            "mention_precision": 0.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 1.0,
+            "update_capture_rate": 1.0,
+            "unsupported_inference_rate": 1.0
+          },
+          "degraded": false
+        }
+      ]
+    }
+  },
+  {
+    "fixture_index": 29,
+    "current_message": "Marcus has been filling out job applications all week.",
+    "result": {
+      "current_message": "Marcus has been filling out job applications all week.",
+      "arms": [
+        {
+          "id": "baseline",
+          "label": "Baseline (production prompt, unmodified)",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 2371.48,
+          "tuning": {
+            "prompt_variant": "baseline",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Marcus",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "fbc45c84-22e0-4c3f-84ab-f4a2fcb182fa"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 1.0,
+            "mention_precision": 1.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 1.0,
+            "update_capture_rate": 1.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        },
+        {
+          "id": "update_aware",
+          "label": "Condition 5: Update-Aware",
+          "ok": true,
+          "enabled": true,
+          "elapsed_ms": 1989.81,
+          "tuning": {
+            "prompt_variant": "update_aware",
+            "model": null,
+            "context_episode_count": 10,
+            "temperature": 0.0
+          },
+          "error": null,
+          "extraction": {
+            "mentions": [
+              {
+                "text": "Marcus",
+                "labels": [
+                  "Entity"
+                ],
+                "uuid": "78cbae63-cac8-4092-8dca-cad79dde86c7"
+              }
+            ],
+            "propositions": []
+          },
+          "gold_scores": {
+            "mention_recall": 1.0,
+            "mention_precision": 1.0,
+            "proposition_recall": 1.0,
+            "proposition_precision": 1.0,
+            "update_capture_rate": 1.0,
+            "unsupported_inference_rate": 0.0
+          },
+          "degraded": false
+        }
+      ]
+    }
+  }
+]

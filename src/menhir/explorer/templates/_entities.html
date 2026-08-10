@@ -1,0 +1,23 @@
+﻿{% if entities %}
+<div class="list">
+  {% for entity in entities %}
+  <div class="row-card">
+    <button data-node-uuid="{{ entity.uuid }}">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start">
+        <strong style="color:var(--accent)">{{ entity.name }}</strong>
+        <span class="badge persistent">{{ entity.connection_count }} edges</span>
+      </div>
+      <div class="meta" style="margin: 0.25rem 0; line-height:1.4">{{ entity.summary_preview }}...</div>
+      <div class="meta">Last seen: <span class="utc-time" data-utc="{{ entity.last_accessed }}">{{ entity.last_accessed or "never" }}</span></div>
+      <div class="badge-row">
+        <span class="badge {{ (entity.scope or 'unknown')|lower }}">{{ entity.scope or "unknown" }}</span>
+        {% if entity.user_flagged %}<span class="badge failed">flagged</span>{% endif %}
+        {% if entity.session_id %}<span class="badge session row-card-code">{{ entity.session_id }}</span>{% endif %}
+      </div>
+    </button>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<p class="muted-empty">No entities matched{% if query %} "{{ query }}"{% endif %}.</p>
+{% endif %}

@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__memory__query_structure"
+    ]
+  },
+  "$version": 3
+}

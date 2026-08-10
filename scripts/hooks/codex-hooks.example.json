@@ -1,0 +1,17 @@
+{
+  "_comment": "Example Codex hooks.json registration for the Menhir Codex TurnEvidence producer. Merge the UserPromptSubmit block into your Codex hooks.json (e.g. C:/Users/<you>/IdeaProjects/.codex/hooks.json). Codex pipes the UserPromptSubmit event JSON to the script on stdin; the script POSTs only triage candidates and fails open. Use an absolute python path (any Python 3; the script is stdlib-only) and an absolute path to the producer.",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/path/to/menhir/.venv/Scripts/python.exe /path/to/menhir/scripts/hooks/menhir_codex_turn_evidence.py",
+            "timeout": 8
+          }
+        ]
+      }
+    ]
+  }
+}

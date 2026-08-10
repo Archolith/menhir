@@ -1,0 +1,810 @@
+<title>Scalar Perception Roadmap</title>
+<style>
+  :root {
+    --paper: #f3f5f3;
+    --surface: #ffffff;
+    --surface-sunk: #eaeeec;
+    --ink: #182220;
+    --muted: #5b6864;
+    --faint: #8a938f;
+    --hairline: #d7ddda;
+    --accent: #0e7a72;
+    --accent-deep: #0a5852;
+    --accent-tint: #e2f1ee;
+    --done: #2e8b57;
+    --done-tint: #e5f2ea;
+    --progress: #9a6a12;
+    --progress-tint: #f5edda;
+    --blocked: #ad4a34;
+    --blocked-tint: #f7e6e1;
+    --pending: #8a8f8c;
+    --pending-tint: #ececea;
+    --shadow: 0 1px 2px rgba(24, 34, 32, 0.06), 0 6px 20px rgba(24, 34, 32, 0.05);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #0e1513;
+      --surface: #141c1a;
+      --surface-sunk: #101815;
+      --ink: #e8edeb;
+      --muted: #93a19d;
+      --faint: #647069;
+      --hairline: #263330;
+      --accent: #3fc7be;
+      --accent-deep: #7fddd5;
+      --accent-tint: #16302c;
+      --done: #5fc98a;
+      --done-tint: #163425;
+      --progress: #d9a441;
+      --progress-tint: #362a12;
+      --blocked: #e2836a;
+      --blocked-tint: #3a1f16;
+      --pending: #7a8481;
+      --pending-tint: #1c2422;
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.35);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --paper: #0e1513;
+    --surface: #141c1a;
+    --surface-sunk: #101815;
+    --ink: #e8edeb;
+    --muted: #93a19d;
+    --faint: #647069;
+    --hairline: #263330;
+    --accent: #3fc7be;
+    --accent-deep: #7fddd5;
+    --accent-tint: #16302c;
+    --done: #5fc98a;
+    --done-tint: #163425;
+    --progress: #d9a441;
+    --progress-tint: #362a12;
+    --blocked: #e2836a;
+    --blocked-tint: #3a1f16;
+    --pending: #7a8481;
+    --pending-tint: #1c2422;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.35);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, "Noto Serif", serif;
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .mono {
+    font-family: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", Consolas, "Liberation Mono", monospace;
+  }
+
+  .wrap {
+    max-width: 780px;
+    margin: 0 auto;
+    padding: 56px 24px 88px;
+  }
+
+  header.page {
+    margin-bottom: 28px;
+  }
+
+  .eyebrow {
+    font-family: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+    font-size: 12.5px;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--accent-deep);
+    margin: 0 0 10px;
+  }
+
+  h1 {
+    font-family: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+    font-size: clamp(28px, 4.4vw, 38px);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    margin: 0 0 10px;
+    text-wrap: balance;
+    color: var(--ink);
+  }
+
+  .dek {
+    font-size: 17px;
+    color: var(--muted);
+    max-width: 62ch;
+    margin: 0 0 18px;
+  }
+
+  .focus-line {
+    display: flex;
+    gap: 10px;
+    align-items: baseline;
+    padding: 12px 16px;
+    background: var(--accent-tint);
+    border-left: 3px solid var(--accent);
+    font-size: 14.5px;
+    color: var(--ink);
+  }
+  .focus-line .tag {
+    font-family: ui-monospace, "SF Mono", "Cascadia Code", monospace;
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--accent-deep);
+    white-space: nowrap;
+  }
+
+  .governance {
+    margin: 28px 0 36px;
+    padding: 16px 18px;
+    border: 1px solid var(--hairline);
+    background: var(--surface);
+    font-size: 13.5px;
+    color: var(--muted);
+    line-height: 1.65;
+  }
+  .governance strong { color: var(--ink); font-weight: 600; }
+
+  .blocking {
+    margin: 0 0 44px;
+    padding: 18px 20px 20px;
+    background: var(--blocked-tint);
+    border: 1px solid color-mix(in srgb, var(--blocked) 35%, var(--hairline));
+  }
+  .blocking h2 {
+    margin: 0 0 12px;
+    font-family: ui-monospace, "SF Mono", "Cascadia Code", monospace;
+    font-size: 13px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--blocked);
+    font-weight: 600;
+  }
+  .blocking ul {
+    margin: 0;
+    padding: 0 0 0 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+  }
+  .blocking li {
+    font-size: 14.5px;
+    padding-left: 18px;
+    position: relative;
+    color: var(--ink);
+  }
+  .blocking li::before {
+    content: "\2013";
+    position: absolute;
+    left: 0;
+    color: var(--blocked);
+    font-weight: 700;
+  }
+  .blocking li b { font-weight: 600; }
+  .blocking li .num {
+    font-family: ui-monospace, "SF Mono", "Cascadia Code", monospace;
+    font-size: 13.5px;
+    color: var(--blocked);
+  }
+
+  .phases {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    counter-reset: phase;
+  }
+
+  .phase {
+    position: relative;
+    padding: 26px 0 30px 0;
+    border-top: 1px solid var(--hairline);
+  }
+  .phases .phase:first-child { border-top: 1px solid var(--hairline); }
+
+  .phase-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 6px;
+  }
+
+  .phase-title-row {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+  }
+
+  .phase-num {
+    font-family: ui-monospace, "SF Mono", "Cascadia Code", monospace;
+    font-size: 13px;
+    color: var(--faint);
+    letter-spacing: 0.04em;
+  }
+
+  .phase h2 {
+    font-family: ui-monospace, "SF Mono", "Cascadia Code", monospace;
+    font-size: 19px;
+    font-weight: 600;
+    margin: 0;
+    letter-spacing: -0.005em;
+    color: var(--ink);
+  }
+
+  .status-chip {
+    font-family: ui-monospace, "SF Mono", "Cascadia Code", monospace;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 3px 9px;
+    border-radius: 3px;
+    white-space: nowrap;
+  }
+  .status-chip.done { background: var(--done-tint); color: var(--done); }
+  .status-chip.progress { background: var(--progress-tint); color: var(--progress); }
+  .status-chip.blocked { background: var(--blocked-tint); color: var(--blocked); }
+  .status-chip.pending { background: var(--pending-tint); color: var(--pending); }
+
+  .thesis {
+    color: var(--muted);
+    font-size: 15px;
+    max-width: 64ch;
+    margin: 6px 0 18px;
+  }
+
+  .item-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .item-list li {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    font-size: 14.5px;
+  }
+  .item-list .mark {
+    flex: none;
+    width: 15px;
+    height: 15px;
+    margin-top: 3px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .item-list .mark svg { width: 15px; height: 15px; display: block; }
+  .item-list .body { color: var(--ink); }
+  .item-list .body .src {
+    display: block;
+    font-family: ui-monospace, "SF Mono", "Cascadia Code", monospace;
+    font-size: 12px;
+    color: var(--faint);
+    margin-top: 2px;
+  }
+
+  .stat-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 22px;
+    margin: 4px 0 20px;
+    padding: 14px 16px;
+    background: var(--surface-sunk);
+  }
+  .stat {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .stat .v {
+    font-family: ui-monospace, "SF Mono", "Cascadia Code", monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 17px;
+    font-weight: 600;
+    color: var(--accent-deep);
+  }
+  .stat .k {
+    font-size: 11.5px;
+    color: var(--muted);
+    letter-spacing: 0.02em;
+  }
+
+  .gate-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+  }
+  .gate-table th {
+    text-align: left;
+    font-family: ui-monospace, "SF Mono", "Cascadia Code", monospace;
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--faint);
+    font-weight: 600;
+    padding: 0 10px 8px 0;
+    border-bottom: 1px solid var(--hairline);
+  }
+  .gate-table td {
+    padding: 10px 10px 10px 0;
+    border-bottom: 1px solid var(--hairline);
+    vertical-align: top;
+    color: var(--ink);
+  }
+  .gate-table tr:last-child td { border-bottom: none; }
+  .gate-table td.state { width: 100px; }
+  .gate-table td.metric { width: 220px; color: var(--muted); font-size: 13px; }
+
+  .g-state {
+    font-family: ui-monospace, "SF Mono", "Cascadia Code", monospace;
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+  }
+  .g-state.met { color: var(--done); }
+  .g-state.failed { color: var(--blocked); }
+  .g-state.pending { color: var(--pending); }
+
+  .track-eyebrow {
+    font-family: ui-monospace, "SF Mono", "Cascadia Code", monospace;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 4px;
+  }
+
+  .status-chip.canonical { background: var(--accent-tint); color: var(--accent-deep); }
+
+  .ladder {
+    margin: 4px 0 20px;
+    padding: 0;
+    list-style: none;
+    counter-reset: rung;
+    display: flex;
+    flex-direction: column;
+  }
+  .ladder li {
+    counter-increment: rung;
+    display: grid;
+    grid-template-columns: 46px 1fr auto;
+    align-items: baseline;
+    gap: 10px;
+    padding: 9px 0;
+    border-bottom: 1px solid var(--hairline);
+    font-size: 13.5px;
+  }
+  .ladder li:last-child { border-bottom: none; }
+  .ladder li::before {
+    content: counter(rung);
+    font-family: ui-monospace, "SF Mono", "Cascadia Code", monospace;
+    font-size: 12px;
+    color: var(--faint);
+  }
+  .ladder .desc { color: var(--ink); }
+  .ladder .desc .tag { color: var(--muted); font-size: 12px; }
+  .ladder .score {
+    font-family: ui-monospace, "SF Mono", "Cascadia Code", monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .ladder li.canonical .score { color: var(--accent-deep); }
+  .ladder li.canonical .desc { font-weight: 600; }
+
+  .callout {
+    margin: 0 0 44px;
+    padding: 18px 20px 20px;
+    border: 1px solid var(--hairline);
+  }
+  .callout.accent { background: var(--accent-tint); border-color: color-mix(in srgb, var(--accent) 35%, var(--hairline)); }
+  .callout.neutral { background: var(--pending-tint); }
+  .callout.neutral h2 { color: var(--muted); }
+  .callout.neutral li::before { content: "\2013"; position: absolute; left: 0; color: var(--muted); font-weight: 700; }
+  .callout h2 {
+    margin: 0 0 12px;
+    font-family: ui-monospace, "SF Mono", "Cascadia Code", monospace;
+    font-size: 13px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    font-weight: 600;
+  }
+  .callout.accent h2 { color: var(--accent-deep); }
+  .callout ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 9px; }
+  .callout li { font-size: 14.5px; padding-left: 18px; position: relative; color: var(--ink); }
+  .callout.accent li::before { content: "\2013"; position: absolute; left: 0; color: var(--accent-deep); font-weight: 700; }
+  .callout li b { font-weight: 600; }
+  .track-pair { display: flex; flex-direction: column; gap: 16px; margin-bottom: 44px; }
+  @media (min-width: 640px) {
+    .track-pair { flex-direction: row; flex-wrap: wrap; }
+    .track-pair .callout { flex: 1 1 220px; margin-bottom: 0; }
+  }
+
+  footer {
+    margin-top: 40px;
+    padding-top: 20px;
+    border-top: 1px solid var(--hairline);
+    font-size: 12.5px;
+    color: var(--faint);
+  }
+  footer .sources {
+    margin-top: 10px;
+    font-family: ui-monospace, "SF Mono", "Cascadia Code", monospace;
+    font-size: 11.5px;
+    line-height: 1.9;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  a { color: var(--accent-deep); }
+
+  @media (max-width: 560px) {
+    .wrap { padding: 36px 16px 64px; }
+    .stat-strip { gap: 16px; }
+    .gate-table td.metric { display: none; }
+  }
+</style>
+
+<div class="wrap">
+
+  <header class="page">
+    <p class="eyebrow">menhir &times; archolith-bench</p>
+    <h1>Scalar Perception Roadmap</h1>
+    <p class="dek">Three roles, three tracks: deterministic-first typed-scalar extraction (avoid the LLM call), ScalarStateView recall + authority (current-state, LLM-based), and Event Scalar / event history (categorical occurrences &mdash; purchased/acquired/attended). Different maturity, different gates &mdash; don't read one as another.</p>
+    <div class="focus-line">
+      <span class="tag">Current focus</span>
+      <span>Track B just cleared a canonical 78-item benchmark and needs a promotion decision. Track C shipped all five phases today but only has small noncanonical evidence. Track A is not authorized to route or persist deterministically &mdash; its extractor barely fires on real text.</span>
+    </div>
+  </header>
+
+  <div class="governance">
+    <strong>Why Track A says &ldquo;not_evaluable,&rdquo; Track B says &ldquo;canonical,&rdquo; and Track C says &ldquo;noncanonical.&rdquo;</strong> Track A's gates are pre-registered before capture and locked before any frozen run &mdash; never chosen after seeing results, and LLM agreement alone can't pass or fail one. Track B's canonical designation is a separate standard: one fresh, non-resumed run on tracked-clean worktrees against the full 78-item fixture, superseding all earlier development/diagnostic runs. Track C is fully implemented but deliberately evaluated only on small focused/canary panels so far &mdash; its own reports say plainly they don't replace a canonical KU78 run. Three different evidentiary bars for three different claims, none of them a stall.
+  </div>
+
+  <div class="track-pair">
+    <section class="callout accent">
+      <h2>Track B &middot; ready for a decision</h2>
+      <ul>
+        <li><b>Canonical KU78 pass landed 2026-08-06,</b> marked canonical this morning (2026-08-07). Scalar state/history + View authority, LLM-based, deterministic router off.</li>
+        <li><b>68/78 (0.872)</b> vs 6/78 (0.077) no-memory &mdash; a +0.795 lift, fresh non-resumed run, both repos tracked-clean.</li>
+        <li>Open: default-on decision for <code class="mono">scalar_view_authority_enabled</code>/<code class="mono">scalar_history_enabled</code>, and triage of the 10 remaining misses.</li>
+      </ul>
+    </section>
+    <section class="callout neutral">
+      <h2>Track C &middot; implemented, evidence still thin</h2>
+      <ul>
+        <li><b>All 5 phases landed today</b> (commit <code class="mono">370eff1</code>): perception, persistence, admission, recall authority, transport. Default-off, byte-compatible when off.</li>
+        <li>230 event-focused tests, a clean 3-namespace canary, and a 5-case focused LME panel &mdash; every report self-labels <b>noncanonical</b>, explicitly not a KU78-scale claim.</li>
+        <li>Open: run this at canonical KU78 scale before any enablement conversation, same as Track B already did.</li>
+      </ul>
+    </section>
+    <section class="callout blocking">
+      <h2>Track A &middot; blocking promotion</h2>
+      <ul>
+        <li><b>Coverage collapse on real text.</b> The router checkpoint's own 78-task fixture: <span class="num">915</span> user episodes &rarr; <span class="num">1</span> typed proposal &rarr; <span class="num">0</span> deterministic bypasses, even with every known class hypothetically promoted.</li>
+        <li><b>Confirmed independently.</b> The research adapter's frozen 78-task replay: <span class="num">36</span> candidates &rarr; <span class="num">0/36</span> composed (canonical), <span class="num">1/36</span> composed (isolated path). Curated panels score 12&ndash;15/15; real conversational text does not.</li>
+        <li><b>Sample size.</b> Per-class gate needs Wilson LB &ge; 0.99 at <span class="num">n &ge; 100</span>. Panels top out at 24&ndash;48 cases total, not per class.</li>
+        <li><b>Unmeasured gates.</b> Recognition, role/operation, performance, cache, replay on the dependency bridge are <span class="num">not_measured</span>, not just unmet.</li>
+      </ul>
+    </section>
+  </div>
+
+  <div class="phases">
+
+    <article class="phase">
+      <div class="phase-head">
+        <div class="phase-title-row">
+          <span class="phase-num">01</span>
+          <h2>Foundation</h2>
+        </div>
+        <span class="status-chip done">Shipped, default&#8209;off</span>
+      </div>
+      <p class="thesis">The extraction, identity, and materialization machinery exists and is proven to work mechanically. Flags off &rarr; byte-identical behavior.</p>
+      <ul class="item-list">
+        <li>
+          <span class="mark" aria-hidden="true">
+            <svg viewBox="0 0 15 15"><circle cx="7.5" cy="7.5" r="7" fill="none" stroke="var(--done)" stroke-width="1.4"/><path d="M4.2 7.7l2.1 2.1 4.4-4.6" fill="none" stroke="var(--done)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </span>
+          <span class="body">Pure deterministic typed-scalar extractor (v0.1) + fail-closed structural composer &mdash; count, money, measurement, duration, frequency, clock_time, weekday, boolean, status, ranges, deltas, expires, previous/current.
+            <span class="src">menhir-deterministic-first-event-scalar-2026-07-30.md &middot; Phase 1 + 2A</span>
+          </span>
+        </li>
+        <li>
+          <span class="mark" aria-hidden="true">
+            <svg viewBox="0 0 15 15"><circle cx="7.5" cy="7.5" r="7" fill="none" stroke="var(--done)" stroke-width="1.4"/><path d="M4.2 7.7l2.1 2.1 4.4-4.6" fill="none" stroke="var(--done)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </span>
+          <span class="body">Compositional identity sidecar &mdash; who the fact is about, what relation, what open-world target/scope, typed value/unit/operation, when. Non-persisted, shadow-only.
+            <span class="src">menhir-compositional-scalar-identity-2026-08-05.md &middot; Phases 1&ndash;3</span>
+          </span>
+        </li>
+        <li>
+          <span class="mark" aria-hidden="true">
+            <svg viewBox="0 0 15 15"><circle cx="7.5" cy="7.5" r="7" fill="none" stroke="var(--done)" stroke-width="1.4"/><path d="M4.2 7.7l2.1 2.1 4.4-4.6" fill="none" stroke="var(--done)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </span>
+          <span class="body">ScalarStateView pipeline proven end to end &mdash; real LLM perceiving scalars from real ingested episodes &rarr; materialized <code class="mono">scalar_state</code> View over bolt, zero duplicate current keys.
+            <span class="src">archolith-bench: menhir-scalar-state-e2e-harness-plan.md &middot; DONE 2026-07-20</span>
+          </span>
+        </li>
+        <li>
+          <span class="mark" aria-hidden="true">
+            <svg viewBox="0 0 15 15"><circle cx="7.5" cy="7.5" r="7" fill="none" stroke="var(--done)" stroke-width="1.4"/><path d="M4.2 7.7l2.1 2.1 4.4-4.6" fill="none" stroke="var(--done)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </span>
+          <span class="body"><code class="mono">scheduler_tasks.py</code> split into <code class="mono">services/scalar_consolidation.py</code> &mdash; scalar paging, activation, repair, and reconciliation now own their own module boundary; behavior unchanged.
+            <span class="src">scalar-consolidation-extraction.md &middot; 815&rarr;659 lines, 3,954 passed</span>
+          </span>
+        </li>
+        <li>
+          <span class="mark" aria-hidden="true">
+            <svg viewBox="0 0 15 15"><circle cx="7.5" cy="7.5" r="7" fill="none" stroke="var(--done)" stroke-width="1.4"/><path d="M4.2 7.7l2.1 2.1 4.4-4.6" fill="none" stroke="var(--done)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </span>
+          <span class="body">Fail-closed deterministic scalar router landed &mdash; default-off, default-empty class allowlist, replay-verifies extraction receipts, falls back to the existing LLM path on any error or ambiguity. This is the safe promotion/fallback <em>framework</em>; it does not itself add coverage.
+            <span class="src">WRAPUP-2026-08-06-menhir-deterministic-scalar-routing-checkpoint.md &middot; commit cdeb43b, pushed</span>
+          </span>
+        </li>
+      </ul>
+    </article>
+
+    <article class="phase">
+      <div class="phase-head">
+        <div class="phase-title-row">
+          <span class="phase-num">02</span>
+          <div>
+            <p class="track-eyebrow">Track B &middot; Recall + Authority</p>
+            <h2>Canonical benchmark landed</h2>
+          </div>
+        </div>
+        <span class="status-chip canonical">Canonical, 2026&#8209;08&#8209;06</span>
+      </div>
+      <p class="thesis">Scalar state/history materialization + View authority, evaluated LLM-based with the deterministic router and classes explicitly disabled. This is the recall-facing track, not the extraction track above &mdash; different question, different maturity.</p>
+      <div class="stat-strip">
+        <div class="stat"><span class="v">68/78</span><span class="k">menhir recall, canonical (0.872)</span></div>
+        <div class="stat"><span class="v">6/78</span><span class="k">no&#8209;memory baseline (0.077)</span></div>
+        <div class="stat"><span class="v">+0.795</span><span class="k">delta over baseline</span></div>
+        <div class="stat"><span class="v">10</span><span class="k">remaining misses, triaged</span></div>
+      </div>
+      <ol class="ladder">
+        <li><span class="desc">Source-attribution checkpoint <span class="tag">(accounting only, not best result)</span></span><span class="score">58/78</span></li>
+        <li><span class="desc">Richer scalar-authority serialization <span class="tag">scalar-authority-recall-v1</span></span><span class="score">63/78</span></li>
+        <li><span class="desc">+ source-time / current-vs-superseded evidence <span class="tag">scalar-temporal-evidence-recall-v2</span></span><span class="score">65/78</span></li>
+        <li><span class="desc">4 targeted write-repair wins, noncanonical isolated clone <span class="tag">scalar-write-repair-targeted-v1</span></span><span class="score">70/78</span></li>
+        <li class="canonical"><span class="desc">Fresh, non-resumed, tracked-clean &mdash; <b>marked canonical 2026-08-07</b> <span class="tag">scalar-canonical-ku78-v1</span></span><span class="score">68/78</span></li>
+      </ol>
+      <p class="thesis" style="margin-top:-4px;">The canonical run re-ran clean rather than reusing the 70/78 dev graph &mdash; a lower but now-trustworthy number beats a higher noncanonical one. Remaining failures cluster on judge-answer contradiction, temporal-validity fallback, and recency-authority selection, not scalar extraction itself &mdash; see <code class="mono">scalar-lme-run-lineage-2026-08-05.md</code>.</p>
+    </article>
+
+    <article class="phase">
+      <div class="phase-head">
+        <div class="phase-title-row">
+          <span class="phase-num">03</span>
+          <div>
+            <p class="track-eyebrow">Track C &middot; Event Scalar / Event History</p>
+            <h2>All five phases shipped</h2>
+          </div>
+        </div>
+        <span class="status-chip progress">Implemented, thin evidence</span>
+      </div>
+      <p class="thesis">The third scalar role in Recall Lab, alongside Current Scalar and Change Scalar: categorical occurrences (purchased/acquired/attended) rather than numeric current-state. A separate <code class="mono">EventAuthorityVerdict</code> layer, never interleaved with or reranked among scalar observations.</p>
+      <div class="stat-strip">
+        <div class="stat"><span class="v">230</span><span class="k">event-focused tests</span></div>
+        <div class="stat"><span class="v">13/13</span><span class="k">production canary checks</span></div>
+        <div class="stat"><span class="v">5/5</span><span class="k">focused LME panel (noncanonical)</span></div>
+        <div class="stat"><span class="v">7/9</span><span class="k">grounded assertions from turns, canary</span></div>
+      </div>
+      <ul class="item-list">
+        <li>
+          <span class="mark" aria-hidden="true">
+            <svg viewBox="0 0 15 15"><circle cx="7.5" cy="7.5" r="7" fill="none" stroke="var(--done)" stroke-width="1.4"/><path d="M4.2 7.7l2.1 2.1 4.4-4.6" fill="none" stroke="var(--done)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </span>
+          <span class="body">Phases 1&ndash;5 complete on <code class="mono">main</code> at commit <code class="mono">370eff1</code>: domain contract + pure selector, persistence + timeline projection, perception/admission, recall authority, transport/lifecycle closeout. Every flag defaults off; flag-off behavior is byte-compatible.</span>
+        </li>
+        <li>
+          <span class="mark" aria-hidden="true">
+            <svg viewBox="0 0 15 15"><circle cx="7.5" cy="7.5" r="7" fill="none" stroke="var(--progress)" stroke-width="1.4"/><circle cx="7.5" cy="7.5" r="2.6" fill="var(--progress)"/></svg>
+          </span>
+          <span class="body">Production canary (isolated Neo4j, 2026-08-07): 3 namespaces, zero failures, latest/predecessor/same-time-ambiguity routing all correct, 13/13 checks &mdash; explicitly labeled <b>noncanonical development canary</b>.</span>
+        </li>
+        <li>
+          <span class="mark" aria-hidden="true">
+            <svg viewBox="0 0 15 15"><circle cx="7.5" cy="7.5" r="7" fill="none" stroke="var(--progress)" stroke-width="1.4"/><circle cx="7.5" cy="7.5" r="2.6" fill="var(--progress)"/></svg>
+          </span>
+          <span class="body">Focused 5-case LongMemEval acceptance panel: latest-event 3/3, predecessor 2/3 with 1 fail-closed abstention, all three negative controls (intent-only, negated-acquisition, possession-only) correctly abstained. Report's own words: &ldquo;not a canonical KU78 headline run.&rdquo;</span>
+        </li>
+        <li>
+          <span class="mark" aria-hidden="true">
+            <svg viewBox="0 0 15 15"><circle cx="7.5" cy="7.5" r="6.3" fill="none" stroke="var(--pending)" stroke-width="1.3" stroke-dasharray="2.2 2.2"/></svg>
+          </span>
+          <span class="body">Phase 5 in <code class="mono">memory-backlog.md</code>'s event_history_rollout entry still lists &ldquo;pending: operator enablement only&rdquo; &mdash; the transport/lifecycle work is done, but no canonical-scale run exists yet to inform that decision.</span>
+        </li>
+      </ul>
+    </article>
+
+    <article class="phase">
+      <div class="phase-head">
+        <div class="phase-title-row">
+          <span class="phase-num">04</span>
+          <div>
+            <p class="track-eyebrow">Track A &middot; Deterministic Extraction</p>
+            <h2>Evidence building</h2>
+          </div>
+        </div>
+        <span class="status-chip progress">In progress</span>
+      </div>
+      <p class="thesis">Bench-owned, offline regression panels replay the real extractor/composer/adapter against labeled fixtures &mdash; no LLM, network, Neo4j, or service calls. Panels score well; the same code replayed against real conversational text does not. Every result is stamped <code class="mono">promotion_status=not_evaluable</code> by design.</p>
+      <div class="stat-strip">
+        <div class="stat"><span class="v">12/12</span><span class="k">compositional identity, structural&#8209;v2 (panel)</span></div>
+        <div class="stat"><span class="v">+6</span><span class="k">noisy composition gain, cumulative holdout (panel)</span></div>
+        <div class="stat"><span class="v">5/6</span><span class="k">dependency&#8209;bridge identities exact, r2 (panel)</span></div>
+        <div class="stat"><span class="v">0&ndash;1 / 36</span><span class="k">composed on real 78&#8209;task replay</span></div>
+      </div>
+      <ul class="item-list">
+        <li>
+          <span class="mark" aria-hidden="true">
+            <svg viewBox="0 0 15 15"><circle cx="7.5" cy="7.5" r="7" fill="none" stroke="var(--progress)" stroke-width="1.4"/><circle cx="7.5" cy="7.5" r="2.6" fill="var(--progress)"/></svg>
+          </span>
+          <span class="body">Compositional scalar identity panel closed the possessive-weight/height grammar gap at <code class="mono">structural-v2</code>: 12/12 exact joins, 12/12 correct identities, zero false admissions &mdash; still a 24-case regression panel, not population evidence.</span>
+        </li>
+        <li>
+          <span class="mark" aria-hidden="true">
+            <svg viewBox="0 0 15 15"><circle cx="7.5" cy="7.5" r="7" fill="none" stroke="var(--progress)" stroke-width="1.4"/><circle cx="7.5" cy="7.5" r="2.6" fill="var(--progress)"/></svg>
+          </span>
+          <span class="body">Cumulative-completion holdout: baseline clean 12/12, baseline noisy 6/12, isolated clean/noisy 12/12 each, 0/0 false-current errors.</span>
+        </li>
+        <li>
+          <span class="mark" aria-hidden="true">
+            <svg viewBox="0 0 15 15"><circle cx="7.5" cy="7.5" r="7" fill="none" stroke="var(--progress)" stroke-width="1.4"/><circle cx="7.5" cy="7.5" r="2.6" fill="var(--progress)"/></svg>
+          </span>
+          <span class="body">Dependency-evidence bridge r2: 48 cases, 45/45 evidence &amp; bridge provenance, 179/192 cue-exact. Its own evaluation plan requires 6/6 canonical-self identity to call even the absolute-only prototype supported; the result is 5/6, one short. Span recognition and role/operation classification are deliberately left <code class="mono">not_measured</code> &mdash; gold locators were supplied, not derived.</span>
+        </li>
+        <li>
+          <span class="mark" aria-hidden="true">
+            <svg viewBox="0 0 15 15"><circle cx="7.5" cy="7.5" r="7" fill="none" stroke="var(--blocked)" stroke-width="1.4"/><path d="M5 5l5 5M10 5l-5 5" stroke="var(--blocked)" stroke-width="1.6" stroke-linecap="round"/></svg>
+          </span>
+          <span class="body"><b>The coverage reality check:</b> the frozen 78-task replay composed 0/36 candidates on the canonical path and 1/36 on the research-only isolated path &mdash; abstentions dominated by <code class="mono">struct.unsafe_list</code>. Curated panels don't predict real coverage.</span>
+        </li>
+      </ul>
+    </article>
+
+    <article class="phase">
+      <div class="phase-head">
+        <div class="phase-title-row">
+          <span class="phase-num">05</span>
+          <div>
+            <p class="track-eyebrow">Track A &middot; Deterministic Extraction</p>
+            <h2>Promotion gates</h2>
+          </div>
+        </div>
+        <span class="status-chip blocked">Blocked</span>
+      </div>
+      <p class="thesis">Class-level promotion, never an aggregate score. The router itself now exists and is safe (fail-closed, default-off, default-empty allowlist) &mdash; the blocker is upstream: the extractor has almost nothing to route.</p>
+      <table class="gate-table">
+        <thead>
+          <tr><th>Gate</th><th>State</th><th>Metric</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Extractor produces bypass-eligible proposals on real text</td>
+            <td class="state"><span class="g-state failed">FAILED</span></td>
+            <td class="metric">1 proposal / 915 episodes, 2026-08-06</td>
+          </tr>
+          <tr>
+            <td>Zero router-missed LLM-baseline claims (shadow dual-run)</td>
+            <td class="state"><span class="g-state pending">PENDING</span></td>
+            <td class="metric">untestable while coverage is ~0</td>
+          </tr>
+          <tr>
+            <td>100% structural invariants on full held-out set</td>
+            <td class="state"><span class="g-state pending">PENDING</span></td>
+            <td class="metric">awaits broader panel</td>
+          </tr>
+          <tr>
+            <td>Zero false-positive / false-current on adversarial set</td>
+            <td class="state"><span class="g-state met">MET so far</span></td>
+            <td class="metric">0/0 across current panels</td>
+          </tr>
+          <tr>
+            <td>Per-class precision floor: Wilson LB &ge; 0.99, n &ge; 100</td>
+            <td class="state"><span class="g-state pending">PENDING</span></td>
+            <td class="metric">panels are 24&ndash;48 cases total</td>
+          </tr>
+          <tr>
+            <td>Frozen-LME recall non-negative per class</td>
+            <td class="state"><span class="g-state pending">PENDING</span></td>
+            <td class="metric">no frozen run yet</td>
+          </tr>
+          <tr>
+            <td>Extraction latency/token savings, separate from recall spend</td>
+            <td class="state"><span class="g-state pending">PENDING</span></td>
+            <td class="metric">not yet instrumented</td>
+          </tr>
+        </tbody>
+      </table>
+    </article>
+
+    <article class="phase">
+      <div class="phase-head">
+        <div class="phase-title-row">
+          <span class="phase-num">06</span>
+          <h2>What's next, per track</h2>
+        </div>
+        <span class="status-chip pending">Mixed</span>
+      </div>
+      <p class="thesis">Track B has canonical evidence and needs a call; Track C needs to run at that same scale before its call; Track A still needs the evidence itself.</p>
+      <ul class="item-list">
+        <li>
+          <span class="mark" aria-hidden="true">
+            <svg viewBox="0 0 15 15"><circle cx="7.5" cy="7.5" r="6.3" fill="none" stroke="var(--accent)" stroke-width="1.3"/><circle cx="7.5" cy="7.5" r="2.6" fill="var(--accent)"/></svg>
+          </span>
+          <span class="body"><b>Track B:</b> owner decision on flipping <code class="mono">scalar_view_authority_enabled</code> / <code class="mono">scalar_history_enabled</code> to default-on, now backed by a canonical +0.795 lift &mdash; this is a rollout call, not a measurement gap.</span>
+        </li>
+        <li>
+          <span class="mark" aria-hidden="true">
+            <svg viewBox="0 0 15 15"><circle cx="7.5" cy="7.5" r="6.3" fill="none" stroke="var(--accent)" stroke-width="1.3"/><circle cx="7.5" cy="7.5" r="2.6" fill="var(--accent)"/></svg>
+          </span>
+          <span class="body"><b>Track B:</b> triage the 10 canonical misses &mdash; mostly judge-contradiction and recency-authority selection, not scalar extraction failures, per the run's own review.</span>
+        </li>
+        <li>
+          <span class="mark" aria-hidden="true">
+            <svg viewBox="0 0 15 15"><circle cx="7.5" cy="7.5" r="6.3" fill="none" stroke="var(--progress)" stroke-width="1.3"/><circle cx="7.5" cy="7.5" r="2.6" fill="var(--progress)"/></svg>
+          </span>
+          <span class="body"><b>Track C:</b> run event history at canonical KU78 scale &mdash; the same bar Track B already cleared &mdash; before any operator-enablement conversation starts. Today's evidence is a 5-case panel and a 3-namespace canary, both self-labeled noncanonical.</span>
+        </li>
+        <li>
+          <span class="mark" aria-hidden="true">
+            <svg viewBox="0 0 15 15"><circle cx="7.5" cy="7.5" r="6.3" fill="none" stroke="var(--pending)" stroke-width="1.3" stroke-dasharray="2.2 2.2"/></svg>
+          </span>
+          <span class="body"><b>Track A:</b> the approved next step per the router checkpoint is resuming the dependency-based detector (<code class="mono">scalar_dependency_evidence.py</code>, <code class="mono">research_scalar_*</code> adapters) and testing it on noisy independent language &mdash; the promotion allowlist stays empty until a class shows real coverage, not just a clean panel score.</span>
+        </li>
+        <li>
+          <span class="mark" aria-hidden="true">
+            <svg viewBox="0 0 15 15"><circle cx="7.5" cy="7.5" r="6.3" fill="none" stroke="var(--pending)" stroke-width="1.3" stroke-dasharray="2.2 2.2"/></svg>
+          </span>
+          <span class="body"><b>Track A:</b> class-level flag promotion (shadow &rarr; class-authoritative &rarr; default-on) is not scheduled until the router gate clears.</span>
+        </li>
+      </ul>
+    </article>
+
+  </div>
+
+  <footer>
+    Compiled from the menhir + archolith-bench <code class="mono">.agent/</code> tree, 2026-08-07.
+    <div class="sources">
+      <span>menhir/.agent/plans/menhir-deterministic-first-event-scalar-2026-07-30.md</span>
+      <span>menhir/.agent/plans/menhir-compositional-scalar-identity-2026-08-05.md</span>
+      <span>menhir/.agent/plans/scalar-consolidation-extraction.md</span>
+      <span>menhir/.agent/default-off-features.md</span>
+      <span>archolith-bench/.agent/plans/menhir-scalar-state-e2e-harness-plan.md</span>
+      <span>archolith-bench/.agent/scripts-index.md</span>
+      <span>archolith-bench/results/lme-ku-buildout/LEDGER.md</span>
+      <span>archolith-bench/.agent/benchmark-notes/scalar-lme-run-lineage-2026-08-05.md</span>
+      <span>archolith-bench/.agent/benchmark-notes/scalar-spend-attribution-2026-08-05.md</span>
+      <span>archolith-bench/.agent/benchmark-notes/deterministic-scalar-research-adapter-2026-08-06.md</span>
+      <span>archolith-bench/.agent/benchmark-notes/deterministic-scalar-nlp-binding-spike-2026-08-06.md</span>
+      <span>archolith-bench/.agent/benchmark-notes/compositional-scalar-possessive-measurement-followup-2026-08-06.md</span>
+      <span>archolith-bench/.agent/benchmark-notes/dependency-scalar-evidence-bridge-evaluation-plan-2026-08-06.md</span>
+      <span>archolith-bench/.agent/benchmark-notes/deterministic-scalar-heldout-smoke-2026-08-05.md</span>
+      <span>archolith-bench/.agent/for-review/HANDOFF-2026-07-29-lme-scalar-history-reingest.md</span>
+      <span>menhir/.agent/for-review/WRAPUP-2026-08-06-menhir-deterministic-scalar-routing-checkpoint.md</span>
+      <span>menhir/.agent/plans/menhir-event-history-implementation-2026-08-07.md</span>
+      <span>menhir/.agent/memory-backlog.md &middot; event_history_rollout</span>
+      <span>archolith-bench/results/event-history-canary/production-path-v1-20260807/report.md</span>
+      <span>archolith-bench/results/event-history-acceptance/event-history-production-gate-v4-20260807/report.md</span>
+    </div>
+  </footer>
+
+</div>

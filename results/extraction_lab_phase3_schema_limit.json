@@ -1,0 +1,4386 @@
+[
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 1,
+    "trial": 9,
+    "total_episodes_available": 12,
+    "window_size_actual": 1,
+    "establishing_present": false,
+    "establishing_indices_in_window": [],
+    "establishing_positions_in_window": [],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 6594.25,
+    "mentions": [
+      "user",
+      "Miami Beach",
+      "Rachel"
+    ],
+    "propositions": [
+      "Rachel is friends with the user.",
+      "Rachel is friends with the user."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.3333333333333333,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.8
+    },
+    "proposition_success": false,
+    "mention_precision": 0.3333333333333333
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 1,
+    "trial": 7,
+    "total_episodes_available": 12,
+    "window_size_actual": 1,
+    "establishing_present": false,
+    "establishing_indices_in_window": [],
+    "establishing_positions_in_window": [],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4167.78,
+    "mentions": [
+      "user",
+      "Miami Beach",
+      "Rachel"
+    ],
+    "propositions": [
+      "Rachel is friends with the user.",
+      "Rachel is friends with the user."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.3333333333333333,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.8
+    },
+    "proposition_success": false,
+    "mention_precision": 0.3333333333333333
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 10,
+    "trial": 5,
+    "total_episodes_available": 24,
+    "window_size_actual": 10,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      21
+    ],
+    "establishing_positions_in_window": [
+      7
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 5640.65,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week for help with setting boundaries.",
+      "user sees Dr. Smith every week for help with setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 10,
+    "trial": 1,
+    "total_episodes_available": 12,
+    "window_size_actual": 10,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      2,
+      4
+    ],
+    "establishing_positions_in_window": [
+      0,
+      2
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 5067.36,
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "User's friend Rachel has moved back to the suburbs again.",
+      "User's friend Rachel has moved back to the suburbs again."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 12,
+    "trial": 7,
+    "total_episodes_available": 12,
+    "window_size_actual": 12,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      2,
+      4
+    ],
+    "establishing_positions_in_window": [
+      2,
+      4
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 6266.44,
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "Rachel has moved back to the suburbs again.",
+      "Rachel has moved back to the suburbs again."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 1,
+    "trial": 4,
+    "total_episodes_available": 24,
+    "window_size_actual": 1,
+    "establishing_present": false,
+    "establishing_indices_in_window": [],
+    "establishing_positions_in_window": [],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4115.22,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "User sees Dr. Smith every week for help with setting boundaries.",
+      "User sees Dr. Smith every week for help with setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 8,
+    "trial": 6,
+    "total_episodes_available": 12,
+    "window_size_actual": 8,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      4
+    ],
+    "establishing_positions_in_window": [
+      0
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4405.15,
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "User is friends with Rachel.",
+      "User is friends with Rachel."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.75
+    },
+    "proposition_success": false,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 5,
+    "trial": 1,
+    "total_episodes_available": 12,
+    "window_size_actual": 5,
+    "establishing_present": false,
+    "establishing_indices_in_window": [],
+    "establishing_positions_in_window": [],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 2176.91,
+    "mentions": [
+      "Rachel"
+    ],
+    "propositions": [],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 1.0,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.0
+    },
+    "proposition_success": false,
+    "mention_precision": 1.0
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 1,
+    "trial": 9,
+    "total_episodes_available": 24,
+    "window_size_actual": 1,
+    "establishing_present": false,
+    "establishing_indices_in_window": [],
+    "establishing_positions_in_window": [],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4079.25,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "User sees Dr. Smith every week and she has been helping user work on boundaries.",
+      "User sees Dr. Smith every week and she has been helping user work on boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.75
+    },
+    "proposition_success": false,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 3,
+    "trial": 6,
+    "total_episodes_available": 12,
+    "window_size_actual": 3,
+    "establishing_present": false,
+    "establishing_indices_in_window": [],
+    "establishing_positions_in_window": [],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4476.41,
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "User's friend Rachel has moved back to the suburbs again.",
+      "User's friend Rachel has moved back to the suburbs again."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 10,
+    "trial": 2,
+    "total_episodes_available": 12,
+    "window_size_actual": 10,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      2,
+      4
+    ],
+    "establishing_positions_in_window": [
+      0,
+      2
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4214.25,
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "Rachel has moved back to the suburbs again.",
+      "Rachel has moved back to the suburbs again."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 10,
+    "trial": 3,
+    "total_episodes_available": 24,
+    "window_size_actual": 10,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      21
+    ],
+    "establishing_positions_in_window": [
+      7
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4648.48,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week for help with setting boundaries and prioritizing tasks",
+      "user sees Dr. Smith every week for help with setting boundaries and prioritizing tasks"
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 3,
+    "trial": 5,
+    "total_episodes_available": 24,
+    "window_size_actual": 3,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      21
+    ],
+    "establishing_positions_in_window": [
+      0
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4109.87,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries.",
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.75
+    },
+    "proposition_success": false,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 8,
+    "trial": 2,
+    "total_episodes_available": 12,
+    "window_size_actual": 8,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      4
+    ],
+    "establishing_positions_in_window": [
+      0
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3828.68,
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "Rachel has moved back to the suburbs again.",
+      "Rachel has moved back to the suburbs again."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 12,
+    "trial": 5,
+    "total_episodes_available": 12,
+    "window_size_actual": 12,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      2,
+      4
+    ],
+    "establishing_positions_in_window": [
+      2,
+      4
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 2315.48,
+    "mentions": [
+      "Rachel"
+    ],
+    "propositions": [],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 1.0,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.0
+    },
+    "proposition_success": false,
+    "mention_precision": 1.0
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 10,
+    "trial": 9,
+    "total_episodes_available": 24,
+    "window_size_actual": 10,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      21
+    ],
+    "establishing_positions_in_window": [
+      7
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4553.45,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries.",
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.75
+    },
+    "proposition_success": false,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 3,
+    "trial": 2,
+    "total_episodes_available": 24,
+    "window_size_actual": 3,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      21
+    ],
+    "establishing_positions_in_window": [
+      0
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4534.8,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "User sees Dr. Smith every week and she's been helping him work on setting boundaries.",
+      "User sees Dr. Smith every week and she's been helping him work on setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 24,
+    "trial": 6,
+    "total_episodes_available": 24,
+    "window_size_actual": 24,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      2,
+      21
+    ],
+    "establishing_positions_in_window": [
+      2,
+      21
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 6594.13,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week",
+      "user sees Dr. Smith every week"
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 8,
+    "trial": 0,
+    "total_episodes_available": 12,
+    "window_size_actual": 8,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      4
+    ],
+    "establishing_positions_in_window": [
+      0
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 8984.42,
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "User's friend Rachel has moved back to the suburbs again.",
+      "User's friend Rachel has moved back to the suburbs again."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 9,
+    "trial": 7,
+    "total_episodes_available": 12,
+    "window_size_actual": 9,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      4
+    ],
+    "establishing_positions_in_window": [
+      1
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 2267.56,
+    "mentions": [
+      "Rachel"
+    ],
+    "propositions": [],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 1.0,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.0
+    },
+    "proposition_success": false,
+    "mention_precision": 1.0
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 10,
+    "trial": 6,
+    "total_episodes_available": 12,
+    "window_size_actual": 10,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      2,
+      4
+    ],
+    "establishing_positions_in_window": [
+      0,
+      2
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4557.83,
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "User's friend Rachel has moved back to the suburbs again.",
+      "User's friend Rachel has moved back to the suburbs again."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 3,
+    "trial": 8,
+    "total_episodes_available": 24,
+    "window_size_actual": 3,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      21
+    ],
+    "establishing_positions_in_window": [
+      0
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4093.79,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries.",
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.75
+    },
+    "proposition_success": false,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 3,
+    "trial": 8,
+    "total_episodes_available": 12,
+    "window_size_actual": 3,
+    "establishing_present": false,
+    "establishing_indices_in_window": [],
+    "establishing_positions_in_window": [],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4174.54,
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "User's friend Rachel has moved back to the suburbs again.",
+      "User's friend Rachel has moved back to the suburbs again."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 12,
+    "trial": 1,
+    "total_episodes_available": 12,
+    "window_size_actual": 12,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      2,
+      4
+    ],
+    "establishing_positions_in_window": [
+      2,
+      4
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 2811.68,
+    "mentions": [
+      "Rachel"
+    ],
+    "propositions": [],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 1.0,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.0
+    },
+    "proposition_success": false,
+    "mention_precision": 1.0
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 1,
+    "trial": 2,
+    "total_episodes_available": 12,
+    "window_size_actual": 1,
+    "establishing_present": false,
+    "establishing_indices_in_window": [],
+    "establishing_positions_in_window": [],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4045.36,
+    "mentions": [
+      "user",
+      "Miami Beach",
+      "Rachel"
+    ],
+    "propositions": [
+      "Rachel is friends with the user.",
+      "Rachel is friends with the user."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.3333333333333333,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.8
+    },
+    "proposition_success": false,
+    "mention_precision": 0.3333333333333333
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 1,
+    "trial": 6,
+    "total_episodes_available": 24,
+    "window_size_actual": 1,
+    "establishing_present": false,
+    "establishing_indices_in_window": [],
+    "establishing_positions_in_window": [],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4435.86,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "User sees Dr. Smith every week for help with setting boundaries.",
+      "User sees Dr. Smith every week for help with setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 20,
+    "trial": 3,
+    "total_episodes_available": 24,
+    "window_size_actual": 20,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      21
+    ],
+    "establishing_positions_in_window": [
+      17
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4421.89,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week for therapy sessions to work on boundaries.",
+      "user sees Dr. Smith every week for therapy sessions to work on boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 8,
+    "trial": 9,
+    "total_episodes_available": 12,
+    "window_size_actual": 8,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      4
+    ],
+    "establishing_positions_in_window": [
+      0
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3783.61,
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "User is friends with Rachel.",
+      "User is friends with Rachel."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.75
+    },
+    "proposition_success": false,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 20,
+    "trial": 5,
+    "total_episodes_available": 24,
+    "window_size_actual": 20,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      21
+    ],
+    "establishing_positions_in_window": [
+      17
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3975.06,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week for therapy sessions to work on boundaries.",
+      "user sees Dr. Smith every week for therapy sessions to work on boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 1,
+    "trial": 1,
+    "total_episodes_available": 12,
+    "window_size_actual": 1,
+    "establishing_present": false,
+    "establishing_indices_in_window": [],
+    "establishing_positions_in_window": [],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4924.39,
+    "mentions": [
+      "user",
+      "Miami Beach",
+      "Rachel"
+    ],
+    "propositions": [
+      "Rachel is friends with the user.",
+      "Rachel is friends with the user."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.3333333333333333,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.8
+    },
+    "proposition_success": false,
+    "mention_precision": 0.3333333333333333
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 5,
+    "trial": 6,
+    "total_episodes_available": 12,
+    "window_size_actual": 5,
+    "establishing_present": false,
+    "establishing_indices_in_window": [],
+    "establishing_positions_in_window": [],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 2177.17,
+    "mentions": [
+      "Rachel"
+    ],
+    "propositions": [],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 1.0,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.0
+    },
+    "proposition_success": false,
+    "mention_precision": 1.0
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 1,
+    "trial": 2,
+    "total_episodes_available": 24,
+    "window_size_actual": 1,
+    "establishing_present": false,
+    "establishing_indices_in_window": [],
+    "establishing_positions_in_window": [],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3952.74,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "User sees Dr. Smith every week for help with setting boundaries.",
+      "User sees Dr. Smith every week for help with setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 20,
+    "trial": 7,
+    "total_episodes_available": 24,
+    "window_size_actual": 20,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      21
+    ],
+    "establishing_positions_in_window": [
+      17
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3782.31,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week",
+      "user sees Dr. Smith every week"
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 24,
+    "trial": 0,
+    "total_episodes_available": 24,
+    "window_size_actual": 24,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      2,
+      21
+    ],
+    "establishing_positions_in_window": [
+      2,
+      21
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4311.2,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week",
+      "user sees Dr. Smith every week"
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 3,
+    "trial": 4,
+    "total_episodes_available": 12,
+    "window_size_actual": 3,
+    "establishing_present": false,
+    "establishing_indices_in_window": [],
+    "establishing_positions_in_window": [],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3832.69,
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "User's friend Rachel has moved back to the suburbs again.",
+      "User's friend Rachel has moved back to the suburbs again."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 10,
+    "trial": 0,
+    "total_episodes_available": 24,
+    "window_size_actual": 10,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      21
+    ],
+    "establishing_positions_in_window": [
+      7
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4625.46,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries.",
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.75
+    },
+    "proposition_success": false,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 9,
+    "trial": 9,
+    "total_episodes_available": 12,
+    "window_size_actual": 9,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      4
+    ],
+    "establishing_positions_in_window": [
+      1
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 2144.83,
+    "mentions": [
+      "Rachel"
+    ],
+    "propositions": [],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 1.0,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.0
+    },
+    "proposition_success": false,
+    "mention_precision": 1.0
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 12,
+    "trial": 0,
+    "total_episodes_available": 12,
+    "window_size_actual": 12,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      2,
+      4
+    ],
+    "establishing_positions_in_window": [
+      2,
+      4
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 2167.02,
+    "mentions": [
+      "Rachel"
+    ],
+    "propositions": [],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 1.0,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.0
+    },
+    "proposition_success": false,
+    "mention_precision": 1.0
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 3,
+    "trial": 0,
+    "total_episodes_available": 24,
+    "window_size_actual": 3,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      21
+    ],
+    "establishing_positions_in_window": [
+      0
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3861.37,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries.",
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.75
+    },
+    "proposition_success": false,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 10,
+    "trial": 0,
+    "total_episodes_available": 12,
+    "window_size_actual": 10,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      2,
+      4
+    ],
+    "establishing_positions_in_window": [
+      0,
+      2
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 6393.49,
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "Rachel has moved back to the suburbs again.",
+      "Rachel has moved back to the suburbs again."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 10,
+    "trial": 7,
+    "total_episodes_available": 24,
+    "window_size_actual": 10,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      21
+    ],
+    "establishing_positions_in_window": [
+      7
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 5258.94,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries.",
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.75
+    },
+    "proposition_success": false,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 8,
+    "trial": 4,
+    "total_episodes_available": 12,
+    "window_size_actual": 8,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      4
+    ],
+    "establishing_positions_in_window": [
+      0
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3682.77,
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "Rachel has moved back to the suburbs again.",
+      "Rachel has moved back to the suburbs again."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 10,
+    "trial": 2,
+    "total_episodes_available": 24,
+    "window_size_actual": 10,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      21
+    ],
+    "establishing_positions_in_window": [
+      7
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3949.83,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week",
+      "user sees Dr. Smith every week"
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 10,
+    "trial": 8,
+    "total_episodes_available": 24,
+    "window_size_actual": 10,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      21
+    ],
+    "establishing_positions_in_window": [
+      7
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4027.68,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week for help with setting boundaries and prioritizing tasks",
+      "user sees Dr. Smith every week for help with setting boundaries and prioritizing tasks"
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 8,
+    "trial": 8,
+    "total_episodes_available": 12,
+    "window_size_actual": 8,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      4
+    ],
+    "establishing_positions_in_window": [
+      0
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3745.69,
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "Rachel has moved back to the suburbs again.",
+      "Rachel has moved back to the suburbs again."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 22,
+    "trial": 9,
+    "total_episodes_available": 24,
+    "window_size_actual": 22,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      2,
+      21
+    ],
+    "establishing_positions_in_window": [
+      0,
+      19
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4038.62,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week",
+      "user sees Dr. Smith every week"
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 9,
+    "trial": 1,
+    "total_episodes_available": 12,
+    "window_size_actual": 9,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      4
+    ],
+    "establishing_positions_in_window": [
+      1
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3270.27,
+    "mentions": [
+      "Rachel"
+    ],
+    "propositions": [],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 1.0,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.0
+    },
+    "proposition_success": false,
+    "mention_precision": 1.0
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 3,
+    "trial": 7,
+    "total_episodes_available": 24,
+    "window_size_actual": 3,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      21
+    ],
+    "establishing_positions_in_window": [
+      0
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3748.25,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries.",
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 3,
+    "trial": 1,
+    "total_episodes_available": 24,
+    "window_size_actual": 3,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      21
+    ],
+    "establishing_positions_in_window": [
+      0
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3895.99,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries.",
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.75
+    },
+    "proposition_success": false,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 10,
+    "trial": 9,
+    "total_episodes_available": 12,
+    "window_size_actual": 10,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      2,
+      4
+    ],
+    "establishing_positions_in_window": [
+      0,
+      2
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3953.51,
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "Rachel has moved back to the suburbs again.",
+      "Rachel has moved back to the suburbs again."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 9,
+    "trial": 2,
+    "total_episodes_available": 12,
+    "window_size_actual": 9,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      4
+    ],
+    "establishing_positions_in_window": [
+      1
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 1991.17,
+    "mentions": [
+      "Rachel"
+    ],
+    "propositions": [],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 1.0,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.0
+    },
+    "proposition_success": false,
+    "mention_precision": 1.0
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 24,
+    "trial": 1,
+    "total_episodes_available": 24,
+    "window_size_actual": 24,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      2,
+      21
+    ],
+    "establishing_positions_in_window": [
+      2,
+      21
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3859.31,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week",
+      "user sees Dr. Smith every week"
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 5,
+    "trial": 2,
+    "total_episodes_available": 12,
+    "window_size_actual": 5,
+    "establishing_present": false,
+    "establishing_indices_in_window": [],
+    "establishing_positions_in_window": [],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 1851.38,
+    "mentions": [
+      "Rachel"
+    ],
+    "propositions": [],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 1.0,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.0
+    },
+    "proposition_success": false,
+    "mention_precision": 1.0
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 12,
+    "trial": 2,
+    "total_episodes_available": 12,
+    "window_size_actual": 12,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      2,
+      4
+    ],
+    "establishing_positions_in_window": [
+      2,
+      4
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3992.21,
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "Rachel has moved back to the suburbs again.",
+      "Rachel has moved back to the suburbs again."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 20,
+    "trial": 9,
+    "total_episodes_available": 24,
+    "window_size_actual": 20,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      21
+    ],
+    "establishing_positions_in_window": [
+      17
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 5314.28,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week for therapy sessions to work on boundaries.",
+      "user sees Dr. Smith every week for therapy sessions to work on boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 5,
+    "trial": 3,
+    "total_episodes_available": 12,
+    "window_size_actual": 5,
+    "establishing_present": false,
+    "establishing_indices_in_window": [],
+    "establishing_positions_in_window": [],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 1824.94,
+    "mentions": [
+      "Rachel"
+    ],
+    "propositions": [],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 1.0,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.0
+    },
+    "proposition_success": false,
+    "mention_precision": 1.0
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 20,
+    "trial": 0,
+    "total_episodes_available": 24,
+    "window_size_actual": 20,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      21
+    ],
+    "establishing_positions_in_window": [
+      17
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4494.98,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week for therapy sessions to work on boundaries.",
+      "user sees Dr. Smith every week for therapy sessions to work on boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 9,
+    "trial": 0,
+    "total_episodes_available": 12,
+    "window_size_actual": 9,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      4
+    ],
+    "establishing_positions_in_window": [
+      1
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 2153.91,
+    "mentions": [
+      "Rachel"
+    ],
+    "propositions": [],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 1.0,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.0
+    },
+    "proposition_success": false,
+    "mention_precision": 1.0
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 12,
+    "trial": 3,
+    "total_episodes_available": 12,
+    "window_size_actual": 12,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      2,
+      4
+    ],
+    "establishing_positions_in_window": [
+      2,
+      4
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4496.37,
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "Rachel recently moved back to the suburbs.",
+      "Rachel recently moved back to the suburbs."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 24,
+    "trial": 4,
+    "total_episodes_available": 24,
+    "window_size_actual": 24,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      2,
+      21
+    ],
+    "establishing_positions_in_window": [
+      2,
+      21
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3823.89,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week",
+      "user sees Dr. Smith every week"
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 20,
+    "trial": 1,
+    "total_episodes_available": 24,
+    "window_size_actual": 20,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      21
+    ],
+    "establishing_positions_in_window": [
+      17
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3989.55,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week",
+      "user sees Dr. Smith every week"
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 24,
+    "trial": 8,
+    "total_episodes_available": 24,
+    "window_size_actual": 24,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      2,
+      21
+    ],
+    "establishing_positions_in_window": [
+      2,
+      21
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3858.97,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries.",
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.75
+    },
+    "proposition_success": false,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 10,
+    "trial": 5,
+    "total_episodes_available": 12,
+    "window_size_actual": 10,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      2,
+      4
+    ],
+    "establishing_positions_in_window": [
+      0,
+      2
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4014.87,
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "Rachel has moved back to the suburbs again.",
+      "Rachel has moved back to the suburbs again."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 12,
+    "trial": 6,
+    "total_episodes_available": 12,
+    "window_size_actual": 12,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      2,
+      4
+    ],
+    "establishing_positions_in_window": [
+      2,
+      4
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 5825.53,
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "Rachel recently moved back to the suburbs.",
+      "Rachel recently moved back to the suburbs."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 1,
+    "trial": 3,
+    "total_episodes_available": 24,
+    "window_size_actual": 1,
+    "establishing_present": false,
+    "establishing_indices_in_window": [],
+    "establishing_positions_in_window": [],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3904.87,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "User sees Dr. Smith every week and she has been helping user work on boundaries.",
+      "User sees Dr. Smith every week and she has been helping user work on boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.75
+    },
+    "proposition_success": false,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 20,
+    "trial": 6,
+    "total_episodes_available": 24,
+    "window_size_actual": 20,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      21
+    ],
+    "establishing_positions_in_window": [
+      17
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4015.4,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week",
+      "user sees Dr. Smith every week"
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 22,
+    "trial": 0,
+    "total_episodes_available": 24,
+    "window_size_actual": 22,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      2,
+      21
+    ],
+    "establishing_positions_in_window": [
+      0,
+      19
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4237.98,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week",
+      "user sees Dr. Smith every week"
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 1,
+    "trial": 8,
+    "total_episodes_available": 24,
+    "window_size_actual": 1,
+    "establishing_present": false,
+    "establishing_indices_in_window": [],
+    "establishing_positions_in_window": [],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3611.75,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "User sees Dr. Smith every week for help with setting boundaries.",
+      "User sees Dr. Smith every week for help with setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 1,
+    "trial": 8,
+    "total_episodes_available": 12,
+    "window_size_actual": 1,
+    "establishing_present": false,
+    "establishing_indices_in_window": [],
+    "establishing_positions_in_window": [],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4029.8,
+    "mentions": [
+      "user",
+      "Miami Beach",
+      "Rachel"
+    ],
+    "propositions": [
+      "Rachel is friends with the user.",
+      "Rachel is friends with the user."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.3333333333333333,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.8
+    },
+    "proposition_success": false,
+    "mention_precision": 0.3333333333333333
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 5,
+    "trial": 4,
+    "total_episodes_available": 12,
+    "window_size_actual": 5,
+    "establishing_present": false,
+    "establishing_indices_in_window": [],
+    "establishing_positions_in_window": [],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 2817.56,
+    "mentions": [
+      "Rachel"
+    ],
+    "propositions": [],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 1.0,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.0
+    },
+    "proposition_success": false,
+    "mention_precision": 1.0
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 9,
+    "trial": 6,
+    "total_episodes_available": 12,
+    "window_size_actual": 9,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      4
+    ],
+    "establishing_positions_in_window": [
+      1
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 2113.92,
+    "mentions": [
+      "Rachel"
+    ],
+    "propositions": [],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 1.0,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.0
+    },
+    "proposition_success": false,
+    "mention_precision": 1.0
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 8,
+    "trial": 7,
+    "total_episodes_available": 12,
+    "window_size_actual": 8,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      4
+    ],
+    "establishing_positions_in_window": [
+      0
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4021.5,
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "Rachel has moved back to the suburbs again.",
+      "Rachel has moved back to the suburbs again."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 24,
+    "trial": 7,
+    "total_episodes_available": 24,
+    "window_size_actual": 24,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      2,
+      21
+    ],
+    "establishing_positions_in_window": [
+      2,
+      21
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4263.92,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week",
+      "user sees Dr. Smith every week"
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 3,
+    "trial": 0,
+    "total_episodes_available": 12,
+    "window_size_actual": 3,
+    "establishing_present": false,
+    "establishing_indices_in_window": [],
+    "establishing_positions_in_window": [],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3921.12,
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "Rachel is friends with the user.",
+      "Rachel is friends with the user."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.75
+    },
+    "proposition_success": false,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 3,
+    "trial": 4,
+    "total_episodes_available": 24,
+    "window_size_actual": 3,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      21
+    ],
+    "establishing_positions_in_window": [
+      0
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3997.31,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries.",
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.75
+    },
+    "proposition_success": false,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 3,
+    "trial": 5,
+    "total_episodes_available": 12,
+    "window_size_actual": 3,
+    "establishing_present": false,
+    "establishing_indices_in_window": [],
+    "establishing_positions_in_window": [],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4200.71,
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "User's friend Rachel has moved back to the suburbs again.",
+      "User's friend Rachel has moved back to the suburbs again."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 12,
+    "trial": 8,
+    "total_episodes_available": 12,
+    "window_size_actual": 12,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      2,
+      4
+    ],
+    "establishing_positions_in_window": [
+      2,
+      4
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4227.33,
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "Rachel recently moved back to the suburbs.",
+      "Rachel recently moved back to the suburbs."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 10,
+    "trial": 8,
+    "total_episodes_available": 12,
+    "window_size_actual": 10,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      2,
+      4
+    ],
+    "establishing_positions_in_window": [
+      0,
+      2
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 2529.53,
+    "mentions": [
+      "Rachel"
+    ],
+    "propositions": [],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 1.0,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.0
+    },
+    "proposition_success": false,
+    "mention_precision": 1.0
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 1,
+    "trial": 5,
+    "total_episodes_available": 12,
+    "window_size_actual": 1,
+    "establishing_present": false,
+    "establishing_indices_in_window": [],
+    "establishing_positions_in_window": [],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 5907.5,
+    "mentions": [
+      "user",
+      "Miami Beach",
+      "Rachel"
+    ],
+    "propositions": [
+      "Rachel just moved back to the suburbs again",
+      "Rachel just moved back to the suburbs again"
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.3333333333333333,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.6
+    },
+    "proposition_success": true,
+    "mention_precision": 0.3333333333333333
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 8,
+    "trial": 3,
+    "total_episodes_available": 12,
+    "window_size_actual": 8,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      4
+    ],
+    "establishing_positions_in_window": [
+      0
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4098.67,
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "Rachel has moved back to the suburbs again.",
+      "Rachel has moved back to the suburbs again."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 20,
+    "trial": 8,
+    "total_episodes_available": 24,
+    "window_size_actual": 20,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      21
+    ],
+    "establishing_positions_in_window": [
+      17
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3956.31,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week for therapy sessions to work on boundaries.",
+      "user sees Dr. Smith every week for therapy sessions to work on boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 9,
+    "trial": 4,
+    "total_episodes_available": 12,
+    "window_size_actual": 9,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      4
+    ],
+    "establishing_positions_in_window": [
+      1
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 2513.09,
+    "mentions": [
+      "Rachel"
+    ],
+    "propositions": [],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 1.0,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.0
+    },
+    "proposition_success": false,
+    "mention_precision": 1.0
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 9,
+    "trial": 5,
+    "total_episodes_available": 12,
+    "window_size_actual": 9,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      4
+    ],
+    "establishing_positions_in_window": [
+      1
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 2180.0,
+    "mentions": [
+      "Rachel"
+    ],
+    "propositions": [],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 1.0,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.0
+    },
+    "proposition_success": false,
+    "mention_precision": 1.0
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 3,
+    "trial": 2,
+    "total_episodes_available": 12,
+    "window_size_actual": 3,
+    "establishing_present": false,
+    "establishing_indices_in_window": [],
+    "establishing_positions_in_window": [],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3911.47,
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "Rachel has moved back to the suburbs again.",
+      "Rachel has moved back to the suburbs again."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 9,
+    "trial": 8,
+    "total_episodes_available": 12,
+    "window_size_actual": 9,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      4
+    ],
+    "establishing_positions_in_window": [
+      1
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 2194.99,
+    "mentions": [
+      "Rachel"
+    ],
+    "propositions": [],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 1.0,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.0
+    },
+    "proposition_success": false,
+    "mention_precision": 1.0
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 22,
+    "trial": 2,
+    "total_episodes_available": 24,
+    "window_size_actual": 22,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      2,
+      21
+    ],
+    "establishing_positions_in_window": [
+      0,
+      19
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3774.26,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week for help with setting boundaries.",
+      "user sees Dr. Smith every week for help with setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 24,
+    "trial": 2,
+    "total_episodes_available": 24,
+    "window_size_actual": 24,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      2,
+      21
+    ],
+    "establishing_positions_in_window": [
+      2,
+      21
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3623.28,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries.",
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.75
+    },
+    "proposition_success": false,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 20,
+    "trial": 4,
+    "total_episodes_available": 24,
+    "window_size_actual": 20,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      21
+    ],
+    "establishing_positions_in_window": [
+      17
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3965.61,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week",
+      "user sees Dr. Smith every week"
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 22,
+    "trial": 1,
+    "total_episodes_available": 24,
+    "window_size_actual": 22,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      2,
+      21
+    ],
+    "establishing_positions_in_window": [
+      0,
+      19
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4405.04,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week for therapy sessions to work on setting boundaries.",
+      "user sees Dr. Smith every week for therapy sessions to work on setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 3,
+    "trial": 9,
+    "total_episodes_available": 12,
+    "window_size_actual": 3,
+    "establishing_present": false,
+    "establishing_indices_in_window": [],
+    "establishing_positions_in_window": [],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3819.59,
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "Rachel has moved back to the suburbs again.",
+      "Rachel has moved back to the suburbs again."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 10,
+    "trial": 6,
+    "total_episodes_available": 24,
+    "window_size_actual": 10,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      21
+    ],
+    "establishing_positions_in_window": [
+      7
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3778.36,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week",
+      "user sees Dr. Smith every week"
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 9,
+    "trial": 3,
+    "total_episodes_available": 12,
+    "window_size_actual": 9,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      4
+    ],
+    "establishing_positions_in_window": [
+      1
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 2168.55,
+    "mentions": [
+      "Rachel"
+    ],
+    "propositions": [],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 1.0,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.0
+    },
+    "proposition_success": false,
+    "mention_precision": 1.0
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 22,
+    "trial": 5,
+    "total_episodes_available": 24,
+    "window_size_actual": 22,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      2,
+      21
+    ],
+    "establishing_positions_in_window": [
+      0,
+      19
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3879.38,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week for therapy sessions to work on setting boundaries.",
+      "user sees Dr. Smith every week for therapy sessions to work on setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 20,
+    "trial": 2,
+    "total_episodes_available": 24,
+    "window_size_actual": 20,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      21
+    ],
+    "establishing_positions_in_window": [
+      17
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3857.03,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week",
+      "user sees Dr. Smith every week"
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 5,
+    "trial": 0,
+    "total_episodes_available": 12,
+    "window_size_actual": 5,
+    "establishing_present": false,
+    "establishing_indices_in_window": [],
+    "establishing_positions_in_window": [],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 1968.45,
+    "mentions": [
+      "Rachel"
+    ],
+    "propositions": [],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 1.0,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.0
+    },
+    "proposition_success": false,
+    "mention_precision": 1.0
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 1,
+    "trial": 0,
+    "total_episodes_available": 12,
+    "window_size_actual": 1,
+    "establishing_present": false,
+    "establishing_indices_in_window": [],
+    "establishing_positions_in_window": [],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4215.67,
+    "mentions": [
+      "user",
+      "Miami Beach",
+      "Rachel"
+    ],
+    "propositions": [
+      "Rachel just moved back to the suburbs again",
+      "Rachel just moved back to the suburbs again"
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.3333333333333333,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.6
+    },
+    "proposition_success": true,
+    "mention_precision": 0.3333333333333333
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 8,
+    "trial": 5,
+    "total_episodes_available": 12,
+    "window_size_actual": 8,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      4
+    ],
+    "establishing_positions_in_window": [
+      0
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4721.26,
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "Rachel just moved back to the suburbs again",
+      "Rachel just moved back to the suburbs again"
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 22,
+    "trial": 6,
+    "total_episodes_available": 24,
+    "window_size_actual": 22,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      2,
+      21
+    ],
+    "establishing_positions_in_window": [
+      0,
+      19
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4005.94,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week for therapy sessions to work on setting boundaries.",
+      "user sees Dr. Smith every week for therapy sessions to work on setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 10,
+    "trial": 7,
+    "total_episodes_available": 12,
+    "window_size_actual": 10,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      2,
+      4
+    ],
+    "establishing_positions_in_window": [
+      0,
+      2
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4591.9,
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "user's friend Rachel has moved back to the suburbs again",
+      "user's friend Rachel has moved back to the suburbs again"
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 24,
+    "trial": 5,
+    "total_episodes_available": 24,
+    "window_size_actual": 24,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      2,
+      21
+    ],
+    "establishing_positions_in_window": [
+      2,
+      21
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 5203.62,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries.",
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.75
+    },
+    "proposition_success": false,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 10,
+    "trial": 3,
+    "total_episodes_available": 12,
+    "window_size_actual": 10,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      2,
+      4
+    ],
+    "establishing_positions_in_window": [
+      0,
+      2
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3695.49,
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "Rachel has moved back to the suburbs again.",
+      "Rachel has moved back to the suburbs again."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 22,
+    "trial": 8,
+    "total_episodes_available": 24,
+    "window_size_actual": 22,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      2,
+      21
+    ],
+    "establishing_positions_in_window": [
+      0,
+      19
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3811.29,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week",
+      "user sees Dr. Smith every week"
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 3,
+    "trial": 9,
+    "total_episodes_available": 24,
+    "window_size_actual": 3,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      21
+    ],
+    "establishing_positions_in_window": [
+      0
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3630.33,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week",
+      "user sees Dr. Smith every week"
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 3,
+    "trial": 3,
+    "total_episodes_available": 24,
+    "window_size_actual": 3,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      21
+    ],
+    "establishing_positions_in_window": [
+      0
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3488.98,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries.",
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.75
+    },
+    "proposition_success": false,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 10,
+    "trial": 1,
+    "total_episodes_available": 24,
+    "window_size_actual": 10,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      21
+    ],
+    "establishing_positions_in_window": [
+      7
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3907.82,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week for help with setting boundaries",
+      "user sees Dr. Smith every week for help with setting boundaries"
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 5,
+    "trial": 5,
+    "total_episodes_available": 12,
+    "window_size_actual": 5,
+    "establishing_present": false,
+    "establishing_indices_in_window": [],
+    "establishing_positions_in_window": [],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4903.55,
+    "mentions": [
+      "Rachel"
+    ],
+    "propositions": [],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 1.0,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.0
+    },
+    "proposition_success": false,
+    "mention_precision": 1.0
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 1,
+    "trial": 1,
+    "total_episodes_available": 24,
+    "window_size_actual": 1,
+    "establishing_present": false,
+    "establishing_indices_in_window": [],
+    "establishing_positions_in_window": [],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3752.27,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "User sees Dr. Smith every week for help with setting boundaries.",
+      "User sees Dr. Smith every week for help with setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 22,
+    "trial": 3,
+    "total_episodes_available": 24,
+    "window_size_actual": 22,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      2,
+      21
+    ],
+    "establishing_positions_in_window": [
+      0,
+      19
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4099.78,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week for therapy sessions to work on setting boundaries.",
+      "user sees Dr. Smith every week for therapy sessions to work on setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 1,
+    "trial": 7,
+    "total_episodes_available": 24,
+    "window_size_actual": 1,
+    "establishing_present": false,
+    "establishing_indices_in_window": [],
+    "establishing_positions_in_window": [],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3917.55,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "User sees Dr. Smith every week for help with setting boundaries.",
+      "User sees Dr. Smith every week for help with setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 12,
+    "trial": 4,
+    "total_episodes_available": 12,
+    "window_size_actual": 12,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      2,
+      4
+    ],
+    "establishing_positions_in_window": [
+      2,
+      4
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3958.89,
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "Rachel has moved back to the suburbs again.",
+      "Rachel has moved back to the suburbs again."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 5,
+    "trial": 9,
+    "total_episodes_available": 12,
+    "window_size_actual": 5,
+    "establishing_present": false,
+    "establishing_indices_in_window": [],
+    "establishing_positions_in_window": [],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 2237.99,
+    "mentions": [
+      "Rachel"
+    ],
+    "propositions": [],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 1.0,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.0
+    },
+    "proposition_success": false,
+    "mention_precision": 1.0
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 5,
+    "trial": 7,
+    "total_episodes_available": 12,
+    "window_size_actual": 5,
+    "establishing_present": false,
+    "establishing_indices_in_window": [],
+    "establishing_positions_in_window": [],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 2267.35,
+    "mentions": [
+      "Rachel"
+    ],
+    "propositions": [],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 1.0,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.0
+    },
+    "proposition_success": false,
+    "mention_precision": 1.0
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 22,
+    "trial": 7,
+    "total_episodes_available": 24,
+    "window_size_actual": 22,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      2,
+      21
+    ],
+    "establishing_positions_in_window": [
+      0,
+      19
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4391.67,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week",
+      "user sees Dr. Smith every week"
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 1,
+    "trial": 3,
+    "total_episodes_available": 12,
+    "window_size_actual": 1,
+    "establishing_present": false,
+    "establishing_indices_in_window": [],
+    "establishing_positions_in_window": [],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3969.99,
+    "mentions": [
+      "user",
+      "Miami Beach",
+      "Rachel"
+    ],
+    "propositions": [
+      "Rachel is friends with the user.",
+      "Rachel is friends with the user."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.3333333333333333,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.8
+    },
+    "proposition_success": false,
+    "mention_precision": 0.3333333333333333
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 1,
+    "trial": 4,
+    "total_episodes_available": 12,
+    "window_size_actual": 1,
+    "establishing_present": false,
+    "establishing_indices_in_window": [],
+    "establishing_positions_in_window": [],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4017.11,
+    "mentions": [
+      "user",
+      "Miami Beach",
+      "Rachel"
+    ],
+    "propositions": [
+      "Rachel is friends with user",
+      "Rachel is friends with user"
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.3333333333333333,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.8
+    },
+    "proposition_success": false,
+    "mention_precision": 0.3333333333333333
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 10,
+    "trial": 4,
+    "total_episodes_available": 12,
+    "window_size_actual": 10,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      2,
+      4
+    ],
+    "establishing_positions_in_window": [
+      0,
+      2
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4273.22,
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "User's friend Rachel has moved back to the suburbs again.",
+      "User's friend Rachel has moved back to the suburbs again."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 1,
+    "trial": 5,
+    "total_episodes_available": 24,
+    "window_size_actual": 1,
+    "establishing_present": false,
+    "establishing_indices_in_window": [],
+    "establishing_positions_in_window": [],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4143.37,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "User sees Dr. Smith every week, and she's been helping user work on setting boundaries.",
+      "User sees Dr. Smith every week, and she's been helping user work on setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 3,
+    "trial": 1,
+    "total_episodes_available": 12,
+    "window_size_actual": 3,
+    "establishing_present": false,
+    "establishing_indices_in_window": [],
+    "establishing_positions_in_window": [],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4026.61,
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "Rachel has moved back to the suburbs again.",
+      "Rachel has moved back to the suburbs again."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 12,
+    "trial": 9,
+    "total_episodes_available": 12,
+    "window_size_actual": 12,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      2,
+      4
+    ],
+    "establishing_positions_in_window": [
+      2,
+      4
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4151.46,
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "Rachel has moved back to the suburbs again.",
+      "Rachel has moved back to the suburbs again."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 22,
+    "trial": 4,
+    "total_episodes_available": 24,
+    "window_size_actual": 22,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      2,
+      21
+    ],
+    "establishing_positions_in_window": [
+      0,
+      19
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3839.04,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week",
+      "user sees Dr. Smith every week"
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 24,
+    "trial": 3,
+    "total_episodes_available": 24,
+    "window_size_actual": 24,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      2,
+      21
+    ],
+    "establishing_positions_in_window": [
+      2,
+      21
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3867.63,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week",
+      "user sees Dr. Smith every week"
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 3,
+    "trial": 6,
+    "total_episodes_available": 24,
+    "window_size_actual": 3,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      21
+    ],
+    "establishing_positions_in_window": [
+      0
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3983.57,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week",
+      "user sees Dr. Smith every week"
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 3,
+    "trial": 3,
+    "total_episodes_available": 12,
+    "window_size_actual": 3,
+    "establishing_present": false,
+    "establishing_indices_in_window": [],
+    "establishing_positions_in_window": [],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4940.37,
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "User's friend Rachel has moved back to the suburbs again.",
+      "User's friend Rachel has moved back to the suburbs again."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 10,
+    "trial": 4,
+    "total_episodes_available": 24,
+    "window_size_actual": 10,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      21
+    ],
+    "establishing_positions_in_window": [
+      7
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3881.73,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries.",
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.75
+    },
+    "proposition_success": false,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 3,
+    "trial": 7,
+    "total_episodes_available": 12,
+    "window_size_actual": 3,
+    "establishing_present": false,
+    "establishing_indices_in_window": [],
+    "establishing_positions_in_window": [],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4094.95,
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "Rachel has moved back to the suburbs again.",
+      "Rachel has moved back to the suburbs again."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 24,
+    "trial": 9,
+    "total_episodes_available": 24,
+    "window_size_actual": 24,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      2,
+      21
+    ],
+    "establishing_positions_in_window": [
+      2,
+      21
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3781.62,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries.",
+      "user sees Dr. Smith every week and she's been helping user work on setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.75
+    },
+    "proposition_success": false,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 8,
+    "trial": 1,
+    "total_episodes_available": 12,
+    "window_size_actual": 8,
+    "establishing_present": true,
+    "establishing_indices_in_window": [
+      4
+    ],
+    "establishing_positions_in_window": [
+      0
+    ],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3830.5,
+    "mentions": [
+      "user",
+      "Rachel"
+    ],
+    "propositions": [
+      "Rachel has moved back to the suburbs again.",
+      "Rachel has moved back to the suburbs again."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-2698e78f",
+    "limit": 1,
+    "trial": 0,
+    "total_episodes_available": 24,
+    "window_size_actual": 1,
+    "establishing_present": false,
+    "establishing_indices_in_window": [],
+    "establishing_positions_in_window": [],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 3792.16,
+    "mentions": [
+      "user",
+      "Dr. Smith"
+    ],
+    "propositions": [
+      "User sees Dr. Smith every week for help with setting boundaries.",
+      "User sees Dr. Smith every week for help with setting boundaries."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.5,
+      "proposition_recall": 1.0,
+      "proposition_precision": 0.5,
+      "update_capture_rate": 1.0,
+      "unsupported_inference_rate": 0.5
+    },
+    "proposition_success": true,
+    "mention_precision": 0.5
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 1,
+    "trial": 6,
+    "total_episodes_available": 12,
+    "window_size_actual": 1,
+    "establishing_present": false,
+    "establishing_indices_in_window": [],
+    "establishing_positions_in_window": [],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 4027.47,
+    "mentions": [
+      "user",
+      "Miami Beach",
+      "Rachel"
+    ],
+    "propositions": [
+      "Rachel is friends with the user.",
+      "Rachel is friends with the user."
+    ],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 0.3333333333333333,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.8
+    },
+    "proposition_success": false,
+    "mention_precision": 0.3333333333333333
+  },
+  {
+    "fixture": "lme-830ce83f",
+    "limit": 5,
+    "trial": 8,
+    "total_episodes_available": 12,
+    "window_size_actual": 5,
+    "establishing_present": false,
+    "establishing_indices_in_window": [],
+    "establishing_positions_in_window": [],
+    "ok": true,
+    "error": null,
+    "elapsed_ms": 2051.05,
+    "mentions": [
+      "Rachel"
+    ],
+    "propositions": [],
+    "gold_scores": {
+      "mention_recall": 0.5,
+      "mention_precision": 1.0,
+      "proposition_recall": 0.0,
+      "proposition_precision": 0.0,
+      "update_capture_rate": 0.0,
+      "unsupported_inference_rate": 0.0
+    },
+    "proposition_success": false,
+    "mention_precision": 1.0
+  }
+]

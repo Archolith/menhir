@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang='en'>
+<head>
+  <meta charset='utf-8'>
+  <meta name='viewport' content='width=device-width, initial-scale=1'>
+  <title>Feature Usage &amp; Effectiveness &middot; yawn.memory</title>
+  <style>
+    :root {
+      --bg-app: #020617;
+      --bg-panel: #0f172a;
+      --bg-card: #1e293b;
+      --border: #334155;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --accent: #38bdf8;
+      --good: #10b981;
+      --warn: #f59e0b;
+      --bad: #ef4444;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg-app); color: var(--text-main);
+      font-family: 'Inter', -apple-system, system-ui, sans-serif; font-size: 14px;
+    }
+    header {
+      display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
+      padding: 1rem 1.5rem; border-bottom: 1px solid var(--border);
+      background: rgba(15,23,42,0.8); position: sticky; top: 0; z-index: 20;
+      backdrop-filter: blur(12px);
+    }
+    header .title { font-weight: 800; font-size: 1.15rem; letter-spacing: -0.02em; }
+    header .title span { color: var(--accent); }
+    header .spacer { flex: 1; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .pill-group { display: flex; gap: 0.35rem; }
+    .pill {
+      padding: 0.35rem 0.75rem; border-radius: 999px; border: 1px solid var(--border);
+      background: var(--bg-panel); color: var(--text-muted); font-weight: 600;
+      font-size: 0.8rem; cursor: pointer;
+    }
+    .pill.active { color: var(--bg-app); background: var(--accent); border-color: var(--accent); }
+    main { padding: 1.5rem; max-width: 1400px; margin: 0 auto; }
+    .muted { color: var(--text-muted); }
+    .section-title {
+      font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em;
+      color: var(--text-muted); margin: 0 0 0.75rem;
+    }
+    /* Parent rollup cards */
+    .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 0.85rem; margin-bottom: 2rem; }
+    .card {
+      background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px;
+      padding: 0.9rem 1rem; cursor: pointer; transition: border-color 0.2s, transform 0.15s;
+    }
+    .card:hover { border-color: var(--accent); transform: translateY(-2px); }
+    .card.active { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+    .card .name { font-weight: 700; text-transform: capitalize; letter-spacing: 0.02em; }
+    .card .fn-count { font-size: 0.7rem; color: var(--text-muted); font-weight: 500; }
+    .card .calls { font-size: 1.6rem; font-weight: 800; margin: 0.35rem 0 0.1rem; }
+    .card .calls small { font-size: 0.7rem; color: var(--text-muted); font-weight: 500; }
+    .card .metrics { display: flex; gap: 0.75rem; margin-top: 0.5rem; font-size: 0.72rem; }
+    .card .metrics span { display: flex; flex-direction: column; }
+    .card .metrics b { font-size: 0.9rem; }
+    /* Table */
+    .toolbar { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem; flex-wrap: wrap; }
+    .toolbar input {
+      background: var(--bg-app); border: 1px solid var(--border); color: var(--text-main);
+      padding: 0.5rem 0.8rem; border-radius: 8px; outline: none; min-width: 220px;
+    }
+    .toolbar input:focus { border-color: var(--accent); }
+    .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 12px; }
+    table { width: 100%; border-collapse: collapse; min-width: 900px; }
+    th, td { padding: 0.6rem 0.8rem; text-align: right; white-space: nowrap; }
+    th:nth-child(-n+3), td:nth-child(-n+3) { text-align: left; }
+    thead th {
+      position: sticky; top: 0; background: var(--bg-panel); color: var(--text-muted);
+      font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; cursor: pointer;
+      user-select: none; border-bottom: 1px solid var(--border);
+    }
+    thead th:hover { color: var(--accent); }
+    thead th.sorted::after { content: ' \25B2'; font-size: 0.6rem; }
+    thead th.sorted.desc::after { content: ' \25BC'; }
+    tbody tr { border-top: 1px solid var(--border); }
+    tbody tr:hover { background: rgba(56,189,248,0.05); }
+    td.fn { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 0.82rem; }
+    .tag {
+      font-size: 0.62rem; padding: 0.15rem 0.5rem; border-radius: 6px; font-weight: 700;
+      text-transform: capitalize; background: rgba(51,65,85,0.6); color: var(--text-muted);
+      border: 1px solid rgba(255,255,255,0.06);
+    }
+    .kind { font-size: 0.68rem; color: var(--text-muted); }
+    .rate { font-weight: 700; }
+    .rate.good { color: var(--good); }
+    .rate.warn { color: var(--warn); }
+    .rate.bad { color: var(--bad); }
+    .dash { color: var(--text-muted); }
+    .empty { padding: 2rem; text-align: center; color: var(--text-muted); }
+    .legend { font-size: 0.72rem; color: var(--text-muted); margin-top: 0.75rem; line-height: 1.6; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class='title'>yawn<span>.memory</span></div>
+    <span class='muted'>Feature Usage &amp; Effectiveness</span>
+    <div class='spacer'></div>
+    <div class='pill-group'>
+      {% for w in report.windows %}
+      <a class='pill {% if w == report.window %}active{% endif %}' href='/explorer/features?window={{ w }}'>{{ w }}</a>
+      {% endfor %}
+    </div>
+    <a href='/explorer'>&larr; explorer</a>
+  </header>
+
+  <main>
+    <p class='muted' style='margin-top:0'>
+      {{ report.total_functions }} features &middot; {{ '{:,}'.format(report.total_calls) }} calls in window
+      &middot; window: <b>{{ report.window }}</b>
+    </p>
+
+    <p class='section-title'>By parent</p>
+    <div class='cards' id='parent-cards'>
+      {% for p in report.parents %}
+      <div class='card' data-parent='{{ p.name }}'>
+        <div class='name'>{{ p.name }} <span class='fn-count'>&middot; {{ p.function_count }} fn</span></div>
+        <div class='calls'>{{ '{:,}'.format(p.total_calls) }} <small>calls / {{ p.calls_per_day }} per day</small></div>
+        <div class='metrics'>
+          <span><span class='muted'>success</span><b class='rate {{ 'good' if p.success_rate_pct >= 90 else 'warn' if p.success_rate_pct >= 70 else 'bad' }}'>{{ p.success_rate_pct }}%</b></span>
+          <span><span class='muted'>errors</span><b>{{ p.errors }}</b></span>
+          <span><span class='muted'>p50</span><b>{{ p.typical_p50_ms if p.typical_p50_ms is not none else '-' }}<small class='muted'>ms</small></b></span>
+          {% if p.avg_score is not none %}
+          <span><span class='muted'>useful</span><b class='rate {{ 'good' if p.avg_score >= 0.7 else 'warn' if p.avg_score >= 0.4 else 'bad' }}'>{{ '%.2f'|format(p.avg_score) }}</b></span>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+    <p class='section-title'>By function</p>
+    <div class='toolbar'>
+      <input id='fn-search' type='text' placeholder='Filter functions...' autocomplete='off'>
+      <span class='muted' id='filter-note'></span>
+    </div>
+    <div class='table-wrap'>
+      <table id='fn-table'>
+        <thead>
+          <tr>
+            <th data-key='parent' data-type='text'>Parent</th>
+            <th data-key='operation' data-type='text'>Function</th>
+            <th data-key='kind' data-type='text'>Kind</th>
+            <th data-key='total_calls' data-type='num' class='sorted desc'>Calls</th>
+            <th data-key='calls_per_day' data-type='num'>Calls/day</th>
+            <th data-key='success_rate_pct' data-type='num'>Success %</th>
+            <th data-key='avg_score' data-type='num' title='Self-reported usefulness (0-1), agent_inference grade'>Usefulness</th>
+            <th data-key='rated_pct' data-type='num' title='Share of recalls that received a rating'>Rated %</th>
+            <th data-key='p50_ms' data-type='num'>p50 ms</th>
+            <th data-key='p95_ms' data-type='num'>p95 ms</th>
+            <th data-key='avg_result_size' data-type='num'>Avg result</th>
+            <th data-key='last_seen' data-type='text'>Last used</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for f in report.functions %}
+          <tr data-parent='{{ f.parent }}' data-op='{{ f.operation|lower }}'>
+            <td data-parent='{{ f.parent }}'><span class='tag'>{{ f.parent }}</span></td>
+            <td class='fn' data-operation='{{ f.operation }}'>{{ f.operation }}</td>
+            <td><span class='kind'>{{ f.kind }}</span></td>
+            <td data-total_calls='{{ f.total_calls }}'>{{ '{:,}'.format(f.total_calls) }}</td>
+            <td data-calls_per_day='{{ f.calls_per_day }}'>{{ f.calls_per_day }}</td>
+            <td data-success_rate_pct='{{ f.success_rate_pct }}'>
+              <span class='rate {{ 'good' if f.success_rate_pct >= 90 else 'warn' if f.success_rate_pct >= 70 else 'bad' }}'>{{ f.success_rate_pct }}%</span>
+            </td>
+            <td data-avg_score='{{ f.avg_score if f.avg_score is not none else -1 }}'>
+              {% if f.avg_score is not none %}
+              <span class='rate {{ 'good' if f.avg_score >= 0.7 else 'warn' if f.avg_score >= 0.4 else 'bad' }}'>{{ '%.2f'|format(f.avg_score) }}</span>
+              {% else %}<span class='dash'>&mdash;</span>{% endif %}
+            </td>
+            <td data-rated_pct='{{ f.rated_pct if f.receipts else -1 }}' class='muted'>
+              {% if f.receipts %}{{ f.rated_pct }}% <small>({{ f.rated }}/{{ f.receipts }})</small>{% else %}<span class='dash'>&mdash;</span>{% endif %}
+            </td>
+            <td data-p50_ms='{{ f.p50_ms if f.p50_ms is not none else -1 }}'>{{ f.p50_ms if f.p50_ms is not none else '-' }}</td>
+            <td data-p95_ms='{{ f.p95_ms if f.p95_ms is not none else -1 }}'>{{ f.p95_ms if f.p95_ms is not none else '-' }}</td>
+            <td data-avg_result_size='{{ f.avg_result_size if f.avg_result_size is not none else -1 }}'>{{ '{:,}'.format(f.avg_result_size) if f.avg_result_size is not none else '-' }}</td>
+            <td data-last_seen='{{ f.last_seen }}' class='muted'>{{ f.last_seen[:10] if f.last_seen else '-' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class='empty' id='no-rows' style='display:none'>No features match the current filter.</div>
+
+    <p class='legend'>
+      <b>Usage</b>: Calls = invocations in window; Calls/day normalises by the active date span.
+      <b>Effectiveness</b>: Success % = calls that did not error;
+      p50/p95 = latency percentiles; Avg result = mean serialized result size (bytes) of successful calls.
+      <b>Usefulness</b> (0-1) and <b>Rated %</b> are <b>self-reported</b> by the agent via <code>rate_recall</code>
+      (useful=1.0 / partial=0.5 / noise=0.0; unused excluded from the mean). This is an agent_inference-grade
+      operational signal only &mdash; it never affects memory heat, promotion, or ranking (R8).
+      Click a parent card to filter, click any column header to sort.
+    </p>
+  </main>
+
+  <script>
+    (function () {
+      const table = document.getElementById('fn-table');
+      const tbody = table.querySelector('tbody');
+      const rows = Array.from(tbody.querySelectorAll('tr'));
+      const search = document.getElementById('fn-search');
+      const note = document.getElementById('filter-note');
+      const noRows = document.getElementById('no-rows');
+      let activeParent = null;
+
+      function cellValue(row, key, type) {
+        const cell = row.querySelector('[data-' + key + ']');
+        const raw = cell ? cell.getAttribute('data-' + key) : '';
+        return type === 'num' ? parseFloat(raw) : (raw || '').toLowerCase();
+      }
+
+      function sortBy(key, type, desc) {
+        const sorted = rows.slice().sort((a, b) => {
+          const av = cellValue(a, key, type);
+          const bv = cellValue(b, key, type);
+          if (type === 'num') return desc ? bv - av : av - bv;
+          return desc ? bv.localeCompare(av) : av.localeCompare(bv);
+        });
+        sorted.forEach(r => tbody.appendChild(r));
+      }
+
+      table.querySelectorAll('thead th').forEach(th => {
+        th.addEventListener('click', () => {
+          const key = th.dataset.key, type = th.dataset.type;
+          const wasSorted = th.classList.contains('sorted');
+          const desc = wasSorted ? !th.classList.contains('desc') : true;
+          table.querySelectorAll('thead th').forEach(o => o.classList.remove('sorted', 'desc'));
+          th.classList.add('sorted');
+          if (desc) th.classList.add('desc');
+          sortBy(key, type, desc);
+        });
+      });
+
+      function applyFilter() {
+        const q = search.value.trim().toLowerCase();
+        let shown = 0;
+        rows.forEach(r => {
+          const matchP = !activeParent || r.dataset.parent === activeParent;
+          const matchQ = !q || r.dataset.op.includes(q) || r.dataset.parent.includes(q);
+          const show = matchP && matchQ;
+          r.style.display = show ? '' : 'none';
+          if (show) shown++;
+        });
+        noRows.style.display = shown ? 'none' : 'block';
+        note.textContent = activeParent ? ('parent: ' + activeParent + ' · clear') : '';
+      }
+
+      search.addEventListener('input', applyFilter);
+      note.addEventListener('click', () => { activeParent = null; setCards(); applyFilter(); });
+
+      function setCards() {
+        document.querySelectorAll('#parent-cards .card').forEach(c => {
+          c.classList.toggle('active', c.dataset.parent === activeParent);
+        });
+      }
+      document.querySelectorAll('#parent-cards .card').forEach(card => {
+        card.addEventListener('click', () => {
+          activeParent = activeParent === card.dataset.parent ? null : card.dataset.parent;
+          setCards();
+          applyFilter();
+        });
+      });
+    })();
+  </script>
+</body>
+</html>

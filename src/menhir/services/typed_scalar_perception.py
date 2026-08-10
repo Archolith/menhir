@@ -1,0 +1,78 @@
+"""Public typed-scalar perception surface.
+
+Implementation is split across deterministic rules, persistence/repair, and the stateful service.
+"""
+
+from menhir.services.typed_scalar_persistence import (
+    bind_and_persist_typed_scalars,
+    repair_pending_bindings,
+)
+from menhir.services.typed_scalar_rules import (
+    LlmComplete,
+    PERCEPTION_EVIDENCE_TIER,
+    SELF_SUBJECT_DISPLAY,
+    SELF_TOKENS,
+    TS_VETO_COMMIT,
+    TS_VETO_SELF_CONSISTENCY,
+    TS_VETO_TIE,
+    TS_VETO_UNGROUNDED,
+    TYPED_SCALAR_SYSTEM_PROMPT,
+    _VOTE_ABSENT,
+    _VOTE_CONFLICTED,
+    ResolveSelfSubject,
+    TypedScalarDecision,
+    TypedScalarProposal,
+    _claim_groups,
+    _interpretation_label,
+    _is_self_reference,
+    _parse_json_array,
+    _reconciled_attribute,
+    _resolve_subject,
+    advisory_subject_uuid,
+    classify_absolute_semantics,
+    extract_typed_scalars_once,
+    gate_typed_scalars,
+    is_ambiguous_exact,
+    parse_scalar_row,
+    resolve_temporal_disposition,
+)
+from menhir.services.typed_scalar_service import (
+    ScalarStateNotActivatedError,
+    TypedScalarPerceptionService,
+    ensure_scalar_state_activated,
+)
+
+__all__ = [
+    "LlmComplete",
+    "PERCEPTION_EVIDENCE_TIER",
+    "SELF_SUBJECT_DISPLAY",
+    "SELF_TOKENS",
+    "TS_VETO_COMMIT",
+    "TS_VETO_SELF_CONSISTENCY",
+    "TS_VETO_TIE",
+    "TS_VETO_UNGROUNDED",
+    "TYPED_SCALAR_SYSTEM_PROMPT",
+    "_VOTE_ABSENT",
+    "_VOTE_CONFLICTED",
+    "ResolveSelfSubject",
+    "ScalarStateNotActivatedError",
+    "TypedScalarDecision",
+    "TypedScalarPerceptionService",
+    "TypedScalarProposal",
+    "_claim_groups",
+    "_interpretation_label",
+    "_is_self_reference",
+    "_parse_json_array",
+    "_reconciled_attribute",
+    "_resolve_subject",
+    "advisory_subject_uuid",
+    "bind_and_persist_typed_scalars",
+    "classify_absolute_semantics",
+    "ensure_scalar_state_activated",
+    "extract_typed_scalars_once",
+    "gate_typed_scalars",
+    "is_ambiguous_exact",
+    "parse_scalar_row",
+    "repair_pending_bindings",
+    "resolve_temporal_disposition",
+]

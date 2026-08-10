@@ -1,0 +1,20 @@
+# Build context = menhir repo root. Keep pyproject.toml, README.md, and src/;
+# exclude everything not needed to build or run the image.
+.git
+.venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.agent
+.coverage
+htmlcov
+node_modules
+*.db
+.env
+.env.*
+tests
+docs
+scripts
+benchmarks
+eval
+.github

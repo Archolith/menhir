@@ -1,0 +1,28 @@
+{% if mcp_events %}
+<div class="list">
+    {% for event in mcp_events %}
+    <div class="row-card">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+            <div>
+                <strong class="row-card-title">{{ event.operation }}</strong>
+                <div class="meta">{{ event.kind }} | {{ event.duration_ms }}ms</div>
+            </div>
+            <div style="text-align:right">
+                <span class="badge {% if event.success %}persistent{% else %}failed{% endif %}">
+                    {% if event.success %}success{% else %}failed{% endif %}
+                </span>
+            </div>
+        </div>
+        <div class="meta" style="margin-top:0.35rem">
+            At: <span class="utc-time" data-utc="{{ event.started_at }}">{{ event.started_at[:19] | replace("T", " ")
+                }}</span><br>
+            {% if event.error %}
+            <span style="color:#b91c1c;">{{ event.error }}</span>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<p class="muted-empty">No recent operations.</p>
+{% endif %}

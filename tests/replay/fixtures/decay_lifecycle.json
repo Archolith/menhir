@@ -1,0 +1,32 @@
+{
+  "scenario": "decay_lifecycle",
+  "description": "Ingest, age, decay — verify compression occurs",
+  "session_id": "replay-session-003",
+  "steps": [
+    {
+      "action": "ingest",
+      "text": "The team decided to use Rust for the CLI tool",
+      "source": "replay-test",
+      "expect": {
+        "status": "INGESTED"
+      }
+    },
+    {
+      "action": "consolidate_session",
+      "expect": {
+        "promoted_min": 0
+      }
+    },
+    {
+      "action": "wait",
+      "note": "In stubbed mode this is a no-op; decay candidates must be pre-seeded"
+    },
+    {
+      "action": "decay",
+      "expect": {
+        "compressed_min": 0,
+        "deleted_min": 0
+      }
+    }
+  ]
+}

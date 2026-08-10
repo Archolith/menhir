@@ -1,0 +1,37 @@
+{
+  "scenario": "budget_cap_requeue",
+  "description": "Rapid ingestion — verify budget cap does not crash the pipeline",
+  "session_id": "replay-session-004",
+  "steps": [
+    {
+      "action": "ingest",
+      "text": "First rapid memory: user name is Alice",
+      "source": "replay-test",
+      "expect": {
+        "status": "INGESTED"
+      }
+    },
+    {
+      "action": "ingest",
+      "text": "Second rapid memory: favorite color is blue",
+      "source": "replay-test",
+      "expect": {
+        "status": "INGESTED"
+      }
+    },
+    {
+      "action": "ingest",
+      "text": "Third rapid memory: works at Acme Corp",
+      "source": "replay-test",
+      "expect": {
+        "status": "INGESTED"
+      }
+    },
+    {
+      "action": "consolidate_session",
+      "expect": {
+        "promoted_min": 0
+      }
+    }
+  ]
+}

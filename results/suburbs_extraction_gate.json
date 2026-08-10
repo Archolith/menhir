@@ -1,0 +1,5593 @@
+{
+  "generated_at": "2026-07-16T17:42:26.392110+00:00",
+  "model": "gpt-4o-mini",
+  "temperature": 0.0,
+  "trials": 10,
+  "summary": {
+    "suburbs": {
+      "baseline": {
+        "successes": 0,
+        "trials": 10
+      },
+      "combined_extraction": {
+        "successes": 10,
+        "trials": 10
+      }
+    },
+    "downtown": {
+      "baseline": {
+        "successes": 0,
+        "trials": 10
+      },
+      "combined_extraction": {
+        "successes": 10,
+        "trials": 10
+      }
+    },
+    "generic_non_fact": {
+      "baseline": {
+        "successes": 10,
+        "trials": 10
+      },
+      "combined_extraction": {
+        "successes": 10,
+        "trials": 10
+      }
+    },
+    "unsupported_move": {
+      "baseline": {
+        "successes": 10,
+        "trials": 10
+      },
+      "combined_extraction": {
+        "successes": 10,
+        "trials": 10
+      }
+    },
+    "named_places": {
+      "baseline": {
+        "successes": 10,
+        "trials": 10
+      },
+      "combined_extraction": {
+        "successes": 10,
+        "trials": 10
+      }
+    }
+  },
+  "passed": true,
+  "records": [
+    {
+      "fixture": "suburbs",
+      "trial": 1,
+      "arm": {
+        "id": "baseline",
+        "label": "baseline",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 3700.44,
+        "tuning": {
+          "prompt_variant": "baseline",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Rachel",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "ba041073-1ba4-435f-afd3-22b63ab357c9"
+            }
+          ],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 0.5,
+          "mention_precision": 1.0,
+          "proposition_recall": 0.0,
+          "proposition_precision": 0.0,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": false
+    },
+    {
+      "fixture": "suburbs",
+      "trial": 1,
+      "arm": {
+        "id": "combined_extraction",
+        "label": "combined_extraction",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 4616.37,
+        "tuning": {
+          "prompt_variant": "combined_extraction",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Rachel",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "00ad4711-2485-4d28-835b-9d5045381f10"
+            },
+            {
+              "text": "the suburbs",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "b3351d02-5d18-49e9-bfb3-3d950e115bc0"
+            }
+          ],
+          "propositions": [
+            {
+              "fact": "Rachel moved back to the suburbs again.",
+              "source_uuid": "00ad4711-2485-4d28-835b-9d5045381f10",
+              "target_uuid": "b3351d02-5d18-49e9-bfb3-3d950e115bc0",
+              "uuid": "7a98b535-437b-4abf-9b61-6b34023fca9c"
+            },
+            {
+              "fact": "Rachel moved back to the suburbs again.",
+              "source_uuid": "00ad4711-2485-4d28-835b-9d5045381f10",
+              "target_uuid": "b3351d02-5d18-49e9-bfb3-3d950e115bc0",
+              "uuid": "7a98b535-437b-4abf-9b61-6b34023fca9c"
+            }
+          ]
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 0.5,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.25
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "downtown",
+      "trial": 1,
+      "arm": {
+        "id": "baseline",
+        "label": "baseline",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 4716.25,
+        "tuning": {
+          "prompt_variant": "baseline",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "David",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "36b21d1a-e2da-4891-8d9a-ab57f88f3e31"
+            }
+          ],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 0.5,
+          "mention_precision": 1.0,
+          "proposition_recall": 0.0,
+          "proposition_precision": 0.0,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": false
+    },
+    {
+      "fixture": "downtown",
+      "trial": 1,
+      "arm": {
+        "id": "combined_extraction",
+        "label": "combined_extraction",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 4429.66,
+        "tuning": {
+          "prompt_variant": "combined_extraction",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "David",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "e19aa71e-7e1b-420a-90df-4011578bc11a"
+            },
+            {
+              "text": "downtown",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "c71f59b2-392c-41e8-b2c6-e3f8c0917351"
+            }
+          ],
+          "propositions": [
+            {
+              "fact": "David is living downtown now.",
+              "source_uuid": "e19aa71e-7e1b-420a-90df-4011578bc11a",
+              "target_uuid": "c71f59b2-392c-41e8-b2c6-e3f8c0917351",
+              "uuid": "d96a773e-5ab0-453e-b0fb-20edeac4a4f2"
+            },
+            {
+              "fact": "David is living downtown now.",
+              "source_uuid": "e19aa71e-7e1b-420a-90df-4011578bc11a",
+              "target_uuid": "c71f59b2-392c-41e8-b2c6-e3f8c0917351",
+              "uuid": "d96a773e-5ab0-453e-b0fb-20edeac4a4f2"
+            }
+          ]
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 0.5,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.25
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "generic_non_fact",
+      "trial": 1,
+      "arm": {
+        "id": "baseline",
+        "label": "baseline",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 1938.77,
+        "tuning": {
+          "prompt_variant": "baseline",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Moving",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "6b1e343e-37dc-4db1-938b-32a321b23293"
+            }
+          ],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 0.0,
+          "mention_precision": 0.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 1.0,
+          "update_capture_rate": 1.0,
+          "unsupported_inference_rate": 1.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "generic_non_fact",
+      "trial": 1,
+      "arm": {
+        "id": "combined_extraction",
+        "label": "combined_extraction",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 1640.22,
+        "tuning": {
+          "prompt_variant": "combined_extraction",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 1.0,
+          "update_capture_rate": 1.0,
+          "unsupported_inference_rate": 0.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "unsupported_move",
+      "trial": 1,
+      "arm": {
+        "id": "baseline",
+        "label": "baseline",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 1580.51,
+        "tuning": {
+          "prompt_variant": "baseline",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Rachel",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "7e729825-14c1-4b70-a297-f639b37eda82"
+            }
+          ],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 1.0,
+          "update_capture_rate": 1.0,
+          "unsupported_inference_rate": 0.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "unsupported_move",
+      "trial": 1,
+      "arm": {
+        "id": "combined_extraction",
+        "label": "combined_extraction",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 2739.46,
+        "tuning": {
+          "prompt_variant": "combined_extraction",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Rachel",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "da216155-cb22-4516-a3a7-ae34c1acf2dd"
+            },
+            {
+              "text": "boxes",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "b223555a-7a1c-4d62-baf5-835ec474524e"
+            }
+          ],
+          "propositions": [
+            {
+              "fact": "Rachel has been packing boxes all week.",
+              "source_uuid": "da216155-cb22-4516-a3a7-ae34c1acf2dd",
+              "target_uuid": "b223555a-7a1c-4d62-baf5-835ec474524e",
+              "uuid": "1f30a69b-97f6-458b-b4dd-4672a2faba6c"
+            },
+            {
+              "fact": "Rachel has been packing boxes all week.",
+              "source_uuid": "da216155-cb22-4516-a3a7-ae34c1acf2dd",
+              "target_uuid": "b223555a-7a1c-4d62-baf5-835ec474524e",
+              "uuid": "1f30a69b-97f6-458b-b4dd-4672a2faba6c"
+            }
+          ]
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 0.5,
+          "proposition_recall": 0.0,
+          "proposition_precision": 0.0,
+          "update_capture_rate": 1.0,
+          "unsupported_inference_rate": 0.75
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "named_places",
+      "trial": 1,
+      "arm": {
+        "id": "baseline",
+        "label": "baseline",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 7315.7,
+        "tuning": {
+          "prompt_variant": "baseline",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Maya",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "a772ca36-8404-4499-91e7-ba3fd0ab787f"
+            },
+            {
+              "text": "Google",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "cfa51c23-579f-4b2d-8468-553ebdf2676d"
+            },
+            {
+              "text": "Microsoft",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "8d2759ed-9714-429f-b7e0-433df33259dd"
+            }
+          ],
+          "propositions": [
+            {
+              "fact": "Maya no longer works at Google",
+              "source_uuid": "a772ca36-8404-4499-91e7-ba3fd0ab787f",
+              "target_uuid": "cfa51c23-579f-4b2d-8468-553ebdf2676d",
+              "uuid": "1045b752-489f-4a1e-830c-abe71be12705"
+            },
+            {
+              "fact": "Maya joined Microsoft",
+              "source_uuid": "a772ca36-8404-4499-91e7-ba3fd0ab787f",
+              "target_uuid": "8d2759ed-9714-429f-b7e0-433df33259dd",
+              "uuid": "b577d7ab-282f-46a9-884f-bfb203e69c6d"
+            },
+            {
+              "fact": "Maya no longer works at Google",
+              "source_uuid": "a772ca36-8404-4499-91e7-ba3fd0ab787f",
+              "target_uuid": "cfa51c23-579f-4b2d-8468-553ebdf2676d",
+              "uuid": "1045b752-489f-4a1e-830c-abe71be12705"
+            },
+            {
+              "fact": "Maya joined Microsoft",
+              "source_uuid": "a772ca36-8404-4499-91e7-ba3fd0ab787f",
+              "target_uuid": "8d2759ed-9714-429f-b7e0-433df33259dd",
+              "uuid": "b577d7ab-282f-46a9-884f-bfb203e69c6d"
+            }
+          ]
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 0.5,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.2857142857142857
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "named_places",
+      "trial": 1,
+      "arm": {
+        "id": "combined_extraction",
+        "label": "combined_extraction",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 7414.16,
+        "tuning": {
+          "prompt_variant": "combined_extraction",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Maya",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "642240f9-920c-42c0-9c69-db98dc132bcd"
+            },
+            {
+              "text": "Google",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "3bee4943-4f1f-4baf-9c33-a577a23c4675"
+            },
+            {
+              "text": "Microsoft",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "ca591101-c86a-4533-b121-d6622450cd8b"
+            }
+          ],
+          "propositions": [
+            {
+              "fact": "Maya no longer works at Google.",
+              "source_uuid": "642240f9-920c-42c0-9c69-db98dc132bcd",
+              "target_uuid": "3bee4943-4f1f-4baf-9c33-a577a23c4675",
+              "uuid": "cc6f94ec-1e1f-43e0-a19f-1107c9ceab07"
+            },
+            {
+              "fact": "Maya joined Microsoft.",
+              "source_uuid": "642240f9-920c-42c0-9c69-db98dc132bcd",
+              "target_uuid": "ca591101-c86a-4533-b121-d6622450cd8b",
+              "uuid": "ec122d88-683c-4c07-a1b4-0087a686c8c3"
+            },
+            {
+              "fact": "Maya no longer works at Google.",
+              "source_uuid": "642240f9-920c-42c0-9c69-db98dc132bcd",
+              "target_uuid": "3bee4943-4f1f-4baf-9c33-a577a23c4675",
+              "uuid": "cc6f94ec-1e1f-43e0-a19f-1107c9ceab07"
+            },
+            {
+              "fact": "Maya joined Microsoft.",
+              "source_uuid": "642240f9-920c-42c0-9c69-db98dc132bcd",
+              "target_uuid": "ca591101-c86a-4533-b121-d6622450cd8b",
+              "uuid": "ec122d88-683c-4c07-a1b4-0087a686c8c3"
+            }
+          ]
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 0.5,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.2857142857142857
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "suburbs",
+      "trial": 2,
+      "arm": {
+        "id": "combined_extraction",
+        "label": "combined_extraction",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 4685.29,
+        "tuning": {
+          "prompt_variant": "combined_extraction",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Rachel",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "ef5c3a68-a8bb-4952-9a9b-1dad56b79c83"
+            },
+            {
+              "text": "the suburbs",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "f74c5563-c7d6-42d7-b1a2-f83ea6b33249"
+            }
+          ],
+          "propositions": [
+            {
+              "fact": "Rachel actually just moved back to the suburbs again.",
+              "source_uuid": "ef5c3a68-a8bb-4952-9a9b-1dad56b79c83",
+              "target_uuid": "f74c5563-c7d6-42d7-b1a2-f83ea6b33249",
+              "uuid": "0ff565b0-fc16-4335-a9b5-c713d17ada01"
+            },
+            {
+              "fact": "Rachel actually just moved back to the suburbs again.",
+              "source_uuid": "ef5c3a68-a8bb-4952-9a9b-1dad56b79c83",
+              "target_uuid": "f74c5563-c7d6-42d7-b1a2-f83ea6b33249",
+              "uuid": "0ff565b0-fc16-4335-a9b5-c713d17ada01"
+            }
+          ]
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 0.5,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.25
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "suburbs",
+      "trial": 2,
+      "arm": {
+        "id": "baseline",
+        "label": "baseline",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 5315.13,
+        "tuning": {
+          "prompt_variant": "baseline",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Rachel",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "f8e68ee1-d12a-488f-97d0-ee741487ae15"
+            }
+          ],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 0.5,
+          "mention_precision": 1.0,
+          "proposition_recall": 0.0,
+          "proposition_precision": 0.0,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": false
+    },
+    {
+      "fixture": "downtown",
+      "trial": 2,
+      "arm": {
+        "id": "combined_extraction",
+        "label": "combined_extraction",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 3856.37,
+        "tuning": {
+          "prompt_variant": "combined_extraction",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "David",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "c110ed3e-0ad7-46aa-9774-53614af6ee5a"
+            },
+            {
+              "text": "downtown",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "db0afc26-55c7-40a6-bba3-9b745cf9d17b"
+            }
+          ],
+          "propositions": [
+            {
+              "fact": "David is living downtown now.",
+              "source_uuid": "c110ed3e-0ad7-46aa-9774-53614af6ee5a",
+              "target_uuid": "db0afc26-55c7-40a6-bba3-9b745cf9d17b",
+              "uuid": "74e3d0bb-10e0-4ed1-a571-50554b144c22"
+            },
+            {
+              "fact": "David is living downtown now.",
+              "source_uuid": "c110ed3e-0ad7-46aa-9774-53614af6ee5a",
+              "target_uuid": "db0afc26-55c7-40a6-bba3-9b745cf9d17b",
+              "uuid": "74e3d0bb-10e0-4ed1-a571-50554b144c22"
+            }
+          ]
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 0.5,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.25
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "downtown",
+      "trial": 2,
+      "arm": {
+        "id": "baseline",
+        "label": "baseline",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 3714.51,
+        "tuning": {
+          "prompt_variant": "baseline",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "David",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "13c56571-0bb9-4529-aa82-08f058bd0cc0"
+            }
+          ],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 0.5,
+          "mention_precision": 1.0,
+          "proposition_recall": 0.0,
+          "proposition_precision": 0.0,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": false
+    },
+    {
+      "fixture": "generic_non_fact",
+      "trial": 2,
+      "arm": {
+        "id": "combined_extraction",
+        "label": "combined_extraction",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 3502.37,
+        "tuning": {
+          "prompt_variant": "combined_extraction",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 1.0,
+          "update_capture_rate": 1.0,
+          "unsupported_inference_rate": 0.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "generic_non_fact",
+      "trial": 2,
+      "arm": {
+        "id": "baseline",
+        "label": "baseline",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 1849.91,
+        "tuning": {
+          "prompt_variant": "baseline",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Moving",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "232235c6-ce8a-46ac-b5d4-558abadb0602"
+            }
+          ],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 0.0,
+          "mention_precision": 0.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 1.0,
+          "update_capture_rate": 1.0,
+          "unsupported_inference_rate": 1.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "unsupported_move",
+      "trial": 2,
+      "arm": {
+        "id": "combined_extraction",
+        "label": "combined_extraction",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 5951.67,
+        "tuning": {
+          "prompt_variant": "combined_extraction",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Rachel",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "e9331d6e-8a1c-4d81-b98d-e9022d401ec4"
+            },
+            {
+              "text": "boxes",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "5d630358-dae5-4e7e-8e16-82ec6ef00fb9"
+            }
+          ],
+          "propositions": [
+            {
+              "fact": "Rachel has been packing boxes all week.",
+              "source_uuid": "e9331d6e-8a1c-4d81-b98d-e9022d401ec4",
+              "target_uuid": "5d630358-dae5-4e7e-8e16-82ec6ef00fb9",
+              "uuid": "6afdaefd-ea0d-45d2-b65e-97aaa0623a11"
+            },
+            {
+              "fact": "Rachel has been packing boxes all week.",
+              "source_uuid": "e9331d6e-8a1c-4d81-b98d-e9022d401ec4",
+              "target_uuid": "5d630358-dae5-4e7e-8e16-82ec6ef00fb9",
+              "uuid": "6afdaefd-ea0d-45d2-b65e-97aaa0623a11"
+            }
+          ]
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 0.5,
+          "proposition_recall": 0.0,
+          "proposition_precision": 0.0,
+          "update_capture_rate": 1.0,
+          "unsupported_inference_rate": 0.75
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "unsupported_move",
+      "trial": 2,
+      "arm": {
+        "id": "baseline",
+        "label": "baseline",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 1653.28,
+        "tuning": {
+          "prompt_variant": "baseline",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Rachel",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "e8eb5804-33fe-4a33-811a-5f6637936449"
+            }
+          ],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 1.0,
+          "update_capture_rate": 1.0,
+          "unsupported_inference_rate": 0.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "named_places",
+      "trial": 2,
+      "arm": {
+        "id": "combined_extraction",
+        "label": "combined_extraction",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 4675.78,
+        "tuning": {
+          "prompt_variant": "combined_extraction",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Maya",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "2ad92e23-f532-4ecc-81ab-56ea87baab69"
+            },
+            {
+              "text": "Google",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "236f8973-9a26-4678-a4ff-3022b5cf283a"
+            },
+            {
+              "text": "Microsoft",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "20909db0-0802-4dfc-b684-f5b3d46ce986"
+            }
+          ],
+          "propositions": [
+            {
+              "fact": "Maya no longer works at Google.",
+              "source_uuid": "2ad92e23-f532-4ecc-81ab-56ea87baab69",
+              "target_uuid": "236f8973-9a26-4678-a4ff-3022b5cf283a",
+              "uuid": "42c3f1b3-596a-4cc6-8a66-e5f2edcd9939"
+            },
+            {
+              "fact": "Maya joined Microsoft.",
+              "source_uuid": "2ad92e23-f532-4ecc-81ab-56ea87baab69",
+              "target_uuid": "20909db0-0802-4dfc-b684-f5b3d46ce986",
+              "uuid": "fe212d55-d39d-4d0a-8986-1e414dad5958"
+            },
+            {
+              "fact": "Maya no longer works at Google.",
+              "source_uuid": "2ad92e23-f532-4ecc-81ab-56ea87baab69",
+              "target_uuid": "236f8973-9a26-4678-a4ff-3022b5cf283a",
+              "uuid": "42c3f1b3-596a-4cc6-8a66-e5f2edcd9939"
+            },
+            {
+              "fact": "Maya joined Microsoft.",
+              "source_uuid": "2ad92e23-f532-4ecc-81ab-56ea87baab69",
+              "target_uuid": "20909db0-0802-4dfc-b684-f5b3d46ce986",
+              "uuid": "fe212d55-d39d-4d0a-8986-1e414dad5958"
+            }
+          ]
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 0.5,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.2857142857142857
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "named_places",
+      "trial": 2,
+      "arm": {
+        "id": "baseline",
+        "label": "baseline",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 4700.29,
+        "tuning": {
+          "prompt_variant": "baseline",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Maya",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "c7795bac-47e5-42e7-a181-6f6cf3f866f3"
+            },
+            {
+              "text": "Google",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "149deaf7-2572-41cf-8c32-b3d4148bf3d9"
+            },
+            {
+              "text": "Microsoft",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "c28743ca-d61f-45b1-b2a8-21eb9bbe4880"
+            }
+          ],
+          "propositions": [
+            {
+              "fact": "Maya no longer works at Google",
+              "source_uuid": "c7795bac-47e5-42e7-a181-6f6cf3f866f3",
+              "target_uuid": "149deaf7-2572-41cf-8c32-b3d4148bf3d9",
+              "uuid": "d5a8be4f-4a52-4196-81af-950fbae6d743"
+            },
+            {
+              "fact": "Maya joined Microsoft",
+              "source_uuid": "c7795bac-47e5-42e7-a181-6f6cf3f866f3",
+              "target_uuid": "c28743ca-d61f-45b1-b2a8-21eb9bbe4880",
+              "uuid": "2eb780b3-de63-4473-b8d6-24788b8f14c2"
+            },
+            {
+              "fact": "Maya no longer works at Google",
+              "source_uuid": "c7795bac-47e5-42e7-a181-6f6cf3f866f3",
+              "target_uuid": "149deaf7-2572-41cf-8c32-b3d4148bf3d9",
+              "uuid": "d5a8be4f-4a52-4196-81af-950fbae6d743"
+            },
+            {
+              "fact": "Maya joined Microsoft",
+              "source_uuid": "c7795bac-47e5-42e7-a181-6f6cf3f866f3",
+              "target_uuid": "c28743ca-d61f-45b1-b2a8-21eb9bbe4880",
+              "uuid": "2eb780b3-de63-4473-b8d6-24788b8f14c2"
+            }
+          ]
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 0.5,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.2857142857142857
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "suburbs",
+      "trial": 3,
+      "arm": {
+        "id": "baseline",
+        "label": "baseline",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 3006.08,
+        "tuning": {
+          "prompt_variant": "baseline",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Rachel",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "7a51fa32-7bb6-497c-928e-fe2cbb2cc689"
+            }
+          ],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 0.5,
+          "mention_precision": 1.0,
+          "proposition_recall": 0.0,
+          "proposition_precision": 0.0,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": false
+    },
+    {
+      "fixture": "suburbs",
+      "trial": 3,
+      "arm": {
+        "id": "combined_extraction",
+        "label": "combined_extraction",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 3894.12,
+        "tuning": {
+          "prompt_variant": "combined_extraction",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Rachel",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "85b7b8ef-5cb5-4e58-8d22-773c872d1910"
+            },
+            {
+              "text": "the suburbs",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "07454f21-5cb3-4149-80b9-40845f236277"
+            }
+          ],
+          "propositions": [
+            {
+              "fact": "Rachel actually just moved back to the suburbs again.",
+              "source_uuid": "85b7b8ef-5cb5-4e58-8d22-773c872d1910",
+              "target_uuid": "07454f21-5cb3-4149-80b9-40845f236277",
+              "uuid": "4554c994-060c-4011-92db-7da1a7596687"
+            },
+            {
+              "fact": "Rachel actually just moved back to the suburbs again.",
+              "source_uuid": "85b7b8ef-5cb5-4e58-8d22-773c872d1910",
+              "target_uuid": "07454f21-5cb3-4149-80b9-40845f236277",
+              "uuid": "4554c994-060c-4011-92db-7da1a7596687"
+            }
+          ]
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 0.5,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.25
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "downtown",
+      "trial": 3,
+      "arm": {
+        "id": "baseline",
+        "label": "baseline",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 2208.24,
+        "tuning": {
+          "prompt_variant": "baseline",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "David",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "57c2e957-65fa-4fe5-a15e-d3860c84d291"
+            }
+          ],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 0.5,
+          "mention_precision": 1.0,
+          "proposition_recall": 0.0,
+          "proposition_precision": 0.0,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": false
+    },
+    {
+      "fixture": "downtown",
+      "trial": 3,
+      "arm": {
+        "id": "combined_extraction",
+        "label": "combined_extraction",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 3227.28,
+        "tuning": {
+          "prompt_variant": "combined_extraction",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "David",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "0e11f1af-387f-4a7a-a64e-0e1c37ab672d"
+            },
+            {
+              "text": "downtown",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "b1d37aa2-f287-4ad2-9e16-4fc1c200cfdc"
+            }
+          ],
+          "propositions": [
+            {
+              "fact": "David is living downtown now.",
+              "source_uuid": "0e11f1af-387f-4a7a-a64e-0e1c37ab672d",
+              "target_uuid": "b1d37aa2-f287-4ad2-9e16-4fc1c200cfdc",
+              "uuid": "9b7eada4-2ddb-4c4d-aeb8-3ea49c0761ec"
+            },
+            {
+              "fact": "David is living downtown now.",
+              "source_uuid": "0e11f1af-387f-4a7a-a64e-0e1c37ab672d",
+              "target_uuid": "b1d37aa2-f287-4ad2-9e16-4fc1c200cfdc",
+              "uuid": "9b7eada4-2ddb-4c4d-aeb8-3ea49c0761ec"
+            }
+          ]
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 0.5,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.25
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "generic_non_fact",
+      "trial": 3,
+      "arm": {
+        "id": "baseline",
+        "label": "baseline",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 1708.43,
+        "tuning": {
+          "prompt_variant": "baseline",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Moving",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "cc119591-f16b-4a15-8238-3f34477bed24"
+            }
+          ],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 0.0,
+          "mention_precision": 0.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 1.0,
+          "update_capture_rate": 1.0,
+          "unsupported_inference_rate": 1.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "generic_non_fact",
+      "trial": 3,
+      "arm": {
+        "id": "combined_extraction",
+        "label": "combined_extraction",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 2406.93,
+        "tuning": {
+          "prompt_variant": "combined_extraction",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 1.0,
+          "update_capture_rate": 1.0,
+          "unsupported_inference_rate": 0.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "unsupported_move",
+      "trial": 3,
+      "arm": {
+        "id": "baseline",
+        "label": "baseline",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 2393.54,
+        "tuning": {
+          "prompt_variant": "baseline",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Rachel",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "0572cdc0-6053-4166-aee1-827e9734b5d6"
+            }
+          ],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 1.0,
+          "update_capture_rate": 1.0,
+          "unsupported_inference_rate": 0.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "unsupported_move",
+      "trial": 3,
+      "arm": {
+        "id": "combined_extraction",
+        "label": "combined_extraction",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 4767.71,
+        "tuning": {
+          "prompt_variant": "combined_extraction",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Rachel",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "ec3c9147-c894-4d97-ae52-15e4d7362c6c"
+            },
+            {
+              "text": "boxes",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "bb07e7ca-4fa2-4337-8f15-16bd6cd097b7"
+            }
+          ],
+          "propositions": [
+            {
+              "fact": "Rachel has been packing boxes all week.",
+              "source_uuid": "ec3c9147-c894-4d97-ae52-15e4d7362c6c",
+              "target_uuid": "bb07e7ca-4fa2-4337-8f15-16bd6cd097b7",
+              "uuid": "9892db6f-a235-4199-93e5-01691c006056"
+            },
+            {
+              "fact": "Rachel has been packing boxes all week.",
+              "source_uuid": "ec3c9147-c894-4d97-ae52-15e4d7362c6c",
+              "target_uuid": "bb07e7ca-4fa2-4337-8f15-16bd6cd097b7",
+              "uuid": "9892db6f-a235-4199-93e5-01691c006056"
+            }
+          ]
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 0.5,
+          "proposition_recall": 0.0,
+          "proposition_precision": 0.0,
+          "update_capture_rate": 1.0,
+          "unsupported_inference_rate": 0.75
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "named_places",
+      "trial": 3,
+      "arm": {
+        "id": "baseline",
+        "label": "baseline",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 5769.95,
+        "tuning": {
+          "prompt_variant": "baseline",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Maya",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "807bcfc6-cca8-4780-9ba7-053d1469e31d"
+            },
+            {
+              "text": "Google",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "ad0a6e87-2a4b-4d35-a8e5-518923993c80"
+            },
+            {
+              "text": "Microsoft",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "71010fe8-100c-4c2f-837e-35928da245e4"
+            }
+          ],
+          "propositions": [
+            {
+              "fact": "Maya no longer works at Google.",
+              "source_uuid": "807bcfc6-cca8-4780-9ba7-053d1469e31d",
+              "target_uuid": "ad0a6e87-2a4b-4d35-a8e5-518923993c80",
+              "uuid": "30c36c0f-4fd5-47ac-9edc-2fdc45c62567"
+            },
+            {
+              "fact": "Maya joined Microsoft.",
+              "source_uuid": "807bcfc6-cca8-4780-9ba7-053d1469e31d",
+              "target_uuid": "71010fe8-100c-4c2f-837e-35928da245e4",
+              "uuid": "f0c78834-1ab8-40ef-8cfd-f1f3148e03ff"
+            },
+            {
+              "fact": "Maya no longer works at Google.",
+              "source_uuid": "807bcfc6-cca8-4780-9ba7-053d1469e31d",
+              "target_uuid": "ad0a6e87-2a4b-4d35-a8e5-518923993c80",
+              "uuid": "30c36c0f-4fd5-47ac-9edc-2fdc45c62567"
+            },
+            {
+              "fact": "Maya joined Microsoft.",
+              "source_uuid": "807bcfc6-cca8-4780-9ba7-053d1469e31d",
+              "target_uuid": "71010fe8-100c-4c2f-837e-35928da245e4",
+              "uuid": "f0c78834-1ab8-40ef-8cfd-f1f3148e03ff"
+            }
+          ]
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 0.5,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.2857142857142857
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "named_places",
+      "trial": 3,
+      "arm": {
+        "id": "combined_extraction",
+        "label": "combined_extraction",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 4163.98,
+        "tuning": {
+          "prompt_variant": "combined_extraction",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Maya",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "650dbf1e-24c8-4d33-b156-ed4cf8b92eb5"
+            },
+            {
+              "text": "Google",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "93d1551f-f100-4344-878a-747db4a7c017"
+            },
+            {
+              "text": "Microsoft",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "95355b99-51d6-4ef9-bc5c-5abb3f7d537c"
+            }
+          ],
+          "propositions": [
+            {
+              "fact": "Maya no longer works at Google.",
+              "source_uuid": "650dbf1e-24c8-4d33-b156-ed4cf8b92eb5",
+              "target_uuid": "93d1551f-f100-4344-878a-747db4a7c017",
+              "uuid": "f42a55c1-63c7-479a-8b00-3cd3073e5d04"
+            },
+            {
+              "fact": "Maya joined Microsoft.",
+              "source_uuid": "650dbf1e-24c8-4d33-b156-ed4cf8b92eb5",
+              "target_uuid": "95355b99-51d6-4ef9-bc5c-5abb3f7d537c",
+              "uuid": "4e23c38b-b339-435b-8f74-cc9a30149642"
+            },
+            {
+              "fact": "Maya no longer works at Google.",
+              "source_uuid": "650dbf1e-24c8-4d33-b156-ed4cf8b92eb5",
+              "target_uuid": "93d1551f-f100-4344-878a-747db4a7c017",
+              "uuid": "f42a55c1-63c7-479a-8b00-3cd3073e5d04"
+            },
+            {
+              "fact": "Maya joined Microsoft.",
+              "source_uuid": "650dbf1e-24c8-4d33-b156-ed4cf8b92eb5",
+              "target_uuid": "95355b99-51d6-4ef9-bc5c-5abb3f7d537c",
+              "uuid": "4e23c38b-b339-435b-8f74-cc9a30149642"
+            }
+          ]
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 0.5,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.2857142857142857
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "suburbs",
+      "trial": 4,
+      "arm": {
+        "id": "combined_extraction",
+        "label": "combined_extraction",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 4151.68,
+        "tuning": {
+          "prompt_variant": "combined_extraction",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Rachel",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "533da835-7f27-45d5-982e-6a7b21facac2"
+            },
+            {
+              "text": "the suburbs",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "e216d6f5-a530-4214-b625-6a14be268084"
+            }
+          ],
+          "propositions": [
+            {
+              "fact": "Rachel actually just moved back to the suburbs again.",
+              "source_uuid": "533da835-7f27-45d5-982e-6a7b21facac2",
+              "target_uuid": "e216d6f5-a530-4214-b625-6a14be268084",
+              "uuid": "afdbda46-7d36-41f7-afff-9193c4b4eabf"
+            },
+            {
+              "fact": "Rachel actually just moved back to the suburbs again.",
+              "source_uuid": "533da835-7f27-45d5-982e-6a7b21facac2",
+              "target_uuid": "e216d6f5-a530-4214-b625-6a14be268084",
+              "uuid": "afdbda46-7d36-41f7-afff-9193c4b4eabf"
+            }
+          ]
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 0.5,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.25
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "suburbs",
+      "trial": 4,
+      "arm": {
+        "id": "baseline",
+        "label": "baseline",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 2517.08,
+        "tuning": {
+          "prompt_variant": "baseline",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Rachel",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "f9bad160-6918-4878-a03a-22660894e7ac"
+            }
+          ],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 0.5,
+          "mention_precision": 1.0,
+          "proposition_recall": 0.0,
+          "proposition_precision": 0.0,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": false
+    },
+    {
+      "fixture": "downtown",
+      "trial": 4,
+      "arm": {
+        "id": "combined_extraction",
+        "label": "combined_extraction",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 3048.51,
+        "tuning": {
+          "prompt_variant": "combined_extraction",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "David",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "9052e399-9178-4b86-b6af-dfdbb8cae207"
+            },
+            {
+              "text": "downtown",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "a464e7ff-5257-4552-afc6-9537b631980d"
+            }
+          ],
+          "propositions": [
+            {
+              "fact": "David is living downtown now.",
+              "source_uuid": "9052e399-9178-4b86-b6af-dfdbb8cae207",
+              "target_uuid": "a464e7ff-5257-4552-afc6-9537b631980d",
+              "uuid": "d131b4e6-aa2e-4827-8b59-76bf261f62cb"
+            },
+            {
+              "fact": "David is living downtown now.",
+              "source_uuid": "9052e399-9178-4b86-b6af-dfdbb8cae207",
+              "target_uuid": "a464e7ff-5257-4552-afc6-9537b631980d",
+              "uuid": "d131b4e6-aa2e-4827-8b59-76bf261f62cb"
+            }
+          ]
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 0.5,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.25
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "downtown",
+      "trial": 4,
+      "arm": {
+        "id": "baseline",
+        "label": "baseline",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 2890.11,
+        "tuning": {
+          "prompt_variant": "baseline",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "David",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "f7a54d2e-4e29-4fd7-a1db-424d38beb5c8"
+            }
+          ],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 0.5,
+          "mention_precision": 1.0,
+          "proposition_recall": 0.0,
+          "proposition_precision": 0.0,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": false
+    },
+    {
+      "fixture": "generic_non_fact",
+      "trial": 4,
+      "arm": {
+        "id": "combined_extraction",
+        "label": "combined_extraction",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 1298.72,
+        "tuning": {
+          "prompt_variant": "combined_extraction",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 1.0,
+          "update_capture_rate": 1.0,
+          "unsupported_inference_rate": 0.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "generic_non_fact",
+      "trial": 4,
+      "arm": {
+        "id": "baseline",
+        "label": "baseline",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 1848.89,
+        "tuning": {
+          "prompt_variant": "baseline",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Moving",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "051dc97b-4305-4298-9b3f-f136f7004001"
+            }
+          ],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 0.0,
+          "mention_precision": 0.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 1.0,
+          "update_capture_rate": 1.0,
+          "unsupported_inference_rate": 1.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "unsupported_move",
+      "trial": 4,
+      "arm": {
+        "id": "combined_extraction",
+        "label": "combined_extraction",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 1333.16,
+        "tuning": {
+          "prompt_variant": "combined_extraction",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 0.0,
+          "mention_precision": 0.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 1.0,
+          "update_capture_rate": 1.0,
+          "unsupported_inference_rate": 0.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "unsupported_move",
+      "trial": 4,
+      "arm": {
+        "id": "baseline",
+        "label": "baseline",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 2547.62,
+        "tuning": {
+          "prompt_variant": "baseline",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Rachel",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "6e3e1fda-9889-4d79-8c55-0968c8bea135"
+            }
+          ],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 1.0,
+          "update_capture_rate": 1.0,
+          "unsupported_inference_rate": 0.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "named_places",
+      "trial": 4,
+      "arm": {
+        "id": "combined_extraction",
+        "label": "combined_extraction",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 4425.54,
+        "tuning": {
+          "prompt_variant": "combined_extraction",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Maya",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "5c663327-4cf1-49f9-966f-0df2e0ad08a2"
+            },
+            {
+              "text": "Google",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "ff647f9c-146b-469c-822e-2cde55fa0917"
+            },
+            {
+              "text": "Microsoft",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "0f722a82-388c-4ed7-8294-68f7c493699f"
+            }
+          ],
+          "propositions": [
+            {
+              "fact": "Maya no longer works at Google.",
+              "source_uuid": "5c663327-4cf1-49f9-966f-0df2e0ad08a2",
+              "target_uuid": "ff647f9c-146b-469c-822e-2cde55fa0917",
+              "uuid": "d1f31e49-622a-4c97-a20d-98232e8bbd85"
+            },
+            {
+              "fact": "Maya joined Microsoft.",
+              "source_uuid": "5c663327-4cf1-49f9-966f-0df2e0ad08a2",
+              "target_uuid": "0f722a82-388c-4ed7-8294-68f7c493699f",
+              "uuid": "08567e5f-91f0-4112-8b15-68b9dc9b114c"
+            },
+            {
+              "fact": "Maya no longer works at Google.",
+              "source_uuid": "5c663327-4cf1-49f9-966f-0df2e0ad08a2",
+              "target_uuid": "ff647f9c-146b-469c-822e-2cde55fa0917",
+              "uuid": "d1f31e49-622a-4c97-a20d-98232e8bbd85"
+            },
+            {
+              "fact": "Maya joined Microsoft.",
+              "source_uuid": "5c663327-4cf1-49f9-966f-0df2e0ad08a2",
+              "target_uuid": "0f722a82-388c-4ed7-8294-68f7c493699f",
+              "uuid": "08567e5f-91f0-4112-8b15-68b9dc9b114c"
+            }
+          ]
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 0.5,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.2857142857142857
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "named_places",
+      "trial": 4,
+      "arm": {
+        "id": "baseline",
+        "label": "baseline",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 5611.6,
+        "tuning": {
+          "prompt_variant": "baseline",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Maya",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "7a475171-756e-49e4-985c-fdb603183fcf"
+            },
+            {
+              "text": "Google",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "c573dda9-4417-42a2-8329-80c61569cc0b"
+            },
+            {
+              "text": "Microsoft",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "86e59747-9940-4034-a481-cd478918a8d1"
+            }
+          ],
+          "propositions": [
+            {
+              "fact": "Maya no longer works at Google.",
+              "source_uuid": "7a475171-756e-49e4-985c-fdb603183fcf",
+              "target_uuid": "c573dda9-4417-42a2-8329-80c61569cc0b",
+              "uuid": "13149998-290a-47a1-b2cd-afc95db8263c"
+            },
+            {
+              "fact": "Maya joined Microsoft.",
+              "source_uuid": "7a475171-756e-49e4-985c-fdb603183fcf",
+              "target_uuid": "86e59747-9940-4034-a481-cd478918a8d1",
+              "uuid": "8321e9a5-fe1b-4b94-92fe-59fc2dbf75de"
+            },
+            {
+              "fact": "Maya no longer works at Google.",
+              "source_uuid": "7a475171-756e-49e4-985c-fdb603183fcf",
+              "target_uuid": "c573dda9-4417-42a2-8329-80c61569cc0b",
+              "uuid": "13149998-290a-47a1-b2cd-afc95db8263c"
+            },
+            {
+              "fact": "Maya joined Microsoft.",
+              "source_uuid": "7a475171-756e-49e4-985c-fdb603183fcf",
+              "target_uuid": "86e59747-9940-4034-a481-cd478918a8d1",
+              "uuid": "8321e9a5-fe1b-4b94-92fe-59fc2dbf75de"
+            }
+          ]
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 0.5,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.2857142857142857
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "suburbs",
+      "trial": 5,
+      "arm": {
+        "id": "baseline",
+        "label": "baseline",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 2096.54,
+        "tuning": {
+          "prompt_variant": "baseline",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Rachel",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "86ff047b-628d-494e-bc79-a4a1ae3fc6ff"
+            }
+          ],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 0.5,
+          "mention_precision": 1.0,
+          "proposition_recall": 0.0,
+          "proposition_precision": 0.0,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": false
+    },
+    {
+      "fixture": "suburbs",
+      "trial": 5,
+      "arm": {
+        "id": "combined_extraction",
+        "label": "combined_extraction",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 5200.65,
+        "tuning": {
+          "prompt_variant": "combined_extraction",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Rachel",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "88c3d1dd-4743-4232-858d-384220f9e93e"
+            },
+            {
+              "text": "the suburbs",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "ad16d088-e0f9-4e4c-9de4-c040959405cb"
+            }
+          ],
+          "propositions": [
+            {
+              "fact": "Rachel moved back to the suburbs again.",
+              "source_uuid": "88c3d1dd-4743-4232-858d-384220f9e93e",
+              "target_uuid": "ad16d088-e0f9-4e4c-9de4-c040959405cb",
+              "uuid": "cbee78ce-5e30-4271-b7ae-5b5b3ba18e60"
+            },
+            {
+              "fact": "Rachel moved back to the suburbs again.",
+              "source_uuid": "88c3d1dd-4743-4232-858d-384220f9e93e",
+              "target_uuid": "ad16d088-e0f9-4e4c-9de4-c040959405cb",
+              "uuid": "cbee78ce-5e30-4271-b7ae-5b5b3ba18e60"
+            }
+          ]
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 0.5,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.25
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "downtown",
+      "trial": 5,
+      "arm": {
+        "id": "baseline",
+        "label": "baseline",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 2375.49,
+        "tuning": {
+          "prompt_variant": "baseline",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "David",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "4f96d1fa-576b-4ca5-bdb2-182ba7e1a0a3"
+            }
+          ],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 0.5,
+          "mention_precision": 1.0,
+          "proposition_recall": 0.0,
+          "proposition_precision": 0.0,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": false
+    },
+    {
+      "fixture": "downtown",
+      "trial": 5,
+      "arm": {
+        "id": "combined_extraction",
+        "label": "combined_extraction",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 2994.52,
+        "tuning": {
+          "prompt_variant": "combined_extraction",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "David",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "590b8327-c390-440a-b4b4-ddab0264fbd3"
+            },
+            {
+              "text": "downtown",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "96471e5d-4129-4043-a3e0-ea83d2f35087"
+            }
+          ],
+          "propositions": [
+            {
+              "fact": "David is living downtown now.",
+              "source_uuid": "590b8327-c390-440a-b4b4-ddab0264fbd3",
+              "target_uuid": "96471e5d-4129-4043-a3e0-ea83d2f35087",
+              "uuid": "d27f0614-5b23-431d-85e9-d90fcaa650d7"
+            },
+            {
+              "fact": "David is living downtown now.",
+              "source_uuid": "590b8327-c390-440a-b4b4-ddab0264fbd3",
+              "target_uuid": "96471e5d-4129-4043-a3e0-ea83d2f35087",
+              "uuid": "d27f0614-5b23-431d-85e9-d90fcaa650d7"
+            }
+          ]
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 0.5,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.25
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "generic_non_fact",
+      "trial": 5,
+      "arm": {
+        "id": "baseline",
+        "label": "baseline",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 1908.39,
+        "tuning": {
+          "prompt_variant": "baseline",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Moving",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "30cea817-b702-4dcb-8bd5-f5e62d8bc53a"
+            }
+          ],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 0.0,
+          "mention_precision": 0.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 1.0,
+          "update_capture_rate": 1.0,
+          "unsupported_inference_rate": 1.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "generic_non_fact",
+      "trial": 5,
+      "arm": {
+        "id": "combined_extraction",
+        "label": "combined_extraction",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 1204.21,
+        "tuning": {
+          "prompt_variant": "combined_extraction",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 1.0,
+          "update_capture_rate": 1.0,
+          "unsupported_inference_rate": 0.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "unsupported_move",
+      "trial": 5,
+      "arm": {
+        "id": "baseline",
+        "label": "baseline",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 3080.83,
+        "tuning": {
+          "prompt_variant": "baseline",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Rachel",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "b61b1db3-ed8f-437f-93fb-dc1e2886d312"
+            }
+          ],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 1.0,
+          "update_capture_rate": 1.0,
+          "unsupported_inference_rate": 0.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "unsupported_move",
+      "trial": 5,
+      "arm": {
+        "id": "combined_extraction",
+        "label": "combined_extraction",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 1237.31,
+        "tuning": {
+          "prompt_variant": "combined_extraction",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 0.0,
+          "mention_precision": 0.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 1.0,
+          "update_capture_rate": 1.0,
+          "unsupported_inference_rate": 0.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "named_places",
+      "trial": 5,
+      "arm": {
+        "id": "baseline",
+        "label": "baseline",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 8840.14,
+        "tuning": {
+          "prompt_variant": "baseline",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Maya",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "d356c11a-1bd2-4449-b1dc-361b93f40557"
+            },
+            {
+              "text": "Google",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "4ece94c7-aa81-4307-b75e-e3e46410c94b"
+            },
+            {
+              "text": "Microsoft",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "7dea1442-033e-480c-9b9a-13d8b8640f84"
+            }
+          ],
+          "propositions": [
+            {
+              "fact": "Maya no longer works at Google",
+              "source_uuid": "d356c11a-1bd2-4449-b1dc-361b93f40557",
+              "target_uuid": "4ece94c7-aa81-4307-b75e-e3e46410c94b",
+              "uuid": "ac28c256-7cdc-4148-9184-e766e8322962"
+            },
+            {
+              "fact": "Maya joined Microsoft",
+              "source_uuid": "d356c11a-1bd2-4449-b1dc-361b93f40557",
+              "target_uuid": "7dea1442-033e-480c-9b9a-13d8b8640f84",
+              "uuid": "09d67b9f-22e9-4840-8d40-4bc6f97a3b80"
+            },
+            {
+              "fact": "Maya no longer works at Google",
+              "source_uuid": "d356c11a-1bd2-4449-b1dc-361b93f40557",
+              "target_uuid": "4ece94c7-aa81-4307-b75e-e3e46410c94b",
+              "uuid": "ac28c256-7cdc-4148-9184-e766e8322962"
+            },
+            {
+              "fact": "Maya joined Microsoft",
+              "source_uuid": "d356c11a-1bd2-4449-b1dc-361b93f40557",
+              "target_uuid": "7dea1442-033e-480c-9b9a-13d8b8640f84",
+              "uuid": "09d67b9f-22e9-4840-8d40-4bc6f97a3b80"
+            }
+          ]
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 0.5,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.2857142857142857
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "named_places",
+      "trial": 5,
+      "arm": {
+        "id": "combined_extraction",
+        "label": "combined_extraction",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 4789.9,
+        "tuning": {
+          "prompt_variant": "combined_extraction",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Maya",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "696735da-77ff-4c0e-8b64-ab7f44d49700"
+            },
+            {
+              "text": "Google",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "93f9571b-3bbf-4de4-932d-481db38d1573"
+            },
+            {
+              "text": "Microsoft",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "594dfcbe-47a4-4b1c-bb34-4b7ff307e278"
+            }
+          ],
+          "propositions": [
+            {
+              "fact": "Maya no longer works at Google.",
+              "source_uuid": "696735da-77ff-4c0e-8b64-ab7f44d49700",
+              "target_uuid": "93f9571b-3bbf-4de4-932d-481db38d1573",
+              "uuid": "1669da24-7078-4dff-b53a-a4dc2047499e"
+            },
+            {
+              "fact": "Maya joined Microsoft.",
+              "source_uuid": "696735da-77ff-4c0e-8b64-ab7f44d49700",
+              "target_uuid": "594dfcbe-47a4-4b1c-bb34-4b7ff307e278",
+              "uuid": "a4bbba5f-cf15-46bd-bbe4-a14313f73ce9"
+            },
+            {
+              "fact": "Maya no longer works at Google.",
+              "source_uuid": "696735da-77ff-4c0e-8b64-ab7f44d49700",
+              "target_uuid": "93f9571b-3bbf-4de4-932d-481db38d1573",
+              "uuid": "1669da24-7078-4dff-b53a-a4dc2047499e"
+            },
+            {
+              "fact": "Maya joined Microsoft.",
+              "source_uuid": "696735da-77ff-4c0e-8b64-ab7f44d49700",
+              "target_uuid": "594dfcbe-47a4-4b1c-bb34-4b7ff307e278",
+              "uuid": "a4bbba5f-cf15-46bd-bbe4-a14313f73ce9"
+            }
+          ]
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 0.5,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.2857142857142857
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "suburbs",
+      "trial": 6,
+      "arm": {
+        "id": "combined_extraction",
+        "label": "combined_extraction",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 4314.35,
+        "tuning": {
+          "prompt_variant": "combined_extraction",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Rachel",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "16254dfd-15b9-4add-a644-4fd49e043d3b"
+            },
+            {
+              "text": "the suburbs",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "5d6ab55d-a668-4099-b5ce-5de56e47064d"
+            }
+          ],
+          "propositions": [
+            {
+              "fact": "Rachel actually just moved back to the suburbs again.",
+              "source_uuid": "16254dfd-15b9-4add-a644-4fd49e043d3b",
+              "target_uuid": "5d6ab55d-a668-4099-b5ce-5de56e47064d",
+              "uuid": "49d0c2b3-de9a-4857-8ac6-994d00f9da15"
+            },
+            {
+              "fact": "Rachel actually just moved back to the suburbs again.",
+              "source_uuid": "16254dfd-15b9-4add-a644-4fd49e043d3b",
+              "target_uuid": "5d6ab55d-a668-4099-b5ce-5de56e47064d",
+              "uuid": "49d0c2b3-de9a-4857-8ac6-994d00f9da15"
+            }
+          ]
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 0.5,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.25
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "suburbs",
+      "trial": 6,
+      "arm": {
+        "id": "baseline",
+        "label": "baseline",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 2472.26,
+        "tuning": {
+          "prompt_variant": "baseline",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Rachel",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "19633739-4807-47da-b19f-b02bcd045860"
+            }
+          ],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 0.5,
+          "mention_precision": 1.0,
+          "proposition_recall": 0.0,
+          "proposition_precision": 0.0,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": false
+    },
+    {
+      "fixture": "downtown",
+      "trial": 6,
+      "arm": {
+        "id": "combined_extraction",
+        "label": "combined_extraction",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 3705.9,
+        "tuning": {
+          "prompt_variant": "combined_extraction",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "David",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "3487611c-c024-45e8-b680-a54f1ff3365e"
+            },
+            {
+              "text": "downtown",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "8d9cb556-ef13-4b4b-9d62-34d0c1334551"
+            }
+          ],
+          "propositions": [
+            {
+              "fact": "David is living downtown now.",
+              "source_uuid": "3487611c-c024-45e8-b680-a54f1ff3365e",
+              "target_uuid": "8d9cb556-ef13-4b4b-9d62-34d0c1334551",
+              "uuid": "fb1cea9b-5c0e-4f87-a915-75303ec3c824"
+            },
+            {
+              "fact": "David is living downtown now.",
+              "source_uuid": "3487611c-c024-45e8-b680-a54f1ff3365e",
+              "target_uuid": "8d9cb556-ef13-4b4b-9d62-34d0c1334551",
+              "uuid": "fb1cea9b-5c0e-4f87-a915-75303ec3c824"
+            }
+          ]
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 0.5,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.25
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "downtown",
+      "trial": 6,
+      "arm": {
+        "id": "baseline",
+        "label": "baseline",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 2532.59,
+        "tuning": {
+          "prompt_variant": "baseline",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "David",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "b688127e-9806-40d1-85e0-7a366d1c542c"
+            }
+          ],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 0.5,
+          "mention_precision": 1.0,
+          "proposition_recall": 0.0,
+          "proposition_precision": 0.0,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": false
+    },
+    {
+      "fixture": "generic_non_fact",
+      "trial": 6,
+      "arm": {
+        "id": "combined_extraction",
+        "label": "combined_extraction",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 1381.67,
+        "tuning": {
+          "prompt_variant": "combined_extraction",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 1.0,
+          "update_capture_rate": 1.0,
+          "unsupported_inference_rate": 0.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "generic_non_fact",
+      "trial": 6,
+      "arm": {
+        "id": "baseline",
+        "label": "baseline",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 1825.14,
+        "tuning": {
+          "prompt_variant": "baseline",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Moving",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "ff2e5176-512a-4d96-b953-31f7266a3b4e"
+            }
+          ],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 0.0,
+          "mention_precision": 0.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 1.0,
+          "update_capture_rate": 1.0,
+          "unsupported_inference_rate": 1.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "unsupported_move",
+      "trial": 6,
+      "arm": {
+        "id": "combined_extraction",
+        "label": "combined_extraction",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 1381.98,
+        "tuning": {
+          "prompt_variant": "combined_extraction",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 0.0,
+          "mention_precision": 0.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 1.0,
+          "update_capture_rate": 1.0,
+          "unsupported_inference_rate": 0.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "unsupported_move",
+      "trial": 6,
+      "arm": {
+        "id": "baseline",
+        "label": "baseline",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 1574.73,
+        "tuning": {
+          "prompt_variant": "baseline",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Rachel",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "49ed785c-0e1b-41a0-a19f-4c5f00157975"
+            }
+          ],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 1.0,
+          "update_capture_rate": 1.0,
+          "unsupported_inference_rate": 0.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "named_places",
+      "trial": 6,
+      "arm": {
+        "id": "combined_extraction",
+        "label": "combined_extraction",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 5211.05,
+        "tuning": {
+          "prompt_variant": "combined_extraction",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Maya",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "32169172-de85-4974-9902-19943e236c97"
+            },
+            {
+              "text": "Microsoft",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "82510155-886d-47fa-87de-0b3f100903e6"
+            },
+            {
+              "text": "Google",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "f56729b7-6a97-41e6-a8db-3969b7da938e"
+            }
+          ],
+          "propositions": [
+            {
+              "fact": "Maya no longer works at Google.",
+              "source_uuid": "32169172-de85-4974-9902-19943e236c97",
+              "target_uuid": "f56729b7-6a97-41e6-a8db-3969b7da938e",
+              "uuid": "9c33a426-1ad3-47f3-88ee-b27d7d58af61"
+            },
+            {
+              "fact": "Maya joined Microsoft.",
+              "source_uuid": "32169172-de85-4974-9902-19943e236c97",
+              "target_uuid": "82510155-886d-47fa-87de-0b3f100903e6",
+              "uuid": "e306e92e-f236-48fb-afc2-81860ca39a5a"
+            },
+            {
+              "fact": "Maya no longer works at Google.",
+              "source_uuid": "32169172-de85-4974-9902-19943e236c97",
+              "target_uuid": "f56729b7-6a97-41e6-a8db-3969b7da938e",
+              "uuid": "9c33a426-1ad3-47f3-88ee-b27d7d58af61"
+            },
+            {
+              "fact": "Maya joined Microsoft.",
+              "source_uuid": "32169172-de85-4974-9902-19943e236c97",
+              "target_uuid": "82510155-886d-47fa-87de-0b3f100903e6",
+              "uuid": "e306e92e-f236-48fb-afc2-81860ca39a5a"
+            }
+          ]
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 0.5,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.2857142857142857
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "named_places",
+      "trial": 6,
+      "arm": {
+        "id": "baseline",
+        "label": "baseline",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 6818.67,
+        "tuning": {
+          "prompt_variant": "baseline",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Maya",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "d3de0804-1175-4a07-a392-64a44046d3c2"
+            },
+            {
+              "text": "Google",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "0b6f140b-c7d7-403e-9826-9e29cb51aed3"
+            },
+            {
+              "text": "Microsoft",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "222507f3-8633-4776-8593-9de116150993"
+            }
+          ],
+          "propositions": [
+            {
+              "fact": "Maya no longer works at Google.",
+              "source_uuid": "d3de0804-1175-4a07-a392-64a44046d3c2",
+              "target_uuid": "0b6f140b-c7d7-403e-9826-9e29cb51aed3",
+              "uuid": "70c61371-73c8-42ef-9de2-ca6c755771bb"
+            },
+            {
+              "fact": "Maya joined Microsoft.",
+              "source_uuid": "d3de0804-1175-4a07-a392-64a44046d3c2",
+              "target_uuid": "222507f3-8633-4776-8593-9de116150993",
+              "uuid": "4e1b4bac-a111-4784-b778-d12ae092436a"
+            },
+            {
+              "fact": "Maya no longer works at Google.",
+              "source_uuid": "d3de0804-1175-4a07-a392-64a44046d3c2",
+              "target_uuid": "0b6f140b-c7d7-403e-9826-9e29cb51aed3",
+              "uuid": "70c61371-73c8-42ef-9de2-ca6c755771bb"
+            },
+            {
+              "fact": "Maya joined Microsoft.",
+              "source_uuid": "d3de0804-1175-4a07-a392-64a44046d3c2",
+              "target_uuid": "222507f3-8633-4776-8593-9de116150993",
+              "uuid": "4e1b4bac-a111-4784-b778-d12ae092436a"
+            }
+          ]
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 0.5,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.2857142857142857
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "suburbs",
+      "trial": 7,
+      "arm": {
+        "id": "baseline",
+        "label": "baseline",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 2718.3,
+        "tuning": {
+          "prompt_variant": "baseline",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Rachel",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "40c52f79-255f-4f31-8dcf-dcbe6c7e3a5c"
+            }
+          ],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 0.5,
+          "mention_precision": 1.0,
+          "proposition_recall": 0.0,
+          "proposition_precision": 0.0,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": false
+    },
+    {
+      "fixture": "suburbs",
+      "trial": 7,
+      "arm": {
+        "id": "combined_extraction",
+        "label": "combined_extraction",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 5410.32,
+        "tuning": {
+          "prompt_variant": "combined_extraction",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Rachel",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "8ae709e1-c2cb-4bec-a3e4-2194f991f8c8"
+            },
+            {
+              "text": "the suburbs",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "b3c7bef1-2bfb-4131-95f0-20c1d7a6ce75"
+            }
+          ],
+          "propositions": [
+            {
+              "fact": "Rachel moved back to the suburbs again.",
+              "source_uuid": "8ae709e1-c2cb-4bec-a3e4-2194f991f8c8",
+              "target_uuid": "b3c7bef1-2bfb-4131-95f0-20c1d7a6ce75",
+              "uuid": "b38e6026-327d-4eb4-aaed-bc3649c3fd68"
+            },
+            {
+              "fact": "Rachel moved back to the suburbs again.",
+              "source_uuid": "8ae709e1-c2cb-4bec-a3e4-2194f991f8c8",
+              "target_uuid": "b3c7bef1-2bfb-4131-95f0-20c1d7a6ce75",
+              "uuid": "b38e6026-327d-4eb4-aaed-bc3649c3fd68"
+            }
+          ]
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 0.5,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.25
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "downtown",
+      "trial": 7,
+      "arm": {
+        "id": "baseline",
+        "label": "baseline",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 3337.75,
+        "tuning": {
+          "prompt_variant": "baseline",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "David",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "f7f24ace-2a87-40a9-b6fd-a21ad5a75015"
+            }
+          ],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 0.5,
+          "mention_precision": 1.0,
+          "proposition_recall": 0.0,
+          "proposition_precision": 0.0,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": false
+    },
+    {
+      "fixture": "downtown",
+      "trial": 7,
+      "arm": {
+        "id": "combined_extraction",
+        "label": "combined_extraction",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 3265.63,
+        "tuning": {
+          "prompt_variant": "combined_extraction",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "David",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "b366cfac-cd0c-455c-8882-98344c95a527"
+            },
+            {
+              "text": "downtown",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "515df836-941b-464d-86e2-c9f02b796896"
+            }
+          ],
+          "propositions": [
+            {
+              "fact": "David is living downtown now.",
+              "source_uuid": "b366cfac-cd0c-455c-8882-98344c95a527",
+              "target_uuid": "515df836-941b-464d-86e2-c9f02b796896",
+              "uuid": "cea6e3f8-fa91-4ea9-a0c8-e7fc3dc0a02a"
+            },
+            {
+              "fact": "David is living downtown now.",
+              "source_uuid": "b366cfac-cd0c-455c-8882-98344c95a527",
+              "target_uuid": "515df836-941b-464d-86e2-c9f02b796896",
+              "uuid": "cea6e3f8-fa91-4ea9-a0c8-e7fc3dc0a02a"
+            }
+          ]
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 0.5,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.25
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "generic_non_fact",
+      "trial": 7,
+      "arm": {
+        "id": "baseline",
+        "label": "baseline",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 1626.13,
+        "tuning": {
+          "prompt_variant": "baseline",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Moving",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "a39946ff-29e0-4c2a-9e3a-3d876c4fd2e2"
+            }
+          ],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 0.0,
+          "mention_precision": 0.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 1.0,
+          "update_capture_rate": 1.0,
+          "unsupported_inference_rate": 1.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "generic_non_fact",
+      "trial": 7,
+      "arm": {
+        "id": "combined_extraction",
+        "label": "combined_extraction",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 1109.55,
+        "tuning": {
+          "prompt_variant": "combined_extraction",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 1.0,
+          "update_capture_rate": 1.0,
+          "unsupported_inference_rate": 0.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "unsupported_move",
+      "trial": 7,
+      "arm": {
+        "id": "baseline",
+        "label": "baseline",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 2499.38,
+        "tuning": {
+          "prompt_variant": "baseline",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Rachel",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "1bc50d59-8a74-4757-acaf-535331951bc5"
+            }
+          ],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 1.0,
+          "update_capture_rate": 1.0,
+          "unsupported_inference_rate": 0.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "unsupported_move",
+      "trial": 7,
+      "arm": {
+        "id": "combined_extraction",
+        "label": "combined_extraction",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 1231.87,
+        "tuning": {
+          "prompt_variant": "combined_extraction",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 0.0,
+          "mention_precision": 0.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 1.0,
+          "update_capture_rate": 1.0,
+          "unsupported_inference_rate": 0.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "named_places",
+      "trial": 7,
+      "arm": {
+        "id": "baseline",
+        "label": "baseline",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 5145.25,
+        "tuning": {
+          "prompt_variant": "baseline",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Maya",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "91b9bd2a-f01f-496c-8bed-bbc4e2a68462"
+            },
+            {
+              "text": "Google",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "d3925846-4e74-4acd-a166-cdff21af3ec8"
+            },
+            {
+              "text": "Microsoft",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "b42b1fc7-c4a5-4236-afab-8871529859a4"
+            }
+          ],
+          "propositions": [
+            {
+              "fact": "Maya no longer works at Google",
+              "source_uuid": "91b9bd2a-f01f-496c-8bed-bbc4e2a68462",
+              "target_uuid": "d3925846-4e74-4acd-a166-cdff21af3ec8",
+              "uuid": "6951392b-13a3-4d1b-9e11-1450ce6a1581"
+            },
+            {
+              "fact": "Maya joined Microsoft",
+              "source_uuid": "91b9bd2a-f01f-496c-8bed-bbc4e2a68462",
+              "target_uuid": "b42b1fc7-c4a5-4236-afab-8871529859a4",
+              "uuid": "fd1a4e57-aedb-4460-8451-3e2aa0b19c3c"
+            },
+            {
+              "fact": "Maya no longer works at Google",
+              "source_uuid": "91b9bd2a-f01f-496c-8bed-bbc4e2a68462",
+              "target_uuid": "d3925846-4e74-4acd-a166-cdff21af3ec8",
+              "uuid": "6951392b-13a3-4d1b-9e11-1450ce6a1581"
+            },
+            {
+              "fact": "Maya joined Microsoft",
+              "source_uuid": "91b9bd2a-f01f-496c-8bed-bbc4e2a68462",
+              "target_uuid": "b42b1fc7-c4a5-4236-afab-8871529859a4",
+              "uuid": "fd1a4e57-aedb-4460-8451-3e2aa0b19c3c"
+            }
+          ]
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 0.5,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.2857142857142857
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "named_places",
+      "trial": 7,
+      "arm": {
+        "id": "combined_extraction",
+        "label": "combined_extraction",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 4289.79,
+        "tuning": {
+          "prompt_variant": "combined_extraction",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Maya",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "70716c6f-82fd-49b8-9dc3-5e02664dc81d"
+            },
+            {
+              "text": "Google",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "eb813ad9-ce1d-4709-9c93-224f926987a1"
+            },
+            {
+              "text": "Microsoft",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "e273142d-8704-49b9-82c3-3efe0e9c9588"
+            }
+          ],
+          "propositions": [
+            {
+              "fact": "Maya no longer works at Google.",
+              "source_uuid": "70716c6f-82fd-49b8-9dc3-5e02664dc81d",
+              "target_uuid": "eb813ad9-ce1d-4709-9c93-224f926987a1",
+              "uuid": "2439aca7-7e27-4dd5-aa71-4997e5aaf820"
+            },
+            {
+              "fact": "Maya joined Microsoft.",
+              "source_uuid": "70716c6f-82fd-49b8-9dc3-5e02664dc81d",
+              "target_uuid": "e273142d-8704-49b9-82c3-3efe0e9c9588",
+              "uuid": "c4183105-ea92-40df-b57d-1cf564cb1703"
+            },
+            {
+              "fact": "Maya no longer works at Google.",
+              "source_uuid": "70716c6f-82fd-49b8-9dc3-5e02664dc81d",
+              "target_uuid": "eb813ad9-ce1d-4709-9c93-224f926987a1",
+              "uuid": "2439aca7-7e27-4dd5-aa71-4997e5aaf820"
+            },
+            {
+              "fact": "Maya joined Microsoft.",
+              "source_uuid": "70716c6f-82fd-49b8-9dc3-5e02664dc81d",
+              "target_uuid": "e273142d-8704-49b9-82c3-3efe0e9c9588",
+              "uuid": "c4183105-ea92-40df-b57d-1cf564cb1703"
+            }
+          ]
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 0.5,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.2857142857142857
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "suburbs",
+      "trial": 8,
+      "arm": {
+        "id": "combined_extraction",
+        "label": "combined_extraction",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 5536.94,
+        "tuning": {
+          "prompt_variant": "combined_extraction",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Rachel",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "2372852b-3de4-450c-b626-bdddc36a486c"
+            },
+            {
+              "text": "the suburbs",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "48f075f6-e490-45f7-9eb8-1f20d0256375"
+            }
+          ],
+          "propositions": [
+            {
+              "fact": "Rachel actually just moved back to the suburbs again.",
+              "source_uuid": "2372852b-3de4-450c-b626-bdddc36a486c",
+              "target_uuid": "48f075f6-e490-45f7-9eb8-1f20d0256375",
+              "uuid": "f489d24f-8cf4-468d-bdb1-26ba7c587c7b"
+            },
+            {
+              "fact": "Rachel actually just moved back to the suburbs again.",
+              "source_uuid": "2372852b-3de4-450c-b626-bdddc36a486c",
+              "target_uuid": "48f075f6-e490-45f7-9eb8-1f20d0256375",
+              "uuid": "f489d24f-8cf4-468d-bdb1-26ba7c587c7b"
+            }
+          ]
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 0.5,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.25
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "suburbs",
+      "trial": 8,
+      "arm": {
+        "id": "baseline",
+        "label": "baseline",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 2689.79,
+        "tuning": {
+          "prompt_variant": "baseline",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Rachel",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "18663f72-1f7f-4d79-9d19-a0611693d3e7"
+            }
+          ],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 0.5,
+          "mention_precision": 1.0,
+          "proposition_recall": 0.0,
+          "proposition_precision": 0.0,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": false
+    },
+    {
+      "fixture": "downtown",
+      "trial": 8,
+      "arm": {
+        "id": "combined_extraction",
+        "label": "combined_extraction",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 2988.86,
+        "tuning": {
+          "prompt_variant": "combined_extraction",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "David",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "f1f9c6a2-2325-4b67-ae8b-a666fdd09c3e"
+            },
+            {
+              "text": "downtown",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "eaf2e67b-c851-4d23-8df5-d1e13c1fd690"
+            }
+          ],
+          "propositions": [
+            {
+              "fact": "David is living downtown now.",
+              "source_uuid": "f1f9c6a2-2325-4b67-ae8b-a666fdd09c3e",
+              "target_uuid": "eaf2e67b-c851-4d23-8df5-d1e13c1fd690",
+              "uuid": "3c0143f1-863c-4876-b149-37321df81aba"
+            },
+            {
+              "fact": "David is living downtown now.",
+              "source_uuid": "f1f9c6a2-2325-4b67-ae8b-a666fdd09c3e",
+              "target_uuid": "eaf2e67b-c851-4d23-8df5-d1e13c1fd690",
+              "uuid": "3c0143f1-863c-4876-b149-37321df81aba"
+            }
+          ]
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 0.5,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.25
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "downtown",
+      "trial": 8,
+      "arm": {
+        "id": "baseline",
+        "label": "baseline",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 2742.63,
+        "tuning": {
+          "prompt_variant": "baseline",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "David",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "ae90a2be-68c5-4aed-b9c3-bdf47115f9e8"
+            }
+          ],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 0.5,
+          "mention_precision": 1.0,
+          "proposition_recall": 0.0,
+          "proposition_precision": 0.0,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": false
+    },
+    {
+      "fixture": "generic_non_fact",
+      "trial": 8,
+      "arm": {
+        "id": "combined_extraction",
+        "label": "combined_extraction",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 1154.79,
+        "tuning": {
+          "prompt_variant": "combined_extraction",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 1.0,
+          "update_capture_rate": 1.0,
+          "unsupported_inference_rate": 0.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "generic_non_fact",
+      "trial": 8,
+      "arm": {
+        "id": "baseline",
+        "label": "baseline",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 1844.02,
+        "tuning": {
+          "prompt_variant": "baseline",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Moving",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "2726916d-71e5-45e1-ae0d-639dd330ceff"
+            }
+          ],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 0.0,
+          "mention_precision": 0.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 1.0,
+          "update_capture_rate": 1.0,
+          "unsupported_inference_rate": 1.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "unsupported_move",
+      "trial": 8,
+      "arm": {
+        "id": "combined_extraction",
+        "label": "combined_extraction",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 1268.69,
+        "tuning": {
+          "prompt_variant": "combined_extraction",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 0.0,
+          "mention_precision": 0.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 1.0,
+          "update_capture_rate": 1.0,
+          "unsupported_inference_rate": 0.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "unsupported_move",
+      "trial": 8,
+      "arm": {
+        "id": "baseline",
+        "label": "baseline",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 2913.67,
+        "tuning": {
+          "prompt_variant": "baseline",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Rachel",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "7d549243-662e-4704-920a-83bf531e7ee6"
+            }
+          ],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 1.0,
+          "update_capture_rate": 1.0,
+          "unsupported_inference_rate": 0.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "named_places",
+      "trial": 8,
+      "arm": {
+        "id": "combined_extraction",
+        "label": "combined_extraction",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 4234.67,
+        "tuning": {
+          "prompt_variant": "combined_extraction",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Maya",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "da694f97-c665-4bea-b077-53155ca165db"
+            },
+            {
+              "text": "Google",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "f82856e1-23dc-415a-be8c-19e03ee80fc5"
+            },
+            {
+              "text": "Microsoft",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "313f4fd2-3eb2-4e50-81db-a9be5241660e"
+            }
+          ],
+          "propositions": [
+            {
+              "fact": "Maya no longer works at Google.",
+              "source_uuid": "da694f97-c665-4bea-b077-53155ca165db",
+              "target_uuid": "f82856e1-23dc-415a-be8c-19e03ee80fc5",
+              "uuid": "c41ad360-97a7-4449-a8bb-a27ff91bf10a"
+            },
+            {
+              "fact": "Maya joined Microsoft.",
+              "source_uuid": "da694f97-c665-4bea-b077-53155ca165db",
+              "target_uuid": "313f4fd2-3eb2-4e50-81db-a9be5241660e",
+              "uuid": "bb911351-f902-4134-a25b-57db1adb194c"
+            },
+            {
+              "fact": "Maya no longer works at Google.",
+              "source_uuid": "da694f97-c665-4bea-b077-53155ca165db",
+              "target_uuid": "f82856e1-23dc-415a-be8c-19e03ee80fc5",
+              "uuid": "c41ad360-97a7-4449-a8bb-a27ff91bf10a"
+            },
+            {
+              "fact": "Maya joined Microsoft.",
+              "source_uuid": "da694f97-c665-4bea-b077-53155ca165db",
+              "target_uuid": "313f4fd2-3eb2-4e50-81db-a9be5241660e",
+              "uuid": "bb911351-f902-4134-a25b-57db1adb194c"
+            }
+          ]
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 0.5,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.2857142857142857
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "named_places",
+      "trial": 8,
+      "arm": {
+        "id": "baseline",
+        "label": "baseline",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 5402.55,
+        "tuning": {
+          "prompt_variant": "baseline",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Maya",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "73de30d8-5931-450d-8608-9a000b5841dc"
+            },
+            {
+              "text": "Google",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "462852bb-4ebd-4710-b75a-0ba61f9a2e86"
+            },
+            {
+              "text": "Microsoft",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "751c3748-907a-41e4-b0ed-c28ede76d539"
+            }
+          ],
+          "propositions": [
+            {
+              "fact": "Maya no longer works at Google",
+              "source_uuid": "73de30d8-5931-450d-8608-9a000b5841dc",
+              "target_uuid": "462852bb-4ebd-4710-b75a-0ba61f9a2e86",
+              "uuid": "93ba12a9-08d5-4093-9dc6-a6adf897b17e"
+            },
+            {
+              "fact": "Maya joined Microsoft",
+              "source_uuid": "73de30d8-5931-450d-8608-9a000b5841dc",
+              "target_uuid": "751c3748-907a-41e4-b0ed-c28ede76d539",
+              "uuid": "2dbfeab2-d754-4805-86a3-cdd759fdd46e"
+            },
+            {
+              "fact": "Maya no longer works at Google",
+              "source_uuid": "73de30d8-5931-450d-8608-9a000b5841dc",
+              "target_uuid": "462852bb-4ebd-4710-b75a-0ba61f9a2e86",
+              "uuid": "93ba12a9-08d5-4093-9dc6-a6adf897b17e"
+            },
+            {
+              "fact": "Maya joined Microsoft",
+              "source_uuid": "73de30d8-5931-450d-8608-9a000b5841dc",
+              "target_uuid": "751c3748-907a-41e4-b0ed-c28ede76d539",
+              "uuid": "2dbfeab2-d754-4805-86a3-cdd759fdd46e"
+            }
+          ]
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 0.5,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.2857142857142857
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "suburbs",
+      "trial": 9,
+      "arm": {
+        "id": "baseline",
+        "label": "baseline",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 2637.69,
+        "tuning": {
+          "prompt_variant": "baseline",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Rachel",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "cf7ef548-02cf-4380-a5ad-ef26b986fd58"
+            }
+          ],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 0.5,
+          "mention_precision": 1.0,
+          "proposition_recall": 0.0,
+          "proposition_precision": 0.0,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": false
+    },
+    {
+      "fixture": "suburbs",
+      "trial": 9,
+      "arm": {
+        "id": "combined_extraction",
+        "label": "combined_extraction",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 4474.77,
+        "tuning": {
+          "prompt_variant": "combined_extraction",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Rachel",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "4ee81f9c-081a-4f76-b919-e0d6d5bdf60e"
+            },
+            {
+              "text": "the suburbs",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "0c575716-b17c-4b25-aeec-94f7e379a6f4"
+            }
+          ],
+          "propositions": [
+            {
+              "fact": "Rachel actually just moved back to the suburbs again.",
+              "source_uuid": "4ee81f9c-081a-4f76-b919-e0d6d5bdf60e",
+              "target_uuid": "0c575716-b17c-4b25-aeec-94f7e379a6f4",
+              "uuid": "16f7cd74-b53b-4853-b93f-03a9dcbed1aa"
+            },
+            {
+              "fact": "Rachel actually just moved back to the suburbs again.",
+              "source_uuid": "4ee81f9c-081a-4f76-b919-e0d6d5bdf60e",
+              "target_uuid": "0c575716-b17c-4b25-aeec-94f7e379a6f4",
+              "uuid": "16f7cd74-b53b-4853-b93f-03a9dcbed1aa"
+            }
+          ]
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 0.5,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.25
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "downtown",
+      "trial": 9,
+      "arm": {
+        "id": "baseline",
+        "label": "baseline",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 2507.85,
+        "tuning": {
+          "prompt_variant": "baseline",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "David",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "56eac771-4b9b-4e5c-b62d-f0a361f49c47"
+            }
+          ],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 0.5,
+          "mention_precision": 1.0,
+          "proposition_recall": 0.0,
+          "proposition_precision": 0.0,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": false
+    },
+    {
+      "fixture": "downtown",
+      "trial": 9,
+      "arm": {
+        "id": "combined_extraction",
+        "label": "combined_extraction",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 6835.89,
+        "tuning": {
+          "prompt_variant": "combined_extraction",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "David",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "d05039bd-c850-49ed-9c05-153fb23a5571"
+            },
+            {
+              "text": "downtown",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "13f06937-c32a-4fb7-bf7e-488a4183a61c"
+            }
+          ],
+          "propositions": [
+            {
+              "fact": "David is living downtown now.",
+              "source_uuid": "d05039bd-c850-49ed-9c05-153fb23a5571",
+              "target_uuid": "13f06937-c32a-4fb7-bf7e-488a4183a61c",
+              "uuid": "a03b72ab-d0a9-41f5-8a78-7944930dab4e"
+            },
+            {
+              "fact": "David is living downtown now.",
+              "source_uuid": "d05039bd-c850-49ed-9c05-153fb23a5571",
+              "target_uuid": "13f06937-c32a-4fb7-bf7e-488a4183a61c",
+              "uuid": "a03b72ab-d0a9-41f5-8a78-7944930dab4e"
+            }
+          ]
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 0.5,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.25
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "generic_non_fact",
+      "trial": 9,
+      "arm": {
+        "id": "baseline",
+        "label": "baseline",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 2061.21,
+        "tuning": {
+          "prompt_variant": "baseline",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Moving",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "8354c22a-b652-4bcb-83c8-4fd929bd9fc5"
+            }
+          ],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 0.0,
+          "mention_precision": 0.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 1.0,
+          "update_capture_rate": 1.0,
+          "unsupported_inference_rate": 1.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "generic_non_fact",
+      "trial": 9,
+      "arm": {
+        "id": "combined_extraction",
+        "label": "combined_extraction",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 1703.75,
+        "tuning": {
+          "prompt_variant": "combined_extraction",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 1.0,
+          "update_capture_rate": 1.0,
+          "unsupported_inference_rate": 0.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "unsupported_move",
+      "trial": 9,
+      "arm": {
+        "id": "baseline",
+        "label": "baseline",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 2409.37,
+        "tuning": {
+          "prompt_variant": "baseline",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Rachel",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "88d22381-87e8-460d-80af-4b89cf51d3f6"
+            }
+          ],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 1.0,
+          "update_capture_rate": 1.0,
+          "unsupported_inference_rate": 0.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "unsupported_move",
+      "trial": 9,
+      "arm": {
+        "id": "combined_extraction",
+        "label": "combined_extraction",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 2818.32,
+        "tuning": {
+          "prompt_variant": "combined_extraction",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Rachel",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "f8d86f6c-2708-4d86-adcb-12950c14524e"
+            },
+            {
+              "text": "boxes",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "69710163-e8ee-4da0-b364-b74f2c70ace7"
+            }
+          ],
+          "propositions": [
+            {
+              "fact": "Rachel has been packing boxes all week.",
+              "source_uuid": "f8d86f6c-2708-4d86-adcb-12950c14524e",
+              "target_uuid": "69710163-e8ee-4da0-b364-b74f2c70ace7",
+              "uuid": "7790b5ed-3a70-4d59-9b08-2fb1256779c7"
+            },
+            {
+              "fact": "Rachel has been packing boxes all week.",
+              "source_uuid": "f8d86f6c-2708-4d86-adcb-12950c14524e",
+              "target_uuid": "69710163-e8ee-4da0-b364-b74f2c70ace7",
+              "uuid": "7790b5ed-3a70-4d59-9b08-2fb1256779c7"
+            }
+          ]
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 0.5,
+          "proposition_recall": 0.0,
+          "proposition_precision": 0.0,
+          "update_capture_rate": 1.0,
+          "unsupported_inference_rate": 0.75
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "named_places",
+      "trial": 9,
+      "arm": {
+        "id": "baseline",
+        "label": "baseline",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 7073.54,
+        "tuning": {
+          "prompt_variant": "baseline",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Maya",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "44d7b4f1-178d-445e-ad9d-82efd0ed295a"
+            },
+            {
+              "text": "Google",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "38a24830-8155-425b-aa67-0429367064b3"
+            },
+            {
+              "text": "Microsoft",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "6a8e9c2e-0a9d-4fbb-88df-0dfc4efd17bf"
+            }
+          ],
+          "propositions": [
+            {
+              "fact": "Maya no longer works at Google",
+              "source_uuid": "44d7b4f1-178d-445e-ad9d-82efd0ed295a",
+              "target_uuid": "38a24830-8155-425b-aa67-0429367064b3",
+              "uuid": "0d524356-cae2-460f-bae2-5ee1d452d3e2"
+            },
+            {
+              "fact": "Maya joined Microsoft",
+              "source_uuid": "44d7b4f1-178d-445e-ad9d-82efd0ed295a",
+              "target_uuid": "6a8e9c2e-0a9d-4fbb-88df-0dfc4efd17bf",
+              "uuid": "6fa83d51-d27b-409a-8f01-9281c41b5140"
+            },
+            {
+              "fact": "Maya no longer works at Google",
+              "source_uuid": "44d7b4f1-178d-445e-ad9d-82efd0ed295a",
+              "target_uuid": "38a24830-8155-425b-aa67-0429367064b3",
+              "uuid": "0d524356-cae2-460f-bae2-5ee1d452d3e2"
+            },
+            {
+              "fact": "Maya joined Microsoft",
+              "source_uuid": "44d7b4f1-178d-445e-ad9d-82efd0ed295a",
+              "target_uuid": "6a8e9c2e-0a9d-4fbb-88df-0dfc4efd17bf",
+              "uuid": "6fa83d51-d27b-409a-8f01-9281c41b5140"
+            }
+          ]
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 0.5,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.2857142857142857
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "named_places",
+      "trial": 9,
+      "arm": {
+        "id": "combined_extraction",
+        "label": "combined_extraction",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 4656.04,
+        "tuning": {
+          "prompt_variant": "combined_extraction",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Maya",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "188e82b6-693f-48eb-b3e8-82817931d2a6"
+            },
+            {
+              "text": "Google",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "b5c96e92-463f-418c-ab24-0e54a7430179"
+            },
+            {
+              "text": "Microsoft",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "74a41ca8-309b-4d0f-b8ae-3971c602f4bd"
+            }
+          ],
+          "propositions": [
+            {
+              "fact": "Maya no longer works at Google.",
+              "source_uuid": "188e82b6-693f-48eb-b3e8-82817931d2a6",
+              "target_uuid": "b5c96e92-463f-418c-ab24-0e54a7430179",
+              "uuid": "689ad409-b4d3-46b5-bc1a-376dd9ffd68c"
+            },
+            {
+              "fact": "Maya joined Microsoft.",
+              "source_uuid": "188e82b6-693f-48eb-b3e8-82817931d2a6",
+              "target_uuid": "74a41ca8-309b-4d0f-b8ae-3971c602f4bd",
+              "uuid": "c93c9270-57ad-4d63-bcb4-7f5e3f2ec6e5"
+            },
+            {
+              "fact": "Maya no longer works at Google.",
+              "source_uuid": "188e82b6-693f-48eb-b3e8-82817931d2a6",
+              "target_uuid": "b5c96e92-463f-418c-ab24-0e54a7430179",
+              "uuid": "689ad409-b4d3-46b5-bc1a-376dd9ffd68c"
+            },
+            {
+              "fact": "Maya joined Microsoft.",
+              "source_uuid": "188e82b6-693f-48eb-b3e8-82817931d2a6",
+              "target_uuid": "74a41ca8-309b-4d0f-b8ae-3971c602f4bd",
+              "uuid": "c93c9270-57ad-4d63-bcb4-7f5e3f2ec6e5"
+            }
+          ]
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 0.5,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.2857142857142857
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "suburbs",
+      "trial": 10,
+      "arm": {
+        "id": "combined_extraction",
+        "label": "combined_extraction",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 4529.97,
+        "tuning": {
+          "prompt_variant": "combined_extraction",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Rachel",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "585849fe-4665-4f4c-a07e-9c60d343fdf3"
+            },
+            {
+              "text": "the suburbs",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "4edf5ed1-a745-496e-b5df-f231eb3127e6"
+            }
+          ],
+          "propositions": [
+            {
+              "fact": "Rachel actually just moved back to the suburbs again.",
+              "source_uuid": "585849fe-4665-4f4c-a07e-9c60d343fdf3",
+              "target_uuid": "4edf5ed1-a745-496e-b5df-f231eb3127e6",
+              "uuid": "d60f99e9-9312-41da-86a7-ba0b26764d5b"
+            },
+            {
+              "fact": "Rachel actually just moved back to the suburbs again.",
+              "source_uuid": "585849fe-4665-4f4c-a07e-9c60d343fdf3",
+              "target_uuid": "4edf5ed1-a745-496e-b5df-f231eb3127e6",
+              "uuid": "d60f99e9-9312-41da-86a7-ba0b26764d5b"
+            }
+          ]
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 0.5,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.25
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "suburbs",
+      "trial": 10,
+      "arm": {
+        "id": "baseline",
+        "label": "baseline",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 2555.2,
+        "tuning": {
+          "prompt_variant": "baseline",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Rachel",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "fb6a1bcd-623b-4778-93d3-8aa1e219dca3"
+            }
+          ],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 0.5,
+          "mention_precision": 1.0,
+          "proposition_recall": 0.0,
+          "proposition_precision": 0.0,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": false
+    },
+    {
+      "fixture": "downtown",
+      "trial": 10,
+      "arm": {
+        "id": "combined_extraction",
+        "label": "combined_extraction",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 3329.43,
+        "tuning": {
+          "prompt_variant": "combined_extraction",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "David",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "f594c773-4900-442a-bbcd-3e1bcebc2b09"
+            },
+            {
+              "text": "downtown",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "cd37464b-71f3-4889-bad6-a0f2f3ce1756"
+            }
+          ],
+          "propositions": [
+            {
+              "fact": "David is living downtown now.",
+              "source_uuid": "f594c773-4900-442a-bbcd-3e1bcebc2b09",
+              "target_uuid": "cd37464b-71f3-4889-bad6-a0f2f3ce1756",
+              "uuid": "0dd3e25f-67f8-4482-9df8-18fa9a8261da"
+            },
+            {
+              "fact": "David is living downtown now.",
+              "source_uuid": "f594c773-4900-442a-bbcd-3e1bcebc2b09",
+              "target_uuid": "cd37464b-71f3-4889-bad6-a0f2f3ce1756",
+              "uuid": "0dd3e25f-67f8-4482-9df8-18fa9a8261da"
+            }
+          ]
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 0.5,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.25
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "downtown",
+      "trial": 10,
+      "arm": {
+        "id": "baseline",
+        "label": "baseline",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 4639.81,
+        "tuning": {
+          "prompt_variant": "baseline",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "David",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "7ded53a9-560a-4792-aa41-d2f68cf7e92e"
+            }
+          ],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 0.5,
+          "mention_precision": 1.0,
+          "proposition_recall": 0.0,
+          "proposition_precision": 0.0,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": false
+    },
+    {
+      "fixture": "generic_non_fact",
+      "trial": 10,
+      "arm": {
+        "id": "combined_extraction",
+        "label": "combined_extraction",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 1383.74,
+        "tuning": {
+          "prompt_variant": "combined_extraction",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 1.0,
+          "update_capture_rate": 1.0,
+          "unsupported_inference_rate": 0.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "generic_non_fact",
+      "trial": 10,
+      "arm": {
+        "id": "baseline",
+        "label": "baseline",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 1907.03,
+        "tuning": {
+          "prompt_variant": "baseline",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Moving",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "c34f4c84-44cd-4a52-8395-914dc282be3e"
+            }
+          ],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 0.0,
+          "mention_precision": 0.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 1.0,
+          "update_capture_rate": 1.0,
+          "unsupported_inference_rate": 1.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "unsupported_move",
+      "trial": 10,
+      "arm": {
+        "id": "combined_extraction",
+        "label": "combined_extraction",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 1265.66,
+        "tuning": {
+          "prompt_variant": "combined_extraction",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 0.0,
+          "mention_precision": 0.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 1.0,
+          "update_capture_rate": 1.0,
+          "unsupported_inference_rate": 0.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "unsupported_move",
+      "trial": 10,
+      "arm": {
+        "id": "baseline",
+        "label": "baseline",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 2469.62,
+        "tuning": {
+          "prompt_variant": "baseline",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Rachel",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "0a833277-34b9-44f9-8d7f-9b1f9a9c2028"
+            }
+          ],
+          "propositions": []
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 1.0,
+          "update_capture_rate": 1.0,
+          "unsupported_inference_rate": 0.0
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "named_places",
+      "trial": 10,
+      "arm": {
+        "id": "combined_extraction",
+        "label": "combined_extraction",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 6171.29,
+        "tuning": {
+          "prompt_variant": "combined_extraction",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Maya",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "86310279-b745-4678-b4a4-a20c350356c8"
+            },
+            {
+              "text": "Microsoft",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "b9f69112-4611-47f7-871a-cdf7699201fb"
+            },
+            {
+              "text": "Google",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "e2a1a12b-50f9-4b97-a1a2-501d19f76c58"
+            }
+          ],
+          "propositions": [
+            {
+              "fact": "Maya no longer works at Google.",
+              "source_uuid": "86310279-b745-4678-b4a4-a20c350356c8",
+              "target_uuid": "e2a1a12b-50f9-4b97-a1a2-501d19f76c58",
+              "uuid": "a7e57c81-9a07-41f6-81ec-df2e3003931a"
+            },
+            {
+              "fact": "Maya joined Microsoft.",
+              "source_uuid": "86310279-b745-4678-b4a4-a20c350356c8",
+              "target_uuid": "b9f69112-4611-47f7-871a-cdf7699201fb",
+              "uuid": "a1991bf1-e92a-4738-b155-0c0d649a960f"
+            },
+            {
+              "fact": "Maya no longer works at Google.",
+              "source_uuid": "86310279-b745-4678-b4a4-a20c350356c8",
+              "target_uuid": "e2a1a12b-50f9-4b97-a1a2-501d19f76c58",
+              "uuid": "a7e57c81-9a07-41f6-81ec-df2e3003931a"
+            },
+            {
+              "fact": "Maya joined Microsoft.",
+              "source_uuid": "86310279-b745-4678-b4a4-a20c350356c8",
+              "target_uuid": "b9f69112-4611-47f7-871a-cdf7699201fb",
+              "uuid": "a1991bf1-e92a-4738-b155-0c0d649a960f"
+            }
+          ]
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 0.5,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.2857142857142857
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    },
+    {
+      "fixture": "named_places",
+      "trial": 10,
+      "arm": {
+        "id": "baseline",
+        "label": "baseline",
+        "ok": true,
+        "enabled": true,
+        "elapsed_ms": 5674.83,
+        "tuning": {
+          "prompt_variant": "baseline",
+          "model": null,
+          "context_episode_count": 10,
+          "temperature": 0.0,
+          "enable_candidate_lookup": false,
+          "forced_known_entities": null,
+          "retrieved_context": null
+        },
+        "error": null,
+        "extraction": {
+          "mentions": [
+            {
+              "text": "Maya",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "052b9fa6-0a30-47a5-ac90-880620f1e32c"
+            },
+            {
+              "text": "Google",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "502a1935-bb4d-4680-ad47-89a6e1d8e5df"
+            },
+            {
+              "text": "Microsoft",
+              "labels": [
+                "Entity"
+              ],
+              "uuid": "9c5078ab-aeb1-4db0-a1a2-e04a11068fff"
+            }
+          ],
+          "propositions": [
+            {
+              "fact": "Maya no longer works at Google.",
+              "source_uuid": "052b9fa6-0a30-47a5-ac90-880620f1e32c",
+              "target_uuid": "502a1935-bb4d-4680-ad47-89a6e1d8e5df",
+              "uuid": "2fef6198-4244-4584-8653-e97e01cf85b4"
+            },
+            {
+              "fact": "Maya joined Microsoft.",
+              "source_uuid": "052b9fa6-0a30-47a5-ac90-880620f1e32c",
+              "target_uuid": "9c5078ab-aeb1-4db0-a1a2-e04a11068fff",
+              "uuid": "4b58e2ee-8c6e-47b7-a0e8-f338c82ff6d1"
+            },
+            {
+              "fact": "Maya no longer works at Google.",
+              "source_uuid": "052b9fa6-0a30-47a5-ac90-880620f1e32c",
+              "target_uuid": "502a1935-bb4d-4680-ad47-89a6e1d8e5df",
+              "uuid": "2fef6198-4244-4584-8653-e97e01cf85b4"
+            },
+            {
+              "fact": "Maya joined Microsoft.",
+              "source_uuid": "052b9fa6-0a30-47a5-ac90-880620f1e32c",
+              "target_uuid": "9c5078ab-aeb1-4db0-a1a2-e04a11068fff",
+              "uuid": "4b58e2ee-8c6e-47b7-a0e8-f338c82ff6d1"
+            }
+          ]
+        },
+        "gold_scores": {
+          "mention_recall": 1.0,
+          "mention_precision": 1.0,
+          "proposition_recall": 1.0,
+          "proposition_precision": 0.5,
+          "update_capture_rate": 0.0,
+          "unsupported_inference_rate": 0.2857142857142857
+        },
+        "degraded": false,
+        "known_entities_used": []
+      },
+      "gate_success": true
+    }
+  ]
+}
