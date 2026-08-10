@@ -1,15 +1,25 @@
 # Menhir
 
+> Git records what changed. A code index records what depends on it. Menhir keeps the
+> evidence and decisions behind agent work, including what later became stale or
+> superseded and which files and tests still carry the impact.
+
 Menhir is a [Model Context Protocol](https://modelcontextprotocol.io/) memory and
-code-context service built for coding agents. It keeps a
-project's structural graph beside its semantic memory in
-[Neo4j](https://neo4j.com/), so a decision, failed approach, plan, or handoff can stay
-connected to the files and tests it concerns. [Graphiti](https://github.com/getzep/graphiti)
-handles entity extraction and graph search, while Menhir adds project indexing, impact
-analysis, lifecycle policy, provenance, and agent-facing tools.
+code-context service built for coding agents. It stores source episodes and governed
+semantic memory in the same [Neo4j](https://neo4j.com/) graph as files, symbols, callers,
+and tests. Paths and attached Git diffs connect decisions, failed approaches, plans, and
+handoffs to the code they concern.
+
+[Graphiti](https://github.com/getzep/graphiti) handles entity extraction and graph search.
+Menhir adds project indexing, impact analysis, currentness and lifecycle policy,
+provenance, typed state, and agent-facing tools.
 
 The current package version is `0.2.0`. Menhir is built for a single operator, requires
 Python 3.12 or newer, and exposes 52 MCP tools plus 9 read-only MCP resources.
+
+[Quick start](#quick-start) | [Agent workflow](#a-coding-loop) |
+[Blast radius](#code-graph-and-blast-radius) |
+[Governance](#governance-and-currentness) | [Security](#security-and-privacy)
 
 ## Why Menhir is useful for agentic coding
 
