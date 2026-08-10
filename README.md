@@ -1,42 +1,161 @@
 # Menhir
 
-Menhir is a graph-based memory service for AI agents. It stores memories in
-[Neo4j](https://neo4j.com/), uses
-[Graphiti](https://github.com/getzep/graphiti) for extraction and graph search, and
-serves its tools through the [Model Context Protocol](https://modelcontextprotocol.io/).
+Menhir is a [Model Context Protocol](https://modelcontextprotocol.io/) memory and
+code-context service built for coding agents. It keeps a
+project's structural graph beside its semantic memory in
+[Neo4j](https://neo4j.com/), so a decision, failed approach, plan, or handoff can stay
+connected to the files and tests it concerns. [Graphiti](https://github.com/getzep/graphiti)
+handles entity extraction and graph search, while Menhir adds project indexing, impact
+analysis, lifecycle policy, provenance, and agent-facing tools.
 
-The current package version is `0.2.0`. Menhir is built for a single operator and
-requires Python 3.12 or newer.
+The current package version is `0.2.0`. Menhir is built for a single operator, requires
+Python 3.12 or newer, and exposes 52 MCP tools plus 9 read-only MCP resources.
 
-## What Menhir does
+## Why Menhir is useful for agentic coding
 
-Menhir keeps durable context outside an agent's context window. An agent can add a
-memory, recall related information later, inspect conflicts, and query a project's
-structure from the same service.
+Menhir's main distinction is the connection between remembered context and live code
+structure. A result can carry the files it belongs to, the code and tests affected by a
+change, an advisory stale-anchor label, and receipts showing where the claim came from.
 
-A running Menhir instance provides:
+| Capability | What the coding agent gets |
+|------------|----------------------------|
+| Structural code graph | Files, symbols, imports, calls, tests, endpoints, dependencies, and cross-project references |
+| Code-linked memory | Memories anchored to repository paths found in their narrative or attached Git diff |
+| Change analysis | Direct and transitive dependents, function callers, affected tests, and related memories in one blast-radius query |
+| Governed recall | Review-only candidates, persistent memory, operator-promoted ground truth, superseded history, conflicts, and source receipts |
+| Typed state | Immutable scalar assertions folded into rebuildable current-state and history Views |
+| Engineering artifacts | Plans, reviews, investigations, implementation reports, and handoffs with typed status and relationships |
+| Agent integrations | Optional prompt and file-event hooks that preserve durable context without installing themselves or blocking the coding session |
 
-- asynchronous memory ingestion with entity and relationship extraction
-- typed scalar assertions with rebuildable current-state and history views
-- hybrid recall followed by graph-aware reranking
-- project indexing for files, imports, tests, endpoints, and dependencies
-- lifecycle compression, rehydration, conflict tracking, and manual retention controls
-- HTTP MCP, a backend-first stdio bridge, REST endpoints, and a graph explorer
-- SQLite telemetry for queue, recall, and lifecycle diagnostics
+The structural and semantic entities live in the same Neo4j graph and share project and
+namespace boundaries. A client does not have to join independent responses from a code
+index and a memory service.
 
-Menhir registers 52 MCP tools and 9 read-only MCP resources. The gateway keeps a small
-set of common tools visible and exposes the rest through tool discovery.
+Current development is concentrated on ingest and projection correctness for typed
+scalar state. The [typed scalar section](#typed-scalar-memory-and-current-priorities)
+explains why that work comes before further retrieval tuning and which authority paths
+remain off by default.
+
+### A coding loop
+
+A typical agent session can use Menhir at each stage:
+
+1. Run `ingest_project` to build or refresh the repository graph.
+2. Before editing, use `query_structure` for local context, blast radius, and affected
+   tests. Pass `file_context` to `recall_memories` to pull in code-linked decisions,
+   failures, and constraints.
+3. During the session, optional hooks can collect durable user-provided evidence and
+   mark changed files dirty. Hook failures do not block the coding agent.
+4. After the change, attach the Git diff to `add_memory` so new lessons can be anchored
+   to touched files. Record remaining code work with repository-relative todo locations,
+   and update any plan, review, report, or handoff artifacts.
+
+```text
+repository scan -> structural code graph
+memory + Git diff -> semantic graph -> ANCHORED_TO file
+changed file -> blast radius -> affected code + tests + related memories
+file event -> stale anchor label -> agent checks the current file
+```
+
+Menhir does not infer the editor's active file. The client must pass `file_context`, and
+the project must be indexed before structural queries or anchors can be trusted.
+
+## Code graph and blast radius
+
+`ingest_project` indexes repository files, symbols, imports, calls, tests, endpoints,
+dependencies, and nested project relationships. A watcher checks indexed projects every
+30 minutes using file fingerprints.
+
+`query_structure` can answer local questions about a module, but its more useful coding
+queries follow a proposed change through the graph:
+
+- `blast_radius` walks reverse imports transitively, reports function-level callers and
+  cross-project references, maps affected tests, and returns memories anchored to the
+  affected files
+- `affected_tests` narrows the result to relevant test files and produces a minimal
+  `pytest` command
+- `context` gathers a file's symbols, imports, importers, tests, and linked memories
+- `endpoints`, `dependencies`, `symbols`, and `cross_refs` expose narrower views when an
+  agent needs evidence instead of a full impact report
+
+```text
+changed module
+  -> direct importers and callers
+  -> transitive dependents and cross-project references
+  -> affected tests
+  -> semantic memories attached to the impacted files
+```
+
+Negative answers are qualified by index coverage. If a requested path was not indexed,
+Menhir refuses to present an empty blast radius as proof that nothing depends on it. It
+also distinguishes a stale project root from a current scan. This matters for coding
+agents, where an incomplete graph can otherwise turn "not found" into a risky claim of
+"safe to change."
+
+## Code-related memory
+
+`add_memory` queues an episode for entity and relationship extraction. During
+enrichment, Menhir finds repository paths in the narrative and any attached Git diff,
+normalizes those paths, resolves them against the structure graph, and writes
+`ANCHORED_TO` relationships. The original episode remains available as provenance.
+
+Recall can then start from code instead of wording alone. Passing `file_context` adds
+memories attached to the file, its imports, its importers, and its tests to the candidate
+pool even when semantic or lexical search did not find them. Blast-radius results use
+the same anchors to put earlier decisions and failures beside the affected code.
+
+An optional file-event hook for Claude Code and Codex observes edit, write, create,
+delete, and rename events. It sends the path and optional hash, modification time, Git,
+and session metadata, but not file contents or transcripts. If the file changed after a
+memory was anchored, recall labels that anchor stale and tells the agent to inspect the
+current file. The label is advisory: it does not delete or downrank the memory, rebuild
+the project index, or automatically rewrite the anchor. See the
+[hook event contract](docs/hook-center-tool-events.md).
+
+Optional TurnEvidence hooks for Claude Code, Codex, and OpenCode inspect user prompts
+with deterministic triage. They retain only prompts that look durable enough for later
+ingestion, not assistant messages, tool output, or a full transcript. See the
+[TurnEvidence producer contract](docs/turn-evidence-producers.md).
+
+## Governance and currentness
+
+Stored text is not treated as equally authoritative. Menhir separates review state,
+lifecycle state, and operator authority:
+
+| State | Recall behavior |
+|-------|-----------------|
+| `CANDIDATE` | Low-trust staging area. Candidates are withheld from recall until a human approves them. |
+| `PERSISTENT` | Normal durable memory that remains subject to conflict and lifecycle handling. |
+| `PROMOTED` | Operator-curated, verified ground truth. Only persistent memory can be promoted, and normal merge handling cannot absorb it. |
+| Superseded or historical | Kept for audit and historical queries, but omitted from current-belief recall by default. |
+
+`get_provenance` expands a memory or derived View into its source episodes, first-class
+evidence, and structural anchor paths. Conflict tools can scan, review, and explicitly
+resolve contradictory memories. Removing promoted content requires an explicit
+operator override. Namespaces and credential tiers keep projects and client roles
+separate within the single-operator trust model.
+
+Menhir also treats engineering documents as `WorkArtifact` objects. Git still owns the
+Markdown bytes; Menhir tracks stable identity, type, status, code locations, open
+questions, and relationships such as `reviews`, `implements`, `informs`, and
+`supersedes`. Supersession moves the old artifact's status and writes the relationship
+together, so a later agent does not have to guess which plan or handoff is current.
+Repository-relative todo locations use the same rule: paths and optional symbols or line
+ranges are normalized, while unresolved references remain unresolved instead of being
+guessed.
+
+Some read-side authority gates, event-history authority, deterministic scalar routing,
+and retrieval experiments remain opt-in. The
+[activation ledger](.agent/default-off-features.md) records their actual default state
+and the evidence required before activation.
 
 ## How memory moves through the system
 
 ### Ingestion
 
 `add_memory` writes an episode to the queue and returns without waiting for extraction.
-A background worker sends the episode to the configured LLM, merges the extracted
-entities and relationships into Neo4j, and records scope and provenance metadata.
-
-If the text contains file paths that already exist in the structure graph, enrichment
-can connect the memory to those files with `ANCHORED_TO` relationships.
+A background worker sends it to the configured LLM, merges extracted entities and
+relationships into Neo4j, and records scope, provenance, and structural anchors.
 
 ```text
 episode -> queue -> LLM extraction -> Neo4j merge -> metadata -> structural anchors
@@ -44,48 +163,26 @@ episode -> queue -> LLM extraction -> Neo4j merge -> metadata -> structural anch
 
 ### Recall
 
-Graphiti supplies candidates using hybrid BM25 and vector search. Menhir then reranks
-them with semantic similarity, graph adjacency, recency, prominence, and conflict
-signals. Passing `file_context` adds memories anchored to that file and nearby imports
-to the candidate pool.
+Graphiti supplies candidates using hybrid BM25 and vector search. Menhir reranks them
+with semantic similarity, graph adjacency, recency, prominence, and conflict signals.
+File-linked candidates can enter through structural context even when they were absent
+from the text search results.
 
-The scoring model is intended to make relationships and current project context useful
-during recall. The repository does not claim that this is universally better than a
-vector-only system; retrieval quality depends on the data, provider, and tuning.
+The repository does not claim that this is universally better than vector-only search.
+Retrieval quality still depends on the stored evidence, provider, index coverage, and
+tuning.
 
 ### Lifecycle
 
 Memories can be session-scoped, persistent, active, compressed, promoted, flagged, or
-marked gone. The maintenance scheduler runs lifecycle consolidation and decay checks
-daily. Eligible inactive memories may be compressed, and compressed content can be
-rehydrated when new context arrives. Flagged and promoted memories receive stronger
-retention protection.
+marked gone. Daily maintenance runs consolidation and decay checks. Eligible inactive
+memories may be compressed, and compressed content can be rehydrated when new context
+arrives. Flagged and promoted memories receive stronger retention protection.
 
-Automatic transitions from `COMPRESSED` to `GONE` are currently disabled. The old
-deletion threshold was tied to a score that did not provide a safe basis for irreversible
-deletion. Manual deletion remains available to an operator, while automatic decay favors
-retention until a replacement policy is validated.
-
-Event-history recall authority, deterministic typed-scalar routing, and frontier
-retrieval experiments ship behind default-off flags. The
-[activation ledger](.agent/default-off-features.md) records why each feature is off and
-what must happen before its default changes.
-
-### Project structure
-
-`ingest_project` indexes files, imports, tests, endpoints, and dependencies. After a
-project has been indexed, the structure watcher checks it every 30 minutes using file
-fingerprints.
-
-`query_structure` supports questions such as:
-
-- which files depend on a changed module
-- which tests cover the affected files
-- which endpoints are defined in a module
-- which memories are anchored to nearby code
-
-Project indexing is explicit. Menhir does not know an editor's current file unless the
-client supplies file context or an operator enables an integration that provides it.
+Automatic transitions from `COMPRESSED` to `GONE` are disabled. The old deletion
+threshold did not provide a safe basis for irreversible removal. An operator can still
+delete memory manually, while automatic decay favors retention until a replacement
+policy is validated.
 
 ## Typed scalar memory and current priorities
 
@@ -311,10 +408,12 @@ bearer challenges, query-string credential rejection, and token smoke tests with
 claiming compatibility with a particular client.
 
 Installing or starting Menhir does not install editor or agent hooks. If you enable the
-included Claude Code, Codex, or OpenCode hooks, accepted prompts may be stored with the
-working directory and transcript path. Review the
-[turn-evidence producer documentation](docs/turn-evidence-producers.md) before using hooks
-for sensitive work.
+included TurnEvidence hooks, accepted prompts may be stored with working-directory, Git,
+and transcript-path metadata. The separate file-event hook stores path and change
+metadata without file contents. Review the
+[TurnEvidence producer documentation](docs/turn-evidence-producers.md) and
+[file-event contract](docs/hook-center-tool-events.md) before using hooks for sensitive
+work.
 
 Report vulnerabilities privately as described in [`SECURITY.md`](SECURITY.md). Do not
 open a public issue for a security report.
@@ -331,8 +430,9 @@ set through the MCP gateway.
 | `add_memory` | Queue a memory for enrichment |
 | `add_memory_and_track` | Queue a memory and stream processing progress |
 | `ingest_document` | Ingest a document as memory episodes |
+| `add_candidate` | Stage low-trust context for human review without making it recallable |
 | `flag_memory` | Protect a memory from normal lifecycle decay |
-| `promote_memory` | Promote a memory to durable scope |
+| `promote_memory` | Mark persistent memory as operator-verified ground truth |
 | `delete_memory` | Delete a memory under operator control |
 
 ### Recall and context
@@ -343,6 +443,7 @@ set through the MCP gateway.
 | `recall_context_memories` | Retrieve recent and relevant startup context |
 | `read_flagged_memories` | Read memories selected for bootstrap |
 | `build_context` | Assemble context within a token budget |
+| `get_provenance` | Expand a result into source episodes, evidence, and code anchors |
 | `rate_recall` | Record explicit retrieval feedback |
 
 ### Inspect projects and operations
@@ -350,7 +451,7 @@ set through the MCP gateway.
 | Tool | Purpose |
 |------|---------|
 | `ingest_project` | Index a repository's structure |
-| `query_structure` | Query files, imports, tests, endpoints, and dependencies |
+| `query_structure` | Query code context, blast radius, affected tests, symbols, endpoints, dependencies, and cross-project references |
 | `get_enrichment_status` | Inspect one episode's processing state |
 | `watch_enrichment` | Monitor enrichment changes |
 | `get_episode_trace` | Read queue and telemetry history for an episode |
@@ -365,8 +466,19 @@ set through the MCP gateway.
 | `scan_for_conflicts` | Scan for similarity-based conflict candidates |
 | `run_llm_conflict_review` | Ask the configured LLM to review unresolved conflicts |
 
-The tool set also includes todo and artifact operations, client-token administration,
-scheduler controls, provenance inspection, and enrichment repair.
+### Track engineering work
+
+| Tool | Purpose |
+|------|---------|
+| `add_todo` | Create a todo with an optional normalized code location |
+| `list_artifacts` | Find plans, reviews, investigations, reports, and handoffs by type or status |
+| `get_artifact` | Read one artifact with its current metadata and Git-backed content |
+| `link_artifacts` | Record a typed `reviews`, `implements`, or `informs` relationship |
+| `transition_artifact` | Apply a legal status transition for that artifact type |
+| `supersede_artifact` | Replace an artifact while updating status and relationship atomically |
+
+The tool set also includes client-token administration, scheduler controls, todo
+cleanup, artifact questions, and enrichment repair.
 
 ## Retrieval scoring
 
