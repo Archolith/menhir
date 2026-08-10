@@ -14,9 +14,10 @@ Menhir keeps durable context outside an agent's context window. An agent can add
 memory, recall related information later, inspect conflicts, and query a project's
 structure from the same service.
 
-A running Menhir instance can:
+A running Menhir instance provides:
 
 - asynchronous memory ingestion with entity and relationship extraction
+- typed scalar assertions with rebuildable current-state and history views
 - hybrid recall followed by graph-aware reranking
 - project indexing for files, imports, tests, endpoints, and dependencies
 - lifecycle compression, rehydration, conflict tracking, and manual retention controls
@@ -85,6 +86,59 @@ fingerprints.
 
 Project indexing is explicit. Menhir does not know an editor's current file unless the
 client supplies file context or an operator enables an integration that provides it.
+
+## Typed scalar memory and current priorities
+
+Recent work has focused on turning grounded statements into typed, auditable state. This
+is different from storing another prose summary. The scalar path keeps the original
+observation and derives a current value that can be rebuilt:
+
+```text
+TurnEvidence
+  -> typed scalar perception and admission
+  -> immutable TypedAssertion
+  -> deterministic fold
+  -> ScalarStateView and ScalarHistoryView
+```
+
+A typed assertion records the subject, attribute, value, unit, operation, source span,
+namespace, and time. The fold can combine an absolute value with later deltas, handle
+corrections and supersession, and retain the assertions that contributed to the current
+View. `ScalarStateView` represents current state. `ScalarHistoryView` is an advisory
+record of changes rather than a competing source of current truth.
+
+The scalar assertion, persistence, fold, repair, and inspection infrastructure is
+implemented. Scalar-state activation and recall authority remain opt-in while the system
+is checked against held-out extraction, namespace, replay, and repair cases. The
+deterministic extractor and router are also default-off; the extractor can run as an
+observe-only shadow without changing persistence or recall. Event-history authority
+follows the same rollout discipline and remains default-off.
+
+### Why ingestion comes first
+
+Menhir treats retrieval as the evidence selector, not the place where missing semantic
+structure should be invented. Recall cannot repair a fact that was never extracted, was
+bound to the wrong subject or namespace, lost its provenance, or folded into the wrong
+current value.
+
+That makes ingest and projection correctness the current priority. The work is ordered
+around four questions:
+
+1. Did perception extract the atomic claim from an exact source span?
+2. Was the claim admitted, bound, and namespaced correctly?
+3. Can the durable assertions deterministically rebuild the expected View?
+4. Can replay, repair, and coverage checks account for every assertion and projection?
+
+Retrieval and context presentation come after those checks. This is also why tentative
+intent is planned as an ingest-owned assertion and View instead of a recall-time phrase
+classifier. Until admitted Intent Views exist, ordinary prose remains general content.
+
+The [typed recall packet decision](.agent/plans/typed-recall-packet-prototype.md) records
+the ingest-owned boundary. The
+[projection and realization coverage plan](.agent/plans/menhir-projection-realization-coverage-implementation.md)
+describes the next reliability and observability work. The
+[activation ledger](.agent/default-off-features.md) lists the paths that are shipped but
+not enabled by default.
 
 ## Interfaces
 
