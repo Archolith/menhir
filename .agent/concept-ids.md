@@ -30,6 +30,7 @@ Use this file only after that when you need an exact id or owner.
 | Id | Owner |
 |----|-------|
 | `runtime.overview` | `architecture.md` |
+| `runtime.projections` | `architecture.md` |
 | `runtime.ops` | `architecture.md` |
 | `runtime.shape` | `architecture.md` |
 | `runtime.dependencies` | `architecture.md` |

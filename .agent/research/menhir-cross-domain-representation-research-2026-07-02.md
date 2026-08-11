@@ -4,7 +4,7 @@
 **Bias (given):** remove complexity; prefer abstractions that replace multiple special cases over new features.
 **Accepted premises:** read-time reranking exhausted · write-time representation is the lever · events immutable ·
 deterministic folds → generic Views · Views additive, never replacements · probability only at the perception boundary.
-**Grounding:** `.agent/plans/fold-algebra.md` (σ/ρ/δ, four monoidal reducers), `event-fold-view-architecture.md`,
+**Grounding:** `.agent/plans/backlog/fold-algebra.md` (σ/ρ/δ, four monoidal reducers), `.agent/architecture.md`,
 D0 results (`archolith-bench/.agent/plans/d0-entropy-delta-counting-slice.md`), `view_repository.py`, `recall_service.py`.
 
 Each idea: **(1) name · (2) source domain · (3) mechanism · (4) why it helps · (5) where it fits ·

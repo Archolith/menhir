@@ -93,7 +93,8 @@ because it requires reading `research-vs-shipped-inventory.md`'s 2026-07-11 reco
 - **All of these flags default `False` as of 2026-07-11**, specifically because
   `research-vs-shipped-inventory.md`'s reconciliation states: *"After the LME campaign proved
   read-time levers neutral-to-negative, the defaults were flipped OFF."*
-- `aggregation-as-consolidation.md` (2026-07-02, the still-active pivot doc) is explicit about why:
+- The archived `aggregation-as-consolidation.md` thesis (2026-07-02) is explicit about why the
+  still-active write-side pivot happened:
   *"Every read-time lever we pulled this session landed neutral-to-negative... You cannot re-rank
   or re-format your way to information candidate generation never assembled."*
 
@@ -111,11 +112,11 @@ failing because the updated fact was never extracted (confirmed for 3/3 checked 
 `rca-lme-stale-fact-retention-2026-07-15.md`), then there is nothing for `CurrentnessWarden` to
 suppress and nothing for the oracle combiner to re-rank — both sides of the belief pair need to
 exist in the graph before "which one is current" is even a question the warden layer can answer.
-This is the same "selection vs. representation" framing `aggregation-as-consolidation.md` already
+This is the same "selection vs. representation" framing the archived consolidation thesis already
 established for the counting-question failures, now shown to also apply to knowledge-update
 failures, which that document had *not* yet connected to the same root cause.
 
-### A specific correction owed to `aggregation-as-consolidation.md`
+### A historical correction to `aggregation-as-consolidation.md`
 
 That document's failure-mode census (line ~104) currently reads:
 
@@ -217,7 +218,7 @@ judge_extraction_lab() -- NOT the existing blind comparative judge (recall_lab.p
                          specifies. No LLM-judge variance on the pass/fail axis: recall/precision
                          against a fixed gold set is deterministic set comparison, not a judged
                          comparison -- avoids re-importing the noisy-llm-judge problem
-                         `aggregation-as-consolidation.md` already diagnosed and fixed via D0 entropy
+                         the archived consolidation thesis already diagnosed and fixed via D0 entropy
                          for the counting-question campaign. An LLM is only needed to classify a
                          raw extracted mention/proposition against the gold set when wording differs
                          (e.g. "the suburbs" vs "suburban area") -- a narrow, single-purpose
@@ -328,8 +329,10 @@ the same idea from scratch.
   temporal-reasoning and candidate-retrieval framing remains useful background.
 - `docs/research/process/research-vs-shipped-inventory.md` — canonical shipped-vs-research map;
   re-audit before trusting the Tier assignments cited here if significant time has passed.
-- `.agent/plans/aggregation-as-consolidation.md` — the active write-time-consolidation
-  direction this plan's Phase 1/2 continues; owes a failure-census correction (see above).
+- `.agent/research/menhir-research-execution-ladder.md` Track W — the current write-time-
+  consolidation status this plan's Phase 1/2 continues. The archived thesis remains at
+  `.agent/archive/plans/aggregation-as-consolidation.md` and owes the historical failure-census
+  correction noted above; its body is intentionally not rewritten.
 - `domain/retrieval_tuning.py`, `config/settings.py:273-292` — the `CandidateSource` /
   `MENHIR_FRONTIER_*` patterns Phase 2 should follow, not reinvent.
 - `explorer/recall_lab.py`, `explorer/app.py:645-691` — the arm/judge/route skeleton Phase 0's new

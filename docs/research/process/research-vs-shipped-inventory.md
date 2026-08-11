@@ -36,7 +36,8 @@ before trusting it.
 
 ## Tier 4 — BUILT since this audit: write-time consolidation (the current direction)
 
-The post-LME pivot (`.agent/plans/aggregation-as-consolidation.md`, 2026-07-02): aggregation
+The post-LME pivot (historical thesis:
+`.agent/archive/plans/aggregation-as-consolidation.md`, 2026-07-02): aggregation
 is a **consolidation** problem, not a retrieval one — maintain query-sufficient state at write time so
 multi-session answers are a lookup, not a fuzzy re-rank. Shipped as code, runs write-time / explicitly
 (scheduler off in bench mode):
@@ -48,20 +49,19 @@ D0 retrieval entropy                 services/view_entropy.py (View-reachability
   (the objective function)           infrastructure/view_repository.py, mcp/tools/ops/view_entropy.py
 D1 QuantState                        services/quantstate_consolidator.py (LLM perception -> deterministic
   (supersedable counter/register)    fold -> in-graph counter), infrastructure/quantstate_repository.py
-Event -> Fold -> View frame          one View node shape + N folds (not N special node types);
-                                     event-fold-view-architecture.md
+Event -> Fold -> View frame          one event-log/projection boundary + a fold library;
+                                     .agent/architecture.md, .agent/data_models.md
 event fold                           services/windowed_fold.py
 agent-experiential counters          services/failure_counter_bridge.py, instability_counter_bridge.py
   (FailureEvent -> QuantState)       (no re-ingest, no LLM; commit f8dd8ab)
 ```
 
-Owner docs: `aggregation-as-consolidation.md`, `quantstate-agent-counter.md`, and
-`event-fold-view-architecture.md` — all three under `.agent/plans/backlog/`, kept as ACTIVE
-DIRECTION. (The latter two briefly relocated to `docs/research/direction/` on 2026-07-11 as
-shipped-primitive / architecture-frame research, then moved back on 2026-08-07 once "shipped
-and realized in code" made the research-corpus placement inaccurate.) All three were
-reconciled 2026-07-11; the pre-ship "build order" drift they carried is resolved
-(`productionize-view-primitives.md` archived; write-side confirmed shipped and running in prod).
+The three July owner plans (`aggregation-as-consolidation.md`, `quantstate-agent-counter.md`, and
+`event-fold-view-architecture.md`) are historical decision records under `.agent/archive/plans/` as
+of 2026-08-10. Track W in `.agent/research/menhir-research-execution-ladder.md` is the current status
+authority. D0/W2's reported counting-slice delta lives in
+`archolith-bench/.agent/plans/d0-entropy-delta-counting-slice.md`; live architecture lives in
+`.agent/architecture.md` and `.agent/data_models.md`.
 
 > 2026-06-29 delta (SUPERSEDED re: defaults by the 2026-07-11 block above): the frontier portions are
 > now **wired into production recall** (no longer "all gated") — `recall_service._apply_frontier` runs

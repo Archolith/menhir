@@ -217,7 +217,9 @@ processor one-off by one-off. Evidence base: D0 Arm A (representation collapses 
 rank-1/1-node/~21 tokens at the oracle ceiling) and Arm B (stated-total perception is reliable at
 5/5; the ~9 remaining questions need a deterministic fold, not a better model). Full results:
 `archolith-bench/.agent/plans/d0-entropy-delta-counting-slice.md`. Architecture frame:
-`event-fold-view-architecture.md` (Event → Fold → View; one View shape; ViewKind SSOT).
+`.agent/architecture.md` (Event → Fold → disposable View/projection) and `.agent/data_models.md`
+(current View kinds and projection contracts). The original frame is retained at
+`.agent/archive/plans/event-fold-view-architecture.md`.
 Design handoff: `.agent/for-review/HANDOFF-2026-07-02-fold-algebra-design.md`.
 
 ---

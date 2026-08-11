@@ -27,14 +27,13 @@ Otherwise it remains a parked research note or issue comment.
 > stack 0.333) and **ships default-off** (`config/settings_model.py`, every `frontier_*` boolean gate False). The **current
 > active direction is write-time consolidation** — "aggregation is a consolidation problem, not a
 > retrieval one": D0 retrieval-entropy, D1 QuantState, Event -> Fold -> View, and agent-experiential
-> counters, all BUILT. Those docs live under `.agent/plans/`
-> (`aggregation-as-consolidation.md`, `quantstate-agent-counter.md`, `event-fold-view-architecture.md`),
-> not this corpus — the latter two briefly relocated into `docs/research/direction/` on 2026-07-11
-> and were moved back on 2026-08-07 (curator audit) once "shipped and realized in code" made the
-> research-corpus placement inaccurate; all three moved out of `plans/backlog/` on 2026-08-10 once
-> the arc was sequenced as Track W in the execution ladder. See the execution ladder's "Bench verdicts — reconciliation"
-> for why the read-side pivoted. The mechanism-ownership tables below remain accurate; only the
-> "what to build next" framing changed.
+> counters, all BUILT and measured. Current status and order live in Track W of
+> `.agent/research/menhir-research-execution-ladder.md`; live mechanism shape lives in
+> `.agent/architecture.md`, `.agent/data_models.md`, and
+> `.agent/memory-aggregation-under-uncertainty.md`. The three July owner plans were archived under
+> `.agent/archive/plans/` on 2026-08-10 after their useful rationale was routed into those current
+> docs. See the execution ladder's "Bench verdicts — reconciliation" for why the read-side pivoted.
+> The mechanism-ownership tables below remain accurate; only the "what to build next" framing changed.
 >
 > **2026-08-09 — the pivot now has a number.** The write-side arc scored **0.910 (71/78)** on the
 > 78-item LongMemEval knowledge-update oracle fixture against a `no_memory` arm of 6/78 — a +0.833

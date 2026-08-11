@@ -11,6 +11,7 @@ This file is the architectural source of truth. Keep operator runbooks, launcher
 - Need scheduler behavior: read `runtime.ops`, `runtime.dependencies`, and `runtime.roadmap`
 - Need provider wiring: read `runtime.providers`
 - Need queue / telemetry behavior: read `runtime.ops` and `runtime.storage`
+- Need write-time memory projections: read `runtime.projections` and `data_models.md`
 - Need package ownership: read `runtime.packages`
 - Need operator commands / readiness checks / logs: use `workflows/operations_runbook.md` and `workflows/logging-and-troubleshooting.md`
 
@@ -27,6 +28,35 @@ recall/ingest service with the following core loop:
 2. Stamp policy metadata (scope, session, source) onto created/touched graph records.
 3. Query for similar nodes and build graph-context ranked results.
 4. Run lifecycle decay jobs to compress/prune stale memories.
+
+### Event → Fold → Projection
+
+Concept id: `runtime.projections`
+
+The durable write-side boundary is:
+
+```text
+immutable, provenance-bearing evidence/events
+  -> deterministic fold or reconciliation
+  -> disposable, query-sufficient projection/View
+  -> recall or a separate authority lane
+```
+
+An LLM may perceive typed assertions/events from language at the first boundary; it does not perform
+the arithmetic, ordering, latest/predecessor selection, or supersession inside the fold. Raw evidence
+and durable assertion/event logs remain the source of truth. Views and scalar/event projections are
+additive, rebuildable products, never replacements for their contributors.
+
+The original July frame described “one View node shape plus N folds.” Current code keeps the useful
+invariant—new capabilities should reuse the event-log/projection boundary and shared write/query
+infrastructure—but does not require every projection to share one physical Neo4j label or one value
+slot. Scalar state/history, event timelines, metrics, and compatibility counters have kind-specific
+contracts documented in `data_models.md`.
+
+Batch and incremental execution are two evaluation modes of the same fold laws, not separate pure
+and stateful operation families. Event-time ordering, replay/dedup, and anchor+delta reconciliation
+are specified in `plans/backlog/fold-algebra.md`; precision and abstention policy are specified in
+`memory-aggregation-under-uncertainty.md`.
 
 ## Technology Stack
 

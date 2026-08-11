@@ -23,7 +23,7 @@ so there was nothing to wire. See CHANGELOG 2026-07-02.
 **Status: READY TO EXECUTE (planned 2026-07-02).** The two experience-counter primitives and the
 QuantState consolidator are built, tested end-to-end, and committed — but **inert**: they only fire
 on manual invocation. This plan makes them run on their own in production. Companion to
-[`event-fold-view-architecture.md`](../../plans/backlog/event-fold-view-architecture.md) (the architecture) and
+[`event-fold-view-architecture.md`](event-fold-view-architecture.md) (historical architecture decision) and
 [`ingest-primitive-family.md`](../../plans/backlog/ingest-primitive-family.md) (the MVP cut).
 
 Three independent workstreams; do them in order (each is safe alone). One project: menhir-frontier.

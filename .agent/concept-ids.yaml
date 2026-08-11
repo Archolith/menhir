@@ -2,6 +2,9 @@ runtime:
   runtime.overview:
     owner: architecture.md
     meaning: Service purpose and core loop
+  runtime.projections:
+    owner: architecture.md
+    meaning: Event-log, deterministic-fold, and disposable-projection boundary
   runtime.stack:
     owner: architecture.md
     meaning: Runtime stack and major dependencies

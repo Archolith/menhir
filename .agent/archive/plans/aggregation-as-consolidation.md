@@ -1,5 +1,14 @@
 # Aggregation as a write-time consolidation problem — CURRENT DIRECTION
 
+> **ARCHIVED 2026-08-10.** This is the historical thesis that caused the read-side-to-write-side
+> pivot. Its durable engineering filter now lives in
+> [`.agent/memory-aggregation-under-uncertainty.md`](../../memory-aggregation-under-uncertainty.md),
+> and the current build/measurement state lives in Track W of the
+> [research execution ladder](../../research/menhir-research-execution-ladder.md). The locked order
+> was executed: D0's counting-slice baseline and Arm A/Arm C deltas are recorded in
+> `archolith-bench/.agent/plans/d0-entropy-delta-counting-slice.md`; W3 was explicitly declined on
+> 2026-08-10. The body below is preserved as the decision record, not an active plan.
+
 **Status: ACTIVE DIRECTION (2026-07-02).** Research docs incoming will refine this; the thesis
 and the first test below are the frame they land on. Supersedes further read-time retrieval work
 on LME (see the negative results in `.agent/plans/anecdotal-recall-oracle-ladder.md` and

@@ -1,14 +1,15 @@
 # Write-time primitive family already hiding in ingest
 
-> **Read this through the Event→Fold→View lens** ([`event-fold-view-architecture.md`](../event-fold-view-architecture.md)):
+> **Read this through the Event→Fold→View lens** ([`.agent/architecture.md`](../../architecture.md)):
 > the items below are **Event sources and candidate Folds**, NOT ten node types to build. There is
 > one View node shape; "primitives" are mostly folds we haven't written yet. Resist primitive explosion.
 
 **Status: INVENTORY + build order (2026-07-02).** Survey of primitive-shaped things ingest ALREADY
 records, framed by the question "what can we promote before we have to re-ingest?" Companion to
-[`quantstate-agent-counter.md`](../quantstate-agent-counter.md) (QuantState is built) and
-[`aggregation-as-consolidation.md`](../aggregation-as-consolidation.md) (the query-sufficient-state
-theory).
+the archived [`quantstate-agent-counter.md`](../../archive/plans/quantstate-agent-counter.md)
+(D1 implementation record) and
+[`aggregation-as-consolidation.md`](../../archive/plans/aggregation-as-consolidation.md)
+(historical query-sufficient-state thesis).
 
 **Key finding:** most of these need NO re-ingest — ingest already writes the data, siloed in the
 telemetry SQLite store (`failure_events`, `episode_task_events`, `lifecycle_events`,
@@ -91,7 +92,7 @@ one other primitive clears it.
    `ViewRepository`, `QuantStateRepository` is an alias. The one thing that flexed: the value slot
    (scalar `view_value` for counter, ordered `view_payload` for timeline). Recall needed no
    per-kind code — both surface through the same stamped-`:Entity` path. See
-   `event-fold-view-architecture.md` § RESULT. BUILT.
+   `.agent/architecture.md` and `.agent/data_models.md`. BUILT.
 
 **Deferred, with reasons (unchanged):**
 - ProcessingAttemptCounter — redundant with FailureEvent (same counter, same event).

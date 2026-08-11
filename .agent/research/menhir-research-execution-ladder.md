@@ -39,7 +39,8 @@ do not re-derive it in the rung blocks.
 - **The pivot — aggregation is a consolidation problem, not a retrieval problem.**
   The campaign's own conclusion: "you cannot re-rank or re-format your way to information candidate
   generation never assembled." So 2026-07-01→04 moved off oracle-ladder rungs into the perception /
-  Event→Fold→View / D0 write-side arc (`aggregation-as-consolidation.md`): maintain quantitative
+  Event→Fold→View / D0 write-side arc (historical thesis in
+  `.agent/archive/plans/aggregation-as-consolidation.md`): maintain quantitative
   state at write/consolidation time so multi-session answers are a lookup, not a fuzzy re-rank.
 
 Standing effect on the rungs below: R1/R6/R7 statuses stay `in-progress` (mechanism built, gated,
@@ -577,15 +578,20 @@ status  planned  (NOT greenfield: the write OPS already exist, scattered —
 
 ## Track W — Write-time consolidation (the active arc)
 
-Sequence is not invented here: it is the "Locked build order (instrument first, pass second)"
-authored in `.agent/plans/aggregation-as-consolidation.md`. Mechanism ownership stays with the
-three plan docs; this track owns ORDER, as with every other track.
+This sequence executed the "Locked build order (instrument first, pass second)" from the archived
+consolidation thesis. Track W is now the current status authority; the original plans remain decision
+records, while live architecture belongs to the operational docs below.
 
 ```text
-owners  .agent/plans/aggregation-as-consolidation.md      thesis, D0, build order
-        .agent/plans/quantstate-agent-counter.md          D1 QuantState primitive
-        .agent/plans/event-fold-view-architecture.md      Event -> Fold -> View frame
+status  .agent/research/menhir-research-execution-ladder.md   order + current rung state
+design  .agent/memory-aggregation-under-uncertainty.md        aggregation safety model
+        .agent/architecture.md                                live Event/Fold/View architecture
+        .agent/plans/backlog/fold-algebra.md                  fold laws + implementation record
+history .agent/archive/plans/aggregation-as-consolidation.md
+        .agent/archive/plans/quantstate-agent-counter.md
+        .agent/archive/plans/event-fold-view-architecture.md
 bench   archolith-bench results/lme-ku-buildout/LEDGER.md
+        archolith-bench .agent/plans/d0-entropy-delta-counting-slice.md
         fixture longmemeval/knowledge_update_subset.json (SHA256 bba252a3...)
 ```
 
@@ -595,26 +601,27 @@ bench   archolith-bench results/lme-ku-buildout/LEDGER.md
 goal        a deterministic, GPT-free objective function over the organization of memory:
             Entropy(q) = size/spread of the MINIMAL evidence set that STILL ENTAILS the answer,
             with the sufficiency constraint as the Goodhart guard and precision guard
-owner       aggregation-as-consolidation.md ("D0 — Retrieval Entropy is the objective function")
+owner       this Track W status + the archived consolidation thesis for rationale
 code        services/view_entropy.py, mcp/tools/ops/view_entropy.py (`view_entropy` is
             registered in ALL_TOOLS), infrastructure/consolidation_queries.py
-bench       offline harness over the LME graph; no GPT
+bench       archolith-bench `.agent/plans/d0-entropy-delta-counting-slice.md`
 metric      entropy vector: count / tokens / episodes / sessions / entities / timespan
 depends_on  —
-status      in-progress — the surface is built and tool-exposed; the deterministic grade
-            called for in the build order has not been reported
+status      done — offline FLOOR/DELIVERED instrument ran; the production View-reachability
+            surface is built and tool-exposed
 ```
 
-Metric family per the owner doc: retrieval entropy now; temporal, provenance, and belief entropy
-cheap next; reasoning entropy DEFERRED because it needs an LLM trace and would re-import the
-variance D0 exists to remove.
+The reported Arm A baseline and oracle grade are captured in W2. Metric family per the historical
+thesis: retrieval entropy now; temporal, provenance, and belief entropy remain optional extensions;
+reasoning entropy stays deferred because it needs an LLM trace and would re-import the variance D0
+exists to remove.
 
 ### W1 — D1 QuantState primitive
 
 ```text
 goal        explicit quantitative self-state becomes a supersedable in-graph fact
             (subject, measure) -> value, latest expiring prior
-owner       quantstate-agent-counter.md ("Integration — BUILT (2026-07-02), all 3 increments")
+owner       live architecture; archived quantstate-agent-counter.md for the D1 decision record
 code        infrastructure/quantstate_repository.py (in-graph primitive, commit 000dc93)
             services/quantstate_consolidator.py (consolidation writer, commit af4ce51)
             recall surfacing, commit 65119e8
@@ -622,26 +629,29 @@ bench       verified end-to-end: two paraphrased queries surface the counters vi
             (BM25 2.29, cosine 0.813)
 metric      counter surfaces as a first-class fact for a non-literal query
 depends_on  W0 (reports against the entropy instrument)
-status      done — all three increments; follow-ups below are non-blocking
+status      done — all three increments and the productionization follow-ups are reconciled
 ```
 
-Non-blocking follow-ups the owner doc names: schedule the consolidator in the real (non-benchmark)
-consolidation loop; `qs_key` schema index behind a migration (adding it to the required-index list
-can flip an existing graph to schema-not-ready); wire a real embedder into the consolidator's
-`embed` seam.
+Follow-up reconciliation: `sync_experience_counters` schedules the typed telemetry bridges and
+receives the production embedder; generic `view_key`/`view_kind`/`view_current` indexes are required
+schema. The prose/LLM `quantstate_consolidator` is a separate explicit/manual predecessor path
+with injected LLM/embed seams, not the scheduled bridge job. Its legacy `qs_key` mirror is retained
+for backward-compatible reads and does not own the primary View lookup index.
 
 ### W2 — Entropy delta across W1
 
 ```text
 goal        D0 measured before vs after the D1 pass on the counting slice; a wrong-fact
             regression shows as entropy NOT dropping, or sufficiency failing
-owner       aggregation-as-consolidation.md build order step 3
+owner       this Track W status; archived consolidation thesis build-order step 3
 code        W0 + W1 surfaces
-bench       ~14 counting questions
-metric      target 1 memory / 1 fact / ~40 tokens for stated-total questions
+bench       archolith-bench `.agent/plans/d0-entropy-delta-counting-slice.md` (14 questions)
+metric      Arm A: reached 12/14 -> 14/14; median rank 2 -> 1; median memories 2 -> 1;
+            median tokens 133 -> 21.5; zero regressions
 depends_on  W0, W1
-status      planned — named as Remaining in quantstate-agent-counter.md
-            ("D0 entropy grade on a counting slice (floor -> 1) as the deterministic win metric")
+status      done — Arm A confirmed the representation ceiling; Arm C then recovered a previously
+            censored question at rank 1 with honest perception, two correct counting commits,
+            zero wrong-state Views, and unchanged held-out retrieval
 ```
 
 ### W3 — Accuracy A/B as downstream validation
@@ -649,7 +659,7 @@ status      planned — named as Remaining in quantstate-agent-counter.md
 ```text
 goal        llm-judge accuracy confirms the entropy win, as validation and not as the
             primary signal
-owner       aggregation-as-consolidation.md build order step 4
+owner       this Track W status; archived consolidation thesis build-order step 4
 code        full write-side stack
 bench       LEDGER.md: scalar-event-activity-ku78-v6-20260809
 metric      recall on the 78-item knowledge-update subset
@@ -669,7 +679,7 @@ status      not-doing — ctharvey, 2026-08-10. The A/B as specified in build-or
 ```text
 goal        capabilities arrive as (Event source) + (Fold) + (View of uniform shape) rather
             than as new node types; one SSOT per kind via the ViewKind object
-owner       event-fold-view-architecture.md
+owner       .agent/architecture.md + .agent/data_models.md; fold-algebra.md for laws
 code        domain/event_history.py, domain/fold_algebra.py, domain/scalar_state_fold.py,
             domain/scalar_view_authority.py, domain/scalar_view_suppression.py,
             services/event_fold.py, services/event_consolidation.py, services/windowed_fold.py,
@@ -678,30 +688,48 @@ code        domain/event_history.py, domain/fold_algebra.py, domain/scalar_state
 bench       v6 ran with Event History and Event History authority enabled
 metric      per LEDGER.md v6 row
 depends_on  W1
-status      done — abstraction EARNED and rename DONE per the owner doc
+status      done — abstraction earned, generic View path shipped, and later scalar/event
+            projections continue to use the same event-log + disposable-projection boundary
 ```
 
 Invariant this track inherits: keep the View shape uniform (the "stamp like ingest" rule). That is
 what made QuantState surface at all, and breaking it silently drops nodes from recall.
 
-### W5 — Reconciliation correctness (stateful folds)
+### W5 — Stateful fold laws and anchor+delta reconciliation
 
 ```text
-goal        name and test the stateful case: a pure fold is f(events) -> view, but supersession
-            is read-modify-write against the prior current View
-owner       event-fold-view-architecture.md ("The one honest gap: pure vs. stateful folds")
-code        record_counter already implements the stateful case correctly
-bench       none yet
-metric      none yet
+goal        make batch and incremental evaluation obey the same fold laws: event-time ordering,
+            replay/dedup safety, and stated-anchor + post-anchor delta reconciliation
+owner       .agent/plans/backlog/fold-algebra.md +
+            .agent/memory-aggregation-under-uncertainty.md
+code        domain/fold_algebra.py, services/perception.py, ViewKind.lww_register/require_newer
+bench       unit coverage in tests/test_fold_algebra.py, tests/test_view_repository_lww.py,
+            and tests/test_perception.py
+metric      stale LWW writes skipped; batch re-fold idempotent; anchor+delta examples commit only
+            through the configured corroboration gates
 depends_on  W4
-status      planned — the owner doc calls reconciliation "the actual hard part of any new View,
-            and where correctness bugs will live"
+status      done — the broad pure-vs-stateful gap is resolved as one monoid with two evaluation
+            modes; Laws 1-3 are implemented and tested
 ```
 
-Known open defect against this rung: v6 miss `26bdc477` left `trip_count=3` and `trip_count=5`
-both minted but `binding_pending`, because possessive "my camera" did not bind to the co-mentioned
-"Canon EOS 80D camera". Fix from a non-benchmark panel that establishes the general alias pattern —
-not against the fixture.
+### W6 — Law-3 corroboration independence
+
+```text
+goal        measure whether the holistic cross-check and verifier fail independently on invented
+            re-narration, genuine-recurrence, and clean scenarios before changing guard policy
+owner       .agent/plans/backlog/perception-law3-bias-coverage-and-crosscheck-independence.md
+code        Law-3 cross-check + anchor-aware verifier are built (Part 2)
+bench       pre-registered live-LLM D/R/V experiment on non-LME fixtures (Part 1)
+metric      itemized double-count rate D; holistic reproduction R|D; verifier catch V;
+            k=1 vs k=3 stability
+depends_on  W5
+status      planned — Part 2 is done; Part 1 remains, and Part 3 documents the resulting policy
+```
+
+The v6 miss `26bdc477` is not a fold-reconciliation defect. Both trip-count assertions remained
+`binding_pending` because possessive "my camera" did not bind to the co-mentioned "Canon EOS 80D
+camera". It belongs to object/alias identity work: fix from a non-benchmark panel that establishes
+the general pattern, never by tuning against the fixture.
 
 ## Track E — Optional / bench-gated
 
@@ -781,17 +809,17 @@ HISTORICAL — do not execute as written:
 
 ### What to build next (current)
 
-The active arc is write-time consolidation, sequenced in **Track W** above. Its three owner docs
-moved out of `.agent/plans/backlog/` to `.agent/plans/` on 2026-08-10: "backlog" understated work
-that is shipped, tool-exposed, and carrying the project's best benchmark result.
+The active arc is write-time consolidation, sequenced in **Track W** above. The three July owner
+plans were archived on 2026-08-10 after their durable rationale and current status were routed to
+the operational architecture, aggregation reference, fold algebra, and this ladder.
 
 Open rungs, in order:
 
 ```text
-1. W0  finish the D0 entropy grade — the instrument is built and registered, the
-       deterministic grade the build order calls for has not been reported
-2. W2  entropy delta across D1 on the counting slice (floor -> 1)
-3. W5  reconciliation correctness; first concrete case is v6 miss 26bdc477
+1. W6  run the pre-registered Law-3 corroboration-independence experiment; Parts 2/3 stay
+       subordinate to its result
+2. object/alias identity  investigate 26bdc477 from a non-benchmark panel; this is not W5
+3. evidence breadth       widen beyond knowledge-update before any external claim
 ```
 
 W3 (the node-only accuracy A/B) is **not-doing** as of 2026-08-10. Entropy is the objective

@@ -1,5 +1,16 @@
 # QuantState — a supersedable counter/register for recurring agent events
 
+> **ARCHIVED 2026-08-10.** D1 shipped and no longer owns active work. The original follow-ups have
+> been reconciled against current code: the typed telemetry bridges run via
+> `sync_experience_counters`; the generic `view_key`/`view_kind`/`view_current` indexes shipped;
+> D0's before/after grade is recorded in
+> `archolith-bench/.agent/plans/d0-entropy-delta-counting-slice.md`; and scheduled bridges receive
+> the production embedder. `services/quantstate_consolidator.py` remains an explicit/manual,
+> dependency-injected predecessor path—it is not the scheduled bridge job. Current
+> runtime ownership lives in [`.agent/architecture.md`](../../architecture.md), with execution
+> status in [Track W](../../research/menhir-research-execution-ladder.md). The body below is retained
+> as the D1 rationale and implementation record.
+
 > **RELOCATED 2026-08-07 (curator audit, ctharvey-approved): moved back from
 > `docs/research/direction/` to `.agent/plans/backlog/`.** This doc describes the SHIPPED,
 > LIVE primitive — `services/quantstate_consolidator.py` and `services/view_entropy.py` are

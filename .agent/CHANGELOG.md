@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-08-10 - Archive shipped write-side owner plans and reconcile Track W
+
+- Archived the July consolidation thesis, QuantState plan, and Event → Fold → View plan as
+  historical decision records after routing their durable rationale to the execution ladder,
+  operational architecture/data-model docs, aggregation safety reference, and fold algebra.
+- Corrected Track W from stale planned/in-progress statuses: D0 and the counting-slice entropy delta
+  are reported, D1 productionization follow-ups are reconciled, and the broad stateful-fold gap is
+  implemented and tested. The remaining Law-3 work is the corroboration-independence experiment.
+- Reclassified KU78 miss `26bdc477` as object/alias identity binding rather than fold
+  reconciliation, and repaired live corpus/roadmap/index references without rewriting historical
+  handoff bodies.
+- Added `runtime.projections` to `architecture.md` and the concept-id routers: immutable evidence →
+  deterministic fold/reconcile → disposable projection is the current invariant; one physical View
+  node shape is no longer overstated as a universal requirement.
+
 ## 2026-08-07 - Event History Phases 3-4 + transport/lifecycle wiring complete (default-off)
 
 - Completed the Event History production wiring at Menhir `370eff1` on top of the Phases 1-2

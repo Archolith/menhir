@@ -1,5 +1,15 @@
 # Event → Fold → View — the memory architecture (not N special node types)
 
+> **ARCHIVED 2026-08-10.** The Event → Fold → View decision remains current, but this July plan is
+> no longer its operational owner. The live architecture and projection model are documented in
+> [`.agent/architecture.md`](../../architecture.md) and
+> [`.agent/data_models.md`](../../data_models.md); the fold laws and implementation record live in
+> [`.agent/plans/backlog/fold-algebra.md`](../../plans/backlog/fold-algebra.md). That algebra resolved
+> the broad “pure vs. stateful” gap into one monoid evaluated in batch or incrementally, with
+> ordering, replay/dedup, and anchor+delta laws. The remaining Law-3 work is the narrower live-LLM
+> corroboration-independence experiment, not a missing View abstraction. The body below is preserved
+> as the original architecture decision record.
+
 > **RELOCATED 2026-08-07 (curator audit, ctharvey-approved): moved back from
 > `docs/research/direction/` to `.agent/plans/backlog/`.** This doc describes the SHIPPED,
 > CURRENT architecture — every mechanism named below (`services/windowed_fold.py`,

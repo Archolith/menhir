@@ -70,7 +70,8 @@
 >   (`services/windowed_fold.py`), and agent-experiential counters
 >   (`services/failure_counter_bridge.py`, `instability_counter_bridge.py`; FailureEvent->QuantState
 >   bridge `f8dd8ab`). It runs write-time / explicitly (scheduler off in bench mode). This is the
->   active direction the read-side ladder pivoted to (2026-07-04, `aggregation-as-consolidation.md`);
+>   active direction the read-side ladder pivoted to (2026-07-04; current status in Track W of
+>   `.agent/research/menhir-research-execution-ladder.md`);
 >   the M1-M5 bodies below predate it and do not mention it.
 >
 > **Live MVP board — updated 2026-07-10. Only M1 remains; everything upstream is DONE:**
@@ -116,7 +117,7 @@ These are treated as already landed on `main`:
 | TurnEvidence producers | Claude Code, OpenCode, and Codex producers share one deterministic triage core; raw turns do not enter normal recall | `docs/turn-evidence-producers.md`, `.agent/adr/0001-conversation-turn-capture-surface.md` |
 | Phase 3 consumer | `consolidate_personal_memory` exists, with real-data validation, correction handling, receipt clarity, and deterministic SUM grounding promoted on | `.agent/reviews/menhir-phase3-realdata-validation-2026-07-07.md`, `.agent/plans/menhir-phase3-*.md` |
 | Hook Center | File events mark structure files dirty; stale anchors are labelled in recall/context; verification receipts enrich warnings without clearing dirty state | `docs/hook-center-tool-events.md`, `docs/runbooks/hook-center-*.md`, `docs/smoke/2026-07-08-hook-center-stale-lane.md` |
-| Write-side consolidation | D0 entropy View-reachability probe, D1 QuantState, event fold, and agent-experiential counters are built + committed; run explicitly (scheduler off in bench mode). The post-LME "aggregation is a consolidation problem" pivot, not a retrieval rung | `.agent/plans/aggregation-as-consolidation.md`, `.agent/plans/quantstate-agent-counter.md`, `.agent/plans/event-fold-view-architecture.md` |
+| Write-side consolidation | D0 entropy/View-reachability, D1 QuantState, event folds, scalar/event projections, and agent-experiential counters are built; scheduled jobs remain off in bench mode. The counting-slice D0 delta is reported; the July owner plans are archived decision records | `.agent/research/menhir-research-execution-ladder.md` Track W, `.agent/architecture.md`, `.agent/data_models.md`, `.agent/memory-aggregation-under-uncertainty.md` |
 | Auth hardening | Static bearer tier scheme has route/tool tier enforcement, constant-time compare, query-auth narrowing, destructive-op audit, and landed OAuth resource-server code for protected HTTP routes; the remaining work is IdP selection and live connector proof | `.agent/plans/auth-oauth-mvp.md` |
 
 ## Archolith-bench Tie-in
