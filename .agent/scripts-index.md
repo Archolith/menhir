@@ -36,6 +36,8 @@ Do not add a `_` script to answer a question one of the durable instruments alre
 | is this LME question a real retrieval miss or a scoring artifact? | `longmemeval/analysis/lib/recall_lab_investigate.py` (LLM judge) | bench |
 | gold@k / support@k across many LME questions, no LLM spend | `longmemeval/analysis/lib/retrieval_quality.py` | bench |
 | did an ingest change alter end-to-end answer accuracy? | `longmemeval/analysis/answer_ab.sh` | bench |
+| does a full or query-filtered typed Recall Lab packet change KU78 answer accuracy without reingest? | `archolith-bench/scripts/longmemeval/analysis/run_typed_recall_packet_rescore.py` (noncanonical, recall-only, paid answer/judge calls) | bench |
+| which compact typed packet shape performs better on the preregistered held-out panel? | `archolith-bench/scripts/longmemeval/analysis/run_packet_shape_panel.py` (noncanonical, recall-only, paid answer/judge calls) | bench |
 | what did enrichment do to ONE episode? | `get_episode_trace` MCP tool (not a script) | menhir |
 | queue stalled / episodes stuck | `workflows/troubleshoot_enrichment_stalls.md` | menhir |
 | a batch of episodes is stuck FAILED, fix has landed | `retry_failed_episodes.py` | menhir |
@@ -201,6 +203,8 @@ Update `results/lme-ku-buildout/LEDGER.md` after every buildout run.
 | `acquisition_window.py` | windowed acquisition counts over the D0 counting slice |
 | `reflection_rescue_survey.py` | survey assistant turns in the KU fixture |
 | `oracle_entity_grouping_probe.py` | oracle entity-grouping sidecar experiment |
+| `run_typed_recall_packet_rescore.py` | noncanonical recall-only typed packet vs canonical checkpoint comparison; refuses incomplete model evidence and records task/token/provenance deltas |
+| `run_packet_shape_panel.py` | preregistered ten-item held-out comparison of compact typed packet shapes over shared production retrieval |
 
 **Stratification warning:** a bare `--limit N` samples only `temporal-reasoning`. A fair run must
 sweep all 6 question types via `--subset`. See the runbook's Stratification section.
