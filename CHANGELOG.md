@@ -1,3 +1,13 @@
+## 2026-08-11 — feat: add an idempotent post-install and agent onboarding path
+
+- Added `menhir setup` to create a missing `.env`, wire repository-managed Git hooks, audit setup
+  without mutation, preserve custom hook paths, and optionally install Claude-compatible lifecycle
+  hooks or the Windows watchdog task.
+- Added the managed pre-push hook, focused CLI/setup tests, and actionable output from `menhir check`.
+- Added a complete post-install runbook and a paste-ready consumer-agent contract; replaced duplicated
+  model-specific instructions with concise routing through `AGENTS.md` and `.agent/README.md`.
+- Aligned TurnEvidence and file-event producer defaults with Menhir's public port `8100`.
+
 ## 2026-08-09 — fix: harden scalar identity and event recall
 
 - Distinguished non-quantifying `around` idioms from genuinely approximate quantities so grounded

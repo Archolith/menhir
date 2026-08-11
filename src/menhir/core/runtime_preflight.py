@@ -325,6 +325,10 @@ def collect_runtime_capabilities(
                         "Stored graph embeddings do not match the current embedder "
                         f"(expected_dim={expected_dim}, wrong_entities={health['wrong_entity_count']}, "
                         f"wrong_communities={health['wrong_community_count']}, wrong_relationships={health['wrong_edge_count']}). "
+                        f"Missing vectors: entities={health.get('null_entity_count', 0)}, "
+                        f"communities={health.get('null_community_count', 0)}, "
+                        f"relationships={health.get('null_edge_count', 0)}; "
+                        f"mixed_dimensions={health.get('mixed', False)}. "
                         "Run scripts/repair_embedding_dimensions.py --apply before relying on semantic retrieval."
                     )
 

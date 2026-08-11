@@ -47,7 +47,7 @@ OpenCode auto-loads `*.js` plugins from `~/.config/opencode/plugin/` (global) or
 3. Optional producer configuration (read by the Python side):
 
    ```
-   MENHIR_TURNS_URL       default http://127.0.0.1:8090/api/turn-evidence
+   MENHIR_TURNS_URL       default http://127.0.0.1:8100/api/turn-evidence
    MENHIR_AGENT_KEY       bearer token (agent tier)
    MENHIR_TURN_NAMESPACE  namespace override; else inferred from the project directory basename
    MENHIR_TURN_HOOK_LOG   failure-log path; else <home>/.claude/menhir-turn-hook.log

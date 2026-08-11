@@ -6,6 +6,7 @@ import typer
 
 from menhir.cli.artifacts import artifacts_app
 from menhir.cli.hook import hook_app
+from menhir.cli.setup import setup as setup_command
 from menhir.infrastructure.text_io import read_text_utf8
 from menhir.infrastructure.logging_config import (
     build_logging_config,
@@ -19,6 +20,7 @@ app = typer.Typer(
 )
 app.add_typer(hook_app)
 app.add_typer(artifacts_app)
+app.command("setup")(setup_command)
 
 
 # Distinct `serve` exit code meaning "another server already owns the bind port".
@@ -194,6 +196,11 @@ def check() -> None:
 
     settings = MemorySettings.from_env()
     failures = collect_runtime_failures(settings, require_venv=True)
+    if failures:
+        for failure in failures:
+            typer.echo(f"[FAIL] {failure}", err=True)
+    else:
+        typer.echo("[OK] Menhir runtime dependencies are ready.")
     raise SystemExit(1 if failures else 0)
 
 
