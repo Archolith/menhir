@@ -29,7 +29,7 @@ See `.agent/memory-lifecycle-under-uncertainty.md` §2–4 for the asymmetry pri
 
 ## Governance obligation
 
-[Reversibility must be monotone in corroboration](file:///.agent/memory-governance.md) — each rung of the ladder (ACTIVE → COMPRESSED → GONE) demands more evidence. F1 enforces this at the stamp boundary (unknown is not evidence); F3 closes the archive-path feedback loop so compression ceases to be irreversible in practice.
+[Reversibility must be monotone in corroboration](../../memory-governance.md) — each rung of the ladder (ACTIVE → COMPRESSED → GONE) demands more evidence. F1 enforces this at the stamp boundary (unknown is not evidence); F3 closes the archive-path feedback loop so compression ceases to be irreversible in practice.
 
 ## Design summary
 
@@ -178,9 +178,9 @@ from `git log` if a number is ever wanted; the receipts are preserved (never cle
 
 ## Cross-reference
 
-- **Governance:** [Reversibility obligation](file:///.agent/memory-governance.md#reversibility-must-be-monotone-in-corroboration)
-- **Scale law:** [memory-lifecycle-under-uncertainty.md §5](file:///.agent/memory-lifecycle-under-uncertainty.md) — signals must be scale-lawful
-- **Asymmetry:** [memory-lifecycle-under-uncertainty.md §2](file:///.agent/memory-lifecycle-under-uncertainty.md) — irreversibility principle
-- **Archive receipt:** [memory-lifecycle-under-uncertainty.md §4](file:///.agent/memory-lifecycle-under-uncertainty.md) — compression keeps its receipt
-- **Hotfix context:** [menhir-lifecycle-scale-probe-2026-07-03.md](file:///.agent/archive/reviews/menhir-lifecycle-scale-probe-2026-07-03.md) CORRECTION section — stamp-default finding
-- **Tracker:** [memory-review-tracker.md §4](file:///.agent/memory-review-tracker.md) — F1–F6 definitions and dependencies
+- **Governance:** [Reversibility obligation](../../memory-governance.md#reversibility-must-be-monotone-in-corroboration)
+- **Scale law:** [memory-lifecycle-under-uncertainty.md §5](../../memory-lifecycle-under-uncertainty.md) — signals must be scale-lawful
+- **Asymmetry:** [memory-lifecycle-under-uncertainty.md §2](../../memory-lifecycle-under-uncertainty.md) — irreversibility principle
+- **Archive receipt:** [memory-lifecycle-under-uncertainty.md §4](../../memory-lifecycle-under-uncertainty.md) — compression keeps its receipt
+- **Hotfix context:** [menhir-lifecycle-scale-probe-2026-07-03.md](../reviews/menhir-lifecycle-scale-probe-2026-07-03.md) CORRECTION section — stamp-default finding
+- **Tracker:** [memory-review-tracker.md §4](../../memory-review-tracker.md) — F1–F6 definitions and dependencies

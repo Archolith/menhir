@@ -18,7 +18,7 @@ before trusting it.
 >    (WeightedOracleCombiner E + LogSpaceOracleCombiner F). **Bench verdict is neutral-to-negative on
 >    LongMemEval** (node-only 0.400 > full stack 0.333) — it ships default-off, not as a win. See
 >    `.agent/research/menhir-research-execution-ladder.md` "Bench verdicts".
-> 2. **All frontier read-side levers now default `False`** (`config/settings.py:232-244`) — this
+> 2. **All frontier read-side levers now default `False`** (`config/settings_model.py:278-295`) — this
 >    **supersedes the 2026-06-29 delta's "defaults `oracle_ranking/intent_lens/shadow=ON`" claim.**
 >    After the LME campaign proved read-time levers neutral-to-negative, the defaults were flipped OFF;
 >    with no `MENHIR_FRONTIER_*` env set the recall path is byte-for-byte baseline ScoringService.

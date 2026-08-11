@@ -153,7 +153,7 @@ Papers:
 
 **Why it matters:** Extraction reliability is the gating risk. Menhir should not always promote extracted beliefs to hard facts.
 
-Menhir application: track uncertain beliefs and contradiction/supersession with confidence. This lane is already partially implemented — see `docs/research/belief-layer.md` and `src/menhir/domain/belief.py`.
+Menhir application: track uncertain beliefs and contradiction/supersession with confidence. This lane is already partially implemented — see `docs/research/belief-temporal/belief-layer.md` and `src/menhir/domain/belief.py`.
 
 Papers:
 

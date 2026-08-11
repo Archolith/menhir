@@ -7,7 +7,7 @@ superseded
 ## Superseded by
 
 ```text
-docs/research/positioning.md
+docs/research/positioning/positioning.md
 ```
 
 ## Why this file remains
@@ -33,4 +33,4 @@ home. The original short CIP vision tag still lives in
 `.agent/memory-futures.md`.
 
 Kept only as a historical pointer so old links do not break. Use
-`docs/research/positioning.md` for new positioning work.
+`docs/research/positioning/positioning.md` for new positioning work.

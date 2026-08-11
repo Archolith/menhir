@@ -14,6 +14,10 @@
 - Added `runtime.projections` to `architecture.md` and the concept-id routers: immutable evidence →
   deterministic fold/reconcile → disposable projection is the current invariant; one physical View
   node shape is no longer overstated as a universal requirement.
+- Continued the research-corpus audit with mechanical pointer repairs: superseded positioning and
+  belief routes now resolve to their clustered homes, the master index lists all seven prior-art
+  notes with accurate pinning caveats, the frontier-settings citation points to `settings_model.py`,
+  and seven archived `file:/` links are portable relative links.
 
 ## 2026-08-07 - Event History Phases 3-4 + transport/lifecycle wiring complete (default-off)
 

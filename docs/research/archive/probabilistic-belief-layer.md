@@ -7,7 +7,7 @@ superseded
 ## Superseded by
 
 ```text
-docs/research/belief-layer.md
+docs/research/belief-temporal/belief-layer.md
 ```
 
 ## Why this file remains
@@ -27,7 +27,7 @@ Keep this file only as a historical pointer so old links do not break.
 
 ## Current source of truth
 
-Use `docs/research/belief-layer.md` for new work on:
+Use `docs/research/belief-temporal/belief-layer.md` for new work on:
 
 ```text
 BeliefCircuit
