@@ -32,6 +32,7 @@ from menhir.domain.todo_location import parse_code_ref
 from menhir.domain.artifact_reconciliation import (
     ARTIFACT_SOURCE_SCHEMA_VERSION,
     ArtifactSourceSnapshot,
+    INTEGRITY_ALGORITHM,
     ResolutionStatus,
     SourceObservation,
     VersionKind,
@@ -61,6 +62,10 @@ from menhir.domain.work_artifact import (
     normalize_declarations,
     relation_is_legal,
     valid_statuses,
+)
+from menhir.infrastructure.schema import (
+    ARTIFACT_RECONCILIATION_REQUIRED_CONSTRAINTS,
+    get_artifact_reconciliation_schema_queries,
 )
 
 
@@ -462,7 +467,7 @@ class WorkArtifactRepository:
         """
         rows = self.neo4j.execute(
             """
-            MATCH (:WorkArtifact)-[:EMBODIED_IN]->(s:ArtifactSource)
+            MATCH (s:ArtifactSource)
             WHERE s.source_uuid IS NULL
             RETURN elementId(s) AS eid
             """,
@@ -490,22 +495,41 @@ class WorkArtifactRepository:
         """
         rows = self.neo4j.execute(
             """
-            MATCH (:WorkArtifact)-[:EMBODIED_IN]->(s:ArtifactSource)
+            MATCH (s:ArtifactSource)
+            WHERE coalesce(s.schema_version, 1) < $schema_version
+               OR s.resolution_status IS NULL
+               OR (s.version IS NOT NULL AND s.version_kind IS NULL)
+               OR (s.integrity IS NOT NULL AND s.integrity_algorithm IS NULL)
+               OR (
+                    coalesce(s.resolution_status, $resolved) = $resolved
+                    AND s.current_locator_key IS NULL
+               )
             RETURN elementId(s)         AS eid,
                    s.locator_repository AS repository,
                    s.medium             AS medium,
                    s.locator_path       AS path,
                    s.version            AS version,
-                   s.version_kind       AS version_kind
+                   s.version_kind       AS version_kind,
+                   s.resolution_status  AS resolution_status
             """,
-            {},
+            {
+                "schema_version": ARTIFACT_SOURCE_SCHEMA_VERSION,
+                "resolved": ResolutionStatus.RESOLVED,
+            },
         )
         updated = 0
         for row in rows:
-            key = locator_key(
-                row.get("repository"),
-                row.get("medium") or ArtifactMedium.MARKDOWN,
-                row.get("path"),
+            resolution_status = (
+                row.get("resolution_status") or ResolutionStatus.RESOLVED
+            )
+            key = (
+                None
+                if resolution_status == ResolutionStatus.UNRESOLVED
+                else locator_key(
+                    row.get("repository"),
+                    row.get("medium") or ArtifactMedium.MARKDOWN,
+                    row.get("path"),
+                )
             )
             version_kind = row.get("version_kind")
             if version_kind is None and row.get("version"):
@@ -515,17 +539,112 @@ class WorkArtifactRepository:
                 MATCH (s:ArtifactSource) WHERE elementId(s) = $eid
                 SET s.current_locator_key = $key,
                     s.version_kind = coalesce(s.version_kind, $version_kind),
-                    s.resolution_status = coalesce(s.resolution_status, $resolved)
+                    s.resolution_status = coalesce(s.resolution_status, $resolved),
+                    s.integrity_algorithm = CASE
+                        WHEN s.integrity IS NULL THEN s.integrity_algorithm
+                        ELSE coalesce(s.integrity_algorithm, $integrity_algorithm)
+                    END,
+                    s.schema_version = $schema_version
                 """,
                 {
                     "eid": row["eid"],
                     "key": key,
                     "version_kind": version_kind,
                     "resolved": ResolutionStatus.RESOLVED,
+                    "integrity_algorithm": INTEGRITY_ALGORITHM,
+                    "schema_version": ARTIFACT_SOURCE_SCHEMA_VERSION,
                 },
             )
             updated += 1
         return updated
+
+    def artifact_reconciliation_preflight(self) -> dict[str, int]:
+        """Count the graph-wide source-v2 migration surface and blockers."""
+        rows = self.neo4j.execute(
+            """
+            CALL () { MATCH (s:ArtifactSource) RETURN count(s) AS sources }
+            CALL () {
+                MATCH (s:ArtifactSource) WHERE s.source_uuid IS NULL
+                RETURN count(s) AS missing_source_uuids
+            }
+            CALL () {
+                MATCH (s:ArtifactSource)
+                WHERE s.current_locator_key IS NULL
+                  AND coalesce(s.resolution_status, 'resolved') <> 'unresolved'
+                RETURN count(s) AS missing_locator_keys
+            }
+            CALL () {
+                MATCH (a:WorkArtifact) WHERE a.artifact_uuid IS NOT NULL
+                WITH a.artifact_uuid AS value, count(*) AS n WHERE n > 1
+                RETURN count(*) AS duplicate_artifact_uuids
+            }
+            CALL () {
+                MATCH (s:ArtifactSource) WHERE s.source_uuid IS NOT NULL
+                WITH s.source_uuid AS value, count(*) AS n WHERE n > 1
+                RETURN count(*) AS duplicate_source_uuids
+            }
+            CALL () {
+                MATCH (s:ArtifactSource)
+                WHERE coalesce(s.resolution_status, 'resolved') <> 'unresolved'
+                WITH trim(coalesce(s.locator_repository, '')) + '|' +
+                     coalesce(s.medium, 'markdown') + '|' +
+                     trim(coalesce(s.locator_path, '')) AS value,
+                     count(*) AS n
+                WHERE n > 1
+                RETURN count(*) AS duplicate_raw_locators
+            }
+            CALL () {
+                MATCH (s:ArtifactSource) WHERE s.current_locator_key IS NOT NULL
+                WITH s.current_locator_key AS value, count(*) AS n WHERE n > 1
+                RETURN count(*) AS duplicate_locator_keys
+            }
+            CALL () {
+                MATCH (c:ArtifactReconciliationCursor)
+                WITH c.repository AS value, count(*) AS n WHERE n > 1
+                RETURN count(*) AS duplicate_cursor_repositories
+            }
+            RETURN sources, missing_source_uuids, missing_locator_keys,
+                   duplicate_artifact_uuids, duplicate_source_uuids,
+                   duplicate_raw_locators, duplicate_locator_keys,
+                   duplicate_cursor_repositories
+            """,
+            {},
+        )
+        keys = (
+            "sources",
+            "missing_source_uuids",
+            "missing_locator_keys",
+            "duplicate_artifact_uuids",
+            "duplicate_source_uuids",
+            "duplicate_raw_locators",
+            "duplicate_locator_keys",
+            "duplicate_cursor_repositories",
+        )
+        row = rows[0] if rows else {}
+        return {key: int(row.get(key, 0) or 0) for key in keys}
+
+    def activate_artifact_reconciliation_schema(self) -> dict[str, Any]:
+        """Install reconciliation constraints and verify their indexes ONLINE."""
+        queries = get_artifact_reconciliation_schema_queries()
+        for query in queries:
+            self.neo4j.execute(query, {})
+        required = list(ARTIFACT_RECONCILIATION_REQUIRED_CONSTRAINTS)
+        rows = self.neo4j.execute(
+            """
+            SHOW INDEXES YIELD name, state
+            WHERE name IN $names AND state = 'ONLINE'
+            RETURN collect(name) AS names
+            """,
+            {"names": required},
+        )
+        online = sorted(str(name) for name in (rows[0].get("names", []) if rows else []))
+        missing = sorted(set(required) - set(online))
+        return {
+            "queries_executed": len(queries),
+            "constraints_online": online,
+            "constraints_missing": missing,
+            "ready": not missing,
+        }
 
     def _source_write_props(self, observation: SourceObservation) -> dict[str, Any]:
         """Observation properties, with absent legs left alone rather than nulled.

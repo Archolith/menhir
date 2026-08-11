@@ -490,8 +490,11 @@ def test_prepare_backfills_sources_created_before_v2(
         """,
         {},
     )
-    stamped = service.prepare_sources()
-    assert stamped == {"source_uuids": 1, "locator_keys": 1}
+    prepared = service.prepare_sources(expected_source_count=1)
+    assert prepared["stamped"] == {"source_uuids": 1, "locator_keys": 1}
+    assert prepared["schema"]["ready"] is True
+    assert prepared["after"]["missing_source_uuids"] == 0
+    assert prepared["after"]["missing_locator_keys"] == 0
 
     row = _sources(test_neo4j_repo)[0]
     assert row["source_uuid"]

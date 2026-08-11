@@ -21,6 +21,7 @@ from uuid import uuid4
 from menhir.domain.artifact_reconciliation import (
     ActionKind,
     ArtifactSourceSnapshot,
+    ConflictKind,
     CorpusEntry,
     CorpusLane,
     GitRename,
@@ -70,6 +71,10 @@ class SourceRepository(Protocol):
         observed_commit: str,
         observed_at: str,
     ) -> dict[str, Any]: ...
+
+    def artifact_reconciliation_preflight(self) -> dict[str, int]: ...
+
+    def activate_artifact_reconciliation_schema(self) -> dict[str, Any]: ...
 
 
 @dataclass(frozen=True)
@@ -356,7 +361,15 @@ class ArtifactReconciliationService:
             else:
                 result.skipped.append(record)
 
-        if result.conflicted:
+        blocking_conflicts = [
+            action
+            for action in report.actions
+            if action.kind == ActionKind.CONFLICT
+            and not self._conflict_allows_cursor_advance(action)
+        ]
+        acknowledged_conflicts = bool(result.conflicted) and not blocking_conflicts
+
+        if blocking_conflicts:
             result.cursor_reason = "conflicts_present"
         elif result.skipped:
             result.cursor_reason = "writes_skipped"
@@ -364,7 +377,11 @@ class ArtifactReconciliationService:
             result.cursor_reason = "observed_commit_unavailable"
         elif report.cursor_commit == report.observed_commit:
             result.cursor_advanced = True
-            result.cursor_reason = "already_current"
+            result.cursor_reason = (
+                "already_current_with_acknowledged_conflicts"
+                if acknowledged_conflicts
+                else "already_current"
+            )
         else:
             advanced = self._repo.advance_artifact_reconciliation_cursor(
                 repository=report.repository,
@@ -376,7 +393,26 @@ class ArtifactReconciliationService:
             if not result.cursor_advanced:
                 result.refused_reason = "reconciliation_cursor_update_failed"
                 result.cursor_reason = "compare_and_set_failed"
+            elif acknowledged_conflicts:
+                result.cursor_reason = "advanced_with_acknowledged_conflicts"
         return result
+
+    @staticmethod
+    def _conflict_allows_cursor_advance(action: ReconciliationAction) -> bool:
+        """Return True only for a conflict that cannot hide source identity.
+
+        An unclassified corpus entry has no graph identity to relocate or
+        overwrite. Advancing past it preserves Git evidence for every existing
+        source while the full scanner keeps reporting the entry on every audit.
+        Any identity-bearing conflict remains a hard cursor barrier.
+        """
+        return (
+            action.conflict_kind == ConflictKind.UNCLASSIFIED_NEW_SOURCE
+            and action.source_uuid is None
+            and action.source_identity is None
+            and action.artifact_uuid is None
+            and action.old_path is None
+        )
 
     @staticmethod
     def _require_repository(repository: str | None) -> str:
@@ -576,15 +612,52 @@ class ArtifactReconciliationService:
             expected_integrity=expected_old_integrity,
         )
 
-    def prepare_sources(self) -> dict[str, int]:
-        """Backfill source UUIDs and locator keys before constraints activate.
+    def source_preflight(self) -> dict[str, int]:
+        """Return the graph-wide preparation surface without writing."""
+        return self._repo.artifact_reconciliation_preflight()
+
+    def prepare_sources(self, *, expected_source_count: int) -> dict[str, Any]:
+        """Backfill source UUIDs and locator keys, then activate constraints.
 
         Ordered deliberately: UUIDs first, then keys, then the schema pass that
         creates the uniqueness constraints. A constraint created over unstamped
         sources would fail on the nulls, and a constraint created over duplicate
         locator keys would fail on the very defect the audit is meant to report.
         """
-        return {
+        preflight = self.source_preflight()
+        actual = int(preflight.get("sources", 0))
+        if expected_source_count < 0 or actual != expected_source_count:
+            raise ValueError(
+                "source count changed: "
+                f"expected {expected_source_count}, observed {actual}; nothing written"
+            )
+        blocker_keys = (
+            "duplicate_artifact_uuids",
+            "duplicate_source_uuids",
+            "duplicate_raw_locators",
+            "duplicate_locator_keys",
+            "duplicate_cursor_repositories",
+        )
+        blockers = {key: preflight.get(key, 0) for key in blocker_keys if preflight.get(key, 0)}
+        if blockers:
+            raise ValueError(f"artifact reconciliation preparation blocked: {blockers}")
+
+        stamped = {
             "source_uuids": self._repo.backfill_source_uuids(),
             "locator_keys": self._repo.backfill_current_locator_keys(),
+        }
+        schema = self._repo.activate_artifact_reconciliation_schema()
+        if not schema.get("ready"):
+            raise RuntimeError(
+                "artifact reconciliation constraints are not ONLINE: "
+                f"{schema.get('constraints_missing', [])}"
+            )
+        after = self.source_preflight()
+        if after.get("missing_source_uuids") or after.get("missing_locator_keys"):
+            raise RuntimeError(f"artifact reconciliation preparation incomplete: {after}")
+        return {
+            "preflight": preflight,
+            "stamped": stamped,
+            "schema": schema,
+            "after": after,
         }

@@ -22,6 +22,28 @@ ARTIFACT_EDGE_LABELS = ("SUPPORTED_BY", "SUPERSEDES")
 # Nodes/edges stamped with an older version will be re-backfilled on next startup.
 _SCHEMA_V = 1
 
+ARTIFACT_RECONCILIATION_REQUIRED_CONSTRAINTS = (
+    "work_artifact_uuid_unique",
+    "artifact_source_uuid_unique",
+    "artifact_source_locator_unique",
+    "artifact_reconcile_cursor_repository_unique",
+)
+
+
+def get_artifact_reconciliation_schema_queries() -> list[str]:
+    """DDL activated only after the source-v2 preparation preflight passes."""
+    return [
+        "DROP INDEX work_artifact_uuid_idx IF EXISTS",
+        "CREATE CONSTRAINT work_artifact_uuid_unique IF NOT EXISTS "
+        "FOR (n:WorkArtifact) REQUIRE n.artifact_uuid IS UNIQUE",
+        "CREATE CONSTRAINT artifact_source_uuid_unique IF NOT EXISTS "
+        "FOR (n:ArtifactSource) REQUIRE n.source_uuid IS UNIQUE",
+        "CREATE CONSTRAINT artifact_source_locator_unique IF NOT EXISTS "
+        "FOR (n:ArtifactSource) REQUIRE n.current_locator_key IS UNIQUE",
+        "CREATE CONSTRAINT artifact_reconcile_cursor_repository_unique IF NOT EXISTS "
+        "FOR (n:ArtifactReconciliationCursor) REQUIRE n.repository IS UNIQUE",
+    ]
+
 PHASE_ONE_REQUIRED_INDEXES = (
     "entity_type_idx",
     "entity_scope_idx",
@@ -122,15 +144,7 @@ def _node_index_queries() -> list[str]:
             # The UUID uniqueness constraint owns the range index for artifact_uuid.
             # Retire the pre-reconciliation plain index first so existing installs
             # can migrate; Neo4j will not create a constraint over the same schema.
-            "DROP INDEX work_artifact_uuid_idx IF EXISTS",
-            "CREATE CONSTRAINT work_artifact_uuid_unique IF NOT EXISTS "
-            "FOR (n:WorkArtifact) REQUIRE n.artifact_uuid IS UNIQUE",
-            "CREATE CONSTRAINT artifact_source_uuid_unique IF NOT EXISTS "
-            "FOR (n:ArtifactSource) REQUIRE n.source_uuid IS UNIQUE",
-            "CREATE CONSTRAINT artifact_source_locator_unique IF NOT EXISTS "
-            "FOR (n:ArtifactSource) REQUIRE n.current_locator_key IS UNIQUE",
-            "CREATE CONSTRAINT artifact_reconcile_cursor_repository_unique IF NOT EXISTS "
-            "FOR (n:ArtifactReconciliationCursor) REQUIRE n.repository IS UNIQUE",
+            *get_artifact_reconciliation_schema_queries(),
             "CREATE INDEX artifact_source_lane_idx IF NOT EXISTS FOR (n:ArtifactSource) ON (n.corpus_lane)",
             "CREATE INDEX artifact_source_resolution_idx IF NOT EXISTS "
             "FOR (n:ArtifactSource) ON (n.resolution_status)",
