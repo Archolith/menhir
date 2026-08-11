@@ -10,12 +10,17 @@ Implementation record:
 - PR #7's first hosted run found and drove repair of two integration omissions: feature-taxonomy
   classification for both new MCP tools, and retirement of the superseded WorkArtifact UUID plain
   index before creation of the uniqueness constraint.
-- Offline verification after repair: 5,926 passed, 197 skipped; the sole failure is the pre-existing
-  worktree-name assertion that accepts only directories named `menhir` or `menhir-frontier`. The 12
-  focused taxonomy/schema tests pass.
-- Throwaway-Neo4j acceptance after repair: all 21 phase-one bootstrap and reconciliation live tests
-  passed, including a second idempotent bootstrap. The complete graph-backed CI selection also
-  passed: 162 passed, 21 expected service-dependent skips.
+- Phase 4/5 readiness remediation is committed on `agent/menhir-phase45-remediation` as `7a19426`,
+  `59a45c7`, and `0779c15`: acknowledged source-less conflicts can advance the cursor, Hook Center
+  carries stable repository identity across worktrees, and graph-wide preparation is separately
+  count-gated with duplicate preflight and verified constraints.
+- Offline verification after remediation: 5,947 passed, 197 skipped. The former worktree-name
+  assertion now checks the actual repository-root relationship instead of allowing two directory
+  names.
+- Throwaway-Neo4j acceptance after remediation: all 21 phase-one bootstrap and reconciliation live
+  tests passed, including source-v2 backfill and constraint activation. The production preflight was
+  read-only and measured 112 global sources, 112 missing UUIDs/locator keys, and zero duplicate
+  artifact UUID, source UUID, raw locator, materialized locator, or cursor-repository groups.
 - No production graph repair or corpus-wide legacy frontmatter mutation has run. Those remain the
   Phase 5 and Phase 6 approval gates below.
 
@@ -669,7 +674,7 @@ This is an operational step, not part of a code commit that silently mutates the
    counts, and capture the pre-repair artifact/source inventory. Restart only after the backup is
    verified.
 2. Run the explicit preparation operation. It must preflight duplicate artifact UUIDs, source UUIDs,
-   raw locators, and cursor repositories; require the owner-approved expected global source count;
+   raw and materialized locators, and cursor repositories; require the owner-approved expected global source count;
    backfill every existing source; install all four reconciliation constraints; and verify their
    backing indexes are `ONLINE`. Preparation currently spans 112 sources (54 Menhir and 58 other
    repositories), so this global scope is a separate owner gate rather than an implication of the
