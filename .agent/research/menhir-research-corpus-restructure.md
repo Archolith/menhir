@@ -1,6 +1,8 @@
 # menhir research-corpus restructure — design spec
 
-**Status:** design (awaiting user review)
+**Status:** IMPLEMENTED (2026-06-29) — historical design record. Open decisions were approved in
+commit `ecad548`; implementation shipped across `8729389` through `dab8bb9` (cluster moves, link
+rewrite, master/cluster indexes, status normalization, roadmap index, plan triage, and changelog).
 **Author:** Claude Code session 2026-06-29
 **Scope:** `docs/research/`, `docs/roadmap/`, `.agent/plans/` (menhir-frontier worktree, branch `claude/menhir-chain-handoff-doc-7iuat2`)
 **Hard constraint:** retain ALL information. No deletions, no body-content rewrites. Every move via `git mv` (history preserved). The only edits to doc bodies are status-header normalization (section D), each evidence-backed.

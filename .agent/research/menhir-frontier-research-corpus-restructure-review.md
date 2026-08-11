@@ -1,6 +1,8 @@
 # menhir-frontier: Research Corpus Restructure Plan Review
 
-**Reviewed Plan:** `.agent/plans/menhir-research-corpus-restructure.md`
+**Status:** HISTORICAL / ACCEPTED. The four open decisions were resolved in `ecad548`; the reviewed
+design and implementation shipped on 2026-06-29 across `8729389` through `dab8bb9`.
+**Reviewed Plan:** `.agent/research/menhir-research-corpus-restructure.md`
 **Project:** `menhir-frontier`
 
 ## Executive Summary

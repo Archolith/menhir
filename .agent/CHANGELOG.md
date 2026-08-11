@@ -18,6 +18,9 @@
   belief routes now resolve to their clustered homes, the master index lists all seven prior-art
   notes with accurate pinning caveats, the frontier-settings citation points to `settings_model.py`,
   and seven archived `file:/` links are portable relative links.
+- Reconciled the completed 2026-06-29 research-corpus restructure trio with landed history: the
+  design and review now identify their implemented/accepted state, the review targets the current
+  design path, and all 26 implementation-plan checkboxes reflect commits `8729389`–`dab8bb9`.
 
 ## 2026-08-07 - Event History Phases 3-4 + transport/lifecycle wiring complete (default-off)
 

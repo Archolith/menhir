@@ -1,5 +1,9 @@
 # Research-Corpus Restructure Implementation Plan
 
+> **Status: COMPLETE (2026-06-29).** All 26 steps below shipped across commits `8729389` through
+> `dab8bb9`. Checkboxes were reconciled to the landed history on 2026-08-10; command paths, branch
+> names, and verification output in the body remain the historical execution record.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans (inline) or superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Re-cluster `docs/research/` into themed subdirectories, index `docs/roadmap/`, triage `.agent/plans/`, and correct stale status headers — losing zero information and zero links.
@@ -65,14 +69,14 @@ print(f"OK: all markdown links resolve ({sum(1 for b in scan_dirs for _ in b.rgl
   - `vision/`: cognitive-replay-and-phasing.md
   - `archive/`: probabilistic-belief-layer.md, probabilistic-circuit-breakers.md, agent-experience-substrate.md, cognitive-artifacts-and-software-cognition.md, cognitive-infrastructure-platform.md
 
-- [ ] **Step 1: Create the subdirectories**
+- [x] **Step 1: Create the subdirectories**
 
 ```bash
 cd /c/Users/you/IdeaProjects/projects/archolith/menhir-frontier/docs/research
 mkdir -p direction process positioning retrieval schemas belief-temporal vision archive
 ```
 
-- [ ] **Step 2: git mv each doc into its cluster**
+- [x] **Step 2: git mv each doc into its cluster**
 
 ```bash
 cd /c/Users/you/IdeaProjects/projects/archolith/menhir-frontier/docs/research
@@ -86,7 +90,7 @@ git mv cognitive-replay-and-phasing.md vision/
 git mv probabilistic-belief-layer.md probabilistic-circuit-breakers.md agent-experience-substrate.md cognitive-artifacts-and-software-cognition.md cognitive-infrastructure-platform.md archive/
 ```
 
-- [ ] **Step 3: Verify all 26 are renames, only README.md remains at top level**
+- [x] **Step 3: Verify all 26 are renames, only README.md remains at top level**
 
 ```bash
 cd /c/Users/you/IdeaProjects/projects/archolith/menhir-frontier
@@ -95,11 +99,11 @@ ls docs/research/*.md                                # expect only README.md
 ```
 Expected: count `26`; `ls` shows only `docs/research/README.md`.
 
-- [ ] **Step 4: Write the 8 subdir READMEs**
+- [x] **Step 4: Write the 8 subdir READMEs**
 
 One per cluster, 5-10 lines: cluster purpose + doc list with one-line summary and current status. (Content authored per spec §3; `archive/README.md` states these are superseded pointers, replacements named, never deleted.) Stage them explicitly.
 
-- [ ] **Step 5: Commit (manifest in body)**
+- [x] **Step 5: Commit (manifest in body)**
 
 ```bash
 cd /c/Users/you/IdeaProjects/projects/archolith/menhir-frontier
@@ -118,7 +122,7 @@ Commit message: `docs: re-cluster research corpus into themed subdirs (git mv on
 **Interfaces:**
 - Consumes: new paths from Task 1.
 
-- [ ] **Step 1: Enumerate every referrer + old reference**
+- [x] **Step 1: Enumerate every referrer + old reference**
 
 ```bash
 cd /c/Users/you/IdeaProjects/projects/archolith/menhir-frontier
@@ -126,18 +130,18 @@ grep -rIn -E '(docs/research/[a-z0-9-]+\.md|\]\([^)]*[a-z0-9-]+\.md\)|`[a-z0-9-]
 wc -l /tmp/refs_before.txt
 ```
 
-- [ ] **Step 2: Rewrite references file-by-file**
+- [x] **Step 2: Rewrite references file-by-file**
 
 For each referrer, update both `docs/research/<file>.md` style paths and relative `](...)` links to the new cluster path, AND backtick prose references where they imply a path. Within a moved research doc, sibling links become relative across clusters (e.g. a `retrieval/` doc linking to `belief-temporal/belief-layer.md` uses `../belief-temporal/belief-layer.md`; same-cluster stays bare). Use Edit per file (do not bulk-sed blindly — some `.md` backticks are .agent docs that did NOT move). Map of moved files -> cluster is in Task 1 Interfaces.
 
-- [ ] **Step 3: Run the link-checker — expect 0 dangling**
+- [x] **Step 3: Run the link-checker — expect 0 dangling**
 
 ```bash
 python /tmp/linkcheck.py
 ```
 Expected: `OK: all markdown links resolve (...)`. If DANGLING printed, fix each listed path and re-run until clean.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 cd /c/Users/you/IdeaProjects/projects/archolith/menhir-frontier
@@ -155,11 +159,11 @@ git commit -m "docs: rewrite cross-links for research-corpus restructure" # + Co
 **Interfaces:**
 - Consumes: new cluster paths (Task 1); registers the two orphans.
 
-- [ ] **Step 1: Replace the flat Canonical/Speculative tables with a cluster-indexed view**
+- [x] **Step 1: Replace the flat Canonical/Speculative tables with a cluster-indexed view**
 
 Keep ALL governance sections verbatim (status vocabulary, anti-sprawl rules, promotion ladder, durable save list, parked concepts, superseded section). Replace the reading-order + the two doc tables so every doc links to its new subdir path. ADD rows for `retrieval/intent-warden.md` (status `supported-by-eval`) and `direction/llm-reviewer-seams.md` (status `speculative`). Update the corpus map + reading-order clusters to name both new docs.
 
-- [ ] **Step 2: Link-check + confirm both orphans now appear**
+- [x] **Step 2: Link-check + confirm both orphans now appear**
 
 ```bash
 cd /c/Users/you/IdeaProjects/projects/archolith/menhir-frontier
@@ -168,7 +172,7 @@ grep -c 'intent-warden.md\|llm-reviewer-seams.md' docs/research/README.md   # ex
 ```
 Expected: link-check OK; grep count >= 2.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add docs/research/README.md
@@ -185,7 +189,7 @@ git commit -m "docs: cluster-index research README + register intent-warden, llm
 **Interfaces:**
 - Consumes: new paths (Task 1).
 
-- [ ] **Step 1: Apply each correction from the spec §6 table**
+- [x] **Step 1: Apply each correction from the spec §6 table**
 
 For each doc, set the `## Status` value to the controlled label (keep any descriptive note as a following line; do NOT touch the rest of the body):
 - intent-warden.md -> `supported-by-eval`
@@ -197,7 +201,7 @@ For each doc, set the `## Status` value to the controlled label (keep any descri
 - semantic-operating-system.md -> `active`
 - research-vs-shipped-inventory.md -> `canonical (snapshot)`
 
-- [ ] **Step 2: Verify each header parses to a controlled label**
+- [x] **Step 2: Verify each header parses to a controlled label**
 
 ```bash
 cd /c/Users/you/IdeaProjects/projects/archolith/menhir-frontier/docs/research
@@ -207,13 +211,13 @@ done
 ```
 Expected: each prints a controlled-vocabulary label.
 
-- [ ] **Step 3: Confirm only header lines changed (no body churn)**
+- [x] **Step 3: Confirm only header lines changed (no body churn)**
 
 ```bash
 git diff --stat docs/research/   # small line counts per file
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add -- <the 8 paths>
@@ -227,18 +231,18 @@ git commit -m "docs: normalize research-doc status headers to controlled vocabul
 **Files:**
 - Create: `docs/roadmap/README.md`
 
-- [ ] **Step 1: Write the altitude-grouped index (spec §4)**
+- [x] **Step 1: Write the altitude-grouped index (spec §4)**
 
 Three groups with one-line purpose each: Active build sequencing (weekend-oracle-runtime-roadmap.md, oracle-integration-plan.md); L3/L4 GAP decision-support — proposals not rungs (l3l4-overlay-sequencing-options.md, l3l4-hybrid-sketch.md); Strategic notes — not rungs (org-scale-menhir.md, doc-drift-watch-mvp.md). Link each file.
 
-- [ ] **Step 2: Link-check**
+- [x] **Step 2: Link-check**
 
 ```bash
 python /tmp/linkcheck.py
 ```
 Expected: OK.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add docs/roadmap/README.md
@@ -252,7 +256,7 @@ git commit -m "docs: add roadmap index grouped by altitude" # + trailer
 **Files:**
 - Move (git mv) to `.agent/archive/plans/`: `session-handoff-2026-06-28-live-verification.md`, `menhir-query-profile-evaluation.md`
 
-- [ ] **Step 1: Confirm archive dir exists, then git mv**
+- [x] **Step 1: Confirm archive dir exists, then git mv**
 
 ```bash
 cd /c/Users/you/IdeaProjects/projects/archolith/menhir-frontier
@@ -261,7 +265,7 @@ git mv .agent/plans/session-handoff-2026-06-28-live-verification.md .agent/archi
 git mv .agent/plans/menhir-query-profile-evaluation.md .agent/archive/plans/
 ```
 
-- [ ] **Step 2: Rewrite any inbound links to the two moved plans, then link-check**
+- [x] **Step 2: Rewrite any inbound links to the two moved plans, then link-check**
 
 ```bash
 cd /c/Users/you/IdeaProjects/projects/archolith/menhir-frontier
@@ -271,7 +275,7 @@ python /tmp/linkcheck.py
 ```
 Expected: link-check OK after edits.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add .agent/plans/ .agent/archive/plans/ -- <plus any edited referrers>
@@ -285,7 +289,7 @@ git commit -m "docs: archive consumed session-handoff + query-profile evaluation
 **Files:**
 - Modify: `.agent/CHANGELOG.md`
 
-- [ ] **Step 1: Full corpus link-check (the acceptance gate)**
+- [x] **Step 1: Full corpus link-check (the acceptance gate)**
 
 ```bash
 cd /c/Users/you/IdeaProjects/projects/archolith/menhir-frontier
@@ -293,7 +297,7 @@ python /tmp/linkcheck.py
 ```
 Expected: `OK: all markdown links resolve`.
 
-- [ ] **Step 2: Confirm the move accounting**
+- [x] **Step 2: Confirm the move accounting**
 
 ```bash
 cd /c/Users/you/IdeaProjects/projects/archolith/menhir-frontier
@@ -303,11 +307,11 @@ ls docs/research/*/ | wc -l   # files distributed across 8 subdirs
 ```
 Expected: 28 renames total across the restructure commits; 0 research .md left at top level except README.md.
 
-- [ ] **Step 3: Add CHANGELOG entry (10 most recent dated entries only)**
+- [x] **Step 3: Add CHANGELOG entry (10 most recent dated entries only)**
 
 `## 2026-06-29 - research corpus restructure` with bullets: clustered docs/research into 8 subdirs; registered intent-warden + llm-reviewer-seams; normalized 8 status headers; added roadmap index; archived 2 consumed plans; 0 dangling links.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add .agent/CHANGELOG.md
