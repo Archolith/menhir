@@ -189,6 +189,7 @@ ConflictKind =
   | DUPLICATE_DECLARED_UUID
   | DUPLICATE_CURRENT_LOCATOR
   | AMBIGUOUS_CONTENT_MATCH
+  | AMBIGUOUS_GIT_RENAME
   | UNCLASSIFIED_NEW_SOURCE
   | INVALID_DECLARED_METADATA
 ```
@@ -203,13 +204,17 @@ For each discovered corpus entry:
    - If it identifies one artifact and the destination is not claimed by another source, refresh or
      relocate that source.
    - If UUID and current locator identify different artifacts, emit a conflict.
-2. Match exact `(repository, medium, locator_path)`.
+2. Apply an explicit rename pair from a Hook Center event or Git diff.
+   - The old locator must identify exactly one source.
+   - The destination must not be claimed by another source unless that source has
+     its own unambiguous rename in the same batch.
+   - Hash equality is not required because a rename and edit can occur in one commit.
+   - Contradictory rename evidence is a conflict and reserves every implicated
+     entry and source from weaker match passes.
+3. Match exact `(repository, medium, locator_path)` only when Git history does not
+   say another source moved to that path.
    - Same hash: `NOOP` except observation timestamps/provenance.
    - Different hash: `REFRESH_SOURCE`; identity is unchanged.
-3. Apply an explicit rename pair from a Hook Center event or Git diff.
-   - The old locator must identify exactly one source.
-   - The destination must not be claimed by another source.
-   - Hash equality is not required because a rename and edit can occur in one commit.
 4. If the old source is missing, try a unique raw-byte SHA-256 match among unclaimed new entries.
    - The old path must no longer exist.
    - Exactly one destination may match.

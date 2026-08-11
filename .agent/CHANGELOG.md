@@ -3,7 +3,7 @@
 ## 2026-08-11 - Implement WorkArtifact corpus reconciliation (phases 0-4)
 
 - `domain/artifact_reconciliation.py`: pure route table, raw-byte SHA-256, authored-metadata reader,
-  and the match planner (declared UUID > exact locator > Git rename > unique content hash), plus the
+  and the match planner (declared UUID > Git rename > exact locator > unique content hash), plus the
   plan digest that covers premises as well as conclusions.
 - `infrastructure/artifact_corpus_scanner.py`: recursive routed scan with Git blob OIDs, observed
   commit, and `--name-status -M` rename evidence. Integrity and blob identity are separate fields;

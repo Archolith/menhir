@@ -209,6 +209,94 @@ def test_rename_is_refused_when_the_old_path_names_two_sources() -> None:
     assert ConflictKind.DUPLICATE_CURRENT_LOCATOR in kinds
 
 
+@pytest.mark.unit
+def test_git_rename_precedes_stale_exact_locator_in_a_chain() -> None:
+    report = plan(
+        [entry(".agent/plans/b.md", integrity=HASH_A),
+         entry(".agent/plans/c.md", integrity=HASH_B)],
+        [source(".agent/plans/a.md", artifact_uuid=UUID_1, source_uuid="s-1",
+                integrity=HASH_A),
+         source(".agent/plans/b.md", artifact_uuid=UUID_2, source_uuid="s-2",
+                integrity=HASH_B)],
+        renames=[GitRename(old_path=".agent/plans/a.md", new_path=".agent/plans/b.md"),
+                 GitRename(old_path=".agent/plans/b.md", new_path=".agent/plans/c.md")],
+    )
+
+    relocations = [a for a in report.actions if a.kind == ActionKind.RELOCATE_SOURCE]
+    assert {(a.artifact_uuid, a.old_path, a.path, a.basis) for a in relocations} == {
+        (UUID_1, ".agent/plans/a.md", ".agent/plans/b.md", MatchBasis.GIT_RENAME),
+        (UUID_2, ".agent/plans/b.md", ".agent/plans/c.md", MatchBasis.GIT_RENAME),
+    }
+    assert not report.conflicts
+
+
+@pytest.mark.unit
+def test_git_rename_precedes_stale_exact_locator_in_a_path_swap() -> None:
+    report = plan(
+        [entry(".agent/plans/a.md", integrity=HASH_B),
+         entry(".agent/plans/b.md", integrity=HASH_A)],
+        [source(".agent/plans/a.md", artifact_uuid=UUID_1, source_uuid="s-1",
+                integrity=HASH_A),
+         source(".agent/plans/b.md", artifact_uuid=UUID_2, source_uuid="s-2",
+                integrity=HASH_B)],
+        renames=[GitRename(old_path=".agent/plans/a.md", new_path=".agent/plans/b.md"),
+                 GitRename(old_path=".agent/plans/b.md", new_path=".agent/plans/a.md")],
+    )
+
+    relocations = [a for a in report.actions if a.kind == ActionKind.RELOCATE_SOURCE]
+    assert {(a.artifact_uuid, a.path, a.basis) for a in relocations} == {
+        (UUID_1, ".agent/plans/b.md", MatchBasis.GIT_RENAME),
+        (UUID_2, ".agent/plans/a.md", MatchBasis.GIT_RENAME),
+    }
+    assert not report.conflicts
+
+
+@pytest.mark.unit
+def test_multiple_git_renames_to_one_destination_fail_closed() -> None:
+    report = plan(
+        [entry(".agent/plans/c.md")],
+        [source(".agent/plans/a.md", artifact_uuid=UUID_1, source_uuid="s-1"),
+         source(".agent/plans/b.md", artifact_uuid=UUID_2, source_uuid="s-2")],
+        renames=[GitRename(old_path=".agent/plans/a.md", new_path=".agent/plans/c.md"),
+                 GitRename(old_path=".agent/plans/b.md", new_path=".agent/plans/c.md")],
+    )
+
+    conflict = only(report, ActionKind.CONFLICT)
+    assert conflict.conflict_kind == ConflictKind.AMBIGUOUS_GIT_RENAME
+    assert conflict.reason == "multiple_git_renames_claim_destination"
+    assert not report.safe_actions
+
+
+@pytest.mark.unit
+def test_one_git_rename_source_to_multiple_destinations_fails_closed() -> None:
+    report = plan(
+        [entry(".agent/plans/b.md"), entry(".agent/plans/c.md")],
+        [source(".agent/plans/a.md")],
+        renames=[GitRename(old_path=".agent/plans/a.md", new_path=".agent/plans/b.md"),
+                 GitRename(old_path=".agent/plans/a.md", new_path=".agent/plans/c.md")],
+    )
+
+    conflicts = [a for a in report.actions if a.kind == ActionKind.CONFLICT]
+    assert len(conflicts) == 2
+    assert {a.conflict_kind for a in conflicts} == {ConflictKind.AMBIGUOUS_GIT_RENAME}
+    assert not report.safe_actions
+
+
+@pytest.mark.unit
+def test_git_rename_to_a_nonmoving_occupied_destination_fails_closed() -> None:
+    report = plan(
+        [entry(".agent/plans/taken.md")],
+        [source(".agent/plans/gone.md", artifact_uuid=UUID_1, source_uuid="s-1"),
+         source(".agent/plans/taken.md", artifact_uuid=UUID_2, source_uuid="s-2")],
+        renames=[GitRename(old_path=".agent/plans/gone.md", new_path=".agent/plans/taken.md")],
+    )
+
+    conflict = only(report, ActionKind.CONFLICT)
+    assert conflict.conflict_kind == ConflictKind.DESTINATION_ALREADY_CLAIMED
+    assert conflict.reason == "git_rename_destination_has_nonmoving_source"
+    assert not report.safe_actions
+
+
 # ---------------------------------------------------------------------------
 # 6-9. Content hash
 # ---------------------------------------------------------------------------
