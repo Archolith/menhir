@@ -27,7 +27,7 @@ experiment — "is scalar LLM spend avoidable?" — not a tune toward the 78 Lon
 Scope boundary: this plan covers **typed-scalar** perception only (count, money, measurement,
 duration, frequency, clock_time, weekday, boolean, status, ranges, deltas, expires,
 previous/current). Categorical temporal **events** (purchased/acquired/attended, "which lens was
-bought most recently") are the separate `.agent/plans/menhir-temporal-event-history-view-2026-07-30.md`
+bought most recently") are the separate `.agent/archive/plans/menhir-temporal-event-history-view-2026-07-30.md`
 plan. The two paths must not merge.
 
 ## Why

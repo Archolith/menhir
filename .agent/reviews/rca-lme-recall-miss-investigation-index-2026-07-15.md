@@ -1,6 +1,6 @@
 # Index: LME recall-miss investigation (2026-07-15)
 
-Follow-up to the M1 gate run (`.agent/plans/menhir-m1-oracle-lme-ir-benchmark.md`,
+Follow-up to the M1 gate run (`.agent/archive/plans/menhir-m1-oracle-lme-ir-benchmark.md`,
 `docs/roadmap/menhir-mvp-roadmap.md` M1). The M1 gate itself PASSED (menhir beats the graphiti
 vector-only baseline by ~11.5x on Hit@3), but the absolute numbers were low (menhir found
 supporting evidence for only 16.2% of the full 500-question corpus). This investigation asks: is

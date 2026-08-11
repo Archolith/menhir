@@ -64,6 +64,9 @@ Consumers import from `menhir.domain.truth` (or via `menhir.domain` which re-exp
 
 ## Research & Forward Planning
 
+- `plans/README.md` -> current plan router; separates active work, approved proposals, saved research, and records needing closeout
+- `plans/backlog/README.md` -> backlog router; separates living/partial work from unstarted design proposals
+- `research/README.md` -> operational research router; execution authority, audits/reviews, transfer inputs, and the unverified PDF
 - `research/menhir-research-execution-ladder.md` -> research → code → bench build order (start here for "what's next"); read-side rungs R*, active write-side arc in Track W
 - `memory-aggregation-under-uncertainty.md` -> current design reference for precise write-time aggregates, veto gates, and anchor+delta safety
 - `architecture.md` + `data_models.md` -> live Event → Fold → disposable View/projection architecture

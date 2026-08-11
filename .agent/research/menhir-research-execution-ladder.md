@@ -71,7 +71,7 @@ Models: gpt-4o-mini extraction/enrichment, text-embedding-3-small embeddings, gp
 gpt-4o-mini judge.
 
 Sources: archolith-bench `results/lme-ku-buildout/LEDGER.md` is the evidence authority, and
-`.agent/plans/menhir-cumulative-activity-scalars-2026-08-08.md` carries the same acceptance record
+`.agent/archive/plans/menhir-cumulative-activity-scalars-2026-08-08.md` carries the same acceptance record
 in this repo (integrity counts, score, token/cost, per-miss reasoning). Prefer the ledger when they
 disagree; the plan is the in-repo copy, not the register.
 

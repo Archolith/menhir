@@ -155,7 +155,7 @@ Done when:
 measured gates PASS: Hit@3(support) menhir=4.60% vs graphiti(vector-only)=0.40% (~11.5x, gate
 recalibrated — see below), MRR@10 0.0466 vs 0.0033 (~14x), explainability 100%. Evidence:
 `archolith-bench/benchmarks/longmemeval-menhir-2026-07-15.md`. Scope: **oracle-only** (`_s`/`_m`
-large-haystack recall deferred post-MVP per `.agent/plans/menhir-m1-oracle-lme-ir-benchmark.md`).
+large-haystack recall deferred post-MVP per `.agent/archive/plans/menhir-m1-oracle-lme-ir-benchmark.md`).
 **Read the evidence doc's "What this PASS means and does not mean" section before citing this** —
 it is a relative (beats-vector-only-baseline) retrieval-quality claim, not an absolute memory-QA
 accuracy claim; in absolute terms menhir found supporting evidence for only 81/500 questions
@@ -199,7 +199,7 @@ MVP gate:
 
 > **Gate-list provenance (2026-07-14):** the two struck criteria were written for the *native*
 > hand-authored-qrels benchmark below, which is unimplemented and is not the MVP path. The MVP path
-> is `.agent/plans/menhir-m1-oracle-lme-ir-benchmark.md` (oracle-LME, reuses the built harness); on
+> is `.agent/archive/plans/menhir-m1-oracle-lme-ir-benchmark.md` (oracle-LME, reuses the built harness); on
 > that path the two criteria do not apply. A synthetic fixture was built to satisfy them, found to
 > duplicate existing unit-test coverage, and removed. Do not reintroduce it.
 
@@ -216,7 +216,7 @@ MVP gate:
 > LongMemEval, not raw retrieval Hit@3, so the metrics aren't comparable. The threshold is replaced
 > with a relative bar (menhir beats the vector-only baseline at the same cutoff), mirroring the
 > existing MRR@10 gate's structure instead of a second unvalidated absolute number. See
-> `.agent/plans/menhir-m1-oracle-lme-ir-benchmark.md` and
+> `.agent/archive/plans/menhir-m1-oracle-lme-ir-benchmark.md` and
 > `archolith-bench/scripts/longmemeval/analysis/lib/retrieval_quality.py` (gate1_pass) for the full
 > evidence and implementation.
 

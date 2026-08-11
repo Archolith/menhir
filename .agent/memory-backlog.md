@@ -110,8 +110,8 @@ Implementation order suggestion:
   - **`canonical_path` property on Entity nodes** *(derived from zhangfengcdt/memoir, 2026-05-06)*: memoir uses dot-notation paths (`profile.professional.skills.python`) as the primary memory key — human-readable, hierarchical, and O(log n) traversable. Our graph is more expressive but less browsable. Consider adding an optional `canonical_path` string property to Entity nodes (e.g., `project.yawn.market.endpoint.price_matrix`) as a human-readable alias alongside the UUID. This enables path-prefix queries ("show me all entities under `project.yawn.market`") and makes the graph inspectable without running Cypher. Low implementation cost — just a computed property from existing label + name + parent edges. Do not change the graph model; treat it as an index/display hint only.
 
 ### `memory.backlog.event_history_rollout`
-- status: **Phases 1–4 plus transport/lifecycle core implemented as a default-off production-capable
-  path at Menhir `370eff1`** (see `.agent/plans/menhir-event-history-implementation-2026-08-07.md`);
+- status: **Phases 1–5 implemented as a default-off production-capable
+  path at Menhir `370eff1`** (see `.agent/archive/plans/menhir-event-history-implementation-2026-08-07.md`);
   **not enabled by default**
 - done (implemented, flag-dormant until an operator enables them):
   - immutable `TypedEventAssertion`/`EventLane` contract + pure latest/predecessor selector (`domain/event_history.py`)
@@ -119,11 +119,11 @@ Implementation order suggestion:
   - predicate/domain event-lane timeline Views + exact `EVENT_HISTORY_ENTRY` edges on the existing `TimelineKind`; deterministic exact-lane rebuild (`services/event_history_service.py`); `MemoryGraphAdapter` delegates
   - **Phase 3 — perception/admission**: flag-gated shadow event perception with a small generic predicate registry (`purchased/acquired`, then measured additions); preserves exact quotes, distinguishes completed events from intent/hypotheticals; shadow-first, recording abstentions and disagreements; ordering/folding/selection stay deterministic
   - **Phase 4 — recall authority**: detects latest/predecessor temporal queries independently of scalar current-state intent; resolves subject/predicate/domain; applies evidence, time, uniqueness, and foundation gates; serializes a separate event verdict without changing scalar verdict contracts
-  - **transport/lifecycle core**: runtime scheduling/manual Phase 3 integration; API/backend/MCP/context transport; bounded metrics; namespace cleanup/shared-head lifecycle safety
+  - **Phase 5 — transport/lifecycle closeout**: runtime scheduling/manual Phase 3 integration; API/backend/MCP/context transport; bounded metrics; deterministic lane rebuild; namespace cleanup/shared-head lifecycle safety
   - **Recall Lab inspection**: task pages separate Current Scalar, Change Scalar, and Event Scalar roles; show absolute/delta/event derivation; and render grounded event assertions plus ordered occurrence Views
 - pending:
   - operator enablement only — the path ships default-off; no default enablement until an operator explicitly turns it on
-  - **Phase 5 — event-specific repair/rollout**: event-specific durable repair receipts and deterministic rebuild; render the selected authority verdict alongside the now-visible evidence → event assertion → timeline path; then a broader stratified temporal-categorical set before any enablement
+  - **post-plan rollout hardening**: add event-specific durable repair receipts; render the selected authority verdict alongside the now-visible evidence → event assertion → timeline path; then run a broader stratified temporal-categorical set before any default enablement
 - constraints: `valid_at` is the only ordering/selection time (`learned_at` is audit/ingest time only — its sole permitted use is choosing a deterministic representative inside an already-proven exact replay group); exact replay dedups and distinct same-world-time winners fail closed as ambiguous; event siblings never supersede by recency; projection is disposable, durable assertion + evidence is source of truth; no benchmark IDs/answers in production docs beyond the approved plan's acceptance section; no canonical-run gains claimed from infrastructure alone
 
 ## Read Next

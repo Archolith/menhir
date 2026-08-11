@@ -1,8 +1,13 @@
 # Event History Implementation
 
+> **ARCHIVED 2026-08-10.** Phases 1–5 shipped on `main` as a default-off production-capable path.
+> Current runtime behavior belongs to [`.agent/architecture.md`](../../architecture.md), while
+> enablement and follow-up policy belong to [`.agent/memory-backlog.md`](../../memory-backlog.md).
+> This document is retained as the implementation and acceptance record.
+
 Status: **Phases 1–5 complete on main; default-off production-capable** (see Implementation Checkpoint)
 
-Builds on: `menhir-temporal-event-history-view-2026-07-30.md` and the existing
+Builds on: [`menhir-temporal-event-history-view-2026-07-30.md`](menhir-temporal-event-history-view-2026-07-30.md) and the existing
 `Event -> Fold -> View` architecture.
 
 ## Why

@@ -21,6 +21,13 @@
 - Reconciled the completed 2026-06-29 research-corpus restructure trio with landed history: the
   design and review now identify their implemented/accepted state, the review targets the current
   design path, and all 26 implementation-plan checkboxes reflect commits `8729389`–`dab8bb9`.
+- Archived completed cycle-break/decomposition plans, superseded Beacon/todo proposals, the shipped
+  todo-namespace and OAuth-routing plans, and the accepted corpus-restructure records after adding
+  explicit disposition banners and repairing their live pointers.
+- Added exhaustive routing indexes for 27 top-level plans, 25 backlog records, and 11 operational
+  research notes plus one unclassified PDF. Archived the completed cumulative-scalar, Event History,
+  temporal-event design, and M1 benchmark records; five closeout-unreconciled plans are explicitly
+  held for verification instead of being inferred complete.
 
 ## 2026-08-07 - Event History Phases 3-4 + transport/lifecycle wiring complete (default-off)
 
@@ -42,7 +49,7 @@
   Evidence commits/artifacts: Bench `e3b85f9`,
   `results/event-history-canary/production-path-v1-20260807`,
   `results/event-history-acceptance/event-history-production-gate-v4-20260807`.
-- Docs: `plans/menhir-event-history-implementation-2026-08-07.md`, `architecture.md`,
+- Docs: `archive/plans/menhir-event-history-implementation-2026-08-07.md`, `architecture.md`,
   `data_models.md`, `endpoints.md`, `memory-governance.md`, `memory-backlog.md`.
 
 ## 2026-08-07 - Event History Phase 1-2 substrate (infrastructure only)
@@ -85,7 +92,7 @@
   history, typed-event persistence, timeline repositories, typed-scalar persistence/fold/state/history,
   legacy windowed recall, View LWW, and large-module boundaries. Only known environment warnings are
   the Pydantic class-config deprecation and the pytest unknown `cache_dir` option.
-- Docs: `plans/menhir-event-history-implementation-2026-08-07.md` (status + Implementation Checkpoint),
+- Docs: `archive/plans/menhir-event-history-implementation-2026-08-07.md` (status + Implementation Checkpoint),
   `architecture.md`, `data_models.md`, `endpoints.md`, `memory-governance.md`, `memory-backlog.md`.
 
 ## 2026-08-06 - Hardened offline dependency-rule target authority
@@ -520,7 +527,7 @@
   actually used for M1. Replaced with a relative bar -- menhir Hit@3(support) must exceed the
   graphiti/vector-only baseline at the same top-3 cutoff on the same graph -- mirroring the
   existing MRR@10 gate's structure instead of a second unvalidated absolute number. Full provenance
-  in the roadmap doc and `.agent/plans/menhir-m1-oracle-lme-ir-benchmark.md`.
+  in the roadmap doc and `.agent/archive/plans/menhir-m1-oracle-lme-ir-benchmark.md`.
 - First full-corpus evidence (n=500): menhir Hit@3(support)=4.6% (23/500), gold present@10=28.6%
   (143/500), menhir MRR@10(support)=0.0467 vs graphiti=0.0033 (~14x menhir advantage over the
   vector-only baseline). `single-session-preference` scored 0/30 for *both* arms, pointing to a

@@ -1,5 +1,9 @@
 # Plan: M1 Launch Benchmark - Oracle-LME IR + Synthetic Fixtures
 
+> **ARCHIVED 2026-08-10.** The M1 gate passed on the full oracle corpus. The current roadmap owns
+> any post-MVP large-haystack work; this document and its linked bench artifact are retained as the
+> launch-gate method, recalibration, and evidence record.
+
 **Status: COMPLETE (M1 gate MET/PASS) — 2026-07-15.** First full n=500 oracle-corpus run passed
 all 3 measured gates. Evidence: `archolith-bench/benchmarks/longmemeval-menhir-2026-07-15.md`. See
 `menhir-mvp-roadmap.md` M1 for the roadmap-level closeout. Both open questions below were resolved

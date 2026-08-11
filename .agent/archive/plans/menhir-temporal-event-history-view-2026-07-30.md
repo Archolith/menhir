@@ -1,5 +1,10 @@
 # Temporal Event History View
 
+> **ARCHIVED 2026-08-10.** This design was implemented by
+> [`menhir-event-history-implementation-2026-08-07.md`](menhir-event-history-implementation-2026-08-07.md).
+> Live Event → Fold → View behavior is owned by [`.agent/architecture.md`](../../architecture.md);
+> the body below remains the design rationale.
+
 Status: **IMPLEMENTED (2026-08-07) — this design was built.** Phases 1-5 are complete on
 `main`, default-off production-capable. See `menhir-event-history-implementation-2026-08-07.md`
 for the build record; this document remains the design rationale it implements against. The
