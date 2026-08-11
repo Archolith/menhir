@@ -127,7 +127,7 @@ code        primary code surface(s)
 bench       archolith-bench fixture(s) that prove it
 metric      what archolith-bench measures
 depends_on  rungs that must land first
-status      planned | in-progress | done | parked
+status      planned | in-progress | done | parked | not-doing
 ```
 
 Discipline (from research-process.md / the index anti-sprawl rules):
@@ -654,9 +654,14 @@ code        full write-side stack
 bench       LEDGER.md: scalar-event-activity-ku78-v6-20260809
 metric      recall on the 78-item knowledge-update subset
 depends_on  W2
-status      partial — v6 scored 0.910 (71/78) against a no_memory arm of 6/78. The build
-            order specifies the comparator as node-only; no_memory is a weaker baseline, so
-            the A/B as written has NOT been run. Do not cite 0.910 as node-only-beating.
+status      not-doing — ctharvey, 2026-08-10. The A/B as specified in build-order step 4
+            (llm-judge accuracy against a node-only comparator) will not be run.
+
+            Standing facts this does not change: v6 scored 0.910 (71/78) against a
+            no_memory arm of 6/78. no_memory is a weaker baseline than node-only, so
+            0.910 must not be cited as node-only-beating. The entropy instrument (W0)
+            remains the primary signal, which is what the build order intended anyway —
+            accuracy was always framed as downstream validation, not the target.
 ```
 
 ### W4 — Event -> Fold -> View realization
@@ -786,9 +791,11 @@ Open rungs, in order:
 1. W0  finish the D0 entropy grade — the instrument is built and registered, the
        deterministic grade the build order calls for has not been reported
 2. W2  entropy delta across D1 on the counting slice (floor -> 1)
-3. W3  the accuracy A/B as specified — against node-only, not no_memory
-4. W5  reconciliation correctness; first concrete case is v6 miss 26bdc477
+3. W5  reconciliation correctness; first concrete case is v6 miss 26bdc477
 ```
+
+W3 (the node-only accuracy A/B) is **not-doing** as of 2026-08-10. Entropy is the objective
+function; accuracy stays downstream validation and is not being chased for its own sake.
 
 Two standing cautions:
 
