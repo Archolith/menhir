@@ -37,6 +37,17 @@ change, an advisory stale-anchor label, and receipts showing where the claim cam
 | Engineering artifacts | Plans, reviews, investigations, implementation reports, and handoffs with typed status and relationships |
 | Agent integrations | Optional prompt and file-event hooks that preserve durable context without installing themselves or blocking the coding session |
 
+### How the pieces connect
+
+These diagrams follow one synthetic authentication change from agent evidence through
+governed memory, code structure, and blast-radius context.
+
+![Menhir preserves agent evidence while governing candidate, current, and historical memory](docs/assets/menhir-01-governed-memory.png)
+
+![Menhir joins governed memories to changed files, imports, endpoints, and tests](docs/assets/menhir-02-code-graph.png)
+
+![Menhir follows a changed file through bounded blast-radius analysis into agent-ready context](docs/assets/menhir-03-blast-radius.png)
+
 The structural and semantic entities live in the same Neo4j graph and share project and
 namespace boundaries. A client does not have to join independent responses from a code
 index and a memory service.
