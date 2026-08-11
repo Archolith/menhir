@@ -6,7 +6,7 @@ import logging
 from typing import Any
 
 from fastapi import HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from menhir.core.backend_impl import RuntimeProvider
 from menhir.core.backend_protocol import MemoryBackend
@@ -383,6 +383,7 @@ class ToolEventRequest(BaseModel):
     session_id: str | None = None
     namespace: str | None = None
     project: str | None = None            # structure_project to scope the match (else path-only)
+    repository: str | None = None         # stable graph ArtifactSource repository identity
     project_root: str | None = None
     cwd: str | None = None
     path: str | None = None
@@ -394,6 +395,15 @@ class ToolEventRequest(BaseModel):
     git_branch: str | None = None
     git_commit: str | None = None
     metadata: dict[str, Any] | None = None
+
+    @field_validator("repository", mode="before")
+    @classmethod
+    def _normalize_repository(cls, value: object) -> str | None:
+        """Treat blank or malformed optional identity as missing so structural marking can proceed."""
+        if not isinstance(value, str):
+            return None
+        value = value.strip()
+        return value or None
 
 
 class ToolEventResponse(BaseModel):
