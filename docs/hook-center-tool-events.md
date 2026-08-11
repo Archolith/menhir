@@ -44,6 +44,7 @@ not content.
   "source_kind": "hook",
   "session_id": "...",
   "project": "menhir",
+  "repository": "menhir",
   "project_root": "/abs/repo",
   "cwd": "...",
   "path": "src/foo.py",
@@ -62,6 +63,8 @@ Only `event_type` is required at the request-model level.
 For v0 `file_changed` events, `path` is required at runtime (400 if missing or blank).
 Unsupported `event_type` values are accepted-and-ignored without requiring a path.
 Everything else is optional so a hook with partial metadata still succeeds.
+`project` scopes structural dirty marking. `repository` is the stable graph `ArtifactSource`
+identity; it is never inferred from `project_root` or a worktree directory name.
 
 ## Path normalization
 
@@ -166,6 +169,9 @@ The response field `artifact_reconciliation` is `null` unless reconciliation was
 otherwise it carries `{attempted, applied, reason, ...}`. A repository error is caught, logged, and
 returned as `applied: false` — the coding tool that sent the event never sees a failure for this
 leg.
+When `repository` is absent or blank, structural dirty marking still runs and reconciliation returns
+`{attempted: true, applied: false, reason: "repository_identity_missing"}` without calling the
+artifact adapter. A malformed non-string repository value is treated the same way.
 
 **This is an accelerator, not the coverage backstop.** The hook only recognizes named file tools. A
 shell `mv`, `apply_patch`, an IDE refactor, a branch switch, or an external editor all move files
@@ -275,7 +281,7 @@ echo '{"tool_name":"Edit","tool_input":{"file_path":"src/foo.py"}}' \
 | `MENHIR_TURN_HOOK_LOG` | Failure-log path; else `<home>/.claude/menhir-turn-hook.log`. |
 | `MENHIR_ARTIFACT_RECONCILE_MODE` | Server-side startup recovery: `off` \| `audit` \| `safe_apply`. Default `audit` — drift is reported, nothing is mutated. `safe_apply` lets the server write to the graph on boot and is an operator choice after the one-time repair. An unrecognized value falls back to `audit`, so a typo can neither disable detection nor enable writes. |
 | `MENHIR_ARTIFACT_RECONCILE_REPO` | Working-tree path the startup pass audits. Unset means the pass is skipped regardless of mode. |
-| `MENHIR_ARTIFACT_RECONCILE_REPOSITORY` | Repository identity recorded on graph source locators. Required whenever the startup pass is enabled; never inferred from a worktree directory name. |
+| `MENHIR_ARTIFACT_RECONCILE_REPOSITORY` | Stable repository identity recorded on graph source locators. The file-event producer uses this first, then repository-local Git config `menhir.artifactRepository`; it never infers identity from a worktree directory name. Required whenever the startup pass is enabled. |
 
 ## Safety and privacy
 

@@ -12,7 +12,7 @@ Hook Center invariants (enforced here):
 - Upload NO file content — only a local sha256 HASH of the file (provenance, not content) + mtime.
 - Fail open: menhir down / unreadable file / malformed input / no path -> log locally + exit 0. Never
   blocks the coding tool, never prints into the agent context.
-- No secrets: only the path + hash + git branch/commit are sent.
+- No secrets: only the path + stable repository identity + hash + git branch/commit are sent.
 
 Install (Claude/Codex `settings.local.json` / `hooks.json`), register on `PostToolUse` matching the
 file tools; pipe the event JSON to this script. See docs/hook-center-tool-events.md.
@@ -73,6 +73,24 @@ def _detect_source_client(hook_input: dict) -> str:
     return "unknown"
 
 
+def _optional_text(value: object) -> str | None:
+    """Return a stripped string or None for absent/malformed optional values."""
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    return value or None
+
+
+def _resolve_artifact_repository(cwd: str | None) -> str | None:
+    """Resolve the stable graph repository identity without using a directory basename."""
+    repository = _optional_text(os.environ.get("MENHIR_ARTIFACT_RECONCILE_REPOSITORY"))
+    if repository:
+        return repository
+    return _optional_text(
+        git_probe(["config", "--local", "--get", "menhir.artifactRepository"], cwd)
+    )
+
+
 def _file_hash(path: str) -> tuple[str | None, str | None]:
     """(sha256 hex, mtime iso) of a file, or (None, None) on any failure. Reads bytes to hash ONLY —
     the digest is provenance, never uploaded content. Never raises."""
@@ -126,6 +144,7 @@ def normalize_event(hook_input: dict) -> dict | None:
                     or hook_input.get("old_path") or None)
     cwd = hook_input.get("cwd") or hook_input.get("workspace_root")
     project_root = git_probe(["rev-parse", "--show-toplevel"], cwd)
+    repository = _resolve_artifact_repository(project_root or cwd)
     # Normalize to repo-relative paths for the structure graph match.
     normalized_path = _structure_relative_path(path, project_root, cwd)
     normalized_old_path = None
@@ -149,6 +168,7 @@ def normalize_event(hook_input: dict) -> dict | None:
         "source_client": _detect_source_client(hook_input),
         "source_kind": SOURCE_KIND,
         "session_id": hook_input.get("session_id"),
+        "repository": repository,
         "project_root": project_root,
         "cwd": cwd,
         "path": normalized_path,

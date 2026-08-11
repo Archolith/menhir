@@ -236,8 +236,15 @@ echo '{"tool_name":"Edit","tool_input":{"file_path":"src/foo.py"}}' \
 | `MENHIR_TOOL_EVENTS_URL` | Endpoint. Default `http://127.0.0.1:8100/api/tool-events`. |
 | `MENHIR_AGENT_KEY` | Bearer token (agent tier). Unset => unauthenticated attempt. |
 | `MENHIR_SOURCE_CLIENT` | Override the detected client name. |
+| `MENHIR_ARTIFACT_RECONCILE_REPOSITORY` | Stable graph repository identity. Preferred over repository-local Git config `menhir.artifactRepository`; never inferred from a worktree basename. |
 | `MENHIR_TURN_EVIDENCE_ENABLED` | Set falsey (`0`/`false`/`no`/`off`) to disable. |
 | `MENHIR_TURN_HOOK_LOG` | Failure-log path. |
+
+Set the shared identity once per repository when the environment variable is not appropriate:
+
+```bash
+git config --local menhir.artifactRepository menhir
+```
 
 ## What is NOT captured
 

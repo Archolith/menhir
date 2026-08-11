@@ -181,7 +181,7 @@ def test_expected_venv_python_resolves_project_root_not_src() -> None:
         "python",
     )
     assert expected.parent.parent.name == ".venv"
-    assert expected.parent.parent.parent.name in {"menhir", "menhir-frontier"}
+    assert expected.parent.parent.parent == Path(runtime_preflight.__file__).resolve().parents[3]
 
 
 @pytest.mark.unit

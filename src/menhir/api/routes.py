@@ -462,7 +462,7 @@ async def record_tool_event(request: Request, body: ToolEventRequest) -> ToolEve
     adapter = getattr(runtime_ctx.built, "graph_adapter", None)
     if adapter is None or not hasattr(adapter, "record_file_event"):
         raise HTTPException(status_code=503, detail="tool-event capture unavailable")
-    # derive a structure_project scope from project_root basename when not given (best-effort).
+    # Derive only the structural scope from project_root. Artifact repository identity is separate.
     project = body.project
     if project is None and body.project_root:
         import os as _os
@@ -487,21 +487,29 @@ async def record_tool_event(request: Request, body: ToolEventRequest) -> ToolEve
     # the hook is a low-latency accelerator, not the coverage backstop.
     reconciliation = None
     if hasattr(adapter, "reconcile_file_event_source"):
-        try:
-            reconciliation = await asyncio.to_thread(
-                adapter.reconcile_file_event_source,
-                path=path,
-                operation=body.operation,
-                old_path=body.old_path,
-                repository=project,
-                after_hash=body.after_hash,
-                git_commit=body.git_commit,
-            )
-        except Exception as exc:  # noqa: BLE001 - never fail the hook on this leg
-            logger.warning("artifact source reconciliation failed for %s: %s", path, exc)
-            reconciliation = {"attempted": True, "applied": False, "reason": "error"}
-        if reconciliation and not reconciliation.get("attempted"):
-            reconciliation = None  # not corpus material; nothing worth reporting
+        repository = (body.repository or "").strip()
+        if not repository:
+            reconciliation = {
+                "attempted": True,
+                "applied": False,
+                "reason": "repository_identity_missing",
+            }
+        else:
+            try:
+                reconciliation = await asyncio.to_thread(
+                    adapter.reconcile_file_event_source,
+                    path=path,
+                    operation=body.operation,
+                    old_path=body.old_path,
+                    repository=repository,
+                    after_hash=body.after_hash,
+                    git_commit=body.git_commit,
+                )
+            except Exception as exc:  # noqa: BLE001 - never fail the hook on this leg
+                logger.warning("artifact source reconciliation failed for %s: %s", path, exc)
+                reconciliation = {"attempted": True, "applied": False, "reason": "error"}
+            if reconciliation and not reconciliation.get("attempted"):
+                reconciliation = None  # not corpus material; nothing worth reporting
 
     return ToolEventResponse(
         accepted=True, event_type=body.event_type, operation=body.operation,

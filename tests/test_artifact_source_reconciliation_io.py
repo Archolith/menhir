@@ -16,8 +16,10 @@ import pytest
 from menhir.domain.artifact_reconciliation import (
     ActionKind,
     ArtifactSourceSnapshot,
+    ConflictKind,
     CorpusLane,
     MatchBasis,
+    ReconciliationAction,
     ResolutionStatus,
     SourceObservation,
     WorkArtifactIdentitySnapshot,
@@ -31,6 +33,7 @@ from menhir.infrastructure.artifact_corpus_scanner import (
     read_index_links,
     scan_corpus,
 )
+from menhir.infrastructure.schema import ARTIFACT_RECONCILIATION_REQUIRED_CONSTRAINTS
 from menhir.infrastructure.work_artifact_repository import WorkArtifactRepository
 from menhir.services.artifact_reconciliation_service import (
     ArtifactReconciliationService,
@@ -266,6 +269,68 @@ def test_legacy_versions_are_relabelled_never_reinterpreted() -> None:
     params = neo.calls[1]["params"]
     assert params["version_kind"] == "legacy_commit_sha"
     assert params["key"] == "menhir|markdown|a.md"
+
+
+@pytest.mark.unit
+def test_preparation_does_not_resurrect_an_unresolved_v2_locator() -> None:
+    neo = _StubNeo4j(
+        responses=[
+            [
+                {
+                    "eid": "e1",
+                    "repository": "menhir",
+                    "medium": "markdown",
+                    "path": "old.md",
+                    "version": "f441a237" * 5,
+                    "version_kind": None,
+                    "resolution_status": ResolutionStatus.UNRESOLVED,
+                }
+            ]
+        ]
+    )
+
+    assert WorkArtifactRepository(neo).backfill_current_locator_keys() == 1
+    params = neo.calls[1]["params"]
+    assert params["key"] is None
+    assert params["version_kind"] == "legacy_commit_sha"
+    assert params["schema_version"] == 2
+    assert (
+        "s.resolution_status = coalesce(s.resolution_status, $resolved)"
+        in neo.calls[1]["query"]
+    )
+
+
+@pytest.mark.unit
+def test_artifact_reconciliation_preflight_reports_global_blockers() -> None:
+    expected = {
+        "sources": 112,
+        "missing_source_uuids": 112,
+        "missing_locator_keys": 112,
+        "duplicate_artifact_uuids": 0,
+        "duplicate_source_uuids": 0,
+        "duplicate_raw_locators": 0,
+        "duplicate_locator_keys": 0,
+        "duplicate_cursor_repositories": 0,
+    }
+    neo = _StubNeo4j(responses=[[expected]])
+
+    assert WorkArtifactRepository(neo).artifact_reconciliation_preflight() == expected
+    assert "MATCH (s:ArtifactSource)" in neo.calls[0]["query"]
+    assert "duplicate_raw_locators" in neo.calls[0]["query"]
+
+
+@pytest.mark.unit
+def test_artifact_reconciliation_schema_activation_verifies_online_indexes() -> None:
+    names = list(ARTIFACT_RECONCILIATION_REQUIRED_CONSTRAINTS)
+    neo = _StubNeo4j(responses=[[], [], [], [], [], [{"names": names}]])
+
+    result = WorkArtifactRepository(neo).activate_artifact_reconciliation_schema()
+
+    assert result["ready"] is True
+    assert result["constraints_missing"] == []
+    assert result["constraints_online"] == sorted(names)
+    assert neo.calls[0]["query"] == "DROP INDEX work_artifact_uuid_idx IF EXISTS"
+    assert "SHOW INDEXES" in neo.calls[-1]["query"]
 
 
 @pytest.mark.unit
@@ -608,6 +673,93 @@ class _RecordingRepo:
     def mark_artifact_source_unresolved(self, **kwargs):
         self.calls.append(("unresolved", kwargs))
         return {"applied": True}
+
+
+class _PreparationRepo:
+    def __init__(self, before: dict, after: dict | None = None) -> None:
+        self.before = before
+        self.after = after or before
+        self.preflight_reads = 0
+        self.calls: list[str] = []
+
+    def artifact_reconciliation_preflight(self):
+        self.calls.append("preflight")
+        self.preflight_reads += 1
+        return self.before if self.preflight_reads == 1 else self.after
+
+    def backfill_source_uuids(self):
+        self.calls.append("source_uuids")
+        return self.before["missing_source_uuids"]
+
+    def backfill_current_locator_keys(self):
+        self.calls.append("locator_keys")
+        return self.before["missing_locator_keys"]
+
+    def activate_artifact_reconciliation_schema(self):
+        self.calls.append("schema")
+        return {
+            "queries_executed": 5,
+            "constraints_online": list(ARTIFACT_RECONCILIATION_REQUIRED_CONSTRAINTS),
+            "constraints_missing": [],
+            "ready": True,
+        }
+
+
+def _preflight(**overrides: int) -> dict[str, int]:
+    result = {
+        "sources": 112,
+        "missing_source_uuids": 112,
+        "missing_locator_keys": 112,
+        "duplicate_artifact_uuids": 0,
+        "duplicate_source_uuids": 0,
+        "duplicate_raw_locators": 0,
+        "duplicate_locator_keys": 0,
+        "duplicate_cursor_repositories": 0,
+    }
+    result.update(overrides)
+    return result
+
+
+@pytest.mark.unit
+def test_prepare_refuses_changed_global_source_count_before_writes() -> None:
+    repo = _PreparationRepo(_preflight())
+
+    with pytest.raises(ValueError, match="expected 111, observed 112"):
+        ArtifactReconciliationService(repo).prepare_sources(expected_source_count=111)
+
+    assert repo.calls == ["preflight"]
+
+
+@pytest.mark.unit
+def test_prepare_refuses_duplicate_locator_before_writes() -> None:
+    repo = _PreparationRepo(_preflight(duplicate_raw_locators=1))
+
+    with pytest.raises(ValueError, match="duplicate_raw_locators"):
+        ArtifactReconciliationService(repo).prepare_sources(expected_source_count=112)
+
+    assert repo.calls == ["preflight"]
+
+
+@pytest.mark.unit
+def test_prepare_backfills_then_activates_and_verifies_constraints() -> None:
+    repo = _PreparationRepo(
+        _preflight(),
+        _preflight(missing_source_uuids=0, missing_locator_keys=0),
+    )
+
+    result = ArtifactReconciliationService(repo).prepare_sources(
+        expected_source_count=112
+    )
+
+    assert repo.calls == [
+        "preflight",
+        "source_uuids",
+        "locator_keys",
+        "schema",
+        "preflight",
+    ]
+    assert result["stamped"] == {"source_uuids": 112, "locator_keys": 112}
+    assert result["schema"]["ready"] is True
 
 
 @pytest.mark.unit
@@ -964,6 +1116,52 @@ def test_a_conflict_does_not_block_unrelated_safe_actions(tmp_path: Path) -> Non
     assert result.applied[0]["path"] == ".agent/plans/good.md"
     assert result.cursor_advanced is False
     assert result.cursor_reason == "conflicts_present"
+
+
+@pytest.mark.unit
+def test_source_less_unclassified_conflict_allows_cursor_advance(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write(tmp_path, ".agent/reference/context.md", "# Context\n")
+    evidence = GitEvidence(
+        observed_commit="head",
+        available=True,
+        rename_evidence_available=True,
+    )
+    monkeypatch.setattr(
+        "menhir.services.artifact_reconciliation_service.collect_git_evidence",
+        lambda *_args, **_kwargs: evidence,
+    )
+    repo = _RecordingRepo()
+    service = ArtifactReconciliationService(repo)
+    report = service.audit(tmp_path, repository="t")
+    assert [action.conflict_kind for action in report.conflicts] == [
+        ConflictKind.UNCLASSIFIED_NEW_SOURCE
+    ]
+
+    result = service.apply(
+        tmp_path,
+        expected_digest=report.plan_digest,
+        repository="t",
+    )
+
+    assert len(result.conflicted) == 1
+    assert result.cursor_advanced is True
+    assert result.cursor_reason == "advanced_with_acknowledged_conflicts"
+    assert repo.cursor == "head"
+
+
+@pytest.mark.unit
+def test_identity_bearing_unclassified_conflict_still_blocks_cursor() -> None:
+    action = ReconciliationAction(
+        kind=ActionKind.CONFLICT,
+        conflict_kind=ConflictKind.UNCLASSIFIED_NEW_SOURCE,
+        repository="t",
+        path=".agent/reference/context.md",
+        source_uuid="source-1",
+    )
+
+    assert ArtifactReconciliationService._conflict_allows_cursor_advance(action) is False
 
 
 @pytest.mark.unit

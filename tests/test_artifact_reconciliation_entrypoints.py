@@ -23,6 +23,38 @@ def test_graph_backed_cli_commands_require_repository(command: str) -> None:
 
 
 @pytest.mark.unit
+def test_prepare_cli_is_read_only_without_apply(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _Service:
+        def source_preflight(self):
+            return {"sources": 112}
+
+        def prepare_sources(self, **kwargs):
+            raise AssertionError("dry-run preparation must not write")
+
+    monkeypatch.setattr("menhir.cli.artifacts._service", lambda: _Service())
+    result = CliRunner().invoke(artifacts_app, ["prepare"])
+
+    assert result.exit_code == 0
+    assert "DRY RUN -- nothing written" in result.output
+    assert "--expected-source-count 112" in result.output
+
+
+@pytest.mark.unit
+def test_prepare_cli_requires_owner_approved_source_count(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _Service:
+        def source_preflight(self):
+            return {"sources": 112}
+
+    monkeypatch.setattr("menhir.cli.artifacts._service", lambda: _Service())
+    result = CliRunner().invoke(artifacts_app, ["prepare", "--apply"])
+
+    assert result.exit_code == 2
+    assert "requires --expected-source-count" in result.output
+
+
+@pytest.mark.unit
 def test_manual_unscoped_adoption_requires_repository() -> None:
     result = CliRunner().invoke(
         artifacts_app,

@@ -52,6 +52,7 @@ def test_a_rename_relocates_one_source_and_still_marks_both_paths_dirty() -> Non
         "path": ".agent/archive/plans/a.md",
         "old_path": ".agent/plans/a.md",
         "project": "menhir",
+        "repository": "menhir",
         "after_hash": "abc123",
         "git_commit": "c0ffee",
     })
@@ -60,6 +61,7 @@ def test_a_rename_relocates_one_source_and_still_marks_both_paths_dirty() -> Non
     assert body["marked_dirty"] is True and body["matched"] == 2
     assert body["artifact_reconciliation"]["applied"] is True
     assert dirty["old_path"] == ".agent/plans/a.md"
+    assert seen["repository"] == "menhir"
     assert seen["after_hash"] == "abc123" and seen["git_commit"] == "c0ffee"
 
 
@@ -71,6 +73,7 @@ def test_a_reconciliation_error_does_not_fail_the_event() -> None:
     response = _client(reconcile=_boom).post("/api/tool-events", json={
         "event_type": "file_changed", "operation": "rename",
         "path": ".agent/archive/plans/a.md", "old_path": ".agent/plans/a.md",
+        "repository": "menhir",
     })
     assert response.status_code == 200
     body = response.json()
@@ -84,9 +87,69 @@ def test_a_path_outside_the_corpus_reports_nothing() -> None:
         reconcile=lambda **_k: {"attempted": False, "reason": "path_is_not_corpus_material"}
     ).post("/api/tool-events", json={
         "event_type": "file_changed", "operation": "edit", "path": "src/menhir/main.py",
+        "repository": "menhir",
     })
     assert response.status_code == 200
     assert response.json()["artifact_reconciliation"] is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("repository", [None, "", "   ", [], {"name": "menhir"}, 42])
+def test_missing_repository_is_visible_after_structural_mark_without_adapter_call(repository) -> None:
+    dirty: dict = {}
+    reconcile_calls: list[dict] = []
+
+    def _record(**kwargs):
+        dirty.update(kwargs)
+        return {"accepted": True, "matched": 1, "marked_dirty": True, "paths": [kwargs["path"]]}
+
+    def _reconcile(**kwargs):
+        reconcile_calls.append(kwargs)
+        return {"attempted": True, "applied": True}
+
+    payload = {
+        "event_type": "file_changed",
+        "operation": "edit",
+        "path": ".agent/plans/a.md",
+        "project_root": "/worktrees/menhir-feature",
+    }
+    if repository is not None:
+        payload["repository"] = repository
+    response = _client(reconcile=_reconcile, record=_record).post("/api/tool-events", json=payload)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["marked_dirty"] is True and dirty["project"] == "menhir-feature"
+    assert body["artifact_reconciliation"] == {
+        "attempted": True,
+        "applied": False,
+        "reason": "repository_identity_missing",
+    }
+    assert reconcile_calls == []
+
+
+@pytest.mark.unit
+def test_worktree_project_and_artifact_repository_are_independent() -> None:
+    dirty: dict = {}
+    reconciled: dict = {}
+
+    def _record(**kwargs):
+        dirty.update(kwargs)
+        return {"accepted": True, "matched": 1, "marked_dirty": True, "paths": [kwargs["path"]]}
+
+    def _reconcile(**kwargs):
+        reconciled.update(kwargs)
+        return {"attempted": True, "applied": True}
+
+    response = _client(reconcile=_reconcile, record=_record).post("/api/tool-events", json={
+        "event_type": "file_changed",
+        "operation": "edit",
+        "path": ".agent/plans/a.md",
+        "project_root": "/worktrees/menhir-feature",
+        "repository": "menhir",
+    })
+    assert response.status_code == 200
+    assert dirty["project"] == "menhir-feature"
+    assert reconciled["repository"] == "menhir"
 
 
 @pytest.mark.unit

@@ -168,6 +168,55 @@ def _print_report(report: Any) -> None:
             print(f"  ... {len(report.contradictions) - 20} more")
 
 
+@artifacts_app.command("prepare")
+def prepare_sources(
+    expected_source_count: Annotated[
+        int,
+        typer.Option(
+            help="Owner-approved graph-wide ArtifactSource count required with --apply."
+        ),
+    ] = -1,
+    apply: Annotated[
+        bool,
+        typer.Option("--apply", help="Backfill all sources and activate constraints."),
+    ] = False,
+    as_json: Annotated[bool, typer.Option("--json", help="Emit JSON.")] = False,
+) -> None:
+    """Preflight or activate graph-wide ArtifactSource v2 preparation."""
+    try:
+        service = _service()
+        preflight = service.source_preflight()
+    except Exception as exc:  # noqa: BLE001 - operator CLI reports rather than traces
+        print(f"graph unavailable: {exc}")
+        raise typer.Exit(EXIT_UNAVAILABLE) from exc
+
+    if not apply:
+        payload = {"applied": False, "preflight": preflight}
+        if as_json:
+            _emit(payload)
+        else:
+            print(f"preflight: {preflight}")
+            print("DRY RUN -- nothing written.")
+            print(
+                "Re-run with: menhir artifacts prepare --apply "
+                f"--expected-source-count {preflight.get('sources', 0)}"
+            )
+        return
+
+    if expected_source_count < 0:
+        print("--apply requires --expected-source-count from the approved preflight.")
+        raise typer.Exit(EXIT_DIGEST_MISMATCH)
+    try:
+        result = service.prepare_sources(expected_source_count=expected_source_count)
+    except (ValueError, RuntimeError) as exc:
+        print(f"preparation refused: {exc}")
+        raise typer.Exit(EXIT_DIGEST_MISMATCH) from exc
+    if as_json:
+        _emit({"applied": True, **result})
+    else:
+        print(f"prepared: {result}")
+
+
 @artifacts_app.command()
 def reconcile(
     repository: Annotated[
@@ -185,7 +234,10 @@ def reconcile(
     ] = "",
     prepare: Annotated[
         bool,
-        typer.Option("--prepare", help="Backfill source UUIDs and locator keys first."),
+        typer.Option(
+            "--prepare",
+            help="Deprecated; use the separately gated `artifacts prepare` command.",
+        ),
     ] = False,
     allow_new_repository: Annotated[
         bool,
@@ -204,8 +256,8 @@ def reconcile(
         raise typer.Exit(EXIT_UNAVAILABLE) from exc
 
     if prepare:
-        stamped = service.prepare_sources()
-        print(f"prepared: {stamped}")
+        print("--prepare is a separate operation; use `menhir artifacts prepare`.")
+        raise typer.Exit(EXIT_DIGEST_MISMATCH)
 
     if not apply:
         report = service.audit(

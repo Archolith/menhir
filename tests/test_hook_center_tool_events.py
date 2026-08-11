@@ -313,6 +313,57 @@ def test_hook_no_original_path_metadata_when_already_relative(monkeypatch):
 
 
 @pytest.mark.unit
+def test_hook_repository_identity_prefers_environment(monkeypatch):
+    hook = _load_hook()
+    calls = []
+
+    def _git_probe(args, cwd):
+        calls.append((args, cwd))
+        if args == ["rev-parse", "--show-toplevel"]:
+            return "/worktrees/menhir-feature"
+        if args == ["rev-parse", "--abbrev-ref", "HEAD"]:
+            return "feature"
+        if args == ["rev-parse", "--short", "HEAD"]:
+            return "abc1234"
+        return "configured-name"
+
+    monkeypatch.setattr(hook, "git_probe", _git_probe)
+    monkeypatch.setenv("MENHIR_ARTIFACT_RECONCILE_REPOSITORY", "  menhir  ")
+    ev = hook.normalize_event({"tool_name": "Edit", "tool_input": {"path": "src/a.py"},
+                               "cwd": "/worktrees/menhir-feature"})
+    assert ev["repository"] == "menhir"
+    assert not any(args[:2] == ["config", "--local"] for args, _cwd in calls)
+
+
+@pytest.mark.unit
+def test_hook_repository_identity_falls_back_to_local_git_config(monkeypatch):
+    hook = _load_hook()
+
+    def _git_probe(args, _cwd):
+        if args == ["rev-parse", "--show-toplevel"]:
+            return "/worktrees/menhir-feature"
+        if args == ["config", "--local", "--get", "menhir.artifactRepository"]:
+            return "  menhir  "
+        return None
+
+    monkeypatch.setattr(hook, "git_probe", _git_probe)
+    monkeypatch.setenv("MENHIR_ARTIFACT_RECONCILE_REPOSITORY", "   ")
+    ev = hook.normalize_event({"tool_name": "Write", "tool_input": {"path": "src/a.py"},
+                               "cwd": "/worktrees/menhir-feature"})
+    assert ev["project_root"] == "/worktrees/menhir-feature"
+    assert ev["repository"] == "menhir"
+
+
+@pytest.mark.unit
+def test_hook_repository_identity_is_none_when_config_is_unavailable(monkeypatch):
+    hook = _load_hook()
+    monkeypatch.setattr(hook, "git_probe", lambda *_args, **_kwargs: None)
+    monkeypatch.delenv("MENHIR_ARTIFACT_RECONCILE_REPOSITORY", raising=False)
+    ev = hook.normalize_event({"tool_name": "Edit", "tool_input": {"path": "src/a.py"}})
+    assert ev["repository"] is None
+
+
+@pytest.mark.unit
 def test_hook_fails_open_when_menhir_unreachable(tmp_path, monkeypatch):
     monkeypatch.setenv("MENHIR_TURN_HOOK_LOG", str(tmp_path / "hook.log"))
     hook = _load_hook()

@@ -10,12 +10,17 @@ Implementation record:
 - PR #7's first hosted run found and drove repair of two integration omissions: feature-taxonomy
   classification for both new MCP tools, and retirement of the superseded WorkArtifact UUID plain
   index before creation of the uniqueness constraint.
-- Offline verification after repair: 5,926 passed, 197 skipped; the sole failure is the pre-existing
-  worktree-name assertion that accepts only directories named `menhir` or `menhir-frontier`. The 12
-  focused taxonomy/schema tests pass.
-- Throwaway-Neo4j acceptance after repair: all 21 phase-one bootstrap and reconciliation live tests
-  passed, including a second idempotent bootstrap. The complete graph-backed CI selection also
-  passed: 162 passed, 21 expected service-dependent skips.
+- Phase 4/5 readiness remediation is committed on `agent/menhir-phase45-remediation` as `7a19426`,
+  `59a45c7`, and `0779c15`: acknowledged source-less conflicts can advance the cursor, Hook Center
+  carries stable repository identity across worktrees, and graph-wide preparation is separately
+  count-gated with duplicate preflight and verified constraints.
+- Offline verification after remediation: 5,947 passed, 197 skipped. The former worktree-name
+  assertion now checks the actual repository-root relationship instead of allowing two directory
+  names.
+- Throwaway-Neo4j acceptance after remediation: all 21 phase-one bootstrap and reconciliation live
+  tests passed, including source-v2 backfill and constraint activation. The production preflight was
+  read-only and measured 112 global sources, 112 missing UUIDs/locator keys, and zero duplicate
+  artifact UUID, source UUID, raw locator, materialized locator, or cursor-repository groups.
 - No production graph repair or corpus-wide legacy frontmatter mutation has run. Those remain the
   Phase 5 and Phase 6 approval gates below.
 
@@ -361,10 +366,14 @@ Persist one `ArtifactReconciliationCursor` per repository in the graph. Audit re
 writing and uses it as the Git evidence base unless an operator supplies `--from-commit`; that flag
 overrides only the evidence range and does not replace the stored cursor. Apply re-reads the cursor
 before any mutation and refuses a stale plan if it changed after audit. It advances the cursor to
-the observed full commit only after a run with no conflicts, no skipped writes, and an available
-observed commit. The compare-and-set update prevents concurrent reconcilers from silently moving the
-same cursor. Both the stored cursor and selected evidence base are visible in the ledger and bound
-into its digest.
+the observed full commit only after a run with no skipped writes, no source-identity conflict, and
+an available observed commit. A source-less `UNCLASSIFIED_NEW_SOURCE` conflict may remain after
+owner review without blocking the cursor: it cannot alias, relocate, or overwrite an existing
+source, and the full corpus scan will continue to report it until metadata is added. Every other
+conflict class blocks cursor advancement. The apply result distinguishes
+`advanced_with_acknowledged_conflicts` from an ordinary clean advance. The compare-and-set update
+prevents concurrent reconcilers from silently moving the same cursor. Both the stored cursor and
+selected evidence base are visible in the ledger and bound into its digest.
 
 Runtime mode is configured explicitly:
 
@@ -380,6 +389,13 @@ it is an accelerator, not the only detector.
 Repository identity is always explicit. A worktree basename is not a stable graph key. Apply refuses
 to register a corpus when the named repository has zero sources unless an operator supplies
 `--allow-new-repository`; startup `safe_apply` never supplies that override.
+
+Hook Center carries a separate `repository` field for artifact reconciliation. The hook resolves it
+from repository-local Git config (`menhir.artifactRepository`) or
+`MENHIR_ARTIFACT_RECONCILE_REPOSITORY`; it never derives artifact identity from `project_root` or a
+worktree basename. The existing `project` field remains the independent structure-graph scope. If
+the explicit artifact repository key is absent, structural dirty marking still runs and the
+artifact leg returns a visible `repository_identity_missing` refusal without writing.
 
 A missing cursor falls back to full audit. If Git cannot compare the stored cursor to the current
 checkout, the read-only ledger is marked `evidence_base_valid: false` and apply refuses before any
@@ -594,7 +610,9 @@ delegate to audit/reconcile so there is one corpus collector.
 
 Acceptance:
 
-- The command reports the measured 4 exact / 24 missing current-plan split before repair.
+- The command preserves the original measured 4 exact / 24 missing current-plan baseline in its
+  historical evidence; the Phase 5 execution baseline is 4 exact / 25 missing after the subsequent
+  corpus/archive pass added one current plan.
 - Commit `f441a23` yields the 13 graph-backed deterministic relocations already observed.
 - Audit mode produces no graph diff.
 - Two identical audits over unchanged state produce byte-identical action ordering and digest.
@@ -626,7 +644,8 @@ Acceptance:
 - Apply with an omitted repository identity writes nothing, and first registration requires an
   explicit `--allow-new-repository` override.
 - Safe actions apply independently of conflicts.
-- Re-running audit immediately after apply reports no repeat actions.
+- Re-running audit immediately after apply reports no repeat safe mutation actions. Reviewed
+  source-less conflicts may repeat until their documents receive explicit metadata.
 - MCP and CLI use the same repository checks; neither has a weaker collision path.
 
 ### Phase 4 — Hook Center and recovery integration
@@ -642,29 +661,46 @@ Acceptance:
 - Hook reconciliation failure is visible and does not block the coding tool or structural stale
   detection.
 - Default runtime mode is audit-only.
+- A hook event emitted from a worktree uses the configured canonical repository identity, not the
+  worktree directory name.
+- Source-less `UNCLASSIFIED_NEW_SOURCE` conflicts remain visible but do not prevent the persisted
+  cursor from reaching the reviewed commit; all source-identity conflicts still block it.
 
 ### Phase 5 — one-time Menhir graph repair
 
 This is an operational step, not part of a code commit that silently mutates the live graph.
 
-1. Export a graph backup and capture the pre-repair artifact/source inventory.
-2. Run the new auditor against the committed Menhir tree.
-3. Review the ledger and approve its digest.
-4. Relocate the 13 `f441a23` sources with exact Git evidence.
-5. Resolve older stale locators through declared UUID, Git history, or unique hash. Leave every
+1. Stop Menhir and its watchdog, export a restorable graph backup, independently verify its record
+   counts, and capture the pre-repair artifact/source inventory. Restart only after the backup is
+   verified.
+2. Run the explicit preparation operation. It must preflight duplicate artifact UUIDs, source UUIDs,
+   raw and materialized locators, and cursor repositories; require the owner-approved expected global source count;
+   backfill every existing source; install all four reconciliation constraints; and verify their
+   backing indexes are `ONLINE`. Preparation currently spans 112 sources (54 Menhir and 58 other
+   repositories), so this global scope is a separate owner gate rather than an implication of the
+   Menhir-only repair digest.
+3. Run the auditor against the committed Menhir tree with `f441a23~1` as the reviewed Git evidence
+   base.
+4. Review the complete ledger and approve its digest and exact action counts.
+5. Relocate the 13 `f441a23` sources with exact Git evidence.
+6. Resolve older stale locators through declared UUID, Git history, or unique hash. Leave every
    ambiguous source unresolved.
-6. Register the 24 missing current plan records and any other unambiguous typed corpus entries.
-7. Do not derive terminal lifecycle states from archive/reference paths. Produce a separate list of
+7. Register the 25 missing current plan records and any other unambiguous typed corpus entries.
+8. Do not derive terminal lifecycle states from archive/reference paths. Produce a separate list of
    lane/status contradictions for owner disposition.
-8. Re-run audit and save the zero-repeat-action report.
+9. Re-run audit and save the zero-repeat-action report. Expected source-less reference conflicts may
+   remain, but no safe action may repeat and the cursor must equal the observed commit.
 
 Repair acceptance:
 
-- All 28 current plan records have exactly one resolvable source locator.
+- All 29 current plan records have exactly one resolvable source locator.
 - No two artifact sources claim one current locator.
 - Existing artifact UUIDs are unchanged.
 - Every unresolved source has an explicit reason.
 - A second apply performs zero mutations.
+- All four reconciliation constraints are present with `ONLINE` backing indexes.
+- The persisted Menhir reconciliation cursor equals the audited observed commit even when the only
+  remaining conflicts are reviewed source-less `UNCLASSIFIED_NEW_SOURCE` entries.
 - The graph backup and before/after counts are recorded in the operator handoff.
 
 ### Phase 6 — legacy metadata backfill

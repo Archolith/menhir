@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-08-11 - Harden WorkArtifact Phase 4/5 execution gates
+
+- Separated Hook Center's structural `project` from its stable artifact `repository`; file-event
+  producers now use `MENHIR_ARTIFACT_RECONCILE_REPOSITORY` or repository-local Git config
+  `menhir.artifactRepository`, so worktree directory names cannot fork or disable source identity.
+- Allowed the persisted reconciliation cursor to advance past only reviewed, source-less
+  `UNCLASSIFIED_NEW_SOURCE` conflicts. Every identity-bearing conflict, other conflict class, and
+  skipped write remains a cursor barrier.
+- Added the separately gated `menhir artifacts prepare` operation. It is read-only by default and
+  requires `--apply --expected-source-count`; apply preflights global duplicate identities and
+  locators, backfills source-v2 identifiers/keys, activates four uniqueness constraints, and verifies
+  their backing indexes are `ONLINE`.
+- Kept unresolved v2 sources unresolved and unkeyed across preparation reruns. Updated the Phase 5
+  baseline to 29 current plans / 25 missing registrations and made the 112-source graph-wide
+  preparation scope explicit.
+- Verification: 5,947 offline tests passed with 197 expected online skips; all 21 isolated-Neo4j
+  bootstrap/reconciliation tests passed. Production checks remained read-only: 112 sources require
+  preparation and every duplicate preflight count is zero.
+
 ## 2026-08-11 - Close WorkArtifact reconciliation implementation review
 
 - Merged phases 0–4 and their five review remediations through PR #6 (`93ce119`): rename evidence
