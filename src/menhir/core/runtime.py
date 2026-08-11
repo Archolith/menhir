@@ -94,13 +94,17 @@ async def _run_startup_artifact_reconcile(built: object, settings: object) -> No
 
     counts = report.get("counts") or {}
     by_kind = counts.get("by_kind") or {}
-    drift = sum(v for k, v in by_kind.items() if k != "NOOP")
     logger.info(
         "Artifact corpus audit (%s): %s entries, %s sources, actions=%s, digest=%s",
         mode, counts.get("entries"), counts.get("sources"), by_kind,
         report.get("plan_digest"),
     )
-    if mode != "safe_apply" or drift == 0:
+    if report.get("evidence_base_valid") is False:
+        logger.warning(
+            "Artifact corpus audit selected a Git evidence base that cannot be "
+            "compared with HEAD; apply will refuse until --from-commit selects a valid base"
+        )
+    if mode != "safe_apply":
         return
 
     # safe_apply re-derives the plan inside apply() and gates on the digest we

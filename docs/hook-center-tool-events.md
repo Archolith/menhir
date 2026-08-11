@@ -172,6 +172,15 @@ shell `mv`, `apply_patch`, an IDE refactor, a branch switch, or an external edit
 without emitting an event menhir can read. Those are caught by the Git/startup recovery audit
 (`MENHIR_ARTIFACT_RECONCILE_MODE`) or by `menhir artifacts audit` run by hand.
 
+The recovery audit reads a graph-backed cursor keyed by the explicit repository identity and uses
+that commit as the default Git rename interval. Audit itself never advances the cursor. A clean
+`safe_apply` or operator apply advances it with compare-and-set; conflicts, skipped writes, missing
+Git HEAD, or a cursor changed by another process retain it. `--from-commit` is a visible,
+digest-bound evidence override, not a cursor mutation.
+If Git cannot compare the selected base with HEAD, audit reports the invalid evidence base and
+`safe_apply` refuses before artifact writes. This prevents a moved-and-edited file from becoming an
+unresolved old source plus a newly registered duplicate.
+
 ### GET /api/tool-events/dirty
 
 Returns `{dirty_files: [...], stale_anchors: [...], counts: {dirty_files: N, stale_anchors: M}}`.

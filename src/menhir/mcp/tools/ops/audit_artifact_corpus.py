@@ -26,9 +26,8 @@ async def audit_artifact_corpus(
         repo_path: Absolute path to the repository working tree to audit.
         repository: Repository name recorded on sources. Required because a
                     worktree directory name is not repository identity.
-        from_commit: Last reconciled commit. Supplying it enables Git rename
-                     detection over the interval; without it, moves are only
-                     found by declared UUID or unique content hash.
+        from_commit: Optional override for the persisted reconciliation cursor.
+                     It changes only the Git evidence interval.
 
     Returns:
         A parity summary, the plan digest, and any conflicts or lane/lifecycle
@@ -62,6 +61,9 @@ class AuditArtifactCorpusTool(BaseTextTool):
             f"  entries {counts.get('entries', 0)} / sources {counts.get('sources', 0)}",
             f"  actions {counts.get('by_kind', {})}",
             f"  by lane {counts.get('entries_by_lane', {})}",
+            f"  stored cursor {str(result.get('cursor_commit') or 'none')[:12]}",
+            f"  evidence base {str(result.get('evidence_from_commit') or 'full audit')[:12]}",
+            f"  evidence valid {result.get('evidence_base_valid')}",
             f"  plan digest {result.get('plan_digest')}",
         ]
 

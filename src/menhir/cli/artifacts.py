@@ -105,7 +105,7 @@ def audit(
         str, typer.Option(help="Repository name recorded on sources (required).")
     ],
     repo: Annotated[str, typer.Option(help="Repository root to audit.")] = ".",
-    from_commit: Annotated[str, typer.Option(help="Last reconciled commit; enables rename detection.")] = "",
+    from_commit: Annotated[str, typer.Option(help="Override the persisted cursor for Git evidence only.")] = "",
     as_json: Annotated[bool, typer.Option("--json", help="Emit the full ledger as JSON.")] = False,
 ) -> None:
     """Report graph/filesystem parity. Read-only: this command never writes."""
@@ -130,6 +130,9 @@ def _print_report(report: Any) -> None:
     counts = report.counts
     print(f"repository      : {report.repository}")
     print(f"observed commit : {(report.observed_commit or 'unknown')[:12]}")
+    print(f"stored cursor   : {(report.cursor_commit or 'none')[:12]}")
+    print(f"evidence base   : {(report.evidence_from_commit or 'full audit')[:12]}")
+    print(f"evidence valid  : {report.evidence_base_valid}")
     print(f"plan digest     : {report.plan_digest}")
     print(f"corpus entries  : {counts.get('entries', 0)}")
     print(f"graph sources   : {counts.get('sources', 0)}")
@@ -162,7 +165,7 @@ def reconcile(
         str, typer.Option(help="Repository name recorded on sources (required).")
     ],
     repo: Annotated[str, typer.Option(help="Repository root to reconcile.")] = ".",
-    from_commit: Annotated[str, typer.Option(help="Last reconciled commit; enables rename detection.")] = "",
+    from_commit: Annotated[str, typer.Option(help="Override the persisted cursor for Git evidence only.")] = "",
     apply: Annotated[bool, typer.Option("--apply", help="Write. Requires --plan-digest.")] = False,
     plan_digest: Annotated[str, typer.Option(help="Digest of the approved audit ledger.")] = "",
     prepare: Annotated[bool, typer.Option("--prepare", help="Backfill source UUIDs and locator keys first.")] = False,
@@ -230,6 +233,8 @@ def reconcile(
             print(f"applied  : {len(result.applied)}")
             print(f"skipped  : {len(result.skipped)}")
             print(f"conflicts: {len(result.conflicted)}")
+            cursor = "advanced" if result.cursor_advanced else result.cursor_reason
+            print(f"cursor   : {cursor or 'retained'}")
             for record in result.skipped[:20]:
                 outcome = record.get("outcome", {})
                 print(f"  skipped {record.get('kind')} {record.get('path')}: "

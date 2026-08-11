@@ -43,13 +43,24 @@ from menhir.infrastructure.artifact_corpus_scanner import (
 class SourceRepository(Protocol):
     """The repository surface reconciliation needs. Kept narrow on purpose.
 
-    Audit only ever sees ``list_artifact_source_snapshots``; a service that
-    cannot reach a write method cannot accidentally perform one.
+    Audit only calls the two read methods. Cursor advancement remains an
+    explicit apply-only operation.
     """
 
     def list_artifact_source_snapshots(
         self, *, repository: str | None = None
     ) -> list[ArtifactSourceSnapshot]: ...
+
+    def get_artifact_reconciliation_cursor(self, *, repository: str) -> str | None: ...
+
+    def advance_artifact_reconciliation_cursor(
+        self,
+        *,
+        repository: str,
+        expected_commit: str | None,
+        observed_commit: str,
+        observed_at: str,
+    ) -> dict[str, Any]: ...
 
 
 @dataclass(frozen=True)
@@ -96,6 +107,8 @@ class ApplyResult:
     skipped: list[dict[str, Any]] = field(default_factory=list)
     conflicted: list[dict[str, Any]] = field(default_factory=list)
     refused_reason: str | None = None
+    cursor_advanced: bool = False
+    cursor_reason: str | None = None
 
     @property
     def ok(self) -> bool:
@@ -107,6 +120,8 @@ class ApplyResult:
             "plan_digest": self.plan_digest,
             "ok": self.ok,
             "refused_reason": self.refused_reason,
+            "cursor_advanced": self.cursor_advanced,
+            "cursor_reason": self.cursor_reason,
             "counts": {
                 "applied": len(self.applied),
                 "skipped": len(self.skipped),
@@ -143,16 +158,28 @@ class ArtifactReconciliationService:
         """
         root = Path(repo_root).resolve()
         name = self._require_repository(repository)
-        evidence = git if git is not None else collect_git_evidence(root, from_commit=from_commit)
+        cursor_commit = self._repo.get_artifact_reconciliation_cursor(repository=name)
+        evidence_from_commit = from_commit or cursor_commit
+        evidence = (
+            git
+            if git is not None
+            else collect_git_evidence(root, from_commit=evidence_from_commit)
+        )
         entries = scan_corpus(root, repository=name, git=evidence)
         snapshots = self._repo.list_artifact_source_snapshots(repository=name)
         renames = tuple(evidence.renames) + tuple(extra_renames)
+        evidence_base_valid = (
+            evidence_from_commit is None or evidence.rename_evidence_available
+        )
         return plan_reconciliation(
             repository=name,
             entries=entries,
             snapshots=snapshots,
             renames=renames,
             observed_commit=evidence.observed_commit,
+            cursor_commit=cursor_commit,
+            evidence_from_commit=evidence_from_commit,
+            evidence_base_valid=evidence_base_valid,
         )
 
     def validate(
@@ -262,6 +289,19 @@ class ArtifactReconciliationService:
             result.refused_reason = "plan_digest_mismatch"
             return result
 
+        current_cursor = self._repo.get_artifact_reconciliation_cursor(
+            repository=report.repository
+        )
+        if current_cursor != report.cursor_commit:
+            result.refused_reason = "reconciliation_cursor_changed"
+            result.cursor_reason = "stale"
+            return result
+
+        if not report.evidence_base_valid:
+            result.refused_reason = "git_evidence_base_unavailable"
+            result.cursor_reason = "invalid_evidence_base"
+            return result
+
         registrations = [
             action for action in report.actions
             if action.kind == ActionKind.REGISTER_ARTIFACT
@@ -289,6 +329,27 @@ class ArtifactReconciliationService:
                 result.applied.append(record)
             else:
                 result.skipped.append(record)
+
+        if result.conflicted:
+            result.cursor_reason = "conflicts_present"
+        elif result.skipped:
+            result.cursor_reason = "writes_skipped"
+        elif not report.observed_commit:
+            result.cursor_reason = "observed_commit_unavailable"
+        elif report.cursor_commit == report.observed_commit:
+            result.cursor_advanced = True
+            result.cursor_reason = "already_current"
+        else:
+            advanced = self._repo.advance_artifact_reconciliation_cursor(
+                repository=report.repository,
+                expected_commit=report.cursor_commit,
+                observed_commit=report.observed_commit,
+                observed_at=now,
+            )
+            result.cursor_advanced = bool(advanced.get("advanced"))
+            if not result.cursor_advanced:
+                result.refused_reason = "reconciliation_cursor_update_failed"
+                result.cursor_reason = "compare_and_set_failed"
         return result
 
     @staticmethod

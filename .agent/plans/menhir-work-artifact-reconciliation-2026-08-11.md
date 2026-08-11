@@ -265,7 +265,8 @@ counts by lane/type/status, and a deterministic `plan_digest`. It performs zero 
 
 The digest covers:
 
-- repository identity and observed commit;
+- repository identity, observed commit, persisted reconciliation cursor, and the selected Git
+  evidence base;
 - every source locator and stored hash read from the graph;
 - every discovered path, size, hash, declared UUID/type/status, and lane;
 - every proposed action in stable order.
@@ -320,6 +321,15 @@ Hook coverage will never be complete. Add a repository-local recovery pass that 
 reconciled commit with the current repository state using Git rename detection (`--name-status -M`)
 and then runs the full corpus audit.
 
+Persist one `ArtifactReconciliationCursor` per repository in the graph. Audit reads it without
+writing and uses it as the Git evidence base unless an operator supplies `--from-commit`; that flag
+overrides only the evidence range and does not replace the stored cursor. Apply re-reads the cursor
+before any mutation and refuses a stale plan if it changed after audit. It advances the cursor to
+the observed full commit only after a run with no conflicts, no skipped writes, and an available
+observed commit. The compare-and-set update prevents concurrent reconcilers from silently moving the
+same cursor. Both the stored cursor and selected evidence base are visible in the ledger and bound
+into its digest.
+
 Runtime mode is configured explicitly:
 
 ```text
@@ -335,8 +345,10 @@ Repository identity is always explicit. A worktree basename is not a stable grap
 to register a corpus when the named repository has zero sources unless an operator supplies
 `--allow-new-repository`; startup `safe_apply` never supplies that override.
 
-Branch checkout and a missing commit cursor fall back to full audit. They do not assume every
-delete/create pair is a rename.
+A missing cursor falls back to full audit. If Git cannot compare the stored cursor to the current
+checkout, the read-only ledger is marked `evidence_base_valid: false` and apply refuses before any
+artifact write. The operator must inspect the branch relationship and provide a valid
+`--from-commit`; an empty rename list is never allowed to masquerade as successful Git evidence.
 
 ### Manual MCP escape hatch
 

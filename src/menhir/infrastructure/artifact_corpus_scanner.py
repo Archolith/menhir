@@ -48,6 +48,7 @@ class GitEvidence:
     blob_oids: dict[str, str] = field(default_factory=dict)
     renames: tuple[GitRename, ...] = ()
     available: bool = False
+    rename_evidence_available: bool = False
 
 
 def _run_git(repo: Path, args: list[str]) -> str | None:
@@ -68,9 +69,11 @@ def _run_git(repo: Path, args: list[str]) -> str | None:
 def collect_git_evidence(repo: Path, *, from_commit: str | None = None) -> GitEvidence:
     """Observed commit, tracked blob OIDs, and renames since ``from_commit``.
 
-    ``from_commit`` is the last reconciled cursor. Without one there is no rename
-    window, and the caller falls back to the full corpus audit rather than
-    assuming every delete/create pair in the interval was a move.
+    ``from_commit`` is the selected evidence base (normally the persisted
+    cursor). Without one there is no rename window, and the caller falls back to
+    the full corpus audit rather than assuming every delete/create pair in the
+    interval was a move. A failed diff is represented separately from a valid
+    diff containing zero renames.
     """
     head = _run_git(repo, ["rev-parse", "HEAD"])
     if head is None:
@@ -89,17 +92,21 @@ def collect_git_evidence(repo: Path, *, from_commit: str | None = None) -> GitEv
             blob_oids[path.strip()] = parts[1]
 
     renames: list[GitRename] = []
+    rename_evidence_available = from_commit is None
     if from_commit:
         diff = _run_git(
             repo, ["diff", "--name-status", "-M", f"{from_commit}..HEAD"]
         )
-        renames.extend(parse_rename_status(diff or ""))
+        if diff is not None:
+            rename_evidence_available = True
+            renames.extend(parse_rename_status(diff))
 
     return GitEvidence(
         observed_commit=observed_commit,
         blob_oids=blob_oids,
         renames=tuple(renames),
         available=True,
+        rename_evidence_available=rename_evidence_available,
     )
 
 

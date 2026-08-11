@@ -603,12 +603,13 @@ Report whether a repository's work-artifact corpus matches the graph. Read-only.
 - **`repo_path`** (str): Absolute path to the working tree to audit.
 - **`repository`** (str, required): Repository name recorded on sources. It is never
   inferred from the worktree directory name.
-- **`from_commit`** (str, optional): Last reconciled commit. Supplying it enables Git rename
-  detection over the interval; without it, moves are only found by declared UUID or unique
-  content hash.
-- Returns parity counts, the plan digest, and bounded lists of conflicts and lane/lifecycle
-  contradictions. The full action ledger stays in CLI JSON output — a chat transport is the
-  wrong place to send several hundred action records.
+- **`from_commit`** (str, optional): Override the persisted reconciliation cursor for this audit's
+  Git evidence interval. It does not replace or advance the stored cursor.
+- Returns the stored cursor, selected evidence base, parity counts, plan digest, and bounded lists
+  of conflicts and lane/lifecycle contradictions. The full action ledger stays in CLI JSON output
+  — a chat transport is the wrong place to send several hundred action records.
+- `evidence_base_valid: false` means Git could not compare that commit with the checkout. Audit still
+  writes nothing, but apply refuses until a valid `--from-commit` is supplied.
 - Writes nothing. Applying anything requires the digest and an operator running
   `menhir artifacts reconcile --repository <name> --apply`.
 

@@ -114,6 +114,9 @@ def _report(
     print(f"  proposed        : {counts.get('by_kind', {})}")
     print(f"  match basis     : {counts.get('by_basis', {})}")
     print(f"  conflicts       : {counts.get('by_conflict', {})}")
+    print(f"  stored cursor   : {report.cursor_commit or 'none'}")
+    print(f"  evidence base   : {report.evidence_from_commit or 'full audit'}")
+    print(f"  evidence valid  : {report.evidence_base_valid}")
     print(f"  plan digest     : {report.plan_digest}")
 
     if not apply:

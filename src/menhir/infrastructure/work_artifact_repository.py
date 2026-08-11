@@ -44,6 +44,7 @@ from menhir.domain.work_artifact import (
     REFERENCES_TODO_EDGE,
     SUPERSEDES_EDGE,
     TERMINAL_ANY,
+    ArtifactMedium,
     ArtifactSourceSpec,
     ArtifactStatus,
     DeclarationKind,
@@ -277,6 +278,77 @@ class WorkArtifactRepository:
             for row in rows
             if row.get("artifact_uuid")
         ]
+
+    def get_artifact_reconciliation_cursor(self, *, repository: str) -> str | None:
+        """Return the last commit cleanly reconciled for one repository."""
+        rows = self.neo4j.execute(
+            """
+            MATCH (c:ArtifactReconciliationCursor {repository: $repository})
+            RETURN c.commit AS commit
+            """,
+            {"repository": repository},
+        )
+        return rows[0].get("commit") if rows else None
+
+    def advance_artifact_reconciliation_cursor(
+        self,
+        *,
+        repository: str,
+        expected_commit: str | None,
+        observed_commit: str,
+        observed_at: str,
+    ) -> dict[str, Any]:
+        """Compare-and-set a repository cursor after a clean reconciliation.
+
+        The conditional CREATE/SET is one Cypher statement. A missing cursor is
+        created only when the caller also observed it missing; an existing
+        cursor moves only when its commit still equals the audit premise.
+        """
+        params = {
+            "repository": repository,
+            "expected_commit": expected_commit,
+            "observed_commit": observed_commit,
+            "observed_at": observed_at,
+        }
+        if expected_commit is None:
+            # MERGE plus a private token makes first creation atomic under the
+            # repository uniqueness constraint. A concurrent loser sees the
+            # winner's token/commit and reports advanced=false.
+            params["cas_token"] = str(uuid4())
+            rows = self.neo4j.execute(
+                """
+                MERGE (c:ArtifactReconciliationCursor {repository: $repository})
+                ON CREATE SET c.commit = $observed_commit,
+                              c.created_at = $observed_at,
+                              c.updated_at = $observed_at,
+                              c._cas_token = $cas_token
+                WITH c, c._cas_token = $cas_token AS advanced
+                FOREACH (_ IN CASE WHEN advanced THEN [1] ELSE [] END |
+                    REMOVE c._cas_token
+                )
+                RETURN advanced, c.commit AS current_commit
+                """,
+                params,
+            )
+        else:
+            rows = self.neo4j.execute(
+                """
+                MATCH (c:ArtifactReconciliationCursor {
+                    repository: $repository,
+                    commit: $expected_commit
+                })
+                SET c.commit = $observed_commit,
+                    c.updated_at = $observed_at
+                RETURN true AS advanced, c.commit AS current_commit
+                """,
+                params,
+            )
+        if not rows:
+            return {"advanced": False, "current_commit": None}
+        return {
+            "advanced": bool(rows[0].get("advanced")),
+            "current_commit": rows[0].get("current_commit"),
+        }
 
     def backfill_source_uuids(self) -> int:
         """Give every existing embodiment a stable handle.

@@ -126,6 +126,8 @@ def _node_index_queries() -> list[str]:
             "FOR (n:ArtifactSource) REQUIRE n.source_uuid IS UNIQUE",
             "CREATE CONSTRAINT artifact_source_locator_unique IF NOT EXISTS "
             "FOR (n:ArtifactSource) REQUIRE n.current_locator_key IS UNIQUE",
+            "CREATE CONSTRAINT artifact_reconcile_cursor_repository_unique IF NOT EXISTS "
+            "FOR (n:ArtifactReconciliationCursor) REQUIRE n.repository IS UNIQUE",
             "CREATE INDEX artifact_source_lane_idx IF NOT EXISTS FOR (n:ArtifactSource) ON (n.corpus_lane)",
             "CREATE INDEX artifact_source_resolution_idx IF NOT EXISTS "
             "FOR (n:ArtifactSource) ON (n.resolution_status)",

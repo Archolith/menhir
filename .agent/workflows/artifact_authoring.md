@@ -10,6 +10,20 @@ Validate before you commit:
 menhir artifacts validate . --repository menhir
 ```
 
+After a commit that creates, moves, or edits tracked artifacts, the normal audit uses Menhir's
+persisted repository cursor automatically:
+
+```bash
+menhir artifacts audit --repo . --repository menhir
+```
+
+Use `--from-commit <sha>` only to inspect a deliberate alternate Git interval. It does not update
+the stored cursor. Cursor advancement happens only through a digest-approved clean reconcile (or
+configured startup `safe_apply`), never through authoring or audit.
+If audit reports `evidence valid: False`, stop: the stored commit is missing or cannot be compared
+with this checkout. Select and review a valid `--from-commit` before reconcile; do not treat an empty
+rename list as a clean interval.
+
 ## Why this exists
 
 Menhir records each tracked document as a `WorkArtifact` with a stable `artifact_uuid`, and records

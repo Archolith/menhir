@@ -480,6 +480,34 @@ def test_the_digest_covers_premises_not_only_conclusions() -> None:
 
 
 @pytest.mark.unit
+def test_the_digest_covers_cursor_and_selected_evidence_base() -> None:
+    entries = [entry(".agent/plans/a.md")]
+    common = {
+        "repository": REPO,
+        "observed_commit": "head",
+        "entries": entries,
+        "snapshots": [],
+        "actions": [],
+    }
+    stored = compute_plan_digest(
+        **common, cursor_commit="stored", evidence_from_commit="stored"
+    )
+    override = compute_plan_digest(
+        **common, cursor_commit="stored", evidence_from_commit="override"
+    )
+    moved = compute_plan_digest(
+        **common, cursor_commit="moved", evidence_from_commit="stored"
+    )
+    invalid = compute_plan_digest(
+        **common,
+        cursor_commit="stored",
+        evidence_from_commit="stored",
+        evidence_base_valid=False,
+    )
+    assert len({stored, override, moved, invalid}) == 4
+
+
+@pytest.mark.unit
 def test_an_unchanged_corpus_proposes_no_safe_actions() -> None:
     """Idempotence: the second run over settled state has nothing to do."""
     entries = [entry(".agent/plans/a.md"), entry(".agent/plans/backlog/b.md",

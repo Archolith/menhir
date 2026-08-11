@@ -1392,6 +1392,9 @@ class MemoryGraphAdapter:
         return {
             "repository": report.repository,
             "observed_commit": report.observed_commit,
+            "cursor_commit": report.cursor_commit,
+            "evidence_from_commit": report.evidence_from_commit,
+            "evidence_base_valid": report.evidence_base_valid,
             "plan_digest": report.plan_digest,
             "counts": dict(report.counts),
             "conflicts": [c.as_dict() for c in conflicts[:limit]],

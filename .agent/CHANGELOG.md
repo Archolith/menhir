@@ -22,6 +22,12 @@
 - Graph-backed reconciliation now requires an explicit repository identity. Startup uses
   `MENHIR_ARTIFACT_RECONCILE_REPOSITORY`, and first registration requires the CLI-only
   `--allow-new-repository` override so a differently named worktree cannot fork the corpus.
+- Added one persisted `ArtifactReconciliationCursor` per repository. Audit uses it automatically
+  for Git evidence while remaining read-only; reports and plan digests expose both the stored cursor
+  and an optional `--from-commit` evidence override. Apply rejects a changed cursor and advances it
+  with compare-and-set only after a conflict-free, skip-free run with an observed commit.
+- A missing or branch-incomparable Git evidence base is explicit in the digest-bound ledger and
+  refuses apply before writes, preventing an empty failed diff from masquerading as “no renames.”
 - `.agent/workflows/artifact_authoring.md` is the canonical authoring contract; README, file-index,
   maintenance, feature_planning, and the plan/backlog/reference indexes route to it.
 - Phases 5 (live graph repair) and 6 (frontmatter backfill) are deliberately NOT done: both require

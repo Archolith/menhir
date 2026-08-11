@@ -611,6 +611,15 @@ the ledger they approved, so an approved plan cannot be applied to a state it wa
 against. Detectors may relocate and refresh sources; lifecycle, supersession, retyping and
 relationships stay behind explicit MCP operations.
 
+Each graph repository has one `ArtifactReconciliationCursor` containing the last commit reached by
+a clean apply. Audit uses that cursor as its default Git rename-evidence base and exposes both the
+stored cursor and selected base in the digest-bound report. `--from-commit` overrides evidence only.
+Apply compares the stored cursor again before writing and advances it with compare-and-set only when
+there are no conflicts or skipped writes and Git supplied an observed commit.
+If Git cannot evaluate the selected cursor-to-HEAD interval, audit marks the evidence base invalid
+and apply refuses before artifact mutation; zero rename records are not treated as proof that no
+rename occurred.
+
 Operational sidecar storage:
 
 - MCP/server telemetry is persisted in SQLite at `<workspace_root>/.agent/mcp_telemetry.db` by default (resolved by `infrastructure/paths.py` from the workspace root, not a hardcoded project path)

@@ -623,6 +623,9 @@ class LaneContradiction:
 class ReconciliationReport:
     repository: str
     observed_commit: str | None
+    cursor_commit: str | None
+    evidence_from_commit: str | None
+    evidence_base_valid: bool
     actions: tuple[ReconciliationAction, ...]
     contradictions: tuple[LaneContradiction, ...]
     plan_digest: str
@@ -640,6 +643,9 @@ class ReconciliationReport:
         return {
             "repository": self.repository,
             "observed_commit": self.observed_commit,
+            "cursor_commit": self.cursor_commit,
+            "evidence_from_commit": self.evidence_from_commit,
+            "evidence_base_valid": self.evidence_base_valid,
             "plan_digest": self.plan_digest,
             "counts": dict(self.counts),
             "actions": [a.as_dict() for a in self.actions],
@@ -735,6 +741,9 @@ def plan_reconciliation(
     snapshots: Sequence[ArtifactSourceSnapshot],
     renames: Sequence[GitRename] = (),
     observed_commit: str | None = None,
+    cursor_commit: str | None = None,
+    evidence_from_commit: str | None = None,
+    evidence_base_valid: bool = True,
 ) -> ReconciliationReport:
     """Decide what each source record should become. Pure; no I/O.
 
@@ -767,6 +776,9 @@ def plan_reconciliation(
     digest = compute_plan_digest(
         repository=repository,
         observed_commit=observed_commit,
+        cursor_commit=cursor_commit,
+        evidence_from_commit=evidence_from_commit,
+        evidence_base_valid=evidence_base_valid,
         entries=scoped_entries,
         snapshots=scoped_snapshots,
         actions=actions,
@@ -774,6 +786,9 @@ def plan_reconciliation(
     return ReconciliationReport(
         repository=repository,
         observed_commit=observed_commit,
+        cursor_commit=cursor_commit,
+        evidence_from_commit=evidence_from_commit,
+        evidence_base_valid=evidence_base_valid,
         actions=actions,
         contradictions=contradictions,
         plan_digest=digest,
@@ -1368,6 +1383,9 @@ def compute_plan_digest(
     *,
     repository: str,
     observed_commit: str | None,
+    cursor_commit: str | None = None,
+    evidence_from_commit: str | None = None,
+    evidence_base_valid: bool = True,
     entries: Iterable[CorpusEntry],
     snapshots: Iterable[ArtifactSourceSnapshot],
     actions: Iterable[ReconciliationAction],
@@ -1382,6 +1400,9 @@ def compute_plan_digest(
     payload = {
         "repository": repository,
         "observed_commit": observed_commit,
+        "cursor_commit": cursor_commit,
+        "evidence_from_commit": evidence_from_commit,
+        "evidence_base_valid": evidence_base_valid,
         "schema": ARTIFACT_SOURCE_SCHEMA_VERSION,
         "sources": sorted(
             [

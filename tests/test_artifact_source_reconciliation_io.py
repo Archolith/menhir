@@ -216,6 +216,45 @@ def test_legacy_versions_are_relabelled_never_reinterpreted() -> None:
     assert params["key"] == "menhir|markdown|a.md"
 
 
+@pytest.mark.unit
+def test_cursor_read_is_repository_scoped() -> None:
+    neo = _StubNeo4j(responses=[[{"commit": "abc123"}]])
+    cursor = WorkArtifactRepository(neo).get_artifact_reconciliation_cursor(
+        repository="menhir"
+    )
+    assert cursor == "abc123"
+    assert neo.calls[0]["params"] == {"repository": "menhir"}
+
+
+@pytest.mark.unit
+def test_first_cursor_advance_uses_atomic_merge() -> None:
+    neo = _StubNeo4j(responses=[[{"advanced": True, "current_commit": "head"}]])
+    result = WorkArtifactRepository(neo).advance_artifact_reconciliation_cursor(
+        repository="menhir",
+        expected_commit=None,
+        observed_commit="head",
+        observed_at="2026-08-11T00:00:00+00:00",
+    )
+    assert result == {"advanced": True, "current_commit": "head"}
+    assert "MERGE (c:ArtifactReconciliationCursor" in neo.calls[0]["query"]
+    assert neo.calls[0]["params"]["cas_token"]
+
+
+@pytest.mark.unit
+def test_existing_cursor_advance_is_compare_and_set() -> None:
+    neo = _StubNeo4j(responses=[])
+    result = WorkArtifactRepository(neo).advance_artifact_reconciliation_cursor(
+        repository="menhir",
+        expected_commit="stale",
+        observed_commit="head",
+        observed_at="2026-08-11T00:00:00+00:00",
+    )
+    assert result == {"advanced": False, "current_commit": None}
+    query = neo.calls[0]["query"]
+    assert "commit: $expected_commit" in query
+    assert "MERGE" not in query
+
+
 # ---------------------------------------------------------------------------
 # Scanner
 # ---------------------------------------------------------------------------
@@ -302,9 +341,21 @@ def test_index_links_are_read_from_the_directory_readme(tmp_path: Path) -> None:
 class _RecordingRepo:
     """Records every call so a test can assert what the service did and did not do."""
 
-    def __init__(self, snapshots=()) -> None:
+    def __init__(self, snapshots=(), *, cursor: str | None = None) -> None:
         self.snapshots = list(snapshots)
+        self.cursor = cursor
         self.calls: list[tuple[str, dict]] = []
+
+    def get_artifact_reconciliation_cursor(self, *, repository: str):
+        self.calls.append(("cursor", {"repository": repository}))
+        return self.cursor
+
+    def advance_artifact_reconciliation_cursor(self, **kwargs):
+        self.calls.append(("advance_cursor", kwargs))
+        if self.cursor != kwargs["expected_commit"]:
+            return {"advanced": False, "current_commit": self.cursor}
+        self.cursor = kwargs["observed_commit"]
+        return {"advanced": True, "current_commit": self.cursor}
 
     def list_artifact_source_snapshots(self, *, repository: str | None = None):
         self.calls.append(("list", {"repository": repository}))
@@ -332,7 +383,7 @@ def test_audit_performs_no_write_calls(tmp_path: Path) -> None:
     _write(tmp_path, ".agent/plans/a.md", "# A\n")
     repo = _RecordingRepo()
     ArtifactReconciliationService(repo).audit(tmp_path, repository="t")
-    assert [name for name, _ in repo.calls] == ["list"]
+    assert [name for name, _ in repo.calls] == ["cursor", "list"]
 
 
 @pytest.mark.unit
@@ -353,7 +404,7 @@ def test_apply_with_the_wrong_digest_writes_nothing(tmp_path: Path) -> None:
     )
     assert result.ok is False
     assert result.refused_reason == "plan_digest_mismatch"
-    assert [name for name, _ in repo.calls] == ["list"]
+    assert [name for name, _ in repo.calls] == ["cursor", "list"]
 
 
 @pytest.mark.unit
@@ -368,7 +419,7 @@ def test_apply_refuses_implicit_first_repository_registration(tmp_path: Path) ->
     )
     assert result.ok is False
     assert result.refused_reason == "new_repository_requires_explicit_allow"
-    assert [name for name, _ in repo.calls] == ["list"]
+    assert [name for name, _ in repo.calls] == ["cursor", "list", "cursor"]
 
 
 @pytest.mark.unit
@@ -386,7 +437,175 @@ def test_explicit_first_repository_registration_can_apply(tmp_path: Path) -> Non
     )
     assert result.ok
     assert len(result.applied) == 1
-    assert [name for name, _ in repo.calls] == ["list", "register"]
+    assert [name for name, _ in repo.calls] == [
+        "cursor", "list", "cursor", "register"
+    ]
+
+
+@pytest.mark.unit
+def test_audit_uses_the_persisted_cursor_as_git_evidence_base(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write(tmp_path, ".agent/plans/a.md", "# A\n")
+    seen: list[str | None] = []
+
+    def fake_git(root: Path, *, from_commit: str | None = None) -> GitEvidence:
+        seen.append(from_commit)
+        return GitEvidence(
+            observed_commit="head", available=True, rename_evidence_available=True
+        )
+
+    monkeypatch.setattr(
+        "menhir.services.artifact_reconciliation_service.collect_git_evidence",
+        fake_git,
+    )
+    report = ArtifactReconciliationService(
+        _RecordingRepo(cursor="stored")
+    ).audit(tmp_path, repository="t")
+    assert seen == ["stored"]
+    assert report.cursor_commit == "stored"
+    assert report.evidence_from_commit == "stored"
+
+
+@pytest.mark.unit
+def test_explicit_from_commit_overrides_only_the_git_evidence_base(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write(tmp_path, ".agent/plans/a.md", "# A\n")
+    seen: list[str | None] = []
+
+    def fake_git(root: Path, *, from_commit: str | None = None) -> GitEvidence:
+        seen.append(from_commit)
+        return GitEvidence(
+            observed_commit="head", available=True, rename_evidence_available=True
+        )
+
+    monkeypatch.setattr(
+        "menhir.services.artifact_reconciliation_service.collect_git_evidence",
+        fake_git,
+    )
+    report = ArtifactReconciliationService(
+        _RecordingRepo(cursor="stored")
+    ).audit(tmp_path, repository="t", from_commit="override")
+    assert seen == ["override"]
+    assert report.cursor_commit == "stored"
+    assert report.evidence_from_commit == "override"
+
+
+@pytest.mark.unit
+def test_clean_apply_advances_cursor_to_the_observed_commit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write(tmp_path, ".agent/plans/a.md", "# A\n")
+    monkeypatch.setattr(
+        "menhir.services.artifact_reconciliation_service.collect_git_evidence",
+        lambda *_args, **_kwargs: GitEvidence(observed_commit="head", available=True),
+    )
+    repo = _RecordingRepo()
+    service = ArtifactReconciliationService(repo)
+    digest = service.audit(tmp_path, repository="t").plan_digest
+    repo.calls.clear()
+
+    result = service.apply(
+        tmp_path,
+        expected_digest=digest,
+        repository="t",
+        allow_new_repository=True,
+    )
+    assert result.ok
+    assert result.cursor_advanced is True
+    assert repo.cursor == "head"
+    assert [name for name, _ in repo.calls] == [
+        "cursor", "list", "cursor", "register", "advance_cursor"
+    ]
+
+
+@pytest.mark.unit
+def test_apply_reports_a_cursor_cas_race_after_completed_actions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write(tmp_path, ".agent/plans/a.md", "# A\n")
+    monkeypatch.setattr(
+        "menhir.services.artifact_reconciliation_service.collect_git_evidence",
+        lambda *_args, **_kwargs: GitEvidence(observed_commit="head", available=True),
+    )
+
+    class _FailedAdvanceRepo(_RecordingRepo):
+        def advance_artifact_reconciliation_cursor(self, **kwargs):
+            self.calls.append(("advance_cursor", kwargs))
+            return {"advanced": False, "current_commit": "other"}
+
+    repo = _FailedAdvanceRepo()
+    service = ArtifactReconciliationService(repo)
+    digest = service.audit(tmp_path, repository="t").plan_digest
+    result = service.apply(
+        tmp_path,
+        expected_digest=digest,
+        repository="t",
+        allow_new_repository=True,
+    )
+    assert len(result.applied) == 1
+    assert result.ok is False
+    assert result.refused_reason == "reconciliation_cursor_update_failed"
+    assert result.cursor_reason == "compare_and_set_failed"
+
+
+@pytest.mark.unit
+def test_apply_refuses_when_cursor_changes_after_reaudit(tmp_path: Path) -> None:
+    _write(tmp_path, ".agent/plans/a.md", "# A\n")
+    approved = ArtifactReconciliationService(
+        _RecordingRepo(cursor="c1")
+    ).audit(tmp_path, repository="t").plan_digest
+
+    class _MovingCursorRepo(_RecordingRepo):
+        def __init__(self) -> None:
+            super().__init__(cursor="c1")
+            self.reads = 0
+
+        def get_artifact_reconciliation_cursor(self, *, repository: str):
+            self.reads += 1
+            self.calls.append(("cursor", {"repository": repository}))
+            return "c1" if self.reads == 1 else "c2"
+
+    repo = _MovingCursorRepo()
+    result = ArtifactReconciliationService(repo).apply(
+        tmp_path,
+        expected_digest=approved,
+        repository="t",
+        allow_new_repository=True,
+    )
+    assert result.refused_reason == "reconciliation_cursor_changed"
+    assert not any(name == "register" for name, _ in repo.calls)
+
+
+@pytest.mark.unit
+def test_apply_refuses_an_unavailable_git_evidence_base_before_writes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write(tmp_path, ".agent/plans/a.md", "# A\n")
+    monkeypatch.setattr(
+        "menhir.services.artifact_reconciliation_service.collect_git_evidence",
+        lambda *_args, **_kwargs: GitEvidence(
+            observed_commit="head",
+            available=True,
+            rename_evidence_available=False,
+        ),
+    )
+    repo = _RecordingRepo(cursor="missing-or-diverged")
+    service = ArtifactReconciliationService(repo)
+    report = service.audit(tmp_path, repository="t")
+    assert report.evidence_base_valid is False
+
+    repo.calls.clear()
+    result = service.apply(
+        tmp_path,
+        expected_digest=report.plan_digest,
+        repository="t",
+        allow_new_repository=True,
+    )
+    assert result.refused_reason == "git_evidence_base_unavailable"
+    assert result.cursor_reason == "invalid_evidence_base"
+    assert not any(name == "register" for name, _ in repo.calls)
 
 
 @pytest.mark.unit
@@ -406,6 +625,8 @@ def test_a_conflict_does_not_block_unrelated_safe_actions(tmp_path: Path) -> Non
     assert len(result.conflicted) == 1
     assert len(result.applied) == 1
     assert result.applied[0]["path"] == ".agent/plans/good.md"
+    assert result.cursor_advanced is False
+    assert result.cursor_reason == "conflicts_present"
 
 
 @pytest.mark.unit
@@ -473,6 +694,7 @@ def test_a_rename_plus_edit_in_one_commit_is_still_recognized(tmp_path: Path) ->
 
     evidence = collect_git_evidence(tmp_path, from_commit=base)
     assert evidence.available
+    assert evidence.rename_evidence_available
     assert any(r.new_path == ".agent/archive/plans/a.md" for r in evidence.renames)
 
     from menhir.domain.artifact_reconciliation import (
@@ -498,6 +720,26 @@ def test_a_rename_plus_edit_in_one_commit_is_still_recognized(tmp_path: Path) ->
     entry = entries[0]
     assert entry.version and entry.version_kind == "git_blob_oid"
     assert entry.integrity != entry.version
+
+
+@pytest.mark.unit
+def test_an_unknown_git_evidence_base_is_reported_not_treated_as_no_renames(
+    tmp_path: Path,
+) -> None:
+    try:
+        _git(tmp_path, "init", "-q")
+    except (OSError, subprocess.CalledProcessError):
+        pytest.skip("git unavailable")
+    _git(tmp_path, "config", "user.email", "t@example.com")
+    _git(tmp_path, "config", "user.name", "t")
+    _write(tmp_path, ".agent/plans/a.md", "# A\n")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-q", "-m", "add")
+
+    evidence = collect_git_evidence(tmp_path, from_commit="not-a-real-commit")
+    assert evidence.available is True
+    assert evidence.rename_evidence_available is False
+    assert evidence.renames == ()
 
 
 @pytest.mark.unit

@@ -336,6 +336,9 @@ def test_audit_leaves_the_graph_byte_identical(
     _write(repo_tree, ".agent/plans/a.md", "# A\n")
     _apply(service, repo_tree)
     before = _sources(test_neo4j_repo)
+    cursor_before = WorkArtifactRepository(
+        test_neo4j_repo
+    ).get_artifact_reconciliation_cursor(repository="t")
 
     _write(repo_tree, ".agent/plans/a.md", "# A changed\n")
     _write(repo_tree, ".agent/plans/new.md", "# New\n")
@@ -345,6 +348,12 @@ def test_audit_leaves_the_graph_byte_identical(
     assert first.plan_digest == second.plan_digest
     assert [a.as_dict() for a in first.actions] == [a.as_dict() for a in second.actions]
     assert _sources(test_neo4j_repo) == before, "audit must not write"
+    assert (
+        WorkArtifactRepository(test_neo4j_repo).get_artifact_reconciliation_cursor(
+            repository="t"
+        )
+        == cursor_before
+    ), "audit must not advance the cursor"
 
 
 @pytest.mark.online
@@ -389,10 +398,10 @@ def test_prepare_backfills_sources_created_before_v2(
 
 
 @pytest.mark.online
-def test_a_branch_switch_falls_back_to_the_full_audit(
+def test_a_branch_switch_uses_the_persisted_cursor_when_it_is_comparable(
     service: ArtifactReconciliationService, repo_tree: Path, test_neo4j_repo
 ) -> None:
-    """No rename cursor, so the hash rule -- not a guess -- has to carry the move."""
+    """The prior reconciled commit is an ancestor, so Git carries the move."""
     _write(repo_tree, ".agent/plans/a.md", "# A\n")
     _git(repo_tree, "add", "-A")
     _git(repo_tree, "commit", "-q", "-m", "add")
@@ -405,10 +414,12 @@ def test_a_branch_switch_falls_back_to_the_full_audit(
     _git(repo_tree, "add", "-A")
     _git(repo_tree, "commit", "-q", "-m", "move on branch")
 
-    report = service.audit(repo_tree, repository="t")  # no from_commit
+    report = service.audit(repo_tree, repository="t")  # persisted cursor is automatic
     relocations = [a for a in report.actions if a.kind == ActionKind.RELOCATE_SOURCE]
     assert len(relocations) == 1
-    assert relocations[0].basis == MatchBasis.UNIQUE_CONTENT_SHA256
+    assert relocations[0].basis == MatchBasis.GIT_RENAME
+    assert report.cursor_commit
+    assert report.evidence_from_commit == report.cursor_commit
 
     service.apply(repo_tree, expected_digest=report.plan_digest, repository="t")
     rows = _sources(test_neo4j_repo)
