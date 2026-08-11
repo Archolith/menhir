@@ -15,6 +15,8 @@ Do not preload the large reference docs.
 
 Start with one file:
 
+- install, post-install setup, Git/client hooks -> `../docs/post-install.md`
+- writing default instructions for agents that use Menhir -> `../docs/agent-usage.md`
 - debugging, incidents, queue problems -> `tasks-debugging.md`
 - memory-review program: open fixes, hotfix status, decisions -> `memory-review-tracker.md`
 - ingest, enrichment, stamping -> `tasks-ingest.md`

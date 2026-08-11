@@ -1,10 +1,3 @@
-Before writing or modifying any code, read all files in the `.agent/` directory.
-
-Start with `.agent/README.md` for maintenance rules and project overview, then read:
-- `.agent/architecture.md` — package map, patterns, tech stack, env vars
-- `.agent/data_models.md` — entities, DTOs, and repository reference
-- `.agent/workflows/code_conventions.md` — formatting and style rules you must follow
-
-Check `.agent/workflows/` for any task-specific runbook before performing operational actions.
-
-If there is a conflict between the code and the `.agent` docs, call it out and ask for clarification before proceeding.
+Follow AGENTS.md for repository-wide rules. Start with .agent/README.md and use its task router; do not
+preload the whole .agent directory. Use Menhir structural queries before filesystem search, check blast
+radius before edits, preserve unrelated worktree changes, and run focused affected tests.

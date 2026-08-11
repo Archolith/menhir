@@ -1,0 +1,12 @@
+#!/usr/bin/env sh
+set -eu
+
+while read -r local_ref local_sha remote_ref remote_sha
+do
+    if [ "$remote_ref" = "refs/heads/master" ]; then
+        printf '%s\n' "Push to master is blocked. Use main or a feature branch." >&2
+        exit 1
+    fi
+done
+
+exit 0
