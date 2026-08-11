@@ -40,8 +40,9 @@ Otherwise it remains a parked research note or issue comment.
 > delta, and up from the 0.872 canonical baseline. Same fixture hash as the read-side campaign, so
 > it compares directly against node-only 0.400. Run `scalar-event-activity-ku78-v6-20260809`
 > (Menhir `1fa57955`, Bench `d5e97cc4`, both clean); the authority is archolith-bench
-> `results/lme-ku-buildout/LEDGER.md`. This is benchmark evidence on one subset, not a launch
-> headline.
+> `results/lme-ku-buildout/LEDGER.md`, with the same acceptance record tracked in this repo at
+> `.agent/plans/menhir-cumulative-activity-scalars-2026-08-08.md`. This is benchmark evidence on
+> one subset, not a launch headline.
 
 ## Cluster layout
 

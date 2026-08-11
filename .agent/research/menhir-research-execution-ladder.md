@@ -69,6 +69,11 @@ authority enabled, deterministic scalar router and shadow paths disabled, TurnEv
 Models: gpt-4o-mini extraction/enrichment, text-embedding-3-small embeddings, gpt-4o answers,
 gpt-4o-mini judge.
 
+Sources: archolith-bench `results/lme-ku-buildout/LEDGER.md` is the evidence authority, and
+`.agent/plans/menhir-cumulative-activity-scalars-2026-08-08.md` carries the same acceptance record
+in this repo (integrity counts, score, token/cost, per-miss reasoning). Prefer the ledger when they
+disagree; the plan is the in-repo copy, not the register.
+
 Read this against the read-side verdicts above. The oracle stack could not re-rank its way past
 0.400 on node-only; write-time consolidation reaches 0.910 on the knowledge-update slice. That is
 the empirical case for the pivot, not just its rationale.
