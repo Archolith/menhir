@@ -360,8 +360,14 @@ class WorkArtifactRepository:
         over a previously known blob OID would turn "not observed this time"
         into "does not exist", which is the same class of error as treating a
         missing file as a deleted artifact.
+
+        ``resolution_reason`` is the one exception and is written back as null.
+        Observing a source resolves it, and carrying "source_not_observed" on a
+        source we just read leaves a record that contradicts itself.
         """
-        return {k: v for k, v in observation.as_properties().items() if v is not None}
+        props = {k: v for k, v in observation.as_properties().items() if v is not None}
+        props["resolution_reason"] = None
+        return props
 
     def refresh_artifact_source(
         self,

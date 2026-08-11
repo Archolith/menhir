@@ -28,7 +28,9 @@ async def relocate_artifact_source(
         artifact_uuid: The artifact you believe currently lives at ``old_path``.
         old_path: Repository-relative path recorded on the source today.
         new_path: Repository-relative path the document now lives at.
-        repository: Repository name recorded on the source.
+        repository: Repository name recorded on the source. Required in
+                    practice -- locators are repository-scoped, so omitting it
+                    cannot match anything.
         expected_old_integrity: Optional sha256 the caller believes is current.
                                 Supplying it makes the write refuse stale input.
         observed_integrity: Optional sha256 of the file at its new path.
@@ -76,6 +78,10 @@ class RelocateArtifactSourceTool(BaseTextTool):
 
         reason = result.get("reason") or "unknown"
         explanations = {
+            "repository_required": (
+                "Pass the repository name recorded on the source; locators are "
+                "repository-scoped and an empty one matches nothing."
+            ),
             "locator_not_found": f"No source is recorded at {old_path}.",
             "locator_is_ambiguous": (
                 f"More than one source claims {old_path}; resolve the duplicate first."

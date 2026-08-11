@@ -502,3 +502,18 @@ def test_registration_collision_check_also_falls_back_to_raw_locator_legs() -> N
     )
     assert result["reason"] == "destination_already_claimed"
     assert "coalesce(s.current_locator_key" in neo.calls[0]["query"]
+
+
+@pytest.mark.unit
+def test_observing_a_source_clears_the_reason_it_went_missing() -> None:
+    """A resolved source carrying "source_not_observed" contradicts itself.
+
+    Every other absent leg is left alone so a partial observation cannot erase a
+    known value; this one is written back as null on purpose.
+    """
+    props = WorkArtifactRepository(_StubNeo4j())._source_write_props(
+        SourceObservation(integrity="abc", observed_at="2026-08-11T00:00:00+00:00")
+    )
+    assert props["resolution_status"] == ResolutionStatus.RESOLVED
+    assert "resolution_reason" in props and props["resolution_reason"] is None
+    assert "version" not in props, "an unobserved leg is still left alone"

@@ -189,3 +189,19 @@ def test_a_repository_error_is_returned_not_raised() -> None:
         path=".agent/plans/a.md", operation="edit", repository="menhir",
     )
     assert result == {"attempted": True, "applied": False, "reason": "error:RuntimeError"}
+
+
+@pytest.mark.unit
+def test_relocating_without_a_repository_names_the_missing_argument() -> None:
+    """Locators are repository-scoped, so an empty one cannot match.
+
+    Reporting that as `locator_not_found` sent the caller hunting for the path
+    when the actual mistake was the argument they left out.
+    """
+    repo = _Repo()
+    result = _adapter(repo).relocate_artifact_source(
+        artifact_uuid="a-1", old_path=".agent/plans/a.md",
+        new_path=".agent/archive/plans/a.md", repository="",
+    )
+    assert result == {"applied": False, "reason": "repository_required"}
+    assert not repo.calls

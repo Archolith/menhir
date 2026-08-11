@@ -1425,8 +1425,14 @@ class MemoryGraphAdapter:
             SourceObservation,
         )
 
+        if not (repository or "").strip():
+            # The locator key is repository-scoped, so an empty repository can
+            # only ever miss. Saying "not found" would send the caller hunting
+            # for the path instead of supplying the argument they omitted.
+            return {"applied": False, "reason": "repository_required"}
+
         source_uuid, reason = self._work_artifacts._source_uuid_at_locator(  # noqa: SLF001
-            repository or "", medium, old_path
+            repository, medium, old_path
         )
         if source_uuid is None:
             return {"applied": False, "reason": reason}

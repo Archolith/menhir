@@ -184,7 +184,16 @@ def reconcile(
         else:
             _print_report(report)
             print("\nDRY RUN -- nothing written.")
-            print(f"Re-run with: --apply --plan-digest {report.plan_digest}")
+            # Echo every option that fed the plan. Dropping one changes the
+            # digest, and the operator would be told their approved plan is
+            # stale by the command this line told them to run.
+            options = [f"--repo {repo}"]
+            if repository:
+                options.append(f"--repository {repository}")
+            if from_commit:
+                options.append(f"--from-commit {from_commit}")
+            options.append(f"--apply --plan-digest {report.plan_digest}")
+            print("Re-run with: menhir artifacts reconcile " + " ".join(options))
         return
 
     if not plan_digest:
