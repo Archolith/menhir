@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-08-11 - Close WorkArtifact reconciliation implementation review
+
+- Merged phases 0–4 and their five review remediations through PR #6 (`93ce119`): rename evidence
+  precedence, explicit repository identity, a persisted reconciliation cursor, source-less artifact
+  attachment, and legacy unscoped-source adoption.
+- PR #7's first hosted run exposed two integration omissions: the new MCP tools were absent from the
+  explorer feature taxonomy, and the new WorkArtifact UUID constraint collided with its superseded
+  plain index. The tools now classify under `artifacts`; bootstrap retires the named plain index
+  before creating the uniqueness constraint, preserving indexed lookup on fresh and existing stores.
+- Re-ran the full offline suite (5,926 passed, 197 skipped, plus the known worktree-name assertion),
+  the 12 focused taxonomy/schema tests, all 21 bootstrap/reconciliation tests, and the complete
+  throwaway-Neo4j CI selection (162 passed, 21 expected service-dependent skips).
+- Updated the plan from proposed to phases 0–4 implemented. Production graph repair (Phase 5) and
+  legacy frontmatter backfill (Phase 6) remain separately owner-gated; no production graph writes
+  were made during implementation or review.
+
 ## 2026-08-11 - Implement WorkArtifact corpus reconciliation (phases 0-4)
 
 - `domain/artifact_reconciliation.py`: pure route table, raw-byte SHA-256, authored-metadata reader,

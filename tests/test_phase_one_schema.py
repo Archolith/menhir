@@ -65,6 +65,20 @@ def test_phase1_schema_targets_expected_labels() -> None:
         assert f"-{label}-" in query_blob or f":{label}" in query_blob
 
 
+def test_work_artifact_uuid_plain_index_is_retired_before_unique_constraint() -> None:
+    queries = get_phase1_bootstrap_queries()
+    drop_index = "DROP INDEX work_artifact_uuid_idx IF EXISTS"
+    create_constraint = (
+        "CREATE CONSTRAINT work_artifact_uuid_unique IF NOT EXISTS "
+        "FOR (n:WorkArtifact) REQUIRE n.artifact_uuid IS UNIQUE"
+    )
+
+    assert drop_index in queries
+    assert create_constraint in queries
+    assert queries.index(drop_index) < queries.index(create_constraint)
+    assert not any(query.startswith("CREATE INDEX work_artifact_uuid_idx") for query in queries)
+
+
 @pytest.mark.unit
 def test_adapter_bootstrap_runs_all_queries() -> None:
     repo = _StubGraphRepo()

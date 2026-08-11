@@ -14,6 +14,8 @@ def test_known_operations_map_to_declared_parents():
     assert classify("resolve_conflict", "tool") == "conflicts"
     assert classify("delete_memory", "tool") == "lifecycle"
     assert classify("rate_recall", "tool") == "stats"
+    assert classify("audit_artifact_corpus", "tool") == "artifacts"
+    assert classify("relocate_artifact_source", "tool") == "artifacts"
 
 
 def test_resource_reads_collapse_to_resources_parent():

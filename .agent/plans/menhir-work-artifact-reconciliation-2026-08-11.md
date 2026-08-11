@@ -1,8 +1,23 @@
 # WorkArtifact Corpus Reconciliation
 
-Status: **PROPOSED — implementation and graph repair require separate approval.**
+Status: **PHASES 0–4 IMPLEMENTED — phases 5–6 remain separately owner-gated.**
 
 Date: 2026-08-11
+
+Implementation record:
+
+- Merged to `main` in [PR #6](https://github.com/Archolith/menhir/pull/6), commit `93ce119`.
+- PR #7's first hosted run found and drove repair of two integration omissions: feature-taxonomy
+  classification for both new MCP tools, and retirement of the superseded WorkArtifact UUID plain
+  index before creation of the uniqueness constraint.
+- Offline verification after repair: 5,926 passed, 197 skipped; the sole failure is the pre-existing
+  worktree-name assertion that accepts only directories named `menhir` or `menhir-frontier`. The 12
+  focused taxonomy/schema tests pass.
+- Throwaway-Neo4j acceptance after repair: all 21 phase-one bootstrap and reconciliation live tests
+  passed, including a second idempotent bootstrap. The complete graph-backed CI selection also
+  passed: 162 passed, 21 expected service-dependent skips.
+- No production graph repair or corpus-wide legacy frontmatter mutation has run. Those remain the
+  Phase 5 and Phase 6 approval gates below.
 
 Extends:
 

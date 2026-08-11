@@ -66,9 +66,11 @@ PARENTS: dict[str, list[str]] = {
     "artifacts": [
         "get_artifact",
         "list_artifacts",
+        "audit_artifact_corpus",
         "list_artifact_questions",
         "get_artifact_relationships",
         "link_artifacts",
+        "relocate_artifact_source",
         "supersede_artifact",
         "transition_artifact",
     ],
