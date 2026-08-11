@@ -5,7 +5,7 @@ All 12 milestones (M0–M7) are complete. This document tracks post-v1 work disc
 > Scope: this doc owns bugs, ops, and deferred features on the **shipped** system.
 > The research build-out (oracle pipeline, belief buckets, retrieval tuning,
 > control rails, cognitive replay) is sequenced separately in
-> `.agent/plans/menhir-research-execution-ladder.md`, which draws on the
+> `.agent/research/menhir-research-execution-ladder.md`, which draws on the
 > `docs/research/` corpus. Keep the two separate: shipped-system work here,
 > research → production rungs there.
 

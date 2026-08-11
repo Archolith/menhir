@@ -112,7 +112,7 @@ These are treated as already landed on `main`:
 | Area | Current state | Owner docs |
 |---|---|---|
 | Core memory service | v1 graph/MCP/REST/runtime complete; namespaces, structure graph, TODO graph, backend-first MCP, and degraded startup are documented | `.agent/memory-roadmap.md`, `.agent/architecture.md`, `.agent/data_models.md` |
-| Read-side frontier/oracle work | Built in pieces but not an MVP dependency; read-side gates were neutral-to-negative on real benches and remain opt-in/default-off | `.agent/plans/menhir-frontier-undone-work-chunks.md`, `.agent/plans/deferred-verification.md` |
+| Read-side frontier/oracle work | Built in pieces but not an MVP dependency; read-side gates were neutral-to-negative on real benches and remain opt-in/default-off | `.agent/plans/backlog/menhir-frontier-undone-work-chunks.md`, `.agent/plans/backlog/deferred-verification.md` |
 | TurnEvidence producers | Claude Code, OpenCode, and Codex producers share one deterministic triage core; raw turns do not enter normal recall | `docs/turn-evidence-producers.md`, `.agent/adr/0001-conversation-turn-capture-surface.md` |
 | Phase 3 consumer | `consolidate_personal_memory` exists, with real-data validation, correction handling, receipt clarity, and deterministic SUM grounding promoted on | `.agent/reviews/menhir-phase3-realdata-validation-2026-07-07.md`, `.agent/plans/menhir-phase3-*.md` |
 | Hook Center | File events mark structure files dirty; stale anchors are labelled in recall/context; verification receipts enrich warnings without clearing dirty state | `docs/hook-center-tool-events.md`, `docs/runbooks/hook-center-*.md`, `docs/smoke/2026-07-08-hook-center-stale-lane.md` |

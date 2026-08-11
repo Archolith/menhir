@@ -10,9 +10,9 @@ benchmark shows a measurable win. Implementation + fixture live in `archolith-be
 > `recall_service.py`/`scoring_service.py`. This is the "Production CandidateSource.FACET seam
 > reserved" mentioned in `menhir-research-execution-ladder.md`. Doesn't change the verdict: still
 > bench-first, no live production recall change.
-**Rung:** R2 in [`menhir-research-execution-ladder.md`](menhir-research-execution-ladder.md) (`depends_on R1`).
-**Owner (mechanism):** [`facet-retrieval.md`](../../docs/research/retrieval/facet-retrieval.md).
-**Bench owner:** [`archolith-bench-operational-model.md`](../../docs/research/process/archolith-bench-operational-model.md).
+**Rung:** R2 in [`menhir-research-execution-ladder.md`](../../research/menhir-research-execution-ladder.md) (`depends_on R1`).
+**Owner (mechanism):** [`facet-retrieval.md`](../../../docs/research/retrieval/facet-retrieval.md).
+**Bench owner:** [`archolith-bench-operational-model.md`](../../../docs/research/process/archolith-bench-operational-model.md).
 
 ## Why
 
