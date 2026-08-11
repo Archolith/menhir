@@ -1,3 +1,10 @@
+## 2026-08-11 — fix: upgrade cryptography to 50.0.0
+
+- Upgraded the locked `cryptography` dependency from 49.0.0 to 50.0.0 to address
+  GHSA-g6cj-pr64-35w5 / CVE-2026-69247.
+- Normalized the stale editable root package entry from `menhir` to its declared
+  `archolith-menhir` package name while regenerating the lockfile.
+
 ## 2026-08-09 — fix: harden scalar identity and event recall
 
 - Distinguished non-quantifying `around` idioms from genuinely approximate quantities so grounded
