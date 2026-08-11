@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
@@ -128,7 +129,7 @@ def test_header_auth_keeps_write_tool_available():
 def test_query_auth_rate_limits_add_memory_by_client(monkeypatch):
     contracts._query_add_memory_events.clear()
     timestamps = iter(float(i) for i in range(20))
-    monkeypatch.setattr(contracts.time, "time", lambda: next(timestamps))
+    monkeypatch.setattr(contracts, "time", SimpleNamespace(time=lambda: next(timestamps)))
     token = bind_request_auth_mode("query")
     session_token = bind_request_session("user-1", "sess-4", client_id="client-4", client_name="web")
     try:
