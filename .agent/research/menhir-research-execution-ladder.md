@@ -2,9 +2,9 @@
 
 ## Status
 
-active (read-side only) — the ordered plan for taking the `docs/research/` corpus into
-code. Its read-side rungs are benched and closed; the live write-side arc is not yet
-sequenced here. See "Write-side verdict" and "What to build next (current)".
+active — the ordered plan for taking research into code. Read-side rungs (R*) are benched
+and closed; the live write-side arc is sequenced in Track W. See "Write-side verdict" and
+"What to build next (current)".
 
 ## Bench verdicts — reconciliation (2026-07-04)
 
@@ -575,6 +575,129 @@ status  planned  (NOT greenfield: the write OPS already exist, scattered —
         boundary + add the no-write-in-evaluate assertion, not build from zero.)
 ```
 
+## Track W — Write-time consolidation (the active arc)
+
+Sequence is not invented here: it is the "Locked build order (instrument first, pass second)"
+authored in `.agent/plans/aggregation-as-consolidation.md`. Mechanism ownership stays with the
+three plan docs; this track owns ORDER, as with every other track.
+
+```text
+owners  .agent/plans/aggregation-as-consolidation.md      thesis, D0, build order
+        .agent/plans/quantstate-agent-counter.md          D1 QuantState primitive
+        .agent/plans/event-fold-view-architecture.md      Event -> Fold -> View frame
+bench   archolith-bench results/lme-ku-buildout/LEDGER.md
+        fixture longmemeval/knowledge_update_subset.json (SHA256 bba252a3...)
+```
+
+### W0 — D0 retrieval-entropy instrument
+
+```text
+goal        a deterministic, GPT-free objective function over the organization of memory:
+            Entropy(q) = size/spread of the MINIMAL evidence set that STILL ENTAILS the answer,
+            with the sufficiency constraint as the Goodhart guard and precision guard
+owner       aggregation-as-consolidation.md ("D0 — Retrieval Entropy is the objective function")
+code        services/view_entropy.py, mcp/tools/ops/view_entropy.py (`view_entropy` is
+            registered in ALL_TOOLS), infrastructure/consolidation_queries.py
+bench       offline harness over the LME graph; no GPT
+metric      entropy vector: count / tokens / episodes / sessions / entities / timespan
+depends_on  —
+status      in-progress — the surface is built and tool-exposed; the deterministic grade
+            called for in the build order has not been reported
+```
+
+Metric family per the owner doc: retrieval entropy now; temporal, provenance, and belief entropy
+cheap next; reasoning entropy DEFERRED because it needs an LLM trace and would re-import the
+variance D0 exists to remove.
+
+### W1 — D1 QuantState primitive
+
+```text
+goal        explicit quantitative self-state becomes a supersedable in-graph fact
+            (subject, measure) -> value, latest expiring prior
+owner       quantstate-agent-counter.md ("Integration — BUILT (2026-07-02), all 3 increments")
+code        infrastructure/quantstate_repository.py (in-graph primitive, commit 000dc93)
+            services/quantstate_consolidator.py (consolidation writer, commit af4ce51)
+            recall surfacing, commit 65119e8
+bench       verified end-to-end: two paraphrased queries surface the counters via /api/recall
+            (BM25 2.29, cosine 0.813)
+metric      counter surfaces as a first-class fact for a non-literal query
+depends_on  W0 (reports against the entropy instrument)
+status      done — all three increments; follow-ups below are non-blocking
+```
+
+Non-blocking follow-ups the owner doc names: schedule the consolidator in the real (non-benchmark)
+consolidation loop; `qs_key` schema index behind a migration (adding it to the required-index list
+can flip an existing graph to schema-not-ready); wire a real embedder into the consolidator's
+`embed` seam.
+
+### W2 — Entropy delta across W1
+
+```text
+goal        D0 measured before vs after the D1 pass on the counting slice; a wrong-fact
+            regression shows as entropy NOT dropping, or sufficiency failing
+owner       aggregation-as-consolidation.md build order step 3
+code        W0 + W1 surfaces
+bench       ~14 counting questions
+metric      target 1 memory / 1 fact / ~40 tokens for stated-total questions
+depends_on  W0, W1
+status      planned — named as Remaining in quantstate-agent-counter.md
+            ("D0 entropy grade on a counting slice (floor -> 1) as the deterministic win metric")
+```
+
+### W3 — Accuracy A/B as downstream validation
+
+```text
+goal        llm-judge accuracy confirms the entropy win, as validation and not as the
+            primary signal
+owner       aggregation-as-consolidation.md build order step 4
+code        full write-side stack
+bench       LEDGER.md: scalar-event-activity-ku78-v6-20260809
+metric      recall on the 78-item knowledge-update subset
+depends_on  W2
+status      partial — v6 scored 0.910 (71/78) against a no_memory arm of 6/78. The build
+            order specifies the comparator as node-only; no_memory is a weaker baseline, so
+            the A/B as written has NOT been run. Do not cite 0.910 as node-only-beating.
+```
+
+### W4 — Event -> Fold -> View realization
+
+```text
+goal        capabilities arrive as (Event source) + (Fold) + (View of uniform shape) rather
+            than as new node types; one SSOT per kind via the ViewKind object
+owner       event-fold-view-architecture.md
+code        domain/event_history.py, domain/fold_algebra.py, domain/scalar_state_fold.py,
+            domain/scalar_view_authority.py, domain/scalar_view_suppression.py,
+            services/event_fold.py, services/event_consolidation.py, services/windowed_fold.py,
+            services/event_history_{service,authority,perception,recall}.py,
+            infrastructure/typed_event_repository.py, infrastructure/scalar_view_repository.py
+bench       v6 ran with Event History and Event History authority enabled
+metric      per LEDGER.md v6 row
+depends_on  W1
+status      done — abstraction EARNED and rename DONE per the owner doc
+```
+
+Invariant this track inherits: keep the View shape uniform (the "stamp like ingest" rule). That is
+what made QuantState surface at all, and breaking it silently drops nodes from recall.
+
+### W5 — Reconciliation correctness (stateful folds)
+
+```text
+goal        name and test the stateful case: a pure fold is f(events) -> view, but supersession
+            is read-modify-write against the prior current View
+owner       event-fold-view-architecture.md ("The one honest gap: pure vs. stateful folds")
+code        record_counter already implements the stateful case correctly
+bench       none yet
+metric      none yet
+depends_on  W4
+status      planned — the owner doc calls reconciliation "the actual hard part of any new View,
+            and where correctness bugs will live"
+```
+
+Known open defect against this rung: v6 miss `26bdc477` left `trip_count=3` and `trip_count=5`
+both minted but `binding_pending`, because possessive "my camera" did not bind to the co-mentioned
+"Canon EOS 80D camera". Fix from a non-benchmark panel that establishes the general alias pattern —
+not against the fixture.
+
 ## Track E — Optional / bench-gated
 
 ### R10 — CrossEncoderRerankOracle
@@ -653,22 +776,25 @@ HISTORICAL — do not execute as written:
 
 ### What to build next (current)
 
-The active arc is write-time consolidation, and it has no rungs in this ladder yet — its design
-docs sit in `.agent/plans/backlog/` (`aggregation-as-consolidation.md`, `quantstate-agent-counter.md`,
-`event-fold-view-architecture.md`) with statuses frozen at 2026-07-02, while the code shipped and
-benched at 0.910. **That gap is open work on this document, not a claim that the arc is unplanned.**
-Until it is closed, treat the ledger and those three docs as the authority on write-side order, and
-this ladder as the authority on read-side order only.
+The active arc is write-time consolidation, sequenced in **Track W** above. Its three owner docs
+moved out of `.agent/plans/backlog/` to `.agent/plans/` on 2026-08-10: "backlog" understated work
+that is shipped, tool-exposed, and carrying the project's best benchmark result.
 
-Concrete near-term items that are already evidence-backed:
+Open rungs, in order:
 
 ```text
-1. Give the write-side arc rungs here (D0 retrieval-entropy, D1 QuantState, Event -> Fold -> View,
-   agent-experiential counters), each with its code surface and its KU78 metric.
-2. Decide whether those three design docs stay in plans/backlog/ or move up — "backlog" now
-   understates them. Direction call, not a filing call.
-3. Camera/possessive alias binding (v6 miss 26bdc477) — from a non-benchmark panel, not the fixture.
-4. Widen beyond knowledge-update before any external claim: 0.910 is one subset.
+1. W0  finish the D0 entropy grade — the instrument is built and registered, the
+       deterministic grade the build order calls for has not been reported
+2. W2  entropy delta across D1 on the counting slice (floor -> 1)
+3. W3  the accuracy A/B as specified — against node-only, not no_memory
+4. W5  reconciliation correctness; first concrete case is v6 miss 26bdc477
+```
+
+Two standing cautions:
+
+```text
+widen beyond knowledge-update before any external claim — 0.910 is one subset
+fix 26bdc477 from a non-benchmark panel, never by tuning against the fixture
 ```
 
 ## Non-goals

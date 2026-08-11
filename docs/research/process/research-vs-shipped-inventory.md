@@ -36,7 +36,7 @@ before trusting it.
 
 ## Tier 4 — BUILT since this audit: write-time consolidation (the current direction)
 
-The post-LME pivot (`.agent/plans/backlog/aggregation-as-consolidation.md`, 2026-07-02): aggregation
+The post-LME pivot (`.agent/plans/aggregation-as-consolidation.md`, 2026-07-02): aggregation
 is a **consolidation** problem, not a retrieval one — maintain query-sufficient state at write time so
 multi-session answers are a lookup, not a fuzzy re-rank. Shipped as code, runs write-time / explicitly
 (scheduler off in bench mode):

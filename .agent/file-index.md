@@ -64,7 +64,11 @@ Consumers import from `menhir.domain.truth` (or via `menhir.domain` which re-exp
 
 ## Research & Forward Planning
 
-- `research/menhir-research-execution-ladder.md` -> research → code → bench build order (start here for "what's next")
+- `research/menhir-research-execution-ladder.md` -> research → code → bench build order (start here for "what's next"); read-side rungs R*, active write-side arc in Track W
+- `plans/aggregation-as-consolidation.md` -> write-time consolidation thesis + D0 retrieval-entropy + the locked build order
+- `plans/quantstate-agent-counter.md` -> D1 QuantState primitive (built; 3 increments)
+- `plans/event-fold-view-architecture.md` -> Event → Fold → View frame; ViewKind SSOT; the stateful-fold gap
+- `../docs/roadmap/README.md` -> build-sequencing and strategic notes, grouped by altitude
 - `plans/backlog/deferred-verification.md` -> LIVING checklist of tests/benches owed once a real env is available (remote sessions can't run them)
 - `plans/backlog/r1-hybrid-candidate-generation.md` -> R1 design note (hybrid candidate generation + source-aware floor)
 - `plans/backlog/r2-facet-candidate-generation.md` -> R2 design note (bench-first facet retrieval; no production change until it beats baselines)

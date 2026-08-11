@@ -13,7 +13,7 @@ Research direction and architectural synthesis.
 > (`config/settings.py` frontier_* all False); the ColdStartBrief/context-assembly half depends on the
 > L3/L4 GAP and is unbuilt. **Programs B/D** (L3/L4 semantic + institutional overlay) remain design-only
 > (schemas exist, unsequenced — the "GAP"). The **current active build direction is write-time
-> consolidation** (`.agent/plans/backlog/aggregation-as-consolidation.md`): maintain query-sufficient
+> consolidation** (`.agent/plans/aggregation-as-consolidation.md`): maintain query-sufficient
 > state at write time (D0 entropy, D1 QuantState, Event -> Fold -> View, agent-counters — all built).
 > That is the first concrete instantiation of **Program C** (knowledge evolution over time), reached
 > after the read-side retrieval levers were exhausted. The vision below stands; only the near-term build

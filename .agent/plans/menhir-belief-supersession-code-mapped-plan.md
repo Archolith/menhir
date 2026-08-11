@@ -328,7 +328,7 @@ the same idea from scratch.
   temporal-reasoning and candidate-retrieval framing remains useful background.
 - `docs/research/process/research-vs-shipped-inventory.md` — canonical shipped-vs-research map;
   re-audit before trusting the Tier assignments cited here if significant time has passed.
-- `.agent/plans/backlog/aggregation-as-consolidation.md` — the active write-time-consolidation
+- `.agent/plans/aggregation-as-consolidation.md` — the active write-time-consolidation
   direction this plan's Phase 1/2 continues; owes a failure-census correction (see above).
 - `domain/retrieval_tuning.py`, `config/settings.py:273-292` — the `CandidateSource` /
   `MENHIR_FRONTIER_*` patterns Phase 2 should follow, not reinvent.

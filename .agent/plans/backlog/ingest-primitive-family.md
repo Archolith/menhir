@@ -1,13 +1,13 @@
 # Write-time primitive family already hiding in ingest
 
-> **Read this through the Event→Fold→View lens** ([`event-fold-view-architecture.md`](event-fold-view-architecture.md)):
+> **Read this through the Event→Fold→View lens** ([`event-fold-view-architecture.md`](../event-fold-view-architecture.md)):
 > the items below are **Event sources and candidate Folds**, NOT ten node types to build. There is
 > one View node shape; "primitives" are mostly folds we haven't written yet. Resist primitive explosion.
 
 **Status: INVENTORY + build order (2026-07-02).** Survey of primitive-shaped things ingest ALREADY
 records, framed by the question "what can we promote before we have to re-ingest?" Companion to
-[`quantstate-agent-counter.md`](quantstate-agent-counter.md) (QuantState is built) and
-[`aggregation-as-consolidation.md`](aggregation-as-consolidation.md) (the query-sufficient-state
+[`quantstate-agent-counter.md`](../quantstate-agent-counter.md) (QuantState is built) and
+[`aggregation-as-consolidation.md`](../aggregation-as-consolidation.md) (the query-sufficient-state
 theory).
 
 **Key finding:** most of these need NO re-ingest — ingest already writes the data, siloed in the
