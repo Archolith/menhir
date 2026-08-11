@@ -2,7 +2,9 @@
 
 ## Status
 
-active — single ordered plan for taking the `docs/research/` corpus into code.
+active (read-side only) — the ordered plan for taking the `docs/research/` corpus into
+code. Its read-side rungs are benched and closed; the live write-side arc is not yet
+sequenced here. See "Write-side verdict" and "What to build next (current)".
 
 ## Bench verdicts — reconciliation (2026-07-04)
 
@@ -44,6 +46,47 @@ Standing effect on the rungs below: R1/R6/R7 statuses stay `in-progress` (mechan
 behavior-neutral) but are **not** "flip default-on once benched" — the bench spoke. Re-opening any
 of them means new bench headroom (a recalibrated R1 gate, a real R2 facet fixture), not more
 read-time ranking.
+
+## Write-side verdict — the pivot paid off (2026-08-09)
+
+The write-time consolidation arc the 2026-07-04 pivot moved to has now been measured on the same
+78-item LongMemEval knowledge-update oracle fixture the read-side campaign used
+(SHA256 `bba252a302e7b257a0f7457fe97411f7de144aafd1c6b44c98a0e88ee8570907`), so the numbers are
+directly comparable.
+
+| Run | Score | Recall | Notes |
+|---|---|---|---|
+| `scalar-canonical-ku78-v1-20260806` | 0.872 | 68/78 | Previous canonical baseline |
+| `scalar-event-activity-ku78-v4-20260809` | 0.885 | 69/78 | Fresh clean run; superseded by v6 |
+| **`scalar-event-activity-ku78-v6-20260809`** | **0.910** | **71/78** | **Current canonical evidence** |
+
+Against a `no_memory` arm of 6/78 (0.077), v6 is a **+0.833 delta**. Provenance: Menhir
+`1fa57955`, Bench `d5e97cc4`, both tracked-clean; fresh non-resumed graph; one attempt; two-item
+checkpoint passed before release; 78/78 manifest rows with `failed_remaining=0`; harness exit 0.
+Configuration: adaptive segmentation, 2/3 scalar agreement, `k=3`, 1/1/1 attribute/scope/subject
+reconciliation, scalar state/history and View authority enabled, Event History and Event History
+authority enabled, deterministic scalar router and shadow paths disabled, TurnEvidence required.
+Models: gpt-4o-mini extraction/enrichment, text-embedding-3-small embeddings, gpt-4o answers,
+gpt-4o-mini judge.
+
+Read this against the read-side verdicts above. The oracle stack could not re-rank its way past
+0.400 on node-only; write-time consolidation reaches 0.910 on the knowledge-update slice. That is
+the empirical case for the pivot, not just its rationale.
+
+Three caveats the ledger states and this doc inherits:
+
+- **It is benchmark evidence, not an approved launch headline.** The subset is knowledge-update,
+  not all of LongMemEval, and the comparison arm is `no_memory`.
+- **"Canonical" is a documentation-level designation.** The immutable artifacts carry provenance
+  (clean commits, fixture hash, fresh graph, exit 0) but no machine-readable `evidence_status`
+  field. `arm: candidate` in `run_provenance.json` names the 2/3-reconciliation benchmark arm; it
+  does not make the run noncanonical. Future runs should emit an explicit `evidence_status` that
+  the runner validates. Do not retroactively edit v6's artifacts.
+- **Seven misses remain** (`f9e8c073`, `c4ea545c`, `e61a7584`, `a2f3aa27`, `26bdc477`,
+  `031748ae_abs`, `07741c45`). They are heterogeneous. The clearest deterministic defect is
+  `26bdc477`: `trip_count=3` and `trip_count=5` both minted but left `binding_pending` because
+  possessive "my camera" did not bind to the co-mentioned "Canon EOS 80D camera". Backlog until a
+  non-benchmark panel establishes the general alias pattern — do not tune it against the fixture.
 
 ## What this owns
 
@@ -588,13 +631,39 @@ measured, not just asserted.
 
 ## Suggested near-term order
 
+> **Superseded 2026-08-09.** The order below was written before the bench ran. It sequences the
+> read-side stack that then landed neutral-to-negative, and following it now walks into known-dead
+> work. It is kept because the dependency reasoning inside it is still correct *if* a rung is ever
+> reopened on new headroom — not because it describes what to build next.
+
 ```text
+HISTORICAL — do not execute as written:
 1. R0  (observability) — unblocks everything
 2. R1  (hybrid + source-aware priors) — biggest near-term retrieval win
 3. R3  (belief buckets) — parallel; extends existing belief.py
 4. R4 -> R5 -> R6 -> R7 -> R7.5 (oracle pipeline to the killer baseline + ablation matrix)
 5. R8 -> R9 (rails + write boundary)
 6. then bench-gate R10/R11 (use the R7.5 matrix for the go/no-go); only then start Phase rungs
+```
+
+### What to build next (current)
+
+The active arc is write-time consolidation, and it has no rungs in this ladder yet — its design
+docs sit in `.agent/plans/backlog/` (`aggregation-as-consolidation.md`, `quantstate-agent-counter.md`,
+`event-fold-view-architecture.md`) with statuses frozen at 2026-07-02, while the code shipped and
+benched at 0.910. **That gap is open work on this document, not a claim that the arc is unplanned.**
+Until it is closed, treat the ledger and those three docs as the authority on write-side order, and
+this ladder as the authority on read-side order only.
+
+Concrete near-term items that are already evidence-backed:
+
+```text
+1. Give the write-side arc rungs here (D0 retrieval-entropy, D1 QuantState, Event -> Fold -> View,
+   agent-experiential counters), each with its code surface and its KU78 metric.
+2. Decide whether those three design docs stay in plans/backlog/ or move up — "backlog" now
+   understates them. Direction call, not a filing call.
+3. Camera/possessive alias binding (v6 miss 26bdc477) — from a non-benchmark panel, not the fixture.
+4. Widen beyond knowledge-update before any external claim: 0.910 is one subset.
 ```
 
 ## Non-goals

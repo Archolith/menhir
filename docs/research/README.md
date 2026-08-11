@@ -24,7 +24,7 @@ Otherwise it remains a parked research note or issue comment.
 > This corpus is organized around the **read-side retrieval pipeline** (candidate -> oracle -> combine
 > -> rails) and labels it the "active pipeline." That is now **historical framing**: the oracle/warden
 > read-side stack was **built and benched neutral-to-negative on LongMemEval** (node-only 0.400 > full
-> stack 0.333) and **ships default-off** (`config/settings.py` frontier_* all False). The **current
+> stack 0.333) and **ships default-off** (`config/settings_model.py`, every `frontier_*` boolean gate False). The **current
 > active direction is write-time consolidation** — "aggregation is a consolidation problem, not a
 > retrieval one": D0 retrieval-entropy, D1 QuantState, Event -> Fold -> View, and agent-experiential
 > counters, all BUILT. Those docs live under `.agent/plans/backlog/`
@@ -34,6 +34,14 @@ Otherwise it remains a parked research note or issue comment.
 > research-corpus placement inaccurate. See the execution ladder's "Bench verdicts — reconciliation"
 > for why the read-side pivoted. The mechanism-ownership tables below remain accurate; only the
 > "what to build next" framing changed.
+>
+> **2026-08-09 — the pivot now has a number.** The write-side arc scored **0.910 (71/78)** on the
+> 78-item LongMemEval knowledge-update oracle fixture against a `no_memory` arm of 6/78 — a +0.833
+> delta, and up from the 0.872 canonical baseline. Same fixture hash as the read-side campaign, so
+> it compares directly against node-only 0.400. Run `scalar-event-activity-ku78-v6-20260809`
+> (Menhir `1fa57955`, Bench `d5e97cc4`, both clean); the authority is archolith-bench
+> `results/lme-ku-buildout/LEDGER.md`. This is benchmark evidence on one subset, not a launch
+> headline.
 
 ## Cluster layout
 
