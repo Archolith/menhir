@@ -273,13 +273,31 @@ def test_legacy_versions_are_relabelled_never_reinterpreted() -> None:
 
 @pytest.mark.unit
 def test_preparation_does_not_resurrect_an_unresolved_v2_locator() -> None:
-    neo = _StubNeo4j(responses=[[]])
+    neo = _StubNeo4j(
+        responses=[
+            [
+                {
+                    "eid": "e1",
+                    "repository": "menhir",
+                    "medium": "markdown",
+                    "path": "old.md",
+                    "version": "f441a237" * 5,
+                    "version_kind": None,
+                    "resolution_status": ResolutionStatus.UNRESOLVED,
+                }
+            ]
+        ]
+    )
 
-    assert WorkArtifactRepository(neo).backfill_current_locator_keys() == 0
-    assert len(neo.calls) == 1
-    query = neo.calls[0]["query"]
-    assert "coalesce(s.resolution_status, $resolved) = $resolved" in query
-    assert neo.calls[0]["params"]["schema_version"] == 2
+    assert WorkArtifactRepository(neo).backfill_current_locator_keys() == 1
+    params = neo.calls[1]["params"]
+    assert params["key"] is None
+    assert params["version_kind"] == "legacy_commit_sha"
+    assert params["schema_version"] == 2
+    assert (
+        "s.resolution_status = coalesce(s.resolution_status, $resolved)"
+        in neo.calls[1]["query"]
+    )
 
 
 @pytest.mark.unit
