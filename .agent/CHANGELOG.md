@@ -19,6 +19,9 @@
   after structural dirty marking and cannot fail it.
 - `MENHIR_ARTIFACT_RECONCILE_MODE` (off|audit|safe_apply, default audit) adds a startup recovery pass
   for moves no hook can see. An unrecognized value falls back to audit.
+- Graph-backed reconciliation now requires an explicit repository identity. Startup uses
+  `MENHIR_ARTIFACT_RECONCILE_REPOSITORY`, and first registration requires the CLI-only
+  `--allow-new-repository` override so a differently named worktree cannot fork the corpus.
 - `.agent/workflows/artifact_authoring.md` is the canonical authoring contract; README, file-index,
   maintenance, feature_planning, and the plan/backlog/reference indexes route to it.
 - Phases 5 (live graph repair) and 6 (frontmatter backfill) are deliberately NOT done: both require

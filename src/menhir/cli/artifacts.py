@@ -101,8 +101,10 @@ def validate(
 
 @artifacts_app.command()
 def audit(
+    repository: Annotated[
+        str, typer.Option(help="Repository name recorded on sources (required).")
+    ],
     repo: Annotated[str, typer.Option(help="Repository root to audit.")] = ".",
-    repository: Annotated[str, typer.Option(help="Repository name recorded on sources.")] = "",
     from_commit: Annotated[str, typer.Option(help="Last reconciled commit; enables rename detection.")] = "",
     as_json: Annotated[bool, typer.Option("--json", help="Emit the full ledger as JSON.")] = False,
 ) -> None:
@@ -115,7 +117,7 @@ def audit(
 
     report = service.audit(
         Path(repo),
-        repository=repository or None,
+        repository=repository,
         from_commit=from_commit or None,
     )
     if as_json:
@@ -156,12 +158,21 @@ def _print_report(report: Any) -> None:
 
 @artifacts_app.command()
 def reconcile(
+    repository: Annotated[
+        str, typer.Option(help="Repository name recorded on sources (required).")
+    ],
     repo: Annotated[str, typer.Option(help="Repository root to reconcile.")] = ".",
-    repository: Annotated[str, typer.Option(help="Repository name recorded on sources.")] = "",
     from_commit: Annotated[str, typer.Option(help="Last reconciled commit; enables rename detection.")] = "",
     apply: Annotated[bool, typer.Option("--apply", help="Write. Requires --plan-digest.")] = False,
     plan_digest: Annotated[str, typer.Option(help="Digest of the approved audit ledger.")] = "",
     prepare: Annotated[bool, typer.Option("--prepare", help="Backfill source UUIDs and locator keys first.")] = False,
+    allow_new_repository: Annotated[
+        bool,
+        typer.Option(
+            "--allow-new-repository",
+            help="Permit first registration when the named repository has no sources.",
+        ),
+    ] = False,
     as_json: Annotated[bool, typer.Option("--json", help="Emit JSON.")] = False,
 ) -> None:
     """Apply the safe actions of an approved ledger. Dry run unless --apply."""
@@ -177,7 +188,7 @@ def reconcile(
 
     if not apply:
         report = service.audit(
-            Path(repo), repository=repository or None, from_commit=from_commit or None
+            Path(repo), repository=repository, from_commit=from_commit or None
         )
         if as_json:
             _emit(report.as_dict())
@@ -188,10 +199,11 @@ def reconcile(
             # digest, and the operator would be told their approved plan is
             # stale by the command this line told them to run.
             options = [f"--repo {repo}"]
-            if repository:
-                options.append(f"--repository {repository}")
+            options.append(f"--repository {repository}")
             if from_commit:
                 options.append(f"--from-commit {from_commit}")
+            if allow_new_repository:
+                options.append("--allow-new-repository")
             options.append(f"--apply --plan-digest {report.plan_digest}")
             print("Re-run with: menhir artifacts reconcile " + " ".join(options))
         return
@@ -203,8 +215,9 @@ def reconcile(
     result = service.apply(
         Path(repo),
         expected_digest=plan_digest,
-        repository=repository or None,
+        repository=repository,
         from_commit=from_commit or None,
+        allow_new_repository=allow_new_repository,
     )
     if as_json:
         _emit(result.as_dict())
@@ -229,7 +242,9 @@ def reconcile(
 def relocate(
     old_path: Annotated[str, typer.Argument(help="Current locator path in the graph.")],
     new_path: Annotated[str, typer.Argument(help="Path the source now lives at.")],
-    repository: Annotated[str, typer.Option(help="Repository name recorded on the source.")] = "menhir",
+    repository: Annotated[
+        str, typer.Option(help="Repository name recorded on the source (required).")
+    ],
     medium: Annotated[str, typer.Option(help="Embodiment medium.")] = "markdown",
     repo: Annotated[str, typer.Option(help="Repository root, for hashing the destination.")] = ".",
 ) -> None:

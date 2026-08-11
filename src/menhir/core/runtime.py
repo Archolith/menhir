@@ -69,13 +69,24 @@ async def _run_startup_artifact_reconcile(built: object, settings: object) -> No
         )
         return
 
+    repository = getattr(settings, "artifact_reconcile_repository", "") or ""
+    if not repository.strip():
+        logger.warning(
+            "Artifact reconcile mode is %s but "
+            "MENHIR_ARTIFACT_RECONCILE_REPOSITORY is unset; skipping",
+            mode,
+        )
+        return
+
     adapter = getattr(built, "graph_adapter", None)
     if adapter is None or not hasattr(adapter, "fetch_artifact_corpus_audit"):
         return
 
     try:
         report = await asyncio.to_thread(
-            adapter.fetch_artifact_corpus_audit, repo_path=repo_path
+            adapter.fetch_artifact_corpus_audit,
+            repo_path=repo_path,
+            repository=repository,
         )
     except Exception:
         logger.warning("Startup artifact corpus audit failed", exc_info=True)
@@ -101,7 +112,11 @@ async def _run_startup_artifact_reconcile(built: object, settings: object) -> No
 
         service = ArtifactReconciliationService(adapter._work_artifacts)  # noqa: SLF001
         result = await asyncio.to_thread(
-            service.apply, repo_path, expected_digest=report.get("plan_digest") or ""
+            service.apply,
+            repo_path,
+            expected_digest=report.get("plan_digest") or "",
+            repository=repository,
+            allow_new_repository=False,
         )
         logger.info(
             "Artifact corpus safe_apply: applied=%s skipped=%s conflicted=%s refused=%s",

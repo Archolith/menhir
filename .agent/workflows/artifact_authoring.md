@@ -173,7 +173,8 @@ menhir artifacts audit --repo . --repository menhir
 ```
 
 Also read-only. It reports what reconciliation *would* do and prints a plan digest; applying
-anything requires that digest and an operator running `menhir artifacts reconcile --apply`.
+anything requires that digest and an operator running
+`menhir artifacts reconcile --repository <name> --apply`.
 
 ## Examples
 

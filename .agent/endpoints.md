@@ -601,8 +601,8 @@ Concept id: `mcp.tool.audit_artifact_corpus`
 
 Report whether a repository's work-artifact corpus matches the graph. Read-only.
 - **`repo_path`** (str): Absolute path to the working tree to audit.
-- **`repository`** (str, optional): Repository name recorded on sources. Defaults to the
-  directory name.
+- **`repository`** (str, required): Repository name recorded on sources. It is never
+  inferred from the worktree directory name.
 - **`from_commit`** (str, optional): Last reconciled commit. Supplying it enables Git rename
   detection over the interval; without it, moves are only found by declared UUID or unique
   content hash.
@@ -610,7 +610,7 @@ Report whether a repository's work-artifact corpus matches the graph. Read-only.
   contradictions. The full action ledger stays in CLI JSON output — a chat transport is the
   wrong place to send several hundred action records.
 - Writes nothing. Applying anything requires the digest and an operator running
-  `menhir artifacts reconcile --apply`.
+  `menhir artifacts reconcile --repository <name> --apply`.
 
 ### `relocate_artifact_source`
 Concept id: `mcp.tool.relocate_artifact_source`

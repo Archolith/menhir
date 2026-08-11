@@ -336,6 +336,15 @@ def test_audit_performs_no_write_calls(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
+def test_graph_backed_audit_requires_explicit_repository_identity(tmp_path: Path) -> None:
+    _write(tmp_path, ".agent/plans/a.md", "# A\n")
+    repo = _RecordingRepo()
+    with pytest.raises(ValueError, match="repository is required"):
+        ArtifactReconciliationService(repo).audit(tmp_path)
+    assert repo.calls == []
+
+
+@pytest.mark.unit
 def test_apply_with_the_wrong_digest_writes_nothing(tmp_path: Path) -> None:
     _write(tmp_path, ".agent/plans/a.md", "# A\n")
     repo = _RecordingRepo()
@@ -348,7 +357,7 @@ def test_apply_with_the_wrong_digest_writes_nothing(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
-def test_apply_with_the_matching_digest_registers_the_new_record(tmp_path: Path) -> None:
+def test_apply_refuses_implicit_first_repository_registration(tmp_path: Path) -> None:
     _write(tmp_path, ".agent/plans/a.md", "# A\n")
     service = ArtifactReconciliationService(_RecordingRepo())
     digest = service.audit(tmp_path, repository="t").plan_digest
@@ -356,6 +365,24 @@ def test_apply_with_the_matching_digest_registers_the_new_record(tmp_path: Path)
     repo = _RecordingRepo()
     result = ArtifactReconciliationService(repo).apply(
         tmp_path, expected_digest=digest, repository="t"
+    )
+    assert result.ok is False
+    assert result.refused_reason == "new_repository_requires_explicit_allow"
+    assert [name for name, _ in repo.calls] == ["list"]
+
+
+@pytest.mark.unit
+def test_explicit_first_repository_registration_can_apply(tmp_path: Path) -> None:
+    _write(tmp_path, ".agent/plans/a.md", "# A\n")
+    service = ArtifactReconciliationService(_RecordingRepo())
+    digest = service.audit(tmp_path, repository="t").plan_digest
+
+    repo = _RecordingRepo()
+    result = ArtifactReconciliationService(repo).apply(
+        tmp_path,
+        expected_digest=digest,
+        repository="t",
+        allow_new_repository=True,
     )
     assert result.ok
     assert len(result.applied) == 1
@@ -371,7 +398,10 @@ def test_a_conflict_does_not_block_unrelated_safe_actions(tmp_path: Path) -> Non
 
     repo = _RecordingRepo()
     result = ArtifactReconciliationService(repo).apply(
-        tmp_path, expected_digest=digest, repository="t"
+        tmp_path,
+        expected_digest=digest,
+        repository="t",
+        allow_new_repository=True,
     )
     assert len(result.conflicted) == 1
     assert len(result.applied) == 1

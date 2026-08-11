@@ -266,6 +266,7 @@ echo '{"tool_name":"Edit","tool_input":{"file_path":"src/foo.py"}}' \
 | `MENHIR_TURN_HOOK_LOG` | Failure-log path; else `<home>/.claude/menhir-turn-hook.log`. |
 | `MENHIR_ARTIFACT_RECONCILE_MODE` | Server-side startup recovery: `off` \| `audit` \| `safe_apply`. Default `audit` — drift is reported, nothing is mutated. `safe_apply` lets the server write to the graph on boot and is an operator choice after the one-time repair. An unrecognized value falls back to `audit`, so a typo can neither disable detection nor enable writes. |
 | `MENHIR_ARTIFACT_RECONCILE_REPO` | Working-tree path the startup pass audits. Unset means the pass is skipped regardless of mode. |
+| `MENHIR_ARTIFACT_RECONCILE_REPOSITORY` | Repository identity recorded on graph source locators. Required whenever the startup pass is enabled; never inferred from a worktree directory name. |
 
 ## Safety and privacy
 

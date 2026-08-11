@@ -257,7 +257,7 @@ repository, API route, and CLI.
 Add:
 
 ```text
-menhir artifacts audit --repo <path> [--from-commit <sha>] [--json]
+menhir artifacts audit --repo <path> --repository <name> [--from-commit <sha>] [--json]
 ```
 
 The command reads files, Git metadata, and graph state. It emits the proposed actions, conflicts,
@@ -280,7 +280,7 @@ returns the summary plus bounded conflicts; large ledgers stay in CLI JSON outpu
 Add:
 
 ```text
-menhir artifacts reconcile --repo <path> --apply --plan-digest <digest>
+menhir artifacts reconcile --repo <path> --repository <name> --apply --plan-digest <digest>
 ```
 
 Dry-run remains the default. Apply re-scans files and graph state, recomputes the plan, and refuses
@@ -324,11 +324,16 @@ Runtime mode is configured explicitly:
 
 ```text
 MENHIR_ARTIFACT_RECONCILE_MODE=off | audit | safe_apply
+MENHIR_ARTIFACT_RECONCILE_REPOSITORY=<graph repository name>
 ```
 
 Default to `audit`. Startup reports drift but does not mutate the graph. `safe_apply` is an operator
 choice after the one-time repair and fixture suite pass. A post-commit hook may run the same command;
 it is an accelerator, not the only detector.
+
+Repository identity is always explicit. A worktree basename is not a stable graph key. Apply refuses
+to register a corpus when the named repository has zero sources unless an operator supplies
+`--allow-new-repository`; startup `safe_apply` never supplies that override.
 
 Branch checkout and a missing commit cursor fall back to full audit. They do not assume every
 delete/create pair is a rename.
@@ -562,12 +567,15 @@ Acceptance:
 
 ### Phase 3 — digest-gated apply and targeted MCP
 
-Add `menhir artifacts reconcile --apply --plan-digest`, the read-only audit MCP tool, and targeted
+Add `menhir artifacts reconcile --repository <name> --apply --plan-digest`, the read-only audit MCP
+tool, and targeted
 manual relocation MCP tool.
 
 Acceptance:
 
 - Apply with the wrong digest writes nothing.
+- Apply with an omitted repository identity writes nothing, and first registration requires an
+  explicit `--allow-new-repository` override.
 - Safe actions apply independently of conflicts.
 - Re-running audit immediately after apply reports no repeat actions.
 - MCP and CLI use the same repository checks; neither has a weaker collision path.

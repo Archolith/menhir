@@ -66,7 +66,12 @@ def service(test_neo4j_repo) -> ArtifactReconciliationService:
 
 def _apply(service: ArtifactReconciliationService, root: Path):
     report = service.audit(root, repository="t")
-    return service.apply(root, expected_digest=report.plan_digest, repository="t")
+    return service.apply(
+        root,
+        expected_digest=report.plan_digest,
+        repository="t",
+        allow_new_repository=True,
+    )
 
 
 def _sources(neo4j) -> list[dict]:

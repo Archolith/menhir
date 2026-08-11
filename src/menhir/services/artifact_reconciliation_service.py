@@ -135,9 +135,14 @@ class ArtifactReconciliationService:
         git: GitEvidence | None = None,
         extra_renames: Sequence[GitRename] = (),
     ) -> ReconciliationReport:
-        """Compare the tree against the graph. Zero writes, by construction."""
+        """Compare the tree against the graph. Zero writes, by construction.
+
+        Graph locators are repository-scoped identities. Inferring that identity
+        from a worktree directory name can make an existing repository appear
+        empty, so every graph-backed caller must supply it explicitly.
+        """
         root = Path(repo_root).resolve()
-        name = repository or root.name
+        name = self._require_repository(repository)
         evidence = git if git is not None else collect_git_evidence(root, from_commit=from_commit)
         entries = scan_corpus(root, repository=name, git=evidence)
         snapshots = self._repo.list_artifact_source_snapshots(repository=name)
@@ -240,6 +245,7 @@ class ArtifactReconciliationService:
         expected_digest: str,
         repository: str | None = None,
         from_commit: str | None = None,
+        allow_new_repository: bool = False,
     ) -> ApplyResult:
         """Re-derive the plan and apply only its safe actions.
 
@@ -254,6 +260,18 @@ class ArtifactReconciliationService:
 
         if report.plan_digest != expected_digest:
             result.refused_reason = "plan_digest_mismatch"
+            return result
+
+        registrations = [
+            action for action in report.actions
+            if action.kind == ActionKind.REGISTER_ARTIFACT
+        ]
+        if (
+            registrations
+            and int(report.counts.get("sources", 0)) == 0
+            and not allow_new_repository
+        ):
+            result.refused_reason = "new_repository_requires_explicit_allow"
             return result
 
         now = datetime.now(timezone.utc).isoformat()
@@ -272,6 +290,15 @@ class ArtifactReconciliationService:
             else:
                 result.skipped.append(record)
         return result
+
+    @staticmethod
+    def _require_repository(repository: str | None) -> str:
+        name = (repository or "").strip()
+        if not name:
+            raise ValueError(
+                "repository is required for graph-backed artifact reconciliation"
+            )
+        return name
 
     def _apply_one(
         self,

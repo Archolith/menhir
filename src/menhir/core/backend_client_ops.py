@@ -561,7 +561,7 @@ class BackendClientOpsMixin:
         self,
         *,
         repo_path: str,
-        repository: str | None = None,
+        repository: str,
         from_commit: str | None = None,
         conflict_limit: int = 25,
     ) -> dict[str, Any]:

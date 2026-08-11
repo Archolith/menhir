@@ -17,8 +17,8 @@ equivalent.
 
 Prefer the CLI directly:
 
-    menhir artifacts audit --repo <path> [--json]
-    menhir artifacts reconcile --repo <path> --apply --plan-digest <digest>
+    menhir artifacts audit --repo <path> --repository <name> [--json]
+    menhir artifacts reconcile --repo <path> --repository <name> --apply --plan-digest <digest>
 """
 
 from __future__ import annotations
@@ -96,7 +96,13 @@ def _revalidate() -> int:
     return 0
 
 
-def _report(root: Path, repository: str, apply: bool, plan_digest: str) -> int:
+def _report(
+    root: Path,
+    repository: str,
+    apply: bool,
+    plan_digest: str,
+    allow_new_repository: bool,
+) -> int:
     service = ArtifactReconciliationService(_connect())
     report = service.audit(root, repository=repository)
     counts = report.counts
@@ -112,13 +118,20 @@ def _report(root: Path, repository: str, apply: bool, plan_digest: str) -> int:
 
     if not apply:
         print("\nDRY RUN -- nothing written.")
+        allow_option = " --allow-new-repository" if allow_new_repository else ""
         print(
             "Apply with: menhir artifacts reconcile "
-            f"--repo {root} --apply --plan-digest {report.plan_digest}"
+            f"--repo {root} --repository {repository} "
+            f"--apply --plan-digest {report.plan_digest}{allow_option}"
         )
         return 0
 
-    result = service.apply(root, expected_digest=plan_digest, repository=repository)
+    result = service.apply(
+        root,
+        expected_digest=plan_digest,
+        repository=repository,
+        allow_new_repository=allow_new_repository,
+    )
     if not result.ok:
         print(f"\nrefused: {result.refused_reason}; current digest {result.plan_digest}")
         return 2
@@ -135,6 +148,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--plan-digest", default="", help="digest of the approved audit ledger")
     ap.add_argument("--repo", default=str(MENHIR_ROOT), help="repository root to reconcile")
     ap.add_argument("--repository", default="", help="repository name recorded on sources")
+    ap.add_argument(
+        "--allow-new-repository",
+        action="store_true",
+        help="permit first registration for a repository with no graph sources",
+    )
     ap.add_argument("--revalidate", action="store_true",
                     help="re-run shape validation over already-ingested artifacts")
     args = ap.parse_args(argv)
@@ -142,11 +160,21 @@ def main(argv: list[str] | None = None) -> int:
     if args.revalidate:
         return _revalidate()
 
+    if not args.repository.strip():
+        print("--repository is required for graph-backed artifact reconciliation.")
+        return 2
+
     root = Path(args.repo).resolve()
     if args.apply and not args.plan_digest:
         print("--apply requires --plan-digest from an approved audit ledger.")
         return 2
-    return _report(root, args.repository or root.name, args.apply, args.plan_digest)
+    return _report(
+        root,
+        args.repository,
+        args.apply,
+        args.plan_digest,
+        args.allow_new_repository,
+    )
 
 
 if __name__ == "__main__":

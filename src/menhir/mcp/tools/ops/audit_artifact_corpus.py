@@ -7,7 +7,7 @@ from menhir.mcp.tools.base import BaseTextTool
 
 async def audit_artifact_corpus(
     repo_path: str,
-    repository: str = "",
+    repository: str,
     from_commit: str = "",
 ) -> str:
     """Report whether a repository's work-artifact corpus matches the graph.
@@ -18,13 +18,14 @@ async def audit_artifact_corpus(
     artifact yet, and sources that can no longer be found.
 
     Conflicts are listed but bounded. For the full action ledger and to apply
-    anything, use the operator CLI: ``menhir artifacts audit --json`` and
-    ``menhir artifacts reconcile --apply --plan-digest <digest>``.
+    anything, use the operator CLI: ``menhir artifacts audit --repository <name>
+    --json`` and ``menhir artifacts reconcile --repository <name> --apply
+    --plan-digest <digest>``.
 
     Args:
         repo_path: Absolute path to the repository working tree to audit.
-        repository: Repository name recorded on sources. Defaults to the
-                    directory name.
+        repository: Repository name recorded on sources. Required because a
+                    worktree directory name is not repository identity.
         from_commit: Last reconciled commit. Supplying it enables Git rename
                      detection over the interval; without it, moves are only
                      found by declared UUID or unique content hash.
@@ -45,12 +46,12 @@ class AuditArtifactCorpusTool(BaseTextTool):
     )
 
     async def endpoint(
-        self, repo_path: str, repository: str = "", from_commit: str = ""
+        self, repo_path: str, repository: str, from_commit: str = ""
     ) -> str:
         backend = self.get_backend()
         result = await backend.fetch_artifact_corpus_audit(
             repo_path=repo_path,
-            repository=repository or None,
+            repository=repository,
             from_commit=from_commit or None,
         )
 

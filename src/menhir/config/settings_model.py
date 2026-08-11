@@ -137,6 +137,7 @@ class MemorySettings:
     # never a default, because it lets a process write to the graph on boot.
     artifact_reconcile_mode: str = "audit"
     artifact_reconcile_repo: str = ""
+    artifact_reconcile_repository: str = ""
 
     # Experience-counter maintenance job (telemetry -> QuantState counters). Env-toggleable so the
     # job can be paused independently of the rest of the scheduler (it can be an expensive fold +
@@ -587,6 +588,9 @@ class MemorySettings:
                 _getenv("MENHIR_ARTIFACT_RECONCILE_MODE", default=cls.artifact_reconcile_mode)
             ),
             artifact_reconcile_repo=_getenv("MENHIR_ARTIFACT_RECONCILE_REPO", default="") or "",
+            artifact_reconcile_repository=_getenv(
+                "MENHIR_ARTIFACT_RECONCILE_REPOSITORY", default=""
+            ) or "",
             experience_counter_enabled=parse_bool_env(_getenv("MENHIR_EXPERIENCE_COUNTER_ENABLED", default=str(cls.experience_counter_enabled))),
             verifier_sync_enabled=parse_bool_env(_getenv("MENHIR_VERIFIER_SYNC_ENABLED", default=str(cls.verifier_sync_enabled))),
             verifier_sync_interval_s=_parse_float(
