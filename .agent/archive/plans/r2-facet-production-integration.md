@@ -1,5 +1,8 @@
 # R2 facet — production integration plan (CandidateSource.FACET)
 
+> **Archived 2026-08-11.** Phases 1–3 shipped, gates A–C were measured, and Phase 4 received the
+> evidence-backed PARK decision; the retained default-off seam is measurement infrastructure.
+
 ## Status
 
 **Phases 1–3 SHIPPED. Production activation remains PARKED; a Recall Lab-only active rerank seam

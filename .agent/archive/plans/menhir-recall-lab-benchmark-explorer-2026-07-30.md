@@ -1,5 +1,8 @@
 # Bench-Run Explorer for Recall Lab
 
+> **Archived 2026-08-11.** The benchmark catalog, inspection routes, privacy boundary, contracts,
+> and regression coverage are implemented.
+
 ## Why
 - LME benchmark runs produce manifest files and checkpoint scores in `archolith-bench/results/`, but browsing them requires the standalone `:8200` dashboard or direct filesystem access.
 - Operators reviewing a run's task-by-task accuracy, evidence, scalar views, and derivation path must switch between the standalone dashboard and the Menhir Recall Lab.

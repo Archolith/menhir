@@ -1,5 +1,8 @@
 # Handoff: Resolve the Real Ingest Failure Before Any More Downstream Composition Work
 
+> **Archived 2026-08-11.** Combined extraction fixed the failure and the isolated production replay
+> verified the current-value result and clean namespace teardown.
+
 Status: NEW SESSION SCOPE. Written 2026-07-16, at the point where the prior session recognized it
 had spent an entire day building and validating downstream shadow-mode context-composition
 machinery (Extraction Lab Phases 1-5, Stage 1 shadow composition, 3 candidate-selection/judge
@@ -58,7 +61,7 @@ with driver.session() as session:
 ## Root cause, as previously diagnosed — and one open nuance found just now, not yet resolved
 
 `.agent/reviews/rca-lme-stale-fact-retention-2026-07-15.md` (original RCA) + Phase 3 of
-`.agent/plans/menhir-extraction-context-ablation-handoff.md` (the controlled A/B trace). Summary
+`.agent/archive/plans/menhir-extraction-context-ablation-handoff.md` (the controlled A/B trace). Summary
 of the existing diagnosis: `graphiti_core.search.search_utils.RELEVANT_SCHEMA_LIMIT = 10` caps how
 many prior episodes ever reach the extraction LLM call; with the real namespace at 29 episodes,
 this cap is in play. An isolated trace with 1 prior episode of context correctly extracted 5
@@ -109,7 +112,7 @@ synthetic 0/1-episode simulation.
 ## Where the related research lives (context, not required reading before starting)
 
 - `.agent/reviews/rca-lme-stale-fact-retention-2026-07-15.md` — original RCA
-- `.agent/plans/menhir-extraction-context-ablation-handoff.md` — Phase 1-5, the full downstream
+- `.agent/archive/plans/menhir-extraction-context-ablation-handoff.md` — Phase 1-5, the full downstream
   investigation (candidate selection given correct metadata — assumes extraction already
   succeeded, which is exactly the assumption this handoff is questioning)
 - `.agent/plans/menhir-context-composition-production-integration.md` — the 4-stage rollout plan

@@ -1,5 +1,8 @@
 # Menhir context brief — for frontier-transfer-review in a fresh session
 
+> **Archived 2026-08-11.** This transfer input describes an earlier architecture and symptom set;
+> regenerate a fresh context brief before commissioning another independent transfer review.
+
 **Purpose:** paste this (plus the skill) into a chat with no Menhir context. It contains architecture and
 measured symptoms only — **no existing research hypotheses** — so that convergence with prior transfers is
 evidence, not echo. Do not add conclusions from `.agent/research/` or `.agent/reviews/` to this brief.

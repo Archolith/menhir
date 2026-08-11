@@ -24,7 +24,7 @@ so there was nothing to wire. See CHANGELOG 2026-07-02.
 QuantState consolidator are built, tested end-to-end, and committed — but **inert**: they only fire
 on manual invocation. This plan makes them run on their own in production. Companion to
 [`event-fold-view-architecture.md`](event-fold-view-architecture.md) (historical architecture decision) and
-[`ingest-primitive-family.md`](../../plans/backlog/ingest-primitive-family.md) (the MVP cut).
+[`ingest-primitive-family.md`](../../reference/ingest-primitive-family.md) (the MVP cut).
 
 Three independent workstreams; do them in order (each is safe alone). One project: menhir-frontier.
 

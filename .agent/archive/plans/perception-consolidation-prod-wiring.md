@@ -1,5 +1,8 @@
 # Plan: production wiring for the personal-memory perception consolidation
 
+> **Archived 2026-08-11.** Production scheduling, dirty discovery, bounded batch re-fold, runtime
+> settings, and tests are implemented; the remaining corroboration experiment is owned by Law-3 W6.
+
 > **Status note 2026-08-08 (curator audit).** The line below is stale — the wiring is BUILT:
 > `consolidate_personal_memory` (`services/scheduler_tasks.py:468`) is a registered nightly job in
 > `MaintenanceScheduler` (`services/maintenance_scheduler.py:150-153`), dirty-namespace-scoped,

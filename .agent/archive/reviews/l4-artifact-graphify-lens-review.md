@@ -1,5 +1,8 @@
 # L4 artifact implementation — Graphify-lens review
 
+> **Archived 2026-08-11.** The review completed and its one material status-clamping finding was
+> fixed and covered at the repository boundary.
+
 **Date:** 2026-06-28 · **Scope:** the menhir-side L4 institutional-artifact slice
 **Files:** `src/menhir/infrastructure/artifact_repository.py`, `src/menhir/domain/artifacts.py`,
 `src/menhir/services/artifact_service.py`, `src/menhir/services/memory_oracle_service.py`,

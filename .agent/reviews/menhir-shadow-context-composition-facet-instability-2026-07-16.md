@@ -189,7 +189,7 @@ selects anything.
 
 - `.agent/plans/menhir-context-composition-production-integration.md` — "Stage 1 execution result"
   subsection (short-form version of this finding, written the same day)
-- `.agent/plans/menhir-extraction-context-ablation-handoff.md` — Phase 5, the Recall-Labs-only
+- `.agent/archive/plans/menhir-extraction-context-ablation-handoff.md` — Phase 5, the Recall-Labs-only
   investigation this stage carries forward (its winning `predict_candidate_aware_ranked` approach
   used hand-authored fixtures with a much smaller, more controlled candidate vocabulary — this
   instability did not surface there)

@@ -1,5 +1,8 @@
 # Merge Provenance Correctness Remediation
 
+> **Archived 2026-08-11.** Complete provenance derivation, exact race guards, effective authority,
+> and exact unmerge behavior are implemented and tested.
+
 ## Objective
 
 Correct commit `01a10e4` without broadening its product design: merged provenance must be

@@ -1,7 +1,11 @@
 # Menhir: Belief Supersession — Codex Research Plan Mapped to Shipped Code
 
+> **Archived 2026-08-11.** Its extraction-context work was superseded by the completed
+> extraction-context ablation campaign; durable temporal and supersession ownership now lives in
+> the typed-scalar/event architecture and the remaining backlog plans.
+
 **Status: PLAN (ready to execute Phase 1).** Produced by auditing
-`.agent/plans/menhir-belief-supersession-temporal-chains-research.md` (Codex, saved 2026-07-15)
+`.agent/reference/../../reference/menhir-belief-supersession-temporal-chains-research.md` (Codex, saved 2026-07-15)
 against the actual `src/menhir` codebase, `research-vs-shipped-inventory.md`, and today's confirmed
 RCA (`.agent/reviews/rca-lme-stale-fact-retention-2026-07-15.md`). This is the "actual plan" the
 Codex research doc's own Step 1 ("Audit Existing Code," "Determine what pieces already exist,"
@@ -144,7 +148,7 @@ machinery; it has no "extraction-time candidate lookup" row because nothing like
 
 Two independent research angles already exist for this exact gap and should NOT be re-derived:
 
-1. `.agent/plans/menhir-extraction-prompt-recency-recall-research.md` (Codex, saved 2026-07-15) —
+1. `.agent/archive/plans/menhir-extraction-prompt-recency-recall-research.md` (Codex, saved 2026-07-15) —
    prompt-level fix: stop conflating "identity resolution uncertain" with "do not extract," via
    5 prompt variants (A-E) and a proposition-level recall/precision evaluation methodology.
 2. This RCA's own "fix candidates, in order of increasing scope" (`rca-lme-stale-fact-retention
@@ -322,14 +326,14 @@ the same idea from scratch.
 
 - `.agent/reviews/rca-lme-stale-fact-retention-2026-07-15.md` — the confirmed root cause this plan
   is built on.
-- `.agent/plans/menhir-extraction-prompt-recency-recall-research.md` — Phase 1's source plan.
-- `.agent/plans/menhir-belief-supersession-temporal-chains-research.md` — the plan this document
+- `.agent/archive/plans/menhir-extraction-prompt-recency-recall-research.md` — Phase 1's source plan.
+- `.agent/reference/../../reference/menhir-belief-supersession-temporal-chains-research.md` — the plan this document
   maps against; its retrieval/consolidation architecture proposal is superseded in practice by
   already-shipped, already-bench-tested code (see "The corrected diagnosis" above), but its
   temporal-reasoning and candidate-retrieval framing remains useful background.
 - `docs/research/process/research-vs-shipped-inventory.md` — canonical shipped-vs-research map;
   re-audit before trusting the Tier assignments cited here if significant time has passed.
-- `.agent/research/menhir-research-execution-ladder.md` Track W — the current write-time-
+- `.agent/plans/menhir-research-execution-ladder.md` Track W — the current write-time-
   consolidation status this plan's Phase 1/2 continues. The archived thesis remains at
   `.agent/archive/plans/aggregation-as-consolidation.md` and owes the historical failure-census
   correction noted above; its body is intentionally not rewritten.

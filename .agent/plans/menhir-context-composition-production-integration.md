@@ -11,7 +11,7 @@ traffic — see "Stage 1 execution result" below for what that run actually foun
 This plan exists because the Recall-Labs-only investigation is finished and its conclusion is
 directional, not hypothetical:
 
-- `.agent/plans/menhir-extraction-context-ablation-handoff.md` — full methodology, all phases,
+- `.agent/archive/plans/../archive/plans/menhir-extraction-context-ablation-handoff.md` — full methodology, all phases,
   exact trial numbers (Phase 1 through Phase 5 items 1-4).
 - `.agent/reviews/rca-lme-stale-fact-retention-2026-07-15.md` — compact RCA, cross-referenced.
 - Frozen selector: `select_structured_then_llm` in

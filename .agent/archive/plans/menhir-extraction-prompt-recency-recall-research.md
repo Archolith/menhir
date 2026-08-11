@@ -1,5 +1,9 @@
 # Menhir Recall Labs Task: Extraction Prompt Failure on Distant Knowledge Updates
 
+> **Archived 2026-08-11.** The proposed prompt/context experiments were consumed by the completed
+> extraction-context ablation campaign, and the motivating production extraction failure was later
+> fixed through combined extraction.
+
 **Status: Research / Prototype — SAVED, NOT ACTIVE.** Explicitly scoped to Recall Labs
 experimentation only. Do not modify production ingestion prompts from this document without a
 completed prompt comparison showing clear improvement (see the doc's own "Deliverables" section).

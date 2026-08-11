@@ -3,9 +3,9 @@
 <!-- Filename convention: <feature>-plan.md -->
 
 **Status:** backlog — proposed 2026-07-11
-**Gap source:** `.agent/research/menhir-frontier-transfer-forensic-admissibility.md` §2.3 + §6 (elevated
-#3) + `.agent/research/menhir-cross-domain-representation-research-2026-07-02.md` arch-critique #2.
-**Related:** `fold-algebra.md` (Views + `view_sig`), the completeness-watermark partial (View coverage
+**Gap source:** `.agent/reference/menhir-frontier-transfer-forensic-admissibility.md` §2.3 + §6 (elevated
+#3) + `.agent/reference/menhir-cross-domain-representation-research-2026-07-02.md` arch-critique #2.
+**Related:** `../../reference/fold-algebra.md` (Views + `view_sig`), the completeness-watermark partial (View coverage
 boundary), `retrieval-recency-split-and-view-injection.md`.
 
 ---

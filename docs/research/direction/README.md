@@ -11,7 +11,7 @@ Cluster 0 of the research corpus. The big-picture architecture the rest of the c
 > `event-fold-view-architecture.md` and `quantstate-agent-counter.md` briefly lived here in July.
 > Their three-document cluster was archived under `.agent/archive/plans/` on 2026-08-10 after D0,
 > D1, and the Event → Fold → View abstraction shipped and were measured. Use
-> `.agent/research/menhir-research-execution-ladder.md` for current status and
+> `.agent/plans/menhir-research-execution-ladder.md` for current status and
 > `.agent/architecture.md` / `.agent/data_models.md` for the live mechanism.
 
 Master index: [`../README.md`](../README.md).

@@ -1,5 +1,8 @@
 # Beacon & Menhir — Architecture Review
 
+> **Archived 2026-08-11.** This is a historical external architecture review with no current Menhir
+> execution ownership; accepted Beacon decisions live with the current Beacon corpus.
+
 **Date:** 2026-06-29
 **Subject:** Project Handoff and Architecture Review for Beacon & Menhir
 **Reviewer:** Antigravity

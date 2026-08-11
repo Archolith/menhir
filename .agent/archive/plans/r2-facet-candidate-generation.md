@@ -1,5 +1,8 @@
 # R2 — Facet candidate generation (bench-first)
 
+> **Archived 2026-08-11.** The bench mechanism and evidence were completed, and the subsequent
+> production-integration record superseded this planned-state design note.
+
 **Date:** 2026-06-27
 **Status:** PLANNED — bench-first rung. **No menhir production change lands from this rung** until the
 benchmark shows a measurable win. Implementation + fixture live in `archolith-bench`.
@@ -10,7 +13,7 @@ benchmark shows a measurable win. Implementation + fixture live in `archolith-be
 > `recall_service.py`/`scoring_service.py`. This is the "Production CandidateSource.FACET seam
 > reserved" mentioned in `menhir-research-execution-ladder.md`. Doesn't change the verdict: still
 > bench-first, no live production recall change.
-**Rung:** R2 in [`menhir-research-execution-ladder.md`](../../research/menhir-research-execution-ladder.md) (`depends_on R1`).
+**Rung:** R2 in [`menhir-research-execution-ladder.md`](../../plans/menhir-research-execution-ladder.md) (`depends_on R1`).
 **Owner (mechanism):** [`facet-retrieval.md`](../../../docs/research/retrieval/facet-retrieval.md).
 **Bench owner:** [`archolith-bench-operational-model.md`](../../../docs/research/process/archolith-bench-operational-model.md).
 
@@ -147,4 +150,4 @@ touching the source/prior taxonomy again.
 
 > Repo-scope note: deliverables 2–4 live in `archolith-bench`, which is outside the current session's
 > GitHub scope and needs the home bench environment. They are tracked in
-> [`deferred-verification.md`](deferred-verification.md) until they can be built and run.
+> [`deferred-verification.md`](../../plans/backlog/deferred-verification.md) until they can be built and run.

@@ -583,10 +583,10 @@ consolidation thesis. Track W is now the current status authority; the original 
 records, while live architecture belongs to the operational docs below.
 
 ```text
-status  .agent/research/menhir-research-execution-ladder.md   order + current rung state
+status  .agent/plans/menhir-research-execution-ladder.md   order + current rung state
 design  .agent/memory-aggregation-under-uncertainty.md        aggregation safety model
         .agent/architecture.md                                live Event/Fold/View architecture
-        .agent/plans/backlog/fold-algebra.md                  fold laws + implementation record
+        .agent/reference/fold-algebra.md                  fold laws + implementation record
 history .agent/archive/plans/aggregation-as-consolidation.md
         .agent/archive/plans/quantstate-agent-counter.md
         .agent/archive/plans/event-fold-view-architecture.md
@@ -700,7 +700,7 @@ what made QuantState surface at all, and breaking it silently drops nodes from r
 ```text
 goal        make batch and incremental evaluation obey the same fold laws: event-time ordering,
             replay/dedup safety, and stated-anchor + post-anchor delta reconciliation
-owner       .agent/plans/backlog/fold-algebra.md +
+owner       .agent/reference/fold-algebra.md +
             .agent/memory-aggregation-under-uncertainty.md
 code        domain/fold_algebra.py, services/perception.py, ViewKind.lww_register/require_newer
 bench       unit coverage in tests/test_fold_algebra.py, tests/test_view_repository_lww.py,

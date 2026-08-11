@@ -2,7 +2,7 @@
 
 > **ARCHIVED 2026-08-10.** The production slice, focused verification, and KU78 follow-up are
 > complete. Current write-side sequencing and benchmark ownership live in
-> [Track W](../../research/menhir-research-execution-ladder.md). The deferred open-world parser and
+> [Track W](../../plans/menhir-research-execution-ladder.md). The deferred open-world parser and
 > further scalar tuning require separate evidence; they do not keep this implementation plan open.
 
 **Status:** IMPLEMENTED / FOCUSED VERIFICATION COMPLETE

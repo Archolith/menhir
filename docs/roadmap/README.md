@@ -1,6 +1,6 @@
 # roadmap index
 
-Build-sequencing and strategic-direction notes. Grouped by altitude so it's clear what authorizes implementation and what is a proposal. None of the proposals or strategic notes is a ladder rung by itself — the dependency-ordered build order lives in [`../../.agent/research/menhir-research-execution-ladder.md`](../../.agent/research/menhir-research-execution-ladder.md).
+Build-sequencing and strategic-direction notes. Grouped by altitude so it's clear what authorizes implementation and what is a proposal. None of the proposals or strategic notes is a ladder rung by itself — the dependency-ordered build order lives in [`../../.agent/plans/menhir-research-execution-ladder.md`](../../.agent/plans/menhir-research-execution-ladder.md).
 
 ## Active build sequencing
 

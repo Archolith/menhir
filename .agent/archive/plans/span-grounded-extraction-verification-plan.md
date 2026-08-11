@@ -10,7 +10,7 @@ code anchors below; it is not standalone backlog work. Superseded-by: `foundatio
 > The original sweep draft wrongly claimed "no perception-exit verifier in src" — a keyword-grep miss.
 > `services/perception.py` (`_stated_value_grounded` / `_sum_arithmetic_grounded`, guards pinned on in
 > `scheduler_tasks.py:424-427`, `sum_grounding` default-on `settings.py:218`) is the shipped verifier.
-**Gap source:** `.agent/research/menhir-cross-domain-representation-research-2026-07-02.md` §C.7.
+**Gap source:** `.agent/reference/menhir-cross-domain-representation-research-2026-07-02.md` §C.7.
 **Design of record for what shipped:** `.agent/for-review/HANDOFF-2026-07-02-perception-boundary.md`.
 
 ---

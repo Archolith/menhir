@@ -55,7 +55,7 @@ contracts documented in `data_models.md`.
 
 Batch and incremental execution are two evaluation modes of the same fold laws, not separate pure
 and stateful operation families. Event-time ordering, replay/dedup, and anchor+delta reconciliation
-are specified in `plans/backlog/fold-algebra.md`; precision and abstention policy are specified in
+are specified in `reference/fold-algebra.md`; precision and abstention policy are specified in
 `memory-aggregation-under-uncertainty.md`.
 
 ## Technology Stack

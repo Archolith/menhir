@@ -175,7 +175,7 @@ interpretations outlive whichever reasoning engine produced them.
 ## Relationship to existing docs
 
 ```text
-.agent/research/menhir-research-execution-ladder.md:
+.agent/plans/menhir-research-execution-ladder.md:
   the executable rung order that realizes these phases (Phase rungs P4/P5/PR/PA).
   This doc owns the conceptual phases; the ladder owns build order.
 

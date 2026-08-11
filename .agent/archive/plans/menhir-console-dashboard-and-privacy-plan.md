@@ -1,5 +1,8 @@
 # menhir — rich console dashboard + memory-content privacy redaction
 
+> **Archived 2026-08-11.** The console dashboard, central display-time privacy policy, runtime
+> settings, Explorer integration, and regression coverage are implemented.
+
 Status: IN PROGRESS
 Author: Claude Code (Opus 4.8)
 Date: 2026-07-12

@@ -544,7 +544,7 @@ in stream entity resolution. What appears genuinely uncommon is the *combination
 invariant* — consolidation audited by mass balance across phases (§5). That invariant, plus the metastable-zone
 operating rule (§1), is the transfer's actual contribution.
 
-Related: `.agent/research/crossdating-relative-chronologies.md` (same research lane, temporal axis);
+Related: `.agent/reference/crossdating-relative-chronologies.md` (same research lane, temporal axis);
 `.agent/reviews/menhir-cross-domain-representation-research-2026-07-02.md` (identity View §B.5 — the twin probe
 is its missing false-merge guard; derivation-layer finding §4). Both MVP experiments here are cheap replays over
 existing data and instruments (correlation clustering + the D0/view-entropy footprint) — they should run before

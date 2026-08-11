@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-08-11 - Separate executable plans, reusable references, and completed records
+
+- Audited all 63 Markdown records in the top-level plan, backlog, and operational-research corpus
+  against current source, tests, commit history, and successor ownership; the PDF remained
+  intentionally unread and unclassified.
+- Established `.agent/reference/` as the indexed home for 13 useful but non-executable Markdown
+  records plus the unverified PDF. Current design laws, negative benchmark evidence, saved research,
+  future options, and inputs consumed by active plans no longer appear to authorize implementation.
+- Moved the research execution ladder into `.agent/plans/` as active execution authority, reduced
+  the top-level plan index to 11 plans plus the ladder, and reduced the backlog to 15 executable or
+  owner-decision records.
+- Archived 20 completed or superseded plan/backlog records and three completed/stale research-review
+  records with explicit disposition banners. Two ambiguous owners remain deliberately active for an
+  owner decision: context-composition Stages 2–4 and generic memory `SUPERSEDED_BY` lineage.
+- Retired the empty `.agent/research/` router and mechanically repaired affected live and historical
+  links. A throwaway repository Markdown-link check reported zero dangling links after the moves.
+
 ## 2026-08-10 - Archive shipped write-side owner plans and reconcile Track W
 
 - Archived the July consolidation thesis, QuantState plan, and Event → Fold → View plan as
@@ -208,7 +225,7 @@
   `MENHIR_BENCH_RESULTS_ROOT` and `MENHIR_BENCH_ACTIVE_RUN_ID`.
 - Files: `explorer/bench_runs.py`, `explorer/templates/bench_runs.html`,
   `explorer/templates/bench_run_detail.html`, `explorer/templates/bench_task_detail.html`,
-  `tests/test_explorer_bench_runs.py`, `.agent/plans/menhir-recall-lab-benchmark-explorer-2026-07-30.md`.
+  `tests/test_explorer_bench_runs.py`, `.agent/archive/plans/menhir-recall-lab-benchmark-explorer-2026-07-30.md`.
   Modified: `explorer/app.py`, `explorer/templates/base.html`. Launch scripts updated.
 - Docs: `endpoints.md` updated, `architecture.md` updated.
 # NOTE: this file currently holds 29+ entries, well past the 10-entry policy; not trimmed as part of
@@ -447,7 +464,7 @@
   window bug from the same-day stale-fact-retention RCA — the "suburbs" fact was still dropped by
   both models. See `archolith-bench/.agent/CHANGELOG.md` 2026-07-15 for the full rationale.
 - Saved a second Codex-authored research plan (verbatim, not yet actioned):
-  `.agent/plans/menhir-extraction-prompt-recency-recall-research.md` — a Recall Labs-scoped prompt
+  `.agent/archive/plans/menhir-extraction-prompt-recency-recall-research.md` — a Recall Labs-scoped prompt
   ablation study targeting the same `830ce83f` failure, proposing 5 alternative extraction-prompt
   variants (minimal recall patch, mention-first, update-aware, proposition-first, structured
   uncertainty) and an evaluation methodology (mention/proposition recall+precision across a small
@@ -508,7 +525,7 @@
   context ages out of the window. Not fixable via conflict-scan, retrieval tuning, or
   correction-resolver — needs a graphiti-core config override or a recency-independent
   "already-known entity" check. Directly motivates
-  `.agent/plans/menhir-belief-supersession-temporal-chains-research.md` (Codex research plan saved
+  `.agent/reference/menhir-belief-supersession-temporal-chains-research.md` (Codex research plan saved
   the same day) rather than being a hypothetical problem that plan was written to pre-empt.
 
 ## 2026-07-15 - M1 gate MET (PASS): first full-corpus run + Hit@3 threshold recalibration

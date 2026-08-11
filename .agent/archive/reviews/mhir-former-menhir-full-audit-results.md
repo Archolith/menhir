@@ -391,7 +391,7 @@ Active vars use correct names (`LOCAL_LLM_*`, `MENHIR_*`). Commented vars still 
 
 **BEG-1: No fresh-container benchmark harness**
 
-The `.agent/plans/fresh-neo4j-memory-benchmark-plan.md` plan exists but implementation not found. Cannot make credible claims about recall quality, ingestion throughput, graph growth, or latency. Required before making any performance or memory-quality claims at launch.
+The `.agent/reference/fresh-neo4j-memory-benchmark-plan.md` plan exists but implementation not found. Cannot make credible claims about recall quality, ingestion throughput, graph growth, or latency. Required before making any performance or memory-quality claims at launch.
 
 ### Dark Code Findings
 

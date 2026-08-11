@@ -8,7 +8,7 @@
 > the production embedder. `services/quantstate_consolidator.py` remains an explicit/manual,
 > dependency-injected predecessor path—it is not the scheduled bridge job. Current
 > runtime ownership lives in [`.agent/architecture.md`](../../architecture.md), with execution
-> status in [Track W](../../research/menhir-research-execution-ladder.md). The body below is retained
+> status in [Track W](../../plans/menhir-research-execution-ladder.md). The body below is retained
 > as the D1 rationale and implementation record.
 
 > **RELOCATED 2026-08-07 (curator audit, ctharvey-approved): moved back from

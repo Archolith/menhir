@@ -22,7 +22,7 @@ All 12 milestones shipped. 722+ tests passing.
 ## Post-v1 Work
 
 See [post-v1-todo.md](post-v1-todo.md) for the living TODO on the shipped system,
-and [research/menhir-research-execution-ladder.md](research/menhir-research-execution-ladder.md)
+and [plans/menhir-research-execution-ladder.md](plans/menhir-research-execution-ladder.md)
 for the research → production build ladder (oracle pipeline, belief buckets,
 retrieval tuning, control rails, cognitive replay). The conceptual phase ladder
 that the rungs realize is in `../docs/research/vision/cognitive-replay-and-phasing.md`.

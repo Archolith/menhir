@@ -62,20 +62,20 @@ Consumers import from `menhir.domain.truth` (or via `menhir.domain` which re-exp
 - `workflows/scalar_state_measurement.md`
 - `workflows/code_conventions.md`
 
-## Research & Forward Planning
+## Plans, References & Forward Planning
 
-- `plans/README.md` -> current plan router; separates active work, approved proposals, saved research, and records needing closeout
-- `plans/backlog/README.md` -> backlog router; separates living/partial work from unstarted design proposals
-- `research/README.md` -> operational research router; execution authority, audits/reviews, transfer inputs, and the unverified PDF
-- `research/menhir-research-execution-ladder.md` -> research → code → bench build order (start here for "what's next"); read-side rungs R*, active write-side arc in Track W
+- `plans/README.md` -> current execution router; active, partial, and owner-decision plans only
+- `plans/backlog/README.md` -> lower-priority or gated executable work
+- `plans/menhir-research-execution-ladder.md` -> research → code → bench build order (start here for "what's next"); read-side rungs R*, active write-side arc in Track W
+- `reference/README.md` -> useful non-executable design laws, research, negative evidence, future options, and the unverified PDF
 - `memory-aggregation-under-uncertainty.md` -> current design reference for precise write-time aggregates, veto gates, and anchor+delta safety
 - `architecture.md` + `data_models.md` -> live Event → Fold → disposable View/projection architecture
-- `plans/backlog/fold-algebra.md` -> fold laws, batch vs incremental evaluation, and implementation record
+- `reference/fold-algebra.md` -> fold laws, batch vs incremental evaluation, and implementation record
 - `archive/plans/{aggregation-as-consolidation,quantstate-agent-counter,event-fold-view-architecture}.md` -> historical pivot, D1, and architecture decision records (not active plans)
 - `../docs/roadmap/README.md` -> build-sequencing and strategic notes, grouped by altitude
 - `plans/backlog/deferred-verification.md` -> LIVING checklist of tests/benches owed once a real env is available (remote sessions can't run them)
-- `plans/backlog/r1-hybrid-candidate-generation.md` -> R1 design note (hybrid candidate generation + source-aware floor)
-- `plans/backlog/r2-facet-candidate-generation.md` -> R2 design note (bench-first facet retrieval; no production change until it beats baselines)
+- `reference/r1-hybrid-candidate-generation.md` -> R1 design and measured non-graduation evidence
+- `archive/plans/r2-facet-{candidate-generation,production-integration}.md` -> completed R2 design, integration, and PARK verdict
 - `../docs/research/README.md` -> forward research index (positioning, retrieval pipeline, belief, vision)
 - `../docs/research/positioning/positioning.md` -> canonical product/category positioning (CIP)
 - `memory-roadmap.md` -> shipped v1 milestones (history)

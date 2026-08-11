@@ -1,10 +1,13 @@
 # Plan: Perceiver versioning + re-fold (insurance for when perception improves)
 
+> **Archived 2026-08-11.** This episode-stamp proposal was overtaken by the versioned typed-assertion
+> and typed-event architecture, version-aware cursors, and deterministic rebuild paths.
+
 <!-- Filename convention: <feature>-plan.md -->
 
 **Status:** backlog — proposed 2026-07-11. **Additive insurance, not a rearchitecture** — the current
 episodes -> perceive -> fold -> View pipeline works and is kept as-is.
-**Gap source:** `.agent/research/menhir-cross-domain-representation-research-2026-07-02.md` §A.1.
+**Gap source:** `.agent/reference/menhir-cross-domain-representation-research-2026-07-02.md` §A.1.
 
 ---
 
@@ -81,6 +84,6 @@ deterministic rebuilds (we don't today).
 
 ## Source
 
-`.agent/research/menhir-cross-domain-representation-research-2026-07-02.md` §A.1 (Kappa replay).
+`.agent/reference/menhir-cross-domain-representation-research-2026-07-02.md` §A.1 (Kappa replay).
 Code confirmed 2026-07-11: `perceive_and_fold` re-derives from episodes; typed events are transient
 (episodes are the durable log); no `perceiver_version` stamp exists.

@@ -41,6 +41,8 @@ Start with one file:
 - conflict-resolution history and suppression-recording semantics -> `conflict-resolution-history-proposal.md`
 - exploring new View shapes (design exploration, not settled) -> `memory-view-kinds-frontier-transfer.md`
 - current local-MVP roadmap -> `../docs/roadmap/menhir-mvp-roadmap.md`
+- current executable plans and dependency order -> `plans/README.md`
+- useful non-executable design, research, and negative evidence -> `reference/README.md`
 
 Use `concept-ids.md` only when you need an exact concept id or owner doc.
 Use `concept-ids.yaml` only when you need the full registry.

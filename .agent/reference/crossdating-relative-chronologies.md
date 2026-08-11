@@ -402,7 +402,7 @@ Four sharpenings recorded for whoever picks this up (none change the proposal's 
    Both are deterministic; they fail differently (under-constraint vs. false match) and should be measured
    separately in the falsification experiment.
 
-Related: fold-algebra design (`.agent/plans/fold-algebra.md`) — RelativeChronologyView is a LIST/DAG-shaped kind
+Related: fold-algebra design (`.agent/reference/fold-algebra.md`) — RelativeChronologyView is a LIST/DAG-shaped kind
 and ChronologyAlignmentView is arguably the first *derived* View (a fold over Views), which connects this note to
 the derivation-layer finding in
 `.agent/reviews/menhir-cross-domain-representation-research-2026-07-02.md` §4.

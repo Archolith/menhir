@@ -1,5 +1,8 @@
 # Handoff: Menhir Ingest-Quality Investigation — Extraction Context
 
+> **Archived 2026-08-11.** Phases 1–5 and the four requested follow-ups were executed; this document
+> is now an experiment/results record rather than an active handoff.
+
 **Status: ACTIVE — supersedes the ad-hoc Phase 1/Phase 2 exploration in
 `menhir-belief-supersession-code-mapped-plan.md` for everything extraction-context-related.**
 That plan's own Phase 0 (Extraction Lab harness) and Phase 1 (prompt ablation) results feed
@@ -11,7 +14,7 @@ undermined both `update_aware`'s and the candidate-lookup's first results.
 built directly from this session's own reported findings and numbers (quotes the exact figures
 from the "Report: Ingest-Quality Investigation" delivered earlier this session). Pasted into this
 Claude Code session as an operational handoff, not a speculative research doc — unlike the two
-earlier Codex documents saved this same day (`menhir-belief-supersession-temporal-chains-research.md`,
+earlier Codex documents saved this same day (`../../reference/menhir-belief-supersession-temporal-chains-research.md`,
 `menhir-extraction-prompt-recency-recall-research.md`), this one is being actioned immediately
 per its own "Required Next Work" phase ordering, starting with Phase 1 (repeated-trial variance
 quantification).

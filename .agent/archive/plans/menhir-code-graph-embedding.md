@@ -1,7 +1,7 @@
 # menhir — semantic embedding for the structural code graph
 
 > **ARCHIVED 2026-08-10.** The todo-motivated proposal was superseded by
-> [`menhir-todo-declared-links.md`](../../plans/menhir-todo-declared-links.md). Its measurements and
+> [`menhir-todo-declared-links.md`](menhir-todo-declared-links.md). Its measurements and
 > separate-embedding design are retained as evidence for any future semantic-code-search proposal.
 
 Status: **SUPERSEDED** by `menhir-todo-declared-links.md` (2026-08-02) *as a todo-motivated

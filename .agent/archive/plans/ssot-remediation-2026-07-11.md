@@ -1,5 +1,8 @@
 # SSOT remediation plan (from menhir-ssot-review-2026-07-11)
 
+> **Archived 2026-08-11.** All four remediation phases are complete; the deliberately separated
+> OAuth settings follow-up was completed and archived independently.
+
 Source review: `.agent/reviews/menhir-ssot-review-2026-07-11.md` (+ coverage CSV).
 Independently spot-verified against current code before this plan was written:
 SSOT-01, SSOT-02, SSOT-04, SSOT-06, SSOT-09, SSOT-13 all confirmed exactly as
@@ -346,7 +349,7 @@ duplication, not any of the 13 findings below.)
       a follow-up; not attempted in this pass to avoid rushing changes into
       authentication-critical code.
       **Sub-plan written 2026-07-12**:
-      [`.agent/archive/plans/menhir-oauth-settings-snapshot-routing-2026-07-12.md`](../archive/plans/menhir-oauth-settings-snapshot-routing-2026-07-12.md).
+      [`.agent/archive/plans/menhir-oauth-settings-snapshot-routing-2026-07-12.md`](menhir-oauth-settings-snapshot-routing-2026-07-12.md).
       Investigation for that plan found the gap is bigger than originally
       estimated here: `oauth.py`'s `_get_setting()` already looks settings-first
       for 16 `oauth_*` attributes, but none of them exist on `MemorySettings`

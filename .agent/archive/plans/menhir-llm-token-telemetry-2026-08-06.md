@@ -1,5 +1,8 @@
 # LLM Token Telemetry
 
+> **Archived 2026-08-11.** Durable LLM usage events, telemetry persistence, runtime integration,
+> and regression coverage are implemented.
+
 ## Why
 
 - Canonical benchmark runs currently retain LLM call counts but discard provider-reported token usage during ingest.

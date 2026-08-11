@@ -4,8 +4,8 @@
 
 Research inputs:
 
-- `.agent/research/menhir-projection-coverage-audit.md`
-- `.agent/research/menhir-realization-coverage.md`
+- `.agent/reference/menhir-projection-coverage-audit.md`
+- `.agent/reference/menhir-realization-coverage.md`
 
 Delivery order is locked:
 

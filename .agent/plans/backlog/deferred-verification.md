@@ -114,7 +114,7 @@ Run: frontier src via PYTHONPATH against the menhir `.venv`; offline/stubbed (on
 
 ## R2 — facet candidate generation (bench-first)
 
-Full plan: [`r2-facet-candidate-generation.md`](r2-facet-candidate-generation.md). **Bench-first: no
+Full plan: [`../../archive/plans/r2-facet-candidate-generation.md`](../../archive/plans/r2-facet-candidate-generation.md). **Bench-first: no
 menhir production change until F beats baselines.** Deliverables 2–4 live in **`archolith-bench`**.
 
 > **Update 2026-06-27 (handoff session):** archolith-bench was **in scope** this session, so the

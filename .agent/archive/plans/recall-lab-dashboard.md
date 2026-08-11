@@ -1,5 +1,8 @@
 # Recall Lab Dashboard
 
+> **Archived 2026-08-11.** The read-only dashboard, concurrent experiment arms, privacy behavior,
+> experiment persistence, and regression coverage are implemented.
+
 ## Why
 
 - Recall tuning is currently exercised through one-off scripts, which makes it hard to compare several configurations on the same query.

@@ -1,5 +1,8 @@
 # menhir — Mount Explorer into the Main App (lifecycle unification)
 
+> **Archived 2026-08-11.** Explorer mounting is integrated with the main application lifecycle and
+> the former standalone-server ownership is closed.
+
 Status: DRAFT — awaiting approval to implement
 Owner: ctharvey
 Author: Claude Code (Opus 4.8)

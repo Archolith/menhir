@@ -1,5 +1,8 @@
 # Structure Graph Coverage
 
+> **Archived 2026-08-11.** Whole-tree discovery, explicit coverage accounting, truncation honesty,
+> stale pruning, and regression coverage are implemented.
+
 Status: **planned; implementation not started**
 
 Revision history:

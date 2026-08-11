@@ -3,10 +3,10 @@
 <!-- Filename convention: <feature>-plan.md -->
 
 **Status:** backlog — proposed 2026-07-11
-**Gap source:** `.agent/research/menhir-frontier-transfer-forensic-admissibility.md` §2.1 + Part 3
+**Gap source:** `.agent/reference/menhir-frontier-transfer-forensic-admissibility.md` §2.1 + Part 3
 (elevated #1 — "largest complexity removal").
 **Related:** `cessation-tombstone-primitive-plan.md` (CESSATION is a permitted perception emission),
-`admission-capability-separation-plan.md` (that gates *who sets the user tier*; this gates *what basis
+`../../archive/plans/admission-capability-separation-plan.md` (that gates *who sets the user tier*; this gates *what basis
 a claim has*).
 **Absorbs:** the residual of the archived `span-grounded-extraction-verification-plan.md` — its span
 checker is SHIPPED for the numeric consolidation path (`perception.py` `_stated_value_grounded` /
@@ -105,5 +105,5 @@ content never does."**
 
 ## Source
 
-`.agent/research/menhir-frontier-transfer-forensic-admissibility.md` §2.1, Part 3 (translation), Part 5
+`.agent/reference/menhir-frontier-transfer-forensic-admissibility.md` §2.1, Part 3 (translation), Part 5
 (the ADMITTED predicate as a conservation law). "The courthouse is built; the judge is missing."

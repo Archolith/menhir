@@ -1,5 +1,8 @@
 # menhir frontier — undone work, grouped into executable chunks
 
+> **Archived 2026-08-11.** This June execution snapshot is superseded by the current research
+> execution ladder, which closes the read-side rungs and owns the remaining Track W sequence.
+
 ## Status
 
 active — execution grouping of the OPEN work on branch
@@ -63,7 +66,7 @@ The earn-the-gate framing above ("graduate the bench → flip oracle defaults ON
 
 Consequence: the on-by-default oracle rungs (Chunks A/D/H) are **not** "graduate to turn on"
 anymore — the honest bench result is already in, and the live direction moved to **write-side
-aggregation / consolidation** (Track W in `.agent/research/menhir-research-execution-ladder.md`;
+aggregation / consolidation** (Track W in `.agent/plans/menhir-research-execution-ladder.md`;
 historical thesis in `.agent/archive/plans/aggregation-as-consolidation.md`). The shipped-gated stack is
 unaffected (behavior-neutral, default-off/shadow). Re-opening R1/R2 means new bench headroom (a
 recalibrated gate, a real facet fixture), not more read-time ranking.

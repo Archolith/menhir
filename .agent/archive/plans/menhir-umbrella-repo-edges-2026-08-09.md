@@ -1,5 +1,8 @@
 # Umbrella Repo Containment Edges
 
+> **Archived 2026-08-11.** Nested-repository representation, `CONTAINS_REPO` edges, queries, stale
+> pruning, and regression coverage are implemented.
+
 Status: **design note; small addition**
 
 Follows: `d88cee9` (nested git repos are scan boundaries).

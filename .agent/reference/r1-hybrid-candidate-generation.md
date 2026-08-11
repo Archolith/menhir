@@ -3,9 +3,9 @@
 **Date:** 2026-06-27
 **Status:** IN PROGRESS — first increment landed (attributed hybrid path + source-aware floor,
 default-off). Bench tuning of `hybrid_alpha` and config wiring deferred (see Scope).
-**Rung:** R1 in [`menhir-research-execution-ladder.md`](../../research/menhir-research-execution-ladder.md) (`depends_on R0`).
-**Owners (mechanism):** [`retrieval-tuning-stack.md`](../../../docs/research/retrieval/retrieval-tuning-stack.md),
-[`oracle-execution-and-performance.md` §3](../../../docs/research/retrieval/oracle-execution-and-performance.md).
+**Rung:** R1 in [`menhir-research-execution-ladder.md`](../plans/menhir-research-execution-ladder.md) (`depends_on R0`).
+**Owners (mechanism):** [`retrieval-tuning-stack.md`](../../docs/research/retrieval/retrieval-tuning-stack.md),
+[`oracle-execution-and-performance.md` §3](../../docs/research/retrieval/oracle-execution-and-performance.md).
 
 ## Why
 

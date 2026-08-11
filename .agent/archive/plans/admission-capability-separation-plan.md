@@ -1,5 +1,8 @@
 # Plan: Capability separation for user-tier writes
 
+> **Archived 2026-08-11.** The grounded user-tier gate, audit View, MCP/API plumbing, provenance
+> join, admission endpoint, and client hook are implemented.
+
 <!-- Filename convention: <feature>-plan.md -->
 
 **Status:** backlog — proposed 2026-07-11, **REVISED 2026-07-12** (design session with ctharvey;

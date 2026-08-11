@@ -28,7 +28,7 @@ Otherwise it remains a parked research note or issue comment.
 > active direction is write-time consolidation** — "aggregation is a consolidation problem, not a
 > retrieval one": D0 retrieval-entropy, D1 QuantState, Event -> Fold -> View, and agent-experiential
 > counters, all BUILT and measured. Current status and order live in Track W of
-> `.agent/research/menhir-research-execution-ladder.md`; live mechanism shape lives in
+> `.agent/plans/menhir-research-execution-ladder.md`; live mechanism shape lives in
 > `.agent/architecture.md`, `.agent/data_models.md`, and
 > `.agent/memory-aggregation-under-uncertainty.md`. The three July owner plans were archived under
 > `.agent/archive/plans/` on 2026-08-10 after their useful rationale was routed into those current
@@ -76,7 +76,7 @@ docs/research/        forward research notes (this corpus): positioning, retriev
 .agent/               operational docs for the SHIPPED system: architecture,
                       data_models, endpoints, memory-design/roadmap, workflows.
                       Token-optimized router system (see .agent/file-index.md).
-.agent/research/menhir-research-execution-ladder.md
+.agent/plans/menhir-research-execution-ladder.md
                       the bridge: dependency-ordered build order taking this
                       corpus into code + bench. Read it for "what to build next".
 ```
@@ -393,7 +393,7 @@ The ordered, dependency-aware build sequence (research → code → bench) now l
 in one execution plan:
 
 ```text
-.agent/research/menhir-research-execution-ladder.md
+.agent/plans/menhir-research-execution-ladder.md
 ```
 
 That ladder maps each rung to its mechanism owner doc, code surface, archolith-
