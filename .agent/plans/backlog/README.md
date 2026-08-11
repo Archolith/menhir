@@ -45,3 +45,11 @@ This index routes all 15 backlog records exactly once.
 Promote an item to the top-level plan directory when it becomes current execution authority. Move
 non-executable but still useful findings to `../../reference/`. Archive it after implementation or
 supersession once residual ownership is routed elsewhere.
+
+## Maintenance rule
+
+Backlog plans follow the same contract as active ones:
+[`../../workflows/artifact_authoring.md`](../../workflows/artifact_authoring.md). Promotion to
+top-level keeps the artifact UUID and the type — only the lane changes, from `backlog` to `active`.
+New backlog records carry the metadata block that guide specifies; older ones are grandfathered
+until the approved backfill.

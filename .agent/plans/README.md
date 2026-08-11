@@ -8,13 +8,14 @@ routed through the [backlog index](backlog/README.md). Useful non-executable mat
 [reference library](../reference/README.md); completed and superseded records live under
 [`../archive/`](../archive/).
 
-This index routes all 11 top-level plan records plus the execution ladder exactly once.
+This index routes all 12 top-level plan records plus the execution ladder exactly once.
 
 ## Active execution authority
 
 | Document | Current ownership |
 |---|---|
 | [`menhir-research-execution-ladder.md`](menhir-research-execution-ladder.md) | Dependency-ordered research → code → bench sequence. Read-side rungs are closed; Track W6 is the remaining write-side rung. |
+| [`menhir-work-artifact-reconciliation-2026-08-11.md`](menhir-work-artifact-reconciliation-2026-08-11.md) | Add read-only corpus parity auditing, hash/Git-backed source reconciliation, bounded move detectors, and a separately approved live-graph repair. |
 | [`menhir-conflict-detection-signal-2026-08-09.md`](menhir-conflict-detection-signal-2026-08-09.md) | Separate fused-retrieval score semantics from cosine conflict thresholds. |
 | [`menhir-conflict-suggestion-remediation-2026-08-09.md`](menhir-conflict-suggestion-remediation-2026-08-09.md) | Repair replacement suggestions and dead resolved-status semantics. |
 | [`menhir-intent-state-view-2026-08-08.md`](menhir-intent-state-view-2026-08-08.md) | Ingest-owned tentative/plan state and its materialized View. |
@@ -38,6 +39,13 @@ This index routes all 11 top-level plan records plus the execution ladder exactl
 | [`menhir-context-composition-production-integration.md`](menhir-context-composition-production-integration.md) | Decide whether Stages 2–4 remain wanted after Stage 1's negative result and the later independent fix of the motivating extraction failure. |
 
 ## Maintenance rule
+
+Creating or moving a plan follows
+[`../workflows/artifact_authoring.md`](../workflows/artifact_authoring.md) — it owns the field
+definitions, the lifecycle vocabulary, and the move/copy/archive rules. Plans created after
+reconciliation support is activated carry the metadata block it specifies; older plans are
+grandfathered until the approved backfill. Promotion from `backlog/` and archival both keep the
+artifact UUID.
 
 A plan remains here only while it owns concrete execution or a named owner decision. Move a
 lower-priority but still executable item to `backlog/`. Move durable non-executable knowledge to

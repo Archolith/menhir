@@ -588,6 +588,29 @@ Primary storage is Neo4j.
   how duplicate vocabulary gets introduced.
 - Graphiti prompt JSON serialization is patched at runtime to handle Neo4j temporal values.
 
+### Work-artifact corpus reconciliation
+
+Concept id: `runtime.storage`
+
+File state and semantic state have different authorities, and the seam between them is three
+modules with no overlap:
+
+- `domain/artifact_reconciliation.py` — pure. Route table, raw-byte hashing, authored-metadata
+  reader, and the match planner that turns "what is on disk" plus "what the graph holds" into
+  actions. No Neo4j, no filesystem, no Git, which is what makes the whole match matrix testable
+  offline.
+- `infrastructure/artifact_corpus_scanner.py` — reads files and asks Git. Produces entries; decides
+  nothing.
+- `services/artifact_reconciliation_service.py` — the single corpus collector, used by
+  `menhir artifacts` (audit / validate / reconcile), the `audit_artifact_corpus` MCP tool, and the
+  startup recovery pass. `scripts/migrate_work_artifacts.py` is now a thin wrapper over it rather
+  than a second collector, which is the drift that caused the corpus split it repairs.
+
+Audit is read-only. Apply re-derives the plan and refuses unless the caller supplies the digest of
+the ledger they approved, so an approved plan cannot be applied to a state it was not approved
+against. Detectors may relocate and refresh sources; lifecycle, supersession, retyping and
+relationships stay behind explicit MCP operations.
+
 Operational sidecar storage:
 
 - MCP/server telemetry is persisted in SQLite at `<workspace_root>/.agent/mcp_telemetry.db` by default (resolved by `infrastructure/paths.py` from the workspace root, not a hardcoded project path)

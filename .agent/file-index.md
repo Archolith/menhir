@@ -6,6 +6,8 @@ Compact inventory of the main `.agent` docs.
 
 - `README.md` -> minimal bot entry router
 - `maintenance.md` -> maintenance and changelog policy
+- `workflows/artifact_authoring.md` -> canonical contract for creating, moving, archiving,
+  and reclassifying tracked artifacts; owns the metadata field definitions
 - `concept-ids.md` -> compact id router
 - `concept-ids.yaml` -> full machine-readable id registry
 - `concept-tree-design.md` -> tree/document authoring model

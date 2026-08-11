@@ -53,3 +53,19 @@ This index routes all 13 Markdown references and the one intentionally unverifie
 Every reference must state why it is still useful and, when applicable, name its active consumer.
 Promote it to `../plans/` only when it becomes executable ownership. Archive it when its constraints
 are fully absorbed or it is superseded and no current consumer remains.
+
+## Maintenance rule
+
+Moving a document here follows
+[`../workflows/artifact_authoring.md`](../workflows/artifact_authoring.md). Three things are
+required and none of them are optional:
+
+- **Keep the artifact UUID.** A reference move is a move, not a new record.
+- **Declare the type explicitly.** The reference lane has no default type, because references are
+  retired plans, completed investigations, and outside research in one directory. A record here
+  without a declared `artifact_type` is reported as unclassifiable rather than guessed at.
+- **State why it is still useful and who consumes it.** That sentence is what separates a reference
+  from an archive entry, and it is the only thing that makes the lane worth having.
+
+A move to reference does not retype the artifact and does not imply a terminal lifecycle state. It
+does remove executable ownership: delist the document from the plan indexes in the same change.

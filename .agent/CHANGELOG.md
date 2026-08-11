@@ -1,5 +1,38 @@
 # Changelog
 
+## 2026-08-11 - Implement WorkArtifact corpus reconciliation (phases 0-4)
+
+- `domain/artifact_reconciliation.py`: pure route table, raw-byte SHA-256, authored-metadata reader,
+  and the match planner (declared UUID > exact locator > Git rename > unique content hash), plus the
+  plan digest that covers premises as well as conclusions.
+- `infrastructure/artifact_corpus_scanner.py`: recursive routed scan with Git blob OIDs, observed
+  commit, and `--name-status -M` rename evidence. Integrity and blob identity are separate fields;
+  a dirty working-tree file records one and not the other.
+- `services/artifact_reconciliation_service.py`: the single corpus collector behind audit, validate,
+  and digest-gated apply. `scripts/migrate_work_artifacts.py` is now a wrapper over it rather than a
+  second collector.
+- `ArtifactSource` v2: `source_uuid`, `corpus_lane`, `integrity`/`version_kind`/`observed_commit`,
+  resolution state, and a uniquely constrained `current_locator_key`. Relocation, refresh, unresolved
+  marking, and registration are conditional on the state the audit read; a stale action is refused.
+- New CLI `menhir artifacts validate|audit|reconcile|relocate`, read-only `audit_artifact_corpus` and
+  agent-tier `relocate_artifact_source` MCP tools, and Hook Center rename/edit handling that runs
+  after structural dirty marking and cannot fail it.
+- `MENHIR_ARTIFACT_RECONCILE_MODE` (off|audit|safe_apply, default audit) adds a startup recovery pass
+  for moves no hook can see. An unrecognized value falls back to audit.
+- `.agent/workflows/artifact_authoring.md` is the canonical authoring contract; README, file-index,
+  maintenance, feature_planning, and the plan/backlog/reference indexes route to it.
+- Phases 5 (live graph repair) and 6 (frontmatter backfill) are deliberately NOT done: both require
+  separate owner approval of the audit ledger. No production graph writes were made.
+
+## 2026-08-11 - Plan WorkArtifact corpus reconciliation
+
+- Added the implementation plan for recursive artifact-corpus auditing, raw-byte SHA-256 and Git
+  provenance, identity-preserving locator repair, Hook Center rename handling, compliant artifact
+  authoring instructions/validation, and a digest-gated one-time graph repair.
+- Kept semantic changes explicit: paths derive corpus lanes but never lifecycle, supersession, or
+  relationships. The build order starts read-only and requires a reviewed audit ledger before live
+  graph mutation.
+
 ## 2026-08-11 - Separate executable plans, reusable references, and completed records
 
 - Audited all 63 Markdown records in the top-level plan, backlog, and operational-research corpus

@@ -8,6 +8,12 @@ Project maintenance rules for `menhir`.
 - New module or script entrypoint -> update `architecture.md`
 - New memory/edge fields, Graphiti constraints, or storage defaults -> update `data_models.md`
 - New MCP tool or resource added -> update `endpoints.md`
+- Creating, copying, moving, archiving, or restoring a tracked artifact (plan, review,
+  handoff, implementation report, reference) -> follow `workflows/artifact_authoring.md`,
+  update the destination's routing index, and run `menhir artifacts validate .` before
+  committing. A move keeps the artifact UUID; a copy needs a new one. An archive move needs
+  an explicit terminal lifecycle decision in the same change — the directory does not choose
+  between IMPLEMENTED, SUPERSEDED, and DEFERRED.
 - New workflow, test task, or runbook change -> add or update files under `workflows/`
 - Backend startup / readiness / launcher behavior changes -> update `workflows/operations_runbook.md` and `workflows/backend-first-mcp.md`
 - Logging layout, request-id behavior, or API error-envelope changes -> update `workflows/logging-and-troubleshooting.md`

@@ -23,6 +23,9 @@ Start with one file:
   re-derived results an existing instrument already produced.
 - measuring whether the scalar/View path worked (4-stage coverage matrix, live authority A/Bs)
   -> `workflows/scalar_state_measurement.md` — the instruments live in `archolith-bench`
+- **creating or moving a plan/review/handoff/reference?** -> `workflows/artifact_authoring.md`
+  — required metadata, which directory owns which type, what a move keeps, and the validation
+  command to run before committing
 - MCP tool or resource selection -> `tasks-mcp.md`
 - backend startup, queue ops, and operator checks -> `workflows/operations_runbook.md`
 - stdio/remote MCP connection setup -> `workflows/backend-first-mcp.md`
