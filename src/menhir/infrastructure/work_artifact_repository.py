@@ -195,12 +195,20 @@ class WorkArtifactRepository:
             CREATE (a)-[:EMBODIED_IN]->(s:ArtifactSource)
             SET s += $props, s.first_seen_at = $now, s.last_seen_at = $now
             """,
-            {"uuid": artifact_uuid, "props": props, "now": datetime.now(timezone.utc).isoformat()},
+            {
+                "uuid": artifact_uuid,
+                "props": props,
+                "now": datetime.now(timezone.utc).isoformat(),
+            },
         )
         return props
 
     def relocate_source(
-        self, artifact_uuid: str, medium: str, locator: dict[str, str], version: str | None = None
+        self,
+        artifact_uuid: str,
+        medium: str,
+        locator: dict[str, str],
+        version: str | None = None,
     ) -> bool:
         """Update an embodiment's locator after a rename, move, or archive.
 
@@ -276,7 +284,63 @@ class WorkArtifactRepository:
                 version=row.get("version"),
                 version_kind=row.get("version_kind"),
                 lane=row.get("corpus_lane"),
-                resolution_status=row.get("resolution_status") or ResolutionStatus.RESOLVED,
+                resolution_status=row.get("resolution_status")
+                or ResolutionStatus.RESOLVED,
+                title=row.get("title"),
+                status=row.get("status"),
+                schema_version=row.get("schema_version"),
+            )
+            for row in rows
+            if row.get("artifact_uuid")
+        ]
+
+    def list_unscoped_artifact_source_snapshots(
+        self, *, paths: Sequence[str], artifact_uuids: Sequence[str]
+    ) -> list[ArtifactSourceSnapshot]:
+        """Relevant legacy sources whose repository locator was never recorded."""
+        if not paths and not artifact_uuids:
+            return []
+        rows = self.neo4j.execute(
+            """
+            MATCH (a:WorkArtifact)-[:EMBODIED_IN]->(s:ArtifactSource)
+            WHERE coalesce(trim(s.locator_repository), '') = ''
+              AND (s.locator_path IN $paths OR a.artifact_uuid IN $artifact_uuids)
+            RETURN a.artifact_uuid       AS artifact_uuid,
+                   a.artifact_type       AS artifact_type,
+                   a.title               AS title,
+                   a.status              AS status,
+                   s.source_uuid         AS source_uuid,
+                   s.medium              AS medium,
+                   s.locator_repository  AS repository,
+                   s.locator_path        AS path,
+                   s.integrity           AS integrity,
+                   s.version             AS version,
+                   s.version_kind        AS version_kind,
+                   s.corpus_lane         AS corpus_lane,
+                   s.resolution_status   AS resolution_status,
+                   s.schema_version      AS schema_version
+            ORDER BY s.locator_path, a.artifact_uuid
+            """,
+            {
+                "paths": sorted(set(paths)),
+                "artifact_uuids": sorted(set(artifact_uuids)),
+            },
+        )
+        return [
+            ArtifactSourceSnapshot(
+                artifact_uuid=row["artifact_uuid"],
+                medium=row.get("medium") or ArtifactMedium.MARKDOWN,
+                source_uuid=row.get("source_uuid"),
+                artifact_type=row.get("artifact_type"),
+                repository=row.get("repository"),
+                path=row.get("path"),
+                integrity=row.get("integrity"),
+                version=row.get("version"),
+                version_kind=row.get("version_kind"),
+                lane=row.get("corpus_lane"),
+                resolution_status=(
+                    row.get("resolution_status") or ResolutionStatus.RESOLVED
+                ),
                 title=row.get("title"),
                 status=row.get("status"),
                 schema_version=row.get("schema_version"),
@@ -535,7 +599,9 @@ class WorkArtifactRepository:
         )
         repository = new_locator.get("repository") or old_locator.get("repository")
         new_key = locator_key(repository, medium, new_locator.get("path"))
-        old_key = locator_key(old_locator.get("repository"), medium, old_locator.get("path"))
+        old_key = locator_key(
+            old_locator.get("repository"), medium, old_locator.get("path")
+        )
         props = self._source_write_props(observation)
         props["locator_repository"] = repository
         props["locator_path"] = new_locator.get("path")
@@ -545,26 +611,43 @@ class WorkArtifactRepository:
             """
             MATCH (a:WorkArtifact)-[:EMBODIED_IN]->(s:ArtifactSource {source_uuid: $source_uuid})
             OPTIONAL MATCH (other:ArtifactSource)
-            WHERE coalesce(other.current_locator_key,
-                           coalesce(other.locator_repository, '') + '|'
-                           + coalesce(other.medium, '') + '|'
-                           + coalesce(other.locator_path, '')) = $new_key
+            WHERE (coalesce(other.current_locator_key,
+                            coalesce(other.locator_repository, '') + '|'
+                            + coalesce(other.medium, '') + '|'
+                            + coalesce(other.locator_path, '')) = $new_key
+                   OR (coalesce(trim(other.locator_repository), '') = ''
+                       AND other.medium = $medium
+                       AND other.locator_path = $new_path))
               AND coalesce(other.source_uuid, '') <> $source_uuid
             WITH a, s, count(other) AS blockers,
+                 count(CASE WHEN other IS NOT NULL
+                                 AND coalesce(trim(other.locator_repository), '') = ''
+                            THEN 1 END) AS unscoped_blockers,
                  (coalesce(s.current_locator_key,
                            coalesce(s.locator_repository, '') + '|'
                            + coalesce(s.medium, '') + '|'
-                           + coalesce(s.locator_path, '')) = $old_key) AS at_old,
+                           + coalesce(s.locator_path, '')) = $old_key
+                  OR ($old_repository_unscoped
+                      AND coalesce(trim(s.locator_repository), '') = ''
+                      AND s.medium = $medium
+                      AND s.locator_path = $old_path)) AS at_old,
                  ($expected IS NULL OR coalesce(s.integrity, '') = $expected) AS fresh
             FOREACH (_ IN CASE WHEN blockers = 0 AND at_old AND fresh THEN [1] ELSE [] END |
                 SET s += $props)
-            RETURN blockers AS blockers, at_old AS at_old, fresh AS fresh,
+            RETURN blockers AS blockers, unscoped_blockers AS unscoped_blockers,
+                   at_old AS at_old, fresh AS fresh,
                    a.artifact_uuid AS artifact_uuid
             """,
             {
                 "source_uuid": source_uuid,
                 "new_key": new_key,
+                "medium": medium,
+                "new_path": new_locator.get("path"),
                 "old_key": old_key,
+                "old_repository_unscoped": not str(
+                    old_locator.get("repository") or ""
+                ).strip(),
+                "old_path": old_locator.get("path"),
                 "expected": expected_integrity,
                 "props": props,
             },
@@ -572,6 +655,8 @@ class WorkArtifactRepository:
         if not rows:
             return {"applied": False, "reason": "source_not_found"}
         row = rows[0]
+        if int(row.get("unscoped_blockers") or 0) > 0:
+            return {"applied": False, "reason": "unscoped_source_claims_destination"}
         if int(row.get("blockers") or 0) > 0:
             return {"applied": False, "reason": "destination_already_claimed"}
         if not row.get("at_old"):
@@ -646,7 +731,9 @@ class WorkArtifactRepository:
         source_uuid, reason = self._source_uuid_at_locator(repository, medium, path)
         if source_uuid is None:
             return {"applied": False, "reason": reason}
-        return self.refresh_artifact_source(source_uuid=source_uuid, observation=observation)
+        return self.refresh_artifact_source(
+            source_uuid=source_uuid, observation=observation
+        )
 
     def mark_artifact_source_unresolved(
         self, *, source_uuid: str, reason: str, observed_commit: str | None = None
@@ -722,11 +809,20 @@ class WorkArtifactRepository:
                            coalesce(s.locator_repository, '') + '|'
                            + coalesce(s.medium, '') + '|'
                            + coalesce(s.locator_path, '')) = $key
-            RETURN count(s) AS n
+               OR (coalesce(trim(s.locator_repository), '') = ''
+                   AND s.medium = $medium AND s.locator_path = $path)
+            RETURN count(s) AS n,
+                   count(CASE WHEN coalesce(trim(s.locator_repository), '') = ''
+                              THEN 1 END) AS unscoped
             """,
-            {"key": key},
+            {"key": key, "medium": medium, "path": path},
         )
         if claimed and int(claimed[0].get("n", 0) or 0) > 0:
+            if int(claimed[0].get("unscoped", 0) or 0) > 0:
+                return {
+                    "applied": False,
+                    "reason": "unscoped_source_claims_destination",
+                }
             return {"applied": False, "reason": "destination_already_claimed"}
 
         created = self.create_artifact(
@@ -782,14 +878,16 @@ class WorkArtifactRepository:
         observed_at = observation.observed_at or datetime.now(timezone.utc).isoformat()
         key = locator_key(repository, medium, path)
         props = self._source_write_props(observation)
-        props.update({
-            "source_uuid": source_uuid,
-            "medium": medium,
-            "locator_repository": repository,
-            "locator_path": path,
-            "current_locator_key": key,
-            "first_seen_at": observed_at,
-        })
+        props.update(
+            {
+                "source_uuid": source_uuid,
+                "medium": medium,
+                "locator_repository": repository,
+                "locator_path": path,
+                "current_locator_key": key,
+                "first_seen_at": observed_at,
+            }
+        )
         try:
             rows = self.neo4j.execute(
                 """
@@ -803,7 +901,13 @@ class WorkArtifactRepository:
                                coalesce(occupied.locator_repository, '') + '|'
                                + coalesce(occupied.medium, '') + '|'
                                + coalesce(occupied.locator_path, '')) = $key
+                   OR (coalesce(trim(occupied.locator_repository), '') = ''
+                       AND occupied.medium = $medium
+                       AND occupied.locator_path = $path)
                 WITH a, source_count, count(occupied) AS blockers,
+                     count(CASE WHEN occupied IS NOT NULL
+                                     AND coalesce(trim(occupied.locator_repository), '') = ''
+                                THEN 1 END) AS unscoped_blockers,
                      a.artifact_type = $expected_artifact_type AS type_matches
                 FOREACH (_ IN CASE WHEN source_count = 0 AND blockers = 0 AND type_matches
                                    THEN [1] ELSE [] END |
@@ -811,13 +915,14 @@ class WorkArtifactRepository:
                     SET s += $props
                 )
                 REMOVE a._reconcile_attach_lock
-                WITH a, source_count, blockers, type_matches
+                WITH a, source_count, blockers, unscoped_blockers, type_matches
                 OPTIONAL MATCH (a)-[:EMBODIED_IN]->(
                     created:ArtifactSource {source_uuid: $source_uuid}
                 )
                 RETURN a.artifact_type AS artifact_type,
                        source_count,
                        blockers,
+                       unscoped_blockers,
                        type_matches,
                        count(created) = 1 AS attached
                 """,
@@ -825,6 +930,8 @@ class WorkArtifactRepository:
                     "artifact_uuid": artifact_uuid,
                     "expected_artifact_type": expected_artifact_type,
                     "key": key,
+                    "medium": medium,
+                    "path": path,
                     "source_uuid": source_uuid,
                     "lock_token": str(uuid4()),
                     "props": props,
@@ -846,6 +953,8 @@ class WorkArtifactRepository:
             }
         if int(row.get("source_count", 0) or 0) > 0:
             return {"applied": False, "reason": "artifact_already_has_source"}
+        if int(row.get("unscoped_blockers", 0) or 0) > 0:
+            return {"applied": False, "reason": "unscoped_source_claims_destination"}
         if int(row.get("blockers", 0) or 0) > 0:
             return {"applied": False, "reason": "destination_already_claimed"}
         if not row.get("attached"):
@@ -984,7 +1093,11 @@ class WorkArtifactRepository:
         is a data-quality signal about the caller's input.
         """
         if relation not in ARTIFACT_RELATIONS:
-            return {"linked": False, "reason": "unsupported_relation", "relation": relation}
+            return {
+                "linked": False,
+                "reason": "unsupported_relation",
+                "relation": relation,
+            }
 
         rows = self.neo4j.execute(
             """
@@ -996,7 +1109,11 @@ class WorkArtifactRepository:
             {"source_uuid": source_uuid, "target_uuid": target_uuid},
         )
         if not rows:
-            return {"linked": False, "reason": "artifact_not_found", "relation": relation}
+            return {
+                "linked": False,
+                "reason": "artifact_not_found",
+                "relation": relation,
+            }
 
         row = rows[0]
         ok, reason = relation_is_legal(relation, row["source_type"], row["target_type"])
@@ -1004,7 +1121,11 @@ class WorkArtifactRepository:
             return {"linked": False, "reason": reason, "relation": relation}
 
         if row["target_ns"] not in (row["source_ns"], DEFAULT_ARTIFACT_NAMESPACE):
-            return {"linked": False, "reason": "namespace_incompatible", "relation": relation}
+            return {
+                "linked": False,
+                "reason": "namespace_incompatible",
+                "relation": relation,
+            }
 
         edge_type = ARTIFACT_RELATIONS[relation][0]
         self.neo4j.execute(
@@ -1107,9 +1228,13 @@ class WorkArtifactRepository:
             return {"linked": True, "edge_type": REFERENCES_TODO_EDGE}
         return {"linked": False, "reason": "todo_not_found_or_namespace_incompatible"}
 
-    def artifact_relationships(self, artifact_uuid: str) -> dict[str, list[dict[str, Any]]]:
+    def artifact_relationships(
+        self, artifact_uuid: str
+    ) -> dict[str, list[dict[str, Any]]]:
         """Declared relationships in both directions, plus subjects and todos."""
-        edge_types = [spec[0] for spec in ARTIFACT_RELATIONS.values()] + [SUPERSEDES_EDGE]
+        edge_types = [spec[0] for spec in ARTIFACT_RELATIONS.values()] + [
+            SUPERSEDES_EDGE
+        ]
         outgoing = self.neo4j.execute(
             """
             MATCH (a:WorkArtifact {artifact_uuid: $uuid})-[r]->(t:WorkArtifact)
@@ -1153,7 +1278,9 @@ class WorkArtifactRepository:
     # Open questions
     # ------------------------------------------------------------------
 
-    def add_open_questions(self, artifact_uuid: str, texts: list[str]) -> list[dict[str, Any]]:
+    def add_open_questions(
+        self, artifact_uuid: str, texts: list[str]
+    ) -> list[dict[str, Any]]:
         """Attach declared open questions, preserving the author's ordering.
 
         Every artifact in this corpus ends with an "Open Questions" list. As
@@ -1166,14 +1293,16 @@ class WorkArtifactRepository:
         """
         rows: list[dict[str, Any]] = []
         for ordinal, text in enumerate(t for t in texts if t and t.strip()):
-            rows.append({
-                "question_uuid": str(uuid4()),
-                "ordinal": ordinal,
-                "text": text.strip(),
-                "raw_segment": text,
-                "status": QuestionStatus.OPEN,
-                "schema_version": ARTIFACT_SCHEMA_VERSION,
-            })
+            rows.append(
+                {
+                    "question_uuid": str(uuid4()),
+                    "ordinal": ordinal,
+                    "text": text.strip(),
+                    "raw_segment": text,
+                    "status": QuestionStatus.OPEN,
+                    "schema_version": ARTIFACT_SCHEMA_VERSION,
+                }
+            )
         if not rows:
             return []
 
@@ -1188,7 +1317,9 @@ class WorkArtifactRepository:
         )
         return rows
 
-    def answer_question(self, question_uuid: str, answering_artifact_uuid: str) -> dict[str, Any]:
+    def answer_question(
+        self, question_uuid: str, answering_artifact_uuid: str
+    ) -> dict[str, Any]:
         """Mark a question answered and record what answered it, atomically.
 
         One statement, for the reason ``resolve_todo`` is: an answered question
@@ -1245,8 +1376,12 @@ class WorkArtifactRepository:
         return {"applied": False, "reason": "question_not_open"}
 
     def open_questions(
-        self, *, artifact_uuid: str | None = None, status: str | None = QuestionStatus.OPEN,
-        namespace: str | None = None, limit: int = 100,
+        self,
+        *,
+        artifact_uuid: str | None = None,
+        status: str | None = QuestionStatus.OPEN,
+        namespace: str | None = None,
+        limit: int = 100,
     ) -> list[dict[str, Any]]:
         """Questions across artifacts, or within one.
 
@@ -1255,7 +1390,9 @@ class WorkArtifactRepository:
         questions carry no copy of it.
         """
         namespaces = (
-            [_safe_namespace(namespace), DEFAULT_ARTIFACT_NAMESPACE] if namespace else None
+            [_safe_namespace(namespace), DEFAULT_ARTIFACT_NAMESPACE]
+            if namespace
+            else None
         )
         return self.neo4j.execute(
             """
@@ -1323,7 +1460,9 @@ class WorkArtifactRepository:
         unchecked documents pass for valid ones.
         """
         namespaces = (
-            [_safe_namespace(namespace), DEFAULT_ARTIFACT_NAMESPACE] if namespace else None
+            [_safe_namespace(namespace), DEFAULT_ARTIFACT_NAMESPACE]
+            if namespace
+            else None
         )
         return self.neo4j.execute(
             """
@@ -1434,7 +1573,9 @@ class WorkArtifactRepository:
         for row in pending:
             outcome = self._resolve_one(artifact_uuid, row)
             self._stamp_declaration(row["declaration_uuid"], outcome)
-            results.append({**outcome, "raw_target": row["raw_target"], "key": row["key"]})
+            results.append(
+                {**outcome, "raw_target": row["raw_target"], "key": row["key"]}
+            )
         return results
 
     def _resolve_one(self, artifact_uuid: str, row: dict[str, Any]) -> dict[str, Any]:
@@ -1456,7 +1597,10 @@ class WorkArtifactRepository:
             # superseded, and the edge and status must move together.
             applied = self.supersede_artifact(artifact_uuid, target_uuid)
             if applied.get("applied"):
-                return {"status": DeclarationStatus.RESOLVED, "target_uuid": target_uuid}
+                return {
+                    "status": DeclarationStatus.RESOLVED,
+                    "target_uuid": target_uuid,
+                }
             return {
                 "status": DeclarationStatus.REJECTED,
                 "reason": applied.get("reason"),
@@ -1499,7 +1643,11 @@ class WorkArtifactRepository:
             RETURN DISTINCT t.artifact_uuid AS artifact_uuid
             LIMIT 5
             """,
-            {"uuid": artifact_uuid, "needle": needle, "default_ns": DEFAULT_ARTIFACT_NAMESPACE},
+            {
+                "uuid": artifact_uuid,
+                "needle": needle,
+                "default_ns": DEFAULT_ARTIFACT_NAMESPACE,
+            },
         )
         if not rows:
             return None, "target_not_found"
@@ -1529,9 +1677,15 @@ class WorkArtifactRepository:
             {"needle": needle},
         )
         if not rows:
-            return {"status": DeclarationStatus.UNRESOLVED, "reason": "subject_not_found"}
+            return {
+                "status": DeclarationStatus.UNRESOLVED,
+                "reason": "subject_not_found",
+            }
         if len(rows) > 1:
-            return {"status": DeclarationStatus.UNRESOLVED, "reason": "ambiguous_subject"}
+            return {
+                "status": DeclarationStatus.UNRESOLVED,
+                "reason": "ambiguous_subject",
+            }
 
         entity_uuid = rows[0]["entity_uuid"]
         linked = self.link_subject(artifact_uuid, entity_uuid)
@@ -1560,7 +1714,11 @@ class WorkArtifactRepository:
             RETURN t.uuid AS todo_uuid
             LIMIT 5
             """,
-            {"uuid": artifact_uuid, "needle": needle, "default_ns": DEFAULT_ARTIFACT_NAMESPACE},
+            {
+                "uuid": artifact_uuid,
+                "needle": needle,
+                "default_ns": DEFAULT_ARTIFACT_NAMESPACE,
+            },
         )
         if not rows:
             return {"status": DeclarationStatus.UNRESOLVED, "reason": "todo_not_found"}
@@ -1577,7 +1735,9 @@ class WorkArtifactRepository:
             "target_uuid": todo_uuid,
         }
 
-    def _stamp_declaration(self, declaration_uuid: str, outcome: dict[str, Any]) -> None:
+    def _stamp_declaration(
+        self, declaration_uuid: str, outcome: dict[str, Any]
+    ) -> None:
         self.neo4j.execute(
             """
             MATCH (d:ArtifactDeclaration {declaration_uuid: $uuid})
@@ -1639,7 +1799,9 @@ class WorkArtifactRepository:
     ) -> dict[str, Any] | None:
         """Fetch one artifact with its embodiments and locations."""
         namespaces = (
-            [_safe_namespace(namespace), DEFAULT_ARTIFACT_NAMESPACE] if namespace else None
+            [_safe_namespace(namespace), DEFAULT_ARTIFACT_NAMESPACE]
+            if namespace
+            else None
         )
         rows = self.neo4j.execute(
             """
@@ -1687,7 +1849,9 @@ class WorkArtifactRepository:
         pinned client sees shared artifacts rather than nothing.
         """
         namespaces = (
-            [_safe_namespace(namespace), DEFAULT_ARTIFACT_NAMESPACE] if namespace else None
+            [_safe_namespace(namespace), DEFAULT_ARTIFACT_NAMESPACE]
+            if namespace
+            else None
         )
         return self.neo4j.execute(
             """

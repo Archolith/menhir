@@ -22,7 +22,11 @@ from menhir.domain.artifact_reconciliation import (
     MatchBasis,
     ResolutionStatus,
 )
-from menhir.domain.work_artifact import ArtifactStatus, ArtifactType
+from menhir.domain.work_artifact import (
+    ArtifactSourceSpec,
+    ArtifactStatus,
+    ArtifactType,
+)
 from menhir.infrastructure.schema import get_phase1_bootstrap_queries
 from menhir.infrastructure.work_artifact_repository import WorkArtifactRepository
 from menhir.services.artifact_reconciliation_service import (
@@ -117,7 +121,9 @@ def test_create_edit_rename_archive_preserves_identity(
 
     # rename into the archive, with a further edit in the same commit
     base = subprocess.run(
-        ["git", "-C", str(repo_tree), "rev-parse", "HEAD"], capture_output=True, text=True
+        ["git", "-C", str(repo_tree), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
     ).stdout.strip()
     (repo_tree / ".agent/plans/a.md").unlink()
     _write(repo_tree, ".agent/archive/plans/a.md", body + "an edit\nand another\n")
@@ -154,7 +160,9 @@ def test_a_second_apply_performs_zero_mutations(
 
     report = service.audit(repo_tree, repository="t")
     assert not report.safe_actions, "settled state must propose nothing"
-    second = service.apply(repo_tree, expected_digest=report.plan_digest, repository="t")
+    second = service.apply(
+        repo_tree, expected_digest=report.plan_digest, repository="t"
+    )
     assert second.applied == [] and second.skipped == []
     assert _sources(test_neo4j_repo) == before
 
@@ -173,7 +181,10 @@ def test_a_copy_gets_its_own_identity_and_leaves_the_original_alone(
     rows = _sources(test_neo4j_repo)
     assert len(rows) == 2
     by_path = {r["path"]: r for r in rows}
-    assert by_path[".agent/plans/original.md"]["artifact_uuid"] == original["artifact_uuid"]
+    assert (
+        by_path[".agent/plans/original.md"]["artifact_uuid"]
+        == original["artifact_uuid"]
+    )
     assert (
         by_path[".agent/plans/copy.md"]["artifact_uuid"] != original["artifact_uuid"]
     ), "an equal-hash copy must not inherit the original's identity"
@@ -218,7 +229,9 @@ def test_an_interrupted_apply_reruns_idempotently(
     from menhir.domain.artifact_reconciliation import observation_from_action
 
     now = datetime.now(timezone.utc).isoformat()
-    for action in [a for a in partial.actions if a.kind == ActionKind.REGISTER_ARTIFACT][:2]:
+    for action in [
+        a for a in partial.actions if a.kind == ActionKind.REGISTER_ARTIFACT
+    ][:2]:
         repo.register_work_artifact(
             artifact_type=action.artifact_type,
             title=action.title,
@@ -254,13 +267,22 @@ def test_a_claimed_destination_is_refused_at_the_database(
     repo = WorkArtifactRepository(test_neo4j_repo)
     outcome = repo.relocate_artifact_source(
         source_uuid=rows[".agent/plans/a.md"]["source_uuid"],
-        old_locator={"repository": "t", "path": ".agent/plans/a.md", "medium": "markdown"},
-        new_locator={"repository": "t", "path": ".agent/plans/b.md", "medium": "markdown"},
+        old_locator={
+            "repository": "t",
+            "path": ".agent/plans/a.md",
+            "medium": "markdown",
+        },
+        new_locator={
+            "repository": "t",
+            "path": ".agent/plans/b.md",
+            "medium": "markdown",
+        },
         observation=SourceObservation(observed_at="2026-08-11T00:00:00+00:00"),
     )
     assert outcome == {"applied": False, "reason": "destination_already_claimed"}
     assert {r["path"] for r in _sources(test_neo4j_repo)} == {
-        ".agent/plans/a.md", ".agent/plans/b.md"
+        ".agent/plans/a.md",
+        ".agent/plans/b.md",
     }
 
 
@@ -314,7 +336,8 @@ def test_a_declared_uuid_survives_a_clean_clone(
     """Registration reuses the author's UUID rather than minting a rival one."""
     declared = "7a1c9f30-2b48-4e15-9c76-0d3f8a21b654"
     _write(
-        repo_tree, ".agent/plans/a.md",
+        repo_tree,
+        ".agent/plans/a.md",
         f"---\nartifact_schema: 1\nartifact_uuid: {declared}\n"
         f"artifact_type: plan\nartifact_status: APPROVED\n---\n\n# A Plan\n",
     )
@@ -367,6 +390,48 @@ def test_a_declared_uuid_attaches_the_first_source_without_mutating_semantics(
 
     second = service.audit(repo_tree, repository="t")
     assert not second.safe_actions
+
+
+@pytest.mark.online
+def test_declared_uuid_adopts_a_legacy_unscoped_source_without_duplication(
+    service: ArtifactReconciliationService, repo_tree: Path, test_neo4j_repo
+) -> None:
+    declared = "fd24368c-7500-4dde-97fc-8616df9a7ef4"
+    repository = WorkArtifactRepository(test_neo4j_repo)
+    repository.create_artifact(
+        artifact_type=ArtifactType.PLAN,
+        title="Legacy",
+        artifact_uuid=declared,
+        source=ArtifactSourceSpec(
+            medium="markdown",
+            locator={"path": ".agent/plans/a.md"},
+        ),
+    )
+    repository.backfill_source_uuids()
+    repository.backfill_current_locator_keys()
+    _write(
+        repo_tree,
+        ".agent/plans/a.md",
+        f"---\nartifact_uuid: {declared}\nartifact_type: plan\n---\n# Legacy\n",
+    )
+
+    report = service.audit(repo_tree, repository="t")
+    assert [a.kind for a in report.safe_actions] == [ActionKind.ADOPT_SOURCE_REPOSITORY]
+    result = service.apply(
+        repo_tree,
+        expected_digest=report.plan_digest,
+        repository="t",
+    )
+    assert len(result.applied) == 1
+    rows = _sources(test_neo4j_repo)
+    assert len(rows) == 1 and rows[0]["artifact_uuid"] == declared
+    scoped = test_neo4j_repo.execute(
+        "MATCH (:WorkArtifact {artifact_uuid: $uuid})-[:EMBODIED_IN]->(s) "
+        "RETURN s.locator_repository AS repository",
+        {"uuid": declared},
+    )
+    assert scoped == [{"repository": "t"}]
+    assert not service.audit(repo_tree, repository="t").safe_actions
 
 
 @pytest.mark.online
@@ -434,7 +499,9 @@ def test_prepare_backfills_sources_created_before_v2(
     kind = test_neo4j_repo.execute(
         "MATCH (s:ArtifactSource) RETURN s.version_kind AS k", {}
     )[0]["k"]
-    assert kind == "legacy_commit_sha", "a commit SHA is labelled, never reread as a blob OID"
+    assert kind == "legacy_commit_sha", (
+        "a commit SHA is labelled, never reread as a blob OID"
+    )
 
 
 @pytest.mark.online

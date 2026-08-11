@@ -23,6 +23,16 @@ def test_graph_backed_cli_commands_require_repository(command: str) -> None:
 
 
 @pytest.mark.unit
+def test_manual_unscoped_adoption_requires_repository() -> None:
+    result = CliRunner().invoke(
+        artifacts_app,
+        ["adopt-repository", "source-1", ".agent/plans/a.md"],
+    )
+    assert result.exit_code == 2
+    assert "repository" in result.output.lower()
+
+
+@pytest.mark.unit
 def test_mcp_audit_requires_repository_argument() -> None:
     parameter = inspect.signature(audit_artifact_corpus).parameters["repository"]
     assert parameter.default is inspect.Parameter.empty

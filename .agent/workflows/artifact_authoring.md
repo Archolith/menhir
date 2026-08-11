@@ -48,6 +48,18 @@ Do not “fix” this by changing the UUID or recreating the artifact; type disa
 for owner review, and lifecycle/title differences never authorize reconciliation to overwrite the
 graph artifact.
 
+If audit reports `UNSCOPED_SOURCE_REPOSITORY`, Menhir found a legacy source with no repository
+identity. Do not register another artifact at that path. When the document declares the UUID of that
+source's owner, audit can propose `ADOPT_SOURCE_REPOSITORY` and preserve the existing embodiment. If
+the document cannot declare its UUID, inspect the conflict and use the explicit operator command:
+
+```bash
+menhir artifacts adopt-repository <source_uuid> <path> --repository menhir
+```
+
+Add `--old-path <path>` when the unscoped source still records an older locator. This command adopts
+exactly the named source; path or content similarity alone never assigns repository ownership.
+
 ## Where each document goes
 
 | Directory | Type | Lane |

@@ -15,6 +15,7 @@ import pytest
 
 from menhir.domain.artifact_reconciliation import (
     ActionKind,
+    ArtifactSourceSnapshot,
     CorpusLane,
     MatchBasis,
     ResolutionStatus,
@@ -49,7 +50,9 @@ class _StubNeo4j:
 
     @property
     def writes(self) -> list[dict]:
-        return [c for c in self.calls if " SET " in c["query"] or "CREATE " in c["query"]]
+        return [
+            c for c in self.calls if " SET " in c["query"] or "CREATE " in c["query"]
+        ]
 
 
 OBSERVATION = SourceObservation(
@@ -68,8 +71,11 @@ OBSERVATION = SourceObservation(
 
 @pytest.mark.unit
 def test_relocation_updates_one_source_and_no_relationship_endpoints() -> None:
-    neo = _StubNeo4j(responses=[[{"blockers": 0, "at_old": True, "fresh": True,
-                                  "artifact_uuid": "a-1"}]])
+    neo = _StubNeo4j(
+        responses=[
+            [{"blockers": 0, "at_old": True, "fresh": True, "artifact_uuid": "a-1"}]
+        ]
+    )
     repo = WorkArtifactRepository(neo)
     result = repo.relocate_artifact_source(
         source_uuid="s-1",
@@ -81,6 +87,7 @@ def test_relocation_updates_one_source_and_no_relationship_endpoints() -> None:
     query = neo.calls[0]["query"]
     assert "SET s += $props" in query
     assert "DELETE" not in query and "MERGE" not in query
+    assert "CASE WHEN other IS NOT NULL" in query
     props = neo.calls[0]["params"]["props"]
     assert props["locator_path"] == "new.md"
     assert props["current_locator_key"] == "menhir|markdown|new.md"
@@ -89,8 +96,11 @@ def test_relocation_updates_one_source_and_no_relationship_endpoints() -> None:
 
 @pytest.mark.unit
 def test_a_claimed_destination_is_refused() -> None:
-    neo = _StubNeo4j(responses=[[{"blockers": 1, "at_old": True, "fresh": True,
-                                  "artifact_uuid": "a-1"}]])
+    neo = _StubNeo4j(
+        responses=[
+            [{"blockers": 1, "at_old": True, "fresh": True, "artifact_uuid": "a-1"}]
+        ]
+    )
     result = WorkArtifactRepository(neo).relocate_artifact_source(
         source_uuid="s-1",
         old_locator={"repository": "menhir", "path": "old.md", "medium": "markdown"},
@@ -102,8 +112,11 @@ def test_a_claimed_destination_is_refused() -> None:
 
 @pytest.mark.unit
 def test_a_stale_expected_integrity_is_refused() -> None:
-    neo = _StubNeo4j(responses=[[{"blockers": 0, "at_old": True, "fresh": False,
-                                  "artifact_uuid": "a-1"}]])
+    neo = _StubNeo4j(
+        responses=[
+            [{"blockers": 0, "at_old": True, "fresh": False, "artifact_uuid": "a-1"}]
+        ]
+    )
     result = WorkArtifactRepository(neo).relocate_artifact_source(
         source_uuid="s-1",
         old_locator={"repository": "menhir", "path": "old.md", "medium": "markdown"},
@@ -116,8 +129,11 @@ def test_a_stale_expected_integrity_is_refused() -> None:
 
 @pytest.mark.unit
 def test_a_source_that_moved_since_the_audit_is_refused() -> None:
-    neo = _StubNeo4j(responses=[[{"blockers": 0, "at_old": False, "fresh": True,
-                                  "artifact_uuid": "a-1"}]])
+    neo = _StubNeo4j(
+        responses=[
+            [{"blockers": 0, "at_old": False, "fresh": True, "artifact_uuid": "a-1"}]
+        ]
+    )
     result = WorkArtifactRepository(neo).relocate_artifact_source(
         source_uuid="s-1",
         old_locator={"repository": "menhir", "path": "old.md", "medium": "markdown"},
@@ -131,7 +147,10 @@ def test_a_source_that_moved_since_the_audit_is_refused() -> None:
 def test_an_ambiguous_old_locator_refuses_rather_than_picking_one() -> None:
     neo = _StubNeo4j(responses=[[{"source_uuid": "s-1"}, {"source_uuid": "s-2"}]])
     result = WorkArtifactRepository(neo).relocate_artifact_source_by_locator(
-        repository="menhir", medium="markdown", old_path="old.md", new_path="new.md",
+        repository="menhir",
+        medium="markdown",
+        old_path="old.md",
+        new_path="new.md",
         observation=OBSERVATION,
     )
     assert result == {"applied": False, "reason": "locator_is_ambiguous"}
@@ -142,7 +161,10 @@ def test_an_ambiguous_old_locator_refuses_rather_than_picking_one() -> None:
 def test_a_source_without_a_backfilled_uuid_refuses_rather_than_guessing() -> None:
     neo = _StubNeo4j(responses=[[{"source_uuid": None}]])
     result = WorkArtifactRepository(neo).refresh_artifact_source_by_locator(
-        repository="menhir", medium="markdown", path="a.md", observation=OBSERVATION,
+        repository="menhir",
+        medium="markdown",
+        path="a.md",
+        observation=OBSERVATION,
     )
     assert result == {"applied": False, "reason": "source_uuid_not_backfilled"}
 
@@ -151,7 +173,9 @@ def test_a_source_without_a_backfilled_uuid_refuses_rather_than_guessing() -> No
 def test_marking_unresolved_never_deletes_and_keeps_the_locator() -> None:
     neo = _StubNeo4j(responses=[[{"artifact_uuid": "a-1"}]])
     result = WorkArtifactRepository(neo).mark_artifact_source_unresolved(
-        source_uuid="s-1", reason="source_not_observed", observed_commit="c0ffee",
+        source_uuid="s-1",
+        reason="source_not_observed",
+        observed_commit="c0ffee",
     )
     assert result["applied"] is True
     query = neo.calls[0]["query"]
@@ -164,11 +188,19 @@ def test_marking_unresolved_never_deletes_and_keeps_the_locator() -> None:
 def test_registration_is_idempotent_by_declared_uuid() -> None:
     neo = _StubNeo4j(responses=[[{"uuid": "a-1"}]])
     result = WorkArtifactRepository(neo).register_work_artifact(
-        artifact_type=ArtifactType.PLAN, title="T", repository="menhir",
-        path="a.md", medium="markdown", observation=OBSERVATION, artifact_uuid="a-1",
+        artifact_type=ArtifactType.PLAN,
+        title="T",
+        repository="menhir",
+        path="a.md",
+        medium="markdown",
+        observation=OBSERVATION,
+        artifact_uuid="a-1",
     )
-    assert result == {"applied": False, "reason": "declared_uuid_already_registered",
-                      "artifact_uuid": "a-1"}
+    assert result == {
+        "applied": False,
+        "reason": "declared_uuid_already_registered",
+        "artifact_uuid": "a-1",
+    }
     assert not neo.writes
 
 
@@ -176,8 +208,12 @@ def test_registration_is_idempotent_by_declared_uuid() -> None:
 def test_registration_is_idempotent_by_current_locator() -> None:
     neo = _StubNeo4j(responses=[[{"n": 1}]])
     result = WorkArtifactRepository(neo).register_work_artifact(
-        artifact_type=ArtifactType.PLAN, title="T", repository="menhir",
-        path="a.md", medium="markdown", observation=OBSERVATION,
+        artifact_type=ArtifactType.PLAN,
+        title="T",
+        repository="menhir",
+        path="a.md",
+        medium="markdown",
+        observation=OBSERVATION,
     )
     assert result == {"applied": False, "reason": "destination_already_claimed"}
     assert not neo.writes
@@ -188,8 +224,13 @@ def test_registration_reuses_a_declared_uuid_rather_than_minting_one() -> None:
     declared = "33333333-3333-4333-8333-333333333333"
     neo = _StubNeo4j(responses=[[], [{"n": 0}]])
     result = WorkArtifactRepository(neo).register_work_artifact(
-        artifact_type=ArtifactType.PLAN, title="T", repository="menhir",
-        path="a.md", medium="markdown", observation=OBSERVATION, artifact_uuid=declared,
+        artifact_type=ArtifactType.PLAN,
+        title="T",
+        repository="menhir",
+        path="a.md",
+        medium="markdown",
+        observation=OBSERVATION,
+        artifact_uuid=declared,
     )
     assert result["artifact_uuid"] == declared
 
@@ -207,10 +248,20 @@ def test_an_unobserved_leg_is_left_alone_rather_than_nulled() -> None:
 
 @pytest.mark.unit
 def test_legacy_versions_are_relabelled_never_reinterpreted() -> None:
-    neo = _StubNeo4j(responses=[[
-        {"eid": "e1", "repository": "menhir", "medium": "markdown", "path": "a.md",
-         "version": "f441a237" * 5, "version_kind": None},
-    ]])
+    neo = _StubNeo4j(
+        responses=[
+            [
+                {
+                    "eid": "e1",
+                    "repository": "menhir",
+                    "medium": "markdown",
+                    "path": "a.md",
+                    "version": "f441a237" * 5,
+                    "version_kind": None,
+                },
+            ]
+        ]
+    )
     assert WorkArtifactRepository(neo).backfill_current_locator_keys() == 1
     params = neo.calls[1]["params"]
     assert params["version_kind"] == "legacy_commit_sha"
@@ -258,15 +309,19 @@ def test_existing_cursor_advance_is_compare_and_set() -> None:
 
 @pytest.mark.unit
 def test_declared_artifact_identity_read_includes_source_less_artifacts() -> None:
-    neo = _StubNeo4j(responses=[[
-        {
-            "artifact_uuid": "a-1",
-            "artifact_type": ArtifactType.PLAN,
-            "title": "T",
-            "status": "APPROVED",
-            "source_count": 0,
-        }
-    ]])
+    neo = _StubNeo4j(
+        responses=[
+            [
+                {
+                    "artifact_uuid": "a-1",
+                    "artifact_type": ArtifactType.PLAN,
+                    "title": "T",
+                    "status": "APPROVED",
+                    "source_count": 0,
+                }
+            ]
+        ]
+    )
     identities = WorkArtifactRepository(neo).list_work_artifact_identities(
         artifact_uuids=["a-1"]
     )
@@ -283,16 +338,47 @@ def test_declared_artifact_identity_read_includes_source_less_artifacts() -> Non
 
 
 @pytest.mark.unit
+def test_unscoped_source_read_is_bounded_to_paths_and_declared_uuids() -> None:
+    neo = _StubNeo4j(
+        responses=[
+            [
+                {
+                    "artifact_uuid": "a-1",
+                    "artifact_type": ArtifactType.PLAN,
+                    "source_uuid": "s-1",
+                    "medium": "markdown",
+                    "repository": None,
+                    "path": ".agent/plans/a.md",
+                }
+            ]
+        ]
+    )
+    rows = WorkArtifactRepository(neo).list_unscoped_artifact_source_snapshots(
+        paths=[".agent/plans/a.md"], artifact_uuids=["a-1"]
+    )
+    assert len(rows) == 1 and rows[0].repository is None
+    assert neo.calls[0]["params"] == {
+        "paths": [".agent/plans/a.md"],
+        "artifact_uuids": ["a-1"],
+    }
+    assert "coalesce(trim(s.locator_repository), '') = ''" in neo.calls[0]["query"]
+
+
+@pytest.mark.unit
 def test_attach_source_preserves_artifact_and_creates_only_the_embodiment() -> None:
-    neo = _StubNeo4j(responses=[[
-        {
-            "artifact_type": ArtifactType.PLAN,
-            "source_count": 0,
-            "blockers": 0,
-            "type_matches": True,
-            "attached": True,
-        }
-    ]])
+    neo = _StubNeo4j(
+        responses=[
+            [
+                {
+                    "artifact_type": ArtifactType.PLAN,
+                    "source_count": 0,
+                    "blockers": 0,
+                    "type_matches": True,
+                    "attached": True,
+                }
+            ]
+        ]
+    )
     result = WorkArtifactRepository(neo).attach_artifact_source(
         artifact_uuid="a-1",
         expected_artifact_type=ArtifactType.PLAN,
@@ -304,6 +390,7 @@ def test_attach_source_preserves_artifact_and_creates_only_the_embodiment() -> N
     assert result["applied"] is True
     query = neo.calls[0]["query"]
     assert "CREATE (a)-[:EMBODIED_IN]->(s:ArtifactSource)" in query
+    assert "CASE WHEN occupied IS NOT NULL" in query
     assert "SET a.title" not in query and "SET a.status" not in query
     props = neo.calls[0]["params"]["props"]
     assert props["current_locator_key"] == "menhir|markdown|.agent/plans/a.md"
@@ -314,12 +401,47 @@ def test_attach_source_preserves_artifact_and_creates_only_the_embodiment() -> N
 @pytest.mark.parametrize(
     ("row", "reason"),
     [
-        ({"artifact_type": ArtifactType.REVIEW, "source_count": 0, "blockers": 0,
-          "type_matches": False, "attached": False}, "artifact_type_changed"),
-        ({"artifact_type": ArtifactType.PLAN, "source_count": 1, "blockers": 0,
-          "type_matches": True, "attached": False}, "artifact_already_has_source"),
-        ({"artifact_type": ArtifactType.PLAN, "source_count": 0, "blockers": 1,
-          "type_matches": True, "attached": False}, "destination_already_claimed"),
+        (
+            {
+                "artifact_type": ArtifactType.REVIEW,
+                "source_count": 0,
+                "blockers": 0,
+                "type_matches": False,
+                "attached": False,
+            },
+            "artifact_type_changed",
+        ),
+        (
+            {
+                "artifact_type": ArtifactType.PLAN,
+                "source_count": 1,
+                "blockers": 0,
+                "type_matches": True,
+                "attached": False,
+            },
+            "artifact_already_has_source",
+        ),
+        (
+            {
+                "artifact_type": ArtifactType.PLAN,
+                "source_count": 0,
+                "blockers": 1,
+                "type_matches": True,
+                "attached": False,
+            },
+            "destination_already_claimed",
+        ),
+        (
+            {
+                "artifact_type": ArtifactType.PLAN,
+                "source_count": 0,
+                "blockers": 1,
+                "unscoped_blockers": 1,
+                "type_matches": True,
+                "attached": False,
+            },
+            "unscoped_source_claims_destination",
+        ),
     ],
 )
 def test_attach_source_refuses_changed_premises(row: dict, reason: str) -> None:
@@ -349,7 +471,9 @@ def _write(root: Path, rel: str, text: str) -> Path:
 
 
 @pytest.mark.unit
-def test_the_scan_reaches_backlog_records_the_old_one_level_scan_missed(tmp_path: Path) -> None:
+def test_the_scan_reaches_backlog_records_the_old_one_level_scan_missed(
+    tmp_path: Path,
+) -> None:
     _write(tmp_path, ".agent/plans/top.md", "# Top\n")
     _write(tmp_path, ".agent/plans/backlog/deep.md", "# Deep\n")
     _write(tmp_path, ".agent/plans/README.md", "# Index\n")
@@ -363,7 +487,9 @@ def test_the_scan_reaches_backlog_records_the_old_one_level_scan_missed(tmp_path
 
 
 @pytest.mark.unit
-def test_a_dirty_working_tree_file_records_integrity_with_no_blob(tmp_path: Path) -> None:
+def test_a_dirty_working_tree_file_records_integrity_with_no_blob(
+    tmp_path: Path,
+) -> None:
     _write(tmp_path, ".agent/plans/a.md", "# A\n")
     entry = scan_corpus(tmp_path, repository="t")[0]
     assert entry.integrity == sha256_bytes(b"# A\n")
@@ -375,7 +501,8 @@ def test_a_dirty_working_tree_file_records_integrity_with_no_blob(tmp_path: Path
 def test_declared_metadata_reaches_the_entry(tmp_path: Path) -> None:
     uuid = "44444444-4444-4444-8444-444444444444"
     _write(
-        tmp_path, ".agent/plans/a.md",
+        tmp_path,
+        ".agent/plans/a.md",
         f"---\nartifact_uuid: {uuid}\nartifact_type: plan\n---\n# A Plan\n",
     )
     entry = scan_corpus(tmp_path, repository="t")[0]
@@ -422,8 +549,11 @@ def test_index_links_are_read_from_the_directory_readme(tmp_path: Path) -> None:
 class _RecordingRepo:
     """Records every call so a test can assert what the service did and did not do."""
 
-    def __init__(self, snapshots=(), *, identities=(), cursor: str | None = None) -> None:
+    def __init__(
+        self, snapshots=(), *, unscoped=(), identities=(), cursor: str | None = None
+    ) -> None:
         self.snapshots = list(snapshots)
+        self.unscoped = list(unscoped)
         self.identities = list(identities)
         self.cursor = cursor
         self.calls: list[tuple[str, dict]] = []
@@ -442,6 +572,18 @@ class _RecordingRepo:
     def list_artifact_source_snapshots(self, *, repository: str | None = None):
         self.calls.append(("list", {"repository": repository}))
         return list(self.snapshots)
+
+    def list_unscoped_artifact_source_snapshots(self, *, paths, artifact_uuids):
+        self.calls.append(
+            (
+                "unscoped",
+                {
+                    "paths": paths,
+                    "artifact_uuids": artifact_uuids,
+                },
+            )
+        )
+        return list(self.unscoped)
 
     def list_work_artifact_identities(self, *, artifact_uuids):
         self.calls.append(("identities", {"artifact_uuids": artifact_uuids}))
@@ -473,11 +615,13 @@ def test_audit_performs_no_write_calls(tmp_path: Path) -> None:
     _write(tmp_path, ".agent/plans/a.md", "# A\n")
     repo = _RecordingRepo()
     ArtifactReconciliationService(repo).audit(tmp_path, repository="t")
-    assert [name for name, _ in repo.calls] == ["cursor", "list"]
+    assert [name for name, _ in repo.calls] == ["cursor", "list", "unscoped"]
 
 
 @pytest.mark.unit
-def test_graph_backed_audit_requires_explicit_repository_identity(tmp_path: Path) -> None:
+def test_graph_backed_audit_requires_explicit_repository_identity(
+    tmp_path: Path,
+) -> None:
     _write(tmp_path, ".agent/plans/a.md", "# A\n")
     repo = _RecordingRepo()
     with pytest.raises(ValueError, match="repository is required"):
@@ -494,7 +638,7 @@ def test_apply_with_the_wrong_digest_writes_nothing(tmp_path: Path) -> None:
     )
     assert result.ok is False
     assert result.refused_reason == "plan_digest_mismatch"
-    assert [name for name, _ in repo.calls] == ["cursor", "list"]
+    assert [name for name, _ in repo.calls] == ["cursor", "list", "unscoped"]
 
 
 @pytest.mark.unit
@@ -509,7 +653,7 @@ def test_apply_refuses_implicit_first_repository_registration(tmp_path: Path) ->
     )
     assert result.ok is False
     assert result.refused_reason == "new_repository_requires_explicit_allow"
-    assert [name for name, _ in repo.calls] == ["cursor", "list", "cursor"]
+    assert [name for name, _ in repo.calls] == ["cursor", "list", "unscoped", "cursor"]
 
 
 @pytest.mark.unit
@@ -528,7 +672,11 @@ def test_explicit_first_repository_registration_can_apply(tmp_path: Path) -> Non
     assert result.ok
     assert len(result.applied) == 1
     assert [name for name, _ in repo.calls] == [
-        "cursor", "list", "cursor", "register"
+        "cursor",
+        "list",
+        "unscoped",
+        "cursor",
+        "register",
     ]
 
 
@@ -566,6 +714,65 @@ def test_existing_source_less_declared_uuid_dispatches_attach_not_register(
 
 
 @pytest.mark.unit
+def test_declared_uuid_dispatches_unscoped_repository_adoption(tmp_path: Path) -> None:
+    declared = "44444444-4444-4444-8444-444444444444"
+    _write(
+        tmp_path,
+        ".agent/plans/a.md",
+        f"---\nartifact_uuid: {declared}\nartifact_type: plan\n---\n# A\n",
+    )
+    unscoped = ArtifactSourceSnapshot(
+        artifact_uuid=declared,
+        artifact_type=ArtifactType.PLAN,
+        source_uuid="legacy-source",
+        medium="markdown",
+        repository=None,
+        path=".agent/plans/a.md",
+        integrity=sha256_bytes(
+            f"---\nartifact_uuid: {declared}\nartifact_type: plan\n---\n# A\n".encode()
+        ),
+    )
+    repo = _RecordingRepo(unscoped=[unscoped])
+    service = ArtifactReconciliationService(repo)
+    report = service.audit(tmp_path, repository="t")
+    assert [a.kind for a in report.safe_actions] == [ActionKind.ADOPT_SOURCE_REPOSITORY]
+
+    repo.calls.clear()
+    result = service.apply(
+        tmp_path,
+        expected_digest=report.plan_digest,
+        repository="t",
+    )
+    assert result.ok
+    relocation = next(kwargs for name, kwargs in repo.calls if name == "relocate")
+    assert relocation["old_locator"]["repository"] == ""
+    assert relocation["new_locator"]["repository"] == "t"
+    assert not any(name == "register" for name, _ in repo.calls)
+
+
+@pytest.mark.unit
+def test_manual_unscoped_adoption_uses_source_uuid_and_null_old_repository(
+    tmp_path: Path,
+) -> None:
+    _write(tmp_path, ".agent/plans/a.md", "# A\n")
+    repo = _RecordingRepo()
+    result = ArtifactReconciliationService(repo).adopt_source_repository_manually(
+        source_uuid="legacy-source",
+        repository="t",
+        medium="markdown",
+        old_path=".agent/plans/legacy.md",
+        new_path=".agent/plans/a.md",
+        repo_root=tmp_path,
+    )
+    assert result["applied"] is True
+    kwargs = next(kwargs for name, kwargs in repo.calls if name == "relocate")
+    assert kwargs["source_uuid"] == "legacy-source"
+    assert kwargs["old_locator"]["repository"] == ""
+    assert kwargs["new_locator"]["repository"] == "t"
+    assert kwargs["observation"].lane == CorpusLane.ACTIVE
+
+
+@pytest.mark.unit
 def test_audit_uses_the_persisted_cursor_as_git_evidence_base(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -582,9 +789,9 @@ def test_audit_uses_the_persisted_cursor_as_git_evidence_base(
         "menhir.services.artifact_reconciliation_service.collect_git_evidence",
         fake_git,
     )
-    report = ArtifactReconciliationService(
-        _RecordingRepo(cursor="stored")
-    ).audit(tmp_path, repository="t")
+    report = ArtifactReconciliationService(_RecordingRepo(cursor="stored")).audit(
+        tmp_path, repository="t"
+    )
     assert seen == ["stored"]
     assert report.cursor_commit == "stored"
     assert report.evidence_from_commit == "stored"
@@ -607,9 +814,9 @@ def test_explicit_from_commit_overrides_only_the_git_evidence_base(
         "menhir.services.artifact_reconciliation_service.collect_git_evidence",
         fake_git,
     )
-    report = ArtifactReconciliationService(
-        _RecordingRepo(cursor="stored")
-    ).audit(tmp_path, repository="t", from_commit="override")
+    report = ArtifactReconciliationService(_RecordingRepo(cursor="stored")).audit(
+        tmp_path, repository="t", from_commit="override"
+    )
     assert seen == ["override"]
     assert report.cursor_commit == "stored"
     assert report.evidence_from_commit == "override"
@@ -639,7 +846,12 @@ def test_clean_apply_advances_cursor_to_the_observed_commit(
     assert result.cursor_advanced is True
     assert repo.cursor == "head"
     assert [name for name, _ in repo.calls] == [
-        "cursor", "list", "cursor", "register", "advance_cursor"
+        "cursor",
+        "list",
+        "unscoped",
+        "cursor",
+        "register",
+        "advance_cursor",
     ]
 
 
@@ -676,9 +888,11 @@ def test_apply_reports_a_cursor_cas_race_after_completed_actions(
 @pytest.mark.unit
 def test_apply_refuses_when_cursor_changes_after_reaudit(tmp_path: Path) -> None:
     _write(tmp_path, ".agent/plans/a.md", "# A\n")
-    approved = ArtifactReconciliationService(
-        _RecordingRepo(cursor="c1")
-    ).audit(tmp_path, repository="t").plan_digest
+    approved = (
+        ArtifactReconciliationService(_RecordingRepo(cursor="c1"))
+        .audit(tmp_path, repository="t")
+        .plan_digest
+    )
 
     class _MovingCursorRepo(_RecordingRepo):
         def __init__(self) -> None:
@@ -753,12 +967,16 @@ def test_a_conflict_does_not_block_unrelated_safe_actions(tmp_path: Path) -> Non
 
 
 @pytest.mark.unit
-def test_validation_reports_a_duplicate_uuid_across_two_documents(tmp_path: Path) -> None:
+def test_validation_reports_a_duplicate_uuid_across_two_documents(
+    tmp_path: Path,
+) -> None:
     uuid = "55555555-5555-4555-8555-555555555555"
     body = f"---\nartifact_uuid: {uuid}\nartifact_type: plan\n---\n# T\n"
     _write(tmp_path, ".agent/plans/a.md", body)
     _write(tmp_path, ".agent/plans/b.md", body)
-    report = ArtifactReconciliationService(_RecordingRepo()).validate(tmp_path, repository="t")
+    report = ArtifactReconciliationService(_RecordingRepo()).validate(
+        tmp_path, repository="t"
+    )
     codes = {f.code for f in report.findings}
     assert "duplicate_artifact_uuid" in codes
     assert report.ok is False
@@ -771,14 +989,18 @@ def test_validation_needs_no_graph_connection(tmp_path: Path) -> None:
             raise AssertionError("validation must not read the graph")
 
     _write(tmp_path, ".agent/plans/a.md", "# A\n")
-    report = ArtifactReconciliationService(_Exploding()).validate(tmp_path, repository="t")
+    report = ArtifactReconciliationService(_Exploding()).validate(
+        tmp_path, repository="t"
+    )
     assert report.checked == 1
 
 
 @pytest.mark.unit
 def test_a_document_with_no_h1_is_reported(tmp_path: Path) -> None:
     _write(tmp_path, ".agent/plans/a.md", "no heading here\n")
-    report = ArtifactReconciliationService(_RecordingRepo()).validate(tmp_path, repository="t")
+    report = ArtifactReconciliationService(_RecordingRepo()).validate(
+        tmp_path, repository="t"
+    )
     assert "missing_h1_title" in {f.code for f in report.findings}
 
 
@@ -807,7 +1029,8 @@ def test_a_rename_plus_edit_in_one_commit_is_still_recognized(tmp_path: Path) ->
     _git(tmp_path, "commit", "-q", "-m", "add")
     base = subprocess.run(
         ["git", "-C", str(tmp_path), "rev-parse", "HEAD"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     ).stdout.strip()
 
     (tmp_path / ".agent/plans/a.md").unlink()
@@ -827,12 +1050,20 @@ def test_a_rename_plus_edit_in_one_commit_is_still_recognized(tmp_path: Path) ->
 
     entries = scan_corpus(tmp_path, repository="t", git=evidence)
     snapshot = ArtifactSourceSnapshot(
-        artifact_uuid="a-1", medium="markdown", source_uuid="s-1",
-        artifact_type=ArtifactType.PLAN, repository="t", path=".agent/plans/a.md",
-        integrity=sha256_bytes(original.encode()), lane=CorpusLane.ACTIVE,
+        artifact_uuid="a-1",
+        medium="markdown",
+        source_uuid="s-1",
+        artifact_type=ArtifactType.PLAN,
+        repository="t",
+        path=".agent/plans/a.md",
+        integrity=sha256_bytes(original.encode()),
+        lane=CorpusLane.ACTIVE,
     )
     report = plan_reconciliation(
-        repository="t", entries=entries, snapshots=[snapshot], renames=evidence.renames,
+        repository="t",
+        entries=entries,
+        snapshots=[snapshot],
+        renames=evidence.renames,
     )
     relocations = [a for a in report.actions if a.kind == ActionKind.RELOCATE_SOURCE]
     assert len(relocations) == 1
@@ -873,8 +1104,11 @@ def test_collision_checks_see_sources_that_predate_the_locator_key() -> None:
     relocation would land on top of the very source the check exists to protect
     -- on exactly the unprepared graph the one-time repair runs against.
     """
-    neo = _StubNeo4j(responses=[[{"blockers": 1, "at_old": True, "fresh": True,
-                                  "artifact_uuid": "a-1"}]])
+    neo = _StubNeo4j(
+        responses=[
+            [{"blockers": 1, "at_old": True, "fresh": True, "artifact_uuid": "a-1"}]
+        ]
+    )
     result = WorkArtifactRepository(neo).relocate_artifact_source(
         source_uuid="s-1",
         old_locator={"repository": "menhir", "path": "old.md", "medium": "markdown"},
@@ -892,11 +1126,85 @@ def test_collision_checks_see_sources_that_predate_the_locator_key() -> None:
 def test_registration_collision_check_also_falls_back_to_raw_locator_legs() -> None:
     neo = _StubNeo4j(responses=[[{"n": 1}]])
     result = WorkArtifactRepository(neo).register_work_artifact(
-        artifact_type=ArtifactType.PLAN, title="T", repository="menhir",
-        path="a.md", medium="markdown", observation=OBSERVATION,
+        artifact_type=ArtifactType.PLAN,
+        title="T",
+        repository="menhir",
+        path="a.md",
+        medium="markdown",
+        observation=OBSERVATION,
     )
     assert result["reason"] == "destination_already_claimed"
     assert "coalesce(s.current_locator_key" in neo.calls[0]["query"]
+
+
+@pytest.mark.unit
+def test_registration_refuses_an_unscoped_same_path_source() -> None:
+    neo = _StubNeo4j(responses=[[{"n": 1, "unscoped": 1}]])
+    result = WorkArtifactRepository(neo).register_work_artifact(
+        artifact_type=ArtifactType.PLAN,
+        title="T",
+        repository="menhir",
+        path=".agent/plans/a.md",
+        medium="markdown",
+        observation=OBSERVATION,
+    )
+    assert result == {
+        "applied": False,
+        "reason": "unscoped_source_claims_destination",
+    }
+    params = neo.calls[0]["params"]
+    assert params["medium"] == "markdown"
+    assert params["path"] == ".agent/plans/a.md"
+
+
+@pytest.mark.unit
+def test_relocation_refuses_an_unscoped_same_path_destination() -> None:
+    neo = _StubNeo4j(
+        responses=[
+            [
+                {
+                    "blockers": 1,
+                    "unscoped_blockers": 1,
+                    "at_old": True,
+                    "fresh": True,
+                    "artifact_uuid": "a-1",
+                }
+            ]
+        ]
+    )
+    result = WorkArtifactRepository(neo).relocate_artifact_source(
+        source_uuid="s-1",
+        old_locator={"repository": "menhir", "path": "old.md", "medium": "markdown"},
+        new_locator={"repository": "menhir", "path": "new.md", "medium": "markdown"},
+        observation=OBSERVATION,
+    )
+    assert result["reason"] == "unscoped_source_claims_destination"
+
+
+@pytest.mark.unit
+def test_unscoped_adoption_accepts_whitespace_legacy_repository_values() -> None:
+    neo = _StubNeo4j(
+        responses=[
+            [
+                {
+                    "blockers": 0,
+                    "unscoped_blockers": 0,
+                    "at_old": True,
+                    "fresh": True,
+                    "artifact_uuid": "a-1",
+                }
+            ]
+        ]
+    )
+    result = WorkArtifactRepository(neo).relocate_artifact_source(
+        source_uuid="s-1",
+        old_locator={"repository": "", "path": "old.md", "medium": "markdown"},
+        new_locator={"repository": "menhir", "path": "new.md", "medium": "markdown"},
+        observation=OBSERVATION,
+    )
+    assert result["applied"] is True
+    assert neo.calls[0]["params"]["old_repository_unscoped"] is True
+    assert "coalesce(trim(s.locator_repository), '') = ''" in neo.calls[0]["query"]
 
 
 @pytest.mark.unit

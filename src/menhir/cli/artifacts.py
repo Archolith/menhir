@@ -65,7 +65,9 @@ def _offline_service() -> Any:
     )
 
     class _NoSources:
-        def list_artifact_source_snapshots(self, *, repository: str | None = None) -> list:
+        def list_artifact_source_snapshots(
+            self, *, repository: str | None = None
+        ) -> list:
             return []
 
     return ArtifactReconciliationService(_NoSources())
@@ -78,7 +80,9 @@ def _emit(payload: dict[str, Any]) -> None:
 @artifacts_app.command()
 def validate(
     path: Annotated[str, typer.Argument(help="Repository root to validate.")] = ".",
-    repository: Annotated[str, typer.Option(help="Repository name recorded on sources.")] = "",
+    repository: Annotated[
+        str, typer.Option(help="Repository name recorded on sources.")
+    ] = "",
     as_json: Annotated[bool, typer.Option("--json", help="Emit JSON.")] = False,
 ) -> None:
     """Check the corpus against the authoring contract. No graph access, no writes."""
@@ -105,8 +109,12 @@ def audit(
         str, typer.Option(help="Repository name recorded on sources (required).")
     ],
     repo: Annotated[str, typer.Option(help="Repository root to audit.")] = ".",
-    from_commit: Annotated[str, typer.Option(help="Override the persisted cursor for Git evidence only.")] = "",
-    as_json: Annotated[bool, typer.Option("--json", help="Emit the full ledger as JSON.")] = False,
+    from_commit: Annotated[
+        str, typer.Option(help="Override the persisted cursor for Git evidence only.")
+    ] = "",
+    as_json: Annotated[
+        bool, typer.Option("--json", help="Emit the full ledger as JSON.")
+    ] = False,
 ) -> None:
     """Report graph/filesystem parity. Read-only: this command never writes."""
     try:
@@ -136,6 +144,7 @@ def _print_report(report: Any) -> None:
     print(f"plan digest     : {report.plan_digest}")
     print(f"corpus entries  : {counts.get('entries', 0)}")
     print(f"graph sources   : {counts.get('sources', 0)}")
+    print(f"unscoped sources: {counts.get('unscoped_sources', 0)}")
     print(f"  by lane       : {counts.get('entries_by_lane', {})}")
     print(f"  by type       : {counts.get('entries_by_type', {})}")
     print(f"actions         : {counts.get('by_kind', {})}")
@@ -165,10 +174,19 @@ def reconcile(
         str, typer.Option(help="Repository name recorded on sources (required).")
     ],
     repo: Annotated[str, typer.Option(help="Repository root to reconcile.")] = ".",
-    from_commit: Annotated[str, typer.Option(help="Override the persisted cursor for Git evidence only.")] = "",
-    apply: Annotated[bool, typer.Option("--apply", help="Write. Requires --plan-digest.")] = False,
-    plan_digest: Annotated[str, typer.Option(help="Digest of the approved audit ledger.")] = "",
-    prepare: Annotated[bool, typer.Option("--prepare", help="Backfill source UUIDs and locator keys first.")] = False,
+    from_commit: Annotated[
+        str, typer.Option(help="Override the persisted cursor for Git evidence only.")
+    ] = "",
+    apply: Annotated[
+        bool, typer.Option("--apply", help="Write. Requires --plan-digest.")
+    ] = False,
+    plan_digest: Annotated[
+        str, typer.Option(help="Digest of the approved audit ledger.")
+    ] = "",
+    prepare: Annotated[
+        bool,
+        typer.Option("--prepare", help="Backfill source UUIDs and locator keys first."),
+    ] = False,
     allow_new_repository: Annotated[
         bool,
         typer.Option(
@@ -237,8 +255,10 @@ def reconcile(
             print(f"cursor   : {cursor or 'retained'}")
             for record in result.skipped[:20]:
                 outcome = record.get("outcome", {})
-                print(f"  skipped {record.get('kind')} {record.get('path')}: "
-                      f"{outcome.get('reason')}")
+                print(
+                    f"  skipped {record.get('kind')} {record.get('path')}: "
+                    f"{outcome.get('reason')}"
+                )
     if not result.ok:
         raise typer.Exit(EXIT_DIGEST_MISMATCH)
 
@@ -251,7 +271,9 @@ def relocate(
         str, typer.Option(help="Repository name recorded on the source (required).")
     ],
     medium: Annotated[str, typer.Option(help="Embodiment medium.")] = "markdown",
-    repo: Annotated[str, typer.Option(help="Repository root, for hashing the destination.")] = ".",
+    repo: Annotated[
+        str, typer.Option(help="Repository root, for hashing the destination.")
+    ] = ".",
 ) -> None:
     """Repair one move by hand, when Git evidence is unavailable.
 
@@ -270,6 +292,43 @@ def relocate(
         medium=medium,
         old_path=old_path,
         new_path=new_path,
+        repo_root=repo,
+    )
+    _emit(result)
+    if not result.get("applied"):
+        raise typer.Exit(EXIT_FINDINGS)
+
+
+@artifacts_app.command("adopt-repository")
+def adopt_repository(
+    source_uuid: Annotated[
+        str, typer.Argument(help="Source UUID from the audit conflict.")
+    ],
+    path: Annotated[
+        str, typer.Argument(help="Path the source belongs to in this repository.")
+    ],
+    repository: Annotated[
+        str, typer.Option(help="Repository identity to assign (required).")
+    ],
+    old_path: Annotated[
+        str, typer.Option(help="Current unscoped path; defaults to PATH.")
+    ] = "",
+    medium: Annotated[str, typer.Option(help="Embodiment medium.")] = "markdown",
+    repo: Annotated[str, typer.Option(help="Repository root, for hashing PATH.")] = ".",
+) -> None:
+    """Assign a repository to one audited legacy source with no repository."""
+    try:
+        service = _service()
+    except Exception as exc:  # noqa: BLE001
+        print(f"graph unavailable: {exc}")
+        raise typer.Exit(EXIT_UNAVAILABLE) from exc
+
+    result = service.adopt_source_repository_manually(
+        source_uuid=source_uuid,
+        repository=repository,
+        medium=medium,
+        old_path=old_path or path,
+        new_path=path,
         repo_root=repo,
     )
     _emit(result)

@@ -32,6 +32,10 @@
   existing `WorkArtifact` receives an explicit, digest-bound `ATTACH_SOURCE` action when its type
   agrees and the locator is free; the write preserves all semantic artifact properties and refuses
   concurrent source creation, type drift, and destination collisions.
+- Legacy sources with a null or empty repository are now included in bounded audits and plan
+  digests. A matching declared owner UUID produces `ADOPT_SOURCE_REPOSITORY`; weaker matches remain
+  conflicts and reserve their paths against duplicate registration. The explicit
+  `menhir artifacts adopt-repository` command handles reviewed legacy cases without document UUIDs.
 - `.agent/workflows/artifact_authoring.md` is the canonical authoring contract; README, file-index,
   maintenance, feature_planning, and the plan/backlog/reference indexes route to it.
 - Phases 5 (live graph repair) and 6 (frontmatter backfill) are deliberately NOT done: both require

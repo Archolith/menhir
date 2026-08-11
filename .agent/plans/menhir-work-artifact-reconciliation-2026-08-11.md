@@ -203,6 +203,9 @@ For each discovered corpus entry:
 1. Parse and validate a declared `artifact_uuid`, if present.
    - If it identifies one artifact and the destination is not claimed by another source, refresh or
      relocate that source.
+   - If that artifact's source has a null or empty repository, assign the audited repository only
+     when the document declares the same UUID. A path or hash match alone cannot establish
+     repository ownership and remains a conflict.
    - If UUID and current locator identify different artifacts, emit a conflict.
 2. Apply an explicit rename pair from a Hook Center event or Git diff.
    - The old locator must identify exactly one source.
@@ -309,6 +312,14 @@ type, or relationships. Audit bulk-reads declared UUID identities and binds thei
 source count into the plan digest. Type disagreement, an already-present source outside the scoped
 source inventory, or an occupied destination is a conflict. Apply locks and rechecks the artifact,
 so a source added after audit becomes a skipped conditional write rather than a duplicate.
+
+Legacy sources with a null, empty, or whitespace-only `locator_repository` are read as a separate,
+bounded inventory: sources at a current corpus path or owned by a UUID declared in the corpus.
+`ADOPT_SOURCE_REPOSITORY` is safe only for the declared-UUID case and updates the existing source in
+place. Every weaker match is `UNSCOPED_SOURCE_REPOSITORY`; it reserves the path so registration,
+attachment, and relocation cannot create a second embodiment there. The manual
+`menhir artifacts adopt-repository` command is the explicit escape hatch for legacy documents that
+cannot declare a UUID.
 
 ### Immediate rename detector
 
@@ -418,6 +429,7 @@ Add or tighten:
 
 ```text
 list_artifact_source_snapshots(repository=None)
+list_unscoped_artifact_source_snapshots(paths, artifact_uuids)
 refresh_artifact_source(source_uuid, observation, expected_integrity=None)
 relocate_artifact_source(source_uuid, old_locator, new_locator, observation)
 relocate_artifact_source_by_locator(repository, medium, old_path, new_path, observation)
@@ -687,6 +699,8 @@ time. Only 3 of 28 current plans map today; broad alias additions would turn com
 - Locator uniqueness survives concurrent relocation attempts.
 - Source UUID and artifact UUID constraints reject duplicates.
 - Registration is idempotent by declared UUID/current locator.
+- Unscoped sources reserve their medium/path; declared UUID adoption preserves their source UUID,
+  while path-only and hash-only matches remain conflicts.
 - Unresolved -> resolved recovery retains identity.
 - Source-v1 backfill reaches every existing embodiment before constraints activate.
 

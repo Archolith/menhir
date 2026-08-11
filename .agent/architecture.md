@@ -626,6 +626,13 @@ semantic identities separately from source snapshots and proposes `ATTACH_SOURCE
 type disagreement, an existing source, or a claimed locator refuses without changing semantic
 artifact properties.
 
+Sources with no repository identity are queried separately and only when relevant to the scanned
+paths or declared artifact UUIDs. They participate in the digest and collision checks but never in
+path- or hash-based automatic matching. A document-declared owner UUID produces the explicit
+`ADOPT_SOURCE_REPOSITORY` action; otherwise audit emits `UNSCOPED_SOURCE_REPOSITORY`. Apply assigns
+the repository through the same conditional source relocation used for normal moves, preserving the
+source node and refusing a stale locator, stale integrity, or newly occupied destination.
+
 Operational sidecar storage:
 
 - MCP/server telemetry is persisted in SQLite at `<workspace_root>/.agent/mcp_telemetry.db` by default (resolved by `infrastructure/paths.py` from the workspace root, not a hardcoded project path)

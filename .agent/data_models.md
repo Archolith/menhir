@@ -187,6 +187,14 @@ embodiment addressable — Owned Record addressability, not semantic identity �
 `current_locator_key` (`repository|medium|path`) is uniquely constrained so two artifacts can never
 claim one current path.
 
+Legacy `ArtifactSource` nodes may predate repository identity and carry a null, empty, or
+whitespace-only `locator_repository`. They are not members of every repository and must not be
+silently ignored. Reconciliation reads only relevant unscoped sources—those at a scanned path or
+owned by a UUID declared by a scanned document. A matching declared UUID can adopt that existing
+source into the audited repository without changing `source_uuid` or artifact identity. Path and
+content-hash matches cannot prove repository ownership, so they produce an explicit conflict and
+reserve the destination against registration until an operator disposes of it.
+
 A source-less `WorkArtifact` remains a valid semantic identity. When a corpus document explicitly
 declares that UUID, reconciliation may attach its first `ArtifactSource` only when the graph and
 document types agree and the locator is unclaimed. This is embodiment repair, not registration:

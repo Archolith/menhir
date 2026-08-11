@@ -69,12 +69,14 @@ class CorpusLane:
     ARCHIVE = "archive"
 
 
-CORPUS_LANES: frozenset[str] = frozenset({
-    CorpusLane.ACTIVE,
-    CorpusLane.BACKLOG,
-    CorpusLane.REFERENCE,
-    CorpusLane.ARCHIVE,
-})
+CORPUS_LANES: frozenset[str] = frozenset(
+    {
+        CorpusLane.ACTIVE,
+        CorpusLane.BACKLOG,
+        CorpusLane.REFERENCE,
+        CorpusLane.ARCHIVE,
+    }
+)
 
 #: Lanes an artifact can be worked from. Used only to report contradictions.
 EXECUTABLE_LANES: frozenset[str] = frozenset({CorpusLane.ACTIVE, CorpusLane.BACKLOG})
@@ -84,6 +86,7 @@ class ActionKind:
     NOOP = "NOOP"
     REFRESH_SOURCE = "REFRESH_SOURCE"
     RELOCATE_SOURCE = "RELOCATE_SOURCE"
+    ADOPT_SOURCE_REPOSITORY = "ADOPT_SOURCE_REPOSITORY"
     ATTACH_SOURCE = "ATTACH_SOURCE"
     REGISTER_ARTIFACT = "REGISTER_ARTIFACT"
     MARK_SOURCE_UNRESOLVED = "MARK_SOURCE_UNRESOLVED"
@@ -92,13 +95,16 @@ class ActionKind:
 
 #: Actions apply mode is allowed to perform. CONFLICT is deliberately absent:
 #: a conflict is a report, never a mutation.
-SAFE_ACTION_KINDS: frozenset[str] = frozenset({
-    ActionKind.REFRESH_SOURCE,
-    ActionKind.RELOCATE_SOURCE,
-    ActionKind.ATTACH_SOURCE,
-    ActionKind.REGISTER_ARTIFACT,
-    ActionKind.MARK_SOURCE_UNRESOLVED,
-})
+SAFE_ACTION_KINDS: frozenset[str] = frozenset(
+    {
+        ActionKind.REFRESH_SOURCE,
+        ActionKind.RELOCATE_SOURCE,
+        ActionKind.ADOPT_SOURCE_REPOSITORY,
+        ActionKind.ATTACH_SOURCE,
+        ActionKind.REGISTER_ARTIFACT,
+        ActionKind.MARK_SOURCE_UNRESOLVED,
+    }
+)
 
 
 class MatchBasis:
@@ -129,6 +135,7 @@ class ConflictKind:
     INVALID_DECLARED_METADATA = "INVALID_DECLARED_METADATA"
     DECLARED_UUID_TYPE_DISAGREEMENT = "DECLARED_UUID_TYPE_DISAGREEMENT"
     DECLARED_UUID_ALREADY_EMBODIED = "DECLARED_UUID_ALREADY_EMBODIED"
+    UNSCOPED_SOURCE_REPOSITORY = "UNSCOPED_SOURCE_REPOSITORY"
 
 
 class ResolutionStatus:
@@ -184,20 +191,29 @@ CORPUS_ROUTES: tuple[CorpusRoute, ...] = (
         ".agent/for-review", ArtifactType.IMPLEMENTATION_REPORT, CorpusLane.ACTIVE
     ),
     CorpusRoute(
-        ".agent/archive/plans", ArtifactType.PLAN, CorpusLane.ARCHIVE,
+        ".agent/archive/plans",
+        ArtifactType.PLAN,
+        CorpusLane.ARCHIVE,
         preserve_existing_type=True,
     ),
     CorpusRoute(
-        ".agent/archive/reviews", ArtifactType.REVIEW, CorpusLane.ARCHIVE,
+        ".agent/archive/reviews",
+        ArtifactType.REVIEW,
+        CorpusLane.ARCHIVE,
         preserve_existing_type=True,
     ),
     CorpusRoute(
-        ".agent/archive/handoffs", ArtifactType.HANDOFF, CorpusLane.ARCHIVE,
+        ".agent/archive/handoffs",
+        ArtifactType.HANDOFF,
+        CorpusLane.ARCHIVE,
         preserve_existing_type=True,
     ),
     CorpusRoute(
-        ".agent/reference", None, CorpusLane.REFERENCE,
-        preserve_existing_type=True, requires_declared_type=True,
+        ".agent/reference",
+        None,
+        CorpusLane.REFERENCE,
+        preserve_existing_type=True,
+        requires_declared_type=True,
     ),
 )
 
@@ -248,24 +264,43 @@ _UUID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE
 )
 _H1_RE = re.compile(r"^#\s+(.+?)\s*$")
-_STATUS_RE = re.compile(r"^\s*[-*]?\s*\*{0,2}status\*{0,2}\s*:\s*(.+?)\s*$", re.IGNORECASE)
+_STATUS_RE = re.compile(
+    r"^\s*[-*]?\s*\*{0,2}status\*{0,2}\s*:\s*(.+?)\s*$", re.IGNORECASE
+)
 
 #: Keys the frontmatter block may carry that this module interprets. Relationship
 #: keys are validated elsewhere (``normalize_declarations``) and pass through
 #: untouched -- reconciliation never resolves or removes a relationship.
-_METADATA_KEYS: frozenset[str] = frozenset({
-    "artifact_schema", "artifact_uuid", "artifact_type", "artifact_status",
-})
+_METADATA_KEYS: frozenset[str] = frozenset(
+    {
+        "artifact_schema",
+        "artifact_uuid",
+        "artifact_type",
+        "artifact_status",
+    }
+)
 
 #: Keys an author must never write: menhir derives them from the source itself.
 #: Present in a document, they are a stale copy of a derived fact, so they are
 #: rejected rather than read.
-DERIVED_KEYS: frozenset[str] = frozenset({
-    "corpus_lane", "integrity", "integrity_algorithm", "version", "version_kind",
-    "observed_commit", "size_bytes", "source_uuid", "resolution_status",
-    "resolution_reason", "last_seen_at", "last_reconciled_at",
-    "last_reconcile_basis", "schema_version",
-})
+DERIVED_KEYS: frozenset[str] = frozenset(
+    {
+        "corpus_lane",
+        "integrity",
+        "integrity_algorithm",
+        "version",
+        "version_kind",
+        "observed_commit",
+        "size_bytes",
+        "source_uuid",
+        "resolution_status",
+        "resolution_reason",
+        "last_seen_at",
+        "last_reconciled_at",
+        "last_reconcile_basis",
+        "schema_version",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -356,11 +391,13 @@ def parse_frontmatter(text: str) -> tuple[dict[str, Any], str, tuple[str, ...]]:
             mapping[key] = ""
         current_key = key
 
-    body = "\n".join(lines[end + 1:])
+    body = "\n".join(lines[end + 1 :])
     return mapping, body, tuple(errors)
 
 
-def read_document_metadata(text: str, *, route_type: str | None = None) -> DocumentMetadata:
+def read_document_metadata(
+    text: str, *, route_type: str | None = None
+) -> DocumentMetadata:
     """Read the authoring block and H1 title out of a document's text.
 
     ``route_type`` is only used to check a declared status against the type the
@@ -520,7 +557,9 @@ class ArtifactSourceSnapshot:
     @property
     def identity(self) -> str:
         """Stable handle for planning. Source UUID once backfilled; locator before."""
-        return self.source_uuid or f"{self.artifact_uuid}:{self.medium}:{self.path or ''}"
+        return (
+            self.source_uuid or f"{self.artifact_uuid}:{self.medium}:{self.path or ''}"
+        )
 
 
 @dataclass(frozen=True)
@@ -692,10 +731,14 @@ class _PlanState:
         self,
         entries: Sequence[CorpusEntry],
         snapshots: Sequence[ArtifactSourceSnapshot],
+        unscoped_snapshots: Sequence[ArtifactSourceSnapshot],
         identities: Sequence[WorkArtifactIdentitySnapshot],
+        repository: str,
     ) -> None:
+        self.repository = repository
         self.entries = list(entries)
         self.snapshots = list(snapshots)
+        self.unscoped_snapshots = list(unscoped_snapshots)
         self.identities = list(identities)
         self.actions: list[ReconciliationAction] = []
         self.claimed_entries: set[tuple[str, str, str]] = set()
@@ -710,11 +753,24 @@ class _PlanState:
             (entry.repository, entry.path) for entry in self.entries
         }
 
-        self.snapshots_by_key: dict[tuple[str, str, str], list[ArtifactSourceSnapshot]] = {}
+        self.snapshots_by_key: dict[
+            tuple[str, str, str], list[ArtifactSourceSnapshot]
+        ] = {}
         self.snapshots_by_artifact: dict[str, list[ArtifactSourceSnapshot]] = {}
         for snapshot in self.snapshots:
             self.snapshots_by_key.setdefault(snapshot.key, []).append(snapshot)
-            self.snapshots_by_artifact.setdefault(snapshot.artifact_uuid, []).append(snapshot)
+            self.snapshots_by_artifact.setdefault(snapshot.artifact_uuid, []).append(
+                snapshot
+            )
+        self.unscoped_by_artifact: dict[str, list[ArtifactSourceSnapshot]] = {}
+        self.unscoped_by_key: dict[tuple[str, str], list[ArtifactSourceSnapshot]] = {}
+        for snapshot in self.unscoped_snapshots:
+            self.unscoped_by_artifact.setdefault(snapshot.artifact_uuid, []).append(
+                snapshot
+            )
+            self.unscoped_by_key.setdefault(
+                (snapshot.medium, snapshot.path or ""), []
+            ).append(snapshot)
         self.identities_by_artifact = {
             identity.artifact_uuid: identity for identity in self.identities
         }
@@ -724,6 +780,11 @@ class _PlanState:
 
     def unclaimed_snapshots(self) -> list[ArtifactSourceSnapshot]:
         return [s for s in self.snapshots if s.identity not in self.claimed_sources]
+
+    def unclaimed_unscoped_snapshots(self) -> list[ArtifactSourceSnapshot]:
+        return [
+            s for s in self.unscoped_snapshots if s.identity not in self.claimed_sources
+        ]
 
     def claim(
         self,
@@ -764,6 +825,7 @@ def plan_reconciliation(
     repository: str,
     entries: Sequence[CorpusEntry],
     snapshots: Sequence[ArtifactSourceSnapshot],
+    unscoped_snapshots: Sequence[ArtifactSourceSnapshot] = (),
     identities: Sequence[WorkArtifactIdentitySnapshot] = (),
     renames: Sequence[GitRename] = (),
     observed_commit: str | None = None,
@@ -786,15 +848,23 @@ def plan_reconciliation(
         (s for s in snapshots if (s.repository or "") == repository),
         key=lambda s: (s.path or "", s.artifact_uuid),
     )
-    state = _PlanState(scoped_entries, scoped_snapshots, identities)
+    state = _PlanState(
+        scoped_entries,
+        scoped_snapshots,
+        unscoped_snapshots,
+        identities,
+        repository,
+    )
 
     _plan_duplicate_locators(state)
     _plan_declared_uuids(state)
+    _plan_unscoped_path_conflicts(state)
     _plan_git_renames(state, renames, repository)
     _plan_exact_locators(state)
     _plan_hash_matches(state)
     _plan_registrations(state)
     _plan_unresolved_sources(state)
+    _plan_remaining_unscoped_sources(state)
 
     actions = tuple(sorted(state.actions, key=lambda a: a.sort_key))
     contradictions = tuple(_lane_contradictions(state))
@@ -807,6 +877,7 @@ def plan_reconciliation(
         evidence_base_valid=evidence_base_valid,
         entries=scoped_entries,
         snapshots=scoped_snapshots,
+        unscoped_snapshots=unscoped_snapshots,
         identities=identities,
         actions=actions,
     )
@@ -891,6 +962,11 @@ def _plan_declared_uuids(state: _PlanState) -> None:
             for s in state.snapshots_by_artifact.get(declared_uuid, [])
             if s.medium == entry.medium and s.identity not in state.claimed_sources
         ]
+        unscoped_candidates = [
+            s
+            for s in state.unscoped_by_artifact.get(declared_uuid, [])
+            if s.medium == entry.medium and s.identity not in state.claimed_sources
+        ]
         occupant = [
             s
             for s in state.snapshots_by_key.get(entry.key, [])
@@ -912,6 +988,142 @@ def _plan_declared_uuids(state: _PlanState) -> None:
                     detail=tuple(sorted(s.artifact_uuid for s in occupant)),
                 ),
                 entry=entry,
+            )
+            continue
+
+        if len(candidates) + len(unscoped_candidates) > 1:
+            implicated = candidates + unscoped_candidates
+            state.reserve_conflict(
+                ReconciliationAction(
+                    kind=ActionKind.CONFLICT,
+                    conflict_kind=ConflictKind.UUID_LOCATOR_DISAGREEMENT,
+                    repository=entry.repository,
+                    medium=entry.medium,
+                    path=entry.path,
+                    artifact_uuid=declared_uuid,
+                    lane=entry.lane,
+                    reason="declared_uuid_has_multiple_sources_of_this_medium",
+                    detail=tuple(sorted(s.path or "" for s in implicated)),
+                ),
+                entry=entry,
+                snapshots=implicated,
+            )
+            continue
+
+        unscoped_occupants = [
+            s
+            for s in state.unscoped_by_key.get((entry.medium, entry.path), [])
+            if s.artifact_uuid != declared_uuid
+            and s.identity not in state.claimed_sources
+        ]
+        if unscoped_occupants:
+            state.reserve_conflict(
+                ReconciliationAction(
+                    kind=ActionKind.CONFLICT,
+                    conflict_kind=ConflictKind.UNSCOPED_SOURCE_REPOSITORY,
+                    repository=entry.repository,
+                    medium=entry.medium,
+                    path=entry.path,
+                    artifact_uuid=declared_uuid,
+                    lane=entry.lane,
+                    reason="declared_uuid_destination_claimed_by_unscoped_source",
+                    detail=tuple(sorted(s.artifact_uuid for s in unscoped_occupants)),
+                ),
+                entry=entry,
+                snapshots=[*candidates, *unscoped_occupants],
+            )
+            continue
+
+        if unscoped_candidates:
+            snapshot = unscoped_candidates[0]
+            destination_occupants = [
+                s
+                for s in state.unscoped_by_key.get((entry.medium, entry.path), [])
+                if s.identity != snapshot.identity
+            ]
+            if destination_occupants:
+                state.reserve_conflict(
+                    ReconciliationAction(
+                        kind=ActionKind.CONFLICT,
+                        conflict_kind=ConflictKind.UNSCOPED_SOURCE_REPOSITORY,
+                        repository=entry.repository,
+                        medium=entry.medium,
+                        path=entry.path,
+                        old_path=snapshot.path,
+                        artifact_uuid=declared_uuid,
+                        lane=entry.lane,
+                        reason="unscoped_destination_claimed_by_different_artifact",
+                        detail=tuple(
+                            sorted(s.artifact_uuid for s in destination_occupants)
+                        ),
+                    ),
+                    entry=entry,
+                    snapshots=[snapshot, *destination_occupants],
+                )
+                continue
+            if entry.effective_type != snapshot.artifact_type:
+                state.reserve_conflict(
+                    ReconciliationAction(
+                        kind=ActionKind.CONFLICT,
+                        conflict_kind=ConflictKind.DECLARED_UUID_TYPE_DISAGREEMENT,
+                        repository=entry.repository,
+                        medium=entry.medium,
+                        path=entry.path,
+                        old_path=snapshot.path,
+                        artifact_uuid=declared_uuid,
+                        artifact_type=entry.effective_type,
+                        lane=entry.lane,
+                        reason="declared_uuid_type_disagrees_with_unscoped_source_owner",
+                        detail=(
+                            snapshot.artifact_type or "graph_type_missing",
+                            entry.effective_type or "document_type_missing",
+                        ),
+                    ),
+                    entry=entry,
+                    snapshots=[snapshot],
+                )
+                continue
+            if not snapshot.source_uuid:
+                state.reserve_conflict(
+                    ReconciliationAction(
+                        kind=ActionKind.CONFLICT,
+                        conflict_kind=ConflictKind.UNSCOPED_SOURCE_REPOSITORY,
+                        repository=entry.repository,
+                        medium=entry.medium,
+                        path=entry.path,
+                        old_path=snapshot.path,
+                        artifact_uuid=declared_uuid,
+                        lane=entry.lane,
+                        reason="unscoped_source_uuid_not_backfilled",
+                    ),
+                    entry=entry,
+                    snapshots=[snapshot],
+                )
+                continue
+            state.claim(
+                ReconciliationAction(
+                    kind=ActionKind.ADOPT_SOURCE_REPOSITORY,
+                    basis=MatchBasis.DECLARED_UUID,
+                    repository=entry.repository,
+                    medium=entry.medium,
+                    path=entry.path,
+                    old_path=snapshot.path,
+                    source_uuid=snapshot.source_uuid,
+                    source_identity=snapshot.identity,
+                    artifact_uuid=declared_uuid,
+                    artifact_type=snapshot.artifact_type,
+                    lane=entry.lane,
+                    integrity=entry.integrity,
+                    expected_integrity=snapshot.integrity,
+                    version=entry.version,
+                    version_kind=entry.version_kind,
+                    size_bytes=entry.size_bytes,
+                    title=snapshot.title or entry.title,
+                    status=snapshot.status,
+                    reason="declared_uuid_adopts_unscoped_source_repository",
+                ),
+                entry=entry,
+                snapshot=snapshot,
             )
             continue
 
@@ -986,28 +1198,39 @@ def _plan_declared_uuids(state: _PlanState) -> None:
             )
             continue
 
-        if len(candidates) > 1:
-            state.claim(
-                ReconciliationAction(
-                    kind=ActionKind.CONFLICT,
-                    conflict_kind=ConflictKind.UUID_LOCATOR_DISAGREEMENT,
-                    repository=entry.repository,
-                    medium=entry.medium,
-                    path=entry.path,
-                    artifact_uuid=declared_uuid,
-                    lane=entry.lane,
-                    reason="declared_uuid_has_multiple_sources_of_this_medium",
-                    detail=tuple(sorted(s.path or "" for s in candidates)),
-                ),
-                entry=entry,
-            )
-            continue
-
         snapshot = candidates[0]
         state.claim(
             _relocate_or_refresh(entry, snapshot, MatchBasis.DECLARED_UUID),
             entry=entry,
             snapshot=snapshot,
+        )
+
+
+def _plan_unscoped_path_conflicts(state: _PlanState) -> None:
+    """A path-only match cannot assign an unknown repository safely."""
+    for entry in state.unclaimed_entries():
+        candidates = [
+            snapshot
+            for snapshot in state.unscoped_by_key.get((entry.medium, entry.path), [])
+            if snapshot.identity not in state.claimed_sources
+        ]
+        if not candidates:
+            continue
+        state.reserve_conflict(
+            ReconciliationAction(
+                kind=ActionKind.CONFLICT,
+                conflict_kind=ConflictKind.UNSCOPED_SOURCE_REPOSITORY,
+                repository=entry.repository,
+                medium=entry.medium,
+                path=entry.path,
+                lane=entry.lane,
+                integrity=entry.integrity,
+                title=entry.title,
+                reason="path_match_cannot_infer_unscoped_source_repository",
+                detail=tuple(sorted(snapshot.artifact_uuid for snapshot in candidates)),
+            ),
+            entry=entry,
+            snapshots=candidates,
         )
 
 
@@ -1038,9 +1261,7 @@ def _plan_git_renames(
     one step, and demanding an unchanged hash would turn the most reliable
     evidence available into the one that fires least often.
     """
-    scoped = [
-        r for r in renames if r.repository in (None, "", repository)
-    ]
+    scoped = [r for r in renames if r.repository in (None, "", repository)]
     by_new_path: dict[str, list[GitRename]] = {}
     by_old_path: dict[str, list[GitRename]] = {}
     for rename in scoped:
@@ -1104,9 +1325,7 @@ def _plan_git_renames(
             continue
 
         candidates = [
-            s
-            for s in raw_candidates
-            if s.identity not in state.claimed_sources
+            s for s in raw_candidates if s.identity not in state.claimed_sources
         ]
         if len(candidates) != 1:
             if raw_candidates:
@@ -1331,6 +1550,26 @@ def _plan_unresolved_sources(state: _PlanState) -> None:
         )
 
 
+def _plan_remaining_unscoped_sources(state: _PlanState) -> None:
+    """Surface relevant unscoped sources even when their old path is absent."""
+    for snapshot in state.unclaimed_unscoped_snapshots():
+        state.actions.append(
+            ReconciliationAction(
+                kind=ActionKind.CONFLICT,
+                conflict_kind=ConflictKind.UNSCOPED_SOURCE_REPOSITORY,
+                repository=state.repository,
+                medium=snapshot.medium,
+                old_path=snapshot.path,
+                source_uuid=snapshot.source_uuid,
+                source_identity=snapshot.identity,
+                artifact_uuid=snapshot.artifact_uuid,
+                artifact_type=snapshot.artifact_type,
+                reason="unscoped_source_requires_repository_disposition",
+            )
+        )
+        state.claimed_sources.add(snapshot.identity)
+
+
 def _relocate_or_refresh(
     entry: CorpusEntry, snapshot: ArtifactSourceSnapshot, basis: str
 ) -> ReconciliationAction:
@@ -1367,7 +1606,9 @@ def _relocate_or_refresh(
         return ReconciliationAction(
             kind=ActionKind.RELOCATE_SOURCE,
             old_path=snapshot.path,
-            reason="source_moved" if not content_changed else "source_moved_and_changed",
+            reason="source_moved"
+            if not content_changed
+            else "source_moved_and_changed",
             **common,
         )
     if content_changed or lane_changed or was_unresolved or stale_schema:
@@ -1392,11 +1633,10 @@ def _lane_contradictions(state: _PlanState) -> list[LaneContradiction]:
     matched_by_key = {
         (a.repository, a.medium, a.path): a
         for a in state.actions
-        if a.kind in (ActionKind.NOOP, ActionKind.REFRESH_SOURCE, ActionKind.RELOCATE_SOURCE)
+        if a.kind
+        in (ActionKind.NOOP, ActionKind.REFRESH_SOURCE, ActionKind.RELOCATE_SOURCE)
     }
-    by_artifact = {
-        s.artifact_uuid: s for s in state.snapshots if s.artifact_uuid
-    }
+    by_artifact = {s.artifact_uuid: s for s in state.snapshots if s.artifact_uuid}
     for entry in state.entries:
         action = matched_by_key.get((entry.repository, entry.medium, entry.path))
         if action is None or not action.artifact_uuid:
@@ -1434,9 +1674,14 @@ def _lane_contradictions(state: _PlanState) -> list[LaneContradiction]:
 
 #: Statuses that mean the artifact is finished with, for contradiction reporting
 #: only. Nothing here transitions anything.
-_TERMINALISH: frozenset[str] = frozenset({
-    "IMPLEMENTED", "COMPLETE", "SUPERSEDED", "DEFERRED",
-})
+_TERMINALISH: frozenset[str] = frozenset(
+    {
+        "IMPLEMENTED",
+        "COMPLETE",
+        "SUPERSEDED",
+        "DEFERRED",
+    }
+)
 
 
 def _summarize(
@@ -1452,7 +1697,9 @@ def _summarize(
         if action.basis != MatchBasis.NONE:
             by_basis[action.basis] = by_basis.get(action.basis, 0) + 1
         if action.conflict_kind:
-            by_conflict[action.conflict_kind] = by_conflict.get(action.conflict_kind, 0) + 1
+            by_conflict[action.conflict_kind] = (
+                by_conflict.get(action.conflict_kind, 0) + 1
+            )
 
     by_lane: dict[str, int] = {}
     by_type: dict[str, int] = {}
@@ -1464,6 +1711,7 @@ def _summarize(
     return {
         "entries": len(state.entries),
         "sources": len(state.snapshots),
+        "unscoped_sources": len(state.unscoped_snapshots),
         "artifact_identities": len(state.identities),
         "actions": len(actions),
         "by_kind": dict(sorted(by_kind.items())),
@@ -1484,6 +1732,7 @@ def compute_plan_digest(
     evidence_base_valid: bool = True,
     entries: Iterable[CorpusEntry],
     snapshots: Iterable[ArtifactSourceSnapshot],
+    unscoped_snapshots: Iterable[ArtifactSourceSnapshot] = (),
     identities: Iterable[WorkArtifactIdentitySnapshot] = (),
     actions: Iterable[ReconciliationAction],
 ) -> str:
@@ -1513,6 +1762,17 @@ def compute_plan_digest(
             ]
             for s in snapshots
         ),
+        "unscoped_sources": sorted(
+            [
+                s.source_uuid or "",
+                s.artifact_uuid,
+                s.medium,
+                s.path or "",
+                s.integrity or "",
+                s.resolution_status,
+            ]
+            for s in unscoped_snapshots
+        ),
         "artifact_identities": sorted(
             [
                 identity.artifact_uuid,
@@ -1539,7 +1799,9 @@ def compute_plan_digest(
         ),
         "actions": [a.as_dict() for a in sorted(actions, key=lambda a: a.sort_key)],
     }
-    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    encoded = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+    )
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
@@ -1598,7 +1860,10 @@ class SourceObservation:
 
 
 def observation_from_action(
-    action: ReconciliationAction, *, observed_commit: str | None, observed_at: str,
+    action: ReconciliationAction,
+    *,
+    observed_commit: str | None,
+    observed_at: str,
     run_id: str | None = None,
 ) -> SourceObservation:
     """The observation a planned action carries, ready for a repository write."""

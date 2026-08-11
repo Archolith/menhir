@@ -58,6 +58,10 @@ class SourceRepository(Protocol):
         self, *, artifact_uuids: Sequence[str]
     ) -> list[WorkArtifactIdentitySnapshot]: ...
 
+    def list_unscoped_artifact_source_snapshots(
+        self, *, paths: Sequence[str], artifact_uuids: Sequence[str]
+    ) -> list[ArtifactSourceSnapshot]: ...
+
     def advance_artifact_reconciliation_cursor(
         self,
         *,
@@ -175,6 +179,10 @@ class ArtifactReconciliationService:
         declared_uuids = sorted(
             {entry.declared_uuid for entry in entries if entry.declared_uuid}
         )
+        unscoped_snapshots = self._repo.list_unscoped_artifact_source_snapshots(
+            paths=sorted({entry.path for entry in entries}),
+            artifact_uuids=declared_uuids,
+        )
         identities = (
             self._repo.list_work_artifact_identities(artifact_uuids=declared_uuids)
             if declared_uuids
@@ -188,6 +196,7 @@ class ArtifactReconciliationService:
             repository=name,
             entries=entries,
             snapshots=snapshots,
+            unscoped_snapshots=unscoped_snapshots,
             identities=identities,
             renames=renames,
             observed_commit=evidence.observed_commit,
@@ -222,7 +231,9 @@ class ArtifactReconciliationService:
                 findings.append(ValidationFinding(entry.path, "missing_h1_title"))
             if entry.requires_declared_type and not entry.declared_type:
                 findings.append(
-                    ValidationFinding(entry.path, "reference_record_without_declared_type")
+                    ValidationFinding(
+                        entry.path, "reference_record_without_declared_type"
+                    )
                 )
 
         for declared_uuid, group in sorted(by_uuid.items()):
@@ -317,7 +328,8 @@ class ArtifactReconciliationService:
             return result
 
         registrations = [
-            action for action in report.actions
+            action
+            for action in report.actions
             if action.kind == ActionKind.REGISTER_ARTIFACT
         ]
         if (
@@ -423,6 +435,24 @@ class ArtifactReconciliationService:
                 new_path=action.path or "",
                 observation=observation,
             )
+        if action.kind == ActionKind.ADOPT_SOURCE_REPOSITORY:
+            if not action.source_uuid:
+                return {"applied": False, "reason": "source_uuid_not_backfilled"}
+            return self._repo.relocate_artifact_source(
+                source_uuid=action.source_uuid,
+                old_locator={
+                    "repository": "",
+                    "path": action.old_path,
+                    "medium": action.medium,
+                },
+                new_locator={
+                    "repository": action.repository,
+                    "path": action.path,
+                    "medium": action.medium,
+                },
+                observation=observation,
+                expected_integrity=action.expected_integrity,
+            )
         if action.kind == ActionKind.REGISTER_ARTIFACT:
             return self._repo.register_work_artifact(
                 artifact_type=action.artifact_type or "",
@@ -501,6 +531,47 @@ class ArtifactReconciliationService:
             source_uuid=source_uuid,
             old_locator={"repository": repository, "path": old_path, "medium": medium},
             new_locator={"repository": repository, "path": new_path, "medium": medium},
+            observation=observation,
+            expected_integrity=expected_old_integrity,
+        )
+
+    def adopt_source_repository_manually(
+        self,
+        *,
+        source_uuid: str,
+        repository: str,
+        medium: str,
+        old_path: str,
+        new_path: str,
+        repo_root: str | Path = ".",
+        expected_old_integrity: str | None = None,
+    ) -> dict[str, Any]:
+        """Assign an unscoped legacy source after explicit operator review."""
+        from menhir.domain.artifact_reconciliation import (
+            MatchBasis,
+            SourceObservation,
+            sha256_bytes,
+        )
+
+        name = self._require_repository(repository)
+        destination = Path(repo_root) / new_path
+        integrity: str | None = None
+        size_bytes: int | None = None
+        if destination.is_file():
+            payload = destination.read_bytes()
+            integrity = sha256_bytes(payload)
+            size_bytes = len(payload)
+        observation = SourceObservation(
+            integrity=integrity,
+            size_bytes=size_bytes,
+            lane=(route_for_path(new_path).lane if route_for_path(new_path) else None),
+            observed_at=datetime.now(timezone.utc).isoformat(),
+            basis=MatchBasis.NONE,
+        )
+        return self._repo.relocate_artifact_source(
+            source_uuid=source_uuid,
+            old_locator={"repository": "", "path": old_path, "medium": medium},
+            new_locator={"repository": name, "path": new_path, "medium": medium},
             observation=observation,
             expected_integrity=expected_old_integrity,
         )

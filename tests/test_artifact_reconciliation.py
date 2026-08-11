@@ -7,8 +7,6 @@ keeps its identity have to be checkable without standing anything up.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-
 import pytest
 
 from menhir.domain.artifact_reconciliation import (
@@ -79,13 +77,14 @@ def source(
     resolution_status: str = ResolutionStatus.RESOLVED,
     status: str | None = None,
     schema_version: int | None = 2,
+    repository: str | None = REPO,
 ) -> ArtifactSourceSnapshot:
     return ArtifactSourceSnapshot(
         artifact_uuid=artifact_uuid,
         medium="markdown",
         source_uuid=source_uuid,
         artifact_type=ArtifactType.PLAN,
-        repository=REPO,
+        repository=repository,
         path=path,
         integrity=integrity,
         lane=lane,
@@ -95,12 +94,13 @@ def source(
     )
 
 
-def plan(entries, snapshots, renames=(), identities=()):
+def plan(entries, snapshots, renames=(), identities=(), unscoped=()):
     return plan_reconciliation(
         repository=REPO,
         entries=entries,
         snapshots=snapshots,
         identities=identities,
+        unscoped_snapshots=unscoped,
         renames=renames,
         observed_commit="c0ffee",
     )
@@ -144,7 +144,13 @@ def test_exact_path_changed_hash_refreshes_without_changing_identity() -> None:
 @pytest.mark.unit
 def test_declared_uuid_at_a_new_path_relocates() -> None:
     report = plan(
-        [entry(".agent/archive/plans/a.md", lane=CorpusLane.ARCHIVE, declared_uuid=UUID_1)],
+        [
+            entry(
+                ".agent/archive/plans/a.md",
+                lane=CorpusLane.ARCHIVE,
+                declared_uuid=UUID_1,
+            )
+        ],
         [source(".agent/plans/a.md")],
     )
     action = only(report, ActionKind.RELOCATE_SOURCE)
@@ -158,8 +164,10 @@ def test_declared_uuid_at_a_new_path_relocates() -> None:
 def test_uuid_and_locator_naming_different_artifacts_is_a_conflict() -> None:
     report = plan(
         [entry(".agent/plans/a.md", declared_uuid=UUID_1)],
-        [source(".agent/plans/a.md", artifact_uuid=UUID_2, source_uuid="s-2"),
-         source(".agent/plans/b.md", artifact_uuid=UUID_1, source_uuid="s-1")],
+        [
+            source(".agent/plans/a.md", artifact_uuid=UUID_2, source_uuid="s-2"),
+            source(".agent/plans/b.md", artifact_uuid=UUID_1, source_uuid="s-1"),
+        ],
     )
     conflict = only(report, ActionKind.CONFLICT)
     assert conflict.conflict_kind == ConflictKind.UUID_LOCATOR_DISAGREEMENT
@@ -171,13 +179,17 @@ def test_uuid_and_locator_naming_different_artifacts_is_a_conflict() -> None:
 @pytest.mark.unit
 def test_a_copy_that_kept_its_parents_uuid_is_a_conflict_for_both() -> None:
     report = plan(
-        [entry(".agent/plans/a.md", declared_uuid=UUID_1),
-         entry(".agent/plans/a-copy.md", declared_uuid=UUID_1)],
+        [
+            entry(".agent/plans/a.md", declared_uuid=UUID_1),
+            entry(".agent/plans/a-copy.md", declared_uuid=UUID_1),
+        ],
         [source(".agent/plans/a.md")],
     )
     conflicts = [a for a in report.actions if a.kind == ActionKind.CONFLICT]
     assert len(conflicts) == 2
-    assert {c.conflict_kind for c in conflicts} == {ConflictKind.DUPLICATE_DECLARED_UUID}
+    assert {c.conflict_kind for c in conflicts} == {
+        ConflictKind.DUPLICATE_DECLARED_UUID
+    }
 
 
 @pytest.mark.unit
@@ -235,6 +247,81 @@ def test_declared_uuid_with_only_out_of_scope_sources_is_a_conflict() -> None:
     assert not report.safe_actions
 
 
+@pytest.mark.unit
+def test_declared_uuid_adopts_an_unscoped_source_repository() -> None:
+    unscoped = source(
+        ".agent/plans/old.md",
+        artifact_uuid=UUID_1,
+        source_uuid="legacy-source",
+        repository=None,
+    )
+    report = plan(
+        [entry(".agent/plans/a.md", declared_uuid=UUID_1)],
+        [],
+        unscoped=[unscoped],
+    )
+    action = only(report, ActionKind.ADOPT_SOURCE_REPOSITORY)
+    assert action.basis == MatchBasis.DECLARED_UUID
+    assert action.source_uuid == "legacy-source"
+    assert action.old_path == ".agent/plans/old.md"
+    assert action.path == ".agent/plans/a.md"
+    assert not report.conflicts
+
+
+@pytest.mark.unit
+def test_unscoped_same_path_without_declared_uuid_blocks_registration() -> None:
+    report = plan(
+        [entry(".agent/plans/a.md")],
+        [],
+        unscoped=[source(".agent/plans/a.md", repository=None)],
+    )
+    conflict = only(report, ActionKind.CONFLICT)
+    assert conflict.conflict_kind == ConflictKind.UNSCOPED_SOURCE_REPOSITORY
+    assert not [a for a in report.actions if a.kind == ActionKind.REGISTER_ARTIFACT]
+
+
+@pytest.mark.unit
+def test_unscoped_same_path_with_a_different_declared_uuid_is_a_conflict() -> None:
+    report = plan(
+        [entry(".agent/plans/a.md", declared_uuid=UUID_2)],
+        [],
+        unscoped=[source(".agent/plans/a.md", artifact_uuid=UUID_1, repository=None)],
+    )
+    conflict = only(report, ActionKind.CONFLICT)
+    assert conflict.conflict_kind == ConflictKind.UNSCOPED_SOURCE_REPOSITORY
+    assert not report.safe_actions
+
+
+@pytest.mark.unit
+def test_unscoped_path_collision_blocks_refresh_of_a_scoped_declared_source() -> None:
+    report = plan(
+        [entry(".agent/plans/a.md", declared_uuid=UUID_1, integrity=HASH_B)],
+        [source(".agent/plans/a.md", artifact_uuid=UUID_1, integrity=HASH_A)],
+        unscoped=[source(".agent/plans/a.md", artifact_uuid=UUID_2, repository=None)],
+    )
+    conflict = only(report, ActionKind.CONFLICT)
+    assert conflict.conflict_kind == ConflictKind.UNSCOPED_SOURCE_REPOSITORY
+    assert not report.safe_actions
+
+
+@pytest.mark.unit
+def test_unscoped_declared_uuid_without_source_uuid_requires_backfill() -> None:
+    report = plan(
+        [entry(".agent/plans/a.md", declared_uuid=UUID_1)],
+        [],
+        unscoped=[
+            source(
+                ".agent/plans/a.md",
+                artifact_uuid=UUID_1,
+                source_uuid="",
+                repository=None,
+            )
+        ],
+    )
+    conflict = only(report, ActionKind.CONFLICT)
+    assert conflict.reason == "unscoped_source_uuid_not_backfilled"
+
+
 # ---------------------------------------------------------------------------
 # 5. Git rename
 # ---------------------------------------------------------------------------
@@ -245,7 +332,11 @@ def test_git_rename_relocates_even_when_the_bytes_changed() -> None:
     report = plan(
         [entry(".agent/archive/plans/a.md", lane=CorpusLane.ARCHIVE, integrity=HASH_B)],
         [source(".agent/plans/a.md")],
-        renames=[GitRename(old_path=".agent/plans/a.md", new_path=".agent/archive/plans/a.md")],
+        renames=[
+            GitRename(
+                old_path=".agent/plans/a.md", new_path=".agent/archive/plans/a.md"
+            )
+        ],
     )
     action = only(report, ActionKind.RELOCATE_SOURCE)
     assert action.basis == MatchBasis.GIT_RENAME
@@ -257,9 +348,15 @@ def test_git_rename_relocates_even_when_the_bytes_changed() -> None:
 def test_rename_is_refused_when_the_old_path_names_two_sources() -> None:
     report = plan(
         [entry(".agent/archive/plans/a.md", lane=CorpusLane.ARCHIVE)],
-        [source(".agent/plans/a.md", artifact_uuid=UUID_1, source_uuid="s-1"),
-         source(".agent/plans/a.md", artifact_uuid=UUID_2, source_uuid="s-2")],
-        renames=[GitRename(old_path=".agent/plans/a.md", new_path=".agent/archive/plans/a.md")],
+        [
+            source(".agent/plans/a.md", artifact_uuid=UUID_1, source_uuid="s-1"),
+            source(".agent/plans/a.md", artifact_uuid=UUID_2, source_uuid="s-2"),
+        ],
+        renames=[
+            GitRename(
+                old_path=".agent/plans/a.md", new_path=".agent/archive/plans/a.md"
+            )
+        ],
     )
     assert not [a for a in report.actions if a.kind == ActionKind.RELOCATE_SOURCE]
     kinds = {a.conflict_kind for a in report.actions if a.kind == ActionKind.CONFLICT}
@@ -269,14 +366,28 @@ def test_rename_is_refused_when_the_old_path_names_two_sources() -> None:
 @pytest.mark.unit
 def test_git_rename_precedes_stale_exact_locator_in_a_chain() -> None:
     report = plan(
-        [entry(".agent/plans/b.md", integrity=HASH_A),
-         entry(".agent/plans/c.md", integrity=HASH_B)],
-        [source(".agent/plans/a.md", artifact_uuid=UUID_1, source_uuid="s-1",
-                integrity=HASH_A),
-         source(".agent/plans/b.md", artifact_uuid=UUID_2, source_uuid="s-2",
-                integrity=HASH_B)],
-        renames=[GitRename(old_path=".agent/plans/a.md", new_path=".agent/plans/b.md"),
-                 GitRename(old_path=".agent/plans/b.md", new_path=".agent/plans/c.md")],
+        [
+            entry(".agent/plans/b.md", integrity=HASH_A),
+            entry(".agent/plans/c.md", integrity=HASH_B),
+        ],
+        [
+            source(
+                ".agent/plans/a.md",
+                artifact_uuid=UUID_1,
+                source_uuid="s-1",
+                integrity=HASH_A,
+            ),
+            source(
+                ".agent/plans/b.md",
+                artifact_uuid=UUID_2,
+                source_uuid="s-2",
+                integrity=HASH_B,
+            ),
+        ],
+        renames=[
+            GitRename(old_path=".agent/plans/a.md", new_path=".agent/plans/b.md"),
+            GitRename(old_path=".agent/plans/b.md", new_path=".agent/plans/c.md"),
+        ],
     )
 
     relocations = [a for a in report.actions if a.kind == ActionKind.RELOCATE_SOURCE]
@@ -290,14 +401,28 @@ def test_git_rename_precedes_stale_exact_locator_in_a_chain() -> None:
 @pytest.mark.unit
 def test_git_rename_precedes_stale_exact_locator_in_a_path_swap() -> None:
     report = plan(
-        [entry(".agent/plans/a.md", integrity=HASH_B),
-         entry(".agent/plans/b.md", integrity=HASH_A)],
-        [source(".agent/plans/a.md", artifact_uuid=UUID_1, source_uuid="s-1",
-                integrity=HASH_A),
-         source(".agent/plans/b.md", artifact_uuid=UUID_2, source_uuid="s-2",
-                integrity=HASH_B)],
-        renames=[GitRename(old_path=".agent/plans/a.md", new_path=".agent/plans/b.md"),
-                 GitRename(old_path=".agent/plans/b.md", new_path=".agent/plans/a.md")],
+        [
+            entry(".agent/plans/a.md", integrity=HASH_B),
+            entry(".agent/plans/b.md", integrity=HASH_A),
+        ],
+        [
+            source(
+                ".agent/plans/a.md",
+                artifact_uuid=UUID_1,
+                source_uuid="s-1",
+                integrity=HASH_A,
+            ),
+            source(
+                ".agent/plans/b.md",
+                artifact_uuid=UUID_2,
+                source_uuid="s-2",
+                integrity=HASH_B,
+            ),
+        ],
+        renames=[
+            GitRename(old_path=".agent/plans/a.md", new_path=".agent/plans/b.md"),
+            GitRename(old_path=".agent/plans/b.md", new_path=".agent/plans/a.md"),
+        ],
     )
 
     relocations = [a for a in report.actions if a.kind == ActionKind.RELOCATE_SOURCE]
@@ -312,10 +437,14 @@ def test_git_rename_precedes_stale_exact_locator_in_a_path_swap() -> None:
 def test_multiple_git_renames_to_one_destination_fail_closed() -> None:
     report = plan(
         [entry(".agent/plans/c.md")],
-        [source(".agent/plans/a.md", artifact_uuid=UUID_1, source_uuid="s-1"),
-         source(".agent/plans/b.md", artifact_uuid=UUID_2, source_uuid="s-2")],
-        renames=[GitRename(old_path=".agent/plans/a.md", new_path=".agent/plans/c.md"),
-                 GitRename(old_path=".agent/plans/b.md", new_path=".agent/plans/c.md")],
+        [
+            source(".agent/plans/a.md", artifact_uuid=UUID_1, source_uuid="s-1"),
+            source(".agent/plans/b.md", artifact_uuid=UUID_2, source_uuid="s-2"),
+        ],
+        renames=[
+            GitRename(old_path=".agent/plans/a.md", new_path=".agent/plans/c.md"),
+            GitRename(old_path=".agent/plans/b.md", new_path=".agent/plans/c.md"),
+        ],
     )
 
     conflict = only(report, ActionKind.CONFLICT)
@@ -329,8 +458,10 @@ def test_one_git_rename_source_to_multiple_destinations_fails_closed() -> None:
     report = plan(
         [entry(".agent/plans/b.md"), entry(".agent/plans/c.md")],
         [source(".agent/plans/a.md")],
-        renames=[GitRename(old_path=".agent/plans/a.md", new_path=".agent/plans/b.md"),
-                 GitRename(old_path=".agent/plans/a.md", new_path=".agent/plans/c.md")],
+        renames=[
+            GitRename(old_path=".agent/plans/a.md", new_path=".agent/plans/b.md"),
+            GitRename(old_path=".agent/plans/a.md", new_path=".agent/plans/c.md"),
+        ],
     )
 
     conflicts = [a for a in report.actions if a.kind == ActionKind.CONFLICT]
@@ -343,9 +474,13 @@ def test_one_git_rename_source_to_multiple_destinations_fails_closed() -> None:
 def test_git_rename_to_a_nonmoving_occupied_destination_fails_closed() -> None:
     report = plan(
         [entry(".agent/plans/taken.md")],
-        [source(".agent/plans/gone.md", artifact_uuid=UUID_1, source_uuid="s-1"),
-         source(".agent/plans/taken.md", artifact_uuid=UUID_2, source_uuid="s-2")],
-        renames=[GitRename(old_path=".agent/plans/gone.md", new_path=".agent/plans/taken.md")],
+        [
+            source(".agent/plans/gone.md", artifact_uuid=UUID_1, source_uuid="s-1"),
+            source(".agent/plans/taken.md", artifact_uuid=UUID_2, source_uuid="s-2"),
+        ],
+        renames=[
+            GitRename(old_path=".agent/plans/gone.md", new_path=".agent/plans/taken.md")
+        ],
     )
 
     conflict = only(report, ActionKind.CONFLICT)
@@ -391,7 +526,9 @@ def test_two_equal_hash_destinations_are_ambiguous() -> None:
     )
     conflicts = [a for a in report.actions if a.kind == ActionKind.CONFLICT]
     assert len(conflicts) == 2
-    assert {c.conflict_kind for c in conflicts} == {ConflictKind.AMBIGUOUS_CONTENT_MATCH}
+    assert {c.conflict_kind for c in conflicts} == {
+        ConflictKind.AMBIGUOUS_CONTENT_MATCH
+    }
     assert not [a for a in report.actions if a.kind == ActionKind.RELOCATE_SOURCE]
 
 
@@ -400,8 +537,10 @@ def test_a_destination_already_claimed_is_never_relocated_into() -> None:
     """The entry at the claimed path matches its own source; nothing moves onto it."""
     report = plan(
         [entry(".agent/plans/taken.md")],
-        [source(".agent/plans/taken.md", artifact_uuid=UUID_2, source_uuid="s-2"),
-         source(".agent/plans/gone.md", artifact_uuid=UUID_1, source_uuid="s-1")],
+        [
+            source(".agent/plans/taken.md", artifact_uuid=UUID_2, source_uuid="s-2"),
+            source(".agent/plans/gone.md", artifact_uuid=UUID_1, source_uuid="s-1"),
+        ],
     )
     assert not [a for a in report.actions if a.kind == ActionKind.RELOCATE_SOURCE]
     unresolved = only(report, ActionKind.MARK_SOURCE_UNRESOLVED)
@@ -424,9 +563,12 @@ def test_missing_source_with_no_match_is_unresolved_not_deleted() -> None:
 @pytest.mark.unit
 def test_an_already_unresolved_source_is_not_re_marked() -> None:
     report = plan(
-        [], [source(".agent/plans/gone.md", resolution_status=ResolutionStatus.UNRESOLVED)]
+        [],
+        [source(".agent/plans/gone.md", resolution_status=ResolutionStatus.UNRESOLVED)],
     )
-    assert not [a for a in report.actions if a.kind == ActionKind.MARK_SOURCE_UNRESOLVED]
+    assert not [
+        a for a in report.actions if a.kind == ActionKind.MARK_SOURCE_UNRESOLVED
+    ]
 
 
 @pytest.mark.unit
@@ -446,9 +588,7 @@ def test_a_reappeared_source_refreshes_back_to_resolved() -> None:
 
 @pytest.mark.unit
 def test_a_new_backlog_plan_registers_as_a_plan_in_the_backlog_lane() -> None:
-    report = plan(
-        [entry(".agent/plans/backlog/new.md", lane=CorpusLane.BACKLOG)], []
-    )
+    report = plan([entry(".agent/plans/backlog/new.md", lane=CorpusLane.BACKLOG)], [])
     action = only(report, ActionKind.REGISTER_ARTIFACT)
     assert action.artifact_type == ArtifactType.PLAN
     assert action.lane == CorpusLane.BACKLOG
@@ -458,12 +598,14 @@ def test_a_new_backlog_plan_registers_as_a_plan_in_the_backlog_lane() -> None:
 @pytest.mark.unit
 def test_a_reference_record_without_a_declared_type_is_unclassified() -> None:
     report = plan(
-        [entry(
-            ".agent/reference/paper.pdf",
-            lane=CorpusLane.REFERENCE,
-            route_type=None,
-            requires_declared_type=True,
-        )],
+        [
+            entry(
+                ".agent/reference/paper.pdf",
+                lane=CorpusLane.REFERENCE,
+                route_type=None,
+                requires_declared_type=True,
+            )
+        ],
         [],
     )
     conflict = only(report, ActionKind.CONFLICT)
@@ -484,11 +626,18 @@ def test_malformed_metadata_is_reported_rather_than_registered() -> None:
 def test_archive_path_with_nonterminal_status_is_reported_never_transitioned() -> None:
     report = plan(
         [entry(".agent/archive/plans/a.md", lane=CorpusLane.ARCHIVE)],
-        [source(".agent/archive/plans/a.md", lane=CorpusLane.ARCHIVE,
-                status=ArtifactStatus.APPROVED)],
+        [
+            source(
+                ".agent/archive/plans/a.md",
+                lane=CorpusLane.ARCHIVE,
+                status=ArtifactStatus.APPROVED,
+            )
+        ],
     )
     assert len(report.contradictions) == 1
-    assert report.contradictions[0].reason == "archived_source_without_terminal_lifecycle"
+    assert (
+        report.contradictions[0].reason == "archived_source_without_terminal_lifecycle"
+    )
     # Reporting a contradiction must not propose a status change of any kind.
     assert all(a.status is None for a in report.actions)
 
@@ -526,12 +675,18 @@ def test_the_digest_covers_premises_not_only_conclusions() -> None:
     """
     entries = [entry(".agent/plans/a.md", integrity=HASH_B)]
     one = compute_plan_digest(
-        repository=REPO, observed_commit="c1", entries=entries,
-        snapshots=[source(".agent/plans/a.md", integrity=HASH_A)], actions=[],
+        repository=REPO,
+        observed_commit="c1",
+        entries=entries,
+        snapshots=[source(".agent/plans/a.md", integrity=HASH_A)],
+        actions=[],
     )
     two = compute_plan_digest(
-        repository=REPO, observed_commit="c1", entries=entries,
-        snapshots=[source(".agent/plans/a.md", integrity="deadbeef")], actions=[],
+        repository=REPO,
+        observed_commit="c1",
+        entries=entries,
+        snapshots=[source(".agent/plans/a.md", integrity="deadbeef")],
+        actions=[],
     )
     assert one != two
 
@@ -575,32 +730,59 @@ def test_the_digest_covers_declared_artifact_identity_state() -> None:
     }
     source_less = compute_plan_digest(
         **common,
-        identities=[WorkArtifactIdentitySnapshot(
-            artifact_uuid=UUID_1,
-            artifact_type=ArtifactType.PLAN,
-            source_count=0,
-        )],
+        identities=[
+            WorkArtifactIdentitySnapshot(
+                artifact_uuid=UUID_1,
+                artifact_type=ArtifactType.PLAN,
+                source_count=0,
+            )
+        ],
     )
     now_embodied = compute_plan_digest(
         **common,
-        identities=[WorkArtifactIdentitySnapshot(
-            artifact_uuid=UUID_1,
-            artifact_type=ArtifactType.PLAN,
-            source_count=1,
-        )],
+        identities=[
+            WorkArtifactIdentitySnapshot(
+                artifact_uuid=UUID_1,
+                artifact_type=ArtifactType.PLAN,
+                source_count=1,
+            )
+        ],
     )
     assert source_less != now_embodied
 
 
 @pytest.mark.unit
+def test_the_digest_covers_unscoped_source_state() -> None:
+    common = {
+        "repository": REPO,
+        "observed_commit": "head",
+        "entries": [entry(".agent/plans/a.md")],
+        "snapshots": [],
+        "actions": [],
+    }
+    clear = compute_plan_digest(**common)
+    blocked = compute_plan_digest(
+        **common,
+        unscoped_snapshots=[source(".agent/plans/a.md", repository=None)],
+    )
+    assert clear != blocked
+
+
+@pytest.mark.unit
 def test_an_unchanged_corpus_proposes_no_safe_actions() -> None:
     """Idempotence: the second run over settled state has nothing to do."""
-    entries = [entry(".agent/plans/a.md"), entry(".agent/plans/backlog/b.md",
-                                                 lane=CorpusLane.BACKLOG)]
+    entries = [
+        entry(".agent/plans/a.md"),
+        entry(".agent/plans/backlog/b.md", lane=CorpusLane.BACKLOG),
+    ]
     snapshots = [
         source(".agent/plans/a.md", source_uuid="s-1"),
-        source(".agent/plans/backlog/b.md", artifact_uuid=UUID_2, source_uuid="s-2",
-               lane=CorpusLane.BACKLOG),
+        source(
+            ".agent/plans/backlog/b.md",
+            artifact_uuid=UUID_2,
+            source_uuid="s-2",
+            lane=CorpusLane.BACKLOG,
+        ),
     ]
     report = plan(entries, snapshots)
     assert not report.safe_actions
@@ -620,7 +802,11 @@ def test_an_unchanged_corpus_proposes_no_safe_actions() -> None:
         (".agent/plans/backlog/x.md", ArtifactType.PLAN, CorpusLane.BACKLOG),
         (".agent/reviews/x.md", ArtifactType.REVIEW, CorpusLane.ACTIVE),
         (".agent/handoffs/x.md", ArtifactType.HANDOFF, CorpusLane.ACTIVE),
-        (".agent/for-review/x.md", ArtifactType.IMPLEMENTATION_REPORT, CorpusLane.ACTIVE),
+        (
+            ".agent/for-review/x.md",
+            ArtifactType.IMPLEMENTATION_REPORT,
+            CorpusLane.ACTIVE,
+        ),
         (".agent/archive/plans/x.md", ArtifactType.PLAN, CorpusLane.ARCHIVE),
         (".agent/reference/x.md", None, CorpusLane.REFERENCE),
     ],
@@ -672,7 +858,9 @@ def test_medium_is_derived_from_the_suffix() -> None:
 @pytest.mark.unit
 def test_locator_key_is_stable_and_scoped() -> None:
     assert locator_key("menhir", "markdown", "a.md") == "menhir|markdown|a.md"
-    assert locator_key("menhir", "markdown", "a.md") != locator_key("other", "markdown", "a.md")
+    assert locator_key("menhir", "markdown", "a.md") != locator_key(
+        "other", "markdown", "a.md"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -740,7 +928,9 @@ def test_an_unterminated_frontmatter_block_is_reported() -> None:
 
 @pytest.mark.unit
 def test_a_document_without_frontmatter_still_yields_its_h1_and_status() -> None:
-    meta = read_document_metadata("# Legacy Plan\n\nStatus: **APPROVED** as the basis\n")
+    meta = read_document_metadata(
+        "# Legacy Plan\n\nStatus: **APPROVED** as the basis\n"
+    )
     assert meta.title == "Legacy Plan"
     assert meta.raw_status_header.startswith("**APPROVED**")
     assert not meta.has_frontmatter
@@ -749,11 +939,18 @@ def test_a_document_without_frontmatter_still_yields_its_h1_and_status() -> None
 @pytest.mark.unit
 def test_a_legacy_status_header_is_transcribed_into_the_registration() -> None:
     report = plan(
-        [CorpusEntry(
-            repository=REPO, path=".agent/plans/legacy.md", medium="markdown",
-            lane=CorpusLane.ACTIVE, integrity=HASH_A, size_bytes=5,
-            route_type=ArtifactType.PLAN, raw_status_header="IMPLEMENTED",
-        )],
+        [
+            CorpusEntry(
+                repository=REPO,
+                path=".agent/plans/legacy.md",
+                medium="markdown",
+                lane=CorpusLane.ACTIVE,
+                integrity=HASH_A,
+                size_bytes=5,
+                route_type=ArtifactType.PLAN,
+                raw_status_header="IMPLEMENTED",
+            )
+        ],
         [],
     )
     action = only(report, ActionKind.REGISTER_ARTIFACT)
@@ -762,13 +959,22 @@ def test_a_legacy_status_header_is_transcribed_into_the_registration() -> None:
 
 
 @pytest.mark.unit
-def test_an_unmappable_header_lands_in_the_initial_state_and_keeps_the_raw_text() -> None:
+def test_an_unmappable_header_lands_in_the_initial_state_and_keeps_the_raw_text() -> (
+    None
+):
     report = plan(
-        [CorpusEntry(
-            repository=REPO, path=".agent/plans/legacy.md", medium="markdown",
-            lane=CorpusLane.ACTIVE, integrity=HASH_A, size_bytes=5,
-            route_type=ArtifactType.PLAN, raw_status_header="mostly done-ish",
-        )],
+        [
+            CorpusEntry(
+                repository=REPO,
+                path=".agent/plans/legacy.md",
+                medium="markdown",
+                lane=CorpusLane.ACTIVE,
+                integrity=HASH_A,
+                size_bytes=5,
+                route_type=ArtifactType.PLAN,
+                raw_status_header="mostly done-ish",
+            )
+        ],
         [],
     )
     action = only(report, ActionKind.REGISTER_ARTIFACT)
