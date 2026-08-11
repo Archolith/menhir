@@ -1,130 +1,46 @@
-"""Migrate the existing artifact corpus into :WorkArtifact nodes.
+"""Compatibility wrapper around `menhir artifacts` — one corpus collector only.
 
-Dry run by default; ``--apply`` writes. Ordered so nothing is hidden before it
-is representable -- the Phase A discipline, where filtering before backfilling
-would have hidden 41 open todos.
+This script used to be its own collector: a one-level scan of four directories
+that created nodes keyed by locator and never reconciled an existing source.
+That produced the failure the reconciliation work exists to fix -- backlog
+records it could not see, and a duplicate identity for every document that had
+moved since it last ran.
 
-What this migration deliberately does NOT do:
+It no longer scans or writes anything itself. Audit and apply are delegated to
+``menhir.services.artifact_reconciliation_service``, which is the only corpus
+collector, so this entry point cannot drift from the reconciler again.
 
-* **No relationships.** There is no declared source for them and inferring them
-  from prose is the rejected path. They accrue as authors declare them. A sparse
-  real graph beats a fabricated dense one.
-* **No code locations by default.** Backticked paths in prose are free to write
-  and therefore numerous; extracting all of them yields volume rather than
-  signal. ``--with-locations`` measures the rate without committing to it.
-* **No guessing.** An unrecognized ``Status:`` header lands the artifact in its
-  type's initial state and is reported as unmapped, rather than being coerced
-  into a state the document never claimed.
+``--revalidate`` is retained and still lives here: shape validation is a
+different question from source reconciliation (is this document well-formed for
+its type, rather than where does it live), and it has no reconciliation
+equivalent.
 
-Identity is minted fresh. Paths are recorded in ArtifactSource, never as
-identity -- archive/restore moves files, and a path-keyed identity would orphan
-every relationship on the first archive.
+Prefer the CLI directly:
+
+    menhir artifacts audit --repo <path> --repository <name> [--json]
+    menhir artifacts reconcile --repo <path> --repository <name> --apply --plan-digest <digest>
 """
 
 from __future__ import annotations
 
 import argparse
 import os
-import re
-import subprocess
 from collections import Counter
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 from menhir.config.settings_model import MemorySettings
-from menhir.domain.work_artifact import (
-    ArtifactMedium,
-    ArtifactSourceSpec,
-    ArtifactType,
-    INITIAL_STATUS,
-    status_from_header,
-)
 from menhir.infrastructure.neo4j import Neo4jRepository
 from menhir.infrastructure.work_artifact_repository import WorkArtifactRepository
+from menhir.services.artifact_reconciliation_service import (
+    ArtifactReconciliationService,
+)
 
 MENHIR_ROOT = Path(__file__).resolve().parents[1]
 # Second artifact tree outside the repo, if the operator keeps one. Defaults to the repo
 # itself so a plain clone scans only what it ships; set WORKSPACE_ROOT to point elsewhere.
 WORKSPACE_ROOT = Path(os.getenv("WORKSPACE_ROOT") or MENHIR_ROOT)
-
-#: Directory conventions, not prose inference: the folder an author filed a
-#: document in is itself a declaration of what kind of document it is.
-DIR_TYPES: dict[str, str] = {
-    "plans": ArtifactType.PLAN,
-    "reviews": ArtifactType.REVIEW,
-    "for-review": ArtifactType.IMPLEMENTATION_REPORT,
-    "handoffs": ArtifactType.HANDOFF,
-}
-
-#: Matches `Status: X`, `**Status**: X`, `- Status: X` and the bolded variants
-#: the corpus actually uses. Anything else is reported unmapped.
-STATUS_RE = re.compile(r"^\s*[-*]?\s*\*{0,2}status\*{0,2}\s*:\s*(.+?)\s*$", re.IGNORECASE)
-H1_RE = re.compile(r"^#\s+(.+?)\s*$")
-CODE_REF_RE = re.compile(r"`([^`\s]+/[^`\s]+\.[A-Za-z0-9]{1,5})`")
-
-
-def _git_sha(repo: Path, rel_path: str) -> str | None:
-    """The revision last observed at this locator -- ONE value, not a history."""
-    try:
-        out = subprocess.run(
-            ["git", "-C", str(repo), "log", "-1", "--format=%H", "--", rel_path],
-            capture_output=True, text=True, timeout=15,
-        )
-        return (out.stdout or "").strip() or None
-    except (OSError, subprocess.SubprocessError):
-        return None
-
-
-def _scan(path: Path) -> tuple[str | None, str | None, list[str]]:
-    """Return (h1_title, raw_status_header, code_ref_tokens)."""
-    title: str | None = None
-    status: str | None = None
-    refs: list[str] = []
-    try:
-        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError:
-        return None, None, []
-
-    for line in lines[:40]:
-        if title is None:
-            m = H1_RE.match(line)
-            if m:
-                title = m.group(1).strip()
-                continue
-        if status is None:
-            m = STATUS_RE.match(line)
-            if m:
-                status = m.group(1).strip()
-    for line in lines:
-        refs.extend(CODE_REF_RE.findall(line))
-    return title, status, refs
-
-
-def _collect(root: Path, namespace: str) -> list[dict]:
-    items: list[dict] = []
-    for dirname, artifact_type in DIR_TYPES.items():
-        directory = root / ".agent" / dirname
-        if not directory.is_dir():
-            continue
-        for path in sorted(directory.glob("*.md")):
-            rel = path.relative_to(root).as_posix()
-            title, raw_status, refs = _scan(path)
-            mapped, reason = status_from_header(raw_status, artifact_type)
-            items.append({
-                "path": path,
-                "rel": rel,
-                "root": root,
-                "namespace": namespace,
-                "artifact_type": artifact_type,
-                "title": title or path.stem,
-                "raw_status": raw_status,
-                "status": mapped or INITIAL_STATUS[artifact_type],
-                "status_mapped": mapped is not None,
-                "unresolved_reason": reason,
-                "code_refs": refs,
-            })
-    return items
 
 
 def _connect() -> WorkArtifactRepository:
@@ -138,8 +54,8 @@ def _connect() -> WorkArtifactRepository:
 def _revalidate() -> int:
     """Re-read every ingested artifact and store a fresh shape verdict.
 
-    This is the 'update' half: a verdict describes the document as it is now,
-    so it has to be recomputed rather than inherited from ingest time.
+    A verdict describes the document as it is now, so it has to be recomputed
+    rather than inherited from ingest time.
     """
     repo = _connect()
     rows = repo.neo4j.execute(
@@ -180,11 +96,66 @@ def _revalidate() -> int:
     return 0
 
 
+def _report(
+    root: Path,
+    repository: str,
+    apply: bool,
+    plan_digest: str,
+    allow_new_repository: bool,
+) -> int:
+    service = ArtifactReconciliationService(_connect())
+    report = service.audit(root, repository=repository)
+    counts = report.counts
+
+    print(f"corpus            : {counts.get('entries', 0)} records in {repository}")
+    print(f"  graph sources   : {counts.get('sources', 0)}")
+    print(f"  by lane         : {counts.get('entries_by_lane', {})}")
+    print(f"  by type         : {counts.get('entries_by_type', {})}")
+    print(f"  proposed        : {counts.get('by_kind', {})}")
+    print(f"  match basis     : {counts.get('by_basis', {})}")
+    print(f"  conflicts       : {counts.get('by_conflict', {})}")
+    print(f"  stored cursor   : {report.cursor_commit or 'none'}")
+    print(f"  evidence base   : {report.evidence_from_commit or 'full audit'}")
+    print(f"  evidence valid  : {report.evidence_base_valid}")
+    print(f"  plan digest     : {report.plan_digest}")
+
+    if not apply:
+        print("\nDRY RUN -- nothing written.")
+        allow_option = " --allow-new-repository" if allow_new_repository else ""
+        print(
+            "Apply with: menhir artifacts reconcile "
+            f"--repo {root} --repository {repository} "
+            f"--apply --plan-digest {report.plan_digest}{allow_option}"
+        )
+        return 0
+
+    result = service.apply(
+        root,
+        expected_digest=plan_digest,
+        repository=repository,
+        allow_new_repository=allow_new_repository,
+    )
+    if not result.ok:
+        print(f"\nrefused: {result.refused_reason}; current digest {result.plan_digest}")
+        return 2
+    print(
+        f"\napplied: {len(result.applied)} written, {len(result.skipped)} skipped, "
+        f"{len(result.conflicted)} conflicted"
+    )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--apply", action="store_true", help="write (default: dry run)")
-    ap.add_argument("--with-locations", action="store_true",
-                    help="also normalize backticked code refs into ArtifactLocation")
+    ap.add_argument("--plan-digest", default="", help="digest of the approved audit ledger")
+    ap.add_argument("--repo", default=str(MENHIR_ROOT), help="repository root to reconcile")
+    ap.add_argument("--repository", default="", help="repository name recorded on sources")
+    ap.add_argument(
+        "--allow-new-repository",
+        action="store_true",
+        help="permit first registration for a repository with no graph sources",
+    )
     ap.add_argument("--revalidate", action="store_true",
                     help="re-run shape validation over already-ingested artifacts")
     args = ap.parse_args(argv)
@@ -192,84 +163,21 @@ def main(argv: list[str] | None = None) -> int:
     if args.revalidate:
         return _revalidate()
 
-    items = _collect(MENHIR_ROOT, "menhir") + _collect(WORKSPACE_ROOT, "workspace")
+    if not args.repository.strip():
+        print("--repository is required for graph-backed artifact reconciliation.")
+        return 2
 
-    by_type = Counter(i["artifact_type"] for i in items)
-    by_status = Counter(i["status"] for i in items)
-    unmapped = [i for i in items if not i["status_mapped"]]
-    reasons = Counter(i["unresolved_reason"] for i in unmapped)
-    ref_total = sum(len(i["code_refs"]) for i in items)
-
-    print(f"corpus            : {len(items)} artifacts")
-    print(f"  by namespace    : {dict(Counter(i['namespace'] for i in items))}")
-    print(f"  by type         : {dict(by_type)}")
-    print(f"  status mapped   : {len(items) - len(unmapped)}/{len(items)}")
-    print(f"  unmapped reasons: {dict(reasons)}")
-    print(f"  status spread   : {dict(by_status)}")
-    print(f"  code refs seen  : {ref_total} (locations {'ON' if args.with_locations else 'OFF'})")
-
-    # The leading token of every header we could not map. This is the corpus's
-    # actual vocabulary; extending STATUS_HEADER_ALIASES is a decision for a
-    # human to make from this list, not something the migration should guess.
-    vocab = Counter(
-        (i["raw_status"] or "").strip().strip("*").split()[0].lower().strip("*")
-        for i in unmapped
-        if i["raw_status"] and i["raw_status"].split()
+    root = Path(args.repo).resolve()
+    if args.apply and not args.plan_digest:
+        print("--apply requires --plan-digest from an approved audit ledger.")
+        return 2
+    return _report(
+        root,
+        args.repository,
+        args.apply,
+        args.plan_digest,
+        args.allow_new_repository,
     )
-    print("\nunrecognized leading tokens (candidates for STATUS_HEADER_ALIASES):")
-    for token, count in vocab.most_common(12):
-        print(f"  {count:>3}  {token}")
-
-    print("\nunmapped sample (lands in the type's initial state, reported not guessed):")
-    for i in unmapped[:10]:
-        raw = (i["raw_status"] or "")[:38]
-        print(f"  {i['unresolved_reason']:<22} {raw:<40} {i['rel']}")
-
-    if not args.apply:
-        print("\nDRY RUN -- nothing written. Re-run with --apply.")
-        return 0
-
-    load_dotenv()
-    s = MemorySettings.from_env()
-    n = Neo4jRepository(
-        uri=s.neo4j_uri, user=s.neo4j_user, password=s.neo4j_password, database=s.neo4j_database
-    )
-    repo = WorkArtifactRepository(n)
-
-    existing = {
-        r["path"]
-        for r in n.execute(
-            "MATCH (:WorkArtifact)-[:EMBODIED_IN]->(s:ArtifactSource) "
-            "WHERE s.locator_path IS NOT NULL RETURN s.locator_path AS path",
-            {},
-        )
-    }
-
-    created = skipped = 0
-    for i in items:
-        if i["rel"] in existing:
-            skipped += 1
-            continue
-        source = ArtifactSourceSpec(
-            medium=ArtifactMedium.MARKDOWN,
-            locator={"repository": i["root"].name, "path": i["rel"]},
-            version=_git_sha(i["root"], i["rel"]),
-        )
-        repo.create_artifact(
-            artifact_type=i["artifact_type"],
-            title=i["title"],
-            source=source,
-            namespace=i["namespace"],
-            status=i["status"],
-            status_raw=i["raw_status"],
-            status_unresolved_reason=i["unresolved_reason"],
-            code_refs=", ".join(i["code_refs"]) if args.with_locations else None,
-            structure_project=i["root"].name,
-        )
-        created += 1
-
-    print(f"\napplied: {created} created, {skipped} already present (idempotent by locator path)")
-    return 0
 
 
 if __name__ == "__main__":

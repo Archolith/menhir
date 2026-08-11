@@ -150,8 +150,8 @@ postcard regression fixture.
 
 ## Related but NOT built
 
-`.agent/research/menhir-projection-coverage-audit.md` (Audit A assertion lifecycle / Audit B fold
-parity) and `.agent/research/menhir-realization-coverage.md` are research proposals. The plan
+`.agent/reference/menhir-projection-coverage-audit.md` (Audit A assertion lifecycle / Audit B fold
+parity) and `.agent/reference/menhir-realization-coverage.md` are research proposals. The plan
 `.agent/plans/menhir-projection-realization-coverage-implementation.md` is READY FOR IMPLEMENTATION
 (2026-07-19) with no `feat` commit against it. Do not go looking for that code — it does not exist.
 The scripts above are what is real today.

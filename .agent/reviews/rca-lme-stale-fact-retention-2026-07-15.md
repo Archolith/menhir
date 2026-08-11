@@ -278,7 +278,7 @@ misses things":
      entity by name" check (e.g. a lightweight name-match against the graph, independent of the
      10-episode window) before the "when in doubt, do NOT extract" conservatism applies — a
      genuine, if nontrivial, entity-resolution architecture change.
-   - This is precisely the kind of problem `.agent/plans/menhir-belief-supersession-temporal-chains-research.md`
+   - This is precisely the kind of problem `.agent/reference/menhir-belief-supersession-temporal-chains-research.md`
      (the Codex research doc saved earlier today) sets out to investigate — its "Candidate
      Retrieval Research" section explicitly proposes signals beyond simple recency (embedding
      similarity, shared entities) for exactly this "is this a re-mention of something I already
@@ -307,8 +307,8 @@ misses things":
 ## 2026-07-16 update: context-form ablation (240 trials) — durable findings, supersedes the "raise the limit" framing above
 
 Follow-on to the fix-candidate list above. Built the Extraction Lab harness (Recall Labs Phase 0
-extension; see `.agent/plans/menhir-belief-supersession-code-mapped-plan.md`), ran a prompt-only
-ablation (Phase 1, 8 variants, n=30 — see `.agent/plans/menhir-extraction-context-ablation-handoff.md`
+extension; see `.agent/archive/plans/menhir-belief-supersession-code-mapped-plan.md`), ran a prompt-only
+ablation (Phase 1, 8 variants, n=30 — see `.agent/archive/plans/menhir-extraction-context-ablation-handoff.md`
 for the full methodology and raw numbers), then a rigorous context-form ablation (Phase 2, 8
 distinct context deliveries x 3 real RCA fixtures x 10 interleaved trials = 240 real `gpt-4o-mini`
 calls with Wilson 95% CIs, not point estimates) against `830ce83f`, `852ce960`, `2698e78f` — the
@@ -540,8 +540,8 @@ handoff doc's Phase 5 section.
   captured, old value the question asks about is lost).
 - `.agent/reviews/rca-lme-extraction-admission-gap-2026-07-15.md` — where these two cases were
   originally (incorrectly) filed; see that document's revision note.
-- `.agent/plans/menhir-extraction-context-ablation-handoff.md` — full Phase 1/2 methodology, all 8
+- `.agent/archive/plans/menhir-extraction-context-ablation-handoff.md` — full Phase 1/2 methodology, all 8
   ablation conditions, raw trial data references, and the Phase 3/4 plan the 2026-07-16 update
   above summarizes.
-- `.agent/plans/menhir-belief-supersession-code-mapped-plan.md` — the Extraction Lab harness (Phase
+- `.agent/archive/plans/menhir-belief-supersession-code-mapped-plan.md` — the Extraction Lab harness (Phase
   0) this ablation work was built on.

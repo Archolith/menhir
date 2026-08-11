@@ -44,6 +44,14 @@ def test_neo4j_password_can_be_set_from_env(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 @pytest.mark.unit
+def test_artifact_reconcile_repository_is_explicit_env_setting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MENHIR_ARTIFACT_RECONCILE_REPOSITORY", "menhir")
+    assert MemorySettings.from_env().artifact_reconcile_repository == "menhir"
+
+
+@pytest.mark.unit
 def test_benchmark_mode_defaults_off() -> None:
     """Benchmark mode is off by default so normal runs keep background work."""
     assert MemorySettings().benchmark_mode is False

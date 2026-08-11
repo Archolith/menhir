@@ -284,6 +284,12 @@ mcp:
   mcp.tool.transition_artifact:
     owner: endpoints.md
     meaning: Move a work artifact to a new lifecycle status if the transition is legal
+  mcp.tool.audit_artifact_corpus:
+    owner: endpoints.md
+    meaning: Read-only parity report between a repository's artifact corpus and the graph
+  mcp.tool.relocate_artifact_source:
+    owner: endpoints.md
+    meaning: Move one artifact source's locator, preserving identity and every relationship
   mcp.tool.close_todo:
     owner: endpoints.md
     meaning: Mark a TODO as closed

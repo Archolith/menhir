@@ -13,7 +13,7 @@ piece of §6 still outstanding.
 
 Name settled: `:WorkArtifact`.
 Date: 2026-08-02
-Extends: `menhir-todo-declared-links.md` (the architectural baseline)
+Extends: `../archive/plans/menhir-todo-declared-links.md` (the architectural baseline)
 Primitives inherited: `model.owned_record`, `model.operational_vs_semantic`,
 `model.embodiment_invariant`
 
@@ -382,7 +382,7 @@ survive. Only a locator that resolves to nothing — file genuinely gone — is
 ```
 (:WorkArtifact {type: 'plan', title: 'todo declared links', status: 'IMPLEMENTED'})
   -[:EMBODIED_IN]-> (:ArtifactSource {project: 'menhir',
-                                      path: '.agent/plans/menhir-todo-declared-links.md'})
+                                      path: '.agent/archive/plans/../archive/plans/menhir-todo-declared-links.md'})
   -[:HAS_LOCATION]-> (:ArtifactLocation {project: 'menhir',
                                          path: 'src/menhir/infrastructure/todo_repository.py'})
   -[:REFERENCES_TODO]-> (:Todo {uuid: 'b65e906d...'})

@@ -3,10 +3,10 @@
 <!-- Filename convention: <feature>-plan.md -->
 
 **Status:** backlog — proposed 2026-07-11
-**Gap source:** `.agent/research/menhir-cross-domain-representation-research-2026-07-02.md` §B.5
+**Gap source:** `.agent/reference/menhir-cross-domain-representation-research-2026-07-02.md` §B.5
 (verdict: *Prototype immediately*; ranked **#1** highest-leverage of the review) +
-`.agent/research/crystallization-control-consolidation.md` §6 (twinning guard / false-merge probe).
-**Related:** `kappa-replay-perceiver-versioning-plan.md` (identity changes are events → re-key = refold),
+`.agent/reference/crystallization-control-consolidation.md` §6 (twinning guard / false-merge probe).
+**Related:** `../../archive/plans/kappa-replay-perceiver-versioning-plan.md` (identity changes are events → re-key = refold),
 `menhir-memory-supersession-and-dedup-plan.md` + `ingest-identity-merge-gating` (today's LLM-only
 merge defense this plan hardens).
 

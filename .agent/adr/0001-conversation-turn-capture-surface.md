@@ -6,7 +6,7 @@
 - **Deciders:** ctharvey (accepted via handoff 2026-07-07)
 - **Related:** `.agent/plans/phase3-canonicalization-guards.md`,
   `.agent/plans/phase3-extractor-matrix-results.md`,
-  `.agent/plans/perception-consolidation-prod-wiring.md`
+  `.agent/archive/plans/perception-consolidation-prod-wiring.md`
 
 ## Context
 

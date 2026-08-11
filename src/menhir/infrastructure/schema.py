@@ -114,6 +114,23 @@ def _node_index_queries() -> list[str]:
             "CREATE INDEX work_artifact_namespace_idx IF NOT EXISTS FOR (n:WorkArtifact) ON (n.namespace)",
             "CREATE INDEX artifact_location_path_idx IF NOT EXISTS FOR (n:ArtifactLocation) ON (n.path)",
             "CREATE INDEX artifact_source_medium_idx IF NOT EXISTS FOR (n:ArtifactSource) ON (n.medium)",
+            # Reconciliation identity. artifact_uuid and source_uuid are unique
+            # because a duplicate of either would let one document wear two
+            # identities; current_locator_key is unique because two artifacts
+            # claiming one path is the state that makes "which plan lives here?"
+            # unanswerable. The key is nullable by design -- an unresolved source
+            # keeps its last known locator and does not block the destination.
+            "CREATE CONSTRAINT work_artifact_uuid_unique IF NOT EXISTS "
+            "FOR (n:WorkArtifact) REQUIRE n.artifact_uuid IS UNIQUE",
+            "CREATE CONSTRAINT artifact_source_uuid_unique IF NOT EXISTS "
+            "FOR (n:ArtifactSource) REQUIRE n.source_uuid IS UNIQUE",
+            "CREATE CONSTRAINT artifact_source_locator_unique IF NOT EXISTS "
+            "FOR (n:ArtifactSource) REQUIRE n.current_locator_key IS UNIQUE",
+            "CREATE CONSTRAINT artifact_reconcile_cursor_repository_unique IF NOT EXISTS "
+            "FOR (n:ArtifactReconciliationCursor) REQUIRE n.repository IS UNIQUE",
+            "CREATE INDEX artifact_source_lane_idx IF NOT EXISTS FOR (n:ArtifactSource) ON (n.corpus_lane)",
+            "CREATE INDEX artifact_source_resolution_idx IF NOT EXISTS "
+            "FOR (n:ArtifactSource) ON (n.resolution_status)",
             "CREATE INDEX open_question_uuid_idx IF NOT EXISTS FOR (n:OpenQuestion) ON (n.question_uuid)",
             "CREATE INDEX artifact_declaration_uuid_idx IF NOT EXISTS FOR (n:ArtifactDeclaration) ON (n.declaration_uuid)",
             # Resolution sweeps filter on status across every declaration in the

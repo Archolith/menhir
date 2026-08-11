@@ -15,7 +15,7 @@ objects from Menhir's own Semantic Object graph. That decision doc no longer exi
 working tree — its only remaining copy is commit `47bab08` on `main`
 (`docs/architecture/semantic-object-architecture-decisions.md`). The open product decision
 below was never answered directly; it was overtaken by the later accepted decision instead.
-**Source:** `.agent/research/menhir-beacon-architecture-review.md` (2026-06-29, reviewer "Antigravity")
+**Source:** `.agent/archive/reviews/menhir-beacon-architecture-review.md` (2026-06-29, reviewer "Antigravity")
 **Decision owner:** ctharvey
 
 ---
@@ -90,5 +90,5 @@ Beacon earns a build only if the product decision below resolves **yes**, and th
 
 ## Source
 
-`.agent/research/menhir-beacon-architecture-review.md`. Confirmed no `beacon` code in `src/menhir`
+`.agent/archive/reviews/menhir-beacon-architecture-review.md`. Confirmed no `beacon` code in `src/menhir`
 (2026-07-11).

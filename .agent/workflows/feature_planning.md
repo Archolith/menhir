@@ -20,8 +20,17 @@ Keep it short. A good plan is usually 0.5 to 2 pages.
 
 Preferred location:
 
-- add a dedicated doc under `.agent/` when the feature is substantial
+- an executable plan goes in `.agent/plans/` (or `.agent/plans/backlog/` if it is real but lower
+  priority), carries the metadata block from
+  [`artifact_authoring.md`](artifact_authoring.md), and is listed in that directory's index
 - add a section to an existing roadmap/backlog/design doc when the feature naturally belongs there
+
+The corpus lanes are `active` (`.agent/plans/`), `backlog` (`.agent/plans/backlog/`), `reference`
+(`.agent/reference/`), and `archive` (`.agent/archive/plans/`). A new plan needs a freshly minted
+`artifact_uuid`, `artifact_type: plan`, and `artifact_status: PROPOSED`; see
+[`artifact_authoring.md`](artifact_authoring.md) for the field definitions, the lifecycle
+vocabulary, and what a move, copy, or archive each require. Run `menhir artifacts validate .`
+before committing.
 
 ## Required template
 

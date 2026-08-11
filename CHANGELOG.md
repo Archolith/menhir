@@ -166,14 +166,3 @@
   navigation. The no-JavaScript fallback still exposes every section.
 - Rendered Turns as a conversation stream, with user evidence aligned right and assistant evidence
   aligned left using distinct bubble styling on desktop and mobile.
-
-## 2026-08-07 — docs: correct stale local-Docker Neo4j guidance in the operations runbook
-
-- `operations_runbook.md` still described the pre-migration local-Docker `yawn-neo4j` workflow
-  (`docker ps`/`docker start yawn-neo4j`, `bolt://localhost:7687`) even though `start-server.ps1`
-  and `.env` (`NEO4J_URI`) have pointed at a remote host running `menhir-neo4j.service` (systemd)
-  for some time — the desktop hasn't run Docker for menhir's Neo4j at all. Rewrote the startup
-  "Behavior" bullets and the "Recover from local Neo4j-down startup failure" section to match
-  actual current behavior: remote bolt-port probing, warn-and-continue on unreachable, and
-  recovery via checking the remote host and starting `menhir-neo4j` there over SSH. Noted the
-  root `docker-compose.yml` is vestigial. No code changed.

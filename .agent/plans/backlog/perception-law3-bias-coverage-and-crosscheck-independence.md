@@ -74,7 +74,7 @@ harness). For each scenario measure:
    macro lens" → 5); veto-4-on-Law-3 abstains on holistic disagreement and commits on agreement;
    prompt-shape unit test for the `stated base` rendering.
 
-## Part 3 — amend `perception-consolidation-prod-wiring.md`
+## Part 3 — amend `../../archive/plans/perception-consolidation-prod-wiring.md`
 
 Per Part 1's outcome, update the locked config in the prod plan **before** it is built:
 - pin `enable_verify=True` (`verify_k` per the existing call-budget cap; ~3 extra calls per

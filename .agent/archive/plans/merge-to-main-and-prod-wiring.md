@@ -87,7 +87,7 @@ failures attributable to the excluded in-flight tree. See session review + memor
   - 5 uncommitted `.agent`/config doc edits are a `cth.mcp.memory`→`menhir` naming sweep the branch
     already did (branch has 0 old-name occurrences + further evolution) → superseded on merge.
   - 2 untracked files were the ONLY unique content and were **rescued onto the branch** (`a772c7f`):
-    `.agent/plans/fresh-neo4j-memory-benchmark-plan.md` + `.agent/reviews/Research Note- Evidence
+    `.agent/reference/fresh-neo4j-memory-benchmark-plan.md` + `.agent/reviews/Research Note- Evidence
     Admission for Agent Memory.pdf`.
   → After the merge lands, reset the clone with `git fetch && git reset --hard origin/main` (drops
   the redundant ports + doc edits, brings it current). Nothing unique is lost.

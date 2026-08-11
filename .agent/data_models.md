@@ -153,9 +153,53 @@ first rename, then silently orphans everything that referenced the object.
 | version | git_sha | revision_id | mtime |
 | integrity | *(git_sha serves both)* | *(often none)* | content hash |
 
-`integrity` is optional and medium-dependent: for Git the version handle **is** a content
-hash, so one value serves both legs; a filesystem needs them separate; a wiki may offer no
-integrity value at all. Do not invent one to fill the column.
+`integrity` is optional and medium-dependent: for a wiki there may be no integrity value at
+all, and inventing one to fill the column is worse than leaving it empty.
+
+**Git is the exception to its own row (`ArtifactSource` schema_version 2).** The v1 table above
+treated a Git handle as serving both legs. It does not, and collapsing them cost the corpus its
+locators. Three separate facts:
+
+| Field | Holds | Answers |
+|---|---|---|
+| `integrity` (+`integrity_algorithm`) | SHA-256 of the current **raw bytes** | did this file's content change? |
+| `version` (+`version_kind`) | `git_blob_oid`, when the file is committed | which committed object is this? |
+| `observed_commit` | the commit checked during reconciliation | when did we look? |
+
+Raw bytes are hashed without normalizing line endings or Markdown: a CRLF change is a real source
+change even when the rendered prose is identical. A dirty working-tree file has an integrity value
+and no blob OID, which is a valid observation rather than an error. `version_kind` exists because
+the v1 migration wrote a *commit* SHA into `version` — two forty-character hex strings meaning
+different things cannot share a field with no discriminator, so legacy values are relabelled
+`legacy_commit_sha` rather than reinterpreted.
+
+**A source's routing lane is not its type or its lifecycle.** `corpus_lane` (`active` | `backlog` |
+`reference` | `archive`) is derived from the locator and lives on `:ArtifactSource`, because a source
+is the thing that has a locator; a future artifact with a Markdown source and a PDF source in
+different collections needs one lane each. A plan moved to reference is still a plan, and a plan
+moved to archive has not thereby been implemented, superseded, or deferred — the auditor reports
+that contradiction and refuses to resolve it.
+
+**A missing source is unresolved, never deleted.** `resolution_status` / `resolution_reason` record
+that a locator could not be found while leaving the locator, the artifact, and every relationship
+intact, so the state reverses itself the moment the file reappears. `source_uuid` makes each
+embodiment addressable — Owned Record addressability, not semantic identity — and
+`current_locator_key` (`repository|medium|path`) is uniquely constrained so two artifacts can never
+claim one current path.
+
+Legacy `ArtifactSource` nodes may predate repository identity and carry a null, empty, or
+whitespace-only `locator_repository`. They are not members of every repository and must not be
+silently ignored. Reconciliation reads only relevant unscoped sources—those at a scanned path or
+owned by a UUID declared by a scanned document. A matching declared UUID can adopt that existing
+source into the audited repository without changing `source_uuid` or artifact identity. Path and
+content-hash matches cannot prove repository ownership, so they produce an explicit conflict and
+reserve the destination against registration until an operator disposes of it.
+
+A source-less `WorkArtifact` remains a valid semantic identity. When a corpus document explicitly
+declares that UUID, reconciliation may attach its first `ArtifactSource` only when the graph and
+document types agree and the locator is unclaimed. This is embodiment repair, not registration:
+the existing artifact's title, status, declarations, and relationships remain authoritative and
+unchanged.
 
 `version` is the embodiment's current revision handle — **one value, never a history**.
 History belongs to the versioning system that owns it. Menhir stores semantic identity;

@@ -4,7 +4,7 @@
 > no longer its operational owner. The live architecture and projection model are documented in
 > [`.agent/architecture.md`](../../architecture.md) and
 > [`.agent/data_models.md`](../../data_models.md); the fold laws and implementation record live in
-> [`.agent/plans/backlog/fold-algebra.md`](../../plans/backlog/fold-algebra.md). That algebra resolved
+> [`.agent/reference/fold-algebra.md`](../../reference/fold-algebra.md). That algebra resolved
 > the broad “pure vs. stateful” gap into one monoid evaluated in batch or incrementally, with
 > ordering, replay/dedup, and anchor+delta laws. The remaining Law-3 work is the narrower live-LLM
 > corroboration-independence experiment, not a missing View abstraction. The body below is preserved

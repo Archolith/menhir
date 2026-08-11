@@ -4,7 +4,7 @@
 > security revisions and passed focused, unit, and full-suite validation. The body is retained as
 > the implementation and security-review record.
 
-Parent: `.agent/plans/ssot-remediation-2026-07-11.md`, SSOT-07 — this sub-item was
+Parent: `.agent/archive/plans/ssot-remediation-2026-07-11.md`, SSOT-07 — this sub-item was
 explicitly scoped out of that fix ("bigger than mechanical") and parked as its own
 follow-up. This is that follow-up plan.
 

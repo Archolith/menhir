@@ -123,7 +123,7 @@ filter them unless that integration is explicitly wired.
 ## Endpoint behavior
 
 ```
-POST /api/tool-events       (agent tier)   -> {accepted, event_type, operation, matched, marked_dirty, ignored_reason}
+POST /api/tool-events       (agent tier)   -> {accepted, event_type, operation, matched, marked_dirty, ignored_reason, artifact_reconciliation}
 GET  /api/tool-events/dirty  (readonly)     -> {dirty_files, stale_anchors, counts}
 GET  /api/tool-events/stale  (readonly)     -> {stale_anchors, count}
 ```
@@ -146,6 +146,40 @@ GET  /api/tool-events/stale  (readonly)     -> {stale_anchors, count}
 → `200 accepted=true, marked_dirty=false, ignored_reason="unsupported event_type in v0"`
 
 **503:** tool-event capture is unavailable (runtime not ready).
+
+### Artifact source reconciliation (second consumer)
+
+A file event has two independent consumers. Structural dirty marking is the first and is
+unconditional. The second is `WorkArtifact` source reconciliation, and it is **strictly additive**:
+it runs *after* the structural mark is recorded, and no outcome it produces can undo, block, or
+change that mark.
+
+| Operation | What reconciliation does |
+|---|---|
+| `rename` | Relocates the one source at `old_path` to `path`, storing `after_hash`, `git_commit`, and the destination's corpus lane. Refuses if `old_path` names more than one source or the destination is claimed. |
+| `edit` / `write` | Refreshes integrity when the path already identifies exactly one source. |
+| `create` | Nothing. The event carries no document metadata, and a filename is not an identity — the next corpus audit registers it from the record actually read. |
+| `delete` | Nothing. Marking a source unresolved needs the whole-corpus view an audit has and an event does not. |
+| anything outside the corpus routes | Nothing, and nothing is reported. |
+
+The response field `artifact_reconciliation` is `null` unless reconciliation was attempted;
+otherwise it carries `{attempted, applied, reason, ...}`. A repository error is caught, logged, and
+returned as `applied: false` — the coding tool that sent the event never sees a failure for this
+leg.
+
+**This is an accelerator, not the coverage backstop.** The hook only recognizes named file tools. A
+shell `mv`, `apply_patch`, an IDE refactor, a branch switch, or an external editor all move files
+without emitting an event menhir can read. Those are caught by the Git/startup recovery audit
+(`MENHIR_ARTIFACT_RECONCILE_MODE`) or by `menhir artifacts audit` run by hand.
+
+The recovery audit reads a graph-backed cursor keyed by the explicit repository identity and uses
+that commit as the default Git rename interval. Audit itself never advances the cursor. A clean
+`safe_apply` or operator apply advances it with compare-and-set; conflicts, skipped writes, missing
+Git HEAD, or a cursor changed by another process retain it. `--from-commit` is a visible,
+digest-bound evidence override, not a cursor mutation.
+If Git cannot compare the selected base with HEAD, audit reports the invalid evidence base and
+`safe_apply` refuses before artifact writes. This prevents a moved-and-edited file from becoming an
+unresolved old source plus a newly registered duplicate.
 
 ### GET /api/tool-events/dirty
 
@@ -239,6 +273,9 @@ echo '{"tool_name":"Edit","tool_input":{"file_path":"src/foo.py"}}' \
 | `MENHIR_SOURCE_CLIENT` | Override the detected client name. |
 | `MENHIR_TURN_EVIDENCE_ENABLED` | Set falsey (`0`/`false`/`no`/`off`) to disable the hook (fail-open no-op). |
 | `MENHIR_TURN_HOOK_LOG` | Failure-log path; else `<home>/.claude/menhir-turn-hook.log`. |
+| `MENHIR_ARTIFACT_RECONCILE_MODE` | Server-side startup recovery: `off` \| `audit` \| `safe_apply`. Default `audit` — drift is reported, nothing is mutated. `safe_apply` lets the server write to the graph on boot and is an operator choice after the one-time repair. An unrecognized value falls back to `audit`, so a typo can neither disable detection nor enable writes. |
+| `MENHIR_ARTIFACT_RECONCILE_REPO` | Working-tree path the startup pass audits. Unset means the pass is skipped regardless of mode. |
+| `MENHIR_ARTIFACT_RECONCILE_REPOSITORY` | Repository identity recorded on graph source locators. Required whenever the startup pass is enabled; never inferred from a worktree directory name. |
 
 ## Safety and privacy
 

@@ -10,6 +10,7 @@ tool or resource section you need.
 - Need recall / memory tools: read `mcp.tool.read_flagged_memories`, `mcp.tool.recall_context_memories`, and `mcp.tool.recall_memories`
 - Need operator / repair tools: read `mcp.tool.list_conflicts`, `mcp.tool.resolve_conflict`, and `mcp.tool.force_scheduler_takeover`
 - Need TODO / task tools: read `mcp.tool.add_todo`, `mcp.tool.list_todos`, and `mcp.tool.close_todo`
+- Need artifact corpus parity or a source move: read `mcp.tool.audit_artifact_corpus` and `mcp.tool.relocate_artifact_source`
 - Need session identity / elapsed time: read `mcp.tool.get_client_context`
 - Need project file/import/test graph: read `mcp.tool.query_structure`
 - Need lightweight inspection: jump to `mcp.resource.system.*` or `mcp.resource.memory.*`
@@ -594,6 +595,42 @@ Move an artifact to a new lifecycle status.
 - Checked against the artifact's stored type and current status, so steps cannot be
   skipped: a `PROPOSED` plan cannot jump to `IMPLEMENTED`.
 - A refusal names the statuses that *are* reachable from the current one.
+
+### `audit_artifact_corpus`
+Concept id: `mcp.tool.audit_artifact_corpus`
+
+Report whether a repository's work-artifact corpus matches the graph. Read-only.
+- **`repo_path`** (str): Absolute path to the working tree to audit.
+- **`repository`** (str, required): Repository name recorded on sources. It is never
+  inferred from the worktree directory name.
+- **`from_commit`** (str, optional): Override the persisted reconciliation cursor for this audit's
+  Git evidence interval. It does not replace or advance the stored cursor.
+- Returns the stored cursor, selected evidence base, parity counts, plan digest, and bounded lists
+  of conflicts and lane/lifecycle contradictions. The full action ledger stays in CLI JSON output
+  — a chat transport is the wrong place to send several hundred action records.
+- `evidence_base_valid: false` means Git could not compare that commit with the checkout. Audit still
+  writes nothing, but apply refuses until a valid `--from-commit` is supplied.
+- Writes nothing. Applying anything requires the digest and an operator running
+  `menhir artifacts reconcile --repository <name> --apply`.
+
+### `relocate_artifact_source`
+Concept id: `mcp.tool.relocate_artifact_source`
+
+Move one artifact source's locator after a file moved. Agent tier.
+- **`artifact_uuid`** (str): The artifact you believe currently lives at `old_path`.
+- **`old_path`** (str): Repository-relative path recorded on the source today.
+- **`new_path`** (str): Repository-relative path the document now lives at.
+- **`repository`** (str, optional): Repository name recorded on the source.
+- **`expected_old_integrity`** (str, optional): SHA-256 the caller believes is current.
+  Supplying it makes the write refuse stale input.
+- **`observed_integrity`** (str, optional): SHA-256 of the file at its new path.
+- Identity survives: the artifact UUID, the source record, and every relationship are
+  untouched; only the locator changes.
+- Refused when the old path belongs to a different artifact, when it identifies more than
+  one source, or when the destination is already claimed. Each refusal names which.
+- **This is the escape hatch, not the routine path.** Ordinary moves are picked up by the
+  file-event hook or by the next corpus audit. Use this for an audited ambiguity, or a move
+  where Git evidence is unavailable.
 
 ### `close_todo`
 Concept id: `mcp.tool.close_todo`

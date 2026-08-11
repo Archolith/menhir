@@ -55,7 +55,7 @@ contracts documented in `data_models.md`.
 
 Batch and incremental execution are two evaluation modes of the same fold laws, not separate pure
 and stateful operation families. Event-time ordering, replay/dedup, and anchor+delta reconciliation
-are specified in `plans/backlog/fold-algebra.md`; precision and abstention policy are specified in
+are specified in `reference/fold-algebra.md`; precision and abstention policy are specified in
 `memory-aggregation-under-uncertainty.md`.
 
 ## Technology Stack
@@ -587,6 +587,51 @@ Primary storage is Neo4j.
   they are not specific to todos or artifacts, and rediscovering them per feature is
   how duplicate vocabulary gets introduced.
 - Graphiti prompt JSON serialization is patched at runtime to handle Neo4j temporal values.
+
+### Work-artifact corpus reconciliation
+
+Concept id: `runtime.storage`
+
+File state and semantic state have different authorities, and the seam between them is three
+modules with no overlap:
+
+- `domain/artifact_reconciliation.py` — pure. Route table, raw-byte hashing, authored-metadata
+  reader, and the match planner that turns "what is on disk" plus "what the graph holds" into
+  actions. No Neo4j, no filesystem, no Git, which is what makes the whole match matrix testable
+  offline.
+- `infrastructure/artifact_corpus_scanner.py` — reads files and asks Git. Produces entries; decides
+  nothing.
+- `services/artifact_reconciliation_service.py` — the single corpus collector, used by
+  `menhir artifacts` (audit / validate / reconcile), the `audit_artifact_corpus` MCP tool, and the
+  startup recovery pass. `scripts/migrate_work_artifacts.py` is now a thin wrapper over it rather
+  than a second collector, which is the drift that caused the corpus split it repairs.
+
+Audit is read-only. Apply re-derives the plan and refuses unless the caller supplies the digest of
+the ledger they approved, so an approved plan cannot be applied to a state it was not approved
+against. Detectors may relocate and refresh sources; lifecycle, supersession, retyping and
+relationships stay behind explicit MCP operations.
+
+Each graph repository has one `ArtifactReconciliationCursor` containing the last commit reached by
+a clean apply. Audit uses that cursor as its default Git rename-evidence base and exposes both the
+stored cursor and selected base in the digest-bound report. `--from-commit` overrides evidence only.
+Apply compares the stored cursor again before writing and advances it with compare-and-set only when
+there are no conflicts or skipped writes and Git supplied an observed commit.
+If Git cannot evaluate the selected cursor-to-HEAD interval, audit marks the evidence base invalid
+and apply refuses before artifact mutation; zero rename records are not treated as proof that no
+rename occurred.
+
+An authored UUID may identify a `WorkArtifact` that exists without an embodiment. Audit reads those
+semantic identities separately from source snapshots and proposes `ATTACH_SOURCE`, not
+`REGISTER_ARTIFACT`. The conditional write creates only `ArtifactSource` plus `EMBODIED_IN`; graph
+type disagreement, an existing source, or a claimed locator refuses without changing semantic
+artifact properties.
+
+Sources with no repository identity are queried separately and only when relevant to the scanned
+paths or declared artifact UUIDs. They participate in the digest and collision checks but never in
+path- or hash-based automatic matching. A document-declared owner UUID produces the explicit
+`ADOPT_SOURCE_REPOSITORY` action; otherwise audit emits `UNSCOPED_SOURCE_REPOSITORY`. Apply assigns
+the repository through the same conditional source relocation used for normal moves, preserving the
+source node and refusing a stale locator, stale integrity, or newly occupied destination.
 
 Operational sidecar storage:
 

@@ -1,7 +1,7 @@
 # menhir — relevance for :Todo CONCERNS edges
 
 > **ARCHIVED 2026-08-10.** This proposal was superseded by
-> [`menhir-todo-declared-links.md`](../../plans/menhir-todo-declared-links.md) after confirming that
+> [`menhir-todo-declared-links.md`](menhir-todo-declared-links.md) after confirming that
 > `CONCERNS` had no consumer. The measurements below remain useful historical evidence.
 
 Status: **SUPERSEDED** by `menhir-todo-declared-links.md` (2026-08-02).

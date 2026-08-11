@@ -171,4 +171,4 @@ Contributing:
 
 ## Remediation
 
-See `.agent/plans/menhir-structure-graph-coverage-2026-08-09.md`.
+See `.agent/archive/plans/menhir-structure-graph-coverage-2026-08-09.md`.

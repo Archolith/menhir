@@ -1,5 +1,72 @@
 # Changelog
 
+## 2026-08-11 - Implement WorkArtifact corpus reconciliation (phases 0-4)
+
+- `domain/artifact_reconciliation.py`: pure route table, raw-byte SHA-256, authored-metadata reader,
+  and the match planner (declared UUID > Git rename > exact locator > unique content hash), plus the
+  plan digest that covers premises as well as conclusions.
+- `infrastructure/artifact_corpus_scanner.py`: recursive routed scan with Git blob OIDs, observed
+  commit, and `--name-status -M` rename evidence. Integrity and blob identity are separate fields;
+  a dirty working-tree file records one and not the other.
+- `services/artifact_reconciliation_service.py`: the single corpus collector behind audit, validate,
+  and digest-gated apply. `scripts/migrate_work_artifacts.py` is now a wrapper over it rather than a
+  second collector.
+- `ArtifactSource` v2: `source_uuid`, `corpus_lane`, `integrity`/`version_kind`/`observed_commit`,
+  resolution state, and a uniquely constrained `current_locator_key`. Relocation, refresh, unresolved
+  marking, and registration are conditional on the state the audit read; a stale action is refused.
+- New CLI `menhir artifacts validate|audit|reconcile|relocate`, read-only `audit_artifact_corpus` and
+  agent-tier `relocate_artifact_source` MCP tools, and Hook Center rename/edit handling that runs
+  after structural dirty marking and cannot fail it.
+- `MENHIR_ARTIFACT_RECONCILE_MODE` (off|audit|safe_apply, default audit) adds a startup recovery pass
+  for moves no hook can see. An unrecognized value falls back to audit.
+- Graph-backed reconciliation now requires an explicit repository identity. Startup uses
+  `MENHIR_ARTIFACT_RECONCILE_REPOSITORY`, and first registration requires the CLI-only
+  `--allow-new-repository` override so a differently named worktree cannot fork the corpus.
+- Added one persisted `ArtifactReconciliationCursor` per repository. Audit uses it automatically
+  for Git evidence while remaining read-only; reports and plan digests expose both the stored cursor
+  and an optional `--from-commit` evidence override. Apply rejects a changed cursor and advances it
+  with compare-and-set only after a conflict-free, skip-free run with an observed commit.
+- A missing or branch-incomparable Git evidence base is explicit in the digest-bound ledger and
+  refuses apply before writes, preventing an empty failed diff from masquerading as “no renames.”
+- Declared UUIDs now distinguish new identity registration from first-source repair. A source-less
+  existing `WorkArtifact` receives an explicit, digest-bound `ATTACH_SOURCE` action when its type
+  agrees and the locator is free; the write preserves all semantic artifact properties and refuses
+  concurrent source creation, type drift, and destination collisions.
+- Legacy sources with a null or empty repository are now included in bounded audits and plan
+  digests. A matching declared owner UUID produces `ADOPT_SOURCE_REPOSITORY`; weaker matches remain
+  conflicts and reserve their paths against duplicate registration. The explicit
+  `menhir artifacts adopt-repository` command handles reviewed legacy cases without document UUIDs.
+- `.agent/workflows/artifact_authoring.md` is the canonical authoring contract; README, file-index,
+  maintenance, feature_planning, and the plan/backlog/reference indexes route to it.
+- Phases 5 (live graph repair) and 6 (frontmatter backfill) are deliberately NOT done: both require
+  separate owner approval of the audit ledger. No production graph writes were made.
+
+## 2026-08-11 - Plan WorkArtifact corpus reconciliation
+
+- Added the implementation plan for recursive artifact-corpus auditing, raw-byte SHA-256 and Git
+  provenance, identity-preserving locator repair, Hook Center rename handling, compliant artifact
+  authoring instructions/validation, and a digest-gated one-time graph repair.
+- Kept semantic changes explicit: paths derive corpus lanes but never lifecycle, supersession, or
+  relationships. The build order starts read-only and requires a reviewed audit ledger before live
+  graph mutation.
+
+## 2026-08-11 - Separate executable plans, reusable references, and completed records
+
+- Audited all 63 Markdown records in the top-level plan, backlog, and operational-research corpus
+  against current source, tests, commit history, and successor ownership; the PDF remained
+  intentionally unread and unclassified.
+- Established `.agent/reference/` as the indexed home for 13 useful but non-executable Markdown
+  records plus the unverified PDF. Current design laws, negative benchmark evidence, saved research,
+  future options, and inputs consumed by active plans no longer appear to authorize implementation.
+- Moved the research execution ladder into `.agent/plans/` as active execution authority, reduced
+  the top-level plan index to 11 plans plus the ladder, and reduced the backlog to 15 executable or
+  owner-decision records.
+- Archived 20 completed or superseded plan/backlog records and three completed/stale research-review
+  records with explicit disposition banners. Two ambiguous owners remain deliberately active for an
+  owner decision: context-composition Stages 2–4 and generic memory `SUPERSEDED_BY` lineage.
+- Retired the empty `.agent/research/` router and mechanically repaired affected live and historical
+  links. A throwaway repository Markdown-link check reported zero dangling links after the moves.
+
 ## 2026-08-10 - Archive shipped write-side owner plans and reconcile Track W
 
 - Archived the July consolidation thesis, QuantState plan, and Event → Fold → View plan as
@@ -208,7 +275,7 @@
   `MENHIR_BENCH_RESULTS_ROOT` and `MENHIR_BENCH_ACTIVE_RUN_ID`.
 - Files: `explorer/bench_runs.py`, `explorer/templates/bench_runs.html`,
   `explorer/templates/bench_run_detail.html`, `explorer/templates/bench_task_detail.html`,
-  `tests/test_explorer_bench_runs.py`, `.agent/plans/menhir-recall-lab-benchmark-explorer-2026-07-30.md`.
+  `tests/test_explorer_bench_runs.py`, `.agent/archive/plans/menhir-recall-lab-benchmark-explorer-2026-07-30.md`.
   Modified: `explorer/app.py`, `explorer/templates/base.html`. Launch scripts updated.
 - Docs: `endpoints.md` updated, `architecture.md` updated.
 # NOTE: this file currently holds 29+ entries, well past the 10-entry policy; not trimmed as part of
@@ -447,7 +514,7 @@
   window bug from the same-day stale-fact-retention RCA — the "suburbs" fact was still dropped by
   both models. See `archolith-bench/.agent/CHANGELOG.md` 2026-07-15 for the full rationale.
 - Saved a second Codex-authored research plan (verbatim, not yet actioned):
-  `.agent/plans/menhir-extraction-prompt-recency-recall-research.md` — a Recall Labs-scoped prompt
+  `.agent/archive/plans/menhir-extraction-prompt-recency-recall-research.md` — a Recall Labs-scoped prompt
   ablation study targeting the same `830ce83f` failure, proposing 5 alternative extraction-prompt
   variants (minimal recall patch, mention-first, update-aware, proposition-first, structured
   uncertainty) and an evaluation methodology (mention/proposition recall+precision across a small
@@ -508,7 +575,7 @@
   context ages out of the window. Not fixable via conflict-scan, retrieval tuning, or
   correction-resolver — needs a graphiti-core config override or a recency-independent
   "already-known entity" check. Directly motivates
-  `.agent/plans/menhir-belief-supersession-temporal-chains-research.md` (Codex research plan saved
+  `.agent/reference/menhir-belief-supersession-temporal-chains-research.md` (Codex research plan saved
   the same day) rather than being a hypothetical problem that plan was written to pre-empt.
 
 ## 2026-07-15 - M1 gate MET (PASS): first full-corpus run + Hit@3 threshold recalibration

@@ -3,8 +3,8 @@
 <!-- Filename convention: <feature>-plan.md -->
 
 **Status:** backlog — proposed 2026-07-11
-**Gap source:** `.agent/research/menhir-cross-domain-representation-research-2026-07-02.md` §A.4
-(verdict: *Prototype immediately*) + `.agent/research/menhir-frontier-transfer-forensic-admissibility.md`
+**Gap source:** `.agent/reference/menhir-cross-domain-representation-research-2026-07-02.md` §A.4
+(verdict: *Prototype immediately*) + `.agent/reference/menhir-frontier-transfer-forensic-admissibility.md`
 §2.5 (CESSATION event + View lifecycle CLOSED).
 **Related:** `span-grounded-extraction-verification-plan.md` (cessation statements need span grounding),
 `menhir-memory-supersession-and-dedup-plan.md` (supersession = value-change; this = retraction).

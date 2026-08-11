@@ -22,6 +22,17 @@ if TYPE_CHECKING:
     from menhir.domain.retrieval_tuning import RetrievalTuningConfig
 
 
+#: Startup reconciliation modes. An unrecognized value falls back to `audit`
+#: rather than raising or silently disabling: a typo in an env var must not turn
+#: drift detection off, and must not turn graph writes on.
+ARTIFACT_RECONCILE_MODES: frozenset[str] = frozenset({"off", "audit", "safe_apply"})
+
+
+def _normalize_reconcile_mode(raw: str) -> str:
+    mode = (raw or "").strip().lower()
+    return mode if mode in ARTIFACT_RECONCILE_MODES else "audit"
+
+
 def _parse_scalar_threshold(raw: str) -> float:
     """Parse a decimal or ratio such as ``2/3`` without the 0.67 rounding trap."""
     text = str(raw).strip()
@@ -119,6 +130,14 @@ class MemorySettings:
     # Structure watcher
     structure_watcher_interval_s: float = 1800.0
     structure_watcher_enabled: bool = True
+
+    # Artifact corpus reconciliation at startup: off | audit | safe_apply.
+    # Defaults to `audit` -- drift is reported, nothing is mutated. `safe_apply`
+    # is an operator choice after the one-time repair and the fixture suite pass,
+    # never a default, because it lets a process write to the graph on boot.
+    artifact_reconcile_mode: str = "audit"
+    artifact_reconcile_repo: str = ""
+    artifact_reconcile_repository: str = ""
 
     # Experience-counter maintenance job (telemetry -> QuantState counters). Env-toggleable so the
     # job can be paused independently of the rest of the scheduler (it can be an expensive fold +
@@ -565,6 +584,13 @@ class MemorySettings:
                 env_var="MENHIR_STRUCTURE_WATCHER_INTERVAL_S",
             ),
             structure_watcher_enabled=parse_bool_env(_getenv("MENHIR_STRUCTURE_WATCHER_ENABLED", default=str(cls.structure_watcher_enabled))),
+            artifact_reconcile_mode=_normalize_reconcile_mode(
+                _getenv("MENHIR_ARTIFACT_RECONCILE_MODE", default=cls.artifact_reconcile_mode)
+            ),
+            artifact_reconcile_repo=_getenv("MENHIR_ARTIFACT_RECONCILE_REPO", default="") or "",
+            artifact_reconcile_repository=_getenv(
+                "MENHIR_ARTIFACT_RECONCILE_REPOSITORY", default=""
+            ) or "",
             experience_counter_enabled=parse_bool_env(_getenv("MENHIR_EXPERIENCE_COUNTER_ENABLED", default=str(cls.experience_counter_enabled))),
             verifier_sync_enabled=parse_bool_env(_getenv("MENHIR_VERIFIER_SYNC_ENABLED", default=str(cls.verifier_sync_enabled))),
             verifier_sync_interval_s=_parse_float(

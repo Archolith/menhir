@@ -289,7 +289,7 @@ triple-flattening — the door is open, nothing is rewritten, recall/ingest unto
   general — it already models kind/ref/directness/trust.)
 - Bench gate: prove on archolith-bench / LongMemEval that FactEvents don't regress recall before
   emitting them in production ingest.
-- Relationship to Chunk E (L3/L4 overlay) in menhir-frontier-undone-work-chunks.md — this is the
+- Relationship to Chunk E (L3/L4 overlay) in ../../archive/plans/menhir-frontier-undone-work-chunks.md — this is the
   storage-shaped half of the same overlay; sequence together.
 ```
 
@@ -307,4 +307,4 @@ triple-flattening — the door is open, nothing is rewritten, recall/ingest unto
 - `infrastructure/memory_graph_adapter.py`, `memory_queries.py`, `artifact_repository.py`
 - `domain/artifacts.py` (L4 proto-hyperedge), `domain/temporal.py`, `scope.py`, `recall.py`, `models.py`
 - `services/recall_service.py` (the one Cypher leak)
-- Related: `menhir-frontier-undone-work-chunks.md` Chunk E (L3/L4 overlay), `docs/research/schemas/layer4-knowledge-artifacts.md`, `.agent/plans/l4-artifact-loop-v0.md`
+- Related: `../../archive/plans/menhir-frontier-undone-work-chunks.md` Chunk E (L3/L4 overlay), `docs/research/schemas/layer4-knowledge-artifacts.md`, `.agent/plans/l4-artifact-loop-v0.md`

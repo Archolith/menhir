@@ -57,7 +57,7 @@ direction is even known.
    structurally can't help — no second entity to link) → isolated trace (false positive, too little
    context) → real re-ingest (reproduced 3x, ruling out transient failure) → controlled A/B (proof).
    Side finding: `DELETE /api/namespace` does not reliably clear Episodic nodes — a separate bug.
-   Fix directions in the RCA, tied to `.agent/plans/menhir-belief-supersession-temporal-chains-research.md`.
+   Fix directions in the RCA, tied to `.agent/reference/menhir-belief-supersession-temporal-chains-research.md`.
 2. `rca-lme-superseded-value-loss`: test `include_superseded=true` on `07741c44` — could resolve
    with zero code change if the data is retained but excluded by default. Still untested, still
    cheap.

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import typer
 
+from menhir.cli.artifacts import artifacts_app
 from menhir.cli.hook import hook_app
 from menhir.cli.setup import setup as setup_command
 from menhir.infrastructure.text_io import read_text_utf8
@@ -18,6 +19,7 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(hook_app)
+app.add_typer(artifacts_app)
 app.command("setup")(setup_command)
 
 
