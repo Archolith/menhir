@@ -288,6 +288,7 @@ running HTTP backend before launching it.
 git clone https://github.com/Archolith/menhir.git
 cd menhir
 python -m pip install .
+menhir setup
 ```
 
 For an editable development install with the PEP 735 development dependency group:
@@ -298,11 +299,16 @@ python -m pip install -e . --group dev
 
 The dependency-group command requires pip 25.1 or newer.
 
+`menhir setup` is the idempotent post-install step for a source checkout. It creates `.env` only
+when missing and enables the repository-managed Git hooks without replacing a custom hooks path.
+Run `menhir setup --check` to audit without changing anything. Runtime, MCP client, optional agent
+hook, and Windows watchdog steps are listed in [`docs/post-install.md`](docs/post-install.md).
+
 ### Configure
 
 ```bash
-cp .env.example .env
 # Edit .env for your Neo4j and LLM provider.
+# If you skipped `menhir setup`: cp .env.example .env
 ```
 
 The default configuration expects Neo4j and a local OpenAI-compatible model server on
@@ -428,7 +434,7 @@ For OAuth resource-server deployments, follow the
 bearer challenges, query-string credential rejection, and token smoke tests without
 claiming compatibility with a particular client.
 
-Installing or starting Menhir does not install editor or agent hooks. If you enable the
+Installing or starting Menhir does not silently install editor or agent capture hooks. If you enable the
 included TurnEvidence hooks, accepted prompts may be stored with working-directory, Git,
 and transcript-path metadata. The separate file-event hook stores path and change
 metadata without file contents. Review the

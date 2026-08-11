@@ -1,18 +1,5 @@
-# GitHub Copilot Instructions — cth.mcp.memory
+# Menhir Copilot instructions
 
-Before suggesting or generating code, read all files in the `.agent/` directory.
-
-## Required Reading
-
-- `.agent/README.md` — project overview, maintenance rules, and contribution standards
-- `.agent/architecture.md` — package map, key patterns, tech stack, and environment variables
-- `.agent/data_models.md` — entities, DTOs, and repository reference
-- `.agent/workflows/code_conventions.md` — formatting and style rules that must be followed
-
-## Before Operational Actions
-
-Check `.agent/workflows/` for task-specific runbooks before executing any build or operational commands.
-
-## Conflicts
-
-If there is a conflict between the code and the `.agent` docs, flag it explicitly and ask for clarification before proceeding.
+Follow `AGENTS.md`. Start with `.agent/README.md` and use its task router rather than reading all project
+documentation. Prefer structural queries before filesystem search, check blast radius before edits, preserve
+unrelated worktree changes, and suggest focused affected tests.

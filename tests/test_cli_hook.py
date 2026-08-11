@@ -4,6 +4,7 @@ pattern detection, stop checkpoint, install/uninstall."""
 from __future__ import annotations
 
 import json
+import shlex
 import time
 from pathlib import Path
 
@@ -437,8 +438,8 @@ def test_project_install_persists_explicit_workspace(tmp_path: Path, monkeypatch
     config = json.loads(settings_file.read_text())
     prompt_command = config["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"]
     compact_command = config["hooks"]["PostCompact"][0]["hooks"][0]["command"]
-    assert '--workspace "project alpha"' in prompt_command
-    assert '--workspace "project alpha"' in compact_command
+    assert shlex.split(prompt_command)[-2:] == ["--workspace", "project alpha"]
+    assert shlex.split(compact_command)[-2:] == ["--workspace", "project alpha"]
 
 
 @pytest.mark.unit

@@ -20,7 +20,7 @@ The server derives `prompt_hash` and `recorded_at`; clients never become hash au
 client-side `prompt_hash` here is provenance/correlation only and mirrors the server's derivation).
 
 Config (env), consistent across producers:
-  MENHIR_TURNS_URL                default http://127.0.0.1:8090/api/turn-evidence
+  MENHIR_TURNS_URL                default http://127.0.0.1:8100/api/turn-evidence
   MENHIR_AGENT_KEY                bearer token (agent tier); unset => unauthenticated POST attempt
   MENHIR_TURN_NAMESPACE           optional namespace override; else inferred from cwd basename
   MENHIR_TURN_HOOK_LOG            optional failure-log path; else <home>/.claude/menhir-turn-hook.log
@@ -39,7 +39,7 @@ import sys
 import time
 import urllib.request
 
-DEFAULT_URL = "http://127.0.0.1:8090/api/turn-evidence"
+DEFAULT_URL = "http://127.0.0.1:8100/api/turn-evidence"
 
 # --- deterministic triage --------------------------------------------------------------------------
 # The ONE definition of what counts as durable evidence. Every producer imports these; a parity test

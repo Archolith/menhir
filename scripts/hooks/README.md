@@ -84,7 +84,7 @@ python menhir_codex_turn_evidence.py --health
 
 | Var | Meaning |
 |-----|---------|
-| `MENHIR_TURNS_URL` | Endpoint. Default `http://127.0.0.1:8090/api/turn-evidence`. |
+| `MENHIR_TURNS_URL` | Endpoint. Default `http://127.0.0.1:8100/api/turn-evidence`. |
 | `MENHIR_AGENT_KEY` | Bearer token (agent tier). Unset => unauthenticated POST attempt. |
 | `MENHIR_TURN_NAMESPACE` | Namespace override; else inferred from the cwd/project basename. |
 | `MENHIR_TURN_HOOK_LOG` | Failure-log path; else `<home>/.claude/menhir-turn-hook.log`. |
@@ -233,7 +233,7 @@ echo '{"tool_name":"Edit","tool_input":{"file_path":"src/foo.py"}}' \
 
 | Var | Meaning |
 |-----|---------|
-| `MENHIR_TOOL_EVENTS_URL` | Endpoint. Default `http://127.0.0.1:8090/api/tool-events`. |
+| `MENHIR_TOOL_EVENTS_URL` | Endpoint. Default `http://127.0.0.1:8100/api/tool-events`. |
 | `MENHIR_AGENT_KEY` | Bearer token (agent tier). Unset => unauthenticated attempt. |
 | `MENHIR_SOURCE_CLIENT` | Override the detected client name. |
 | `MENHIR_TURN_EVIDENCE_ENABLED` | Set falsey (`0`/`false`/`no`/`off`) to disable. |

@@ -1,8 +1,7 @@
-# menhir
+# Menhir
 
-> **MCP sync** *(maintainer-only; does not apply to outside contributors)*: in the
-> maintainer's workspace this project's MCP server entry is generated from a central
-> registry. If the entry point, args, env, or cwd change, that registry must be updated and
-> regenerated so all clients (Claude, Gemini, opencode, Qwen) stay in sync.
+Follow [`AGENTS.md`](AGENTS.md). Start with [`.agent/README.md`](.agent/README.md) and use its task router;
+do not read the entire `.agent/` tree by default.
 
-Read everything in [`.agent/`](.agent/) before starting work — it contains project context, architecture, data models, workflows, and maintenance rules.
+> **Maintainer MCP sync:** the maintainer workspace generates Menhir's MCP client entries from a central
+> registry. If the entry point, args, environment, or cwd changes, update and regenerate that registry.

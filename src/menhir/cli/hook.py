@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shlex
+import subprocess
 import sys
 from pathlib import Path
 from typing import Annotated
@@ -283,73 +285,21 @@ def install(
             default="user",
         )
 
-    location = location.strip().lower()
-    if location not in ("user", "project"):
-        typer.echo(f"Invalid location: {location!r}. Use 'user' or 'project'.", err=True)
-        raise typer.Exit(1)
-
-    from menhir.domain.bootstrap_scope import normalize_workspace_key
-
-    if location == "project" and not workspace:
-        typer.echo("Project hook installation requires --workspace.", err=True)
-        raise typer.Exit(1)
-    if location == "user" and workspace:
-        typer.echo("User hooks are general-only; omit --workspace.", err=True)
-        raise typer.Exit(1)
-    workspace = normalize_workspace_key(workspace) if workspace else ""
-    if location == "project" and not workspace:
-        typer.echo("Project hook installation requires a non-empty --workspace.", err=True)
-        raise typer.Exit(1)
-
-    settings_path = _resolve_settings_path(location)
-
-    # Detect the Python executable — prefer the venv that has menhir installed
-    python_exe = sys.executable
-    venv_python = Path(sys.prefix) / ("Scripts" if sys.platform == "win32" else "bin") / Path(sys.executable).name
-    if venv_python.exists():
-        python_exe = str(venv_python)
-
-    workspace_arg = f" --workspace {json.dumps(workspace)}" if workspace else ""
-    recall_cmd = f"{python_exe} -m menhir.cli hook run --frequency {frequency}{workspace_arg}"
-    save_cmd = f"{python_exe} -m menhir.cli hook run --event stop --frequency {save_frequency}"
-    postcompact_cmd = f"{python_exe} -m menhir.cli hook run --event postcompact{workspace_arg}"
-
-    # Read existing settings
-    existing: dict = {}
-    if settings_path.exists():
-        try:
-            existing = json.loads(settings_path.read_text())
-        except Exception:
-            existing = {}
-
-    hooks = existing.setdefault("hooks", {})
-
-    # --- UserPromptSubmit (recall + write nudges) ---
-    recall_entry = {
-        "hooks": [{"type": "command", "command": recall_cmd}]
-    }
-    _upsert_hook_entry(hooks, "UserPromptSubmit", recall_entry)
-
-    # --- Stop (save checkpoint) ---
-    save_entry = {
-        "hooks": [{"type": "command", "command": save_cmd}]
-    }
-    _upsert_hook_entry(hooks, "Stop", save_entry)
-
-    # --- PostCompact (forced recall into fresh context after compaction) ---
-    postcompact_entry = {
-        "hooks": [{"type": "command", "command": postcompact_cmd}]
-    }
-    _upsert_hook_entry(hooks, "PostCompact", postcompact_entry)
-
-    # Write
-    settings_path.parent.mkdir(parents=True, exist_ok=True)
-    settings_path.write_text(json.dumps(existing, indent=2) + "\n")
+    try:
+        settings_path, commands = install_hooks(
+            location=location,
+            frequency=frequency,
+            save_frequency=save_frequency,
+            workspace=workspace,
+        )
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
 
     typer.echo(f"Installed menhir hooks to {settings_path}")
-    typer.echo(f"  Recall:     {recall_cmd}")
-    typer.echo(f"  Save check: {save_cmd}")
-    typer.echo(f"  PostCompact: {postcompact_cmd}")
+    typer.echo(f"  Recall:      {commands['recall']}")
+    typer.echo(f"  Save check:  {commands['save']}")
+    typer.echo(f"  PostCompact: {commands['postcompact']}")
 
 
 # ---------------------------------------------------------------------------
@@ -424,15 +374,115 @@ def uninstall(
 def _upsert_hook_entry(hooks: dict, event_key: str, entry: dict) -> None:
     """Insert or replace a menhir hook entry in the given event key."""
     event_hooks: list = hooks.setdefault(event_key, [])
+    if not isinstance(event_hooks, list):
+        raise ValueError(f"Expected hooks.{event_key} to be a JSON array")
     for i, existing_entry in enumerate(event_hooks):
+        if not isinstance(existing_entry, dict):
+            continue
         entry_hooks = existing_entry.get("hooks", [])
-        if any(_HOOK_MARKER in h.get("command", "") for h in entry_hooks):
+        if not isinstance(entry_hooks, list):
+            continue
+        if any(
+            isinstance(hook, dict) and _HOOK_MARKER in hook.get("command", "")
+            for hook in entry_hooks
+        ):
             event_hooks[i] = entry
             return
     event_hooks.append(entry)
 
 
-def _resolve_settings_path(location: str) -> Path:
+def install_hooks(
+    *,
+    location: str,
+    frequency: int = 10,
+    save_frequency: int = 10,
+    workspace: str = "",
+    project_dir: Path | None = None,
+) -> tuple[Path, dict[str, str]]:
+    """Install the package-native recall hooks and preserve unrelated client config."""
+    from menhir.domain.bootstrap_scope import normalize_workspace_key
+
+    location = location.strip().lower()
+    if location not in ("user", "project"):
+        raise ValueError(f"Invalid location: {location!r}. Use 'user' or 'project'.")
+    if location == "project" and not workspace:
+        raise ValueError("Project hook installation requires --workspace.")
+    if location == "user" and workspace:
+        raise ValueError("User hooks are general-only; omit --workspace.")
+
+    workspace = normalize_workspace_key(workspace) if workspace else ""
+    if location == "project" and not workspace:
+        raise ValueError("Project hook installation requires a non-empty --workspace.")
+
+    if project_dir is None:
+        settings_path = _resolve_settings_path(location)
+    else:
+        settings_path = _resolve_settings_path(location, project_dir)
+
+    python_exe = sys.executable
+    venv_python = (
+        Path(sys.prefix)
+        / ("Scripts" if sys.platform == "win32" else "bin")
+        / Path(sys.executable).name
+    )
+    if venv_python.exists():
+        python_exe = str(venv_python)
+
+    recall_args = [python_exe, "-m", "menhir.cli", "hook", "run", "--frequency", str(frequency)]
+    if workspace:
+        recall_args.extend(("--workspace", workspace))
+    postcompact_args = [python_exe, "-m", "menhir.cli", "hook", "run", "--event", "postcompact"]
+    if workspace:
+        postcompact_args.extend(("--workspace", workspace))
+    commands = {
+        "recall": _format_hook_command(recall_args),
+        "save": _format_hook_command(
+            [python_exe, "-m", "menhir.cli", "hook", "run", "--event", "stop", "--frequency", str(save_frequency)]
+        ),
+        "postcompact": _format_hook_command(postcompact_args),
+    }
+
+    existing: dict = {}
+    if settings_path.exists():
+        try:
+            existing = json.loads(settings_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Could not parse {settings_path}: {exc}") from exc
+        if not isinstance(existing, dict):
+            raise ValueError(f"Expected a JSON object in {settings_path}")
+
+    hooks = existing.setdefault("hooks", {})
+    if not isinstance(hooks, dict):
+        raise ValueError(f"Expected 'hooks' to be a JSON object in {settings_path}")
+
+    _upsert_hook_entry(
+        hooks,
+        "UserPromptSubmit",
+        {"hooks": [{"type": "command", "command": commands["recall"]}]},
+    )
+    _upsert_hook_entry(
+        hooks,
+        "Stop",
+        {"hooks": [{"type": "command", "command": commands["save"]}]},
+    )
+    _upsert_hook_entry(
+        hooks,
+        "PostCompact",
+        {"hooks": [{"type": "command", "command": commands["postcompact"]}]},
+    )
+
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    settings_path.write_text(json.dumps(existing, indent=2) + "\n", encoding="utf-8")
+    return settings_path, commands
+
+
+def _format_hook_command(args: list[str]) -> str:
+    if sys.platform == "win32":
+        return subprocess.list2cmdline(args)
+    return shlex.join(args)
+
+
+def _resolve_settings_path(location: str, project_dir: Path | None = None) -> Path:
     if location == "user":
         return Path.home() / ".claude" / "settings.json"
-    return Path.cwd() / ".claude" / "settings.local.json"
+    return (project_dir or Path.cwd()) / ".claude" / "settings.local.json"

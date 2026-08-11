@@ -9,14 +9,20 @@ From the repository root:
 1. Install dependencies
 
 ```bash
-python -m pip install -r requirements.txt
+python -m pip install -e . --group dev
 ```
+
+The dependency-group form requires pip 25.1 or newer. This repository does not use a
+`requirements.txt` file.
 
 2. Ensure env is present
 
 ```bash
-copy .env.example .env
+menhir setup
 ```
+
+`menhir setup` creates `.env` only when missing and also wires the repository-managed Git hooks.
+Use `menhir setup --check` for a non-mutating audit.
 
 3. Neo4j connectivity
 
@@ -115,4 +121,3 @@ Expected behavior:
 - validates the configured Graphiti extraction backend and Graphiti embed backend separately
 - for hybrid mode, this means direct OpenAI extraction can be checked independently from the local OpenAI-compatible embed endpoint
 - exits `0` when both are healthy, otherwise exits `1`
-

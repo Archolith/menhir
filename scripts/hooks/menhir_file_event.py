@@ -38,7 +38,7 @@ from menhir_turn_evidence_common import (  # noqa: E402
     log_failure,
 )
 
-DEFAULT_URL = "http://127.0.0.1:8090/api/tool-events"
+DEFAULT_URL = "http://127.0.0.1:8100/api/tool-events"
 SOURCE_KIND = "hook"
 
 #: Claude/Codex tool_name -> file operation. Tools not here are ignored (not file events).
