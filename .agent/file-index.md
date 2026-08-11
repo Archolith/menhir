@@ -64,10 +64,10 @@ Consumers import from `menhir.domain.truth` (or via `menhir.domain` which re-exp
 
 ## Research & Forward Planning
 
-- `plans/menhir-research-execution-ladder.md` -> research → code → bench build order (start here for "what's next")
-- `plans/deferred-verification.md` -> LIVING checklist of tests/benches owed once a real env is available (remote sessions can't run them)
-- `plans/r1-hybrid-candidate-generation.md` -> R1 design note (hybrid candidate generation + source-aware floor)
-- `plans/r2-facet-candidate-generation.md` -> R2 design note (bench-first facet retrieval; no production change until it beats baselines)
+- `research/menhir-research-execution-ladder.md` -> research → code → bench build order (start here for "what's next")
+- `plans/backlog/deferred-verification.md` -> LIVING checklist of tests/benches owed once a real env is available (remote sessions can't run them)
+- `plans/backlog/r1-hybrid-candidate-generation.md` -> R1 design note (hybrid candidate generation + source-aware floor)
+- `plans/backlog/r2-facet-candidate-generation.md` -> R2 design note (bench-first facet retrieval; no production change until it beats baselines)
 - `../docs/research/README.md` -> forward research index (positioning, retrieval pipeline, belief, vision)
 - `../docs/research/positioning/positioning.md` -> canonical product/category positioning (CIP)
 - `memory-roadmap.md` -> shipped v1 milestones (history)

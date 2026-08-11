@@ -8,7 +8,7 @@ Condition #2 below is met: the benchmark-local `MemoryFacetIndex` + `MeetPointRe
 + A–F ladder live in `archolith-bench` (`archolith_bench/facet/`, 46 unit tests), with a
 DEMO-fixture comparison against BM25/embedding/hybrid/file-context. Not yet `supported-by-eval`:
 that needs the real 50/20 gold fixture run to clear the promotion gate (see the bench's
-`.agent/benchmark-notes/facet-r2-demo-run.md` and menhir `.agent/plans/deferred-verification.md`).
+`.agent/benchmark-notes/facet-r2-demo-run.md` and menhir `.agent/plans/backlog/deferred-verification.md`).
 
 > **2026-07-11 update:** the real-embedder run has since happened (text-embedding-3-small) and **F still
 > graduates gold+hybrid** on the DRAFT fixture (`facet-r2-real-embedder-run.md`); `CandidateSource.FACET`
