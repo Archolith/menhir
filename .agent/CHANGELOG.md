@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-08-11 - Close WorkArtifact reconciliation implementation review
+
+- Merged phases 0–4 and their five review remediations through PR #6 (`93ce119`): rename evidence
+  precedence, explicit repository identity, a persisted reconciliation cursor, source-less artifact
+  attachment, and legacy unscoped-source adoption.
+- Re-ran the combined merged-tree unit suite (3,295 passed, 6 skipped, plus the known worktree-name
+  assertion) and all 16 throwaway-Neo4j reconciliation acceptance tests.
+- Updated the plan from proposed to phases 0–4 implemented. Production graph repair (Phase 5) and
+  legacy frontmatter backfill (Phase 6) remain separately owner-gated; no production graph writes
+  were made during implementation or review.
+
 ## 2026-08-11 - Implement WorkArtifact corpus reconciliation (phases 0-4)
 
 - `domain/artifact_reconciliation.py`: pure route table, raw-byte SHA-256, authored-metadata reader,

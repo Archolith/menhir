@@ -1,8 +1,18 @@
 # WorkArtifact Corpus Reconciliation
 
-Status: **PROPOSED — implementation and graph repair require separate approval.**
+Status: **PHASES 0–4 IMPLEMENTED — phases 5–6 remain separately owner-gated.**
 
 Date: 2026-08-11
+
+Implementation record:
+
+- Merged to `main` in [PR #6](https://github.com/Archolith/menhir/pull/6), commit `93ce119`.
+- Offline/unit verification on the merged tree: 3,295 passed, 6 skipped; the sole failure is the
+  pre-existing worktree-name assertion that accepts only directories named `menhir` or
+  `menhir-frontier`.
+- Throwaway-Neo4j acceptance: all 16 reconciliation live tests passed.
+- No production graph repair or corpus-wide legacy frontmatter mutation has run. Those remain the
+  Phase 5 and Phase 6 approval gates below.
 
 Extends:
 
