@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-08-11 - Complete Phase 5 production repair and queue closeout refresh
+
+- Verified pre/post Neo4j dumps and consistency checks, repaired five stale standalone Entity RANGE
+  indexes under owner approval, and restored Menhir and its watchdog healthy.
+- Completed the 112-source preparation with zero duplicate categories, all four reconciliation
+  constraints `ONLINE`, the approved 191-action apply, and a zero-mutation second apply at
+  `338b1cb8dc25f9134ccd015edbe6aa0d4563a1cd`.
+- Recorded 106 lane/lifecycle contradictions for owner disposition without inferring or mutating
+  lifecycle. Phase 6 remains separately owner-gated.
+- Closeout publication remains partial: this changelog, the plan, and the wrapup are scanned corpus
+  artifacts. After their docs commit merges, run a fresh read-only audit, approve its exact digest,
+  apply once, and complete a zero-repeat re-audit before claiming the persisted cursor is current.
+
 ## 2026-08-11 - Harden WorkArtifact Phase 4/5 execution gates
 
 - Separated Hook Center's structural `project` from its stable artifact `repository`; file-event

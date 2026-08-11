@@ -1,15 +1,17 @@
-# WRAPUP — Menhir Phase 4/5 artifact reconciliation remediation
+# WRAPUP REVIEWED WITH FINDINGS - Menhir Phase 4/5 artifact reconciliation remediation
 
-**Date:** 2026-08-11  
-**Agent:** Codex  
-**Model:** GPT-5  
-**Status:** PARTIAL  
-**Plan / Ticket:** `C:\Users\thron\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\.agent\plans\menhir-work-artifact-reconciliation-2026-08-11.md`  
-**Worktree:** `C:\Users\thron\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation`  
-**Branch:** `agent/menhir-phase45-remediation`  
-**Commits:** `7a19426297f022ed887d22a255a7d01c31e7b9d2`, `59a45c727244d2de2f44699fc939ac2f1489d831`, `0779c15fb120a0338b40c64af3bf326e9b805a51`, `fe8bfdc78474a89c0e17f753c63c8652097e45a6`, `2e18832811c4fd19f494ddafe858181a908df15b`  
-**Verification Scope:** the five work-product commits above plus this wrapup document; production graph checks were read-only  
-**Docs Updated:** `C:\Users\thron\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\.agent\plans\menhir-work-artifact-reconciliation-2026-08-11.md`, `C:\Users\thron\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\docs\hook-center-tool-events.md`, `C:\Users\thron\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\scripts\hooks\README.md`  
+**Date:** 2026-08-11
+**Agent:** Codex
+**Model:** GPT-5
+**Status:** REVIEWED WITH FINDINGS
+**Plan / Ticket:** `C:\Users\thron\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\.agent\plans\menhir-work-artifact-reconciliation-2026-08-11.md`
+**Worktree:** `C:\Users\thron\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation`
+**Branch:** `agent/menhir-phase5-closeout`
+**Commits:** `7a19426297f022ed887d22a255a7d01c31e7b9d2`, `59a45c727244d2de2f44699fc939ac2f1489d831`, `0779c15fb120a0338b40c64af3bf326e9b805a51`, `fe8bfdc78474a89c0e17f753c63c8652097e45a6`, `2e18832811c4fd19f494ddafe858181a908df15b`, `1fcd050848da1e78ef9768993b080ce6ff199786`, `338b1cb8dc25f9134ccd015edbe6aa0d4563a1cd`
+**PR:** [#8](https://github.com/Archolith/menhir/pull/8)
+**Merge Commit / Closeout Base:** `338b1cb8dc25f9134ccd015edbe6aa0d4563a1cd`
+**Verification Scope:** verifier-supplied hosted CI, production backup and index repair, source-v2 preparation, reconciliation apply, repeat audit, and direct acceptance evidence
+**Docs Updated:** `C:\Users\thron\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\.agent\plans\menhir-work-artifact-reconciliation-2026-08-11.md`, `C:\Users\thron\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\.agent\for-review\WRAPUP-2026-08-11-menhir-phase4-5-remediation.md`, `C:\Users\thron\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\.agent\CHANGELOG.md`, `C:\Users\thron\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\docs\hook-center-tool-events.md`, `C:\Users\thron\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\scripts\hooks\README.md`, `C:\Users\thron\IdeaProjects\.agent\handoffs\HANDOFF-2026-08-11-menhir-artifact-reconciliation-phase5.md`, `C:\Users\thron\IdeaProjects\.agent\handoffs\MENHIR-PHASE5-LIFECYCLE-CONTRADICTIONS-2026-08-11.md`
 **Changelog Updated:** `C:\Users\thron\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\.agent\CHANGELOG.md`
 
 ---
@@ -19,26 +21,35 @@
 The Phase 5 acceptance criteria were traced backwards from zero-repeat reconciliation and a current
 persisted cursor. That exposed three prerequisites: acknowledged source-less conflicts must not pin
 the cursor forever, Hook Center must carry canonical repository identity across worktrees, and the
-source-v2 backfill must install and verify constraints before any corpus repair. Those are now
-implemented and tested. The production backup, prepare, digest approval, apply, and zero-repeat pass
-remain deliberately unexecuted pending the owner gate.
+source-v2 backfill must install and verify constraints before corpus repair. Those prerequisites
+were merged in PR #8. The owner then approved the backup, index consistency repair, graph-wide
+preparation, reconciliation digest, first apply, and zero-mutation second apply. This closeout records
+that completed Phase 5 operation; it does not close or authorize Phase 6.
 
 ---
 
 ## Summary
 
-Phase 4/5 is code-ready but not operationally complete. Hook events now keep structural project
-scope separate from stable artifact repository identity. Apply advances the persisted cursor past
-only source-less `UNCLASSIFIED_NEW_SOURCE` conflicts; every identity-bearing conflict, other conflict
-class, and skipped write still blocks it. A new graph-wide preparation command is read-only by
-default and requires an owner-approved source count before it backfills source-v2 fields, activates
-four uniqueness constraints, and verifies their backing indexes `ONLINE`.
+Phases 4 and 5 are complete. PR #8 merged at
+`338b1cb8dc25f9134ccd015edbe6aa0d4563a1cd`, and both hosted CI jobs passed. Hook events now keep
+structural project scope separate from stable artifact repository identity. The production source-v2
+preparation stamped 112 source UUIDs and locator keys, left every duplicate category at zero, and
+placed all four uniqueness constraints and backing indexes `ONLINE` at 100 percent.
 
-The full offline suite and isolated-Neo4j acceptance pass. A read-only production preflight measured
-112 sources requiring preparation and zero duplicate blockers. The current Menhir audit remains the
-expected 13 relocations, 29 refreshes, 136 registrations, 12 unresolved markings, and 12 source-less
-reference conflicts. No production graph writes, service restart, branch push, PR merge, or runtime
-configuration change occurred in this remediation.
+The approved reconciliation applied 191 safe actions with no skips: 13 relocations, 29 refreshes,
+137 registrations, and 12 unresolved-source markings. The cursor advanced despite 12 reviewed
+source-less `UNCLASSIFIED_NEW_SOURCE` conflicts. Repeat audit reported 179 `NOOP` actions, the same
+12 conflicts, zero safe mutations, and the cursor exactly at the `338b1cb` production baseline. A
+second apply wrote nothing. All 29 current plans now have exactly one artifact and one resolvable source. The resulting
+106 lane/lifecycle contradictions are classification debt for owner disposition; no lifecycle was
+inferred or mutated. Phase 6 remains separately owner-gated, and this wrapup remains `PARTIAL`
+because `artifact_validate` is unavailable and closeout publication has not yet been reconciled.
+
+**Closeout publication caveat:** This plan, wrapup, and changelog are themselves in Menhir's scanned
+corpus. Once their eventual docs commit merges, the persisted cursor at `338b1cb` will be behind the
+new observed commit. A fresh read-only audit, owner approval of its exact digest, one apply, and a
+zero-repeat re-audit are required after the docs merge. Phase 5's production repair at `338b1cb` is
+complete; the post-doc cursor must not be described as current until that sequence completes.
 
 ## Files Changed
 
@@ -46,7 +57,7 @@ configuration change occurred in this remediation.
 |------|-----|
 | `C:\Users\thron\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\.agent\plans\menhir-work-artifact-reconciliation-2026-08-11.md` | Correct Phase 4/5 cursor, worktree identity, preparation, backup, and 29/25 acceptance gates. |
 | `C:\Users\thron\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\.agent\CHANGELOG.md` | Record the remediation and verification evidence. |
-| `C:\Users\thron\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\.agent\for-review\WRAPUP-2026-08-11-menhir-phase4-5-remediation.md` | Record the implementation evidence and remaining production gate. |
+| `C:\Users\thron\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\.agent\for-review\WRAPUP-2026-08-11-menhir-phase4-5-remediation.md` | Record completed Phase 5 evidence and the remaining Phase 6 gate. |
 | `C:\Users\thron\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\docs\hook-center-tool-events.md` | Document stable artifact repository identity. |
 | `C:\Users\thron\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\scripts\hooks\README.md` | Document hook environment/Git configuration. |
 | `C:\Users\thron\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\scripts\hooks\menhir_file_event.py` | Emit explicit repository identity from environment or repository-local Git config. |
@@ -62,60 +73,146 @@ configuration change occurred in this remediation.
 | `C:\Users\thron\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\tests\test_hook_center_artifact_reconciliation.py` | Cover worktree identity separation and visible missing identity. |
 | `C:\Users\thron\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\tests\test_hook_center_tool_events.py` | Cover environment/Git-config identity resolution and precedence. |
 | `C:\Users\thron\Documents\Codex\2026-08-10\mes-3\menhir-phase45-remediation\tests\test_main_checks.py` | Replace a checkout-name allowlist with the actual repository-root invariant. |
+| `C:\Users\thron\IdeaProjects\.agent\handoffs\HANDOFF-2026-08-11-menhir-artifact-reconciliation-phase5.md` | Record the workspace-level Phase 5 operator procedure and evidence. |
+| `C:\Users\thron\IdeaProjects\.agent\handoffs\MENHIR-PHASE5-LIFECYCLE-CONTRADICTIONS-2026-08-11.md` | Record the 106-item lifecycle contradiction queue for owner disposition. |
 
 ## Verification
 
-- `python -m compileall -q src` — `PASS` — all source files compiled.
-- Focused reconciliation/entrypoint/schema/hook tests — `PASS` — 133 passed.
-- `python -m pytest -p no:cacheprovider -q` — `PASS` — 5,947 passed, 197 skipped.
-- `python -m pytest -p no:cacheprovider -q --run-online tests/test_phase_one_bootstrap_live.py tests/test_artifact_reconciliation_live.py` — `PASS` — 21 passed against the isolated port-7688 Neo4j container; the container and network were removed afterward.
-- Production `source_preflight()` — `PASS` — read-only result: 112 sources, 112 missing source UUIDs, 112 missing current locator keys, and zero duplicate artifact UUID, source UUID, raw locator, materialized locator, or cursor-repository groups.
-- `menhir artifacts audit --repo . --repository menhir --from-commit f441a23~1` against production — `PASS` — read-only digest `a8e75e6253bb39034771be72d0161587c7069f845fb28c1317a33adba9342a08`; 190 corpus entries, 54 Menhir graph sources, 13 relocations, 29 refreshes, 136 registrations, 12 unresolved markings, and 12 `UNCLASSIFIED_NEW_SOURCE` conflicts.
-- Independent read-only cursor/hook review — `PASS` — no P0-P3 findings.
-- Independent read-only preparation review — `PASS WITH TEST GAP REMEDIATED` — reviewer questioned unresolved-source re-keying; the intended null key was confirmed and a direct unresolved-row regression test was added and passed.
-- Hosted CI — `NOT RUN` — branch has not been pushed.
-- Production backup/prepare/apply/zero-repeat — `NOT RUN` — requires owner approval and a verified restorable backup path.
-- `artifact_validate(artifact_type="wrapups", ...)` — `NOT RUN` — that validator tool is unavailable in this harness; status remains `PARTIAL`.
+The following results were supplied by the central verifier; no command in this section was run by
+the closeout author during this documentation edit.
+
+- Earlier local focused verification: `PASS`, 133 passed.
+- Earlier full offline suite: `PASS`, 5,947 passed and 197 skipped.
+- Earlier isolated Neo4j acceptance: `PASS`, 21 passed.
+- Hosted CI for PR #8: `PASS`; `offline-tests` completed in 2m00s and `online-tests` in 2m14s.
+- Canonical checkout: `PASS`; `main` was fast-forwarded without a branch switch to
+  `338b1cb8dc25f9134ccd015edbe6aa0d4563a1cd`, the unrelated untracked
+  `.agent/plans/menhir-post-install-and-agent-defaults-plan.md` was preserved, and repository-local
+  Git config is `menhir.artifactRepository=menhir`.
+- Pre-repair dump: `/home/ctharvey/menhir-neo4j/backups/phase5-20260811T211356Z`.
+  `neo4j.dump` SHA-256 is
+  `44f135b570aa27ca70a9617387bc1af022a0995e651e52822ccb7fb33d339df8`; `system.dump`
+  SHA-256 is `a7edf7885688b785d85ab5dfdc9d9110ff39ef851c4e453ca07c138ecbcb756a`.
+- Restore/consistency validation found five stale standalone Entity RANGE-index entries across
+  `name_entity_index`, `created_at_entity_index`, `entity_last_accessed_idx`, `entity_uuid`, and
+  `entity_freshness_idx`. No constraints backed them. With owner approval and Menhir/watchdog
+  paused, all five were recreated from `SHOW INDEXES` `createStatement` and reached `ONLINE` at
+  100 percent.
+- Post-repair dump:
+  `/home/ctharvey/menhir-neo4j/backups/phase5-post-index-repair-20260811T212419Z`.
+  `neo4j.dump` SHA-256 is
+  `f93e6b1c6afa626d8b7eb7ebcbaa2b71c01ecb0c80b7bebb1db1e582abefd2c7`; `system.dump`
+  SHA-256 is `49ceacafc2d6debab2e629e4bb061f39081670610989fa9f14de1984fc2017d4`.
+  Both post-repair consistency checks passed.
+- Service restoration: `PASS`; server HTTP ready, Neo4j up, and watchdog task enabled/Ready on
+  Neo4j Community 5.26.26 at `ubuntu-server`.
+- Preparation preflight: 112 sources, 112 missing source UUIDs, 112 missing locator keys, and zero
+  duplicates in all five categories. Owner-approved apply stamped all 112 UUIDs and keys. Postflight
+  missing and duplicate counts were all zero.
+- Constraint acceptance: `artifact_reconcile_cursor_repository_unique`,
+  `artifact_source_locator_unique`, `artifact_source_uuid_unique`, and
+  `work_artifact_uuid_unique`, with all backing indexes `ONLINE` at 100 percent.
+- Merged-tree dry-run: observed `338b1cb8dc25f9134ccd015edbe6aa0d4563a1cd`; digest
+  `1479335f132bdd92915b3312a26bb157d0d8fcae7e2d114241f6b993055ac3d4`; corpus 191;
+  graph sources 54; 13 relocations, 29 refreshes, 137 registrations, 12 unresolved marks, 12
+  source-less `UNCLASSIFIED_NEW_SOURCE` conflicts, and 12 then-visible lifecycle contradictions.
+- First apply `9cb08c3e-b499-4f23-9b86-2d9997d84e62`: applied 191, skipped zero, retained 12
+  conflicts, and advanced the cursor.
+- Repeat audit: graph sources 191; 179 `NOOP`; 12 source-less conflicts; zero safe mutations; cursor
+  exactly `338b1cb8dc25f9134ccd015edbe6aa0d4563a1cd` for the production checkpoint; digest
+  `159bc5590794143daa7e14513b171c6ff8e4c3beb32a01977b2d25095c407ac9`.
+- Second apply `1f19dedf-1155-47ea-91a2-89d6bff75eb7`: applied zero, skipped zero, retained 12
+  conflicts, and kept the cursor current for the `338b1cb` production baseline.
+- Direct acceptance: 29 of 29 current plans have exactly one artifact and one resolvable source;
+  duplicate locator groups are zero; all 12 unresolved sources have
+  `resolution_reason=source_not_observed_in_corpus_scan`.
+- Post-registration audit: 106 lane/lifecycle contradictions remain for owner disposition. No
+  lifecycle was inferred or mutated.
+- `artifact_validate(artifact_type="wrapups", ...)`: `NOT RUN`; the validator is unavailable in this
+  harness, so status remains `PARTIAL`.
+- Post-doc-merge audit/apply/zero-repeat: `PENDING`; no closeout docs commit exists yet, and no
+  post-doc cursor is claimed current.
 
 ## Claim Cross-Check
 
-- Summary checked against actual code/diff: `yes`
-- Files Changed checked against actual modified files: `yes`
-- Commit list checked against actual commit hashes or working-tree state: `yes`
-- Verification results copied from actual command output: `yes`
+- Summary checked against verifier-supplied evidence: `yes`
+- Files Changed retained from the implementation wrapup record: `yes`
+- PR and merge commit copied from verifier-supplied evidence: `yes`
+- Verification and production results copied from verifier-supplied evidence: `yes`
+- Git, build, test, and graph commands run by this closeout author: `none`
 
 ## Completion Checklist
 
-- Plan / acceptance criteria completed: `partial`
+- Phases 0-5 acceptance criteria completed: `yes`
+- Phase 6 completed: `no - separately owner-gated`
 - Docs updated as required: `yes`
-- Changelog updated as required: `yes`
-- Work committed: `yes`
+- Current Phase 5 closeout changelog entry added: `yes`
+- Workspace operator handoff and 106-item contradiction report referenced: `yes`
+- Implementation merged: `yes - PR #8`
+- Phase 5 production repair at `338b1cb` complete: `yes`
+- Closeout publication reconciled after docs merge: `no - pending audit, approved digest, apply, and zero-repeat re-audit`
+- Closeout document committed: `not yet; its eventual commit is intentionally omitted`
 
 ## Assumptions
 
-1. The 12 current reference conflicts remain source-less `UNCLASSIFIED_NEW_SOURCE` entries until a separately approved metadata pass.
-2. The owner-approved preparation count remains 112 at execution time; the command refuses if it changes.
-3. Phase 5 will run only from a merged commit with a newly generated digest.
+1. The 12 remaining conflicts stay source-less until an owner-approved metadata pass classifies
+   their documents.
+2. The 106 lane/lifecycle contradictions require human semantic disposition; their directory lanes
+   alone are not lifecycle evidence.
+3. Phase 6 remains a separate approval and must not be inferred from Phase 5 completion.
+4. The cursor evidence is current only for the `338b1cb` production baseline, not for the eventual
+   closeout docs commit.
 
 ## Risks / Gaps
 
-1. `scripts/export_graph_backup.py` produces a self-consistent logical export, but this repository has no tested importer. Before production mutation, use a verified `neo4j-admin database dump` on the remote host or demonstrate restoration of the logical export into an isolated database.
-2. The running Menhir server predates this branch and startup reconciliation is not configured with a repository path/identity. Phase 4 is not operationally active until merge, configuration, and restart.
-3. The 12 reference conflicts will remain visible after repair. They are allowed to coexist with cursor advancement only because they carry no source or artifact identity.
-4. Hosted CI and PR review have not run.
+1. `artifact_validate` is unavailable in this harness, so the wrapup cannot be validator-cleared and
+   remains `PARTIAL`.
+2. The 106 lane/lifecycle contradictions are prominent remaining classification debt. Resolving them
+   requires owner decisions and may feed Phase 6; automatic path-based lifecycle mutation remains
+   prohibited.
+3. The 12 source-less `UNCLASSIFIED_NEW_SOURCE` conflicts remain intentionally visible. They do not
+   compromise existing source identity, but they will repeat until explicit metadata is approved.
+4. Merging these closeout artifacts will put the scanned corpus ahead of the persisted cursor. The
+   required post-merge reconciliation sequence remains incomplete.
 
 ## Follow-Up Tasks
 
-1. Push the branch, open a PR, run hosted CI, and obtain approval before merging to `main`.
-2. Stop Menhir and the watchdog; create and restore-test a complete backup, including embeddings or an explicitly documented re-embedding route; record before counts.
-3. Run `menhir artifacts prepare --apply --expected-source-count 112`, then verify all four constraint indexes are `ONLINE`.
-4. Audit the merged commit with `--from-commit f441a23~1`; obtain owner approval of the new digest and exact action counts; apply once.
-5. Re-audit: no safe mutation action may repeat, the 12 reviewed source-less conflicts may remain, and the Menhir cursor must equal the observed commit.
-6. Configure repository-local `menhir.artifactRepository=menhir` and audit-only startup repository/path settings, restart Menhir, and verify startup output.
+1. After the closeout docs commit merges, run a fresh read-only audit, obtain owner approval of the
+   exact digest, apply once, and verify a zero-repeat re-audit with the cursor at the new commit.
+2. Review and disposition the 106 lane/lifecycle contradictions one by one without inferring status
+   from location.
+3. Decide whether to add explicit metadata for the 12 source-less unclassified documents in a
+   separately approved documentation pass.
+4. Gate and execute Phase 6 only after owner approval of the metadata/status vocabulary and exact
+   corpus scope.
+5. Run `artifact_validate` in a harness where it is available. Update this wrapup status only after
+   validation and the post-doc-merge reconciliation complete; Phase 6 remains separately gated.
 
 ## Notes
 
-- No production graph mutation occurred during this remediation.
+- Phase 5 production graph mutation occurred only after the recorded owner approvals and verified
+  Neo4j dump/consistency gates.
 - The temporary isolated-Neo4j container and network used for live tests were removed after the tests passed.
-- The commit list names the work-product commits. This wrapup's own commit is omitted because a file
-  cannot truthfully contain the hash of the commit that first adds it.
+- The `Commits:` list includes the known implementation commits, prior wrapup commit, and PR #8
+  merge. The new closeout docs commit is omitted because it does not exist yet and cannot truthfully
+  be recorded in the file it will commit.
+- No post-doc cursor-current claim is made. The required closeout reconciliation begins only after
+  the docs commit merges.
+
+## Review Findings
+
+**Reviewed:** 2026-08-11
+**Reviewer:** Codex (GPT-5)
+**Implementation score:** 99/100 (A)
+**Wrapup score:** 97/100 (A)
+
+No P1-P3 implementation or reporting defect remains after the documentation corrections made during
+review. The review independently confirmed the plan-to-implementation mapping, PR and commit anchors,
+production cursor and acceptance counts, all four live backup hashes, and an exact row-for-row match
+between the 106-item owner-disposition report and the live JSON audit.
+
+Open closeout gates are accurately disclosed rather than treated as defects: the closeout docs are
+not yet committed or merged, their merge will require a newly approved reconciliation digest and
+zero-repeat proof, and `artifact_validate` is unavailable in this harness. Phase 6 and the 106
+lifecycle decisions remain separately owner-gated. No archolith session grade applies because this
+was a native Codex task rather than an archolith-context proxy session.
