@@ -620,6 +620,12 @@ If Git cannot evaluate the selected cursor-to-HEAD interval, audit marks the evi
 and apply refuses before artifact mutation; zero rename records are not treated as proof that no
 rename occurred.
 
+An authored UUID may identify a `WorkArtifact` that exists without an embodiment. Audit reads those
+semantic identities separately from source snapshots and proposes `ATTACH_SOURCE`, not
+`REGISTER_ARTIFACT`. The conditional write creates only `ArtifactSource` plus `EMBODIED_IN`; graph
+type disagreement, an existing source, or a claimed locator refuses without changing semantic
+artifact properties.
+
 Operational sidecar storage:
 
 - MCP/server telemetry is persisted in SQLite at `<workspace_root>/.agent/mcp_telemetry.db` by default (resolved by `infrastructure/paths.py` from the workspace root, not a hardcoded project path)

@@ -84,6 +84,7 @@ class ActionKind:
     NOOP = "NOOP"
     REFRESH_SOURCE = "REFRESH_SOURCE"
     RELOCATE_SOURCE = "RELOCATE_SOURCE"
+    ATTACH_SOURCE = "ATTACH_SOURCE"
     REGISTER_ARTIFACT = "REGISTER_ARTIFACT"
     MARK_SOURCE_UNRESOLVED = "MARK_SOURCE_UNRESOLVED"
     CONFLICT = "CONFLICT"
@@ -94,6 +95,7 @@ class ActionKind:
 SAFE_ACTION_KINDS: frozenset[str] = frozenset({
     ActionKind.REFRESH_SOURCE,
     ActionKind.RELOCATE_SOURCE,
+    ActionKind.ATTACH_SOURCE,
     ActionKind.REGISTER_ARTIFACT,
     ActionKind.MARK_SOURCE_UNRESOLVED,
 })
@@ -125,6 +127,8 @@ class ConflictKind:
     AMBIGUOUS_GIT_RENAME = "AMBIGUOUS_GIT_RENAME"
     UNCLASSIFIED_NEW_SOURCE = "UNCLASSIFIED_NEW_SOURCE"
     INVALID_DECLARED_METADATA = "INVALID_DECLARED_METADATA"
+    DECLARED_UUID_TYPE_DISAGREEMENT = "DECLARED_UUID_TYPE_DISAGREEMENT"
+    DECLARED_UUID_ALREADY_EMBODIED = "DECLARED_UUID_ALREADY_EMBODIED"
 
 
 class ResolutionStatus:
@@ -520,6 +524,22 @@ class ArtifactSourceSnapshot:
 
 
 @dataclass(frozen=True)
+class WorkArtifactIdentitySnapshot:
+    """Semantic identity state for a UUID declared by a corpus document.
+
+    Kept separate from ``ArtifactSourceSnapshot`` so a source-less artifact is
+    represented honestly rather than as a fabricated source with an empty
+    locator.
+    """
+
+    artifact_uuid: str
+    artifact_type: str | None
+    title: str | None = None
+    status: str | None = None
+    source_count: int = 0
+
+
+@dataclass(frozen=True)
 class GitRename:
     old_path: str
     new_path: str
@@ -672,9 +692,11 @@ class _PlanState:
         self,
         entries: Sequence[CorpusEntry],
         snapshots: Sequence[ArtifactSourceSnapshot],
+        identities: Sequence[WorkArtifactIdentitySnapshot],
     ) -> None:
         self.entries = list(entries)
         self.snapshots = list(snapshots)
+        self.identities = list(identities)
         self.actions: list[ReconciliationAction] = []
         self.claimed_entries: set[tuple[str, str, str]] = set()
         self.claimed_sources: set[str] = set()
@@ -693,6 +715,9 @@ class _PlanState:
         for snapshot in self.snapshots:
             self.snapshots_by_key.setdefault(snapshot.key, []).append(snapshot)
             self.snapshots_by_artifact.setdefault(snapshot.artifact_uuid, []).append(snapshot)
+        self.identities_by_artifact = {
+            identity.artifact_uuid: identity for identity in self.identities
+        }
 
     def unclaimed_entries(self) -> list[CorpusEntry]:
         return [e for e in self.entries if e.key not in self.claimed_entries]
@@ -739,6 +764,7 @@ def plan_reconciliation(
     repository: str,
     entries: Sequence[CorpusEntry],
     snapshots: Sequence[ArtifactSourceSnapshot],
+    identities: Sequence[WorkArtifactIdentitySnapshot] = (),
     renames: Sequence[GitRename] = (),
     observed_commit: str | None = None,
     cursor_commit: str | None = None,
@@ -760,7 +786,7 @@ def plan_reconciliation(
         (s for s in snapshots if (s.repository or "") == repository),
         key=lambda s: (s.path or "", s.artifact_uuid),
     )
-    state = _PlanState(scoped_entries, scoped_snapshots)
+    state = _PlanState(scoped_entries, scoped_snapshots, identities)
 
     _plan_duplicate_locators(state)
     _plan_declared_uuids(state)
@@ -781,6 +807,7 @@ def plan_reconciliation(
         evidence_base_valid=evidence_base_valid,
         entries=scoped_entries,
         snapshots=scoped_snapshots,
+        identities=identities,
         actions=actions,
     )
     return ReconciliationReport(
@@ -864,9 +891,6 @@ def _plan_declared_uuids(state: _PlanState) -> None:
             for s in state.snapshots_by_artifact.get(declared_uuid, [])
             if s.medium == entry.medium and s.identity not in state.claimed_sources
         ]
-        if not candidates:
-            continue  # a pre-minted UUID on a new document; registration handles it
-
         occupant = [
             s
             for s in state.snapshots_by_key.get(entry.key, [])
@@ -886,6 +910,77 @@ def _plan_declared_uuids(state: _PlanState) -> None:
                     title=entry.title,
                     reason="declared_uuid_and_current_locator_name_different_artifacts",
                     detail=tuple(sorted(s.artifact_uuid for s in occupant)),
+                ),
+                entry=entry,
+            )
+            continue
+
+        if not candidates:
+            identity = state.identities_by_artifact.get(declared_uuid)
+            if identity is None:
+                continue  # a pre-minted UUID on a new document; registration handles it
+
+            artifact_type = entry.effective_type
+            if artifact_type != identity.artifact_type:
+                state.claim(
+                    ReconciliationAction(
+                        kind=ActionKind.CONFLICT,
+                        conflict_kind=ConflictKind.DECLARED_UUID_TYPE_DISAGREEMENT,
+                        repository=entry.repository,
+                        medium=entry.medium,
+                        path=entry.path,
+                        artifact_uuid=declared_uuid,
+                        artifact_type=artifact_type,
+                        lane=entry.lane,
+                        integrity=entry.integrity,
+                        title=entry.title,
+                        reason="declared_uuid_type_disagrees_with_graph_artifact",
+                        detail=(
+                            identity.artifact_type or "graph_type_missing",
+                            artifact_type or "document_type_missing",
+                        ),
+                    ),
+                    entry=entry,
+                )
+                continue
+
+            if identity.source_count:
+                state.claim(
+                    ReconciliationAction(
+                        kind=ActionKind.CONFLICT,
+                        conflict_kind=ConflictKind.DECLARED_UUID_ALREADY_EMBODIED,
+                        repository=entry.repository,
+                        medium=entry.medium,
+                        path=entry.path,
+                        artifact_uuid=declared_uuid,
+                        artifact_type=identity.artifact_type,
+                        lane=entry.lane,
+                        integrity=entry.integrity,
+                        title=entry.title,
+                        reason="declared_uuid_has_sources_outside_reconciliation_scope",
+                        detail=(f"source_count:{identity.source_count}",),
+                    ),
+                    entry=entry,
+                )
+                continue
+
+            state.claim(
+                ReconciliationAction(
+                    kind=ActionKind.ATTACH_SOURCE,
+                    basis=MatchBasis.DECLARED_UUID,
+                    repository=entry.repository,
+                    medium=entry.medium,
+                    path=entry.path,
+                    artifact_uuid=declared_uuid,
+                    artifact_type=identity.artifact_type or artifact_type,
+                    lane=entry.lane,
+                    integrity=entry.integrity,
+                    version=entry.version,
+                    version_kind=entry.version_kind,
+                    size_bytes=entry.size_bytes,
+                    title=entry.title,
+                    status=identity.status,
+                    reason="declared_uuid_identifies_source_less_artifact",
                 ),
                 entry=entry,
             )
@@ -1369,6 +1464,7 @@ def _summarize(
     return {
         "entries": len(state.entries),
         "sources": len(state.snapshots),
+        "artifact_identities": len(state.identities),
         "actions": len(actions),
         "by_kind": dict(sorted(by_kind.items())),
         "by_basis": dict(sorted(by_basis.items())),
@@ -1388,6 +1484,7 @@ def compute_plan_digest(
     evidence_base_valid: bool = True,
     entries: Iterable[CorpusEntry],
     snapshots: Iterable[ArtifactSourceSnapshot],
+    identities: Iterable[WorkArtifactIdentitySnapshot] = (),
     actions: Iterable[ReconciliationAction],
 ) -> str:
     """A digest over the premises *and* the conclusions.
@@ -1415,6 +1512,16 @@ def compute_plan_digest(
                 s.resolution_status,
             ]
             for s in snapshots
+        ),
+        "artifact_identities": sorted(
+            [
+                identity.artifact_uuid,
+                identity.artifact_type or "",
+                identity.title or "",
+                identity.status or "",
+                str(identity.source_count),
+            ]
+            for identity in identities
         ),
         "entries": sorted(
             [

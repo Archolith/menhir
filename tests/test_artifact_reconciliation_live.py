@@ -330,6 +330,46 @@ def test_a_declared_uuid_survives_a_clean_clone(
 
 
 @pytest.mark.online
+def test_a_declared_uuid_attaches_the_first_source_without_mutating_semantics(
+    service: ArtifactReconciliationService, repo_tree: Path, test_neo4j_repo
+) -> None:
+    declared = "8c3dd5f8-3786-47de-a212-e918580ff492"
+    WorkArtifactRepository(test_neo4j_repo).create_artifact(
+        artifact_type=ArtifactType.PLAN,
+        title="Graph-owned title",
+        status=ArtifactStatus.APPROVED,
+        artifact_uuid=declared,
+    )
+    _write(
+        repo_tree,
+        ".agent/plans/a.md",
+        f"---\nartifact_uuid: {declared}\nartifact_type: plan\n"
+        "artifact_status: PROPOSED\n---\n# File title\n",
+    )
+
+    report = service.audit(repo_tree, repository="t")
+    assert [a.kind for a in report.safe_actions] == [ActionKind.ATTACH_SOURCE]
+    result = service.apply(
+        repo_tree,
+        expected_digest=report.plan_digest,
+        repository="t",
+    )
+    assert len(result.applied) == 1
+    rows = _sources(test_neo4j_repo)
+    assert len(rows) == 1 and rows[0]["artifact_uuid"] == declared
+
+    artifact = test_neo4j_repo.execute(
+        "MATCH (a:WorkArtifact {artifact_uuid: $uuid}) "
+        "RETURN a.title AS title, a.status AS status",
+        {"uuid": declared},
+    )[0]
+    assert artifact == {"title": "Graph-owned title", "status": ArtifactStatus.APPROVED}
+
+    second = service.audit(repo_tree, repository="t")
+    assert not second.safe_actions
+
+
+@pytest.mark.online
 def test_audit_leaves_the_graph_byte_identical(
     service: ArtifactReconciliationService, repo_tree: Path, test_neo4j_repo
 ) -> None:

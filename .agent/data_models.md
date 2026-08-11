@@ -187,6 +187,12 @@ embodiment addressable — Owned Record addressability, not semantic identity �
 `current_locator_key` (`repository|medium|path`) is uniquely constrained so two artifacts can never
 claim one current path.
 
+A source-less `WorkArtifact` remains a valid semantic identity. When a corpus document explicitly
+declares that UUID, reconciliation may attach its first `ArtifactSource` only when the graph and
+document types agree and the locator is unclaimed. This is embodiment repair, not registration:
+the existing artifact's title, status, declarations, and relationships remain authoritative and
+unchanged.
+
 `version` is the embodiment's current revision handle — **one value, never a history**.
 History belongs to the versioning system that owns it. Menhir stores semantic identity;
 Git stores revisions. Do not duplicate version control.

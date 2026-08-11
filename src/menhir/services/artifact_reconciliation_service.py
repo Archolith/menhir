@@ -30,6 +30,7 @@ from menhir.domain.artifact_reconciliation import (
     observation_from_action,
     plan_reconciliation,
     route_for_path,
+    WorkArtifactIdentitySnapshot,
 )
 from menhir.domain.work_artifact import ArtifactMedium
 from menhir.infrastructure.artifact_corpus_scanner import (
@@ -43,7 +44,7 @@ from menhir.infrastructure.artifact_corpus_scanner import (
 class SourceRepository(Protocol):
     """The repository surface reconciliation needs. Kept narrow on purpose.
 
-    Audit only calls the two read methods. Cursor advancement remains an
+    Audit only calls the read methods. Cursor advancement remains an
     explicit apply-only operation.
     """
 
@@ -52,6 +53,10 @@ class SourceRepository(Protocol):
     ) -> list[ArtifactSourceSnapshot]: ...
 
     def get_artifact_reconciliation_cursor(self, *, repository: str) -> str | None: ...
+
+    def list_work_artifact_identities(
+        self, *, artifact_uuids: Sequence[str]
+    ) -> list[WorkArtifactIdentitySnapshot]: ...
 
     def advance_artifact_reconciliation_cursor(
         self,
@@ -167,6 +172,14 @@ class ArtifactReconciliationService:
         )
         entries = scan_corpus(root, repository=name, git=evidence)
         snapshots = self._repo.list_artifact_source_snapshots(repository=name)
+        declared_uuids = sorted(
+            {entry.declared_uuid for entry in entries if entry.declared_uuid}
+        )
+        identities = (
+            self._repo.list_work_artifact_identities(artifact_uuids=declared_uuids)
+            if declared_uuids
+            else []
+        )
         renames = tuple(evidence.renames) + tuple(extra_renames)
         evidence_base_valid = (
             evidence_from_commit is None or evidence.rename_evidence_available
@@ -175,6 +188,7 @@ class ArtifactReconciliationService:
             repository=name,
             entries=entries,
             snapshots=snapshots,
+            identities=identities,
             renames=renames,
             observed_commit=evidence.observed_commit,
             cursor_commit=cursor_commit,
@@ -421,6 +435,15 @@ class ArtifactReconciliationService:
                 status_raw=action.raw_status_header,
                 artifact_uuid=action.artifact_uuid,
                 structure_project=action.repository,
+            )
+        if action.kind == ActionKind.ATTACH_SOURCE:
+            return self._repo.attach_artifact_source(
+                artifact_uuid=action.artifact_uuid or "",
+                expected_artifact_type=action.artifact_type or "",
+                repository=action.repository,
+                path=action.path or "",
+                medium=action.medium,
+                observation=observation,
             )
         if action.kind == ActionKind.MARK_SOURCE_UNRESOLVED:
             if not action.source_uuid:

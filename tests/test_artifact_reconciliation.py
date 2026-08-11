@@ -20,6 +20,7 @@ from menhir.domain.artifact_reconciliation import (
     GitRename,
     MatchBasis,
     ResolutionStatus,
+    WorkArtifactIdentitySnapshot,
     compute_plan_digest,
     is_index_document,
     locator_key,
@@ -94,11 +95,12 @@ def source(
     )
 
 
-def plan(entries, snapshots, renames=()):
+def plan(entries, snapshots, renames=(), identities=()):
     return plan_reconciliation(
         repository=REPO,
         entries=entries,
         snapshots=snapshots,
+        identities=identities,
         renames=renames,
         observed_commit="c0ffee",
     )
@@ -176,6 +178,61 @@ def test_a_copy_that_kept_its_parents_uuid_is_a_conflict_for_both() -> None:
     conflicts = [a for a in report.actions if a.kind == ActionKind.CONFLICT]
     assert len(conflicts) == 2
     assert {c.conflict_kind for c in conflicts} == {ConflictKind.DUPLICATE_DECLARED_UUID}
+
+
+@pytest.mark.unit
+def test_declared_uuid_attaches_a_source_to_a_source_less_artifact() -> None:
+    identity = WorkArtifactIdentitySnapshot(
+        artifact_uuid=UUID_1,
+        artifact_type=ArtifactType.PLAN,
+        title="Existing semantic artifact",
+        status=ArtifactStatus.APPROVED,
+        source_count=0,
+    )
+    report = plan(
+        [entry(".agent/plans/a.md", declared_uuid=UUID_1)],
+        [],
+        identities=[identity],
+    )
+    action = only(report, ActionKind.ATTACH_SOURCE)
+    assert action.basis == MatchBasis.DECLARED_UUID
+    assert action.artifact_uuid == UUID_1
+    assert action.artifact_type == ArtifactType.PLAN
+    assert not [a for a in report.actions if a.kind == ActionKind.REGISTER_ARTIFACT]
+
+
+@pytest.mark.unit
+def test_source_less_declared_uuid_with_a_type_disagreement_is_a_conflict() -> None:
+    identity = WorkArtifactIdentitySnapshot(
+        artifact_uuid=UUID_1,
+        artifact_type=ArtifactType.REVIEW,
+        source_count=0,
+    )
+    report = plan(
+        [entry(".agent/plans/a.md", declared_uuid=UUID_1)],
+        [],
+        identities=[identity],
+    )
+    conflict = only(report, ActionKind.CONFLICT)
+    assert conflict.conflict_kind == ConflictKind.DECLARED_UUID_TYPE_DISAGREEMENT
+    assert not report.safe_actions
+
+
+@pytest.mark.unit
+def test_declared_uuid_with_only_out_of_scope_sources_is_a_conflict() -> None:
+    identity = WorkArtifactIdentitySnapshot(
+        artifact_uuid=UUID_1,
+        artifact_type=ArtifactType.PLAN,
+        source_count=1,
+    )
+    report = plan(
+        [entry(".agent/plans/a.md", declared_uuid=UUID_1)],
+        [],
+        identities=[identity],
+    )
+    conflict = only(report, ActionKind.CONFLICT)
+    assert conflict.conflict_kind == ConflictKind.DECLARED_UUID_ALREADY_EMBODIED
+    assert not report.safe_actions
 
 
 # ---------------------------------------------------------------------------
@@ -505,6 +562,34 @@ def test_the_digest_covers_cursor_and_selected_evidence_base() -> None:
         evidence_base_valid=False,
     )
     assert len({stored, override, moved, invalid}) == 4
+
+
+@pytest.mark.unit
+def test_the_digest_covers_declared_artifact_identity_state() -> None:
+    common = {
+        "repository": REPO,
+        "observed_commit": "head",
+        "entries": [entry(".agent/plans/a.md", declared_uuid=UUID_1)],
+        "snapshots": [],
+        "actions": [],
+    }
+    source_less = compute_plan_digest(
+        **common,
+        identities=[WorkArtifactIdentitySnapshot(
+            artifact_uuid=UUID_1,
+            artifact_type=ArtifactType.PLAN,
+            source_count=0,
+        )],
+    )
+    now_embodied = compute_plan_digest(
+        **common,
+        identities=[WorkArtifactIdentitySnapshot(
+            artifact_uuid=UUID_1,
+            artifact_type=ArtifactType.PLAN,
+            source_count=1,
+        )],
+    )
+    assert source_less != now_embodied
 
 
 @pytest.mark.unit

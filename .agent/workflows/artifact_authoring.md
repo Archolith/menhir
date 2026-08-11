@@ -42,6 +42,12 @@ So the division of labour is:
 Never write a derived key into a document. A stale copy of an observation is worse than no copy —
 validation rejects it.
 
+If a document declares a UUID that already exists in Menhir but has no source, audit proposes
+`ATTACH_SOURCE`. That preserves the existing semantic artifact and adds only its first embodiment.
+Do not “fix” this by changing the UUID or recreating the artifact; type disagreement is a conflict
+for owner review, and lifecycle/title differences never authorize reconciliation to overwrite the
+graph artifact.
+
 ## Where each document goes
 
 | Directory | Type | Lane |

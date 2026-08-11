@@ -28,6 +28,10 @@
   with compare-and-set only after a conflict-free, skip-free run with an observed commit.
 - A missing or branch-incomparable Git evidence base is explicit in the digest-bound ledger and
   refuses apply before writes, preventing an empty failed diff from masquerading as “no renames.”
+- Declared UUIDs now distinguish new identity registration from first-source repair. A source-less
+  existing `WorkArtifact` receives an explicit, digest-bound `ATTACH_SOURCE` action when its type
+  agrees and the locator is free; the write preserves all semantic artifact properties and refuses
+  concurrent source creation, type drift, and destination collisions.
 - `.agent/workflows/artifact_authoring.md` is the canonical authoring contract; README, file-index,
   maintenance, feature_planning, and the plan/backlog/reference indexes route to it.
 - Phases 5 (live graph repair) and 6 (frontmatter backfill) are deliberately NOT done: both require

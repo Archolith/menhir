@@ -19,6 +19,7 @@ from menhir.domain.artifact_reconciliation import (
     MatchBasis,
     ResolutionStatus,
     SourceObservation,
+    WorkArtifactIdentitySnapshot,
     sha256_bytes,
 )
 from menhir.domain.work_artifact import ArtifactType
@@ -255,6 +256,86 @@ def test_existing_cursor_advance_is_compare_and_set() -> None:
     assert "MERGE" not in query
 
 
+@pytest.mark.unit
+def test_declared_artifact_identity_read_includes_source_less_artifacts() -> None:
+    neo = _StubNeo4j(responses=[[
+        {
+            "artifact_uuid": "a-1",
+            "artifact_type": ArtifactType.PLAN,
+            "title": "T",
+            "status": "APPROVED",
+            "source_count": 0,
+        }
+    ]])
+    identities = WorkArtifactRepository(neo).list_work_artifact_identities(
+        artifact_uuids=["a-1"]
+    )
+    assert identities == [
+        WorkArtifactIdentitySnapshot(
+            artifact_uuid="a-1",
+            artifact_type=ArtifactType.PLAN,
+            title="T",
+            status="APPROVED",
+            source_count=0,
+        )
+    ]
+    assert "OPTIONAL MATCH" in neo.calls[0]["query"]
+
+
+@pytest.mark.unit
+def test_attach_source_preserves_artifact_and_creates_only_the_embodiment() -> None:
+    neo = _StubNeo4j(responses=[[
+        {
+            "artifact_type": ArtifactType.PLAN,
+            "source_count": 0,
+            "blockers": 0,
+            "type_matches": True,
+            "attached": True,
+        }
+    ]])
+    result = WorkArtifactRepository(neo).attach_artifact_source(
+        artifact_uuid="a-1",
+        expected_artifact_type=ArtifactType.PLAN,
+        repository="menhir",
+        path=".agent/plans/a.md",
+        medium="markdown",
+        observation=OBSERVATION,
+    )
+    assert result["applied"] is True
+    query = neo.calls[0]["query"]
+    assert "CREATE (a)-[:EMBODIED_IN]->(s:ArtifactSource)" in query
+    assert "SET a.title" not in query and "SET a.status" not in query
+    props = neo.calls[0]["params"]["props"]
+    assert props["current_locator_key"] == "menhir|markdown|.agent/plans/a.md"
+    assert props["corpus_lane"] == CorpusLane.ARCHIVE
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("row", "reason"),
+    [
+        ({"artifact_type": ArtifactType.REVIEW, "source_count": 0, "blockers": 0,
+          "type_matches": False, "attached": False}, "artifact_type_changed"),
+        ({"artifact_type": ArtifactType.PLAN, "source_count": 1, "blockers": 0,
+          "type_matches": True, "attached": False}, "artifact_already_has_source"),
+        ({"artifact_type": ArtifactType.PLAN, "source_count": 0, "blockers": 1,
+          "type_matches": True, "attached": False}, "destination_already_claimed"),
+    ],
+)
+def test_attach_source_refuses_changed_premises(row: dict, reason: str) -> None:
+    neo = _StubNeo4j(responses=[[row]])
+    result = WorkArtifactRepository(neo).attach_artifact_source(
+        artifact_uuid="a-1",
+        expected_artifact_type=ArtifactType.PLAN,
+        repository="menhir",
+        path=".agent/plans/a.md",
+        medium="markdown",
+        observation=OBSERVATION,
+    )
+    assert result["applied"] is False
+    assert result["reason"] == reason
+
+
 # ---------------------------------------------------------------------------
 # Scanner
 # ---------------------------------------------------------------------------
@@ -341,8 +422,9 @@ def test_index_links_are_read_from_the_directory_readme(tmp_path: Path) -> None:
 class _RecordingRepo:
     """Records every call so a test can assert what the service did and did not do."""
 
-    def __init__(self, snapshots=(), *, cursor: str | None = None) -> None:
+    def __init__(self, snapshots=(), *, identities=(), cursor: str | None = None) -> None:
         self.snapshots = list(snapshots)
+        self.identities = list(identities)
         self.cursor = cursor
         self.calls: list[tuple[str, dict]] = []
 
@@ -361,9 +443,17 @@ class _RecordingRepo:
         self.calls.append(("list", {"repository": repository}))
         return list(self.snapshots)
 
+    def list_work_artifact_identities(self, *, artifact_uuids):
+        self.calls.append(("identities", {"artifact_uuids": artifact_uuids}))
+        return list(self.identities)
+
     def register_work_artifact(self, **kwargs):
         self.calls.append(("register", kwargs))
         return {"applied": True, "artifact_uuid": "new"}
+
+    def attach_artifact_source(self, **kwargs):
+        self.calls.append(("attach", kwargs))
+        return {"applied": True, "artifact_uuid": kwargs["artifact_uuid"]}
 
     def refresh_artifact_source(self, **kwargs):
         self.calls.append(("refresh", kwargs))
@@ -440,6 +530,39 @@ def test_explicit_first_repository_registration_can_apply(tmp_path: Path) -> Non
     assert [name for name, _ in repo.calls] == [
         "cursor", "list", "cursor", "register"
     ]
+
+
+@pytest.mark.unit
+def test_existing_source_less_declared_uuid_dispatches_attach_not_register(
+    tmp_path: Path,
+) -> None:
+    declared = "33333333-3333-4333-8333-333333333333"
+    _write(
+        tmp_path,
+        ".agent/plans/a.md",
+        f"---\nartifact_uuid: {declared}\nartifact_type: plan\n---\n# A\n",
+    )
+    identity = WorkArtifactIdentitySnapshot(
+        artifact_uuid=declared,
+        artifact_type=ArtifactType.PLAN,
+        source_count=0,
+    )
+    repo = _RecordingRepo(identities=[identity])
+    service = ArtifactReconciliationService(repo)
+    report = service.audit(tmp_path, repository="t")
+    assert [action.kind for action in report.safe_actions] == [ActionKind.ATTACH_SOURCE]
+
+    repo.calls.clear()
+    result = service.apply(
+        tmp_path,
+        expected_digest=report.plan_digest,
+        repository="t",
+    )
+    assert result.ok
+    assert len(result.applied) == 1
+    names = [name for name, _ in repo.calls]
+    assert "attach" in names
+    assert "register" not in names
 
 
 @pytest.mark.unit

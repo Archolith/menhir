@@ -292,6 +292,8 @@ Safe apply handles only:
 
 - exact source refresh;
 - declared-UUID relocation;
+- first-source attachment when a declared UUID identifies an existing source-less artifact of the
+  same type;
 - exact old/new rename relocation;
 - unique-hash relocation under the strict rules above;
 - registration under an unambiguous typed route;
@@ -299,6 +301,14 @@ Safe apply handles only:
 
 Conflicts produce no mutation for the affected source. One conflict does not block unrelated safe
 actions, but the result must list applied, skipped, and conflicted actions separately.
+
+Registration and attachment are distinct ledger actions. `REGISTER_ARTIFACT` creates semantic
+identity plus its first embodiment. `ATTACH_SOURCE` creates only the first `ArtifactSource` and
+`EMBODIED_IN` edge for a globally existing UUID; it never rewrites the artifact title, lifecycle,
+type, or relationships. Audit bulk-reads declared UUID identities and binds their type, status, and
+source count into the plan digest. Type disagreement, an already-present source outside the scoped
+source inventory, or an occupied destination is a conflict. Apply locks and rechecks the artifact,
+so a source added after audit becomes a skipped conditional write rather than a duplicate.
 
 ### Immediate rename detector
 

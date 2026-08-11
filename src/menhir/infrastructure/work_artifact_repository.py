@@ -19,8 +19,13 @@ Both subordinates are Owned Records (`model.owned_record`): own label, never
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Sequence
 from uuid import uuid4
+
+try:
+    from neo4j.exceptions import ConstraintError as _Neo4jConstraintError
+except ModuleNotFoundError:  # pragma: no cover - import guard
+    _Neo4jConstraintError = ()  # type: ignore[assignment]
 
 from menhir.domain.artifact_shape import ShapeReport, ShapeStatus, validate_shape
 from menhir.domain.todo_location import parse_code_ref
@@ -30,6 +35,7 @@ from menhir.domain.artifact_reconciliation import (
     ResolutionStatus,
     SourceObservation,
     VersionKind,
+    WorkArtifactIdentitySnapshot,
     locator_key,
 )
 from menhir.domain.work_artifact import (
@@ -289,6 +295,38 @@ class WorkArtifactRepository:
             {"repository": repository},
         )
         return rows[0].get("commit") if rows else None
+
+    def list_work_artifact_identities(
+        self, *, artifact_uuids: Sequence[str]
+    ) -> list[WorkArtifactIdentitySnapshot]:
+        """Identity state for declared UUIDs, including artifacts with no source."""
+        if not artifact_uuids:
+            return []
+        rows = self.neo4j.execute(
+            """
+            UNWIND $artifact_uuids AS artifact_uuid
+            MATCH (a:WorkArtifact {artifact_uuid: artifact_uuid})
+            OPTIONAL MATCH (a)-[:EMBODIED_IN]->(s:ArtifactSource)
+            RETURN a.artifact_uuid AS artifact_uuid,
+                   a.artifact_type AS artifact_type,
+                   a.title AS title,
+                   a.status AS status,
+                   count(s) AS source_count
+            ORDER BY a.artifact_uuid
+            """,
+            {"artifact_uuids": sorted(set(artifact_uuids))},
+        )
+        return [
+            WorkArtifactIdentitySnapshot(
+                artifact_uuid=row["artifact_uuid"],
+                artifact_type=row.get("artifact_type"),
+                title=row.get("title"),
+                status=row.get("status"),
+                source_count=int(row.get("source_count", 0) or 0),
+            )
+            for row in rows
+            if row.get("artifact_uuid")
+        ]
 
     def advance_artifact_reconciliation_cursor(
         self,
@@ -720,6 +758,103 @@ class WorkArtifactRepository:
         created["applied"] = True
         created["source_uuid"] = props["source_uuid"]
         return created
+
+    def attach_artifact_source(
+        self,
+        *,
+        artifact_uuid: str,
+        expected_artifact_type: str,
+        repository: str,
+        path: str,
+        medium: str,
+        observation: SourceObservation,
+    ) -> dict[str, Any]:
+        """Attach the first embodiment to an existing semantic artifact.
+
+        A temporary property write locks the artifact before source state is
+        read, so concurrent attachment attempts serialize. The property is
+        removed in the same transaction and never becomes committed state.
+        """
+        if medium not in ARTIFACT_MEDIA:
+            raise ValueError(f"unknown medium: {medium!r}")
+
+        source_uuid = str(uuid4())
+        observed_at = observation.observed_at or datetime.now(timezone.utc).isoformat()
+        key = locator_key(repository, medium, path)
+        props = self._source_write_props(observation)
+        props.update({
+            "source_uuid": source_uuid,
+            "medium": medium,
+            "locator_repository": repository,
+            "locator_path": path,
+            "current_locator_key": key,
+            "first_seen_at": observed_at,
+        })
+        try:
+            rows = self.neo4j.execute(
+                """
+                MATCH (a:WorkArtifact {artifact_uuid: $artifact_uuid})
+                SET a._reconcile_attach_lock = $lock_token
+                WITH a
+                OPTIONAL MATCH (a)-[:EMBODIED_IN]->(existing:ArtifactSource)
+                WITH a, count(existing) AS source_count
+                OPTIONAL MATCH (occupied:ArtifactSource)
+                WHERE coalesce(occupied.current_locator_key,
+                               coalesce(occupied.locator_repository, '') + '|'
+                               + coalesce(occupied.medium, '') + '|'
+                               + coalesce(occupied.locator_path, '')) = $key
+                WITH a, source_count, count(occupied) AS blockers,
+                     a.artifact_type = $expected_artifact_type AS type_matches
+                FOREACH (_ IN CASE WHEN source_count = 0 AND blockers = 0 AND type_matches
+                                   THEN [1] ELSE [] END |
+                    CREATE (a)-[:EMBODIED_IN]->(s:ArtifactSource)
+                    SET s += $props
+                )
+                REMOVE a._reconcile_attach_lock
+                WITH a, source_count, blockers, type_matches
+                OPTIONAL MATCH (a)-[:EMBODIED_IN]->(
+                    created:ArtifactSource {source_uuid: $source_uuid}
+                )
+                RETURN a.artifact_type AS artifact_type,
+                       source_count,
+                       blockers,
+                       type_matches,
+                       count(created) = 1 AS attached
+                """,
+                {
+                    "artifact_uuid": artifact_uuid,
+                    "expected_artifact_type": expected_artifact_type,
+                    "key": key,
+                    "source_uuid": source_uuid,
+                    "lock_token": str(uuid4()),
+                    "props": props,
+                },
+            )
+        except _Neo4jConstraintError:
+            # The locator uniqueness constraint is the final race fence when a
+            # different artifact claims the destination concurrently.
+            return {"applied": False, "reason": "destination_already_claimed"}
+
+        if not rows:
+            return {"applied": False, "reason": "artifact_not_found"}
+        row = rows[0]
+        if not row.get("type_matches"):
+            return {
+                "applied": False,
+                "reason": "artifact_type_changed",
+                "artifact_type": row.get("artifact_type"),
+            }
+        if int(row.get("source_count", 0) or 0) > 0:
+            return {"applied": False, "reason": "artifact_already_has_source"}
+        if int(row.get("blockers", 0) or 0) > 0:
+            return {"applied": False, "reason": "destination_already_claimed"}
+        if not row.get("attached"):
+            return {"applied": False, "reason": "source_attach_not_confirmed"}
+        return {
+            "applied": True,
+            "artifact_uuid": artifact_uuid,
+            "source_uuid": source_uuid,
+        }
 
     def _known_projects(self) -> frozenset[str]:
         if self._known_projects_cache is None:
