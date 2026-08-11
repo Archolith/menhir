@@ -24,6 +24,14 @@ from uuid import uuid4
 
 from menhir.domain.artifact_shape import ShapeReport, ShapeStatus, validate_shape
 from menhir.domain.todo_location import parse_code_ref
+from menhir.domain.artifact_reconciliation import (
+    ARTIFACT_SOURCE_SCHEMA_VERSION,
+    ArtifactSourceSnapshot,
+    ResolutionStatus,
+    SourceObservation,
+    VersionKind,
+    locator_key,
+)
 from menhir.domain.work_artifact import (
     ABOUT_EDGE,
     ANSWERS_QUESTION_EDGE,
@@ -79,6 +87,7 @@ class WorkArtifactRepository:
         status_unresolved_reason: str | None = None,
         document: str | None = None,
         structure_project: str | None = None,
+        artifact_uuid: str | None = None,
     ) -> dict[str, Any]:
         """Create a :WorkArtifact with its embodiment and any code references.
 
@@ -103,7 +112,10 @@ class WorkArtifactRepository:
                 f"status {resolved_status!r} is not valid for {artifact_type!r}"
             )
 
-        artifact_uuid = str(uuid4())
+        # A caller may supply the UUID the document already declares, so a
+        # clean-clone registration reuses the author's identity instead of
+        # minting a second one for the same record.
+        artifact_uuid = artifact_uuid or str(uuid4())
         now = datetime.now(timezone.utc).isoformat()
         safe_namespace = _safe_namespace(namespace)
 
@@ -208,6 +220,428 @@ class WorkArtifactRepository:
             },
         )
         return bool(rows and int(rows[0].get("updated", 0)) > 0)
+
+    # ------------------------------------------------------------------
+    # Source reconciliation (v2)
+    #
+    # Every write here is conditional on the state the audit read: the source
+    # UUID, the old locator, and the integrity that was current when the plan
+    # was computed. A stale action is refused rather than applied over newer
+    # state -- an approved ledger must not be able to overwrite a change that
+    # happened after it was approved.
+    # ------------------------------------------------------------------
+
+    def list_artifact_source_snapshots(
+        self, *, repository: str | None = None
+    ) -> list[ArtifactSourceSnapshot]:
+        """Every embodiment as the graph holds it, for the read-only audit."""
+        rows = self.neo4j.execute(
+            """
+            MATCH (a:WorkArtifact)-[:EMBODIED_IN]->(s:ArtifactSource)
+            WHERE $repository IS NULL OR s.locator_repository = $repository
+            RETURN a.artifact_uuid       AS artifact_uuid,
+                   a.artifact_type       AS artifact_type,
+                   a.title               AS title,
+                   a.status              AS status,
+                   s.source_uuid         AS source_uuid,
+                   s.medium              AS medium,
+                   s.locator_repository  AS repository,
+                   s.locator_path        AS path,
+                   s.integrity           AS integrity,
+                   s.version             AS version,
+                   s.version_kind        AS version_kind,
+                   s.corpus_lane         AS corpus_lane,
+                   s.resolution_status   AS resolution_status,
+                   s.schema_version      AS schema_version
+            ORDER BY s.locator_path, a.artifact_uuid
+            """,
+            {"repository": repository},
+        )
+        return [
+            ArtifactSourceSnapshot(
+                artifact_uuid=row.get("artifact_uuid"),
+                medium=row.get("medium") or ArtifactMedium.MARKDOWN,
+                source_uuid=row.get("source_uuid"),
+                artifact_type=row.get("artifact_type"),
+                repository=row.get("repository"),
+                path=row.get("path"),
+                integrity=row.get("integrity"),
+                version=row.get("version"),
+                version_kind=row.get("version_kind"),
+                lane=row.get("corpus_lane"),
+                resolution_status=row.get("resolution_status") or ResolutionStatus.RESOLVED,
+                title=row.get("title"),
+                status=row.get("status"),
+                schema_version=row.get("schema_version"),
+            )
+            for row in rows
+            if row.get("artifact_uuid")
+        ]
+
+    def backfill_source_uuids(self) -> int:
+        """Give every existing embodiment a stable handle.
+
+        Addressability for an Owned Record, not semantic identity: a source
+        still carries no meaning alone and still dies with its artifact. It has
+        to exist before a uniqueness constraint can be created, and before a
+        write can be conditioned on "this exact source and no other".
+        """
+        rows = self.neo4j.execute(
+            """
+            MATCH (:WorkArtifact)-[:EMBODIED_IN]->(s:ArtifactSource)
+            WHERE s.source_uuid IS NULL
+            RETURN elementId(s) AS eid
+            """,
+            {},
+        )
+        stamped = 0
+        for row in rows:
+            self.neo4j.execute(
+                """
+                MATCH (s:ArtifactSource) WHERE elementId(s) = $eid
+                SET s.source_uuid = coalesce(s.source_uuid, $uuid)
+                """,
+                {"eid": row["eid"], "uuid": str(uuid4())},
+            )
+            stamped += 1
+        return stamped
+
+    def backfill_current_locator_keys(self) -> int:
+        """Materialize the normalized locator key on every existing source.
+
+        Also retypes the v1 ``version`` leg: a forty-character value written by
+        the old migration is a commit SHA, and labelling it as such is the only
+        way a later reader can tell it apart from a blob OID. The value is not
+        reinterpreted, only described.
+        """
+        rows = self.neo4j.execute(
+            """
+            MATCH (:WorkArtifact)-[:EMBODIED_IN]->(s:ArtifactSource)
+            RETURN elementId(s)         AS eid,
+                   s.locator_repository AS repository,
+                   s.medium             AS medium,
+                   s.locator_path       AS path,
+                   s.version            AS version,
+                   s.version_kind       AS version_kind
+            """,
+            {},
+        )
+        updated = 0
+        for row in rows:
+            key = locator_key(
+                row.get("repository"),
+                row.get("medium") or ArtifactMedium.MARKDOWN,
+                row.get("path"),
+            )
+            version_kind = row.get("version_kind")
+            if version_kind is None and row.get("version"):
+                version_kind = VersionKind.LEGACY_COMMIT_SHA
+            self.neo4j.execute(
+                """
+                MATCH (s:ArtifactSource) WHERE elementId(s) = $eid
+                SET s.current_locator_key = $key,
+                    s.version_kind = coalesce(s.version_kind, $version_kind),
+                    s.resolution_status = coalesce(s.resolution_status, $resolved)
+                """,
+                {
+                    "eid": row["eid"],
+                    "key": key,
+                    "version_kind": version_kind,
+                    "resolved": ResolutionStatus.RESOLVED,
+                },
+            )
+            updated += 1
+        return updated
+
+    def _source_write_props(self, observation: SourceObservation) -> dict[str, Any]:
+        """Observation properties, with absent legs left alone rather than nulled.
+
+        A scan that could not reach Git still knows the raw bytes. Writing None
+        over a previously known blob OID would turn "not observed this time"
+        into "does not exist", which is the same class of error as treating a
+        missing file as a deleted artifact.
+        """
+        return {k: v for k, v in observation.as_properties().items() if v is not None}
+
+    def refresh_artifact_source(
+        self,
+        *,
+        source_uuid: str,
+        observation: SourceObservation,
+        expected_integrity: str | None = None,
+    ) -> dict[str, Any]:
+        """Update integrity and provenance for a source that has not moved."""
+        rows = self.neo4j.execute(
+            """
+            MATCH (a:WorkArtifact)-[:EMBODIED_IN]->(s:ArtifactSource {source_uuid: $source_uuid})
+            WITH a, s,
+                 ($expected IS NULL OR coalesce(s.integrity, '') = $expected) AS fresh
+            FOREACH (_ IN CASE WHEN fresh THEN [1] ELSE [] END | SET s += $props)
+            RETURN fresh AS fresh, a.artifact_uuid AS artifact_uuid
+            """,
+            {
+                "source_uuid": source_uuid,
+                "expected": expected_integrity,
+                "props": self._source_write_props(observation),
+            },
+        )
+        if not rows:
+            return {"applied": False, "reason": "source_not_found"}
+        row = rows[0]
+        if not row.get("fresh"):
+            return {"applied": False, "reason": "stale_expected_integrity"}
+        return {
+            "applied": True,
+            "artifact_uuid": row.get("artifact_uuid"),
+            "source_uuid": source_uuid,
+        }
+
+    def relocate_artifact_source(
+        self,
+        *,
+        source_uuid: str,
+        old_locator: dict[str, str],
+        new_locator: dict[str, str],
+        observation: SourceObservation,
+        expected_integrity: str | None = None,
+    ) -> dict[str, Any]:
+        """Move one source's locator in place, preserving identity and edges.
+
+        The destination is checked inside the same statement that changes the
+        key. Checking first and writing second would leave a window in which two
+        relocations both saw an empty destination -- and the uniqueness
+        constraint on the key is the backstop if one still slips through.
+        """
+        medium = str(
+            new_locator.get("medium")
+            or old_locator.get("medium")
+            or ArtifactMedium.MARKDOWN
+        )
+        repository = new_locator.get("repository") or old_locator.get("repository")
+        new_key = locator_key(repository, medium, new_locator.get("path"))
+        old_key = locator_key(old_locator.get("repository"), medium, old_locator.get("path"))
+        props = self._source_write_props(observation)
+        props["locator_repository"] = repository
+        props["locator_path"] = new_locator.get("path")
+        props["current_locator_key"] = new_key
+
+        rows = self.neo4j.execute(
+            """
+            MATCH (a:WorkArtifact)-[:EMBODIED_IN]->(s:ArtifactSource {source_uuid: $source_uuid})
+            OPTIONAL MATCH (other:ArtifactSource)
+            WHERE coalesce(other.current_locator_key,
+                           coalesce(other.locator_repository, '') + '|'
+                           + coalesce(other.medium, '') + '|'
+                           + coalesce(other.locator_path, '')) = $new_key
+              AND coalesce(other.source_uuid, '') <> $source_uuid
+            WITH a, s, count(other) AS blockers,
+                 (coalesce(s.current_locator_key,
+                           coalesce(s.locator_repository, '') + '|'
+                           + coalesce(s.medium, '') + '|'
+                           + coalesce(s.locator_path, '')) = $old_key) AS at_old,
+                 ($expected IS NULL OR coalesce(s.integrity, '') = $expected) AS fresh
+            FOREACH (_ IN CASE WHEN blockers = 0 AND at_old AND fresh THEN [1] ELSE [] END |
+                SET s += $props)
+            RETURN blockers AS blockers, at_old AS at_old, fresh AS fresh,
+                   a.artifact_uuid AS artifact_uuid
+            """,
+            {
+                "source_uuid": source_uuid,
+                "new_key": new_key,
+                "old_key": old_key,
+                "expected": expected_integrity,
+                "props": props,
+            },
+        )
+        if not rows:
+            return {"applied": False, "reason": "source_not_found"}
+        row = rows[0]
+        if int(row.get("blockers") or 0) > 0:
+            return {"applied": False, "reason": "destination_already_claimed"}
+        if not row.get("at_old"):
+            return {"applied": False, "reason": "stale_old_locator"}
+        if not row.get("fresh"):
+            return {"applied": False, "reason": "stale_expected_integrity"}
+        return {
+            "applied": True,
+            "artifact_uuid": row.get("artifact_uuid"),
+            "source_uuid": source_uuid,
+            "path": new_locator.get("path"),
+        }
+
+    def _source_uuid_at_locator(
+        self, repository: str, medium: str, path: str
+    ) -> tuple[str | None, str | None]:
+        """Resolve one locator to one source UUID, or say why it could not.
+
+        Returns ``(source_uuid, reason)``. Ambiguity is a refusal: an old path
+        that identifies two sources is exactly the case where picking one does
+        the most damage.
+        """
+        key = locator_key(repository, medium, path)
+        rows = self.neo4j.execute(
+            """
+            MATCH (:WorkArtifact)-[:EMBODIED_IN]->(s:ArtifactSource)
+            WHERE coalesce(s.current_locator_key,
+                           coalesce(s.locator_repository, '') + '|' + coalesce(s.medium, '')
+                           + '|' + coalesce(s.locator_path, '')) = $key
+            RETURN s.source_uuid AS source_uuid
+            """,
+            {"key": key},
+        )
+        if not rows:
+            return None, "locator_not_found"
+        if len(rows) > 1:
+            return None, "locator_is_ambiguous"
+        source_uuid = rows[0].get("source_uuid")
+        if not source_uuid:
+            return None, "source_uuid_not_backfilled"
+        return str(source_uuid), None
+
+    def relocate_artifact_source_by_locator(
+        self,
+        *,
+        repository: str,
+        medium: str,
+        old_path: str,
+        new_path: str,
+        observation: SourceObservation,
+    ) -> dict[str, Any]:
+        """Relocate by old locator, for callers with no source UUID in hand.
+
+        The immediate hook detector knows two paths and nothing else, which is
+        enough for an unambiguous move and deliberately not enough for anything
+        else.
+        """
+        source_uuid, reason = self._source_uuid_at_locator(repository, medium, old_path)
+        if source_uuid is None:
+            return {"applied": False, "reason": reason}
+        return self.relocate_artifact_source(
+            source_uuid=source_uuid,
+            old_locator={"repository": repository, "path": old_path, "medium": medium},
+            new_locator={"repository": repository, "path": new_path, "medium": medium},
+            observation=observation,
+        )
+
+    def refresh_artifact_source_by_locator(
+        self, *, repository: str, medium: str, path: str, observation: SourceObservation
+    ) -> dict[str, Any]:
+        """Refresh integrity for an unmoved path. One source or nothing."""
+        source_uuid, reason = self._source_uuid_at_locator(repository, medium, path)
+        if source_uuid is None:
+            return {"applied": False, "reason": reason}
+        return self.refresh_artifact_source(source_uuid=source_uuid, observation=observation)
+
+    def mark_artifact_source_unresolved(
+        self, *, source_uuid: str, reason: str, observed_commit: str | None = None
+    ) -> dict[str, Any]:
+        """Record that a source could not be found. Never a delete.
+
+        The locator, the artifact, and every relationship stay exactly as they
+        were, so the state is reversible: if the file reappears, the next audit
+        refreshes it back to resolved rather than minting a second identity for
+        the same document.
+        """
+        rows = self.neo4j.execute(
+            """
+            MATCH (a:WorkArtifact)-[:EMBODIED_IN]->(s:ArtifactSource {source_uuid: $source_uuid})
+            SET s.resolution_status = $unresolved,
+                s.resolution_reason = $reason,
+                s.observed_commit = coalesce($observed_commit, s.observed_commit),
+                s.last_reconciled_at = $now,
+                s.schema_version = $schema_version
+            RETURN a.artifact_uuid AS artifact_uuid
+            """,
+            {
+                "source_uuid": source_uuid,
+                "unresolved": ResolutionStatus.UNRESOLVED,
+                "reason": reason,
+                "observed_commit": observed_commit,
+                "now": datetime.now(timezone.utc).isoformat(),
+                "schema_version": ARTIFACT_SOURCE_SCHEMA_VERSION,
+            },
+        )
+        if not rows:
+            return {"applied": False, "reason": "source_not_found"}
+        return {"applied": True, "artifact_uuid": rows[0].get("artifact_uuid")}
+
+    def register_work_artifact(
+        self,
+        *,
+        artifact_type: str,
+        title: str,
+        repository: str,
+        path: str,
+        medium: str,
+        observation: SourceObservation,
+        namespace: str | None = None,
+        status: str | None = None,
+        status_raw: str | None = None,
+        artifact_uuid: str | None = None,
+        structure_project: str | None = None,
+    ) -> dict[str, Any]:
+        """Create one artifact for one newly discovered source.
+
+        Idempotent on both keys that could already identify it: a declared UUID
+        already in the graph, and a locator already claimed. Re-running a
+        reconcile must not mint a second identity for a document that has one.
+        """
+        if artifact_uuid:
+            existing = self.neo4j.execute(
+                "MATCH (a:WorkArtifact {artifact_uuid: $uuid}) RETURN a.artifact_uuid AS uuid",
+                {"uuid": artifact_uuid},
+            )
+            if existing:
+                return {
+                    "applied": False,
+                    "reason": "declared_uuid_already_registered",
+                    "artifact_uuid": artifact_uuid,
+                }
+
+        key = locator_key(repository, medium, path)
+        claimed = self.neo4j.execute(
+            """
+            MATCH (s:ArtifactSource)
+            WHERE coalesce(s.current_locator_key,
+                           coalesce(s.locator_repository, '') + '|'
+                           + coalesce(s.medium, '') + '|'
+                           + coalesce(s.locator_path, '')) = $key
+            RETURN count(s) AS n
+            """,
+            {"key": key},
+        )
+        if claimed and int(claimed[0].get("n", 0) or 0) > 0:
+            return {"applied": False, "reason": "destination_already_claimed"}
+
+        created = self.create_artifact(
+            artifact_type=artifact_type,
+            title=title,
+            source=ArtifactSourceSpec(
+                medium=medium,
+                locator={"repository": repository, "path": path},
+                version=observation.version,
+                integrity=observation.integrity,
+            ),
+            namespace=namespace,
+            status=status,
+            status_raw=status_raw,
+            structure_project=structure_project,
+            artifact_uuid=artifact_uuid,
+        )
+        props = self._source_write_props(observation)
+        props["current_locator_key"] = key
+        props["source_uuid"] = str(uuid4())
+        self.neo4j.execute(
+            """
+            MATCH (a:WorkArtifact {artifact_uuid: $uuid})-[:EMBODIED_IN]->(s:ArtifactSource)
+            WHERE s.locator_path = $path
+            SET s += $props
+            """,
+            {"uuid": created["artifact_uuid"], "path": path, "props": props},
+        )
+        created["applied"] = True
+        created["source_uuid"] = props["source_uuid"]
+        return created
 
     def _known_projects(self) -> frozenset[str]:
         if self._known_projects_cache is None:

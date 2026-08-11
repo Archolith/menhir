@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import typer
 
+from menhir.cli.artifacts import artifacts_app
 from menhir.cli.hook import hook_app
 from menhir.infrastructure.text_io import read_text_utf8
 from menhir.infrastructure.logging_config import (
@@ -17,6 +18,7 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(hook_app)
+app.add_typer(artifacts_app)
 
 
 # Distinct `serve` exit code meaning "another server already owns the bind port".

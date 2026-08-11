@@ -1,6 +1,7 @@
 """Ops tool group — enrichment management, scheduler, diagnostics, stats, todos, artifacts."""
 
 from .add_todo import AddTodoTool
+from .audit_artifact_corpus import AuditArtifactCorpusTool
 from .list_artifact_questions import ArtifactQuestionsTool
 from .get_artifact_relationships import ArtifactRelationshipsTool
 from .close_stale_todos import CloseStaleTodosTool
@@ -22,6 +23,7 @@ from .get_todo import GetTodoTool
 from .link_artifacts import LinkArtifactsTool
 from .list_artifacts import ListArtifactsTool
 from .supersede_artifact import SupersedeArtifactTool
+from .relocate_artifact_source import RelocateArtifactSourceTool
 from .transition_artifact import TransitionArtifactTool
 from .get_memory_stats import GetMemoryStatsTool
 from .get_provenance import GetProvenanceTool
@@ -62,6 +64,8 @@ OPS_TOOLS = [
     LinkArtifactsTool,
     SupersedeArtifactTool,
     TransitionArtifactTool,
+    AuditArtifactCorpusTool,
+    RelocateArtifactSourceTool,
     RateRecallTool,
     MintClientTool,
     RevokeClientTool,

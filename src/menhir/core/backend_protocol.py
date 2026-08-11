@@ -566,6 +566,31 @@ class MemoryBackend(Protocol):
         """Move an artifact to a new status if the transition is legal for its type."""
         ...
 
+    async def fetch_artifact_corpus_audit(
+        self,
+        *,
+        repo_path: str,
+        repository: str | None = None,
+        from_commit: str | None = None,
+        conflict_limit: int = 25,
+    ) -> dict[str, Any]:
+        """Read-only graph/filesystem parity summary for one artifact corpus."""
+        ...
+
+    async def relocate_artifact_source(
+        self,
+        *,
+        artifact_uuid: str,
+        old_path: str,
+        new_path: str,
+        repository: str | None = None,
+        medium: str = "markdown",
+        expected_old_integrity: str = "",
+        observed_integrity: str = "",
+    ) -> dict[str, Any]:
+        """Move one artifact source's locator, preserving identity and edges."""
+        ...
+
     async def close_todo(self, uuid: str) -> bool:
         """Mark a todo as closed. Returns True if it was open and got closed."""
         ...

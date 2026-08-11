@@ -403,6 +403,11 @@ class ToolEventResponse(BaseModel):
     matched: int          # existing structure-file nodes matched
     marked_dirty: bool
     ignored_reason: str | None = None
+    # Optional and additive. Artifact reconciliation runs AFTER structural dirty
+    # marking and cannot fail it: a path outside the corpus, an ambiguous move,
+    # or a repository error all leave this null-or-unapplied and change nothing
+    # about the structural half of the response.
+    artifact_reconciliation: dict[str, Any] | None = None
 
 
 class StaleAnchorVerificationRequest(BaseModel):
@@ -596,6 +601,12 @@ _BACKEND_METHODS = {
     "link_artifacts",
     "supersede_artifact",
     "transition_artifact_status",
+    # Named `fetch_` rather than `audit_` so the read-only remainder rule below
+    # classifies it by convention instead of by exception. The MCP tool it backs
+    # is still called `audit_artifact_corpus`: the agent-facing name describes
+    # the task, the dispatch name has to obey the tier-naming policy.
+    "fetch_artifact_corpus_audit",
+    "relocate_artifact_source",
     "close_todo",
     "delete_todo",
     "close_stale_todos",
@@ -633,6 +644,11 @@ _OP_TIER_AGENT = {
     # an assertion about engineering history, so it is not readonly. None are
     # operator-tier: they are all reversible and none deletes anything.
     "link_artifacts", "supersede_artifact", "transition_artifact_status",
+    # Relocation changes a source locator, which is an assertion about where a
+    # document is -- reversible, and never a lifecycle or relationship change,
+    # so agent rather than operator. `fetch_artifact_corpus_audit` is absent
+    # deliberately: it writes nothing and falls to the readonly remainder.
+    "relocate_artifact_source",
 }
 assert _OP_TIER_OPERATOR <= _BACKEND_METHODS and _OP_TIER_AGENT <= _BACKEND_METHODS, (
     "op tier map references unknown backend operations"

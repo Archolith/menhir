@@ -480,9 +480,33 @@ async def record_tool_event(request: Request, body: ToolEventRequest) -> ToolEve
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    # Artifact source reconciliation is a second, independent consumer of the
+    # same event. It runs after the structural mark has already been recorded so
+    # a reconciliation refusal cannot roll back or suppress stale detection --
+    # the hook is a low-latency accelerator, not the coverage backstop.
+    reconciliation = None
+    if hasattr(adapter, "reconcile_file_event_source"):
+        try:
+            reconciliation = await asyncio.to_thread(
+                adapter.reconcile_file_event_source,
+                path=path,
+                operation=body.operation,
+                old_path=body.old_path,
+                repository=project,
+                after_hash=body.after_hash,
+                git_commit=body.git_commit,
+            )
+        except Exception as exc:  # noqa: BLE001 - never fail the hook on this leg
+            logger.warning("artifact source reconciliation failed for %s: %s", path, exc)
+            reconciliation = {"attempted": True, "applied": False, "reason": "error"}
+        if reconciliation and not reconciliation.get("attempted"):
+            reconciliation = None  # not corpus material; nothing worth reporting
+
     return ToolEventResponse(
         accepted=True, event_type=body.event_type, operation=body.operation,
         matched=int(result.get("matched", 0)), marked_dirty=bool(result.get("marked_dirty", False)),
+        artifact_reconciliation=reconciliation,
     )
 
 

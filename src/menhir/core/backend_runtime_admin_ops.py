@@ -437,6 +437,48 @@ class RuntimeProviderAdminOpsMixin:
             )
         )
 
+    async def fetch_artifact_corpus_audit(
+        self,
+        *,
+        repo_path: str,
+        repository: str | None = None,
+        from_commit: str | None = None,
+        conflict_limit: int = 25,
+    ) -> dict[str, Any]:
+        return _to_jsonable(
+            await self._off_loop(
+                self.built.graph_adapter.fetch_artifact_corpus_audit,
+                repo_path=repo_path,
+                repository=repository,
+                from_commit=from_commit,
+                conflict_limit=conflict_limit,
+            )
+        )
+
+    async def relocate_artifact_source(
+        self,
+        *,
+        artifact_uuid: str,
+        old_path: str,
+        new_path: str,
+        repository: str | None = None,
+        medium: str = "markdown",
+        expected_old_integrity: str = "",
+        observed_integrity: str = "",
+    ) -> dict[str, Any]:
+        return _to_jsonable(
+            await self._off_loop(
+                self.built.graph_adapter.relocate_artifact_source,
+                artifact_uuid=artifact_uuid,
+                old_path=old_path,
+                new_path=new_path,
+                repository=repository,
+                medium=medium,
+                expected_old_integrity=expected_old_integrity,
+                observed_integrity=observed_integrity,
+            )
+        )
+
     async def close_todo(self, uuid: str) -> bool:
         return bool(await self._off_loop(self.built.graph_adapter.close_todo, uuid))
 
