@@ -1,5 +1,8 @@
 # Research-Corpus Restructure Implementation Plan
 
+> **ARCHIVED 2026-08-10.** All 26 tasks shipped on 2026-06-29; the checklist was reconciled to the
+> landed history on 2026-08-10. The body is retained as the execution record.
+
 > **Status: COMPLETE (2026-06-29).** All 26 steps below shipped across commits `8729389` through
 > `dab8bb9`. Checkboxes were reconciled to the landed history on 2026-08-10; command paths, branch
 > names, and verification output in the body remain the historical execution record.

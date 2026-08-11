@@ -4,7 +4,8 @@ Status: **APPROVED FOR IMPLEMENTATION** — Phase A is implementation-ready afte
 review rounds (2026-08-02). Round 1 required three factual corrections; round 2 required
 compatibility, indexing, and write-integrity specifications. Both are incorporated.
 Date: 2026-08-02
-Supersedes: `menhir-todo-concerns-semantic-relevance.md`, `menhir-code-graph-embedding.md`
+Supersedes: [`menhir-todo-concerns-semantic-relevance.md`](../archive/plans/menhir-todo-concerns-semantic-relevance.md),
+[`menhir-code-graph-embedding.md`](../archive/plans/menhir-code-graph-embedding.md)
 Follows: `930a77e`, `5e015ec` (CONCERNS matching), `c6b5e43` (namespace invariant)
 
 ## Corrections to the first draft

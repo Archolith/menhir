@@ -1,5 +1,8 @@
 # menhir — make namespace a storage invariant on :Todo
 
+> **ARCHIVED 2026-08-10.** All three steps shipped in `c6b5e43`, including the live-graph
+> backfill. This document is retained as the migration and invariant decision record.
+
 Status: IMPLEMENTED in `c6b5e43` (all three steps). Backfill applied to the live graph.
 Date: 2026-08-02
 

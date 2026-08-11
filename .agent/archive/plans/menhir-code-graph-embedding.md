@@ -1,5 +1,9 @@
 # menhir — semantic embedding for the structural code graph
 
+> **ARCHIVED 2026-08-10.** The todo-motivated proposal was superseded by
+> [`menhir-todo-declared-links.md`](../../plans/menhir-todo-declared-links.md). Its measurements and
+> separate-embedding design are retained as evidence for any future semantic-code-search proposal.
+
 Status: **SUPERSEDED** by `menhir-todo-declared-links.md` (2026-08-02) *as a todo-motivated
 project*. Its justification was CONCERNS scoring, and CONCERNS turned out to have no
 consumer. The idea may still stand on its own for semantic code search, `query_structure`

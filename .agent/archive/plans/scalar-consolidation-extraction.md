@@ -1,5 +1,9 @@
 # Scalar Consolidation Extraction
 
+> **ARCHIVED 2026-08-10.** The scalar consolidation pipeline was extracted and validated. Current
+> runtime ownership is documented in [`.agent/architecture.md`](../../architecture.md); this body
+> is retained as the implementation record.
+
 ## Why
 
 - `scheduler_tasks.consolidate_personal_memory` currently contains both counter consolidation and the

@@ -1,5 +1,8 @@
 # Recall/Trace Domain Cycle Break
 
+> **ARCHIVED 2026-08-10.** The recall/trace domain cycle was removed, the obsolete module was
+> deleted, and validation passed. This document is retained as the boundary-change record.
+
 ## Why
 
 - `domain.recall` references `RetrievalTrace`, while `domain.retrieval_trace` imports

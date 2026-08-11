@@ -1,5 +1,8 @@
 # menhir research-corpus restructure — design spec
 
+> **ARCHIVED 2026-08-10.** The restructure shipped on 2026-06-29 and its checklist/status records
+> were reconciled on 2026-08-10. This is the historical design spec, not an active corpus owner.
+
 **Status:** IMPLEMENTED (2026-06-29) — historical design record. Open decisions were approved in
 commit `ecad548`; implementation shipped across `8729389` through `dab8bb9` (cluster moves, link
 rewrite, master/cluster indexes, status normalization, roadmap index, plan triage, and changelog).

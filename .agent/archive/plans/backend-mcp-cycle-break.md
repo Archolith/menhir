@@ -1,5 +1,8 @@
 # Backend/MCP Cycle Break
 
+> **ARCHIVED 2026-08-10.** The cycle break shipped and passed focused and full validation. This
+> document is retained as the implementation and boundary-closeout record, not an active plan.
+
 ## Why
 
 - `menhir.core` currently imports MCP service-access and tool modules, creating a backend/MCP import cycle.

@@ -345,7 +345,8 @@ duplication, not any of the 13 findings below.)
       worth revisiting together with this refactor, not separately. Left as
       a follow-up; not attempted in this pass to avoid rushing changes into
       authentication-critical code.
-      **Sub-plan written 2026-07-12**: `.agent/plans/menhir-oauth-settings-snapshot-routing-2026-07-12.md`.
+      **Sub-plan written 2026-07-12**:
+      [`.agent/archive/plans/menhir-oauth-settings-snapshot-routing-2026-07-12.md`](../archive/plans/menhir-oauth-settings-snapshot-routing-2026-07-12.md).
       Investigation for that plan found the gap is bigger than originally
       estimated here: `oauth.py`'s `_get_setting()` already looks settings-first
       for 16 `oauth_*` attributes, but none of them exist on `MemorySettings`

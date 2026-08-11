@@ -663,7 +663,7 @@
 - **`docs/roadmap/README.md`** (new): altitude-grouped index (active build sequencing / L3-L4 GAP decision-support / strategic notes).
 - **`.agent/plans/`**: archived 2 consumed plans (`session-handoff-2026-06-28-live-verification.md`, `menhir-query-profile-evaluation.md`) to `.agent/archive/plans/`.
 - **Cross-links**: rewrote all `docs/research/<file>.md` path references across roadmap, plans, and operational `.agent` docs to the new cluster paths. Link-check: 0 dangling attributable to this work (2 pre-existing unrelated `endpoints.index.md` links in `tasks-ingest.md`/`tasks-mcp.md` remain, out of scope).
-- **Plan/spec**: `.agent/plans/menhir-research-corpus-restructure.md` (design) + `-plan.md` (7-task implementation plan).
+- **Plan/spec**: `.agent/archive/plans/menhir-research-corpus-restructure.md` (design) + `-plan.md` (7-task implementation plan; archived after completion).
 
 ## 2026-06-27 - R2 facet candidate generation plan (bench-first) + deferred-verification expansion
 - **`.agent/plans/r2-facet-candidate-generation.md`** (new): bench-first R2 design note. No menhir production change lands until facet-index + meet-point rerank (condition F) beats BM25/embedding/hybrid baselines on stale-hit / wrong-scope / support-sufficiency without unacceptable recall loss. Implementation + fixture live in `archolith-bench`; the `CandidateSource.FACET` seam reserved in R1 is for the post-graduation integration only.

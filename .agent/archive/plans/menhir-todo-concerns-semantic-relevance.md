@@ -1,5 +1,9 @@
 # menhir — relevance for :Todo CONCERNS edges
 
+> **ARCHIVED 2026-08-10.** This proposal was superseded by
+> [`menhir-todo-declared-links.md`](../../plans/menhir-todo-declared-links.md) after confirming that
+> `CONCERNS` had no consumer. The measurements below remain useful historical evidence.
+
 Status: **SUPERSEDED** by `menhir-todo-declared-links.md` (2026-08-02).
 Reason: this plan proposed improving CONCERNS precision, but CONCERNS has no consumer —
 nothing in the codebase reads it. Improving an unread edge is not worth doing. The

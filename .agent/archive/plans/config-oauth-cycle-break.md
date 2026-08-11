@@ -1,5 +1,8 @@
 # Config/OAuth Cycle Break
 
+> **ARCHIVED 2026-08-10.** The config/OAuth dependency cycle was removed and the resulting
+> settings/authentication boundary passed focused and full validation. The body is historical.
+
 ## Why
 
 - Authentication-mode selection and OAuth environment parsing currently live under `api` even

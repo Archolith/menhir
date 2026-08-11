@@ -1,5 +1,8 @@
 # Proposal: Beacon — an "LSP for Agents" (SEPARATE PROJECT)
 
+> **ARCHIVED 2026-08-10.** This proposal was superseded by the accepted Menhir-native Beacon
+> architecture described in its status note below. It is retained as rejected design history.
+
 <!-- This is a NEW-PROJECT proposal, not a menhir backlog plan. Placed in .agent/plans/ (not
      backlog/) because it is deliberately decoupled from menhir. If greenlit it should graduate to its
      own repo; menhir becomes one (optional, "smart") provider behind it, never a dependency. -->

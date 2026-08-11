@@ -1,8 +1,11 @@
 # menhir-frontier: Research Corpus Restructure Plan Review
 
+> **ARCHIVED 2026-08-10.** The reviewed restructure was accepted and implemented. This review is
+> retained as the decision record; it does not carry open findings.
+
 **Status:** HISTORICAL / ACCEPTED. The four open decisions were resolved in `ecad548`; the reviewed
 design and implementation shipped on 2026-06-29 across `8729389` through `dab8bb9`.
-**Reviewed Plan:** `.agent/research/menhir-research-corpus-restructure.md`
+**Reviewed Plan:** [`menhir-research-corpus-restructure.md`](../plans/menhir-research-corpus-restructure.md)
 **Project:** `menhir-frontier`
 
 ## Executive Summary

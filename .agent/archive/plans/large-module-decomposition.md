@@ -1,5 +1,8 @@
 # Large Module Decomposition
 
+> **ARCHIVED 2026-08-10.** All five decomposition slices shipped and completed final validation.
+> This document is retained as the implementation record, not an active decomposition queue.
+
 ## Why
 
 - Several production modules combine unrelated policies, persistence operations, orchestration, and
