@@ -7,6 +7,7 @@ name = "archolith-menhir"
 version = "0.2.0"
 description = "Evidence-backed graph memory and code-impact analysis for coding agents."
 readme = "README.md"
+maintainers = [{ name = "Archolith", email = "contact@archolith.dev" }]
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE", "THIRD-PARTY-LICENSES.txt"]
 requires-python = ">=3.12"

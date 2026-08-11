@@ -563,3 +563,8 @@ src/menhir/
 Menhir is licensed under the [Apache License 2.0](LICENSE). See [NOTICE](NOTICE) for
 attribution and [THIRD-PARTY-LICENSES.txt](THIRD-PARTY-LICENSES.txt) for dependency
 licenses.
+
+## Contact
+
+For general questions, contact [contact@archolith.dev](mailto:contact@archolith.dev).
+Report vulnerabilities privately through the process in [`SECURITY.md`](SECURITY.md).
