@@ -109,7 +109,6 @@ def _node_index_queries() -> list[str]:
     # without these every artifact read is a label scan.
     queries.extend(
         [
-            "CREATE INDEX work_artifact_uuid_idx IF NOT EXISTS FOR (n:WorkArtifact) ON (n.artifact_uuid)",
             "CREATE INDEX work_artifact_type_status_idx IF NOT EXISTS FOR (n:WorkArtifact) ON (n.artifact_type, n.status)",
             "CREATE INDEX work_artifact_namespace_idx IF NOT EXISTS FOR (n:WorkArtifact) ON (n.namespace)",
             "CREATE INDEX artifact_location_path_idx IF NOT EXISTS FOR (n:ArtifactLocation) ON (n.path)",
@@ -120,6 +119,10 @@ def _node_index_queries() -> list[str]:
             # claiming one path is the state that makes "which plan lives here?"
             # unanswerable. The key is nullable by design -- an unresolved source
             # keeps its last known locator and does not block the destination.
+            # The UUID uniqueness constraint owns the range index for artifact_uuid.
+            # Retire the pre-reconciliation plain index first so existing installs
+            # can migrate; Neo4j will not create a constraint over the same schema.
+            "DROP INDEX work_artifact_uuid_idx IF EXISTS",
             "CREATE CONSTRAINT work_artifact_uuid_unique IF NOT EXISTS "
             "FOR (n:WorkArtifact) REQUIRE n.artifact_uuid IS UNIQUE",
             "CREATE CONSTRAINT artifact_source_uuid_unique IF NOT EXISTS "
