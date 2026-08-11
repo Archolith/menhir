@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "archolith-menhir"
 version = "0.2.0"
-description = "Graph-based long-term memory system for AI agents."
+description = "Evidence-backed graph memory and code-impact analysis for coding agents."
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE", "THIRD-PARTY-LICENSES.txt"]
@@ -27,6 +27,13 @@ dependencies = [
     "uvicorn>=0.30,<1",
     "joserfc>=1.0,<2",
 ]
+
+[project.urls]
+Homepage = "https://archolith.dev"
+Repository = "https://github.com/Archolith/menhir"
+Documentation = "https://github.com/Archolith/menhir#readme"
+Issues = "https://github.com/Archolith/menhir/issues"
+Security = "https://github.com/Archolith/menhir/security/policy"
 
 [project.scripts]
 menhir = "menhir.main:main"
