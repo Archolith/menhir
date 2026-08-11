@@ -1,6 +1,6 @@
 # WorkArtifact Corpus Reconciliation
 
-Status: **PHASES 0–4 IMPLEMENTED — phases 5–6 remain separately owner-gated.**
+Status: **PHASES 0-5 IMPLEMENTED; CLOSEOUT PARTIAL PENDING POST-DOC-MERGE RECONCILIATION; PHASE 6 REMAINS SEPARATELY OWNER-GATED.**
 
 Date: 2026-08-11
 
@@ -10,19 +10,27 @@ Implementation record:
 - PR #7's first hosted run found and drove repair of two integration omissions: feature-taxonomy
   classification for both new MCP tools, and retirement of the superseded WorkArtifact UUID plain
   index before creation of the uniqueness constraint.
-- Phase 4/5 readiness remediation is committed on `agent/menhir-phase45-remediation` as `7a19426`,
-  `59a45c7`, and `0779c15`: acknowledged source-less conflicts can advance the cursor, Hook Center
-  carries stable repository identity across worktrees, and graph-wide preparation is separately
-  count-gated with duplicate preflight and verified constraints.
-- Offline verification after remediation: 5,947 passed, 197 skipped. The former worktree-name
-  assertion now checks the actual repository-root relationship instead of allowing two directory
-  names.
-- Throwaway-Neo4j acceptance after remediation: all 21 phase-one bootstrap and reconciliation live
-  tests passed, including source-v2 backfill and constraint activation. The production preflight was
-  read-only and measured 112 global sources, 112 missing UUIDs/locator keys, and zero duplicate
-  artifact UUID, source UUID, raw locator, materialized locator, or cursor-repository groups.
-- No production graph repair or corpus-wide legacy frontmatter mutation has run. Those remain the
-  Phase 5 and Phase 6 approval gates below.
+- Phase 4/5 remediation merged through [PR #8](https://github.com/Archolith/menhir/pull/8) at
+  `338b1cb8dc25f9134ccd015edbe6aa0d4563a1cd`. It includes acknowledged source-less cursor policy,
+  stable Hook Center repository identity across worktrees, and separately count-gated source-v2
+  preparation with duplicate preflight and verified constraints.
+- Hosted CI passed after merge: `offline-tests` in 2m00s and `online-tests` in 2m14s. Earlier local
+  evidence remains 133 focused passes, 5,947 full-offline passes with 197 skipped, and 21 isolated
+  Neo4j passes.
+- Phase 5 completed against Neo4j Community 5.26.26 after owner-approved dump, consistency repair,
+  preparation, digest review, reconciliation, repeat audit, and zero-mutation second apply.
+- Preparation stamped 112 source UUIDs and 112 locator keys after all five duplicate categories
+  measured zero. All four reconciliation uniqueness constraints and backing indexes reached
+  `ONLINE` at 100 percent.
+- Reconciliation run `9cb08c3e-b499-4f23-9b86-2d9997d84e62` applied 191 safe actions with zero
+  skips and advanced the cursor. Run `1f19dedf-1155-47ea-91a2-89d6bff75eb7` then applied zero
+  actions, with the cursor current at the `338b1cb` production baseline before closeout docs.
+- Phase 6 has not run. Legacy metadata and 106 lane/lifecycle contradictions remain separately
+  owner-gated; no lifecycle was inferred or mutated during Phase 5.
+- Closeout publication is not reconciled yet. This plan, its wrapup, and `.agent/CHANGELOG.md` are
+  themselves in Menhir's scanned corpus. After their docs commit merges, a fresh read-only audit,
+  owner approval of its exact digest, one apply, and a zero-repeat re-audit must advance the cursor
+  beyond `338b1cb`; no post-doc cursor is claimed current before that sequence completes.
 
 Extends:
 
@@ -46,10 +54,11 @@ This plan adds a read-only corpus auditor first, then a bounded reconciliation p
 locators and hashes. The one-time graph repair is a separate, reviewable operation after the audit
 ledger is approved.
 
-## Current failure, measured
+## Original failure, measured
 
-The 2026-08-11 corpus pass exposed a gap between the implemented identity model and its operating
-path:
+The pre-repair 2026-08-11 corpus pass exposed a gap between the implemented identity model and its
+operating path. These counts are retained as historical baseline evidence; the Phase 5 completion
+record below is authoritative for post-repair state:
 
 - The live graph has 54 Menhir `WorkArtifact` nodes and 54 `ArtifactSource` embodiments.
 - It has 29 `artifact_type='plan'` nodes.
@@ -586,7 +595,7 @@ Documentation acceptance:
 
 ## Locked implementation order
 
-### Phase 0 — pure scanner and planner
+### Phase 0 - pure scanner and planner
 
 Add the reconciliation domain values, route table, raw-byte SHA-256 calculation, Git evidence
 adapter, pure match planner, metadata validator, and canonical `.agent` authoring instructions. No
@@ -602,7 +611,7 @@ Acceptance:
 - New artifact examples in `artifact_authoring.md` pass the validator; malformed UUID, type/status,
   route/type, and duplicate-copy fixtures fail with exact reasons.
 
-### Phase 1 — read-only graph audit
+### Phase 1 - read-only graph audit
 
 Add source-snapshot reads and the `menhir artifacts audit` CLI with JSON output and plan digest.
 Retire `migrate_work_artifacts.py` as an apply mechanism; keep a compatibility wrapper or make it
@@ -619,7 +628,7 @@ Acceptance:
 
 **Owner gate:** review the complete audit ledger before Phase 2 graph mutations or the one-time repair.
 
-### Phase 2 — source-v2 schema and conditional writes
+### Phase 2 - source-v2 schema and conditional writes
 
 Add source UUIDs, hashes, Git fields, lane, resolution state, uniqueness constraints, and precise
 repository mutations. Backfill source UUIDs first, then create constraints.
@@ -632,7 +641,7 @@ Acceptance:
 - Missing source marking is reversible when the source reappears.
 - Migration can be rerun without changing UUIDs or duplicating sources.
 
-### Phase 3 — digest-gated apply and targeted MCP
+### Phase 3 - digest-gated apply and targeted MCP
 
 Add `menhir artifacts reconcile --repository <name> --apply --plan-digest`, the read-only audit MCP
 tool, and targeted
@@ -648,7 +657,7 @@ Acceptance:
   source-less conflicts may repeat until their documents receive explicit metadata.
 - MCP and CLI use the same repository checks; neither has a weaker collision path.
 
-### Phase 4 — Hook Center and recovery integration
+### Phase 4 - Hook Center and recovery integration
 
 Wire exact rename/edit observations into artifact source reconciliation, then add startup/post-commit
 audit mode.
@@ -666,7 +675,7 @@ Acceptance:
 - Source-less `UNCLASSIFIED_NEW_SOURCE` conflicts remain visible but do not prevent the persisted
   cursor from reaching the reviewed commit; all source-identity conflicts still block it.
 
-### Phase 5 — one-time Menhir graph repair
+### Phase 5 - one-time Menhir graph repair
 
 This is an operational step, not part of a code commit that silently mutates the live graph.
 
@@ -703,7 +712,61 @@ Repair acceptance:
   remaining conflicts are reviewed source-less `UNCLASSIFIED_NEW_SOURCE` entries.
 - The graph backup and before/after counts are recorded in the operator handoff.
 
-### Phase 6 — legacy metadata backfill
+Phase 5 completion record (2026-08-11):
+
+- Workspace-level operator evidence is recorded in
+  `C:\Users\thron\IdeaProjects\.agent\handoffs\HANDOFF-2026-08-11-menhir-artifact-reconciliation-phase5.md`
+  and
+  `C:\Users\thron\IdeaProjects\.agent\handoffs\MENHIR-PHASE5-LIFECYCLE-CONTRADICTIONS-2026-08-11.md`.
+- Canonical `main` was fast-forwarded to `338b1cb8dc25f9134ccd015edbe6aa0d4563a1cd`
+  without a branch switch. The unrelated untracked
+  `.agent/plans/menhir-post-install-and-agent-defaults-plan.md` was preserved, and repository-local
+  Git config was set to `menhir.artifactRepository=menhir`.
+- Menhir and its watchdog were paused for Neo4j dumps. The pre-repair dump is
+  `/home/ctharvey/menhir-neo4j/backups/phase5-20260811T211356Z`; SHA-256 values are
+  `44f135b570aa27ca70a9617387bc1af022a0995e651e52822ccb7fb33d339df8` for `neo4j.dump`
+  and `a7edf7885688b785d85ab5dfdc9d9110ff39ef851c4e453ca07c138ecbcb756a` for
+  `system.dump`.
+- Restore/consistency validation found five stale standalone Entity RANGE-index entries across
+  `name_entity_index`, `created_at_entity_index`, `entity_last_accessed_idx`, `entity_uuid`, and
+  `entity_freshness_idx`. With owner approval, those unconstrained indexes were recreated from
+  their `SHOW INDEXES` `createStatement` values and all reached `ONLINE` at 100 percent.
+- The post-repair dump is
+  `/home/ctharvey/menhir-neo4j/backups/phase5-post-index-repair-20260811T212419Z`; SHA-256 values are
+  `f93e6b1c6afa626d8b7eb7ebcbaa2b71c01ecb0c80b7bebb1db1e582abefd2c7` for `neo4j.dump`
+  and `49ceacafc2d6debab2e629e4bb061f39081670610989fa9f14de1984fc2017d4` for
+  `system.dump`. Both `neo4j` and `system` consistency checks passed. Menhir and the watchdog were
+  restored healthy.
+- Preparation preflight measured 112 sources, 112 missing source UUIDs, 112 missing locator keys,
+  and zero duplicates in all five categories. The owner-approved apply stamped all 112 UUIDs and
+  keys. `artifact_reconcile_cursor_repository_unique`, `artifact_source_locator_unique`,
+  `artifact_source_uuid_unique`, and `work_artifact_uuid_unique` and their backing indexes are
+  `ONLINE` at 100 percent; postflight missing and duplicate counts are zero.
+- The merged-tree dry-run observed `338b1cb8dc25f9134ccd015edbe6aa0d4563a1cd` with digest
+  `1479335f132bdd92915b3312a26bb157d0d8fcae7e2d114241f6b993055ac3d4`: 191 corpus
+  entries, 54 graph sources, 13 relocations, 29 refreshes, 137 registrations, 12 unresolved marks,
+  12 source-less `UNCLASSIFIED_NEW_SOURCE` conflicts, and 12 then-visible lifecycle contradictions.
+- Owner-approved apply `9cb08c3e-b499-4f23-9b86-2d9997d84e62` applied 191 actions, skipped zero,
+  retained 12 source-less conflicts, and advanced the cursor. Repeat audit digest
+  `159bc5590794143daa7e14513b171c6ff8e4c3beb32a01977b2d25095c407ac9` reported 191 graph
+  sources, 179 `NOOP` actions, the same 12 source-less conflicts, and zero safe mutations. The
+  cursor exactly matched the `338b1cb` implementation merge commit at this production checkpoint.
+- Owner-approved second apply `1f19dedf-1155-47ea-91a2-89d6bff75eb7` applied zero actions,
+  skipped zero, retained the 12 conflicts, and kept the cursor current for the `338b1cb` production
+  baseline. Direct acceptance found
+  all 29 current plans with exactly one artifact and one resolvable source, zero duplicate locator
+  groups, and 12 unresolved sources whose reason is `source_not_observed_in_corpus_scan`.
+- The post-registration audit exposes 106 lane/lifecycle contradictions for owner disposition.
+  This is expected classification debt, not a Phase 5 failure. Phase 5 did not infer or mutate any
+  lifecycle state; disposition remains Phase 6 or separately owner-gated work.
+
+**Closeout publication caveat:** The plan, wrapup, and changelog edits are scanned corpus artifacts.
+Their eventual docs merge will move the repository beyond the persisted `338b1cb` cursor. After that
+merge, run a fresh read-only audit, obtain owner approval for the exact new digest, apply it once, and
+perform a zero-repeat re-audit. Phase 5's production repair at `338b1cb` is complete, but closeout
+publication/reconciliation remains pending until this sequence advances and verifies the cursor.
+
+### Phase 6 - legacy metadata backfill
 
 Phase 0 makes canonical metadata mandatory for newly created artifacts after feature activation.
 Phase 6 addresses the older corpus:
@@ -722,8 +785,9 @@ every tracked artifact. The reconciler never inserts or edits frontmatter as a s
 repair.
 
 Before any status backfill, normalize the current status vocabulary or review it one record at a
-time. Only 3 of 28 current plans map today; broad alias additions would turn commentary such as
-"partially implemented" into lifecycle claims the typed state machine cannot represent.
+time. Only 3 of the 28 records in the original planning baseline mapped at that time; broad alias
+additions would turn commentary such as "partially implemented" into lifecycle claims the typed
+state machine cannot represent. Phase 6 must re-audit the full current corpus before approval.
 
 ## Test matrix
 
@@ -820,8 +884,10 @@ Existing seams:
 
 ## Owner approvals
 
-Implementation needs three explicit approvals at different points:
+Approval record and remaining gate:
 
-1. Approve this design and the locked read-only-first build order.
-2. Approve the Phase 1 audit ledger/digest before graph-write code is used on the live corpus.
-3. Approve any corpus-wide UUID/status frontmatter pass separately from graph reconciliation.
+1. The design and locked read-only-first build order were approved and implemented.
+2. The Phase 5 backup, index repair, preparation count, reconciliation digest, first apply, and
+   zero-mutation second apply were separately owner-approved and completed.
+3. Any corpus-wide UUID/status frontmatter pass and disposition of the 106 lane/lifecycle
+   contradictions remain separately owner-gated as Phase 6 work.
