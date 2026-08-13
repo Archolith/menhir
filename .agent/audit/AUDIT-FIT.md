@@ -12,7 +12,7 @@ Verified at commit `eebf6d6dd83f15083167bf847b639d24b953fdc9`.
 |---|---|---|---|---|
 | functional-correctness | good | 11 modules | `--type a1` | highest yield so far |
 | security | good | M2 | `--type a2` | |
-| architecture | good | none | `--type a3` | gap: never run |
+| architecture | good | M3 | `--type a3` | external pass @ 7aa977e1 |
 | maintainability | good | M2, M10 | core checks | |
 | performance | **partial** | none | partial via a2 | audit is JVM-shaped; see below |
 | test-coverage | **partial** | none | none | coverage data 34 days stale |
