@@ -649,9 +649,89 @@ def plugin_a2_security(files: list[Path], repo: Path) -> None:
     print("        from another package is NOT resolved here.")
 
 
+def plugin_a3_architecture(files: list[Path], repo: Path) -> None:
+    """Architecture lane: cycles, blast radius, responsibility proxy.
+
+    The architecture audit's Lane A asks for circular dependencies, the most-
+    imported files, and god modules. The first two are mechanical; the third is
+    a judgement call the probe can only supply inputs for.
+    """
+    section("A3-1. IMPORT CYCLES (whole repo, not just this module)")
+    graph: dict[str, set] = defaultdict(set)
+    src = repo / "src" / "menhir"
+    for p in iter_py(src):
+        tree, _ = parse(p)
+        if tree is None:
+            continue
+        mod = "menhir." + p.relative_to(src).with_suffix("").as_posix().replace("/", ".")
+        mod = mod.replace(".__init__", "")
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("menhir"):
+                graph[mod].add(node.module)
+
+    cycles, seen, stack = [], set(), []
+
+    def dfs(u: str) -> None:
+        if u in stack:
+            cycles.append(stack[stack.index(u):] + [u])
+            return
+        if u in seen:
+            return
+        seen.add(u)
+        stack.append(u)
+        for v in sorted(graph.get(u, ())):
+            dfs(v)
+        stack.pop()
+
+    for m in sorted(graph):
+        dfs(m)
+
+    if cycles:
+        for c in cycles[:20]:
+            print("  " + " -> ".join(x.replace("menhir.", "") for x in c))
+    else:
+        print("  none found")
+    print("\n  Import cycles: %d" % len(cycles))
+
+    section("A3-2. BLAST RADIUS (most-imported modules repo-wide)")
+    indeg: dict[str, int] = defaultdict(int)
+    for _, targets in graph.items():
+        for t in targets:
+            indeg[t] += 1
+    ranked = sorted(indeg.items(), key=lambda kv: -kv[1])[:15]
+    for mod, n in ranked:
+        print("  %-52s imported by %d modules" % (mod.replace("menhir.", ""), n))
+    if not ranked:
+        print("  none found")
+    print("\n  A signature change in the top entries touches that many modules.")
+
+    section("A3-3. RESPONSIBILITY PROXY (inputs for a god-module judgement)")
+    print("  %-44s %6s %7s %8s %9s" % ("file", "lines", "publics", "classes", "decorated"))
+    for p in files:
+        tree, text = parse(p)
+        if tree is None:
+            continue
+        publics = sum(
+            1 for n in tree.body
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and not n.name.startswith("_")
+        )
+        classes = sum(1 for n in tree.body if isinstance(n, ast.ClassDef))
+        decorated = sum(
+            1 for n in ast.walk(tree)
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.decorator_list
+        )
+        lines = len(text.splitlines())
+        flag = "  <-" if lines > 500 else ""
+        print("  %-44s %6d %7d %8d %9d%s"
+              % (rel(p, repo), lines, publics, classes, decorated, flag))
+    print("\n  A file is not a god module because it is long. These are INPUTS to that")
+    print("  judgement -- count distinct responsibilities by reading, and cite line ranges.")
+
+
 PLUGINS = {
     "a1": plugin_a1_correctness,
     "a2": plugin_a2_security,
+    "a3": plugin_a3_architecture,
 }
 
 

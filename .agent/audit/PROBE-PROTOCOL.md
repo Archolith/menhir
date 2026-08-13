@@ -56,6 +56,8 @@ Plugins:
   formats compared as TEXT; intra-module keyword-argument mismatches
 - `--type a2` — route/tier coverage; request data reaching logs unredacted;
   synchronous I/O on an async path, direct and one hop
+- `--type a3` — import cycles repo-wide; blast radius by import in-degree;
+  responsibility proxy (lines, publics, classes, decorated) per file
 
 ## Reading the output honestly
 
