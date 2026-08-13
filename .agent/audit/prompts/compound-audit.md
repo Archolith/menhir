@@ -113,6 +113,19 @@ extend by hand where it states a limit.
 
 ## Non-negotiable rules
 
+- **Control-test your instruments.** If a search, index, or connector returns
+  empty, verify it against a symbol you can SEE defined before treating the empty
+  result as absence. If you write a probe, run a self-test over synthetic cases
+  covering its known blind spots before trusting its output on real code. Both
+  external passes that did this caught something real: one discarded its
+  code-search tool after it returned nothing for a class visible in the file it
+  had just read; the other ran a control suite (relative imports,
+  TYPE_CHECKING context, function defaults, dotted private attributes, body
+  hashes, SCCs) before reporting a single number.
+- **Never convert a static reading into an executed count.** If you cannot run
+  something, write `NOT RUN` and the reason. An honest unexecuted result beats a
+  confident fabricated one: one pass reported a precise count of blocking calls
+  across five named files, and the function it counted appears in only one.
 - **A comment is NOT evidence of the invariant it asserts.** Nine confirmed
   findings here are comments describing controls the code does not implement,
   including a docstring claiming "fail-closed" over a function that fails open.
