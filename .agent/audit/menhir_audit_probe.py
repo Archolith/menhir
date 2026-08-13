@@ -728,10 +728,25 @@ def plugin_a3_architecture(files: list[Path], repo: Path) -> None:
     print("  judgement -- count distinct responsibilities by reading, and cite line ranges.")
 
 
+#: Audit-type plugins. Both the charter code (a1) and the readable name
+#: (correctness) select the same checks -- the code matches the column headings
+#: in MODULE-MAP.md, the name is what anyone reading the command will expect.
 PLUGINS = {
     "a1": plugin_a1_correctness,
+    "correctness": plugin_a1_correctness,
     "a2": plugin_a2_security,
+    "security": plugin_a2_security,
     "a3": plugin_a3_architecture,
+    "architecture": plugin_a3_architecture,
+}
+
+#: Audit types with no plugin, and why. Naming them explicitly stops a lane
+#: assuming a check ran when none exists for that type.
+NO_PLUGIN = {
+    "a4 / maintainability": "fully covered by the core checks; no plugin needed",
+    "a5 / performance": "needs a profiler this project does not configure; see AUDIT-FIT.md",
+    "a6 / test-coverage": "coverage data is regenerated out of band; see AUDIT-FIT.md",
+    "a7 / llm-ai": "prompt-construction review is judgement, not mechanical",
 }
 
 
@@ -739,10 +754,27 @@ PLUGINS = {
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Menhir mechanical audit probe")
+    epilog = (
+        "audit-type plugins (code or name, both work):\n"
+        "  a1 | correctness    CancelledError escaping except Exception; mixed\n"
+        "                      timestamp formats compared as TEXT; kwarg mismatches\n"
+        "  a2 | security       route/tier coverage; request data reaching logs\n"
+        "                      unredacted; sync I/O on the async path (direct + 1 hop)\n"
+        "  a3 | architecture   import cycles; blast radius by in-degree; per-file\n"
+        "                      responsibility inputs\n"
+        "\nno plugin (the core checks still run):\n"
+        + "".join("  %-22s %s\n" % (k, v) for k, v in NO_PLUGIN.items())
+        + "\nThe core checks always run. See .agent/audit/PROBE-PROTOCOL.md."
+    )
+    ap = argparse.ArgumentParser(
+        description="Menhir mechanical audit probe -- structural checks only.",
+        epilog=epilog,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     ap.add_argument("module", help="module directory, e.g. src/menhir/api")
     ap.add_argument("--type", dest="atype", default=None, choices=sorted(PLUGINS),
-                    help="audit-type plugin to run in addition to the core checks")
+                    metavar="TYPE",
+                    help="audit-type plugin to add to the core checks (see below)")
     ap.add_argument("--repo", default=None, help="repository root (default: inferred)")
     ap.add_argument("--no-recurse", action="store_true",
                     help="only files directly in the module dir")
