@@ -76,8 +76,8 @@ class Results:
         counts = Counter(item.status for item in self.items)
         order = ("CONFIRMED", "PASS", "NOT FOUND", "SKIP", "FAIL")
         print("\nsummary: " + ", ".join(f"{key}={counts[key]}" for key in order))
-        failures = sum(item.status == "FAIL" and item.mandatory for item in self.items)
-        print(f"mandatory_failures={failures}")
+        failures = counts["FAIL"]
+        print(f"strict_failures={failures}")
         return failures
 
 
