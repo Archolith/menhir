@@ -82,6 +82,40 @@ def ascii_safe(text: str) -> str:
     return text.encode("ascii", "replace").decode("ascii")
 
 
+def package_root(module: Path, repo_root: Path) -> tuple[str, Path]:
+    """Infer (top-level package name, its directory) from the module path.
+
+    Hardcoding the package name made every import-based check silently return
+    zero on any other project -- the reader sees "0 violations" and concludes
+    clean, when the check never ran. Silent zeros are the failure this tool
+    exists to prevent, so the package is derived instead.
+    """
+    parts = module.resolve().relative_to(repo_root.resolve()).parts
+    if "src" in parts:
+        i = parts.index("src")
+        if i + 1 < len(parts):
+            return parts[i + 1], repo_root / "src" / parts[i + 1]
+    # no src/ layout: treat the module's own top directory as the package
+    return (parts[0], repo_root / parts[0]) if parts else (module.name, module)
+
+
+def sibling_layers(pkg_dir: Path) -> tuple:
+    """Immediate subpackages of the top-level package -- the 'layers'.
+
+    Derived rather than listed, so the check applies to any project instead of
+    only the one it was written against.
+    """
+    if not pkg_dir.is_dir():
+        return ()
+    # Any subdirectory holding .py files counts. Requiring __init__.py missed
+    # PEP 420 namespace packages entirely and reported "0 subpackages" for a
+    # project that plainly had them -- another silent zero.
+    return tuple(sorted(
+        d.name for d in pkg_dir.iterdir()
+        if d.is_dir() and d.name != "__pycache__" and any(d.glob("*.py"))
+    ))
+
+
 # --------------------------------------------------------------------------
 # helpers
 # --------------------------------------------------------------------------
@@ -255,8 +289,8 @@ def check_unread_constants(files: list[Path], repo: Path, repo_root: Path) -> No
     print("\n  Constants scanned: %d   never read: %d" % (len(consts), len(unread)))
 
 
-def check_private_imports(files: list[Path], repo: Path) -> None:
-    section("CORE 4. CROSS-MODULE PRIVATE-SYMBOL IMPORTS")
+def check_private_imports(files: list[Path], repo: Path, pkg: str = "menhir") -> None:
+    section("CORE 4. CROSS-MODULE PRIVATE-SYMBOL IMPORTS  [package: %s]" % pkg)
     rows = []
     for p in files:
         tree, _ = parse(p)
@@ -266,7 +300,7 @@ def check_private_imports(files: list[Path], repo: Path) -> None:
         for node in ast.walk(tree):
             if not isinstance(node, ast.ImportFrom) or not node.module:
                 continue
-            if not node.module.startswith("menhir"):
+            if not node.module.startswith(pkg):
                 continue
             src_pkg = node.module.split(".")[-2] if "." in node.module else ""
             for alias in node.names:
@@ -282,9 +316,15 @@ def check_private_imports(files: list[Path], repo: Path) -> None:
     print("\n  Private imports: %d total, %d cross-package" % (len(rows), cross))
 
 
-def check_layering(files: list[Path], repo: Path) -> None:
-    section("CORE 5. LAYERING EDGES")
-    layers = ("domain", "services", "infrastructure", "api", "mcp", "cli", "explorer", "core", "config")
+def check_layering(files: list[Path], repo: Path, pkg: str = "menhir",
+                   layers: tuple = ()) -> None:
+    section("CORE 5. LAYERING EDGES  [package: %s]" % pkg)
+    if not layers:
+        print("  WARNING: no subpackages detected under %s -- this check cannot run." % pkg)
+        print("  A zero below would mean 'not measured', not 'no violations'.")
+        return
+    print("  layers detected: %s\n" % ", ".join(layers))
+    prefix = pkg + "."
     rows = []
     for p in files:
         tree, _ = parse(p)
@@ -297,9 +337,9 @@ def check_layering(files: list[Path], repo: Path) -> None:
                 mod = node.module
             elif isinstance(node, ast.Import):
                 for a in node.names:
-                    if a.name.startswith("menhir."):
+                    if a.name.startswith(prefix):
                         mod = a.name
-            if not mod or not mod.startswith("menhir."):
+            if not mod or not mod.startswith(prefix):
                 continue
             parts = mod.split(".")
             if len(parts) < 2:
@@ -649,7 +689,8 @@ def plugin_a2_security(files: list[Path], repo: Path) -> None:
     print("        from another package is NOT resolved here.")
 
 
-def plugin_a3_architecture(files: list[Path], repo: Path) -> None:
+def plugin_a3_architecture(files: list[Path], repo: Path, pkg: str = "menhir",
+                           pkg_dir: Path | None = None) -> None:
     """Architecture lane: cycles, blast radius, responsibility proxy.
 
     The architecture audit's Lane A asks for circular dependencies, the most-
@@ -658,15 +699,18 @@ def plugin_a3_architecture(files: list[Path], repo: Path) -> None:
     """
     section("A3-1. IMPORT CYCLES (whole repo, not just this module)")
     graph: dict[str, set] = defaultdict(set)
-    src = repo / "src" / "menhir"
-    for p in iter_py(src):
+    if not pkg_dir.is_dir():
+        print("  WARNING: package dir %s not found -- cannot build the import graph." % pkg_dir)
+        print("  A zero here would mean 'not measured', not 'no cycles'.")
+        return
+    for p in iter_py(pkg_dir):
         tree, _ = parse(p)
         if tree is None:
             continue
-        mod = "menhir." + p.relative_to(src).with_suffix("").as_posix().replace("/", ".")
+        mod = pkg + "." + p.relative_to(pkg_dir).with_suffix("").as_posix().replace("/", ".")
         mod = mod.replace(".__init__", "")
         for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("menhir"):
+            if isinstance(node, ast.ImportFrom) and node.module and node.module.startswith(pkg):
                 graph[mod].add(node.module)
 
     cycles, seen, stack = [], set(), []
@@ -688,7 +732,7 @@ def plugin_a3_architecture(files: list[Path], repo: Path) -> None:
 
     if cycles:
         for c in cycles[:20]:
-            print("  " + " -> ".join(x.replace("menhir.", "") for x in c))
+            print("  " + " -> ".join(x.replace(pkg + ".", "") for x in c))
     else:
         print("  none found")
     print("\n  Import cycles: %d" % len(cycles))
@@ -700,7 +744,7 @@ def plugin_a3_architecture(files: list[Path], repo: Path) -> None:
             indeg[t] += 1
     ranked = sorted(indeg.items(), key=lambda kv: -kv[1])[:15]
     for mod, n in ranked:
-        print("  %-52s imported by %d modules" % (mod.replace("menhir.", ""), n))
+        print("  %-52s imported by %d modules" % (mod.replace(pkg + ".", ""), n))
     if not ranked:
         print("  none found")
     print("\n  A signature change in the top entries touches that many modules.")
@@ -793,12 +837,15 @@ def main() -> int:
             repo_root = repo_root.parent
 
     files = list(iter_py(module, recursive=not args.no_recurse))
+    pkg, pkg_dir = package_root(module, repo_root)
+    layers = sibling_layers(pkg_dir)
 
     print(SEP)
-    print("MENHIR MECHANICAL AUDIT PROBE")
+    print("MECHANICAL AUDIT PROBE")
     print(SEP)
     print("  module    : %s" % rel(module, repo_root))
     print("  repo root : %s" % repo_root)
+    print("  package   : %s  (%d subpackages)" % (pkg, len(layers)))
     print("  files     : %d" % len(files))
     print("  plugin    : %s" % (args.atype or "core only"))
     print("\n  Structural checks only. Nothing here judges intent or correctness.")
@@ -808,13 +855,17 @@ def main() -> int:
     check_line_reconciliation(files, repo_root)
     check_duplicate_bodies(files, repo_root)
     check_unread_constants(files, repo_root, repo_root)
-    check_private_imports(files, repo_root)
-    check_layering(files, repo_root)
+    check_private_imports(files, repo_root, pkg)
+    check_layering(files, repo_root, pkg, layers)
     check_dead_symbols(files, repo_root, repo_root)
     check_comment_claims(files, repo_root)
 
     if args.atype:
-        PLUGINS[args.atype](files, repo_root)
+        fn = PLUGINS[args.atype]
+        if fn is plugin_a3_architecture:
+            fn(files, repo_root, pkg, pkg_dir)
+        else:
+            fn(files, repo_root)
 
     print("\n" + SEP)
     print("END OF PROBE OUTPUT")

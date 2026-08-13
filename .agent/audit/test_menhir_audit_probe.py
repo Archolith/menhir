@@ -33,17 +33,25 @@ def run(module: str, atype: str | None = None) -> str:
     """Capture probe output for a module without spawning a subprocess."""
     mod = REPO / module
     files = list(probe.iter_py(mod))
+    # Derive package and layers exactly as main() does, so the test exercises
+    # the real wiring rather than the defaults.
+    pkg, pkg_dir = probe.package_root(mod, REPO)
+    layers = probe.sibling_layers(pkg_dir)
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         probe.check_line_reconciliation(files, REPO)
         probe.check_duplicate_bodies(files, REPO)
         probe.check_unread_constants(files, REPO, REPO)
-        probe.check_private_imports(files, REPO)
-        probe.check_layering(files, REPO)
+        probe.check_private_imports(files, REPO, pkg)
+        probe.check_layering(files, REPO, pkg, layers)
         probe.check_dead_symbols(files, REPO, REPO)
         probe.check_comment_claims(files, REPO)
         if atype:
-            probe.PLUGINS[atype](files, REPO)
+            fn = probe.PLUGINS[atype]
+            if fn is probe.plugin_a3_architecture:
+                fn(files, REPO, pkg, pkg_dir)
+            else:
+                fn(files, REPO)
     return buf.getvalue()
 
 
