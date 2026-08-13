@@ -17,7 +17,12 @@
 
 ## 1. Executive Summary
 
-DRAFT. No structural verdict has been promoted yet.
+DRAFT — first promoted results:
+
+1. **The per-tool module split is not a runtime isolation boundary.** `server.py` invokes `register_all_tools(mcp)` at module import time; the registry eagerly imports all four tool families, concatenates their class lists, then constructs and registers every class in one unguarded loop (`src/menhir/mcp/server.py:17-19,49`; `src/menhir/mcp/tools/__init__.py:7-15,19-22`). A failing import or registration can therefore prevent the complete MCP surface from starting. The split may still provide source-ownership isolation; that verdict remains under review.
+2. **Ordinary invocation failures are contained but flattened into return values.** The shared tracker wraps the runner in `asyncio.wait_for`, catches timeout and ordinary `Exception`, records/logs them, and returns mapped JSON or an `"Error: ..."` string (`src/menhir/mcp/telemetry/tracker.py:56-110`). This avoids process-wide failure but erases protocol-level failure semantics. Cancellation is not caught by those branches and propagates.
+
+The full risk ordering remains DRAFT until all 70 files and the mechanical output are complete.
 
 ## 2. Layering Edge Table and violation judgements
 
@@ -33,15 +38,25 @@ DRAFT.
 
 ## 5. Tool Dispatch Architecture — registration through tier check
 
-DRAFT.
+### Registration path established so far
+
+1. `src/menhir/mcp/server.py` constructs the gateway server and invokes `register_all_tools(mcp)` at import time (`src/menhir/mcp/server.py:31-49`).
+2. `src/menhir/mcp/tools/__init__.py` imports four family registries, concatenates them as `ALL_TOOLS`, and iterates them without a per-tool guard (`src/menhir/mcp/tools/__init__.py:7-15,19-22`).
+3. Each class is instantiated and its shared `register()` method installs a wrapper preserving the concrete endpoint signature. The complete shared-contract trace is still being reconciled.
+
+**Interim verdict:** per-file tool modules are compile-time/source boundaries, not independent runtime components. One module import, class construction, or registration failure can abort registration of all later tools.
 
 ## 6. Failure-Mode Trace — one complete invocation
 
-DRAFT.
+### Shared containment layer established so far
+
+`track_mcp_call()` executes the invocation under `asyncio.wait_for` (`src/menhir/mcp/telemetry/tracker.py:44-65`). A timeout is converted to a caller-facing string/JSON value after best-effort telemetry (`src/menhir/mcp/telemetry/tracker.py:66-92`); any ordinary `Exception` is diagnosed, logged, recorded, and likewise converted (`src/menhir/mcp/telemetry/tracker.py:93-110`). The success path logs and records completion (`src/menhir/mcp/telemetry/tracker.py:112-136`).
+
+**Interim failure-semantics result:** backend-unreachable and Neo4j exceptions that reach this wrapper are surfaced as normal tool results rather than protocol errors. `asyncio.CancelledError` is not caught by the ordinary-exception branch and propagates. Malformed-argument behavior remains to be traced through FastMCP dispatch.
 
 ## 7. Observability Assessment
 
-DRAFT.
+The shared tracker logs `kind`, `operation`, duration, and diagnosed error on ordinary failures (`src/menhir/mcp/telemetry/tracker.py:93-101`) and records input/result sizes plus a payload preview (`src/menhir/mcp/telemetry/tracker.py:101-109,120-134`). No caller, request/session identifier, or correlation identifier is passed into this layer. This is an interim result pending inspection of the telemetry store and HTTP binding path.
 
 ## 8. Fan-Out Register
 
@@ -66,6 +81,7 @@ DRAFT.
 ## 12. Open Questions
 
 - **Environment:** whether the connector-reconstructed checkout can be made complete enough to execute the probe locally. Until execution succeeds, mechanical outputs remain `NOT RUN` rather than inferred.
+- **Correctness/security, deliberately not pursued here:** `BaseTool.execute` only enforces the tier comparison when `get_request_tier()` returns a truthy value. This belongs to the other passes.
 
 ## 13. Coverage Table — all 70 files and line reconciliation
 
@@ -78,13 +94,14 @@ DRAFT. No file is marked read merely because its directory entry was enumerated.
 - Target commit identity.
 - Repository access and write permission.
 - Top-level MCP layout: root shared modules, telemetry, and tool subpackages.
+- Eager aggregate registration and the shared telemetry containment path.
 
 ### Not yet verified
 
 - Full 70-file line reconciliation.
 - Probe outputs.
-- Runtime behavior of a complete invocation.
+- Runtime behavior of a complete invocation past the shared wrapper.
 
 ## 15. Review Confidence
 
-**Current draft confidence: 5/100.** This is intentionally low until every scope file is read and the mechanical checks execute.
+**Current draft confidence: 15/100.** This remains low until every scope file is read and the mechanical checks execute.
