@@ -1,0 +1,153 @@
+name: Menhir M1 Domain Architecture External Probe
+
+on:
+  push:
+    branches:
+      - audit/m1-domain-architecture-external
+    paths:
+      - .github/workflows/menhir-m1-domain-architecture-external-probe.yml
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Run control-tested stdlib architecture probe
+        shell: bash
+        run: |
+          python - <<'PY'
+          import ast,json,subprocess,tarfile,tempfile
+          from collections import defaultdict
+          from pathlib import Path
+          P='eebf6d6dd83f15083167bf847b639d24b953fdc9'; R='.agent/reviews/menhir-M1-domain-architecture-external.md'; W='.github/workflows/menhir-m1-domain-architecture-external-probe.yml'; O=Path('/tmp/menhir-m1-artifact')
+          ROOT='''artifact_reconciliation.py 1880
+          work_artifact.py 477
+          belief.py 414
+          merge_snapshot.py 314
+          warden.py 310
+          artifact_shape.py 218
+          git_staleness.py 194
+          merge_delta.py 178
+          legacy_snapshot.py 150
+          merge_eligibility.py 145
+          artifacts.py 133
+          repo_snapshot.py 95
+          namespace.py 90
+          artifact_role.py 83
+          belief_evidence.py 77
+          models.py 76
+          bootstrap_scope.py 58
+          scope.py 46
+          session.py 37
+          edges.py 30
+          ingest.py 25'''
+          C={f'src/menhir/domain/{a}':int(b) for a,b in (x.split() for x in ROOT.splitlines())}; T=[f'src/menhir/domain/truth/{x}' for x in ('__init__.py','admission_gate.py','attestation.py','kinds.py','labels.py')]; S=list(C)+T; HI=('menhir.services','menhir.api','menhir.mcp','menhir.infrastructure','menhir.cli')
+          class V(ast.NodeVisitor):
+           def __init__(s,m,p,pkg=False):s.m,s.p,s.pkg,s.e,s.t,s.f,s.o,s.c=m,p,m if pkg else m.rpartition('.')[0],[],0,0,0,0
+           def add(s,n,t,k,name=None,alias=None):s.e.append({'source':s.m,'path':s.p,'target':t,'line':n.lineno,'kind':k,'name':name,'alias':alias,'type_only':bool(s.t),'local':bool(s.f),'optional':bool(s.o),'conditional':bool(s.c)})
+           def rel(s,m,l):
+            if not l:return m or ''
+            p=s.pkg.split('.') if s.pkg else []; p=p[:max(0,len(p)-l+1)]; return '.'.join(p+((m or '').split('.') if m else []))
+           def visit_If(s,n):
+            tc=isinstance(n.test,ast.Name) and n.test.id=='TYPE_CHECKING' or isinstance(n.test,ast.Attribute) and n.test.attr=='TYPE_CHECKING'; s.visit(n.test); s.c+=1;s.t+=tc
+            for x in n.body:s.visit(x)
+            s.t-=tc
+            for x in n.orelse:s.visit(x)
+            s.c-=1
+           def visit_Try(s,n):
+            opt=any(h.type is None or isinstance(h.type,ast.Name) and h.type.id in ('ImportError','ModuleNotFoundError') for h in n.handlers);s.o+=opt;s.c+=1
+            for x in n.body:s.visit(x)
+            s.o-=opt
+            for q in (n.handlers,n.orelse,n.finalbody):
+             for x in q:s.visit(x)
+            s.c-=1
+           def fn(s,n):
+            s.f+=1
+            for x in n.body:s.visit(x)
+            s.f-=1
+           visit_FunctionDef=fn;visit_AsyncFunctionDef=fn;visit_Lambda=fn
+           def visit_Import(s,n):
+            for x in n.names:s.add(n,x.name,'import',alias=x.asname)
+           def visit_ImportFrom(s,n):
+            b=s.rel(n.module,n.level)
+            for x in n.names:s.add(n,b,'from',x.name,x.asname)
+          def mp(p,r):
+           q=list(p.relative_to(r).with_suffix('').parts);q=q[1:] if q and q[0]=='src' else q;pkg=q[-1]=='__init__';q=q[:-1] if pkg else q;return '.'.join(q),pkg
+          def pub(t):
+           for n in t.body:
+            if isinstance(n,ast.Assign) and any(isinstance(x,ast.Name) and x.id=='__all__' for x in n.targets) and isinstance(n.value,(ast.List,ast.Tuple)) and all(isinstance(x,ast.Constant) and isinstance(x.value,str) for x in n.value.elts):return [x.value for x in n.value.elts]
+           z=[]
+           for n in t.body:
+            if isinstance(n,(ast.FunctionDef,ast.AsyncFunctionDef,ast.ClassDef)) and not n.name.startswith('_'):z.append(n.name)
+            if isinstance(n,ast.ImportFrom):z += [x.asname or x.name for x in n.names if not (x.asname or x.name).startswith('_') and x.name!='*']
+           return sorted(set(z))
+          def targets(e,M):
+           z=set();t=e['target']
+           if e['kind']=='from':
+            if t in M:z.add(t)
+            u=t+'.'+e['name'] if t and e['name'] and e['name']!='*' else ''
+            if u in M:z.add(u)
+           elif t in M:z.add(t)
+           return z
+          def comps(g):
+           i=0;st=[];on=set();ix={};lo={};ans=[]
+           def f(v):
+            nonlocal i
+            ix[v]=lo[v]=i;i+=1;st.append(v);on.add(v)
+            for w in g[v]:
+             if w not in ix:f(w);lo[v]=min(lo[v],lo[w])
+             elif w in on:lo[v]=min(lo[v],ix[w])
+            if lo[v]==ix[v]:
+             c=[]
+             while 1:
+              w=st.pop();on.remove(w);c.append(w)
+              if w==v:break
+             if len(c)>1 or v in g[v]:ans.append(sorted(c))
+           for v in sorted(g):
+            if v not in ix:f(v)
+           return ans
+          def test():
+           x='''from typing import TYPE_CHECKING\nfrom . import sibling\nif TYPE_CHECKING:\n from pkg.types import T\ndef f():\n import pkg.local as q\ntry:\n from pkg.optional import Opt\nexcept ImportError: pass\nif FLAG: import pkg.conditional\nfrom pkg.absolute import value as a\nfrom pkg.exported import Public as AliasPublic\n__all__=["AliasPublic"]\n''';t=ast.parse(x);v=V('pkg.core','x.py');v.visit(t);e={(x['target'],x['name']):x for x in v.e};k={'relative_import':('pkg','sibling') in e,'type_checking':e['pkg.types','T']['type_only'],'function_local':next(x for x in v.e if x['target']=='pkg.local')['local'],'aliased_import':next(x for x in v.e if x['target']=='pkg.absolute')['alias']=='a','__all__reexport':'AliasPublic' in pub(t),'optional_import':e['pkg.optional','Opt']['optional'],'conditional_import':next(x for x in v.e if x['target']=='pkg.conditional')['conditional']};a=[f"SELFTEST {n}: {'PASS' if y else 'FAIL'}" for n,y in k.items()];a+=[f"SELFTEST OVERALL: {'PASS' if all(k.values()) else 'FAIL'} ({sum(k.values())}/{len(k)})"]
+           if not all(k.values()):raise SystemExit('selftest failed')
+           return a
+          def main():
+           O.mkdir(exist_ok=True);a=test();print('\n'.join(a));(O/'selftest.txt').write_text('\n'.join(a)+'\n');r=Path.cwd();chg=sorted(subprocess.check_output(['git','diff','--name-only',P,'HEAD'],text=True).splitlines())
+           if chg!=sorted((R,W)):raise SystemExit('read-only assertion '+repr(chg))
+           lc={p:(r/p).read_bytes().count(b'\n') for p in S}
+           if sum(lc.values())!=5601 or any(lc[p]!=n for p,n in C.items()) or sum(lc[p] for p in T)!=571:raise SystemExit('wc mismatch')
+           D={};err=[]
+           for p in sorted(r.rglob('*.py')):
+            if any(x in ('.git','.agent','.venv','venv','__pycache__') for x in p.parts):continue
+            m,k=mp(p,r)
+            try:D[m]=(p,ast.parse(p.read_text()),k)
+            except Exception as x:err.append([str(p.relative_to(r)),repr(x)])
+           M=set(D);E=[];G={m:set() for m in M}
+           for m,(p,t,k) in D.items():
+            v=V(m,str(p.relative_to(r)),k);v.visit(t);E+=v.e
+            for e in v.e:G[m]|=targets(e,M)
+           I=defaultdict(set)
+           for m,z in G.items():
+            for q in z:I[q].add(m)
+           PM={str(p.relative_to(r)):m for m,(p,_,_) in D.items()};BR={p:sorted(I[PM[p]]) for p in S};SC=set(PM[p] for p in S);CC=comps(G);INV=[e for e in E if e['source'] in SC and any(e['target']==h or e['target'].startswith(h+'.') for h in HI)];A='menhir.domain.artifact_reconciliation';SY=pub(D[A][1]);CALL=defaultdict(set)
+           for e in E:
+            if e['target']==A and e['kind']=='from' and e['name'] in SY:CALL[e['name']].add(e['source'])
+           out={'commit':P,'head':subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),'changed':chg,'line_counts':lc,'total':sum(lc.values()),'parse_errors':err,'imports':E,'inverted_edges':INV,'all_sccs':CC,'scope_sccs':[x for x in CC if SC.intersection(x)],'scope_importers':BR,'artifact_public_symbols':SY,'artifact_direct_callers':{x:sorted(CALL[x]) for x in SY}}
+           (O/'probe-output.json').write_text(json.dumps(out,indent=2,sort_keys=True)+'\n');tracked=subprocess.check_output(['git','ls-files'],text=True).splitlines()
+           with tarfile.open(O/'source.tar.gz','w:gz') as z:
+            for x in tracked:
+             if not x.startswith('.agent/') and (x.endswith('.py') or x in ('pyproject.toml','pytest.ini')):z.add(r/x,arcname=x)
+           wc='\n'.join(f'{lc[x]:6d} {x}' for x in S)+f'\n{sum(lc.values()):6d} total\n';(O/'wc-output.txt').write_text(wc);print(wc,end='');print(f"PROBE_SUMMARY modules={len(M)} python_files={len(D)} parse_errors={len(err)} inverted_edges={len(INV)} scope_sccs={len(out['scope_sccs'])}")
+          if __name__=='__main__':main()
+          PY
+      - name: Upload probe evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: menhir-m1-domain-architecture-evidence
+          path: /tmp/menhir-m1-artifact
+          if-no-files-found: error
+          retention-days: 1
