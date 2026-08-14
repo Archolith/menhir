@@ -20,130 +20,567 @@ jobs:
       - name: Run control-tested stdlib architecture probe
         shell: bash
         run: |
-          python - <<'PY'
-          import ast,json,subprocess,tarfile,tempfile
+          cat > /tmp/menhir_m1_domain_architecture_probe.py <<'PY'
+          from __future__ import annotations
+          
+          import ast
+          import json
+          import subprocess
+          import tarfile
+          import tempfile
           from collections import defaultdict
+          from dataclasses import dataclass, asdict
           from pathlib import Path
-          P='eebf6d6dd83f15083167bf847b639d24b953fdc9'; R='.agent/reviews/menhir-M1-domain-architecture-external.md'; W='.github/workflows/menhir-m1-domain-architecture-external-probe.yml'; O=Path('/tmp/menhir-m1-artifact')
-          ROOT='''artifact_reconciliation.py 1880
-          work_artifact.py 477
-          belief.py 414
-          merge_snapshot.py 314
-          warden.py 310
-          artifact_shape.py 218
-          git_staleness.py 194
-          merge_delta.py 178
-          legacy_snapshot.py 150
-          merge_eligibility.py 145
-          artifacts.py 133
-          repo_snapshot.py 95
-          namespace.py 90
-          artifact_role.py 83
-          belief_evidence.py 77
-          models.py 76
-          bootstrap_scope.py 58
-          scope.py 46
-          session.py 37
-          edges.py 30
-          ingest.py 25'''
-          C={f'src/menhir/domain/{a}':int(b) for a,b in (x.split() for x in ROOT.splitlines())}; T=[f'src/menhir/domain/truth/{x}' for x in ('__init__.py','admission_gate.py','attestation.py','kinds.py','labels.py')]; S=list(C)+T; HI=('menhir.services','menhir.api','menhir.mcp','menhir.infrastructure','menhir.cli')
-          class V(ast.NodeVisitor):
-           def __init__(s,m,p,pkg=False):s.m,s.p,s.pkg,s.e,s.t,s.f,s.o,s.c=m,p,m if pkg else m.rpartition('.')[0],[],0,0,0,0
-           def add(s,n,t,k,name=None,alias=None):s.e.append({'source':s.m,'path':s.p,'target':t,'line':n.lineno,'kind':k,'name':name,'alias':alias,'type_only':bool(s.t),'local':bool(s.f),'optional':bool(s.o),'conditional':bool(s.c)})
-           def rel(s,m,l):
-            if not l:return m or ''
-            p=s.pkg.split('.') if s.pkg else []; p=p[:max(0,len(p)-l+1)]; return '.'.join(p+((m or '').split('.') if m else []))
-           def visit_If(s,n):
-            tc=isinstance(n.test,ast.Name) and n.test.id=='TYPE_CHECKING' or isinstance(n.test,ast.Attribute) and n.test.attr=='TYPE_CHECKING'; s.visit(n.test); s.c+=1;s.t+=tc
-            for x in n.body:s.visit(x)
-            s.t-=tc
-            for x in n.orelse:s.visit(x)
-            s.c-=1
-           def visit_Try(s,n):
-            opt=any(h.type is None or isinstance(h.type,ast.Name) and h.type.id in ('ImportError','ModuleNotFoundError') for h in n.handlers);s.o+=opt;s.c+=1
-            for x in n.body:s.visit(x)
-            s.o-=opt
-            for q in (n.handlers,n.orelse,n.finalbody):
-             for x in q:s.visit(x)
-            s.c-=1
-           def fn(s,n):
-            s.f+=1
-            for x in n.body:s.visit(x)
-            s.f-=1
-           visit_FunctionDef=fn;visit_AsyncFunctionDef=fn
-           def visit_Import(s,n):
-            for x in n.names:s.add(n,x.name,'import',alias=x.asname)
-           def visit_ImportFrom(s,n):
-            b=s.rel(n.module,n.level)
-            for x in n.names:s.add(n,b,'from',x.name,x.asname)
-          def mp(p,r):
-           q=list(p.relative_to(r).with_suffix('').parts);q=q[1:] if q and q[0]=='src' else q;pkg=q[-1]=='__init__';q=q[:-1] if pkg else q;return '.'.join(q),pkg
-          def pub(t):
-           for n in t.body:
-            if isinstance(n,ast.Assign) and any(isinstance(x,ast.Name) and x.id=='__all__' for x in n.targets) and isinstance(n.value,(ast.List,ast.Tuple)) and all(isinstance(x,ast.Constant) and isinstance(x.value,str) for x in n.value.elts):return [x.value for x in n.value.elts]
-           z=[]
-           for n in t.body:
-            if isinstance(n,(ast.FunctionDef,ast.AsyncFunctionDef,ast.ClassDef)) and not n.name.startswith('_'):z.append(n.name)
-            if isinstance(n,ast.ImportFrom):z += [x.asname or x.name for x in n.names if not (x.asname or x.name).startswith('_') and x.name!='*']
-           return sorted(set(z))
-          def targets(e,M):
-           z=set();t=e['target']
-           if e['kind']=='from':
-            if t in M:z.add(t)
-            u=t+'.'+e['name'] if t and e['name'] and e['name']!='*' else ''
-            if u in M:z.add(u)
-           elif t in M:z.add(t)
-           return z
-          def comps(g):
-           i=0;st=[];on=set();ix={};lo={};ans=[]
-           def f(v):
-            nonlocal i
-            ix[v]=lo[v]=i;i+=1;st.append(v);on.add(v)
-            for w in g[v]:
-             if w not in ix:f(w);lo[v]=min(lo[v],lo[w])
-             elif w in on:lo[v]=min(lo[v],ix[w])
-            if lo[v]==ix[v]:
-             c=[]
-             while 1:
-              w=st.pop();on.remove(w);c.append(w)
-              if w==v:break
-             if len(c)>1 or v in g[v]:ans.append(sorted(c))
-           for v in sorted(g):
-            if v not in ix:f(v)
-           return ans
-          def test():
-           x='''from typing import TYPE_CHECKING\nfrom . import sibling\nif TYPE_CHECKING:\n from pkg.types import T\ndef f():\n import pkg.local as q\ntry:\n from pkg.optional import Opt\nexcept ImportError: pass\nif FLAG: import pkg.conditional\nfrom pkg.absolute import value as a\nfrom pkg.exported import Public as AliasPublic\n__all__=["AliasPublic"]\n''';t=ast.parse(x);v=V('pkg.core','x.py');v.visit(t);e={(x['target'],x['name']):x for x in v.e};k={'relative_import':('pkg','sibling') in e,'type_checking':e['pkg.types','T']['type_only'],'function_local':next(x for x in v.e if x['target']=='pkg.local')['local'],'aliased_import':next(x for x in v.e if x['target']=='pkg.absolute')['alias']=='a','__all__reexport':'AliasPublic' in pub(t),'optional_import':e['pkg.optional','Opt']['optional'],'conditional_import':next(x for x in v.e if x['target']=='pkg.conditional')['conditional']};a=[f"SELFTEST {n}: {'PASS' if y else 'FAIL'}" for n,y in k.items()];a+=[f"SELFTEST OVERALL: {'PASS' if all(k.values()) else 'FAIL'} ({sum(k.values())}/{len(k)})"]
-           if not all(k.values()):raise SystemExit('selftest failed')
-           return a
-          def main():
-           O.mkdir(exist_ok=True);a=test();print('\n'.join(a));(O/'selftest.txt').write_text('\n'.join(a)+'\n');r=Path.cwd();chg=sorted(subprocess.check_output(['git','diff','--name-only',P,'HEAD'],text=True).splitlines())
-           if chg!=sorted((R,W)):raise SystemExit('read-only assertion '+repr(chg))
-           lc={p:(r/p).read_bytes().count(b'\n') for p in S}
-           if sum(lc.values())!=5601 or any(lc[p]!=n for p,n in C.items()) or sum(lc[p] for p in T)!=571:raise SystemExit('wc mismatch')
-           D={};err=[]
-           for p in sorted(r.rglob('*.py')):
-            if any(x in ('.git','.agent','.venv','venv','__pycache__') for x in p.parts):continue
-            m,k=mp(p,r)
-            try:D[m]=(p,ast.parse(p.read_text()),k)
-            except Exception as x:err.append([str(p.relative_to(r)),repr(x)])
-           M=set(D);E=[];G={m:set() for m in M}
-           for m,(p,t,k) in D.items():
-            v=V(m,str(p.relative_to(r)),k);v.visit(t);E+=v.e
-            for e in v.e:G[m]|=targets(e,M)
-           I=defaultdict(set)
-           for m,z in G.items():
-            for q in z:I[q].add(m)
-           PM={str(p.relative_to(r)):m for m,(p,_,_) in D.items()};BR={p:sorted(I[PM[p]]) for p in S};SC=set(PM[p] for p in S);CC=comps(G);INV=[e for e in E if e['source'] in SC and any(e['target']==h or e['target'].startswith(h+'.') for h in HI)];A='menhir.domain.artifact_reconciliation';SY=pub(D[A][1]);CALL=defaultdict(set)
-           for e in E:
-            if e['target']==A and e['kind']=='from' and e['name'] in SY:CALL[e['name']].add(e['source'])
-           out={'commit':P,'head':subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),'changed':chg,'line_counts':lc,'total':sum(lc.values()),'parse_errors':err,'imports':E,'inverted_edges':INV,'all_sccs':CC,'scope_sccs':[x for x in CC if SC.intersection(x)],'scope_importers':BR,'artifact_public_symbols':SY,'artifact_direct_callers':{x:sorted(CALL[x]) for x in SY}}
-           (O/'probe-output.json').write_text(json.dumps(out,indent=2,sort_keys=True)+'\n');tracked=subprocess.check_output(['git','ls-files'],text=True).splitlines()
-           with tarfile.open(O/'source.tar.gz','w:gz') as z:
-            for x in tracked:
-             if not x.startswith('.agent/') and (x.endswith('.py') or x in ('pyproject.toml','pytest.ini')):z.add(r/x,arcname=x)
-           wc='\n'.join(f'{lc[x]:6d} {x}' for x in S)+f'\n{sum(lc.values()):6d} total\n';(O/'wc-output.txt').write_text(wc);print(wc,end='');print(f"PROBE_SUMMARY modules={len(M)} python_files={len(D)} parse_errors={len(err)} inverted_edges={len(INV)} scope_sccs={len(out['scope_sccs'])}")
-          if __name__=='__main__':main()
+          from typing import Iterable
+          
+          PINNED = "eebf6d6dd83f15083167bf847b639d24b953fdc9"
+          REPORT_PATH = ".agent/reviews/menhir-M1-domain-architecture-external.md"
+          PROBE_PATH = ".github/workflows/menhir-m1-domain-architecture-external-probe.yml"
+          OUT_DIR = Path("/tmp/menhir-m1-artifact")
+          
+          ROOT_EXPECTED = {
+              "artifact_reconciliation.py": 1880,
+              "work_artifact.py": 477,
+              "belief.py": 414,
+              "merge_snapshot.py": 314,
+              "warden.py": 310,
+              "artifact_shape.py": 218,
+              "git_staleness.py": 194,
+              "merge_delta.py": 178,
+              "legacy_snapshot.py": 150,
+              "merge_eligibility.py": 145,
+              "artifacts.py": 133,
+              "repo_snapshot.py": 95,
+              "namespace.py": 90,
+              "artifact_role.py": 83,
+              "belief_evidence.py": 77,
+              "models.py": 76,
+              "bootstrap_scope.py": 58,
+              "scope.py": 46,
+              "session.py": 37,
+              "edges.py": 30,
+              "ingest.py": 25,
+          }
+          TRUTH_FILES = ("__init__.py", "admission_gate.py", "attestation.py", "kinds.py", "labels.py")
+          SCOPE_PATHS = [f"src/menhir/domain/{name}" for name in ROOT_EXPECTED]
+          SCOPE_PATHS += [f"src/menhir/domain/truth/{name}" for name in TRUTH_FILES]
+          FORBIDDEN = (
+              "menhir.services",
+              "menhir.api",
+              "menhir.mcp",
+              "menhir.infrastructure",
+              "menhir.cli",
+          )
+          
+          
+          @dataclass(frozen=True)
+          class ImportEdge:
+              source: str
+              path: str
+              target: str
+              line: int
+              kind: str
+              name: str | None = None
+              alias: str | None = None
+              type_only: bool = False
+              local: bool = False
+              optional: bool = False
+              conditional: bool = False
+          
+          
+          @dataclass
+          class ModuleInfo:
+              name: str
+              path: Path
+              tree: ast.Module
+              is_package: bool
+              exports: dict[str, set[str]]
+              all_names: set[str] | None
+          
+          
+          def module_name(path: Path, root: Path) -> tuple[str, bool]:
+              parts = list(path.relative_to(root).with_suffix("").parts)
+              if parts and parts[0] == "src":
+                  parts = parts[1:]
+              is_package = bool(parts and parts[-1] == "__init__")
+              if is_package:
+                  parts = parts[:-1]
+              return ".".join(parts), is_package
+          
+          
+          def resolve_relative(package: str, module: str | None, level: int) -> str:
+              if level == 0:
+                  return module or ""
+              parts = package.split(".") if package else []
+              keep = max(0, len(parts) - level + 1)
+              base = parts[:keep]
+              if module:
+                  base.extend(module.split("."))
+              return ".".join(base)
+          
+          
+          class ImportVisitor(ast.NodeVisitor):
+              def __init__(self, module: str, path: str, is_package: bool = False) -> None:
+                  self.module = module
+                  self.path = path
+                  self.package = module if is_package else module.rpartition(".")[0]
+                  self.edges: list[ImportEdge] = []
+                  self.type_depth = 0
+                  self.function_depth = 0
+                  self.optional_depth = 0
+                  self.conditional_depth = 0
+          
+              def add(self, node: ast.AST, target: str, kind: str, name: str | None = None,
+                      alias: str | None = None) -> None:
+                  self.edges.append(ImportEdge(
+                      source=self.module,
+                      path=self.path,
+                      target=target,
+                      line=int(getattr(node, "lineno", 0)),
+                      kind=kind,
+                      name=name,
+                      alias=alias,
+                      type_only=self.type_depth > 0,
+                      local=self.function_depth > 0,
+                      optional=self.optional_depth > 0,
+                      conditional=self.conditional_depth > 0,
+                  ))
+          
+              @staticmethod
+              def _is_type_checking(test: ast.AST) -> bool:
+                  return (
+                      isinstance(test, ast.Name) and test.id == "TYPE_CHECKING"
+                  ) or (
+                      isinstance(test, ast.Attribute) and test.attr == "TYPE_CHECKING"
+                  )
+          
+              def visit_If(self, node: ast.If) -> None:
+                  self.visit(node.test)
+                  type_guard = self._is_type_checking(node.test)
+                  self.conditional_depth += 1
+                  self.type_depth += int(type_guard)
+                  for child in node.body:
+                      self.visit(child)
+                  self.type_depth -= int(type_guard)
+                  for child in node.orelse:
+                      self.visit(child)
+                  self.conditional_depth -= 1
+          
+              def visit_Try(self, node: ast.Try) -> None:
+                  catches_import = any(
+                      handler.type is None
+                      or isinstance(handler.type, ast.Name)
+                      and handler.type.id in {"ImportError", "ModuleNotFoundError"}
+                      or isinstance(handler.type, ast.Tuple)
+                      and any(isinstance(item, ast.Name) and item.id in {"ImportError", "ModuleNotFoundError"}
+                              for item in handler.type.elts)
+                      for handler in node.handlers
+                  )
+                  self.conditional_depth += 1
+                  self.optional_depth += int(catches_import)
+                  for child in node.body:
+                      self.visit(child)
+                  self.optional_depth -= int(catches_import)
+                  for group in (node.handlers, node.orelse, node.finalbody):
+                      for child in group:
+                          self.visit(child)
+                  self.conditional_depth -= 1
+          
+              def _visit_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+                  # Decorators/defaults execute at definition time; only the body is local.
+                  for deco in node.decorator_list:
+                      self.visit(deco)
+                  for default in [*node.args.defaults, *node.args.kw_defaults]:
+                      if default is not None:
+                          self.visit(default)
+                  if node.returns:
+                      self.visit(node.returns)
+                  self.function_depth += 1
+                  for child in node.body:
+                      self.visit(child)
+                  self.function_depth -= 1
+          
+              visit_FunctionDef = _visit_function
+              visit_AsyncFunctionDef = _visit_function
+          
+              def visit_Import(self, node: ast.Import) -> None:
+                  for item in node.names:
+                      self.add(node, item.name, "import", alias=item.asname)
+          
+              def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+                  base = resolve_relative(self.package, node.module, node.level)
+                  for item in node.names:
+                      self.add(node, base, "from", name=item.name, alias=item.asname)
+          
+          
+          def assigned_names(node: ast.AST) -> set[str]:
+              names: set[str] = set()
+              targets: Iterable[ast.AST]
+              if isinstance(node, (ast.Assign, ast.AnnAssign)):
+                  targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+              else:
+                  return names
+              for target in targets:
+                  if isinstance(target, ast.Name):
+                      names.add(target.id)
+                  elif isinstance(target, (ast.Tuple, ast.List)):
+                      names.update(item.id for item in target.elts if isinstance(item, ast.Name))
+              return names
+          
+          
+          def literal_all(tree: ast.Module) -> set[str] | None:
+              for node in tree.body:
+                  if isinstance(node, (ast.Assign, ast.AnnAssign)):
+                      names = assigned_names(node)
+                      value = node.value
+                      if "__all__" in names and isinstance(value, (ast.List, ast.Tuple, ast.Set)):
+                          if all(isinstance(item, ast.Constant) and isinstance(item.value, str) for item in value.elts):
+                              return {str(item.value) for item in value.elts}
+              return None
+          
+          
+          def build_exports(module: str, package: str, tree: ast.Module) -> dict[str, set[str]]:
+              """Map names available from this module to their defining/re-export source modules."""
+              exports: dict[str, set[str]] = defaultdict(set)
+              for node in tree.body:
+                  if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                      exports[node.name].add(module)
+                  elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+                      for name in assigned_names(node):
+                          exports[name].add(module)
+                  elif isinstance(node, ast.ImportFrom):
+                      base = resolve_relative(package, node.module, node.level)
+                      for item in node.names:
+                          local = item.asname or item.name
+                          if item.name == "*":
+                              # Resolved after all modules have their direct export tables.
+                              exports["*"].add(base)
+                          else:
+                              candidate_module = f"{base}.{item.name}" if base else item.name
+                              # If the imported name is itself a submodule, resolution later prefers it.
+                              exports[local].add(candidate_module)
+                              exports[local].add(base)
+                  elif isinstance(node, ast.Import):
+                      for item in node.names:
+                          local = item.asname or item.name.split(".")[0]
+                          exports[local].add(item.name)
+              return {key: set(value) for key, value in exports.items()}
+          
+          
+          def load_modules(root: Path) -> tuple[dict[str, ModuleInfo], list[list[str]]]:
+              modules: dict[str, ModuleInfo] = {}
+              errors: list[list[str]] = []
+              for path in sorted(root.rglob("*.py")):
+                  if any(part in {".git", ".agent", ".venv", "venv", "__pycache__"} for part in path.parts):
+                      continue
+                  name, is_package = module_name(path, root)
+                  try:
+                      tree = ast.parse(path.read_text())
+                  except Exception as exc:  # pragma: no cover - repository evidence path
+                      errors.append([str(path.relative_to(root)), repr(exc)])
+                      continue
+                  package = name if is_package else name.rpartition(".")[0]
+                  modules[name] = ModuleInfo(
+                      name=name,
+                      path=path,
+                      tree=tree,
+                      is_package=is_package,
+                      exports=build_exports(name, package, tree),
+                      all_names=literal_all(tree),
+                  )
+              return modules, errors
+          
+          
+          def resolve_export_origins(
+              module: str,
+              symbol: str,
+              modules: dict[str, ModuleInfo],
+              seen: set[tuple[str, str]] | None = None,
+          ) -> set[str]:
+              """Resolve a public name through explicit package re-exports to repository modules."""
+              seen = set() if seen is None else set(seen)
+              key = (module, symbol)
+              if key in seen:
+                  return set()
+              seen.add(key)
+              info = modules.get(module)
+              if info is None:
+                  return set()
+              if info.all_names is not None and symbol not in info.all_names:
+                  # It can still be explicitly imported with `from module import private`; __all__ only
+                  # constrains star export. Do not reject direct lookup. This branch is intentionally no-op.
+                  pass
+              candidates = set(info.exports.get(symbol, set()))
+              origins: set[str] = set()
+              for candidate in candidates:
+                  if candidate in modules:
+                      origins.add(candidate)
+                      # If candidate is a package/module that re-exports the same symbol, follow it.
+                      if candidate != module:
+                          origins.update(resolve_export_origins(candidate, symbol, modules, seen))
+                  else:
+                      base, dot, tail = candidate.rpartition(".")
+                      if dot and base in modules:
+                          origins.update(resolve_export_origins(base, tail, modules, seen))
+              # Star re-exports: only expose names allowed by the target's __all__ (or public names if absent).
+              for star_base in info.exports.get("*", set()):
+                  target = modules.get(star_base)
+                  if target is None:
+                      continue
+                  allowed = target.all_names if target.all_names is not None else {
+                      name for name in target.exports if not name.startswith("_") and name != "*"
+                  }
+                  if symbol in allowed:
+                      origins.add(star_base)
+                      origins.update(resolve_export_origins(star_base, symbol, modules, seen))
+              return origins
+          
+          
+          def edge_targets(edge: ImportEdge, modules: dict[str, ModuleInfo]) -> set[str]:
+              targets: set[str] = set()
+              if edge.kind == "import":
+                  # Importing a dotted module initializes the exact module; if only a parent is indexed,
+                  # retain the longest indexed prefix.
+                  candidate = edge.target
+                  while candidate:
+                      if candidate in modules:
+                          targets.add(candidate)
+                          break
+                      candidate = candidate.rpartition(".")[0]
+                  return targets
+          
+              base = edge.target
+              if base in modules:
+                  targets.add(base)
+              if edge.name and edge.name != "*":
+                  submodule = f"{base}.{edge.name}" if base else edge.name
+                  if submodule in modules:
+                      targets.add(submodule)
+                  targets.update(resolve_export_origins(base, edge.name, modules))
+              elif edge.name == "*" and base in modules:
+                  info = modules[base]
+                  names = info.all_names if info.all_names is not None else {
+                      name for name in info.exports if not name.startswith("_") and name != "*"
+                  }
+                  for symbol in names:
+                      targets.update(resolve_export_origins(base, symbol, modules))
+              return {target for target in targets if target in modules}
+          
+          
+          def strongly_connected_components(graph: dict[str, set[str]]) -> list[list[str]]:
+              index = 0
+              stack: list[str] = []
+              on_stack: set[str] = set()
+              indices: dict[str, int] = {}
+              low: dict[str, int] = {}
+              result: list[list[str]] = []
+          
+              def visit(node: str) -> None:
+                  nonlocal index
+                  indices[node] = low[node] = index
+                  index += 1
+                  stack.append(node)
+                  on_stack.add(node)
+                  for neighbor in sorted(graph.get(node, set())):
+                      if neighbor not in indices:
+                          visit(neighbor)
+                          low[node] = min(low[node], low[neighbor])
+                      elif neighbor in on_stack:
+                          low[node] = min(low[node], indices[neighbor])
+                  if low[node] == indices[node]:
+                      component: list[str] = []
+                      while True:
+                          member = stack.pop()
+                          on_stack.remove(member)
+                          component.append(member)
+                          if member == node:
+                              break
+                      if len(component) > 1 or node in graph.get(node, set()):
+                          result.append(sorted(component))
+          
+              for node in sorted(graph):
+                  if node not in indices:
+                      visit(node)
+              return sorted(result, key=lambda component: (len(component), component))
+          
+          
+          def run_self_test() -> list[str]:
+              with tempfile.TemporaryDirectory() as tmp:
+                  root = Path(tmp)
+                  (root / "pkg").mkdir()
+                  (root / "pkg" / "__init__.py").write_text(
+                      "from .core import Public as AliasPublic\n"
+                      "from .star import *\n"
+                      "__all__ = ['AliasPublic', 'StarPublic']\n"
+                  )
+                  (root / "pkg" / "core.py").write_text(
+                      "from typing import TYPE_CHECKING\n"
+                      "from . import sibling\n"
+                      "if TYPE_CHECKING:\n    from pkg.types import T\n"
+                      "def f():\n    import pkg.local as q\n"
+                      "try:\n    from pkg.optional import Opt\nexcept ImportError:\n    pass\n"
+                      "if FLAG:\n    import pkg.conditional\n"
+                      "from pkg.absolute import value as a\n"
+                      "class Public: pass\n"
+                  )
+                  (root / "pkg" / "star.py").write_text("__all__=['StarPublic']\nclass StarPublic: pass\n")
+                  for name in ("sibling", "types", "local", "optional", "conditional", "absolute"):
+                      (root / "pkg" / f"{name}.py").write_text("T=Opt=value=1\n")
+                  (root / "consumer.py").write_text(
+                      "from pkg import AliasPublic, StarPublic\n"
+                      "from pkg.core import Public as P\n"
+                  )
+                  modules, errors = load_modules(root)
+                  if errors:
+                      raise AssertionError(errors)
+                  edges: list[ImportEdge] = []
+                  graph = {name: set() for name in modules}
+                  for info in modules.values():
+                      visitor = ImportVisitor(info.name, str(info.path.relative_to(root)), info.is_package)
+                      visitor.visit(info.tree)
+                      edges.extend(visitor.edges)
+                      for edge in visitor.edges:
+                          graph[info.name].update(edge_targets(edge, modules))
+                  keyed = {(edge.target, edge.name): edge for edge in edges}
+                  checks = {
+                      "relative_import": ("pkg", "sibling") in keyed,
+                      "type_checking": keyed[("pkg.types", "T")].type_only,
+                      "function_local": next(edge for edge in edges if edge.target == "pkg.local").local,
+                      "aliased_import": next(edge for edge in edges if edge.target == "pkg.absolute").alias == "a",
+                      "__all__reexport": "pkg.core" in graph["consumer"] and "pkg.star" in graph["consumer"],
+                      "optional_import": keyed[("pkg.optional", "Opt")].optional,
+                      "conditional_import": next(edge for edge in edges if edge.target == "pkg.conditional").conditional,
+                  }
+              lines = [f"SELFTEST {name}: {'PASS' if passed else 'FAIL'}" for name, passed in checks.items()]
+              lines.append(f"SELFTEST OVERALL: {'PASS' if all(checks.values()) else 'FAIL'} "
+                           f"({sum(checks.values())}/{len(checks)})")
+              if not all(checks.values()):
+                  raise SystemExit("self-test failed\n" + "\n".join(lines))
+              return lines
+          
+          
+          def main() -> None:
+              root = Path.cwd()
+              OUT_DIR.mkdir(parents=True, exist_ok=True)
+              selftest = run_self_test()
+              print("\n".join(selftest))
+              (OUT_DIR / "selftest.txt").write_text("\n".join(selftest) + "\n")
+          
+              # In the hosted branch run, source must differ from PINNED only by report + probe.
+              if (root / ".git").exists():
+                  changed = sorted(subprocess.check_output(
+                      ["git", "diff", "--name-only", PINNED, "HEAD"], text=True
+                  ).splitlines())
+                  allowed = sorted([REPORT_PATH, PROBE_PATH])
+                  if changed != allowed:
+                      raise SystemExit(f"read-only assertion failed: {changed!r} != {allowed!r}")
+                  head = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+              else:
+                  changed = []
+                  head = None
+          
+              line_counts = {path: sum(1 for _ in (root / path).open("rb")) for path in SCOPE_PATHS}
+              expected = {f"src/menhir/domain/{name}": count for name, count in ROOT_EXPECTED.items()}
+              if any(line_counts[path] != count for path, count in expected.items()):
+                  raise SystemExit("root wc mismatch")
+              if sum(line_counts[path] for path in SCOPE_PATHS if "/truth/" in path) != 571:
+                  raise SystemExit("truth wc mismatch")
+              if sum(line_counts.values()) != 5601:
+                  raise SystemExit("scope total mismatch")
+          
+              modules, parse_errors = load_modules(root)
+              all_edges: list[ImportEdge] = []
+              graph: dict[str, set[str]] = {name: set() for name in modules}
+              resolved_by_edge: list[dict[str, object]] = []
+              for info in modules.values():
+                  visitor = ImportVisitor(info.name, str(info.path.relative_to(root)), info.is_package)
+                  visitor.visit(info.tree)
+                  all_edges.extend(visitor.edges)
+                  for edge in visitor.edges:
+                      targets = edge_targets(edge, modules)
+                      graph[info.name].update(targets)
+                      resolved_by_edge.append({**asdict(edge), "resolved_targets": sorted(targets)})
+          
+              importers: dict[str, set[str]] = defaultdict(set)
+              for source, targets in graph.items():
+                  for target in targets:
+                      if source != target:
+                          importers[target].add(source)
+          
+              path_to_module = {str(info.path.relative_to(root)): name for name, info in modules.items()}
+              scope_modules = {path_to_module[path] for path in SCOPE_PATHS}
+              sccs = strongly_connected_components(graph)
+          
+              inverted = [
+                  asdict(edge)
+                  for edge in all_edges
+                  if edge.source in scope_modules
+                  and any(edge.target == prefix or edge.target.startswith(prefix + ".") for prefix in FORBIDDEN)
+              ]
+          
+              artifact_module = "menhir.domain.artifact_reconciliation"
+              artifact_info = modules[artifact_module]
+              artifact_defined_symbols: list[dict[str, object]] = []
+              for node in artifact_info.tree.body:
+                  if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and not node.name.startswith("_"):
+                      artifact_defined_symbols.append({"name": node.name, "kind": type(node).__name__, "line": node.lineno})
+                  elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+                      for name in sorted(assigned_names(node)):
+                          if not name.startswith("_"):
+                              artifact_defined_symbols.append({"name": name, "kind": "constant", "line": node.lineno})
+          
+              output = {
+                  "commit": PINNED,
+                  "head": head,
+                  "changed": changed,
+                  "line_counts": line_counts,
+                  "total": sum(line_counts.values()),
+                  "parse_errors": parse_errors,
+                  "imports": resolved_by_edge,
+                  "inverted_edges": inverted,
+                  "all_sccs": sccs,
+                  "scope_sccs": [component for component in sccs if scope_modules.intersection(component)],
+                  "scope_importers": {
+                      path: sorted(importers[path_to_module[path]]) for path in SCOPE_PATHS
+                  },
+                  "scope_direct_importers": {
+                      path: sorted({edge.source for edge in all_edges if path_to_module[path] in edge_targets(edge, modules)})
+                      for path in SCOPE_PATHS
+                  },
+                  "artifact_defined_symbols": artifact_defined_symbols,
+                  "artifact_importers": sorted(importers[artifact_module]),
+                  "module_count": len(modules),
+              }
+              (OUT_DIR / "probe-output.json").write_text(json.dumps(output, indent=2, sort_keys=True) + "\n")
+          
+              tracked = (
+                  subprocess.check_output(["git", "ls-files"], text=True).splitlines()
+                  if (root / ".git").exists()
+                  else [str(path.relative_to(root)) for path in root.rglob("*") if path.is_file()]
+              )
+              with tarfile.open(OUT_DIR / "source.tar.gz", "w:gz") as archive:
+                  for rel in tracked:
+                      if rel.startswith(".agent/"):
+                          continue
+                      if rel.endswith(".py") or rel in {"pyproject.toml", "pytest.ini"}:
+                          archive.add(root / rel, arcname=rel)
+          
+              wc_text = "\n".join(f"{line_counts[path]:6d} {path}" for path in SCOPE_PATHS)
+              wc_text += f"\n{sum(line_counts.values()):6d} total\n"
+              (OUT_DIR / "wc-output.txt").write_text(wc_text)
+              print(wc_text, end="")
+              print(
+                  "PROBE_SUMMARY "
+                  f"modules={len(modules)} parse_errors={len(parse_errors)} "
+                  f"inverted_edges={len(inverted)} scope_sccs={len(output['scope_sccs'])} "
+                  "reexports=resolved"
+              )
+          
+          
+          if __name__ == "__main__":
+              main()
           PY
+          python /tmp/menhir_m1_domain_architecture_probe.py
       - name: Upload probe evidence
         uses: actions/upload-artifact@v4
         with:
