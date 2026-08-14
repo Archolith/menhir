@@ -54,6 +54,30 @@ jobs:
         working-directory: menhir
         run: ruff check --select F811 --output-format concise .
 
+      # F821 (undefined name) and ASYNC (blocking calls in async functions) are scoped to src/
+      # deliberately -- see the baselines below. Both catch real defects that the test suite
+      # cannot: F821 fires on names that only blow up when a branch executes, ASYNC on calls
+      # that are correct in isolation and wrong on an event loop.
+      #
+      # BASELINE AT INTRODUCTION, src/ only: 13 F821 + 10 ASYNC = 23.
+      #   F821  9  telemetry/{event,lifecycle,recall}_store.py call logger.warning() with no
+      #            logging import and no logger binding, every use inside `except sqlite3.Error`.
+      #            A recoverable DB error raises NameError instead of degrading. That is CF-67
+      #            (High) -- six audit lanes read these files and none found it; ruff took a second.
+      #         4  type names used in annotations (MergeEligibility, ConsolidationResult,
+      #            DecayResult, logging) -- confirm each is a real import gap before "fixing".
+      #   ASYNC 1  ASYNC230 blocking open() in an async function, context_builder.py:534
+      #         6  ASYNC240 os.path methods in async functions (stat calls -- lower severity)
+      #         3  ASYNC109 async def taking a `timeout` parameter
+      #
+      # NOT repo-wide, on purpose. F821 over the whole tree is 79 hits: the extra 66 are almost
+      # all forward-referenced stub classes in test annotations, which do not fail at runtime
+      # (the suite passes) and would bury the 9 that matter. Widen to tests/ only after those
+      # are triaged -- a signal nobody can read is a signal nobody acts on.
+      - name: Check for undefined names and blocking async calls (src only)
+        working-directory: menhir
+        run: ruff check --select F821,ASYNC --output-format concise src
+
   offline-tests:
     runs-on: ubuntu-latest
     # Hard ceiling independent of pytest-timeout's per-test guard: if the known
