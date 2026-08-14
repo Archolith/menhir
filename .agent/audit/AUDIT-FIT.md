@@ -14,8 +14,8 @@ Verified at commit `eebf6d6dd83f15083167bf847b639d24b953fdc9`.
 | security | good | M2 | `--type a2` | |
 | architecture | good | M3 | `--type a3` | external pass @ 7aa977e1 |
 | maintainability | good | M2, M10 | core checks | |
-| performance | **partial** | none | partial via a2 | audit is JVM-shaped; see below |
-| test-coverage | **partial** | none | none | coverage data 34 days stale |
+| performance | **good** | none | `--type a5` + a2 | JVM version superseded by workspace `.agent/audit/performance-audit-python-asyncio.md`; a5 plugin verified running 2026-08-14 |
+| test-coverage | **good** | none | none | coverage.xml regenerated 2026-08-13: line-rate 0.8439, 369 classes. Verified 2026-08-14 |
 | llm-ai | good | M6 | none (judgement) | |
 | compliance | good | none | none | all artifacts present, fully actionable |
 | architecture-sql-storage | **N/A** | - | - | JVM + Postgres only |
@@ -26,7 +26,18 @@ Verified at commit `eebf6d6dd83f15083167bf847b639d24b953fdc9`.
 
 ## Where the library does not fit, and why
 
-### performance-audit - partial
+### performance-audit - RESOLVED 2026-08-14
+
+**The rewrite described below was done.** Workspace `.agent/audit/performance-audit-python-asyncio.md`
+replaces the JVM version. Its Lanes A-D cover every concern the table further down marks
+"uncovered": sequential awaits and N+1 (Lane B), unbounded result sets and unbounded in-memory
+structures including caches without eviction (Lane C), repeated per-request work (Lane D). It
+also splits evidence into STRUCTURAL vs MEASURED, so a lane with no profiler still produces
+real findings instead of inventing numbers; Lane E is the optional measured lane.
+The original analysis is kept below - it is still the correct statement of what Menhir's
+performance questions actually are.
+
+### Original analysis - why the library version did not fit
 
 Its Lane A asks for "top 10 hottest code paths by CPU profile (flame graph)",
 Lane B for "heap profile", "GC pause analysis (mode, frequency, duration)", and
