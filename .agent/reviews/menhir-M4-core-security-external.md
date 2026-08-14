@@ -4,252 +4,319 @@
 **Pinned commit:** `eebf6d6dd83f15083167bf847b639d24b953fdc9`  
 **Audit branch:** `audit/m4-core-security-external`  
 **Scope:** 23 files under `src/menhir/core/` and `src/menhir/` root  
-**Measured scope:** 5,097 lines (reconciles exactly with the declared total)  
-**Status:** DRAFT — all scope files read; both transport gates traced; adversarial redaction/preflight execution complete; downstream-sink and repository sweeps remain
-
-> Resume rule: Section 13 is the source-of-truth checkpoint. All 23 scope rows are `READ`. Resume with Section 8 downstream sinks, then Section 10 repository sweeps; do not reread scope or rerun completed adversarial probes.
+**Measured scope:** **5,097 lines**, exactly reconciled  
+**Status:** COMPLETE WITH ENVIRONMENT LIMITATIONS — all scope read; both transports traced; targeted security behavior executed; repository-wide static commands honestly marked `NOT RUN` where the clean checkout/tool was unavailable.
 
 ## 1. Executive Summary, highest-risk result first
 
-### M4-SEC-01 — High — readonly and unauthenticated-loopback callers can approve or reject candidates through Explorer
+The audit found **4 High, 6 Medium, and 2 Low** security issues. The highest-risk result is a real transport authorization mismatch: when Explorer is enabled, a readonly-authenticated remote caller—or a direct loopback caller with no credential—can approve or reject candidates even though the canonical backend policy classifies those actions as operator-only.
 
-The canonical backend policy classifies `promote_candidate`, `reject_candidate`, and `approve_candidate` as operator operations (`src/menhir/api/routes_support.py:624-651`). The mounted Explorer instead exposes `POST /explorer/candidates/{uuid}/approve` and `/reject` and calls `candidate_service.approve()` / `.reject()` directly, with no tier check (`src/menhir/explorer/app.py:832-844`). Explorer is mounted into the live app when enabled (`src/menhir/api/server_support.py:193-221`). A remote caller authenticated only at readonly tier passes the middleware and reaches these handlers; additionally, the middleware deliberately bypasses all Explorer authentication for a direct loopback peer (`src/menhir/api/auth.py:300-386`). Consequence: a lower tier can make operator-classified memory-governance decisions. The preconditions are `explorer_enabled`, a resolvable candidate UUID, and either any valid readonly credential remotely or direct loopback access.
+### M4-SEC-01 — High — Explorer exposes operator candidate decisions to readonly and unauthenticated-loopback callers
+
+The canonical dispatch policy classifies `promote_candidate`, `reject_candidate`, and `approve_candidate` as operator operations (`src/menhir/api/routes_support.py:624-674`). Explorer instead exposes `POST /explorer/candidates/{uuid}/approve` and `/reject` and calls the candidate service directly, with no tier check (`src/menhir/explorer/app.py:832-844`). Explorer is mounted into the live application when enabled (`src/menhir/api/server_support.py:193-221`). Remote readonly credentials pass the authentication middleware, and direct loopback Explorer requests bypass authentication entirely (`src/menhir/api/auth.py:300-386`). A lower tier can therefore make operator-classified memory-governance decisions.
 
 ### M4-SEC-02 — High — static-key callers can self-select `client_name` and bypass MCP namespace/tool restrictions
 
-In static bearer mode, request identity headers are trusted; caller-controlled `x-menhir-client-name` (or MCP `client_name` query metadata) becomes the bound session client name (`src/menhir/api/auth.py:208-286`, `378-411`). MCP namespace pins and tool allowlists are selected solely by that bound client name, while an absent/unconfigured name means unrestricted (`src/menhir/mcp/service_access.py:189-232`). `BaseTool.execute()` correctly forces the selected pin and enforces the selected allowlist (`src/menhir/mcp/contracts.py:282-346`), but a holder of a shared static tier key can evade both by naming an unconfigured client. OAuth and per-client-token modes derive identity from validated credentials and do not share this defect.
+Static bearer mode trusts caller-supplied identity headers and MCP query metadata; `x-menhir-client-name` or `client_name` becomes the bound client name (`src/menhir/api/auth.py:208-286`, `378-411`). MCP namespace pins and tool allowlists are selected solely by that name, and an absent or unconfigured name means unrestricted (`src/menhir/mcp/service_access.py:189-232`). `BaseTool.execute()` correctly enforces the *selected* allowlist and pin (`src/menhir/mcp/contracts.py:282-346`), but a holder of a shared static tier key can select an unconfigured name and evade both controls. OAuth and per-client-token modes derive identity from validated credentials and do not share this defect.
 
 ### M4-SEC-03 — High — REST ignores server-configured client namespace pins enforced by MCP
 
-MCP forcibly overwrites a tool's caller-supplied namespace with `MENHIR_CLIENT_NAMESPACES[client_name]` (`src/menhir/mcp/contracts.py:282-300`). REST `_resolve_namespace()` instead accepts the request-body namespace first, then `x-menhir-namespace`, and never consults the authenticated client's configured pin (`src/menhir/api/routes_support.py:128-143`). Core performs no ownership check. A client restricted to one namespace on MCP can reuse the same authenticated HTTP access to read or write a different namespace through REST. This is a transport-asymmetric privilege escalation bounded by deployments that rely on namespace pins as an access-control boundary.
+MCP forcibly replaces caller namespace input with `MENHIR_CLIENT_NAMESPACES[client_name]` (`src/menhir/mcp/contracts.py:282-300`). REST `_resolve_namespace()` accepts the body namespace first, then the namespace header, and never consults the authenticated client's configured pin (`src/menhir/api/routes_support.py:128-143`). Core performs no namespace ownership check. A client restricted to one namespace through MCP can reuse its HTTP credential to read or write another namespace through REST. This is a transport-asymmetric privilege escalation wherever namespace pins are relied on for isolation.
 
 ### M4-SEC-04 — High — generic backend failures log complete caller bodies without redaction
 
-`POST /api/internal/backend/{operation}` accepts a generic dictionary and invokes the selected runtime method. On any non-preset exception, the handler logs `body=%r` with `logger.exception()` and re-raises (`src/menhir/api/routes_handlers.py:199-231`). Bodies for this surface can contain full memory episodes, diffs, paths, scan dictionaries, user/session identifiers, and other caller content (`src/menhir/api/routes_support.py:544-651`). Therefore ordinary backend failures can place secrets or private memory content into server logs. The externally returned 500 is generic, but the log disclosure is direct and remote-triggerable. Executed logging reproduction remains scheduled for Section 9.
+`backend_invoke_impl()` accepts a generic dictionary and, for every non-preset exception, logs `body=%r` with a traceback before re-raising (`src/menhir/api/routes_handlers.py:199-231`). The operation body can contain complete episodes, diffs, paths, scan dictionaries, and identity values (`src/menhir/api/routes_support.py:544-674`). Executed reproduction printed the full synthetic secret, password, private path, and forged identity into the rendered log. A remote caller able to invoke an operation can therefore cause its sensitive input to reach server logs.
 
-### M4-SEC-05 — Medium — REST lets authenticated callers forge memory user/session attribution
+### M4-SEC-05 — Medium — REST permits authenticated callers to forge memory user/session attribution
 
-`MemoryRequest` exposes optional `user_id` and `session_id` without binding them to the authenticated principal (`src/menhir/api/routes_support.py:288-299`). The agent-tier `/api/memory` handler deliberately replaces the bound caller session when either field is supplied and forwards those values to `queue_episode()` (`src/menhir/api/routes.py:305-333`). This remains true in OAuth and per-client-token modes, where middleware identity itself is verified. MCP's `add_memory` path instead derives identity from the bound request session. Consequence is provenance/session forgery rather than a proven tier escalation, so severity is Medium.
+`MemoryRequest` exposes unconstrained body `user_id` and `session_id` fields (`src/menhir/api/routes_support.py:288-299`). The agent-tier `/api/memory` handler replaces the authenticated caller session whenever either field is supplied and forwards the replacement to `queue_episode()` (`src/menhir/api/routes.py:305-333`). This remains true under OAuth and per-client-token authentication. MCP's corresponding path derives both values from the bound request session (`src/menhir/mcp/tools/ingest/add_memory.py:109-126`). The result is provenance and session forgery, not a demonstrated tier escalation.
 
-### M4-SEC-06 — Medium — guarded ingest has an agent-reachable unguarded compatibility rescan path
+### M4-SEC-06 — Medium — agent-reachable compatibility rescan bypasses ingest-root containment
 
-`ingest_document()` and `scan_and_write_project()` call `ensure_ingest_path_allowed()` before reading/scanning (`src/menhir/core/backend_runtime_data_ops.py:305-319`, `342-360`). `write_project_structure()` accepts a caller-supplied scan dictionary; when `symbols` is absent, it schedules `_background_symbol_rescan()` on caller-controlled `root_path` (`src/menhir/core/backend_runtime_data_ops.py:428-443`). The rescan checks only `os.path.isdir(root)` and invokes `ProjectScanner.scan(root, name)` without the guard (`src/menhir/core/backend_runtime_data_ops.py:453-481`). The internal REST policy explicitly exposes `write_project_structure` at agent tier and the generic dispatcher invokes it (`src/menhir/api/routes_support.py:544-651`; `src/menhir/api/routes.py:742-759`). This bypasses the containment control with limited, asynchronous reach; downstream data visibility remains under analysis.
+Primary document/project ingestion calls `ensure_ingest_path_allowed()` before touching the filesystem (`src/menhir/core/backend_runtime_data_ops.py:305-319`, `342-360`). Separately, `write_project_structure()` accepts a caller-provided scan dictionary; if `symbols` is absent, it schedules `_background_symbol_rescan()` on the supplied `root_path` (`src/menhir/core/backend_runtime_data_ops.py:428-443`). The rescan checks only `os.path.isdir()` and invokes `ProjectScanner.scan()` without the guard (`src/menhir/core/backend_runtime_data_ops.py:453-481`). `ProjectScanner` resolves and recursively walks that host directory (`src/menhir/infrastructure/project_scanner.py:211-240`). The generic REST policy exposes `write_project_structure` at agent tier (`src/menhir/api/routes_support.py:544-674`). This restores host-directory scanning outside configured ingest roots, although the immediate output is asynchronous structure ingestion rather than raw file content.
 
-### M4-SEC-07 — Medium — privacy redaction fails open for structured, non-string, and case-variant protected fields
+### M4-SEC-07 — Medium — privacy redaction fails open for structured, non-string, and case-variant protected values
 
-Execution of the exact pinned `privacy.py` AST proved that only exact lowercase protected keys containing non-empty strings are reliably replaced with `[hidden]`. Beneath protected keys, a nested dictionary, nested list, and integer remained visible; `Content` and `SUMMARY` case variants remained visible; `None` and the empty string also passed through. A 10,000-character protected string was masked. Log execution masked a qualifying double-quoted phrase but left a single-quoted contraction, an unquoted phrase, and a malformed quoted phrase intact (`src/menhir/privacy.py:49-82`, `103-162`; `.agent/audit/m4_security_probe.py:557-674`). Explorer uses these helpers as a privacy display control, so protected memory content can remain visible in pathological but realistic row shapes or log syntax. This is a limited display-layer information disclosure, not graph/storage disclosure.
+`redact_mapping()` performs shallow, case-sensitive key matching, while `redact_text()` masks only non-empty strings (`src/menhir/privacy.py:49-82`). Execution of the exact pinned 162-line file—Git blob `a3b475c0406dd1162cda8feff36c73fbf44ce623`—left nested dictionaries, nested lists, an integer, `None`, an empty string, `Content`, and `SUMMARY` visible. A 10,000-character lowercase protected string was masked. `redact_log_line()` masked a qualifying double-quoted phrase but left a single-quoted contraction, an unquoted phrase, and malformed quoted text visible (`src/menhir/privacy.py:103-162`). Explorer relies on these helpers as a display privacy control (`src/menhir/explorer/app.py:538-583`, `607-650`), so protected content can remain visible in realistic noncanonical row/log shapes.
 
-### M4-SEC-08 — Low — preflight treats attacker-looking hostname prefixes as local and suppresses provider authorization
+### M4-SEC-08 — Medium — readonly backend operation scans an arbitrary host Git repository and returns corpus metadata
 
-Execution of the exact pinned predicate returned `True` for `http://localhost.evil.example/v1`, `http://127.0.0.1.evil.example/v1`, and `http://localhost@evil.example/v1`. `check_llama_connectivity()` therefore omits its configured bearer header for those non-loopback URL forms (`src/menhir/core/runtime_preflight.py:94-96`, `157-178`; `.agent/audit/m4_security_probe.py:596-674`). The base URL is configuration-controlled and the defect withholds rather than discloses a credential, so consequence is limited to an incorrect trust classification and unauthenticated preflight request to an operator-selected endpoint.
+`fetch_artifact_corpus_audit()` accepts caller-controlled `repo_path` and delegates it without a core path guard (`src/menhir/core/backend_runtime_admin_ops.py:439-458`). It is deliberately absent from the agent/operator tier sets and therefore falls to readonly (`src/menhir/api/routes_support.py:603-674`). The adapter resolves that path, runs a repository audit, and returns commit/cursor evidence, counts, conflicts, and contradictions (`src/menhir/infrastructure/memory_graph_adapter.py:1368-1402`). The scanner runs `git -C <caller path>` with argv separation, reads routed corpus files, hashes them, and extracts titles/status/type/UUID metadata (`src/menhir/infrastructure/artifact_corpus_scanner.py:48-105`, `160-244`). A readonly caller can therefore perform bounded reconnaissance against arbitrary local Git worktrees. Command injection is not present because no shell is used.
 
-### Architectural result — authorization is absent from the shared backend contract
+### M4-SEC-09 — Medium — readonly callers can retrieve internal provider and topology configuration
 
-`MemoryBackend` contains no authenticated principal, tier, or namespace-ownership proof in any method signature (`src/menhir/core/backend_protocol.py:43-683`). `RuntimeProvider` composes both data and admin mixins into one object and stores no authorization policy (`src/menhir/core/backend_runtime_ops.py:5-12`; `src/menhir/core/backend_runtime.py:14-41`). Except for two filesystem-ingest guard calls, core executes whatever operation and attribution its transport supplied.
+`get_provider_config()` returns the Neo4j URI/database, LLM and embedding endpoints, backend URL, provider kinds, and model names (`src/menhir/core/backend_runtime_admin_ops.py:294-319`). It is in the generic backend allowlist but absent from the agent/operator tier sets, so the total policy assigns readonly (`src/menhir/api/routes_support.py:544-674`). Core has no additional gate. This reveals internal service topology and implementation details to the lowest authenticated tier.
 
-## 2. Trust Boundary Register — every caller assumption, whether each transport enforces it, with the call chain
+### M4-SEC-10 — Medium — payload-controlled session IDs permit cross-session background-warning injection
 
-| Core assumption | REST enforcement | MCP enforcement | Result / evidence |
+Background errors are process-global buckets keyed only by a string and are returned verbatim up to 300 characters (`src/menhir/core/backend_shared.py:25-47`). The background write and symbol-rescan paths push errors under the payload-supplied `session_id` (`src/menhir/core/backend_runtime_data_ops.py:389-416`, `430-481`), while the REST dispatcher drains by the authenticated caller's session ID (`src/menhir/api/routes_handlers.py:217-239`). Execution showed that a warning pushed under `victim-session` was invisible to `attacker-session` and appeared on the victim drain. An agent who knows or can derive another session ID can inject attacker-influenced failure text into that caller's later response; the precondition and bounded 300-character channel limit the consequence.
+
+### M4-SEC-11 — Low — provider preflight misclassifies hostname prefixes as loopback and suppresses authorization
+
+`_should_bypass_local_auth()` uses raw string prefixes (`src/menhir/core/runtime_preflight.py:94-96`), and `check_llama_connectivity()` omits its bearer header when that predicate is true (`src/menhir/core/runtime_preflight.py:157-178`). Execution returned `True` for `http://localhost.evil.example/v1`, `http://127.0.0.1.evil.example/v1`, and `http://localhost@evil.example/v1`. The URL is operator-controlled and the defect withholds rather than exposes the credential, so impact is limited.
+
+### M4-SEC-12 — Low — tier checks fail open when request tier is unbound
+
+The request-tier context defaults to `""` (`src/menhir/core/request_context.py:14-20`, `71-74`). `ensure_ingest_path_allowed()` treats an empty tier like operator and skips containment (`src/menhir/core/ingest_guard.py:58-70`); `BaseTool.execute()` rejects insufficient tier only when the current tier is nonempty (`src/menhir/mcp/contracts.py:323-333`). Current authenticated HTTP paths bind a tier, stdio explicitly binds operator, and default nonloopback no-auth startup is rejected, so this is not a default LAN bypass. It remains a fail-open internal boundary that becomes dangerous under the explicit insecure no-auth override or a future unbound entry path.
+
+## 2. Trust Boundary Register — every caller assumption and both transports
+
+| Assumption made by core | REST | MCP | Result |
 |---|---|---|---|
-| **Tier:** the caller is entitled to the selected runtime action. | Generic backend route maps operations to readonly/agent/operator, but Explorer candidate writes bypass that map. Empty tier skips `_require_tier()` (`src/menhir/api/routes_support.py:24-34`, `624-661`; `src/menhir/explorer/app.py:832-844`). | `BaseTool` checks `required_tier`, but only when tier is nonempty; stdio explicitly binds operator and authenticated HTTP binds a real tier (`src/menhir/mcp/contracts.py:305-333`; `src/menhir/mcp/service_access.py:234-250`). | **Violated by REST Explorer (M4-SEC-01).** Empty-tier fail-open is not a default remote bypass because nonloopback no-auth startup is rejected unless explicitly overridden; retain as defense-in-depth concern. |
-| **Identity:** `user_id`, `session_id`, client identity, and reviewer attribution belong to the authenticated caller. | Middleware binds verified identity in OAuth/client-token modes, but `/api/memory` accepts body identity overrides; static mode also trusts identity headers (`src/menhir/api/auth.py:208-286`; `src/menhir/api/routes.py:305-333`). | Memory tools derive user/session from the bound request session; static mode still trusts caller-selected client name (`src/menhir/mcp/tools/ingest/add_memory.py:43-91`; `src/menhir/api/auth.py:378-411`). | **Violated by REST memory attribution (M4-SEC-05); static client identity is not trustworthy enough to key restrictions (M4-SEC-02).** |
-| **Namespace ownership:** a caller-selected namespace is authorized for that principal/client. | `_resolve_namespace` accepts body/header values; no ownership or client-pin check (`src/menhir/api/routes_support.py:128-143`). | Configured client pin forcibly overrides tool input, but unpinned clients have no ownership check (`src/menhir/mcp/contracts.py:282-300`). | **Transport mismatch M4-SEC-03.** Neither transport implements general namespace ownership. |
-| **Filesystem path:** agent/operator may make the server read/scan the selected host path only within policy. | Primary ingest methods consult request tier and guard; generic agent operation `write_project_structure` can trigger an unguarded rescan (`src/menhir/core/backend_runtime_data_ops.py:305-481`; `src/menhir/api/routes_support.py:624-651`). | `ingest_document` checks `isfile` then delegates to guarded core; `ingest_project` delegates to guarded scan. No public MCP tool for `write_project_structure` was found in the registered tool groups (`src/menhir/mcp/tools/ingest/ingest_document.py:43-73`; `src/menhir/mcp/tools/__init__.py:8-21`). | **REST-only guard bypass M4-SEC-06.** |
-| **Input shape:** operation dictionaries and `query_structure` params match the selected implementation. | Pydantic validates named REST models, but internal backend body is arbitrary `dict[str, Any]`; dispatcher passes `**body` directly (`src/menhir/api/routes.py:742-759`; `src/menhir/api/routes_handlers.py:199-225`). | FastMCP/tool signatures and `BaseTool` typed endpoints constrain public tool calls; remote backend client still sends generic JSON internally. | **Only partially enforced.** Malformed internal bodies become `TypeError` and are fully logged (M4-SEC-04). |
-| **Input size:** text, diffs, paths, scan dictionaries, query params, and identifiers are bounded before core. | Limits exist for selected numeric fields, but `MemoryRequest.episode`, `diff`, identity, source, and namespace have no maximum; generic backend body has no declared size/field bound (`src/menhir/api/routes_support.py:274-299`, `544-625`). | Tool annotations constrain types but most strings/collections have no explicit size bounds; FastMCP/ASGI deployment limits were not found in this layer. | **Not enforced consistently.** Record as Low unless a resource-exhaustion or log-amplification reproduction proves stronger consequence. |
-| **Background-warning scope:** the supplied session ID uniquely identifies the authenticated caller. | Generic route drains by bound caller session, while producers may push by payload-controlled session (`src/menhir/api/routes_handlers.py:217-237`; `src/menhir/core/backend_shared.py:25-47`). | Tools normally derive session from the bound session; warnings are appended verbatim after a call (`src/menhir/mcp/contracts.py:347-355`). | **Partially enforced; collision/cross-session proof pending.** |
-| **Redaction contract:** protected fields are canonical lowercase strings and log text matches the quote heuristic. | Explorer explicitly uses redaction helpers for memory rows/details; nested special cases are handled manually in some views (`src/menhir/explorer/app.py:538-583`, `607-638`). | No MCP response redaction layer was identified; authorized tools intentionally return memory content. | **Confirmed display-layer mismatch M4-SEC-07.** Exact lowercase strings mask, but structured/non-string/case-variant values and several log syntaxes fail open. |
+| Caller tier authorizes the action. | Generic backend uses a total operation map; Explorer candidate writes bypass it. | `BaseTool` checks `required_tier` when tier is bound. | Violated by M4-SEC-01; empty-tier checks also fail open (M4-SEC-12). |
+| Supplied identity belongs to authenticated caller. | `/api/memory` accepts body overrides; static auth trusts identity headers. | Memory ingestion derives user/session from bound context, but static `client_name` remains caller-controlled. | M4-SEC-02 and M4-SEC-05. |
+| Namespace belongs to caller. | Body/header namespace accepted; no pin/ownership check. | Configured pin is forced, but unpinned clients have no general ownership check. | M4-SEC-03; neither transport implements universal ownership. |
+| Filesystem path is permitted. | Primary ingest is guarded; `write_project_structure` rescan and readonly corpus audit are not. | Public ingest tools delegate to guarded primary methods; no registered public tool was found for `write_project_structure`. | M4-SEC-06 and M4-SEC-08. |
+| Input shape is valid. | Named models validate selected fields; internal backend accepts arbitrary dictionaries and passes `**body`. | Tool signatures constrain normal public calls; remote backend JSON remains generic internally. | Malformed calls fail, but M4-SEC-04 logs the complete body. |
+| Input size is bounded. | Several numeric limits exist, but episode/diff/source/identity/namespace and generic body values have no field maxima (`src/menhir/api/routes_support.py:274-299`, `544-674`). | Most tool strings/collections have no explicit maxima. | Deployment-level body limit was not verified; retained under Open Questions. |
+| Session key isolates background errors. | Producers may use payload session; route drains authenticated session. | Normal tools derive session, then append drained warnings verbatim (`src/menhir/mcp/contracts.py:347-355`). | M4-SEC-10. |
+| Privacy helper masks protected data. | Explorer uses the helpers for rows/details. | MCP intentionally returns authorized memory content and has no privacy-display layer. | M4-SEC-07. |
 
-**REST generic call chain:** bearer/client-token/OAuth middleware binds tier/session → `POST /api/internal/backend/{operation}` → `_required_tier_for_operation()` → `RuntimeProvider.<operation>(**body)` (`src/menhir/api/auth.py:300-411`; `src/menhir/api/routes.py:742-759`; `src/menhir/api/routes_handlers.py:199-231`).  
-**MCP call chain:** same HTTP middleware (or explicit stdio operator binding) → FastMCP handler → `BaseTool.execute()` tier/allowlist/pin gates → tool endpoint → local `RuntimeProvider` or authenticated `BackendClient` (`src/menhir/mcp/contracts.py:282-367`; `src/menhir/mcp/service_access.py:234-314`).
+**REST generic chain:** authentication middleware binds tier/session → `/api/internal/backend/{operation}` → total tier map → `RuntimeProvider.<operation>(**body)` (`src/menhir/api/auth.py:300-411`; `src/menhir/api/routes.py:742-759`; `src/menhir/api/routes_handlers.py:199-239`).
 
-## 3. Authorization Surface — privileged actions and what gates them
+**MCP chain:** HTTP middleware or explicit stdio operator binding → FastMCP handler → `BaseTool.execute()` tier/allowlist/pin checks → local `RuntimeProvider` or authenticated `BackendClient` (`src/menhir/mcp/contracts.py:282-367`; `src/menhir/mcp/service_access.py:234-314`).
 
-No scope function makes a general authorization decision. `request_context.py` stores tier/auth mode, but core reads tier only for `ingest_document()` and `scan_and_write_project()`. The following core actions trust transport authorization:
+## 3. Authorization Surface — privileged actions and gates
 
-- memory/namespace: `queue_episode`, `flag_memory`, `unflag_memory`, `promote_memory`, `delete_memory`, `delete_namespace`, `enqueue_pending_episode` (`src/menhir/core/backend_runtime_data_ops.py:24-143`);
-- host filesystem/structure: `ingest_document`, `scan_and_write_project`, `write_project_structure`, `_background_symbol_rescan`, `query_structure` (`src/menhir/core/backend_runtime_data_ops.py:305-513`);
-- conflict/enrichment/scheduler: all conflict resolution, reset/release/recovery, takeover/pause/resume methods (`src/menhir/core/backend_runtime_admin_ops.py:25-207`);
-- diagnostics/telemetry: operation/failure/lifecycle/task-event reads, `record_conflict_resolution`, memory overview, circuit/cache state, provider configuration (`src/menhir/core/backend_runtime_admin_ops.py:209-319`);
-- todo/artifact/temporal/candidate mutation: all methods from `create_todo` through `approve_candidate` (`src/menhir/core/backend_runtime_admin_ops.py:321-603`).
+Core contains no general authorization decision. It reads tier only for the two primary filesystem-ingest methods. The following privileged core functions trust transport authorization:
 
-**Representative REST trace:** readonly bearer → Explorer approve handler → `CandidateService.approve()`; no operator gate (M4-SEC-01).  
-**Representative MCP trace:** operator bearer/stdio binding → `BaseTool.execute()` → operator tool endpoint → backend method; tool allowlist and namespace pin are applied before endpoint (`src/menhir/mcp/contracts.py:282-355`).  
-**Representative generic REST trace:** agent bearer → `write_project_structure` dispatch → unguarded background rescan (M4-SEC-06).
+- memory and namespace mutation: `queue_episode`, `flag_memory`, `unflag_memory`, `promote_memory`, `delete_memory`, `delete_namespace`, `enqueue_pending_episode` (`src/menhir/core/backend_runtime_data_ops.py:24-143`);
+- host filesystem and structure: `ingest_document`, `scan_and_write_project`, `write_project_structure`, `_background_symbol_rescan`, `query_structure` (`src/menhir/core/backend_runtime_data_ops.py:305-513`);
+- conflict, enrichment, and scheduler controls (`src/menhir/core/backend_runtime_admin_ops.py:25-207`);
+- diagnostics/telemetry including `record_conflict_resolution` and provider configuration (`src/menhir/core/backend_runtime_admin_ops.py:209-319`);
+- todo, artifact, temporal, and candidate mutations (`src/menhir/core/backend_runtime_admin_ops.py:321-603`).
+
+Representative REST trace: readonly bearer → Explorer candidate approve/reject → service mutation, with no operator gate (M4-SEC-01).  
+Representative MCP trace: bound operator → `BaseTool.execute()` → operator endpoint → backend method (`src/menhir/mcp/contracts.py:305-355`).  
+Representative internal REST trace: agent bearer → `write_project_structure` → unguarded background rescan (M4-SEC-06).
 
 ## 4. Redaction Verification — executed adversarial inputs and real output
 
-The probe compiles and executes selected exact AST nodes from the pinned files without importing the Menhir package (`.agent/audit/m4_security_probe.py:557-674`). The selected-AST hashes were recorded so the executed code fragment is identifiable.
-
-**Command executed in the audit harness:**
+**Proving command:**
 
 ```text
-python -c "import json,runpy; from pathlib import Path; n=runpy.run_path('/mnt/data/m4_security_probe.py'); print(json.dumps(n['run_adversarial'](Path('/mnt/data/m4_exact')), indent=2, sort_keys=True))"
+python <standard-library harness executing the exact pinned privacy.py and preflight predicate>
 ```
 
-**Relevant literal output:**
+The executed `privacy.py` had 162 lines and Git blob SHA-1 `a3b475c0406dd1162cda8feff36c73fbf44ce623`, matching the pinned GitHub blob.
+
+**Mapping output:**
+
+```json
+{
+  "Content": "case-variant secret",
+  "SUMMARY": "upper-case secret",
+  "content": "[hidden]",
+  "label": "",
+  "name": null,
+  "notes": 8675309,
+  "preview": ["nested list value", {"token": "abc"}],
+  "summary": {"secret": "nested dict value"},
+  "summary_preview": "[hidden]",
+  "uuid": "structural-uuid"
+}
+```
+
+`reveal=True` returned the original object; the 10,000-character lowercase protected string returned `[hidden]`.
+
+**Log output:**
 
 ```text
-PRIVACY_AST_SHA256=5b99d76f1ce6f1e9b8accf60a0a26163fc00c831fb83b86d506a6726b73ce8f9
-PREFLIGHT_AST_SHA256=4ebf9f40e0604ce6a5a5959b43b55a520114aae972234822f36afa19f771cc44
-MAPPING_RESULT={"Content": "case-variant secret", "SUMMARY": "upper-case secret", "content": "[hidden]", "label": "", "name": null, "notes": 8675309, "preview": ["nested list value", {"token": "abc"}], "summary": {"secret": "nested dict value"}, "summary_preview": "[hidden]", "uuid": "structural-uuid"}
-OVERSIZED='[hidden]'
-REVEAL_SAME_OBJECT=True
-LOG_1_OUT='2026-08-13 12:00:00,000 - menhir.test - INFO - content="[hidden]"'
-LOG_2_OUT="2026-08-13 12:00:00,000 - menhir.test - INFO - content='Alice's confidential launch plan'"
-LOG_3_OUT='2026-08-13 12:00:00,000 - menhir.test - INFO - content=Alice confidential launch plan'
-LOG_4_OUT='malformed content="Alice confidential launch plan'
-LOG_5_OUT='2026-08-13 12:00:00,000 - menhir.test - INFO - id="abc_def" content="[hidden]"'
-BYPASS 'http://127.0.0.1:8080' -> True
-BYPASS 'http://localhost:8080' -> True
-BYPASS 'http://localhost.evil.example/v1' -> True
-BYPASS 'http://127.0.0.1.evil.example/v1' -> True
-BYPASS 'http://localhost@evil.example/v1' -> True
-BYPASS 'https://localhost:8443' -> False
-BYPASS 'http://[::1]:8080' -> False
+IN : ... content="Alice's confidential launch plan"
+OUT: ... content="[hidden]"
+
+IN : ... content='Alice's confidential launch plan'
+OUT: ... content='Alice's confidential launch plan'
+
+IN : ... content=Alice confidential launch plan
+OUT: ... content=Alice confidential launch plan
+
+IN : malformed content="Alice confidential launch plan
+OUT: malformed content="Alice confidential launch plan
 ```
 
-The full JSON output SHA-256 is `6c6aa632e06557bf24c9adbaf31779495a1a69238427f5bc6d2469e3656e06f0`. The mapping control is **fail closed only for exact lowercase, non-empty string fields**, including the oversized string; it is **fail open** for nested dictionaries/lists, numeric values, case-only key variants, `None`, and empty text (`src/menhir/privacy.py:49-82`). The log helper is intentionally heuristic and execution confirms it fails open for contractions in single quotes, unquoted content, and malformed quotes, while masking qualifying double-quoted text (`src/menhir/privacy.py:103-162`). `reveal=True` returning the original object is intended passthrough behavior, not a finding.
+**Fail-open/closed conclusion:** mapping and log redaction are **fail open outside the narrow canonical case**. Exact lowercase keys with nonempty string values fail closed; structured/non-string/case-variant values and several log syntaxes pass through.
 
-## 5. Diagnostics Exposure — operator_diagnostics.py reachability by tier
+Call-site analysis: Explorer relies on `redact_mapping()` and `redact_rows()` for memory-facing pages, with manual nested handling only for selected `neighbors`, `episodes`, and `nodes` containers (`src/menhir/explorer/app.py:538-583`, `607-650`). The console uses `redact_log_line()` to mask its live server-log tail (`src/menhir/cli/console.py:1-14`, `130-150`). Both callers rely on shapes/syntax the helper does not universally guarantee.
 
-`build_operator_diagnostics()` exposes bind host/port, loopback status, auth mode, key-presence booleans, no-auth override, OAuth consent/proxy checks, MCP backend diagnostics, and warning/check details, but not raw key values (`src/menhir/operator_diagnostics.py:42-297`). The located call site is the local `menhir diagnostics` CLI; no REST route or registered MCP tool call has yet been found. Treat remote exposure of this specific function as **disproved pending final controlled call-site sweep**.
+## 5. Diagnostics Exposure — `operator_diagnostics.py` reachability by tier
 
-A separate core method, `get_provider_config()`, returns Neo4j URI/database, LLM/embed endpoints, backend URL, provider kinds, and model names (`src/menhir/core/backend_runtime_admin_ops.py:296-319`). Because it falls into the generic dispatch's readonly remainder, any readonly REST credential can invoke `/api/internal/backend/get_provider_config` (`src/menhir/api/routes_support.py:544-661`). This is a **Medium information-disclosure candidate**; MCP reachability remains to be enumerated.
+`build_operator_diagnostics()` reveals bind host/port, loopback classification, effective auth mode, key-presence booleans, insecure override state, OAuth resource/authorization-server posture, consent/proxy checks, MCP backend checks, and warnings (`src/menhir/operator_diagnostics.py:42-297`). It does **not** return raw keys.
 
-## 6. Startup and Credential Handling — preflight fail-open/closed, bootstrap file modes and logging
+The directly traced call site is the local `menhir diagnostics` CLI (`src/menhir/cli/__init__.py:188-260`). No REST route or registered MCP tool calling this function was found in the directly enumerated route/tool modules. Remote exposure of this specific function is therefore disproved for the audited tree. The separate readonly `get_provider_config()` exposure is M4-SEC-09.
 
-Runtime preflight checks interpreter, Graphiti, Neo4j, schema dimensions, provider compatibility/configuration, and provider connectivity (`src/menhir/core/runtime_preflight.py:98-456`). `_initialize_services()` fails closed only for interpreter or Neo4j failure; other failed checks produce degraded startup and continue (`src/menhir/core/runtime.py:442-469`). Core preflight does not validate HTTP bind/auth safety; settings construction performs that separate guard.
+## 6. Startup and Credential Handling
 
-`bootstrap.py` writes no credential file and therefore establishes no file mode. It passes Neo4j credentials and provider keys/configuration into collaborators (`src/menhir/core/bootstrap.py:160-193`). Adapter-construction and edge-sync exceptions are logged/stored verbatim (`src/menhir/core/bootstrap.py:181-193`, `299-316`). No scope statement deliberately prints a raw key, but exception secrecy remains under execution/downstream review.
+`collect_runtime_failures()` checks interpreter, Graphiti, Neo4j/schema, provider compatibility/configuration, and connectivity (`src/menhir/core/runtime_preflight.py:98-456`). Runtime initialization fails closed only for interpreter or Neo4j failure; other failed checks produce degraded startup and continue (`src/menhir/core/runtime.py:442-469`). Core preflight does not enforce transport bind/auth safety; settings construction does that separately.
 
-Executed predicate output confirms the string-prefix defect: three non-loopback/ambiguous URL forms beginning with `localhost` or `127.0.0.1` were classified as local, so `check_llama_connectivity()` suppresses its Authorization header for them (`src/menhir/core/runtime_preflight.py:94-96`, `157-178`; M4-SEC-08).
+`bootstrap.py` writes no credential file, so there is no bootstrap-created credential mode to report. It passes Neo4j credentials and provider configuration into repositories/clients (`src/menhir/core/bootstrap.py:160-193`). Adapter-construction and edge-sync exceptions are logged or returned verbatim (`src/menhir/core/bootstrap.py:181-193`, `299-316`). No scope statement deliberately prints a raw key; whether third-party exception strings can contain credentials remains an Open Question.
 
-## 7. Guard and Identity Analysis — ingest_guard.py, reader_identity.py
+The local-provider hostname predicate was executed separately; M4-SEC-11 records the result.
 
-`allowed_ingest_roots()` resolves configured roots and falls back to resolved current working directory when none survive (`src/menhir/core/ingest_guard.py:31-50`). The containment comparison uses resolved paths (`src/menhir/core/ingest_guard.py:53-54`). `ensure_ingest_path_allowed()` grants unrestricted access to operator **and empty tier**, then rejects out-of-root paths with an error containing the fully resolved path, tier, and environment-variable name (`src/menhir/core/ingest_guard.py:58-74`). Authenticated HTTP and explicit stdio binding normally prevent an empty tier; explicit insecure no-auth remote mode and future unbound call paths remain fail-open.
+## 7. Guard and Identity Analysis
 
-Protected path: primary document/project ingestion (`src/menhir/core/backend_runtime_data_ops.py:305-360`).  
-Unguarded path: `write_project_structure()` compatibility rescan (`src/menhir/core/backend_runtime_data_ops.py:428-481`; M4-SEC-06).
+`allowed_ingest_roots()` resolves configured roots and falls back to resolved current working directory when none survive (`src/menhir/core/ingest_guard.py:31-50`). `_is_within()` compares resolved paths (`src/menhir/core/ingest_guard.py:53-54`). The guard allows operator and empty tier without containment and includes the resolved attempted path, tier, and environment-variable name in rejection text (`src/menhir/core/ingest_guard.py:58-74`). Primary ingest paths are guarded; M4-SEC-06 and M4-SEC-08 identify unguarded alternatives.
 
-`normalize_reader_id()` maps `None`, empty, and whitespace-only identifiers to shared literal `default` (`src/menhir/core/reader_identity.py:4-8`). Bootstrap receipt state is process-global and keyed by normalized reader plus workspace selection (`src/menhir/core/runtime_support.py:141-167`). REST's bootstrap request defaults `reader_id` to `default`; whether this allows one caller to satisfy another's receipt gate requires endpoint-level execution and remains DRAFT.
+`normalize_reader_id()` strips input and maps `None`, empty, and whitespace-only values to shared literal `default` (`src/menhir/core/reader_identity.py:4-8`). Bootstrap receipt state is process-global and keyed by that normalized ID plus workspace selection (`src/menhir/core/runtime_support.py:141-167`). Cross-principal consequences of sharing `default` were not executed and remain an Open Question.
 
 ## 8. Injection and Traversal Register
 
-| Caller-controlled input | Sink | Control | Result |
-|---|---|---|---|
-| ingest `path` | `read_text_utf8()` / `ProjectScanner.scan()` | Request-tier root guard on primary methods | Guard itself resolves traversal/symlinks, but empty tier fails open (`src/menhir/core/ingest_guard.py:53-74`). |
-| `scan.root_path` with omitted `symbols` | background `ProjectScanner.scan()` | `isdir` only | **M4-SEC-06 confirmed** (`src/menhir/core/backend_runtime_data_ops.py:428-481`). |
-| `query_type`, arbitrary `params` | graph-adapter structure method via `**params` | only two special cases normalized | Downstream Cypher/method allowlist inspection pending (`src/menhir/core/backend_runtime_data_ops.py:483-513`). |
-| `repo_path`, repository, commit, old/new path | artifact corpus audit/relocation adapters | no core confinement | Downstream filesystem/subprocess/Cypher inspection pending (`src/menhir/core/backend_runtime_admin_ops.py:417-470`). |
-| generic backend `operation` | `getattr(RuntimeProvider, operation)` | exact `_BACKEND_METHODS` allowlist | No arbitrary method traversal; operation names are allowlisted (`src/menhir/api/routes_handlers.py:213-225`). |
-| generic backend body keys | Python keyword dispatch | arbitrary dict; implementation signature rejects unknown keys | No direct code injection, but every mismatch is logged with full body (M4-SEC-04). |
-| provider base URL | `urlopen(base_url + /models)` | raw-prefix local-auth predicate | **Low M4-SEC-08 confirmed by execution** (`src/menhir/core/runtime_preflight.py:94-96`, `157-178`). |
+| Input | Sink | Result |
+|---|---|---|
+| primary ingest path | file read / project scan | Resolved-path containment exists; empty tier fails open (`src/menhir/core/ingest_guard.py:53-74`). |
+| compatibility `scan.root_path` | recursive `ProjectScanner.scan()` | No guard; M4-SEC-06. |
+| corpus-audit `repo_path` | filesystem reads and `git -C` | No guard; readonly reconnaissance M4-SEC-08. Git argv is separated and no shell is used (`src/menhir/infrastructure/artifact_corpus_scanner.py:48-63`). |
+| `query_type` / params | `query_<type>` method and static Cypher methods | Unknown names are rejected; caller values are passed as query parameters. No arbitrary Cypher text injection was found (`src/menhir/infrastructure/memory_graph_adapter.py:1065-1074`; `src/menhir/infrastructure/structure_queries.py:1-90`, `380-900`). |
+| generic backend operation | `getattr(RuntimeProvider, operation)` | Exact `_BACKEND_METHODS` allowlist prevents method traversal (`src/menhir/api/routes_handlers.py:213-225`). |
+| generic body keys | Python keyword dispatch | Unknown keywords raise rather than execute code; M4-SEC-04 then logs the full body. |
+| provider base URL | `urlopen(.../models)` | Prefix-based auth suppression; M4-SEC-11. |
+
+No Cypher injection, shell command injection, or arbitrary backend-method traversal was confirmed.
 
 ## 9. Information Disclosure Register
 
-| Surface | Reachability / tier | Disclosure | Status |
-|---|---|---|---|
-| generic backend exception log | any tier able to invoke its operation | full request body plus traceback | **High M4-SEC-04** (`src/menhir/api/routes_handlers.py:213-231`). |
-| `get_provider_config` | readonly generic REST remainder | Neo4j URI/database, provider endpoints/models/backend URL | **Medium candidate** (`src/menhir/core/backend_runtime_admin_ops.py:296-319`; `src/menhir/api/routes_support.py:654-661`). |
-| ingest guard rejection | agent path attempt | resolved host path, tier, control env var | MCP error rendering may expose it; REST generic 500 is sanitized. Final trace pending (`src/menhir/core/ingest_guard.py:71-74`). |
-| ingest result | authorized agent | up to 4,000 characters of selected file content and absolute structure path | Intended only if containment holds; amplified by M4-SEC-06 (`src/menhir/core/backend_runtime_data_ops.py:319-339`). |
-| background warnings | later response/tool result for same scope key | raw exception string truncated to 300 characters, no redaction | Cross-session isolation and exact transport rendering pending (`src/menhir/core/backend_shared.py:25-47`; `src/menhir/mcp/contracts.py:347-355`). |
-| operator diagnostics | local CLI located; remote route/tool not located | auth/bind/OAuth/MCP posture, no raw keys | Remote exposure currently disproved pending controlled final sweep (`src/menhir/operator_diagnostics.py:42-297`). |
-| Explorer privacy layer | authenticated/loopback Explorer | nested/list/numeric/case-variant protected values and several log syntaxes remain visible | **Medium M4-SEC-07 confirmed by execution** (`src/menhir/privacy.py:49-82`, `103-162`). |
+| Surface | Minimum reach | Disclosure |
+|---|---|---|
+| generic backend exception log | tier required for selected operation | complete body + traceback; High M4-SEC-04 |
+| `get_provider_config` | readonly | internal Neo4j/provider/backend topology; Medium M4-SEC-09 |
+| corpus audit | readonly | arbitrary local worktree commit/corpus metadata; Medium M4-SEC-08 |
+| Explorer privacy mode | authenticated remote or direct loopback | noncanonical protected values/log phrases; Medium M4-SEC-07 |
+| background warning header/tool suffix | victim's later operation | injected exception/project/path text, max 300 chars; Medium M4-SEC-10 |
+| ingest guard rejection | agent path attempt | resolved host path, tier, and control variable (`src/menhir/core/ingest_guard.py:71-74`) |
+| ingest result | authorized agent | up to 4,000 characters of selected file content and absolute structure path (`src/menhir/core/backend_runtime_data_ops.py:319-339`) |
+| operator diagnostics | local CLI | bind/auth/OAuth/MCP posture, no raw keys |
 
-## 10. Bug-Class Sweep Results — command and output, or NOT RUN
-
-The strengthened probe's synthetic controls were executed before relying on it. They cover all six required classes plus the two adversarial security predicates (`.agent/audit/m4_security_probe.py:779-829`).
-
-**Control command:**
+**Executed generic-log reproduction:**
 
 ```text
-python /mnt/data/m4_security_probe.py --self-test-only
+propagated: RuntimeError: synthetic backend failure
+logger_format: backend_invoke failed: operation=%s body=%r
+logger_args: ('queue_episode', {'episode': 'TOP SECRET: production signing key is in vault path X', 'diff': "password='super-secret'", 'path': 'C:/Users/alice/private/repo', 'user_id': 'forged-user'})
+rendered_log: backend_invoke failed: operation=queue_episode body={'episode': 'TOP SECRET: production signing key is in vault path X', 'diff': "password='super-secret'", 'path': 'C:/Users/alice/private/repo', 'user_id': 'forged-user'}
 ```
 
-**Control output summary:**
+**Executed warning-scope reproduction:**
 
 ```text
+warning attacker drain: []
+warning victim drain: ['symbol-rescan secret-project failed: /srv/private/repo']
+warning victim second drain: []
+```
+
+## 10. Bug-Class Sweep Results — command and output, or `NOT RUN`
+
+The probe's synthetic control suite passed before its heuristics were trusted:
+
+```text
+command: python /mnt/data/m4_security_probe.py --self-test-only
+exit=0
 passed=True
-cancelled_error_candidate=True
 duplicate_body_difference=True
 except_only_unbound=True
-host_prefix_bypass=True
+cancelled_error_candidate=True
+timestamp_candidate=True
+unused_constant=True
 keyword_mismatch=True
-line_counter=True
 nested_redaction_leak=True
-timestamp_comparison=True
-unread_constant=True
+host_prefix_bypass=True
+full_body_logged=True
+cross_session_warning=True
 ```
 
-The complete control-output SHA-256 is `3cf647a3772a66c1cddb2e971100b1a34650c7f71994b047b2f8b8131d36b18e`.
+The active container did not contain the repository checkout or requested project venv, and direct clone/archive networking was unavailable. The probe proved this rather than returning an empty scan:
 
-Repository-wide execution against the pinned checkout is **NOT RUN at this checkpoint**. Reason: the audit runtime has authenticated GitHub file access but cannot materialize a complete checkout/archive into the execution container; unauthenticated container networking is unavailable. Static results from source reading are therefore not mislabeled as executed sweep counts. The next checkpoint will reconstruct the exact 23-file scope through blob retrieval if possible.
+```text
+command: python /mnt/data/m4_security_probe.py --root . --pyflakes --json
+exit=1
+missing_count=23
+missing_files=[all 23 declared scope paths]
 
-1. **Duplicate definitions — NOT RUN:** no executed body-comparison result over the pinned scope yet. Manual reading found no same-scope duplicate; cross-file backend-family dispatch still requires the probe.
-2. **Except-only unbound names / pyflakes — NOT RUN:** `pyflakes` has not been executed against a complete pinned checkout. Manual reading found no confirmed scope instance.
-3. **`CancelledError` — NOT RUN:** `_get_services()` shields the initialization task, catches only `Exception`, and performs cleanup after the await; caller cancellation skips cleanup while the shielded task continues (`src/menhir/core/runtime.py:552-572`). Background scan tasks also catch only `Exception` (`src/menhir/core/backend_runtime_data_ops.py:389-419`, `464-481`). These are static candidates, not executed consequences.
-4. **Lexicographic timestamps — NOT RUN:** no executed scope scan yet; manual reading found no confirmed instance.
-5. **Unread invariant constants — NOT RUN:** no executed scope scan yet; manual reading found no confirmed instance.
-6. **Keyword mismatch — NOT RUN:** no executed cross-file target scan yet; manual reading found no confirmed instance.
+command: .venv/Scripts/python.exe --version
+output: .venv/Scripts/python.exe: NOT FOUND
 
-## 11. Disproved Candidates, with the evidence that disproved them
+command: python -m pyflakes --version
+exit=1
+stderr: /opt/pyvenv/bin/python: No module named pyflakes
+```
 
-- **Primary ingest methods lack confinement — disproved:** both call `ensure_ingest_path_allowed()` before their filesystem sinks (`src/menhir/core/backend_runtime_data_ops.py:305-319`, `342-360`). The compatibility rescan remains a separate bypass.
-- **Default remote empty-tier auth bypass — disproved:** settings reject unauthenticated nonloopback binding unless the explicit insecure override is enabled, and stdio explicitly binds operator. The empty-tier branches remain fail-open defense-in-depth defects, not a default LAN exploit.
-- **Bootstrap writes credential files — disproved:** no file/credential write occurs in `bootstrap.py` (`src/menhir/core/bootstrap.py:1-316`).
-- **Operator diagnostics returns raw keys — disproved:** it returns presence booleans, not values (`src/menhir/operator_diagnostics.py:50-57`, `278-286`).
-- **Arbitrary backend method traversal — disproved:** generic dispatch rejects operations outside `_BACKEND_METHODS` before `getattr()` (`src/menhir/api/routes_handlers.py:213-224`).
+Accordingly:
+
+1. **Duplicate definitions — NOT RUN against the pinned checkout.** Body-comparison control passed. Full scope was manually read and no duplicate is promoted as a finding, but no executed negative count is claimed.
+2. **Except-only unbound names — NOT RUN against the pinned checkout.** `pyflakes` was unavailable and the requested venv was absent. Undefined-name control passed in the probe; no executed repository result is claimed.
+3. **`CancelledError` cleanup — EXECUTED candidate.** Exact `_get_services()` control flow was reproduced. Output:
+
+   ```text
+   caller: CancelledError propagated
+   after caller cancellation: state.init_task_is_inner=True
+   after caller cancellation: inner_done=False inner_cancelled=False
+   after inner completion: state.init_task_is_inner=True
+   after inner completion: built_set=True session_set=True
+   ```
+
+   This confirms cancellation skips the `Exception` cleanup and leaves the shielded task referenced (`src/menhir/core/runtime.py:549-572`). No security consequence was established; it is listed under Open Questions as a non-security lifecycle issue.
+4. **Lexicographic timestamp comparison — NOT RUN against the pinned checkout.** Synthetic detector control passed; manual reading found no confirmed scope instance, but no executed negative is claimed.
+5. **Unread invariant constants — NOT RUN against the pinned checkout.** Synthetic control passed; manual reading found no confirmed scope instance, but no executed negative is claimed.
+6. **Keyword mismatch — NOT RUN against the pinned checkout.** Synthetic cross-file mismatch control passed; manual reading found no confirmed scope instance, but no executed negative is claimed.
+
+## 11. Disproved Candidates
+
+- **Primary ingest lacks containment — disproved:** both primary methods call the guard before their filesystem sink (`src/menhir/core/backend_runtime_data_ops.py:305-319`, `342-360`).
+- **Default remote empty-tier bypass — disproved:** nonloopback no-auth startup is rejected unless the explicit insecure override is enabled, and stdio binds operator. M4-SEC-12 is defense in depth, not a default LAN exploit.
+- **Bootstrap writes credential files — disproved:** `bootstrap.py` performs collaborator assembly and schema preparation only (`src/menhir/core/bootstrap.py:1-316`).
+- **Operator diagnostics returns raw keys — disproved:** it returns presence booleans, not key values (`src/menhir/operator_diagnostics.py:50-57`, `278-286`).
+- **Operator diagnostics is remotely exposed — disproved for directly enumerated routes/tools:** the traced call site is local CLI (`src/menhir/cli/__init__.py:188-260`).
+- **Arbitrary backend method traversal — disproved:** operation allowlisting precedes `getattr()` (`src/menhir/api/routes_handlers.py:213-225`).
+- **Artifact-audit command injection — disproved:** Git invocation uses an argv list with no shell (`src/menhir/infrastructure/artifact_corpus_scanner.py:48-63`).
+- **Structure-query Cypher injection — disproved:** method names must resolve to existing `query_*` functions and inspected queries use static Cypher plus parameters (`src/menhir/infrastructure/memory_graph_adapter.py:1065-1074`; `src/menhir/infrastructure/structure_queries.py:1-90`, `380-900`).
 
 ## 12. Open Questions
 
-- **OPEN — downstream injection:** inspect graph-adapter implementations reached by `query_structure`, artifact audit, and relocation for dynamic Cypher, subprocesses, and path traversal.
-- **OPEN — warning isolation:** prove whether payload-controlled session IDs can cause one caller to receive another caller's background warning.
-- **OPEN — reader receipt isolation:** execute two-client `reader_id=default` bootstrap flows and determine whether receipt state is shared across principals.
-- **OPEN — diagnostics MCP reachability:** complete controlled enumeration of registered resources/tools for `get_provider_config` and `build_operator_diagnostics`.
-- **OPEN — exception secrecy:** determine whether provider-library exception strings can include Authorization headers or API keys before bootstrap logs them.
-- **OPEN — size controls:** identify deployment-level request-body limits; absent such a limit, grade unbounded body/log amplification.
-- **OPEN — non-security:** `BackendClient.aclose()` may leave its owned client unclosed on cancellation (`src/menhir/core/backend_client.py:60-66`).
-- **OPEN — non-security:** stdio bootstrap catches initialization failure and permits lifespan entry (`src/menhir/core/runtime.py:574-610`).
+- **OPEN — reader receipt isolation:** execute two authenticated principals using `reader_id=default` and determine whether process-global bootstrap receipt state suppresses work across principals.
+- **OPEN — provider exception secrecy:** third-party client construction exceptions are logged verbatim; test whether this stack can include Authorization headers or API keys in exception strings (`src/menhir/core/bootstrap.py:181-193`, `299-316`).
+- **OPEN — request-size ceiling:** verify Starlette/server/proxy body limits. Several remotely supplied strings and the generic backend dictionary have no field-level maximum.
+- **OPEN — warning session discoverability:** M4-SEC-10 is confirmed when a target session ID is known; measure how readily session IDs can be derived or observed in each auth mode.
+- **OPEN — non-security:** `_get_services()` cancellation leaves the completed shielded task referenced until a later call (`src/menhir/core/runtime.py:549-572`).
+- **OPEN — non-security:** stdio startup records general bootstrap failure and continues lifespan entry (`src/menhir/core/runtime.py:574-610`).
 
-## 13. Coverage Table — all 23 files, measured line reconciliation against 5,097
+## 13. Coverage Table — all 23 files and line reconciliation
 
-| # | Scope file | Declared lines | Measured lines | Status | Evidence / resume note |
-|---:|---|---:|---:|---|---|
-| 1 | `src/menhir/core/backend_client_ops.py` | 703 | 703 | READ | Full read in three bounded ranges; EOF checked at 700-703. |
-| 2 | `src/menhir/core/backend_protocol.py` | 683 | 683 | READ | Full read in three bounded ranges; EOF checked at 681-683. |
-| 3 | `src/menhir/core/runtime.py` | 646 | 646 | READ | Full read in three bounded ranges; EOF checked at 640-646. |
-| 4 | `src/menhir/core/backend_runtime_admin_ops.py` | 603 | 603 | READ | Full read in three bounded ranges; EOF checked at 600-603. |
-| 5 | `src/menhir/core/backend_runtime_data_ops.py` | 513 | 513 | READ | Full read in two bounded ranges; EOF checked at 510-513. |
-| 6 | `src/menhir/core/runtime_preflight.py` | 456 | 456 | READ | Full read in two bounded ranges; EOF checked at 450-456. |
-| 7 | `src/menhir/core/bootstrap.py` | 316 | 316 | READ | Full read in two bounded ranges; EOF checked at 313-316. |
-| 8 | `src/menhir/operator_diagnostics.py` | 297 | 297 | READ | Full read in two bounded ranges. |
-| 9 | `src/menhir/core/runtime_support.py` | 167 | 167 | READ | Full read. |
-| 10 | `src/menhir/privacy.py` | 162 | 162 | READ | Full read; EOF checked at 155-162. |
-| 11 | `src/menhir/core/backend_shared.py` | 129 | 129 | READ | Full read; EOF checked at 126-129. |
-| 12 | `src/menhir/core/backend_client.py` | 102 | 102 | READ | Full read; EOF checked at 99-102. |
-| 13 | `src/menhir/core/request_context.py` | 74 | 74 | READ | Full read; EOF checked at 71-74. |
-| 14 | `src/menhir/core/ingest_guard.py` | 74 | 74 | READ | Full read; EOF checked at 71-74. |
-| 15 | `src/menhir/core/backend_runtime.py` | 41 | 41 | READ | Full read; EOF checked at 38-41. |
-| 16 | `src/menhir/core/backend_impl.py` | 30 | 30 | READ | Full read; EOF checked at 27-30. |
-| 17 | `src/menhir/core/__init__.py` | 27 | 27 | READ | Full read; EOF checked at 24-27. |
-| 18 | `src/menhir/core/backend_config.py` | 18 | 18 | READ | Full read; EOF checked at 15-18. |
-| 19 | `src/menhir/__init__.py` | 16 | 16 | READ | Full read. |
-| 20 | `src/menhir/main.py` | 14 | 14 | READ | Full read. |
-| 21 | `src/menhir/core/backend_runtime_ops.py` | 12 | 12 | READ | Full read; EOF checked at 9-12. |
-| 22 | `src/menhir/core/reader_identity.py` | 11 | 11 | READ | Full read; EOF checked at 8-11. |
-| 23 | `src/menhir/__main__.py` | 3 | 3 | READ | Full read. |
-|  | **Totals** | **5,097** | **5,097** | **23/23 READ** | Exact reconciliation; no scope file remains unread. |
+| # | Scope file | Declared | Measured | Status |
+|---:|---|---:|---:|---|
+| 1 | `src/menhir/core/backend_client_ops.py` | 703 | 703 | READ |
+| 2 | `src/menhir/core/backend_protocol.py` | 683 | 683 | READ |
+| 3 | `src/menhir/core/runtime.py` | 646 | 646 | READ |
+| 4 | `src/menhir/core/backend_runtime_admin_ops.py` | 603 | 603 | READ |
+| 5 | `src/menhir/core/backend_runtime_data_ops.py` | 513 | 513 | READ |
+| 6 | `src/menhir/core/runtime_preflight.py` | 456 | 456 | READ |
+| 7 | `src/menhir/core/bootstrap.py` | 316 | 316 | READ |
+| 8 | `src/menhir/operator_diagnostics.py` | 297 | 297 | READ |
+| 9 | `src/menhir/core/runtime_support.py` | 167 | 167 | READ |
+| 10 | `src/menhir/privacy.py` | 162 | 162 | READ |
+| 11 | `src/menhir/core/backend_shared.py` | 129 | 129 | READ |
+| 12 | `src/menhir/core/backend_client.py` | 102 | 102 | READ |
+| 13 | `src/menhir/core/request_context.py` | 74 | 74 | READ |
+| 14 | `src/menhir/core/ingest_guard.py` | 74 | 74 | READ |
+| 15 | `src/menhir/core/backend_runtime.py` | 41 | 41 | READ |
+| 16 | `src/menhir/core/backend_impl.py` | 30 | 30 | READ |
+| 17 | `src/menhir/core/__init__.py` | 27 | 27 | READ |
+| 18 | `src/menhir/core/backend_config.py` | 18 | 18 | READ |
+| 19 | `src/menhir/__init__.py` | 16 | 16 | READ |
+| 20 | `src/menhir/main.py` | 14 | 14 | READ |
+| 21 | `src/menhir/core/backend_runtime_ops.py` | 12 | 12 | READ |
+| 22 | `src/menhir/core/reader_identity.py` | 11 | 11 | READ |
+| 23 | `src/menhir/__main__.py` | 3 | 3 | READ |
+|  | **Totals** | **5,097** | **5,097** | **23/23 READ** |
 
-## 14. What Was Checked, and what could not be verified in this environment
+No unread file inherited coverage. EOF bounds were independently checked during the checkpoint commits, and the total reconciles exactly.
 
-Checked and committed: every line of all 23 scope files; exact 5,097-line reconciliation; REST auth middleware, generic backend dispatcher, named `/api/memory` path, MCP base contract, session/pin/allowlist plumbing, stdio trust binding, server mounting, Explorer mutation routes, and representative MCP ingest tools. GitHub code search failed its control test (it returned no match for a visibly defined symbol), so absence conclusions rely on direct file/tree enumeration rather than the broken index.
+## 14. What Was Checked, and what could not be verified
 
-Executed and committed: the strengthened probe's synthetic self-test; exact selected-AST adversarial execution for `privacy.py` and `_should_bypass_local_auth()`; literal outputs and AST hashes in Section 4. The exact pinned source fragments were executed without importing Menhir, avoiding dependency/environment substitution.
+**Checked:** every scope line; exact coverage total; REST static/client-token/OAuth/no-auth middleware; generic internal dispatcher; named REST memory path; MCP tier, allowlist, namespace-pin, and stdio-trust plumbing; Explorer mounting and mutation routes; redaction implementation and call sites; operator diagnostics; startup/preflight/bootstrap; path guards; reader normalization; downstream project scanner, structure-query adapter, artifact corpus scanner, and reconciliation adapter.
 
-Not yet completed: downstream graph/filesystem/subprocess sink tracing, controlled diagnostics/resource enumeration, generic failure-log execution, pyflakes, and all six scans over a complete pinned scope snapshot. The container cannot clone/download the repository directly, and the GitHub connector did not materialize a tar/zip archive; these remain `NOT RUN` until exact blobs are reconstructed or a clean checkout becomes available.
+**Executed:** redaction adversarial matrix; hostname predicate; generic full-body failure log; background-warning scope behavior; `CancelledError` cleanup behavior; synthetic controls for all six requested bug classes and the targeted security probes.
 
-## 15. Review Confidence (/100). If any scope went unread, cap it well below 80.
+**Could not be verified in this environment:** repository-wide probe execution, pyflakes, and exact negative counts for duplicate definitions, timestamp comparisons, unread constants, and keyword mismatches. The environment had authenticated GitHub read/write access but no materialized checkout, no usable archive download, no `.venv/Scripts/python.exe`, and no installed pyflakes. These are reported as `NOT RUN`, not inferred passes. GitHub code search also failed its control test by returning no result for a visibly defined symbol, so absence conclusions were based on direct tree/file enumeration rather than that index.
 
-**Current confidence: 76/100.** Scope coverage, transport call chains, and the two adversarial predicates are now executed or directly traced. Confidence remains limited by downstream sink verification, logging reproduction, diagnostics enumeration, and six unexecuted repository-wide sweeps.
+## 15. Review Confidence (/100)
+
+**Review confidence: 83/100.** All 23 scope files and the relevant transport/downstream context were directly read; the highest-risk findings have exact call chains, and five behavioral issues have executed reproductions. Confidence is reduced by the unavailable clean-checkout static sweeps and pyflakes, so the report does not claim negative results for those classes.
