@@ -70,7 +70,7 @@ jobs:
             s.f+=1
             for x in n.body:s.visit(x)
             s.f-=1
-           visit_FunctionDef=fn;visit_AsyncFunctionDef=fn;visit_Lambda=fn
+           visit_FunctionDef=fn;visit_AsyncFunctionDef=fn
            def visit_Import(s,n):
             for x in n.names:s.add(n,x.name,'import',alias=x.asname)
            def visit_ImportFrom(s,n):
