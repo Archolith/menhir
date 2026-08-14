@@ -6,6 +6,54 @@ on:
   pull_request:
 
 jobs:
+  # F811 (redefinition of unused name) catches a class defining the same method twice.
+  # Python accepts that silently, keeps the LAST definition, and discards the earlier body
+  # with no error or warning -- so the only signal is a linter.
+  #
+  # It is not hypothetical here. MemoryGraphAdapter defined `supersede_artifact` twice with
+  # REVERSED argument order and different target repositories (:1362 -> _work_artifacts vs
+  # :1664 -> _artifacts), and `fail_exhausted_pending_episodes` twice, silently disabling a
+  # raw-capture preservation body. Thirteen supersession tests passed throughout, because they
+  # exercise the repositories and fake adapters rather than the adapter seam where the
+  # shadowing lived. Tests could not see it; ruff finds it in under a second.
+  #
+  # Scope is deliberately ONE rule. A broad ruleset on a codebase this size produces a wall of
+  # style findings, gets muted, and then catches nothing. Widen it later on purpose, not by
+  # accident. The narrow selection is passed on the command line rather than written into
+  # pyproject.toml, so an ad-hoc local `ruff check` keeps ruff's full defaults.
+  #
+  # BASELINE AT INTRODUCTION: 14 violations, not 2 -- 9 under src/, 5 under tests/. Three kinds:
+  #   2  duplicate METHOD definitions      memory_graph_adapter.py:876, :1664   <- the real defects
+  #   4  a `ProgressCallback` type alias defined at :14 then shadowed by an import of the same
+  #      name at :46 in each of lifecycle_{conflicts,consolidation,decay,service}.py, so the
+  #      local definition is dead -- same defect class, smaller blast radius
+  #   6  redundant function-local re-imports of a module already imported at file top
+  #      (`import asyncio`, `from dataclasses import replace`); harmless, and ruff --fix handles
+  #      all six
+  # This job therefore FAILS until those are addressed. That is the intended state: the two
+  # method duplicates are confirmed defects (CF-65 Critical, CF-66 High) and CI going red is the
+  # signal that was missing. Do not silence it by dropping F811; fix the code.
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout menhir
+        uses: actions/checkout@v4
+        with:
+          path: menhir
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ruff
+        run: python -m pip install --upgrade pip ruff
+
+      - name: Check for duplicate definitions (F811)
+        working-directory: menhir
+        run: ruff check --select F811 --output-format concise .
+
   offline-tests:
     runs-on: ubuntu-latest
     # Hard ceiling independent of pytest-timeout's per-test guard: if the known
