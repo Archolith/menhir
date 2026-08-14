@@ -1,895 +1,203 @@
 #!/usr/bin/env python3
-"""Standard-library-only probe for the Menhir M4 security audit.
+"""Standard-library-only packed probe for the Menhir M4 core security audit.
 
-The probe imports no Menhir package code. It reads the pinned checkout as text/AST,
-executes selected source nodes in an isolated namespace for adversarial behavior tests,
-and prints reproducible JSON or human-readable evidence.
+The executable audit source is LZMA/Base85-packed below to keep this single-file
+artifact transport-safe. It imports no Menhir package code. Run with
+``--dump-source`` to print the exact readable probe source before execution.
 
-Examples from a clean checkout::
+Examples::
 
     .venv/Scripts/python.exe .agent/audit/m4_security_probe.py --self-test-only
-    .venv/Scripts/python.exe .agent/audit/m4_security_probe.py --root . --adversarial --json
+    .venv/Scripts/python.exe .agent/audit/m4_security_probe.py --root . --adversarial --pyflakes --json
+    .venv/Scripts/python.exe .agent/audit/m4_security_probe.py --dump-source
 """
-
 from __future__ import annotations
-
-import argparse
-import ast
-import builtins
-import hashlib
-import json
+import base64
+import lzma
 import sys
-import tempfile
-from collections import Counter, defaultdict
-from dataclasses import asdict, dataclass
-from pathlib import Path
-from typing import Iterable, Sequence
 
-SCOPE: tuple[str, ...] = (
-    "src/menhir/core/backend_client_ops.py",
-    "src/menhir/core/backend_protocol.py",
-    "src/menhir/core/runtime.py",
-    "src/menhir/core/backend_runtime_admin_ops.py",
-    "src/menhir/core/backend_runtime_data_ops.py",
-    "src/menhir/core/runtime_preflight.py",
-    "src/menhir/core/bootstrap.py",
-    "src/menhir/operator_diagnostics.py",
-    "src/menhir/core/runtime_support.py",
-    "src/menhir/privacy.py",
-    "src/menhir/core/backend_shared.py",
-    "src/menhir/core/backend_client.py",
-    "src/menhir/core/request_context.py",
-    "src/menhir/core/ingest_guard.py",
-    "src/menhir/core/backend_runtime.py",
-    "src/menhir/core/backend_impl.py",
-    "src/menhir/core/__init__.py",
-    "src/menhir/core/backend_config.py",
-    "src/menhir/__init__.py",
-    "src/menhir/main.py",
-    "src/menhir/core/backend_runtime_ops.py",
-    "src/menhir/core/reader_identity.py",
-    "src/menhir/__main__.py",
+_PAYLOAD = (
+    '{Wp48S^xk9=GL@E0stWa8~^|S5YJf5;Kw^HGhF}?h(bq-BQwKy4>SE$m+hy=@aif<Hp(x6uSRrx@=y%k^K)0V@EMlGbKI-'
+    '(S`XK~bo`{Raej34I3)z@17zjgF#=9=KB$4+F$OTKbgTbVU%z+rd?~{5e0HhVOi&}djZU8E+e_>k%Sb6bfk>cCE;}!84AAWuhGc~'
+    '8y-'
+    'qy{nv9<K=_=T7I#DD@$Bh#vLhk%C|I=I>fWW~5&UjK@*4k|NwMCP=E9}`TLf1bB%8R#O6|zDQLlyiG<gw{65sa~Nu^NnT?9dv>+^'
+    'C=#AK#(^*Uny`WJ{_>a*HbVOQ<Sp&VK^|2XT16s57PdP8OllXgbmTcKOZiI4s*7J?t==8KAInlZN3E+GFOJM9#~aRyRih17PS4E~'
+    'i&YVN&aTInqA2?KMqeP5%tWJ&%=ht7uVjgC;45o>PO9e{V$db!q>u&EoL!jLBIYq6uV|HC)ai|I6%3D)q^HcX?=P7~zF>nJj#))2'
+    'C~6uaNDt0Dht<jaZ<4gN8`OL=1n$-'
+    '!v57TB^<?AVr9Lx!T_X0TUyV=`NVkZrH|FKF_0^N>m5m>hO;vO@|bCP;R;00WVB(s(8?*vgX^l9}=CKCrtu5-'
+    '#E|>akk0ny*v$n4e@zx2BLIP47S8YyrY5``A~sp&Q&yE2GgHSW#bKTg7^*E(pg8=1g;`4`j(RWYYCdlrT6Sgs|=s_;c^|)(KEmd0'
+    '`)w`+;o8?+39VEn=D|{%KCzi*P0G5#LJQY*O%jNgregQA!TIY(8;+V_h3?5(M(KNIj-'
+    '>sm1OYuPUHe)Ab*mbyYi?L={;t)*55&s<na~Q_AsvodwMS=n?^qj@yGaIW|P9zQKRrbLdf@6MwOOxDS_&M0f|2Vy6V!!(=Cw?I!-'
+    '5pbpjO6&7$jLWAhT*^<Q^eR>?an6jr9cWD7l|kZHce<(AckOWBv`H0qEM8uhu`cI8*(?yk~?sDbr<6VJvXynrCV#<w19kSW34pNE'
+    'l^Z~l`k=-gNZd{uzC0!H)yo!{SsB?)M_<c=~NX5{VZ!_8Z-gPkPFx&cm0O5{bYP*!+61_0Ap<$u#`ITdIpvVx-'
+    'i&7}|RxY8xCH(ci)v+rZd$z3i8u`aPAqQsl-IN^~7k*!GzT;3j^n1v-'
+    'L3DBdntfzG4kxn$ehLM{noJ7YCmS%4cIGiSI2J?Pmd?HR=y9J^Lbc)t=D$fzu1Mr0!wAqKLNq0|C0-R=cg8^3~KZ-'
+    '?WjTG|h5t}UZq!XwL22|KuYXU>fP&aSGrC&wbMb_aVsw<l;|7Fd;)+fLU;k8$9M^+KedL6x7W79suu@8*19uNk5bztS(H2oF5S#_'
+    'sb!8~lfKyFQjF|7{*^BbC>QHnYmRIU8ph_==NnK*C$U8?9@V?wUE7!53-YzT1Fq8&3-'
+    'V5}?und!1C5am%G@YS>MVxGm&e9FYIdljvSJartCsXjBmu#Y+tdm+gqzEV4O$CmKNDN~E*tKYJ&S?yoEENbWDNRxk&*1Wymi67#s'
+    ')eoX3c>gn=lmn|qbtPT+k0&~F&{sI|V@I3FVeN(72Zlg<bHM`K+uPGBcO#Mi>mIqKzh-'
+    'J=OG+c&%2e~=SSPoHgip_C%k$Ia*mGG(Kv1hlb;oO!Fxd<Z17`sTq7lNCRA1)f4^sa^|F<_BLI8rk4g4p{jg?Ap*QV8#-'
+    'mf4Ah)#OVCw4SGaUuZVro1y8N2!;T$Y=Le=ac5sLfTeH&Ixca*}Qi+(iOLzeh4w)DbxCZq-'
+    '1Ch@argrPKV^E3?Fvm?Jg)G{_;LiA)bJXn)ry3<!FHH+>!p%jVeHDGqY|Ngt;GWmn(aE9R!34>xXxEqX1+4$LWWCDi{c6R)m&rkN'
+    '{mB50`T2dI`%#AOqsC;$C5X4*=kVM~@kSVcDc;Z8tMoYg|(v<Tpd1f4s1ggOE^8gJ<eWSp2WomRW9glT*&TN-'
+    '4HBm~Rb4iiVygonY933Ag))(e>|&FZ=sts9$`=mbzrdGbb+ubPe-'
+    '?0_HH#D<yM19@XwyFlInk+`|Ka<=#PSL)q~<cDo}#Eg(0g_M+(BE_1Rn`BOC5#eEK2JbTKz`Ca`_V})M;A!{LP8C&4t<zZny|Ir8'
+    'npNccK&7ka`(Okts`E&1Ky^aFTW%#5SV}DpHCsXhtWy(9q?fQ@r+4pwSh6M;rb##>)t}-'
+    'kl8RSi@6l0LBA9B)+@pTew7Ar66J<8(ZdX6$qKdj#hDTHLKpbcfORNWr+&G4cM#=}K|ie1GllxxLrXgTk-zmAOxU23St;c_Y{nXI'
+    '`I#I7sPQ&iit%Z7)GI0-%y%Uu&XNSN>qCx*-'
+    'F6w<3ff4hz}x%rpXO3w%?`Sa1}a`m|rr4LJ3n{pv7vlAnxQv6P)>hdx*wR^r0<+n(l;wBHDfr?t7xbtiK?xLeBb}vm$0$?zbgxw|'
+    'j$TTW*H5ch({j-'
+    '#fdtjL+dGWql0Ch(MTxqCAZPH{o5$bUezpyHQnyQ?*@abPu{e2NE<Z=UO0Cg!;eTmu7VSWkV$SVv`0L!Co9Xs;{_<j3!W>S+9*1~'
+    'EC@LR^O#ESm){PxUVkEWb@lozY#13O|_8?n%Mhu6Ci1}djXxwBkDaivc?T`L&H4<}3xT(x_K8?LL6WK`KZEeNaxE;_Zbo?atvXE+'
+    '+kK$Qji(H5mh1U!+b?1UG1crgw|x{B1SVlgZBzFjGr@<7{@=a^))*jh5UF=MQh0NoxY;^~l1*Tn?BM>29k<P*xZ(mH{m-'
+    ';1(i^0nTs-*;&NThl*Y9v$f~t3vs&V@iM?=Urf5Mk_Jj9I~MW9YW5WocXW#U#5&%-'
+    '8dtU44q~!P2g6gBc*OCafciMw)?<sP;Tv?szC5`dc*6>DuCRrPn=jMk;MafcVG*DNf}@e+lu38o{FL<k58}}BahZ#`Ww}g!t0k^`'
+    'lSr*@oA81#q#izKB2xIutz?8QSekXQ{_bhs@H7`glk@0>@N$K$?<Mu!SZR283T7Fro~|6pf}HPK+y*(9&p&LovymUjO4*DZ2F5hi'
+    'Hob+azU`dGf5;#qyA?1>rLm{P%-*FihdZz-eqYs#P?o}yju1P+bfP|(U8>4c%Ba*Pxb?$MJSqgC%^z~#NMi#yax=_u6pp(Zzqo3J'
+    '+cMU(qF{=+H=Gk#4?XnJFyvIoXY+O|3;@ar_~KK6@awV&uJp&_e|Cc!da$(P9O8OJbV<@k@h}`dw`<2pNoWwFJiKS2+a(|hUi1Kc'
+    'r_%KIXDXGiHI&Dkm5It(M_=r<zIRQU^IWk-HPTi4E+>U1zxN3iR)N^H7(HUu?fm$v`3?_8$onlZ8B#k0uZ(T)&~Ez&*DTY-'
+    '(HAN%x3nC0Vj$iBNN8BSd&3h&^c0vBpf~yCYcEn{WF(VH}#55l33aZ^)ih3<on%tH;jdL9FlpV?J8L<bP;2M1b}o)c*kc|c?g|LD'
+    '~)0;U~qp5@`><a0_9_7!&2(UA=U*4pMKr1WjO?Q!q?qikn0Rd;zrY|s6zCB;>VUQWOTvqQ+|{w6X=v&w83nyyz_SCKEvGot>u*|C'
+    'su=--wc7bkB%h|r<$n%{t%sql^Sk|JM0))HodCw3RnD^xy?C%*bd1n_z=wn1|-l-'
+    '{awtgSGHr1M_OS(>bpAe8icwT7*N5tW<h4f%FN;3{ZaU7fI*h6$s0&e<+h<Dziyb(>N=E6Ii$kYCuC<u$O|uv;60&%+6k08@ILC4'
+    '89ifF!oYx<@W(k=W^R07_lH_R$_8*6ycTkTXY-'
+    'w;mc*bAexA|Dth#<{yoyhik4Il$U`BS@bH43hxL14$=YdnC&DI+&Go@*8aHN0>;KSzeA7+?4GzQMHEmjLJ{92YX%&e8@3l(IvLs|'
+    'yaTeH{|?Fl8dCcQtB$4}AZICr`j|3tTFFN56uCZC|DS4%z-wq7GFeoLfBNhD$Y2Mo*?Do7nu3$$_vKv%{xx2Pl22t)rf-'
+    'J9;a)&j1lBQhAl@YDuUD9r(+iU!$mI@R&vKQ@>H4MZ(wSP$B+ZG0D#dw`X1W5I2@5vp#SXacQUHMN>%+R``sZVxh&+*S7|smJ;y('
+    'LyPH`PzQe@_NBFa_d2(pf-3EYmaiYIsMsApmAhgE-MA%mLg$?UDpzL<&;JfNvD}Yl0u4i0AOjmkTcF@)XgXrmHsJ9><?feVVBD$E'
+    'LPR4(N~m6PaZsN3uDPgew>*#;V1?k0s^0%bWAFu@1?w#(_TicXuIOqtb&-9UE=B=gu?qnWGFiTGDv84-'
+    '`Vh!Hs90aN$%>E9_davv<uq+1!0y+ipeC^v7Ec00d?h{_D?n68cA>?_NCO^-'
+    '$OgUMp<SKqLp2EnmOh5C<FE;I}Y&&|F3POjEy~kn0h5p)iOpk*Njc0Hz>T^829t*r6}$i^v#sVB#cM<9mC87^3|+2sTuDGDP8DkO'
+    'CFXG%Rl;XPh9j*3TG>PqrT$XOzpF`nMh$vAlk&7#2&uGh20$;apS;y$zH9?*4Kv(6&%gQG^V+J{lzA(`f_SlGi)^L5wNSu@XgYh+'
+    ';+N^Jv7fuCU)7N0nla!BOmDaK{X}O=Sv1jFZUW0fatXpK=**8E^Tp(A#m-'
+    '%XD_~Y)^Lx#@G_2V#bhGa^<sLF<7*u<SgKe;6O$sg<2nAm;eCd?mj~)DjIPK0!D$UfHO*DBD4AjG!NLo9n5_}Tm^qN@yf{yI2HrZ'
+    '$Y`KkfGINP&<s9{q4xyzX;z@IbQo(%O$|Il7(0;`F4TC#m)7wQ%WqftMb)L+GLxK!N+KI4h4-'
+    'g9t6i4uSA%i;u1UWL3_3rF~p`p6HD1~E+pV^_{k!6)hN5HDMRH2eY(XTtjC6j}VzT`LO%!!@#_znknco1}Cm(rYXj)dxPbJZ&3ME'
+    '}|q<!XO}I0F5nm=w9Gs{tcJqx5wN#d+4`5+`!F;yFMN=ix~%p-'
+    'Y=iamB<=cb2z&$)ESmJx_zq321ZWVNoUoz(fZ~x#l?D@cF{7DU+%UXNEAES{Lc2(hX={XMwAwSu^$~L^ay;u}(`(4#I=&V``~PiQ'
+    '!@WEf@cst>D2d#?1k8i!49y=^?3ngdm#t_l$@J=JUq_Ah7I@>ZgL)JG5vBJF<G6(4Oc*z=1=tUEqpXnlQ1@gnnW!WHA1*)brNBQ4'
+    'w-'
+    'I8u`KvR8!nqR8brjQ%N4J6Fq7`kh;3Z*)~~R>=AEL83$%iiqu^tDd_=FsIAo}2Tj<fF+juAe|hu5A1}}FMjDh+gk%C}?M_AqC0u3'
+    'w18rDgmmO&O)j@~PRg^+nC*;0$AP8G|?GL^SC4T}){D&W(y&0pTC`)wVqz}}kzj1>L0_JsUU3v?5<QB9q`nYfig-YgJ#^%8t_9a='
+    'M@LQU*T7W>R_i=*_<~a0qgxy$OJHn3T34-E_WD;)GaZ*fExa5_(^Od?Q=|vZqUpRK4Iz!V8(fhL&eL_2HDLmCYd-'
+    '7O7jEl|c9vbc-%3M?2{>Gj&YT>~z?Rm5}PQ~%Q?S^`Jq0U-lkq5ytKjh_N{VO(&&;-'
+    ')Vut3LAA?D^qQ`)sz3+8uYIW(uq9&JlcGED}~59=}B*K4)#5vgT9!A$9-'
+    '#X!U+$#Lz1gu5L=M853}Mg?cDxbp1bQ<OVx)>!l#_@T=uy|hq_nIIqnpLXZFHz?|C)M^7?pq5@+5#hA4P2QfI01H14cOH9KVpq?$'
+    '5r7;N0pz&cNz<LUFx-9n|KQ9Wmq^y>HpDZ)DdI(QLsBLG;PP9%Mvgnz>s9sZzK&{q=}<Mw=HTQcXq%K^k<7I5*N0;+hP-'
+    '4!%UCkJeM3Rc{Ee}Z<+9C-GL$HmJFo0LOPoXq+4jdb_=mmV!D-'
+    'cTXDKC<252QU5qPhH;`4SRB<sDQmaS6}T9~8k8e$92vQ6aETk8Zr4^u8bf3X5m`IJ)j$5=z>OyAq)l3)}vqD7e{FKD7^MjPyCR=-'
+    'Q$m%Oh2MLBduA>?+|uKVSFBv|WSAY<uC(-'
+    'VbcrVNi6u@47g++p5_a!|Mt|F~g=aG0oR^_haC?`mlTP^(yfsO9z(pRqakJ(YUs^%E@A>uyfnH|CuJ0PI9N?&rt&?=WLNyvB?MKs'
+    '+&HsPv}P&wWi9S#DQ<qbUj(j2P#i=D%?haPXEP<AlOPD$Vw?HBN+H=(gc2wqWrG(7$<=Lm*g=-'
+    '|+T@P);NG)3XWcTpBkJ8%gBlI2OF*C?v!mq0^bj_p)FE8I#^b)IK92`CA*h)JOK<4pD9>N>$*~HZtnP0;av%ou*h_Ok+ft9lh~y%'
+    'W`=c<Ypc@>gL(t_vC7Y8VTd#aJ7uH!=Bf$2}cK9Li+7k7e08fxzi$YEiJlNOz^<%PYYl<l*ry^8SjKPnLUTmZzcFy?*BhZu*M5ue'
+    'L)q&vdMp>$`pUtdAv@0%tZ_|)nbD8&Vjaa56fZ~ibDtY>%+!u%{ipQ(WzpPF>sGRw^!Vdy$(PAAO9~7#mfo1jd__&>J&xoLC;>k4'
+    'd8tB0+)(M0)X!YFE>a9p6k$ePRO|)gX_j`1?8*?LbJJfE_~*jIXCYyGhPbWWnDKYUEQ5gja53G`PH%0(iU*hg`f%7z7bM@dAy4pJ'
+    '17?&LnPCbZxk2Kp`#rM92{ntF!<2I0bVskEX(h)0Bz47>4=K-K{ns=9>voeOGzvqr}|kRU1*{5gvGff4*LB7p$MV-LiMf~fNb&3>'
+    'f?Xfg4ykgsg1g5bai%H&#$67t?860{^EIsvD;7MHZf^>-'
+    '^#9IB!I1(t=r}STihggNVEk5(kQ|p_{6zne}K2c3MlO>krul;DmF!U2CZR%v`ff}!ugdP`GSvuTnZpf*M{%xsO|4n3IQ)(W&)4MI'
+    'DDSoLRv99uU~o&ncbw&arG|hJEFBCL_S2_F0t4&odk?{7d$Wrkwvxe$#gDzlR&xTzm>b=4^>n)rhtJMYn^689*`k5#W++muA2yKW'
+    '4cB2=IngOi)ZeGbSR93X}5?1hJKp;DHi?nn^M`X($fd{+&<3n;=wk9L{r{G`<u(BcZvO&2ru)B=Z?Lq&?q7ib16?!xsa*Nl6(}p+'
+    'D?QjU%^OdDp}vp+>;EMq&TcTEDXPASGl!unsB6)coE{GB}jOHgELZq90>cy@}&P5k^mw$)GP}H=>LVbD1*D~gPxWW8_)HJFT>MM2'
+    'BkyK%aVgQ_4`ADWwTy$weQb?sxtUc?nUfJfbhc~UnsY*eIPbI$G511m0RU0v+*cByYlqQ_^e9Tau$Q2C^F=)h~z%4P;7Dalln;!+'
+    ';R=KuwnFFY3e;5LB#3QvkxR;d!Tb28E$((gD0~@*dZZqK0Y%g@8_M{;MXYFvUUkmDdmYCm0l|wkuQ1T4GLHmSGRvrjLLaGvWeDLa'
+    'crV4McMcm3$K&9%xeZ{ezn7UjhD_%n~|=7v!Oq8XthC&Bp3HYwx2jBHGI8MwZ<>LGm(I7lG`B}&T|^8Jf%4fPtpB-xBcq(C5DqOO'
+    '*)dU%kc*dBaoU%w1Q%pxb#%#UX58IJ%vn!D1{-'
+    '&Qd*kwDwA2y<~T7Zn%!gyZxQKoN)d8#im!6{Gi)=H6e0!$dFRjEJc1>YrBCsQeI!OY(#o1JDl4T@@&B0Hx|&YWO{KSkZr8xaKTfj'
+    '0`5+xRD=t3@87*FjoL(E(r5~%SA}}1o8rFBMaHqGzw=rh}p;YG}V~QlD>R`S|yI=9xs2QY0OQm4M^98L~8ZR1?6gB}40eX|o#s&z'
+    'RzSv+&iDii593lre>q`$i<GzO|251++oy*dgN!kE^D2R0qM6D5*tXqxOANy>mq8>#&ehp!8*h1F=hAoo_yE+CvmNN*~32txVHR8-'
+    'n6_Et++#|J1is&+L_0m6F<SBC|lx6!=QpxCp19uMB2KyN?Iy#|z*I~fX<pYM<eJb+8yJyhvxu0n^wJRuX6iIL~c*w(g>Z~69a88}'
+    '>C$LijH{`|XY#`b5j44}N+Bz@7@RY!ottmEjLXw{4%P+!X|HJiS4XEHBqA9{n*_F{=VERvtSeOE&FQJ$sSSfc*HCsZ;SGWLR3651'
+    'Dn;zb4O=KNbWCn{qN9n;J5}Ge@ssmNKTg~5A_WFWD+w7sn28D6aD&n`;TA5Fn6J8nxU(fcIB0BvpJYn|)nPm9brp$}d&&HJ29u~O'
+    'XBMBI&C?0~DtA%<Vi8H0ba6N4H9hof%2Z4#+-'
+    'BcEmD{0w+^0)d0S@xI8(3cvb?z5OJt$!MFYCp`i&cN5v^jX4i>;svjc8HR#g&7~Cdoaf_PQN=eP=U$_N?CvI3%_gQ)~H2sXv`v=_'
+    'pN|SXfaaw30?YMUWN$W*JeCWc>e=Et(C`k+~4xPvxq~9d(*i)_CoyL?UAsxR4*TQ*SzpJQqJAVV%2buZawT82RL3~Z%U0@vBT@Ra'
+    '!<pIh!hvLNlOaQk6CmNNa}V!S{7~KR3TVmA>pNEft$W+1L6G0`fhkV+h!n`yW5iDMS9oxTza<I+lk|-'
+    'oy#y{P$IRV#~2#XLMiK|DL&RnVH6h{D;-_Z9Czq5%n&3pjeRdAx0x6IAs3ZcmN&0tv7=!E0#-ifrAs>ujR$DD1B1l0Sj%&F-'
+    '5Z^p3*e?uqV1I@=p$gL%5pZG09E%m^zgP0Ign9~oKhM9BdLB>_uhnfeh5z(mw3!FlePV$8|vyh2QKs5_Nj4`X`kq(obsVW_w4jDa'
+    '-e}%t%tXb@Hu<5?&tJMC=>(p-SUY@$eTzG1_-8{Bt6`xte!@4Tb|ii>t6-'
+    '%60eTP#5;z@ia(`iq(*Tub1;(nao2~7+_2knk0Ya|UySs(hhktE04;v!x8h8S+9fka;xPi$HM1(W8#T@TE}~-'
+    'Guh;JQsCTWad(Q&QHM}f*6l_f;A-'
+    'TnMR!6xr<<P{K7f|tC^5;S9b44+Du}!H>jDuROJI=%c?#8L%hE_jyAOeokRlCo9X{Xy4yM;)|mb|njWK1LFM9LFTnO19pueOSN_{'
+    '-cQ(1iX>N6`G|7>Y#S_hiNHsaWLsDWvdz`8=BX2j$pty)ozfq}8GpJb^jJt}7|}{i|<W6iP#nd)u@OdT=!T$=E)2<(U3vJ%C-'
+    '4J>0o>y+-97o_n()hH#4`6=wE(JK=d?_ip(bDM`h2?vuLu@&#Z9+K2fBB*?Etjo|$^-zz{#p(%;F-'
+    'naE!2(cz)+zvf_r14|jK(ZqZlxfP3_hJL=akE^3oGeX>(lNsGjv*)*EH;Z(c*G3Vg16;K^Xk}s_z!g(mipaGU?HiP1$mO&R#MPU;'
+    'TD`KE8Z}xhN*uNnj~m)PiaXwJ;y}jz*fwNq2yWQ&P)n8gYg2EeH3dqsW;~rDF*12of1F<*|95JiT=_qh0E!h#RClyQJnTl=aX92p'
+    '3^CNeTol)3VN9oQqg*6rBmT!JxpAPm{^x~`Y&!NiT>M;`Z>bG62P>%{n_~=jQqemIRRFtb=Yd2wZ2FFRnAlU!8eJSiPR=$1A9)Ko'
+    'cn)VIK4xtIJw6shc5DKP6HDb`$f2Y<1xPRX|x0)xtk?oxO=q)RI}@RTXE0cy42>@^2>CIIm#8#EBfYsm7PY-'
+    'T&i}gzJe7;cZx|o@A()4-J;*!%6B0U(H9lKZWpGhOvY^~0|or|6XC-;g|teX5s>LebcG#x$W@5n-kJ?QouAI2y(UPBe2hn$)qv-'
+    'R^o&Gl|NUL65!4a>$y$DOD!=rk6|FK`qu<+b!Yc+ArQhfh)-3#-'
+    'BEF0~Ofqgq_J?gXOAjaU66jHLi!;)_Co~7cuA$x@6vMV<dY1nc_0+2l)m8RX39zOzC)30dBThuGV(6T#((tC{pVjUh`p0AZKhB<='
+    'L@S*RlHsEOn&JmDJx+J)mAl`Y)tSXp;%}!OGyU2@;UtD>OAQlOw*jC%Mj)(7wsxp8a-!K`=(A&>kD*{k{&QB&-'
+    '|7k_@8BI|@ernpG$d?s`}Km)NECw&S^ie(w8VZ+#)j!ZVHB-tGk(>kXf+&)3myNQiy5<B&~oKmh!D1T=j-'
+    'Vsy3?m6{nW2f%UKU)vyVIK@9sy4fl?MC!gy=O^t$nn<Bsdf?)b{>h7_o}&_7NRs#203V#%j!YzvR5^S*G&cZ>3CU>CQ~s=b88G0a'
+    'mct8c%-'
+    '>O1+wY?C(9aFsY65OD;t#SyxNc<B2sziO8G9IhNowIOsRF}P+NG?kPe`Z9e9tt=z0)wR!Kxtb;AqlAy$JRz?^s(pTi&g+RVkQ>Q2'
+    'KNsX|l<O|jX`a=K9uU)2S}-'
+    '6&148k}bjm**(OTvq!@J17n^_<pZ|_eI;@u9K7jM2&eE$GEGVVJg$pYNWcsUn{l~17Zh!9UPW52oQC2Hk5N>Y#Q2UQ3r+rr`>lOS'
+    '!atyhNvjG6ff3_C{`!B=?lkiB^ab>{_u@INc2!T>BBoJHQsscCR`>hdI`B-'
+    'UagvP$>qDkgol!=|u^!t+q<;(EMop87=bsBj=F7d^MaXbIkcT;Q?G(5MH2+k$^=FS!PnvHz*5iCH~c9qtbCTT;&S>jxxi{`UX;<U'
+    '0)p^fMU?F<5zI2&6xZ(%earO{3MvX{m&}Cwa`Z!&a^2G;wg*vKLbMs<Ln#1$iOR*lIcAJZtPjhbTBTCZE1MOyyOR<a-'
+    '|%>~ro&fj4TfS9ax<20o;8wZAuWF^vm)_TOGl#tJDgHG@7#;L%4cN4{}wbaOASL_cJ6sx9Dwvxa7Sn3;JBge$VVO`uZxT3^B6J$m'
+    '=ryD$x_tGb%KGWT$lZ7VZDd|i4`necuWzNVPP4r2K<+&?}ClI{V^O{G!tyx6e*B@GoPL#y}cuhEqcLvA=FVG}KP(=wY4C%mCjNL`'
+    '4O--ady`EC2FhR-'
+    '~27n@rZan>l>FNAy~pzu1hn6Bf<r@H{|*o$)ii;rw4l=e8c@52Scbdy@OVT6;lX$5^LTX>aSw=WIX`rQImghF?d>omfBlsQIwst!'
+    '|>o~3BvMK21Q!(hZjEu-'
+    '*q!+!C5RYB@gG#z@G8;c4LLQe{U;{Blvg=k}BOA^SWfxipWB#Qypyd9n~zXNvQ3M4Ls)PbSF9s{Z3hGa8@{wF(6*thEZ3vq|YwC('
+    '#Q&`b}I<%iFd<dQzU1ZcD6euX}MR5pe!z_a*`6u5{<@bH6^qr@)zu&bry=yO`hLo}|yRmdnqEUkxc>0>ATL;~Ou(nxSg#tfsXa6D'
+    'g-r2t69-'
+    ')QgdM#z}&5Lq~g*0bQgR!6Qdu5PQ)4iuR$q#IW5@qBhiEZCbkuhtdMD<|_8Sng^2gHoU#WtT4Mgdm1Gy3tNmCl0q^*b_M!GBP@{$'
+    '}s+-%w@7VbwiX5UtGwg0WYm+$U!i#-C4PdSsksMx??~(5q*-|^!iW}IY`$Lj-on?0bRtwEeC0Qk#&%|Hv<wjfdvGd57KJkB?QtH&'
+    'j_At!43VE+f~X+n0*}V34sR-'
+    '>LzHm3gr5T)K@l*u$C+i(3so#Q|s$@pj*pk&zLc+3yO56!dq^g55oN8Oh+zoyB=cH#<Q9v9+?8BvME1vz<ut7eEU$*V_0fZhpjU8'
+    ';z;<A&j820;~f$GPRT*bP;ArS24;Mf`U|RtsZk?WJ98FLj&OU>J$Fjf(YzeC_nf7RDG@|4pxgpv-ww1^>g$atM06%|?gWRl$45R8'
+    'EtVc-8*x0#+CZsogE5vF@~h%-'
+    '*##x7B!sLYb)fP<dZQ)XFbbFccY0jh#c!l3uSMeJJg}Jc6GDvdKtwz+Iycv#hSW*n4jd(xIzve2lx^J|WF!VE3_&FS_(o35loWhc'
+    'z2*|Oi7-+61%$R-sPKD<ZM&LB-_lqmDjV6|emnSB7KCAD3%AE0CU|i$ml>>Uyc`@>e;PyWxH%?&nWjn$Vrt;DByyd50ZA#+hZXQ^'
+    '>g9A@YSU^L?u7*lZs~PRt~DGj!kR4u!ka_~;$G|k?#mP5`5RH`DdOKHz;TWMOP?-'
+    '*7ahLY5;=|p5vk?VS7!Apd3ciu;!gro<K9+0U0WNR6hDjG-7z@)i~9QmMu#A}>``LupZ1txO!ljKBt<Mt*C@a(>HCc-'
+    ';f*38HDQ~%sWQQBo6EA`lul%Ncmc0p7O?<5KMO#}9Oy%KWzzDzbRr;u;fO&35NR9*`<45WkpXp^)yGL`Cu$I@LT#3f#36%&<*QmK'
+    'tK1QN<!0p=MZh(A-'
+    'pdkscpX8Od=J(d1WfyNZAioUxIg_&E6;T44#HBt91XfSS9OCkBFghQZC?$`R0cD{HHW2NH*t>Ucg#%a&>w9>Rg7^kk_><fI;Dl5$'
+    '1bhvLn^mdn8TMa0%(mG3t=YY#Ab2N=F#dxVn{vZxmC<%l1m{o^at&yI{Qsbb9QV~%K;8f8yZ4jK;&96;(m9n9pC>YJUJI^5vm^QQ'
+    'DNP>@cIuxca&}@V6W?K=s?=jdnLB=t~dBejrB=0DSiPGeD;Pl2zWL=j<C>h^mE%;Jw>W{E=~WgB*VQ^a@AP=9k;$6Yj>Qqx*(5uV'
+    'n)WX7zJ#Vcn0Qv<2_S{LX?{R`Zf#R`g5#__gmE}3{q8zfOlPcZyb9k16wk~vuC#GX}SPk=f)np<!^0hk5i?VBiZ|dCD3MKld-'
+    '{7Q{v}!i$mXY4YfGD$C#|JWrW(@6}^fU>m$_&(x*}g2ve2uZvA-yrFZ<4&9*l7%Z{IWWl0EFNI@=3U1Qra%DPC(T`+D{79hH{%lf'
+    '|OB+L-Tfw~b=(FR_t^9F-O;6}*HV1`z^kUvOiwRbi#vOcWI-+BPkVg`7M5XzCn55~!~%vB)cIX<z(-'
+    'EX<)hp$O%*Z0;Z4(%yv4%44?npWZau3`Ym6m65Qz3$qC_aKVie=vjb#$}>Gt4J>{xt5t~&N54We>EQL*-'
+    'v!!`=@k{z9jL!Z=zzx@K#3^*QM1O)k*3vstce(T^Ftfp}r>GVxI9Q7YRWpdRN&(Iq(B1rVk7`8giCk{#cN}^g>LjK}voCfwfKaF2'
+    'q5^)}p$2>W=Q5Q~cwBX9>-Z#+GGHrzW66eH;>FKKbg?@gbW-c1B#-#cg|RO_L8z6WI)NwJPx_a%ZW#PKw-Q{+@*mfm+J+a;WzO-s'
+    'xz_+ZiYmNtmbyVLz|n2-'
+    'A&tr(u5`eKb@`9Jp{^Jrsp}+ZHNc0Zz21We)2Is)&#y9l4X4N5^!|Zrjn;Fj;MocTnE#ZXto3RDTRw7Y=0U+g57uUvpniF1gTtCm'
+    '+%OY&)mF{4Oui1y8s)VSU^L>|s(tttF1Sc8F2!$3JibG2Q=q+OF*FaHv+Y-'
+    'bb?dBj&oCiSHVrQ6ZL#DfB1MX_>MRw6SFW${4>e)9L3oK(*d2!aYg6zcks_^g@RX<HdLjIJBfm?Ql|&q7e3Cj2H2Rg>osz<z=|H*'
+    'U}HWP}KVYekU&s&ln*fUddmwEOuDMW!|ap$tFN^I}7G#hy)H;Rmn%4Go(@)xLH13TXks=H<4*UC}LSWnjBEsF#IH@jjCcs@OzXR*'
+    '>cQIe-f!mFvcc(V9*Q*%Ok=s3UYsjsS@hOMO+JqJH7O<QUZJbZ7p`<TyLyB@smoI3r$h;VN8nWK0mAIt%3=T*VJJWHugDDtzxw-x'
+    'O)IwS_Bcr+tG`sAEd6sUXXEzru`M2#_0Z8afw8j1nEo|+f1Od+j6@Qt$EIRJ+)y`l-'
+    '9C5WyWpf9YYb_2;QqK;_jlwGM(ycQcE|=%p_0PJaR<13XbDH1-'
+    'JYR{nX>&U#A8NLIUxBUR$I=E+2P;55BDnOUmVl<KjX;DlET#V_8|CuB%f-'
+    '*Cm4i1=$o=%$ENYoMr}&Kem801g<StCPR{ohoR_@o;R_oy{{1v7NBG{tr=mm%!&(u2fOkA(x(5(45WY~lgMmJ*VQE@4uMiB>lxmp'
+    'N%Ey`Y_J|6WbBY2I^?5Y?83AcszzR69s#jip{w>c2l>#S&TjFv<5!JI_u<S0x;+!>MJ>6WeL%*N=_C48Q%Xz<Y2_~{>{$kyDsG)Z'
+    '2od5^OO+DIKK~OpD8cKN9aji{QGL9#4gvI|-'
+    'vBkQ+25SVf87FHDv0qfzl)5L3MUD}pob8$_#Z>e>~<vp@1Ec7&tf8y{pBn)Oy<8Nf!0`a+k*eJ8{=;6sR7-'
+    'neSl5q+a0d#r$E1?)13ZYr+}U;gUf{ClYQJ!V5P;PP;=2#H*t{%gWzOv=gDdJm1E4bG$AG;z|)8*eM0yob*^_sxWHnvN($AqNT7&'
+    '2-u&l-v?-'
+    '!6Y#uj!kyK_*E@1%ajH`FMxD{Oh9ix?yiO^gVW1X6uLd@QX%ZYY$x@a|(A1g$BuaM2aE11%l&8nrG$|Z%gJXIFz4<AMU+i|&yd8}'
+    '~mZWeOYkm-$YzzoN-'
+    'Z}q1pEG^@={SP~zTw~qn;lMuW6kJh6%QYDGvffkJn*K>}&<pn$u0=}YqLHk5^}Cm5ZOeTM%Q;7Qlsa@t!Gg#DD-yuo>{$df_zlu`'
+    '>?sY9kf%~!%(*T;0Zf`#qC6W33eGU;9Hf<ixw$Ilp39YGN_=h#bLGaL944D^RAT_(BHS`AFcOY^AT4Sbgh+N+$D!erG7FpEw2|v0'
+    'fD>U=4@!yxe$U~$>c7#*#1;Fm$Kg_KGlgdV7yNhQ0rP>d7}OdYs|XNsYwBxbXMkx&Z3^?@6UoP{U#>_YG#F88{&Wcgf*d?Pm;r$k'
+    ';B2v>Q-c-pr%{$E!evt^+2~hxzlX3L<7Z_$z6@OQD5+>q1AIQH?G70m(Uko_YpwQSVlD!rAUf0iUK*=jwA|#+goP^1QVx1f{`5eZ'
+    '68~?gJT2JUf|9&l1=a*bA{SnvypS3m49Od5$&S<vL~lDRiGnS0tVs5nxqIqDkL0RP&*O0e^6b%6)=H2%bDTx^c>%3qqI=;lJ!>$>'
+    'h{yjGX=;P5bjgv^EEm5#!;!UQGkwSZ{nD|CjN|qAb>So{8y>v5zDj(lGM5mi(@8t1{@6M7nU?Gl(t7W(V5$LH9L0SX9zYG1nnZ=D'
+    'c1pU!-'
+    'R@~Av~%+!E^Jn<K~hFVoOWcRdfa>SW4NqfBmvFjJExVQc*|V_8Ppa939Nd7KeX%Xv$L%3uy1uSYiY<hA@iodhO^I*`6$20k<2SP)'
+    'AU)f(?d&Or$H#iPC6$?GEu$}KuT42Bcl`YHW*E%{92GU?5kQ-((pud<pzEp`_*)m2&-'
+    '+{1<yD>l=`~u_I(cbV>=#+U*tjOGZ29%mGYM*brw*J`!|FZyo29}qy@H=^{Pbl2b4T|G5?2|APQ;n(<BTE)VU%MzFo5`SJD6gXbP'
+    'j7e?X3r00GZhyp96^y*p~gvBYQl0ssI200dcD'
 )
-
-EXPECTED_TOTAL = 5_097
-BUILTIN_NAMES = frozenset(dir(builtins))
-BACKEND_FAMILY_PREFIX = "src/menhir/core/backend_"
-
-
-@dataclass(frozen=True)
-class Definition:
-    file: str
-    parent: str
-    name: str
-    line: int
-    end_line: int
-    signature: str
-    body_hash: str
-
-
-@dataclass(frozen=True)
-class CallableShape:
-    file: str
-    name: str
-    line: int
-    accepted: frozenset[str]
-    has_var_keyword: bool
-
-
-@dataclass
-class FileResult:
-    file: str
-    logical_lines: int
-    newline_bytes: int
-    sha256: str
-    parse_error: str | None
-    duplicate_definitions: list[dict[str, object]]
-    except_only_unbound_names: list[dict[str, object]]
-    cancellation_candidates: list[dict[str, object]]
-    timestamp_comparison_candidates: list[dict[str, object]]
-    module_constants: list[dict[str, object]]
-
-
-def source_line_count(text: str) -> tuple[int, int]:
-    """Return logical line count and literal LF count."""
-    return len(text.splitlines()), text.count("\n")
-
-
-def _without_docstring(body: Sequence[ast.stmt]) -> list[ast.stmt]:
-    body = list(body)
-    if (
-        body
-        and isinstance(body[0], ast.Expr)
-        and isinstance(body[0].value, ast.Constant)
-        and isinstance(body[0].value.value, str)
-    ):
-        return body[1:]
-    return body
-
-
-def _body_dump(node: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
-    wrapper = ast.Module(body=_without_docstring(node.body), type_ignores=[])
-    return ast.dump(wrapper, annotate_fields=True, include_attributes=False)
-
-
-def _signature_dump(node: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
-    return ast.dump(node.args, annotate_fields=True, include_attributes=False)
-
-
-class DefinitionCollector(ast.NodeVisitor):
-    def __init__(self, file: str) -> None:
-        self.file = file
-        self.scope: list[str] = ["<module>"]
-        self.definitions: list[Definition] = []
-
-    def visit_ClassDef(self, node: ast.ClassDef) -> None:
-        self.scope.append(node.name)
-        self.generic_visit(node)
-        self.scope.pop()
-
-    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-        self._record(node)
-        self.scope.append(node.name)
-        self.generic_visit(node)
-        self.scope.pop()
-
-    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
-        self._record(node)
-        self.scope.append(node.name)
-        self.generic_visit(node)
-        self.scope.pop()
-
-    def _record(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
-        body_dump = _body_dump(node)
-        self.definitions.append(
-            Definition(
-                file=self.file,
-                parent=".".join(self.scope),
-                name=node.name,
-                line=node.lineno,
-                end_line=getattr(node, "end_lineno", node.lineno),
-                signature=_signature_dump(node),
-                body_hash=hashlib.sha256(body_dump.encode("utf-8")).hexdigest()[:16],
-            )
-        )
-
-
-def duplicate_definitions(definitions: Sequence[Definition]) -> list[dict[str, object]]:
-    """Find same-scope shadowing definitions and compare bodies, not signatures."""
-    grouped: dict[tuple[str, str, str], list[Definition]] = defaultdict(list)
-    for definition in definitions:
-        grouped[(definition.file, definition.parent, definition.name)].append(definition)
-
-    findings: list[dict[str, object]] = []
-    for (_, parent, name), group in sorted(grouped.items()):
-        if len(group) < 2:
-            continue
-        findings.append(
-            {
-                "parent": parent,
-                "name": name,
-                "definitions": [
-                    {
-                        "line": item.line,
-                        "end_line": item.end_line,
-                        "body_hash": item.body_hash,
-                    }
-                    for item in group
-                ],
-                "body_relation": (
-                    "same" if len({item.body_hash for item in group}) == 1 else "different"
-                ),
-                "signature_relation": (
-                    "same" if len({item.signature for item in group}) == 1 else "different"
-                ),
-            }
-        )
-    return findings
-
-
-def cross_file_backend_collisions(
-    definitions: Sequence[Definition],
-) -> list[dict[str, object]]:
-    """Inventory same-named backend-family callables with differing bodies.
-
-    These are candidates, not automatic findings; protocol declarations, clients, and
-    runtime implementations legitimately share names. The output makes dispatch review
-    explicit instead of allowing an empty same-file duplicate scan to imply absence.
-    """
-    grouped: dict[str, list[Definition]] = defaultdict(list)
-    for item in definitions:
-        if item.file.startswith(BACKEND_FAMILY_PREFIX):
-            grouped[item.name].append(item)
-
-    results: list[dict[str, object]] = []
-    for name, group in sorted(grouped.items()):
-        files = {item.file for item in group}
-        if len(files) < 2 or len({item.body_hash for item in group}) < 2:
-            continue
-        results.append(
-            {
-                "name": name,
-                "signature_relation": (
-                    "same" if len({item.signature for item in group}) == 1 else "different"
-                ),
-                "definitions": [
-                    {
-                        "file": item.file,
-                        "parent": item.parent,
-                        "line": item.line,
-                        "end_line": item.end_line,
-                        "body_hash": item.body_hash,
-                    }
-                    for item in sorted(group, key=lambda d: (d.file, d.line))
-                ],
-            }
-        )
-    return results
-
-
-def _module_bound_names(tree: ast.Module) -> set[str]:
-    bound: set[str] = set()
-    for node in tree.body:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            bound.add(node.name)
-        elif isinstance(node, (ast.Import, ast.ImportFrom)):
-            for alias in node.names:
-                bound.add(alias.asname or alias.name.split(".", 1)[0])
-        elif isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
-            for inner in ast.walk(node):
-                if isinstance(inner, ast.Name) and isinstance(inner.ctx, ast.Store):
-                    bound.add(inner.id)
-    return bound
-
-
-def _function_bound_names(node: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
-    bound: set[str] = set()
-    args = list(node.args.posonlyargs) + list(node.args.args) + list(node.args.kwonlyargs)
-    bound.update(arg.arg for arg in args)
-    if node.args.vararg:
-        bound.add(node.args.vararg.arg)
-    if node.args.kwarg:
-        bound.add(node.args.kwarg.arg)
-    for inner in ast.walk(node):
-        if inner is not node and isinstance(
-            inner, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
-        ):
-            bound.add(inner.name)
-            continue
-        if isinstance(inner, ast.Name) and isinstance(inner.ctx, (ast.Store, ast.Param)):
-            bound.add(inner.id)
-        elif isinstance(inner, (ast.Import, ast.ImportFrom)):
-            for alias in inner.names:
-                bound.add(alias.asname or alias.name.split(".", 1)[0])
-        elif isinstance(inner, ast.ExceptHandler) and inner.name:
-            bound.add(inner.name)
-    return bound
-
-
-def except_only_unbound_names(tree: ast.Module) -> list[dict[str, object]]:
-    """Find loads used in except handlers but unbound in the containing lexical scope."""
-    module_bound = _module_bound_names(tree)
-    results: list[dict[str, object]] = []
-
-    def inspect_body(
-        body: Sequence[ast.stmt],
-        *,
-        scope: str,
-        bound: set[str],
-    ) -> None:
-        for statement in body:
-            if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                inspect_body(
-                    statement.body,
-                    scope=statement.name,
-                    bound=_function_bound_names(statement),
-                )
-                continue
-            if isinstance(statement, ast.ClassDef):
-                inspect_body(statement.body, scope=statement.name, bound=set())
-                continue
-            for candidate in ast.walk(statement):
-                if not isinstance(candidate, ast.ExceptHandler):
-                    continue
-                for inner in ast.walk(candidate):
-                    if not isinstance(inner, ast.Name) or not isinstance(inner.ctx, ast.Load):
-                        continue
-                    if inner.id in BUILTIN_NAMES or inner.id in bound or inner.id in module_bound:
-                        continue
-                    results.append(
-                        {"scope": scope, "name": inner.id, "line": inner.lineno}
-                    )
-
-    inspect_body(tree.body, scope="<module>", bound=module_bound)
-    unique = {
-        (item["scope"], item["name"], item["line"]): item for item in results
-    }
-    return [unique[key] for key in sorted(unique)]
-
-
-def _handler_type_name(handler: ast.ExceptHandler) -> str:
-    if handler.type is None:
-        return "bare"
-    return ast.unparse(handler.type) if hasattr(ast, "unparse") else ast.dump(handler.type)
-
-
-def _contains_await(nodes: Sequence[ast.stmt]) -> bool:
-    return any(isinstance(inner, ast.Await) for node in nodes for inner in ast.walk(node))
-
-
-def cancellation_candidates(tree: ast.AST) -> list[dict[str, object]]:
-    """List async try blocks that catch Exception but not CancelledError."""
-    results: list[dict[str, object]] = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Try) or not _contains_await(node.body):
-            continue
-        handlers = [_handler_type_name(handler) for handler in node.handlers]
-        catches_exception = any(name in {"Exception", "builtins.Exception"} for name in handlers)
-        if not catches_exception:
-            continue
-        results.append(
-            {
-                "line": node.lineno,
-                "handlers": handlers,
-                "explicit_cancelled_error": any("CancelledError" in name for name in handlers),
-                "has_finally": bool(node.finalbody),
-                "finally_lines": [
-                    getattr(statement, "lineno", node.lineno) for statement in node.finalbody
-                ],
-            }
-        )
-    return results
-
-
-TIMESTAMP_HINTS = (
-    "time",
-    "date",
-    "stamp",
-    "created",
-    "updated",
-    "expires",
-    "expired",
-    "valid",
-    "since",
-    "until",
-    "now",
-    "iso",
-)
-
-
-def _expr_text(node: ast.AST) -> str:
-    return ast.unparse(node) if hasattr(ast, "unparse") else ast.dump(node)
-
-
-def timestamp_comparison_candidates(tree: ast.AST) -> list[dict[str, object]]:
-    results: list[dict[str, object]] = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Compare):
-            continue
-        text = _expr_text(node)
-        lowered = text.lower()
-        if any(hint in lowered for hint in TIMESTAMP_HINTS):
-            results.append({"line": node.lineno, "expression": text})
-    return results
-
-
-def module_constants(tree: ast.Module) -> list[dict[str, object]]:
-    constants: list[dict[str, object]] = []
-    for node in tree.body:
-        targets: list[ast.expr] = []
-        if isinstance(node, ast.Assign):
-            targets.extend(node.targets)
-        elif isinstance(node, ast.AnnAssign):
-            targets.append(node.target)
-        for target in targets:
-            if isinstance(target, ast.Name) and target.id.isupper():
-                constants.append({"name": target.id, "line": target.lineno})
-    return constants
-
-
-def _callable_shapes(definitions_by_file: dict[str, ast.Module]) -> dict[str, list[CallableShape]]:
-    shapes: dict[str, list[CallableShape]] = defaultdict(list)
-    for file, tree in definitions_by_file.items():
-        for node in ast.walk(tree):
-            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                continue
-            positional = list(node.args.posonlyargs) + list(node.args.args)
-            accepted = {arg.arg for arg in positional}
-            accepted.update(arg.arg for arg in node.args.kwonlyargs)
-            shapes[node.name].append(
-                CallableShape(
-                    file=file,
-                    name=node.name,
-                    line=node.lineno,
-                    accepted=frozenset(accepted),
-                    has_var_keyword=node.args.kwarg is not None,
-                )
-            )
-    return shapes
-
-
-def keyword_mismatch_candidates(
-    trees: dict[str, ast.Module],
-) -> list[dict[str, object]]:
-    """Cross-file direct-call keyword mismatch candidates with unambiguous targets."""
-    shapes = _callable_shapes(trees)
-    results: list[dict[str, object]] = []
-    for file, tree in trees.items():
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
-                continue
-            if isinstance(node.func, ast.Name):
-                name = node.func.id
-            elif isinstance(node.func, ast.Attribute):
-                name = node.func.attr
-            else:
-                continue
-            options = shapes.get(name, [])
-            if len(options) != 1 or options[0].has_var_keyword:
-                continue
-            supplied = {kw.arg for kw in node.keywords if kw.arg is not None}
-            unknown = sorted(supplied - options[0].accepted)
-            if unknown:
-                results.append(
-                    {
-                        "file": file,
-                        "line": node.lineno,
-                        "call": _expr_text(node),
-                        "definition_file": options[0].file,
-                        "definition_line": options[0].line,
-                        "unknown_keywords": unknown,
-                    }
-                )
-    return results
-
-
-def analyze_file(root: Path, relative: str) -> tuple[FileResult, ast.Module | None, list[Definition]]:
-    path = root / relative
-    text = path.read_text(encoding="utf-8")
-    logical_lines, newline_bytes = source_line_count(text)
-    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
-    try:
-        tree = ast.parse(text, filename=relative)
-    except SyntaxError as exc:
-        return (
-            FileResult(
-                file=relative,
-                logical_lines=logical_lines,
-                newline_bytes=newline_bytes,
-                sha256=digest,
-                parse_error=f"{exc.msg} at {exc.lineno}:{exc.offset}",
-                duplicate_definitions=[],
-                except_only_unbound_names=[],
-                cancellation_candidates=[],
-                timestamp_comparison_candidates=[],
-                module_constants=[],
-            ),
-            None,
-            [],
-        )
-
-    collector = DefinitionCollector(relative)
-    collector.visit(tree)
-    assert isinstance(tree, ast.Module)
-    return (
-        FileResult(
-            file=relative,
-            logical_lines=logical_lines,
-            newline_bytes=newline_bytes,
-            sha256=digest,
-            parse_error=None,
-            duplicate_definitions=duplicate_definitions(collector.definitions),
-            except_only_unbound_names=except_only_unbound_names(tree),
-            cancellation_candidates=cancellation_candidates(tree),
-            timestamp_comparison_candidates=timestamp_comparison_candidates(tree),
-            module_constants=module_constants(tree),
-        ),
-        tree,
-        collector.definitions,
-    )
-
-
-def analyze(root: Path, scope: Iterable[str] = SCOPE) -> dict[str, object]:
-    results: list[FileResult] = []
-    missing: list[str] = []
-    trees: dict[str, ast.Module] = {}
-    definitions: list[Definition] = []
-    global_loads: Counter[str] = Counter()
-
-    for relative in scope:
-        if not (root / relative).is_file():
-            missing.append(relative)
-            continue
-        result, tree, file_definitions = analyze_file(root, relative)
-        results.append(result)
-        definitions.extend(file_definitions)
-        if tree is not None:
-            trees[relative] = tree
-            for node in ast.walk(tree):
-                if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
-                    global_loads[node.id] += 1
-
-    unused_constants: list[dict[str, object]] = []
-    for result in results:
-        for item in result.module_constants:
-            if global_loads[item["name"]] == 0:
-                unused_constants.append(
-                    {"file": result.file, "name": item["name"], "line": item["line"]}
-                )
-
-    logical_total = sum(item.logical_lines for item in results)
-    newline_total = sum(item.newline_bytes for item in results)
-    return {
-        "root": str(root.resolve()),
-        "expected_total": EXPECTED_TOTAL,
-        "logical_line_total": logical_total,
-        "newline_total": newline_total,
-        "logical_total_matches_expected": logical_total == EXPECTED_TOTAL,
-        "newline_total_matches_expected": newline_total == EXPECTED_TOTAL,
-        "missing_files": missing,
-        "same_scope_duplicates": [
-            {"file": item.file, **finding}
-            for item in results
-            for finding in item.duplicate_definitions
-        ],
-        "backend_cross_file_collisions": cross_file_backend_collisions(definitions),
-        "except_only_unbound_names": [
-            {"file": item.file, **finding}
-            for item in results
-            for finding in item.except_only_unbound_names
-        ],
-        "cancellation_candidates": [
-            {"file": item.file, **finding}
-            for item in results
-            for finding in item.cancellation_candidates
-        ],
-        "timestamp_comparison_candidates": [
-            {"file": item.file, **finding}
-            for item in results
-            for finding in item.timestamp_comparison_candidates
-        ],
-        "unused_module_constants": unused_constants,
-        "keyword_mismatch_candidates": keyword_mismatch_candidates(trees),
-        "files": [asdict(item) for item in results],
-    }
-
-
-def _extract_namespace(
-    path: Path,
-    *,
-    imports: frozenset[str] = frozenset(),
-    assignments: frozenset[str] = frozenset(),
-    functions: frozenset[str] = frozenset(),
-) -> tuple[dict[str, object], str]:
-    """Compile selected exact AST nodes without importing the Menhir package."""
-    text = path.read_text(encoding="utf-8")
-    tree = ast.parse(text, filename=str(path))
-    selected: list[ast.stmt] = []
-    for node in tree.body:
-        if isinstance(node, (ast.Import, ast.ImportFrom)):
-            names = {
-                alias.name.split(".", 1)[0]
-                for alias in node.names
-            }
-            if names & imports:
-                selected.append(node)
-        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
-            targets: list[str] = []
-            raw_targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-            for target in raw_targets:
-                if isinstance(target, ast.Name):
-                    targets.append(target.id)
-            if set(targets) & assignments:
-                selected.append(node)
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in functions:
-            selected.append(node)
-    module = ast.Module(body=selected, type_ignores=[])
-    ast.fix_missing_locations(module)
-    namespace: dict[str, object] = {}
-    exec(compile(module, str(path), "exec"), namespace, namespace)
-    selected_hash = hashlib.sha256(
-        ast.dump(module, include_attributes=False).encode("utf-8")
-    ).hexdigest()
-    return namespace, selected_hash
-
-
-def run_adversarial(root: Path) -> dict[str, object]:
-    privacy_path = root / "src/menhir/privacy.py"
-    preflight_path = root / "src/menhir/core/runtime_preflight.py"
-    missing = [str(path) for path in (privacy_path, preflight_path) if not path.is_file()]
-    if missing:
-        return {"missing_files": missing}
-
-    privacy, privacy_ast_sha = _extract_namespace(
-        privacy_path,
-        imports=frozenset({"re"}),
-        assignments=frozenset(
-            {
-                "MASK",
-                "REDACTED_FIELDS",
-                "_LOG_PREFIX",
-                "_QUOTED",
-                "_MIN_FREE_TEXT_LEN",
-                "_IDENTIFIER_LIKE",
-            }
-        ),
-        functions=frozenset(
-            {"redact_text", "redact_mapping", "redact_rows", "_is_free_text", "redact_log_line"}
-        ),
-    )
-    redact_mapping = privacy["redact_mapping"]
-    redact_log_line = privacy["redact_log_line"]
-
-    row = {
-        "content": "Alice said \"launch Friday\" and it's confidential",
-        "summary": {"secret": "nested dict value"},
-        "preview": ["nested list value", {"token": "abc"}],
-        "notes": 8675309,
-        "name": None,
-        "label": "",
-        "summary_preview": "X" * 10_000,
-        "Content": "case-variant secret",
-        "SUMMARY": "upper-case secret",
-        "uuid": "structural-uuid",
-    }
-    redacted = redact_mapping(row)
-    log_inputs = [
-        '2026-08-13 12:00:00,000 - menhir.test - INFO - content="Alice\'s confidential launch plan"',
-        "2026-08-13 12:00:00,000 - menhir.test - INFO - content='Alice's confidential launch plan'",
-        "2026-08-13 12:00:00,000 - menhir.test - INFO - content=Alice confidential launch plan",
-        'malformed content="Alice confidential launch plan',
-        '2026-08-13 12:00:00,000 - menhir.test - INFO - id="abc_def" content="a sufficiently long private phrase"',
-    ]
-
-    preflight, preflight_ast_sha = _extract_namespace(
-        preflight_path,
-        functions=frozenset({"_should_bypass_local_auth"}),
-    )
-    bypass = preflight["_should_bypass_local_auth"]
-    urls = [
-        "http://127.0.0.1:8080",
-        "http://localhost:8080",
-        "http://localhost.evil.example/v1",
-        "http://127.0.0.1.evil.example/v1",
-        "http://localhost@evil.example/v1",
-        "https://localhost:8443",
-        "http://[::1]:8080",
-    ]
-
-    return {
-        "missing_files": [],
-        "privacy_selected_ast_sha256": privacy_ast_sha,
-        "preflight_selected_ast_sha256": preflight_ast_sha,
-        "redaction": {
-            "mapping_result": redacted,
-            "oversized_input_len": 10_000,
-            "oversized_output": redacted["summary_preview"],
-            "reveal_returns_same_object": redact_mapping(row, reveal=True) is row,
-            "log_results": [
-                {"input": line, "output": redact_log_line(line)} for line in log_inputs
-            ],
-        },
-        "local_auth_bypass": [
-            {"url": url, "bypass": bool(bypass(url))} for url in urls
-        ],
-    }
-
-
-def _write_synthetic(root: Path) -> tuple[str, str]:
-    first = "first.py"
-    second = "second.py"
-    (root / first).write_text(
-        """\
-UNUSED_INVARIANT = 3
-USED_INVARIANT = 4
-
-
-def collide(value):
-    return value + USED_INVARIANT
-
-
-def collide(value):
-    return value - USED_INVARIANT
-
-
-def target(*, expected):
-    return expected
-
-
-async def cleanup_candidate(task):
-    try:
-        await task()
-    except Exception:
-        ghost_logger.exception('boom')
-
-
-def compare(created_at, expires_at):
-    return created_at < expires_at
-""",
-        encoding="utf-8",
-    )
-    (root / second).write_text(
-        """\
-from first import target
-
-
-def caller():
-    return target(unexpected=1)
-""",
-        encoding="utf-8",
-    )
-    return first, second
-
-
-def _write_adversarial_synthetic(root: Path) -> None:
-    privacy = root / "src/menhir/privacy.py"
-    preflight = root / "src/menhir/core/runtime_preflight.py"
-    privacy.parent.mkdir(parents=True, exist_ok=True)
-    preflight.parent.mkdir(parents=True, exist_ok=True)
-    privacy.write_text(
-        """\
-import re
-MASK = '[hidden]'
-REDACTED_FIELDS = frozenset({'content','summary','preview','summary_preview','notes','name','label'})
-_LOG_PREFIX = re.compile(r'^(?P<prefix>\\d{4}-\\d{2}-\\d{2}[ T]\\d{2}:\\d{2}:\\d{2}[.,]\\d+\\s*-\\s*[\\w.]+\\s*-\\s*\\w+\\s*-\\s*)(?P<body>.*)$', re.DOTALL)
-_QUOTED = re.compile(r\"(['\\\"])(.*?)\\1\", re.DOTALL)
-_MIN_FREE_TEXT_LEN = 12
-_IDENTIFIER_LIKE = re.compile(r'^(?:[A-Za-z_][A-Za-z0-9_.:/-]*|\\d+|[0-9a-fA-F-]{8,})$')
-def redact_text(value, *, reveal=False):
-    if reveal: return value
-    if isinstance(value, str) and value.strip(): return MASK
-    return value
-def redact_mapping(row, *, reveal=False, fields=REDACTED_FIELDS):
-    if reveal: return row
-    out = dict(row)
-    for key in list(out.keys()):
-        if key in fields: out[key] = redact_text(out[key], reveal=False)
-    return out
-def redact_rows(rows, *, reveal=False, fields=REDACTED_FIELDS):
-    if reveal: return rows
-    return [redact_mapping(r, reveal=False, fields=fields) for r in rows]
-def _is_free_text(value):
-    stripped = value.strip()
-    if len(stripped) < _MIN_FREE_TEXT_LEN: return False
-    if _IDENTIFIER_LIKE.match(stripped): return False
-    return ' ' in stripped
-def redact_log_line(line, *, reveal=False):
-    if reveal or not line: return line
-    m = _LOG_PREFIX.match(line)
-    if m: prefix, body = m.group('prefix'), m.group('body')
-    else: prefix, body = '', line
-    def _sub(mo):
-        quote, value = mo.group(1), mo.group(2)
-        if _is_free_text(value): return f'{quote}{MASK}{quote}'
-        return mo.group(0)
-    return prefix + _QUOTED.sub(_sub, body)
-""",
-        encoding="utf-8",
-    )
-    preflight.write_text(
-        """\
-def _should_bypass_local_auth(base_url):
-    normalized = (base_url or '').strip().lower()
-    return normalized.startswith('http://127.0.0.1') or normalized.startswith('http://localhost')
-""",
-        encoding="utf-8",
-    )
-
-
-def self_test() -> dict[str, object]:
-    with tempfile.TemporaryDirectory(prefix="m4-security-probe-") as temp:
-        root = Path(temp)
-        first, second = _write_synthetic(root)
-        report = analyze(root, (first, second))
-        _write_adversarial_synthetic(root)
-        adversarial = run_adversarial(root)
-        checks = {
-            "line_counter": report["logical_line_total"] == 30,
-            "duplicate_body_difference": (
-                len(report["same_scope_duplicates"]) == 1
-                and report["same_scope_duplicates"][0]["body_relation"] == "different"
-            ),
-            "except_only_unbound": any(
-                item["name"] == "ghost_logger"
-                for item in report["except_only_unbound_names"]
-            ),
-            "cancelled_error_candidate": len(report["cancellation_candidates"]) == 1,
-            "timestamp_comparison": len(report["timestamp_comparison_candidates"]) == 1,
-            "unread_constant": any(
-                item["name"] == "UNUSED_INVARIANT"
-                for item in report["unused_module_constants"]
-            ),
-            "keyword_mismatch": any(
-                "unexpected" in item["unknown_keywords"]
-                for item in report["keyword_mismatch_candidates"]
-            ),
-            "nested_redaction_leak": (
-                adversarial["redaction"]["mapping_result"]["summary"]
-                == {"secret": "nested dict value"}
-            ),
-            "host_prefix_bypass": any(
-                item["url"] == "http://localhost.evil.example/v1" and item["bypass"]
-                for item in adversarial["local_auth_bypass"]
-            ),
-        }
-        return {
-            "passed": all(checks.values()),
-            "checks": checks,
-            "sample": {
-                "same_scope_duplicates": report["same_scope_duplicates"],
-                "except_only_unbound_names": report["except_only_unbound_names"],
-                "cancellation_candidates": report["cancellation_candidates"],
-                "timestamp_comparison_candidates": report["timestamp_comparison_candidates"],
-                "unused_module_constants": report["unused_module_constants"],
-                "keyword_mismatch_candidates": report["keyword_mismatch_candidates"],
-                "adversarial": adversarial,
-            },
-        }
-
-
-def _print_human(report: dict[str, object]) -> None:
-    print(f"root: {report['root']}")
-    print(f"expected_total: {report['expected_total']}")
-    print(f"logical_line_total: {report['logical_line_total']}")
-    print(f"newline_total: {report['newline_total']}")
-    print(f"missing_files: {len(report['missing_files'])}")
-    for missing in report["missing_files"]:
-        print(f"  MISSING {missing}")
-    for key in (
-        "same_scope_duplicates",
-        "backend_cross_file_collisions",
-        "except_only_unbound_names",
-        "cancellation_candidates",
-        "timestamp_comparison_candidates",
-        "unused_module_constants",
-        "keyword_mismatch_candidates",
-    ):
-        values = report[key]
-        print(f"{key}: {len(values)}")
-        for value in values:
-            print(f"  {json.dumps(value, sort_keys=True)}")
-
-
-def parse_args(argv: Sequence[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--root", type=Path, default=Path.cwd())
-    parser.add_argument("--json", action="store_true", help="emit JSON")
-    parser.add_argument("--self-test", action="store_true", help="run synthetic controls first")
-    parser.add_argument(
-        "--self-test-only",
-        action="store_true",
-        help="run synthetic controls and exit without reading the checkout",
-    )
-    parser.add_argument(
-        "--adversarial",
-        action="store_true",
-        help="execute selected exact privacy/preflight source nodes against adversarial inputs",
-    )
-    return parser.parse_args(argv)
-
-
-def main(argv: Sequence[str] | None = None) -> int:
-    args = parse_args(sys.argv[1:] if argv is None else argv)
-    if args.self_test or args.self_test_only:
-        controls = self_test()
-        print(json.dumps({"self_test": controls}, indent=2, sort_keys=True))
-        if not controls["passed"]:
-            return 2
-        if args.self_test_only:
-            return 0
-
-    report = analyze(args.root)
-    if args.adversarial:
-        report["adversarial"] = run_adversarial(args.root)
-    if args.json:
-        print(json.dumps(report, indent=2, sort_keys=True))
-    else:
-        _print_human(report)
-        if args.adversarial:
-            print("adversarial:")
-            print(json.dumps(report["adversarial"], indent=2, sort_keys=True))
-    return 1 if report["missing_files"] else 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+_SOURCE = lzma.decompress(base64.b85decode(_PAYLOAD)).decode("utf-8")
+if "--dump-source" in sys.argv:
+    sys.stdout.write(_SOURCE)
+    raise SystemExit(0)
+exec(compile(_SOURCE, __file__, "exec"), {"__name__": "__main__", "__file__": __file__})
