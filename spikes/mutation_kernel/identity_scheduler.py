@@ -129,6 +129,8 @@ class GuardedNeo4jGraphMaterializer(Neo4jGraphMaterializer):
         guard_keys = [row.receipt_storage_key for row in guards]
         if len(guard_keys) != len(set(guard_keys)):
             raise ValueError("receipt identity guards must be unique")
+        if not guards:
+            return super().reconcile_edges(outcome)
 
         edges = outcome.edges if isinstance(outcome, EdgeSet) else ()
         for edge in edges:
@@ -191,22 +193,19 @@ class GuardedNeo4jGraphMaterializer(Neo4jGraphMaterializer):
 
         rows = self._neo4j.execute(
             """
-            UNWIND CASE WHEN size($guards)=0 THEN [null] ELSE $guards END AS guard
-            OPTIONAL MATCH (receipt:MutationEntityReceipt)
-              WHERE guard IS NOT NULL
-                AND receipt.storage_key=guard.receipt_storage_key
-                AND receipt.namespace=$namespace
-            OPTIONAL MATCH (receipt)-[:CURRENT_IDENTITY]->(current_identity:MutationEntity)
-            WITH collect({guard:guard, current_identity:current_identity}) AS checked_guards
-            WITH size([
-                row IN checked_guards
-                WHERE row.guard IS NOT NULL
-                  AND (
-                    row.current_identity IS NULL
-                    OR row.current_identity.entity_id <> row.guard.expected_current_entity_id
-                  )
-            ]) AS stale_guard_count
-            WHERE stale_guard_count=0
+            UNWIND $guards AS guard
+            MATCH (receipt:MutationEntityReceipt {storage_key:guard.receipt_storage_key})
+                  -[:CURRENT_IDENTITY]->(current_identity:MutationEntity)
+            WHERE receipt.namespace=$namespace
+              AND current_identity.namespace=$namespace
+            WITH guard, collect(current_identity.entity_id) AS current_ids
+            WITH collect({expected:guard.expected_current_entity_id, current_ids:current_ids})
+                 AS guard_checks
+            WHERE size(guard_checks)=size($guards)
+              AND all(check IN guard_checks WHERE
+                  size(check.current_ids)=1
+                  AND check.current_ids[0]=check.expected
+              )
             WITH 1 AS identity_guard_ok
             UNWIND CASE WHEN size($edges)=0 THEN [null] ELSE $edges END AS candidate
             OPTIONAL MATCH (source:MutationEntity)
@@ -276,7 +275,9 @@ class GuardedNeo4jGraphMaterializer(Neo4jGraphMaterializer):
             },
         )
         if not rows:
-            raise ValueError("identity guard changed before graph write or graph endpoints are unresolved")
+            raise ValueError(
+                "identity guard changed before graph write or graph endpoints are unresolved"
+            )
         row = rows[0]
         previous_active = tuple(str(value) for value in (row.get("previous_active_keys") or []))
         return {
@@ -311,7 +312,11 @@ class IdentityDependencyScheduler:
     def _state_key(self, definition: IdentityDependencyDefinition) -> str:
         return _hash_parts(self.namespace, "identity-dependency-state", definition.definition_id)
 
-    def _work_key(self, definition: IdentityDependencyDefinition, target: GraphMaterializerTarget) -> str:
+    def _work_key(
+        self,
+        definition: IdentityDependencyDefinition,
+        target: GraphMaterializerTarget,
+    ) -> str:
         return _hash_parts(
             self.namespace,
             "identity-graph-work",
@@ -344,7 +349,10 @@ class IdentityDependencyScheduler:
             for row in rows
         ]
 
-    def _load_state(self, definition: IdentityDependencyDefinition) -> tuple[str, list[dict[str, str]]]:
+    def _load_state(
+        self,
+        definition: IdentityDependencyDefinition,
+    ) -> tuple[str, list[dict[str, str]]]:
         rows = self._neo4j.execute(
             """
             MATCH (state:MutationIdentityDependencyState {storage_key:$storage_key})
@@ -396,8 +404,10 @@ class IdentityDependencyScheduler:
     ) -> tuple[IdentityMappingChange, ...]:
         def keyed(rows: Sequence[dict[str, str]]) -> dict[tuple[str, str], str]:
             return {
-                (str(row.get("original_entity_id") or ""), str(row.get("source_key") or "")):
-                str(row.get("current_entity_id") or "")
+                (
+                    str(row.get("original_entity_id") or ""),
+                    str(row.get("source_key") or ""),
+                ): str(row.get("current_entity_id") or "")
                 for row in rows
             }
 
@@ -434,7 +444,11 @@ class IdentityDependencyScheduler:
                 identity_fingerprint=fingerprint,
             )
 
-        changes = self._changes(entity_kind=definition.entity_kind, before=before, after=after)
+        changes = self._changes(
+            entity_kind=definition.entity_kind,
+            before=before,
+            after=after,
+        )
         targets = tuple(sorted(set(definition.mapper(changes))))
         target_rows = [
             {
@@ -493,7 +507,9 @@ class IdentityDependencyScheduler:
             },
         )
         if not rows:
-            raise ValueError("identity dependency state changed concurrently; retry from a fresh snapshot")
+            raise ValueError(
+                "identity dependency state changed concurrently; retry from a fresh snapshot"
+            )
         return IdentityDependencySyncResult(
             definition_id=definition.definition_id,
             definition_version=definition.version,
