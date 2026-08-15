@@ -223,16 +223,73 @@ work under contention.
 - generation-backed repair removing a slot from the dirty set;
 - a late old worker being unable to overwrite a newer projection.
 
-This experiment also exposed a new extension boundary rather than hiding it: **the assertion write
-must know which projection definitions it dirties.** Registering a new View or changing projection
-mapping later therefore needs an explicit backfill/reindex mechanism for already-durable assertions.
-The current spike does not invent that mechanism yet.
-
 The generational layer currently subclasses the spike Neo4j store and reuses several private helper
 functions. If the design survives, those envelope/hash/slot helpers are candidates for promotion into
 a supported persistence interface; that coupling is spike debt, not a proposed production API.
 
-The spike-local `:MutationAssertion`, `:MutationProjection`, and `:MutationProjectionWork` labels and
+## Experiment 6 — projection definitions, multi-input Views, and historical backfill
+
+`registry.py` adds an extension-owned `ProjectionDefinition` / `ProjectionRegistry` contract. A
+definition declares:
+
+```text
+definition id + monotonically increasing version
+  + accepted assertion type(s)
+  + mapper: Assertion -> output ProjectionTarget(s)
+  + fold: current contributing Assertions -> View | Abstention | Retirement
+```
+
+The generic layer does not know what the input types or output View mean. The extension mapper is
+responsible for deciding whether an assertion contributes and which subject/scope/key/dimensions
+output slot it invalidates.
+
+For new writes:
+
+```text
+new Assertion
+  -> registry resolves matching definition target(s)
+  -> assertion + registered dirty work committed atomically
+  -> generation-backed reconciliation
+```
+
+For a definition introduced after history already exists:
+
+```text
+existing immutable Assertions
+  -> explicit one-time backfill scan for the definition's input types
+  -> extension mapper discovers historical output slots
+  -> one idempotent backfill marker per definition-version/target
+  -> those targets become dirty
+  -> normal generation-backed reconciliation builds the new Views
+```
+
+Backfill is intentionally explicit rather than pretending immutable assertion replay is a new write.
+Re-running the same definition version does not manufacture another generation. Increasing the
+projection-definition version marks the historical targets dirty again, allowing changed fold
+semantics to rebuild without rewriting evidence. A worker holding an older definition version cannot
+overwrite the newer persisted projection.
+
+The registry experiment also removes the earlier one-input limitation. A single definition can
+consume several assertion types. The reference test builds `personality.conflict_style_view` from
+both:
+
+- observed `personality.trait` evidence; and
+- explicit `personality.explicit_preference` assertions.
+
+Both types map to the same `conflict_style` output slot and are folded together. The generic store and
+scheduler never learn what "conflict style", "trait", or "explicit preference" mean.
+
+`test_registry_neo4j.py` covers:
+
+- a newly installed projection definition backfilling already-durable history;
+- idempotent backfill for the same definition version;
+- registry routing of new writes and replay not advancing work generations;
+- one View consuming two different assertion types;
+- a later assertion of either input type invalidating the shared output slot;
+- a definition-version upgrade rebuilding historical evidence without evidence mutation;
+- a late worker from the prior definition version being unable to overwrite the newer projection.
+
+The spike-local `:MutationAssertion`, `:MutationProjection`, work, and backfill-marker labels and
 constraints exist only in the throwaway test database. They are intentionally **not** a proposal for
 Menhir's production schema.
 
@@ -250,8 +307,9 @@ Menhir's production schema.
 - no claim that the spike-local generic Neo4j schema is production-ready
 - no distributed transaction between external source admission and Neo4j assertion persistence
 - no lease/exclusive projection-worker claim
-- no projection-definition registry migration or historical backfill
-- no multi-input projection whose fold consumes several assertion types at once
+- no persistent/distributed registry service shared across independently upgraded processes
+- no automatic cleanup yet when a new definition version stops mapping an output slot that an older
+  version used to own
 
 ## Current boundary ledger
 
@@ -277,9 +335,19 @@ Evidence from the spike now supports these narrower claims:
 9. **Correctness does not require an exclusive worker lease in the tested model.** Optimistic
    generations keep newer projections from being overwritten by late older work; leases would be an
    efficiency mechanism.
-10. **Projection registration is part of the extension contract.** The system needs to know which
-    projection slots a new assertion invalidates, while the meaning and fold remain extension-owned.
-11. **Production scalar persistence fits the conceptual contract, but not yet the generic store.**
+10. **Projection registration can remain extension-owned.** Core needs generic type/slot/version
+    metadata, while the extension owns the mapping from assertions to projection targets and the fold.
+11. **Historical backfill can be explicit and idempotent.** Installing or versioning a definition can
+    scan its declared historical input types once, discover output slots through the extension mapper,
+    and feed those slots into the normal dirty/reconciliation path without pretending old assertions
+    are new evidence.
+12. **A View does not need a single assertion type.** The tested registry can fold multiple declared
+    assertion types into one output while preserving immutable contributors and generic lifecycle
+    behavior.
+13. **Projection definition versions can participate in optimistic correctness.** A version upgrade
+    dirties historical targets, and late work from an older definition version cannot overwrite the
+    newer projection.
+14. **Production scalar persistence fits the conceptual contract, but not yet the generic store.**
     Scalar deliberately continues using Menhir's production repositories; replacing those with the
     spike schema would prove something different and is not justified by this experiment.
 
@@ -289,13 +357,17 @@ Still open:
 2. Can relationship/person/group scopes flow through production recall without changing recall core?
 3. Can coding-specific belief evidence (`TEST_FAILED`, `SOURCE_IS_GIT`, etc.) become registered
    extension signals rather than a closed core enum?
-4. What should the projection-definition registry look like, and how does adding/changing a
-   projection backfill historical assertions without replaying domain semantics incorrectly?
-5. Can one projection safely consume several assertion types, or does the current one-assertion-type
-   `ProjectionSlot` need a more general input-set identity?
-6. Should abstentions expose exact offending assertion IDs? Production scalar abstention currently
+4. How should projection definitions be distributed/version-negotiated across several Menhir
+   processes so a stale process cannot route a newly admitted assertion using an obsolete mapper?
+5. When a new definition version stops mapping an old target entirely, what generic mechanism marks
+   the old projection retired/abstained instead of leaving it current?
+6. How should very large historical backfills be indexed/checkpointed so a new definition does not
+   require an unbounded one-shot scan?
+7. Does supersession need a broader lookup contract when a superseding assertion falls outside a
+   projection definition's declared input types?
+8. Should abstentions expose exact offending assertion IDs? Production scalar abstention currently
    does not provide them.
-7. Are worker leases worth adding purely to reduce duplicate folds under high contention?
+9. Are worker leases worth adding purely to reduce duplicate folds under high contention?
 
 ## Run the spike tests
 
