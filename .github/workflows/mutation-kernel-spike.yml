@@ -1,0 +1,33 @@
+name: mutation-kernel-spike
+
+on:
+  push:
+    branches:
+      - research/mutation-kernel-spike
+    paths:
+      - "spikes/mutation_kernel/**"
+      - ".github/workflows/mutation-kernel-spike.yml"
+  workflow_dispatch:
+
+jobs:
+  scalar-parity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout Menhir research branch
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: pyproject.toml
+
+      - name: Install Menhir and pytest
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e . pytest
+
+      - name: Run isolated mutation-kernel tests
+        run: pytest -q spikes/mutation_kernel

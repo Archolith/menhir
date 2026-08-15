@@ -1,0 +1,179 @@
+{
+  "namespace": "mutation-kernel-fixture",
+  "subject_uuid": "fixture-user-uuid",
+  "episodes": [
+    {
+      "uuid": "scalar-episode-absolute",
+      "reference_time": "2026-01-10T12:00:00+00:00",
+      "content": "I have 10 tokens."
+    },
+    {
+      "uuid": "scalar-episode-delta",
+      "reference_time": "2026-01-11T12:00:00+00:00",
+      "content": "I added 3 tokens."
+    }
+  ],
+  "success_samples": [
+    [
+      {
+        "episode": 0,
+        "observations": [
+          {
+            "subject": "user",
+            "attribute": "token_balance",
+            "scope": "",
+            "value_kind": "count",
+            "unit": "",
+            "operation": "absolute",
+            "value": 10,
+            "when": "",
+            "stated_span": "I have 10 tokens"
+          }
+        ]
+      },
+      {
+        "episode": 1,
+        "observations": [
+          {
+            "subject": "user",
+            "attribute": "token_balance",
+            "scope": "",
+            "value_kind": "count",
+            "unit": "",
+            "operation": "delta",
+            "value": 3,
+            "when": "",
+            "stated_span": "I added 3 tokens"
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "episode": 0,
+        "observations": [
+          {
+            "subject": "user",
+            "attribute": "token_balance",
+            "scope": "",
+            "value_kind": "count",
+            "unit": "",
+            "operation": "absolute",
+            "value": 10,
+            "when": "",
+            "stated_span": "I have 10 tokens"
+          }
+        ]
+      },
+      {
+        "episode": 1,
+        "observations": [
+          {
+            "subject": "user",
+            "attribute": "token_balance",
+            "scope": "",
+            "value_kind": "count",
+            "unit": "",
+            "operation": "delta",
+            "value": 3,
+            "when": "",
+            "stated_span": "I added 3 tokens"
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "episode": 0,
+        "observations": [
+          {
+            "subject": "user",
+            "attribute": "token_balance",
+            "scope": "",
+            "value_kind": "count",
+            "unit": "",
+            "operation": "absolute",
+            "value": 10,
+            "when": "",
+            "stated_span": "I have 10 tokens"
+          }
+        ]
+      },
+      {
+        "episode": 1,
+        "observations": [
+          {
+            "subject": "user",
+            "attribute": "token_balance",
+            "scope": "",
+            "value_kind": "count",
+            "unit": "",
+            "operation": "delta",
+            "value": 3,
+            "when": "",
+            "stated_span": "I added 3 tokens"
+          }
+        ]
+      }
+    ]
+  ],
+  "conflict_samples": [
+    [
+      {
+        "episode": 0,
+        "observations": [
+          {
+            "subject": "user",
+            "attribute": "token_balance",
+            "scope": "",
+            "value_kind": "count",
+            "unit": "",
+            "operation": "absolute",
+            "value": 10,
+            "when": "",
+            "stated_span": "I have 10 tokens"
+          }
+        ]
+      },
+      {"episode": 1, "observations": []}
+    ],
+    [
+      {
+        "episode": 0,
+        "observations": [
+          {
+            "subject": "user",
+            "attribute": "token_balance",
+            "scope": "",
+            "value_kind": "count",
+            "unit": "",
+            "operation": "absolute",
+            "value": 11,
+            "when": "",
+            "stated_span": "I have 10 tokens"
+          }
+        ]
+      },
+      {"episode": 1, "observations": []}
+    ],
+    [
+      {
+        "episode": 0,
+        "observations": [
+          {
+            "subject": "user",
+            "attribute": "token_balance",
+            "scope": "",
+            "value_kind": "count",
+            "unit": "",
+            "operation": "absolute",
+            "value": 10,
+            "when": "",
+            "stated_span": "I have 10 tokens"
+          }
+        ]
+      },
+      {"episode": 1, "observations": []}
+    ]
+  ]
+}
