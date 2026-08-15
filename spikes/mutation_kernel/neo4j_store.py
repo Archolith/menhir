@@ -1,11 +1,11 @@
 """Type-neutral Neo4j persistence for the mutation-kernel research spike.
 
 This module deliberately knows only the kernel envelopes. Domain extensions provide a value codec
-for their opaque ``Assertion.value`` / ``View.value`` payloads; the store owns namespace isolation,
-durable envelope fields, replay-safe assertion identity, and one replaceable current View per slot.
+for their opaque values; the store owns namespace isolation, immutable assertion storage, and one
+replaceable current projection outcome per generic slot.
 
 It is NOT a proposed production schema. The point of the experiment is to test whether persistence
-can be an extension-neutral seam without importing scalar or personality semantics.
+and lifecycle repair can remain extension-neutral without importing scalar or personality semantics.
 """
 
 from __future__ import annotations
@@ -15,11 +15,14 @@ import hashlib
 import json
 from typing import Any, Protocol
 
-from .kernel import Assertion, EvidenceRef, View
+from .kernel import Abstention, Assertion, EvidenceRef, Retirement, View
+
+
+ProjectionOutcome = View | Abstention | Retirement
 
 
 class ValueCodec(Protocol):
-    """Extension-owned codec for opaque assertion/view values."""
+    """Extension-owned codec for opaque assertion/projection values."""
 
     def encode(self, value: Any) -> Any: ...
 
@@ -68,12 +71,24 @@ def _evidence_json(evidence: tuple[EvidenceRef, ...]) -> str:
     )
 
 
+def _projection_slot(outcome: ProjectionOutcome) -> tuple[str, str, str, str, tuple[tuple[str, str], ...]]:
+    return (
+        outcome.view_type,
+        outcome.subject_id,
+        outcome.scope,
+        outcome.key,
+        outcome.dimensions,
+    )
+
+
 class Neo4jEnvelopeStore:
-    """Persist generic kernel Assertions and current Views in one namespace.
+    """Persist generic kernel assertions and projection outcomes in one namespace.
 
     Assertion rows are immutable-by-fingerprint: replaying the same assertion is a no-op, while
-    presenting a different envelope under the same assertion identity fails closed. Views are
-    projections, so recording the same slot updates that one disposable current row.
+    presenting a different envelope under the same assertion identity fails closed.
+
+    Projection rows are disposable current state. One row exists per generic slot and can move
+    between View, Abstention, and Retirement as a deterministic rebuild changes its answer.
 
     ``namespace`` is storage isolation rather than assertion semantics. The same generic assertion
     identity may therefore exist independently in two namespaces without collision.
@@ -93,14 +108,14 @@ class Neo4jEnvelopeStore:
         self.codec: ValueCodec = codec or JsonValueCodec()
 
     def activate(self) -> None:
-        """Create only the two spike-local uniqueness constraints used by this store."""
+        """Create only the spike-local uniqueness constraints used by this store."""
         self._neo4j.execute(
             "CREATE CONSTRAINT mutation_assertion_storage_key IF NOT EXISTS "
             "FOR (a:MutationAssertion) REQUIRE a.storage_key IS UNIQUE"
         )
         self._neo4j.execute(
-            "CREATE CONSTRAINT mutation_view_storage_key IF NOT EXISTS "
-            "FOR (v:MutationView) REQUIRE v.storage_key IS UNIQUE"
+            "CREATE CONSTRAINT mutation_projection_storage_key IF NOT EXISTS "
+            "FOR (p:MutationProjection) REQUIRE p.storage_key IS UNIQUE"
         )
 
     def record_assertion(self, assertion: Assertion) -> dict[str, str]:
@@ -187,6 +202,7 @@ class Neo4jEnvelopeStore:
         assertion_type: str | None = None,
         scope: str | None = None,
         key: str | None = None,
+        dimensions: tuple[tuple[str, str], ...] | None = None,
     ) -> list[Assertion]:
         predicates = ["a.namespace = $namespace"]
         params: dict[str, Any] = {"namespace": self.namespace}
@@ -199,6 +215,9 @@ class Neo4jEnvelopeStore:
             if value is not None:
                 predicates.append(f"a.{field} = ${field}")
                 params[field] = value
+        if dimensions is not None:
+            predicates.append("a.dimensions_json = $dimensions_json")
+            params["dimensions_json"] = _pairs_json(dimensions)
         rows = self._neo4j.execute(
             f"""
             MATCH (a:MutationAssertion)
@@ -224,85 +243,74 @@ class Neo4jEnvelopeStore:
         )
         return int(rows[0].get("n", 0) or 0) if rows else 0
 
-    def record_view(self, view: View) -> dict[str, str]:
-        encoded_value = self.codec.encode(view.value)
-        view_key = _hash_parts(
-            view.view_type,
-            view.subject_id,
-            view.scope,
-            view.key,
-            _pairs_json(view.dimensions),
+    def record_view(self, view: View) -> dict[str, Any]:
+        """Compatibility wrapper for the earlier active-View-only experiment."""
+        return self.record_outcome(view)
+
+    def record_outcome(self, outcome: ProjectionOutcome) -> dict[str, Any]:
+        """Atomically replace the current projection outcome for one generic slot."""
+        payload = self._encode_outcome(outcome)
+        view_type, subject_id, scope, key, dimensions = _projection_slot(outcome)
+        projection_key = _hash_parts(
+            view_type,
+            subject_id,
+            scope,
+            key,
+            _pairs_json(dimensions),
         )
-        storage_key = _hash_parts(self.namespace, view_key)
-        projection_hash = _hash_parts(
-            _stable_json(
-                {
-                    "view_type": view.view_type,
-                    "subject_id": view.subject_id,
-                    "scope": view.scope,
-                    "key": view.key,
-                    "value": encoded_value,
-                    "confidence": view.confidence,
-                    "contributor_ids": list(view.contributor_ids),
-                    "counterevidence_ids": list(view.counterevidence_ids),
-                    "effective_authority": view.effective_authority,
-                    "rationale": list(view.rationale),
-                    "dimensions": [list(pair) for pair in view.dimensions],
-                }
-            )
-        )
-        self._neo4j.execute(
+        storage_key = _hash_parts(self.namespace, projection_key)
+        projection_hash = _hash_parts(_stable_json(payload))
+        rows = self._neo4j.execute(
             """
-            MERGE (v:MutationView {storage_key:$storage_key})
-            SET v.namespace = $namespace,
-                v.view_key = $view_key,
-                v.view_type = $view_type,
-                v.subject_id = $subject_id,
-                v.scope = $scope,
-                v.key = $key,
-                v.value_json = $value_json,
-                v.confidence = $confidence,
-                v.contributor_ids_json = $contributor_ids_json,
-                v.counterevidence_ids_json = $counterevidence_ids_json,
-                v.effective_authority = $effective_authority,
-                v.rationale_json = $rationale_json,
-                v.dimensions_json = $dimensions_json,
-                v.projection_hash = $projection_hash,
-                v.updated_at = datetime()
+            MERGE (p:MutationProjection {storage_key:$storage_key})
+            WITH p, p.projection_hash AS previous_hash
+            SET p.namespace = $namespace,
+                p.projection_key = $projection_key,
+                p.view_type = $view_type,
+                p.subject_id = $subject_id,
+                p.scope = $scope,
+                p.key = $key,
+                p.dimensions_json = $dimensions_json,
+                p.status = $status,
+                p.payload_json = $payload_json,
+                p.projection_hash = $projection_hash,
+                p.updated_at = datetime()
+            RETURN previous_hash AS previous_hash, p.projection_hash AS projection_hash
             """,
             {
                 "storage_key": storage_key,
                 "namespace": self.namespace,
-                "view_key": view_key,
-                "view_type": view.view_type,
-                "subject_id": view.subject_id,
-                "scope": view.scope,
-                "key": view.key,
-                "value_json": _stable_json(encoded_value),
-                "confidence": float(view.confidence),
-                "contributor_ids_json": _stable_json(list(view.contributor_ids)),
-                "counterevidence_ids_json": _stable_json(list(view.counterevidence_ids)),
-                "effective_authority": view.effective_authority,
-                "rationale_json": _stable_json(list(view.rationale)),
-                "dimensions_json": _pairs_json(view.dimensions),
+                "projection_key": projection_key,
+                "view_type": view_type,
+                "subject_id": subject_id,
+                "scope": scope,
+                "key": key,
+                "dimensions_json": _pairs_json(dimensions),
+                "status": payload["status"],
+                "payload_json": _stable_json(payload),
                 "projection_hash": projection_hash,
             },
         )
+        previous_hash = rows[0].get("previous_hash") if rows else None
         return {
             "storage_key": storage_key,
-            "view_key": view_key,
+            "projection_key": projection_key,
             "projection_hash": projection_hash,
+            "previous_hash": None if previous_hash is None else str(previous_hash),
+            "changed": previous_hash != projection_hash,
+            "status": payload["status"],
         }
 
-    def load_views(
+    def load_outcomes(
         self,
         *,
         subject_id: str | None = None,
         view_type: str | None = None,
         scope: str | None = None,
         key: str | None = None,
-    ) -> list[View]:
-        predicates = ["v.namespace = $namespace"]
+        dimensions: tuple[tuple[str, str], ...] | None = None,
+    ) -> list[ProjectionOutcome]:
+        predicates = ["p.namespace = $namespace"]
         params: dict[str, Any] = {"namespace": self.namespace}
         for field, value in (
             ("subject_id", subject_id),
@@ -311,32 +319,153 @@ class Neo4jEnvelopeStore:
             ("key", key),
         ):
             if value is not None:
-                predicates.append(f"v.{field} = ${field}")
+                predicates.append(f"p.{field} = ${field}")
                 params[field] = value
+        if dimensions is not None:
+            predicates.append("p.dimensions_json = $dimensions_json")
+            params["dimensions_json"] = _pairs_json(dimensions)
         rows = self._neo4j.execute(
             f"""
-            MATCH (v:MutationView)
+            MATCH (p:MutationProjection)
             WHERE {' AND '.join(predicates)}
-            RETURN v.view_type AS view_type, v.subject_id AS subject_id,
-                   v.scope AS scope, v.key AS key, v.value_json AS value_json,
-                   v.confidence AS confidence,
-                   v.contributor_ids_json AS contributor_ids_json,
-                   v.counterevidence_ids_json AS counterevidence_ids_json,
-                   v.effective_authority AS effective_authority,
-                   v.rationale_json AS rationale_json,
-                   v.dimensions_json AS dimensions_json
-            ORDER BY v.view_type ASC, v.subject_id ASC, v.scope ASC, v.key ASC
+            RETURN p.payload_json AS payload_json
+            ORDER BY p.view_type ASC, p.subject_id ASC, p.scope ASC, p.key ASC,
+                     p.dimensions_json ASC
             """,
             params,
         )
-        return [self._hydrate_view(dict(row)) for row in rows]
+        return [
+            self._hydrate_outcome(json.loads(str(row["payload_json"])))
+            for row in rows
+        ]
 
-    def count_views(self) -> int:
+    def load_views(
+        self,
+        *,
+        subject_id: str | None = None,
+        view_type: str | None = None,
+        scope: str | None = None,
+        key: str | None = None,
+        dimensions: tuple[tuple[str, str], ...] | None = None,
+    ) -> list[View]:
+        """Return only active Views; abstentions and retirements are intentionally absent."""
+        return [
+            outcome
+            for outcome in self.load_outcomes(
+                subject_id=subject_id,
+                view_type=view_type,
+                scope=scope,
+                key=key,
+                dimensions=dimensions,
+            )
+            if isinstance(outcome, View)
+        ]
+
+    def count_projections(self) -> int:
         rows = self._neo4j.execute(
-            "MATCH (v:MutationView {namespace:$namespace}) RETURN count(v) AS n",
+            "MATCH (p:MutationProjection {namespace:$namespace}) RETURN count(p) AS n",
             {"namespace": self.namespace},
         )
         return int(rows[0].get("n", 0) or 0) if rows else 0
+
+    def count_views(self) -> int:
+        rows = self._neo4j.execute(
+            """
+            MATCH (p:MutationProjection {namespace:$namespace, status:'view'})
+            RETURN count(p) AS n
+            """,
+            {"namespace": self.namespace},
+        )
+        return int(rows[0].get("n", 0) or 0) if rows else 0
+
+    def _encode_outcome(self, outcome: ProjectionOutcome) -> dict[str, Any]:
+        if isinstance(outcome, View):
+            return {
+                "status": "view",
+                "view_type": outcome.view_type,
+                "subject_id": outcome.subject_id,
+                "scope": outcome.scope,
+                "key": outcome.key,
+                "dimensions": [list(pair) for pair in outcome.dimensions],
+                "value": self.codec.encode(outcome.value),
+                "confidence": outcome.confidence,
+                "contributor_ids": list(outcome.contributor_ids),
+                "counterevidence_ids": list(outcome.counterevidence_ids),
+                "effective_authority": outcome.effective_authority,
+                "rationale": list(outcome.rationale),
+            }
+        if isinstance(outcome, Abstention):
+            return {
+                "status": "abstention",
+                "view_type": outcome.view_type,
+                "subject_id": outcome.subject_id,
+                "scope": outcome.scope,
+                "key": outcome.key,
+                "dimensions": [list(pair) for pair in outcome.dimensions],
+                "reason": outcome.reason,
+                "assertion_ids": list(outcome.assertion_ids),
+            }
+        if isinstance(outcome, Retirement):
+            return {
+                "status": "retirement",
+                "view_type": outcome.view_type,
+                "subject_id": outcome.subject_id,
+                "scope": outcome.scope,
+                "key": outcome.key,
+                "dimensions": [list(pair) for pair in outcome.dimensions],
+                "reason": outcome.reason,
+                "effective_at": outcome.effective_at,
+                "contributor_ids": list(outcome.contributor_ids),
+                "retired_value": self.codec.encode(outcome.retired_value),
+            }
+        raise TypeError(f"unsupported projection outcome: {type(outcome)!r}")
+
+    def _hydrate_outcome(self, payload: dict[str, Any]) -> ProjectionOutcome:
+        dimensions = tuple(
+            (str(name), str(value))
+            for name, value in payload.get("dimensions", [])
+        )
+        common = {
+            "view_type": str(payload["view_type"]),
+            "subject_id": str(payload["subject_id"]),
+            "scope": str(payload.get("scope") or ""),
+            "key": str(payload["key"]),
+            "dimensions": dimensions,
+        }
+        status = str(payload.get("status") or "")
+        if status == "view":
+            return View(
+                **common,
+                value=self.codec.decode(payload.get("value")),
+                confidence=float(payload.get("confidence", 0.0)),
+                contributor_ids=tuple(
+                    str(value) for value in payload.get("contributor_ids", [])
+                ),
+                counterevidence_ids=tuple(
+                    str(value) for value in payload.get("counterevidence_ids", [])
+                ),
+                effective_authority=str(payload.get("effective_authority") or "agent"),
+                rationale=tuple(str(value) for value in payload.get("rationale", [])),
+            )
+        if status == "abstention":
+            return Abstention(
+                **common,
+                reason=str(payload.get("reason") or ""),
+                assertion_ids=tuple(
+                    str(value) for value in payload.get("assertion_ids", [])
+                ),
+            )
+        if status == "retirement":
+            return Retirement(
+                **common,
+                reason=str(payload.get("reason") or ""),
+                effective_at=str(payload.get("effective_at") or ""),
+                contributor_ids=tuple(
+                    str(value) for value in payload.get("contributor_ids", [])
+                ),
+                retired_value=self.codec.decode(payload.get("retired_value")),
+            )
+        raise ValueError(f"unknown persisted projection status: {status!r}")
 
     def _hydrate_assertion(self, row: dict[str, Any]) -> Assertion:
         evidence = tuple(
@@ -370,33 +499,6 @@ class Neo4jEnvelopeStore:
             metadata=tuple(
                 (str(name), str(value))
                 for name, value in json.loads(str(row.get("metadata_json") or "[]"))
-            ),
-            dimensions=tuple(
-                (str(name), str(value))
-                for name, value in json.loads(str(row.get("dimensions_json") or "[]"))
-            ),
-        )
-
-    def _hydrate_view(self, row: dict[str, Any]) -> View:
-        return View(
-            view_type=str(row["view_type"]),
-            subject_id=str(row["subject_id"]),
-            scope=str(row.get("scope") or ""),
-            key=str(row["key"]),
-            value=self.codec.decode(json.loads(str(row["value_json"]))),
-            confidence=float(row.get("confidence", 0.0)),
-            contributor_ids=tuple(
-                str(value)
-                for value in json.loads(str(row.get("contributor_ids_json") or "[]"))
-            ),
-            counterevidence_ids=tuple(
-                str(value)
-                for value in json.loads(str(row.get("counterevidence_ids_json") or "[]"))
-            ),
-            effective_authority=str(row.get("effective_authority") or "agent"),
-            rationale=tuple(
-                str(value)
-                for value in json.loads(str(row.get("rationale_json") or "[]"))
             ),
             dimensions=tuple(
                 (str(name), str(value))

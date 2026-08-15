@@ -114,18 +114,18 @@ Blank scope is valid because production scalar slots use it.
 
 ## Experiment 3 — extension-neutral Neo4j persistence
 
-`neo4j_store.py` tests a different boundary: can a non-scalar extension persist through Neo4j
-without either the store or Menhir production code learning personality concepts?
+`neo4j_store.py` asks whether a non-scalar extension can persist through Neo4j without either the
+store or Menhir production code learning personality concepts.
 
-`Neo4jEnvelopeStore` knows only kernel `Assertion`, `EvidenceRef`, and `View` envelopes. It:
+`Neo4jEnvelopeStore` knows only kernel envelopes. It:
 
 - stores immutable assertions under a namespace-scoped storage identity;
 - fingerprint-checks assertion replay and fails closed if the same identity carries a different
   envelope;
-- stores one replaceable current View per generic slot
+- stores one replaceable current projection outcome per generic slot
   `(view_type, subject_id, scope, key, dimensions)`;
 - keeps namespace isolation in persistence rather than extension semantics;
-- delegates opaque `value` serialization to an injected extension codec.
+- delegates opaque value serialization to an injected extension codec.
 
 `personality_codec.py` owns the JSON mapping for `ContinuousSignal`, `PolicySignal`, and
 `PolicyDecision`. The Neo4j store never imports the personality extension.
@@ -143,13 +143,49 @@ Personality Incident
 ```
 
 The test also replays the same inputs, adds later evidence that changes the preferred behavior,
-checks that assertion history grows while the current View remains one row, checks namespace
-isolation, and verifies the experiment created no production `:TypedAssertion` or scalar-state View
-nodes.
+checks that assertion history grows while the current View remains one projection row, checks
+namespace isolation, and verifies the experiment created no production `:TypedAssertion` or
+scalar-state View nodes.
 
-The spike-local `:MutationAssertion` / `:MutationView` labels and constraints exist only in the
-throwaway test database. This is intentionally **not** a proposal to add those labels to Menhir's
-production schema.
+## Experiment 4 — lifecycle, reconciliation, and crash repair
+
+`lifecycle.py` adds a generic `ProjectionSlot` + `rebuild_projection` mechanism:
+
+```text
+durable assertion history
+  -> exact slot selection (including opaque dimensions)
+  -> kernel supersession/current set
+  -> extension fold
+  -> validate fold stayed in requested slot
+  -> atomically replace current projection outcome
+```
+
+The persisted projection is not always a View. Its current state may be:
+
+- `View` — a current answer exists;
+- `Abstention` — the fold cannot safely answer, so an older View must not remain current;
+- `Retirement` — an earlier answer explicitly ended and its absence is itself known state.
+
+This lets assertion persistence and projection persistence remain separate commits. If a process dies
+after a durable assertion write but before refreshing its projection, the old projection can be
+reconstructed and reconciled from assertion history. The projection write itself is one Neo4j query,
+so the current outcome changes atomically within that database transaction.
+
+The lifecycle experiment also closed a genericity hole exposed by the earlier persistence test:
+`load_assertions()` can now filter exact extension-owned `dimensions`. Without that, repair of two
+slots sharing subject/type/scope/key but differing on axes such as unit could mix their evidence.
+
+`test_lifecycle_neo4j.py` covers:
+
+- an assertion-only interruption leaving a stale View, followed by deterministic repair;
+- explicit supersession changing the rebuilt personality trait without deleting history;
+- a contested fold replacing a previously active View with durable Abstention;
+- View -> Retirement -> later View reactivation in one stable projection slot;
+- exact dimension filtering so extension-owned slot axes cannot bleed into one another;
+- idempotent reconciliation after the repaired projection already matches the fold.
+
+The spike-local `:MutationAssertion` / `:MutationProjection` labels and constraints exist only in the
+throwaway test database. They are intentionally **not** a proposal for Menhir's production schema.
 
 ## What this deliberately does not do
 
@@ -163,6 +199,7 @@ production schema.
 - no live external LLM call
 - no claim that the personality fold math is final personality science
 - no claim that the spike-local generic Neo4j schema is production-ready
+- no distributed transaction between assertion admission and projection materialization
 
 ## Current boundary ledger
 
@@ -170,15 +207,20 @@ Evidence from the spike now supports these narrower claims:
 
 1. **Fold semantics can remain extension-owned.** Personality and production scalar folds coexist
    behind the same outcome envelopes without a shared arithmetic model.
-2. **Additional slot axes can remain opaque to core.** `dimensions` was enough for scalar
-   `value_kind/unit` without scalar vocabulary in the kernel.
+2. **Additional slot axes can remain opaque to core.** `dimensions` is enough for scalar
+   `value_kind/unit`, and lifecycle selection can preserve those axes without interpreting them.
 3. **Opaque values require an extension codec.** Generic persistence cannot faithfully reconstruct
    `Any` by itself. Injecting the codec keeps this responsibility with the extension.
 4. **Namespace can stay below extension semantics.** Storage can isolate identical assertion
    identities in separate silos without changing the assertion contract.
 5. **Projection mutability differs from assertion durability.** Replay-safe immutable Assertions and
-   disposable replaceable Views need different persistence rules.
-6. **Production scalar persistence fits the conceptual contract, but not yet the generic store.**
+   disposable current projections need different persistence rules.
+6. **Absence has multiple meanings.** Abstention and Retirement must be durable projection outcomes
+   rather than both collapsing to "no View", or a stale prior answer can survive incorrectly.
+7. **Crash repair does not require domain-specific persistence logic.** Once assertion history is
+   durable, a slot can be reselected, supersession applied, the extension fold rerun, and the current
+   projection atomically reconciled without the store knowing the domain.
+8. **Production scalar persistence fits the conceptual contract, but not yet the generic store.**
    Scalar deliberately continues using Menhir's production repositories; replacing those with the
    spike schema would prove something different and is not justified by this experiment.
 
@@ -188,9 +230,12 @@ Still open:
 2. Can relationship/person/group scopes flow through production recall without changing recall core?
 3. Can coding-specific belief evidence (`TEST_FAILED`, `SOURCE_IS_GIT`, etc.) become registered
    extension signals rather than a closed core enum?
-4. What generic lifecycle contract is needed for View retirement/reconciliation and crash repair?
+4. How should reconciliation discover *which* slots are dirty at production scale without scanning
+   every assertion/projection?
 5. Should abstentions expose exact offending assertion IDs? Production scalar abstention currently
    does not provide them.
+6. Does production need an explicit projection generation/checkpoint or dirty marker, or is
+   deterministic on-demand reconciliation sufficient?
 
 ## Run the spike tests
 
