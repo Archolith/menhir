@@ -58,6 +58,15 @@ FoldFunction = Callable[[list[Assertion]], ProjectionOutcome]
 
 
 @dataclass(frozen=True)
+class ProjectionDerivation:
+    """Pure rebuild result before any disposable projection write occurs."""
+
+    outcome: ProjectionOutcome
+    assertion_count: int
+    current_assertion_count: int
+
+
+@dataclass(frozen=True)
 class ReconcileResult:
     """One deterministic rebuild and the persistence change it caused."""
 
@@ -69,16 +78,16 @@ class ReconcileResult:
     projection_hash: str
 
 
-def rebuild_projection(
+def derive_projection(
     store: ProjectionStore,
     slot: ProjectionSlot,
     fold: FoldFunction,
-) -> ReconcileResult:
-    """Rebuild one current projection from durable assertion history.
+) -> ProjectionDerivation:
+    """Derive one current projection from durable history without writing it.
 
-    The kernel applies explicit supersession before handing rows to the extension fold. If
-    supersession leaves no current evidence, the lifecycle layer persists an explicit abstention
-    instead of leaving a stale View behind.
+    Keeping derivation separate from persistence lets generation-aware schedulers attach an
+    optimistic generation token to the later projection write without teaching the fold or the
+    domain extension about queueing/concurrency mechanics.
     """
     assertions = store.load_assertions(
         subject_id=slot.subject_id,
@@ -105,12 +114,31 @@ def rebuild_projection(
         )
 
     _validate_outcome_slot(outcome, slot)
-    write = store.record_outcome(outcome)
-    return ReconcileResult(
+    return ProjectionDerivation(
         outcome=outcome,
-        changed=bool(write["changed"]),
         assertion_count=len(assertions),
         current_assertion_count=len(current),
+    )
+
+
+def rebuild_projection(
+    store: ProjectionStore,
+    slot: ProjectionSlot,
+    fold: FoldFunction,
+) -> ReconcileResult:
+    """Rebuild one current projection from durable assertion history.
+
+    The kernel applies explicit supersession before handing rows to the extension fold. If
+    supersession leaves no current evidence, the lifecycle layer persists an explicit abstention
+    instead of leaving a stale View behind.
+    """
+    derived = derive_projection(store, slot, fold)
+    write = store.record_outcome(derived.outcome)
+    return ReconcileResult(
+        outcome=derived.outcome,
+        changed=bool(write["changed"]),
+        assertion_count=derived.assertion_count,
+        current_assertion_count=derived.current_assertion_count,
         previous_hash=(
             None if write.get("previous_hash") is None else str(write["previous_hash"])
         ),
