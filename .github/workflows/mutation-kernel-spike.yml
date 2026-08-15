@@ -12,7 +12,22 @@ on:
 jobs:
   scalar-parity:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
+    services:
+      neo4j:
+        image: neo4j:5-community
+        env:
+          NEO4J_AUTH: neo4j/testpassword
+          NEO4J_PLUGINS: '["apoc"]'
+          NEO4J_server_memory_heap_max__size: 512m
+        ports:
+          - 7688:7687
+        options: >-
+          --health-cmd "wget -qO- http://localhost:7474 || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 20
+
     steps:
       - name: Checkout Menhir research branch
         uses: actions/checkout@v4
@@ -21,13 +36,30 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: "pip"
+          cache: pip
           cache-dependency-path: pyproject.toml
 
-      - name: Install Menhir and pytest
+      - name: Install Menhir and test dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e . pytest
+          pip install -e . "graphiti-core==0.29.2" pytest pytest-asyncio pytest-timeout
+
+      - name: Verify scratch Neo4j is reachable
+        run: |
+          python - <<'PY'
+          from neo4j import GraphDatabase
+          drv = GraphDatabase.driver("bolt://localhost:7688", auth=("neo4j", "testpassword"))
+          drv.verify_connectivity()
+          with drv.session() as session:
+              assert session.run("RETURN 1 AS ok").single()["ok"] == 1
+          drv.close()
+          print("scratch neo4j ok")
+          PY
 
       - name: Run isolated mutation-kernel tests
+        env:
+          MENHIR_TEST_NEO4J_URI: bolt://localhost:7688
+          MENHIR_TEST_NEO4J_USER: neo4j
+          MENHIR_TEST_NEO4J_PASSWORD: testpassword
+          MENHIR_TEST_NEO4J_DATABASE: neo4j
         run: pytest -q spikes/mutation_kernel
