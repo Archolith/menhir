@@ -1,12 +1,8 @@
 """Generic entity/edge contracts for the mutation-kernel research spike.
 
-The graph layer deliberately does not know what a Person, Parcel, OWNS edge, coding Symbol, or any
-other domain object means. Extensions register entity kinds with identity resolvers and edge kinds
-with allowed endpoint kinds. The store persists source-grounded entity receipts and rebuildable
-materialized graph relationships while preserving exact contributor assertion IDs.
-
-This is a research schema under ``spikes/`` only. It is not a proposal to replace Menhir's production
-Graphiti schema.
+Extensions own entity identity and relationship meaning. The generic layer owns stable IDs,
+source-grounded entity receipts, endpoint-kind validation, and rebuildable Neo4j relationships.
+Nothing here is imported by production Menhir.
 """
 
 from __future__ import annotations
@@ -31,16 +27,15 @@ def _hash_parts(*parts: str) -> str:
     return h.hexdigest()
 
 
-def _canonical_properties(
-    properties: Sequence[tuple[str, Any]],
-) -> tuple[tuple[str, Any], ...]:
-    normalized = tuple(sorted(((str(name).strip(), value) for name, value in properties), key=lambda row: row[0]))
+def _canonical_properties(properties: Sequence[tuple[str, Any]]) -> tuple[tuple[str, Any], ...]:
+    normalized = tuple(
+        sorted(((str(name).strip(), value) for name, value in properties), key=lambda row: row[0])
+    )
     names = [name for name, _ in normalized]
     if any(not name for name in names):
         raise ValueError("property names must be non-empty")
     if len(names) != len(set(names)):
         raise ValueError("property names must be unique")
-    # Fail early if an extension tries to put a value in generic persistence that cannot round-trip.
     _stable_json({name: value for name, value in normalized})
     return normalized
 
@@ -51,11 +46,7 @@ def _properties_dict(properties: Sequence[tuple[str, Any]]) -> dict[str, Any]:
 
 @dataclass(frozen=True)
 class EntityProposal:
-    """One source-grounded request to resolve/materialize an entity.
-
-    The proposal carries observed properties, not canonical identity semantics. ``EntityKind`` owns
-    the resolver that decides which proposal fields constitute the durable identity key.
-    """
+    """One source-grounded request for an extension-owned entity identity resolver."""
 
     entity_kind: str
     display_name: str
@@ -68,18 +59,15 @@ class EntityProposal:
     ordinal: int = 0
 
     def __post_init__(self) -> None:
-        if not self.entity_kind.strip():
-            raise ValueError("EntityProposal.entity_kind must be non-empty")
-        if not self.display_name.strip():
-            raise ValueError("EntityProposal.display_name must be non-empty")
+        if not self.entity_kind.strip() or not self.display_name.strip():
+            raise ValueError("EntityProposal kind/display name must be non-empty")
         if not self.valid_at.strip() or not self.learned_at.strip():
             raise ValueError("EntityProposal valid/learned time must be non-empty")
         if not 0.0 <= self.confidence <= 1.0:
             raise ValueError("EntityProposal.confidence must be between 0 and 1")
         if self.ordinal < 0:
             raise ValueError("EntityProposal.ordinal must be >= 0")
-        canonical = _canonical_properties(self.properties)
-        if self.properties != canonical:
+        if self.properties != _canonical_properties(self.properties):
             raise ValueError("EntityProposal.properties must be canonical")
 
     @property
@@ -101,8 +89,6 @@ IdentityResolver = Callable[[EntityProposal], str]
 
 @dataclass(frozen=True)
 class EntityKind:
-    """Extension-owned entity identity policy registered with the generic graph layer."""
-
     kind_id: str
     version: int
     identity_resolver: IdentityResolver
@@ -115,17 +101,14 @@ class EntityKind:
 
     def resolve(self, proposal: EntityProposal) -> "ResolvedEntity":
         if proposal.entity_kind != self.kind_id:
-            raise ValueError(
-                f"entity proposal kind mismatch: expected={self.kind_id!r} actual={proposal.entity_kind!r}"
-            )
+            raise ValueError("entity proposal kind mismatch")
         canonical_key = str(self.identity_resolver(proposal)).strip()
         if not canonical_key:
             raise ValueError("entity identity resolver returned an empty canonical key")
-        entity_id = _hash_parts(self.kind_id, canonical_key)
         return ResolvedEntity(
             entity_kind=self.kind_id,
             entity_kind_version=self.version,
-            entity_id=entity_id,
+            entity_id=_hash_parts(self.kind_id, canonical_key),
             canonical_key=canonical_key,
             display_name=proposal.display_name,
         )
@@ -142,8 +125,6 @@ class ResolvedEntity:
 
 @dataclass(frozen=True)
 class EdgeKind:
-    """Extension-owned relationship schema, without domain meaning in core."""
-
     kind_id: str
     version: int
     source_kinds: tuple[str, ...]
@@ -152,10 +133,8 @@ class EdgeKind:
     provenance_required: bool = True
 
     def __post_init__(self) -> None:
-        if not self.kind_id.strip():
-            raise ValueError("EdgeKind.kind_id must be non-empty")
-        if self.version < 1:
-            raise ValueError("EdgeKind.version must be >= 1")
+        if not self.kind_id.strip() or self.version < 1:
+            raise ValueError("EdgeKind requires a non-empty ID and version >= 1")
         source = tuple(sorted(str(value).strip() for value in self.source_kinds))
         target = tuple(sorted(str(value).strip() for value in self.target_kinds))
         if not source or not target or any(not value for value in (*source, *target)):
@@ -180,30 +159,27 @@ class MaterializedEdge:
     properties: tuple[tuple[str, Any], ...] = ()
 
     def __post_init__(self) -> None:
-        for name in (
-            "edge_kind",
-            "source_entity_id",
-            "source_entity_kind",
-            "target_entity_id",
-            "target_entity_kind",
-            "valid_from",
-            "effective_authority",
-        ):
-            if not str(getattr(self, name)).strip():
-                raise ValueError(f"MaterializedEdge.{name} must be non-empty")
-        if not 0.0 <= self.confidence <= 1.0:
-            raise ValueError("MaterializedEdge.confidence must be between 0 and 1")
+        required = (
+            self.edge_kind,
+            self.source_entity_id,
+            self.source_entity_kind,
+            self.target_entity_id,
+            self.target_entity_kind,
+            self.valid_from,
+            self.effective_authority,
+        )
+        if any(not str(value).strip() for value in required):
+            raise ValueError("MaterializedEdge required fields must be non-empty")
         if not self.contributor_ids:
             raise ValueError("MaterializedEdge requires at least one contributor")
-        canonical = _canonical_properties(self.properties)
-        if self.properties != canonical:
+        if not 0.0 <= self.confidence <= 1.0:
+            raise ValueError("MaterializedEdge.confidence must be between 0 and 1")
+        if self.properties != _canonical_properties(self.properties):
             raise ValueError("MaterializedEdge.properties must be canonical")
 
 
 @dataclass(frozen=True)
 class EdgeSet:
-    """One extension fold's current graph answer for a materializer slot."""
-
     materializer_id: str
     slot_key: str
     effective_at: str
@@ -215,14 +191,14 @@ class EdgeSet:
             raise ValueError("EdgeSet materializer/slot/effective time must be non-empty")
         identities = [
             (
-                edge.edge_kind,
-                edge.source_entity_kind,
-                edge.source_entity_id,
-                edge.target_entity_kind,
-                edge.target_entity_id,
-                edge.valid_from,
+                e.edge_kind,
+                e.source_entity_kind,
+                e.source_entity_id,
+                e.target_entity_kind,
+                e.target_entity_id,
+                e.valid_from,
             )
-            for edge in self.edges
+            for e in self.edges
         ]
         if len(identities) != len(set(identities)):
             raise ValueError("EdgeSet contains duplicate edge identities")
@@ -230,8 +206,6 @@ class EdgeSet:
 
 @dataclass(frozen=True)
 class EdgeAbstention:
-    """Current graph state is intentionally absent because the extension cannot safely decide."""
-
     materializer_id: str
     slot_key: str
     effective_at: str
@@ -268,14 +242,7 @@ class PersistedEdge:
 
 
 class GraphSchema:
-    """In-process schema registry. Extensions provide kinds; the generic layer validates contracts."""
-
-    def __init__(
-        self,
-        *,
-        entity_kinds: Sequence[EntityKind],
-        edge_kinds: Sequence[EdgeKind],
-    ) -> None:
+    def __init__(self, *, entity_kinds: Sequence[EntityKind], edge_kinds: Sequence[EdgeKind]) -> None:
         entities = tuple(entity_kinds)
         edges = tuple(edge_kinds)
         if len({row.kind_id for row in entities}) != len(entities):
@@ -292,29 +259,23 @@ class GraphSchema:
         return kind.resolve(proposal)
 
     def entity_kind(self, kind_id: str) -> EntityKind:
-        try:
-            return self._entity_kinds[kind_id]
-        except KeyError as exc:
-            raise KeyError(f"unregistered entity kind: {kind_id}") from exc
+        if kind_id not in self._entity_kinds:
+            raise KeyError(f"unregistered entity kind: {kind_id}")
+        return self._entity_kinds[kind_id]
 
     def edge_kind(self, kind_id: str) -> EdgeKind:
-        try:
-            return self._edge_kinds[kind_id]
-        except KeyError as exc:
-            raise KeyError(f"unregistered edge kind: {kind_id}") from exc
+        if kind_id not in self._edge_kinds:
+            raise KeyError(f"unregistered edge kind: {kind_id}")
+        return self._edge_kinds[kind_id]
 
     def validate_edge(self, edge: MaterializedEdge) -> None:
         kind = self.edge_kind(edge.edge_kind)
         self.entity_kind(edge.source_entity_kind)
         self.entity_kind(edge.target_entity_kind)
         if edge.source_entity_kind not in kind.source_kinds:
-            raise ValueError(
-                f"edge {kind.kind_id} does not allow source kind {edge.source_entity_kind}"
-            )
+            raise ValueError(f"edge {kind.kind_id} does not allow source kind {edge.source_entity_kind}")
         if edge.target_entity_kind not in kind.target_kinds:
-            raise ValueError(
-                f"edge {kind.kind_id} does not allow target kind {edge.target_entity_kind}"
-            )
+            raise ValueError(f"edge {kind.kind_id} does not allow target kind {edge.target_entity_kind}")
         if kind.provenance_required and not edge.contributor_ids:
             raise ValueError(f"edge {kind.kind_id} requires provenance contributors")
         if kind.temporal and not edge.valid_from.strip():
@@ -322,7 +283,7 @@ class GraphSchema:
 
 
 class Neo4jGraphMaterializer:
-    """Persist extension-neutral entities and rebuildable actual Neo4j relationships."""
+    """Persist generic entities plus actual ``MUTATION_EDGE`` relationships."""
 
     def __init__(self, neo4j: Any, *, namespace: str, schema: GraphSchema) -> None:
         if not namespace.strip():
@@ -350,14 +311,9 @@ class Neo4jGraphMaterializer:
 
     def record_entity(self, proposal: EntityProposal) -> ResolvedEntity:
         resolved = self.schema.resolve_entity(proposal)
-        entity_storage_key = self._entity_storage_key(resolved.entity_kind, resolved.entity_id)
-        receipt_storage_key = _hash_parts(
-            self.namespace,
-            "entity-receipt",
-            entity_storage_key,
-            proposal.source_key,
-        )
-        evidence_payload = {
+        entity_key = self._entity_storage_key(resolved.entity_kind, resolved.entity_id)
+        receipt_key = _hash_parts(self.namespace, "entity-receipt", entity_key, proposal.source_key)
+        evidence = {
             "source_id": proposal.source.source_id,
             "source_kind": proposal.source.source_kind,
             "span_start": proposal.source.span_start,
@@ -366,29 +322,27 @@ class Neo4jGraphMaterializer:
         }
         rows = self._neo4j.execute(
             """
-            MERGE (e:MutationEntity {storage_key:$entity_storage_key})
-              ON CREATE SET
-                e.namespace = $namespace,
-                e.entity_kind = $entity_kind,
-                e.entity_kind_version = $entity_kind_version,
-                e.entity_id = $entity_id,
-                e.canonical_key = $canonical_key,
-                e.display_name = $display_name,
-                e.created_at = datetime()
+            MERGE (e:MutationEntity {storage_key:$entity_key})
+              ON CREATE SET e.namespace=$namespace,
+                            e.entity_kind=$entity_kind,
+                            e.entity_kind_version=$entity_kind_version,
+                            e.entity_id=$entity_id,
+                            e.canonical_key=$canonical_key,
+                            e.display_name=$display_name,
+                            e.created_at=datetime()
             WITH e
-            MERGE (receipt:MutationEntityReceipt {storage_key:$receipt_storage_key})
-              ON CREATE SET
-                receipt.namespace = $namespace,
-                receipt.entity_storage_key = $entity_storage_key,
-                receipt.source_key = $source_key,
-                receipt.observed_display_name = $display_name,
-                receipt.properties_json = $properties_json,
-                receipt.evidence_json = $evidence_json,
-                receipt.valid_at = $valid_at,
-                receipt.learned_at = $learned_at,
-                receipt.authority = $authority,
-                receipt.confidence = $confidence,
-                receipt.created_at = datetime()
+            MERGE (receipt:MutationEntityReceipt {storage_key:$receipt_key})
+              ON CREATE SET receipt.namespace=$namespace,
+                            receipt.entity_storage_key=$entity_key,
+                            receipt.source_key=$source_key,
+                            receipt.observed_display_name=$display_name,
+                            receipt.properties_json=$properties_json,
+                            receipt.evidence_json=$evidence_json,
+                            receipt.valid_at=$valid_at,
+                            receipt.learned_at=$learned_at,
+                            receipt.authority=$authority,
+                            receipt.confidence=$confidence,
+                            receipt.created_at=datetime()
             MERGE (receipt)-[:EVIDENCE_FOR]->(e)
             RETURN e.entity_kind AS entity_kind,
                    e.entity_kind_version AS entity_kind_version,
@@ -398,8 +352,8 @@ class Neo4jGraphMaterializer:
             """,
             {
                 "namespace": self.namespace,
-                "entity_storage_key": entity_storage_key,
-                "receipt_storage_key": receipt_storage_key,
+                "entity_key": entity_key,
+                "receipt_key": receipt_key,
                 "entity_kind": resolved.entity_kind,
                 "entity_kind_version": int(resolved.entity_kind_version),
                 "entity_id": resolved.entity_id,
@@ -407,7 +361,7 @@ class Neo4jGraphMaterializer:
                 "display_name": resolved.display_name,
                 "source_key": proposal.source_key,
                 "properties_json": _stable_json(proposal.property_map),
-                "evidence_json": _stable_json(evidence_payload),
+                "evidence_json": _stable_json(evidence),
                 "valid_at": proposal.valid_at,
                 "learned_at": proposal.learned_at,
                 "authority": proposal.authority,
@@ -458,12 +412,8 @@ class Neo4jGraphMaterializer:
 
         edge_rows: list[dict[str, Any]] = []
         for edge in edges:
-            source_storage_key = self._entity_storage_key(
-                edge.source_entity_kind, edge.source_entity_id
-            )
-            target_storage_key = self._entity_storage_key(
-                edge.target_entity_kind, edge.target_entity_id
-            )
+            source_key = self._entity_storage_key(edge.source_entity_kind, edge.source_entity_id)
+            target_key = self._entity_storage_key(edge.target_entity_kind, edge.target_entity_id)
             storage_key = _hash_parts(
                 self.namespace,
                 outcome.materializer_id,
@@ -478,9 +428,9 @@ class Neo4jGraphMaterializer:
             edge_rows.append(
                 {
                     "storage_key": storage_key,
-                    "source_storage_key": source_storage_key,
+                    "source_storage_key": source_key,
                     "source_entity_kind": edge.source_entity_kind,
-                    "target_storage_key": target_storage_key,
+                    "target_storage_key": target_key,
                     "target_entity_kind": edge.target_entity_kind,
                     "edge_kind": edge.edge_kind,
                     "valid_from": edge.valid_from,
@@ -492,66 +442,72 @@ class Neo4jGraphMaterializer:
             )
 
         desired_keys = [str(row["storage_key"]) for row in edge_rows]
-        payload = {
-            "materializer_id": outcome.materializer_id,
-            "slot_key": outcome.slot_key,
-            "effective_at": outcome.effective_at,
-            "status": "edges" if isinstance(outcome, EdgeSet) else "abstention",
-            "reason": None if isinstance(outcome, EdgeSet) else outcome.reason,
-            "assertion_ids": list(outcome.assertion_ids),
-            "edges": edge_rows,
-        }
-        projection_hash = _hash_parts(_stable_json(payload))
+        projection_hash = _hash_parts(
+            _stable_json(
+                {
+                    "materializer_id": outcome.materializer_id,
+                    "slot_key": outcome.slot_key,
+                    "effective_at": outcome.effective_at,
+                    "status": "edges" if isinstance(outcome, EdgeSet) else "abstention",
+                    "reason": None if isinstance(outcome, EdgeSet) else outcome.reason,
+                    "assertion_ids": list(outcome.assertion_ids),
+                    "edges": edge_rows,
+                }
+            )
+        )
 
         rows = self._neo4j.execute(
             """
-            UNWIND CASE WHEN size($edges) = 0 THEN [null] ELSE $edges END AS candidate
-            OPTIONAL MATCH (s:MutationEntity {storage_key:candidate.source_storage_key})
+            UNWIND CASE WHEN size($edges)=0 THEN [null] ELSE $edges END AS candidate
+            OPTIONAL MATCH (source:MutationEntity)
               WHERE candidate IS NOT NULL
-                AND s.namespace = $namespace
-                AND s.entity_kind = candidate.source_entity_kind
-            OPTIONAL MATCH (t:MutationEntity {storage_key:candidate.target_storage_key})
+                AND source.storage_key=candidate.source_storage_key
+                AND source.namespace=$namespace
+                AND source.entity_kind=candidate.source_entity_kind
+            OPTIONAL MATCH (target:MutationEntity)
               WHERE candidate IS NOT NULL
-                AND t.namespace = $namespace
-                AND t.entity_kind = candidate.target_entity_kind
-            WITH collect({edge:candidate, source:s, target:t}) AS candidates
+                AND target.storage_key=candidate.target_storage_key
+                AND target.namespace=$namespace
+                AND target.entity_kind=candidate.target_entity_kind
+            WITH collect({edge:candidate, source:source, target:target}) AS candidates
             WITH [row IN candidates WHERE row.edge IS NOT NULL] AS edge_rows
             WITH edge_rows,
                  size([row IN edge_rows WHERE row.source IS NULL OR row.target IS NULL]) AS missing
-            WHERE missing = 0
+            WHERE missing=0
             OPTIONAL MATCH ()-[current:MUTATION_EDGE]->()
-            WHERE current.namespace = $namespace
-              AND current.materializer_id = $materializer_id
-              AND current.slot_key = $slot_key
-              AND coalesce(current.active, false) = true
+              WHERE current.namespace=$namespace
+                AND current.materializer_id=$materializer_id
+                AND current.slot_key=$slot_key
+                AND coalesce(current.active,false)=true
             WITH edge_rows, collect(current) AS current_edges
-            WITH edge_rows, current_edges,
+            WITH edge_rows,
                  [r IN current_edges WHERE NOT r.storage_key IN $desired_keys] AS retiring,
                  [r IN current_edges | r.storage_key] AS previous_active_keys
             FOREACH (r IN retiring |
-                SET r.active = false,
-                    r.retired_at = $effective_at,
-                    r.updated_at = datetime()
+                SET r.active=false,
+                    r.retired_at=$effective_at,
+                    r.updated_at=datetime()
             )
+            WITH edge_rows, retiring, previous_active_keys
             CALL {
                 WITH edge_rows
                 UNWIND edge_rows AS row
                 WITH row.edge AS edge, row.source AS source, row.target AS target
                 MERGE (source)-[rel:MUTATION_EDGE {storage_key:edge.storage_key}]->(target)
-                  ON CREATE SET rel.created_at = datetime()
-                SET rel.namespace = $namespace,
-                    rel.edge_kind = edge.edge_kind,
-                    rel.materializer_id = $materializer_id,
-                    rel.slot_key = $slot_key,
-                    rel.active = true,
-                    rel.valid_from = edge.valid_from,
-                    rel.retired_at = null,
-                    rel.contributor_ids_json = edge.contributor_ids_json,
-                    rel.effective_authority = edge.effective_authority,
-                    rel.confidence = edge.confidence,
-                    rel.properties_json = edge.properties_json,
-                    rel.projection_hash = $projection_hash,
-                    rel.updated_at = datetime()
+                  ON CREATE SET rel.created_at=datetime()
+                SET rel.namespace=$namespace,
+                    rel.edge_kind=edge.edge_kind,
+                    rel.materializer_id=$materializer_id,
+                    rel.slot_key=$slot_key,
+                    rel.active=true,
+                    rel.valid_from=edge.valid_from,
+                    rel.retired_at=null,
+                    rel.contributor_ids_json=edge.contributor_ids_json,
+                    rel.effective_authority=edge.effective_authority,
+                    rel.confidence=edge.confidence,
+                    rel.properties_json=edge.properties_json,
+                    rel.projection_hash=$projection_hash,
+                    rel.updated_at=datetime()
                 RETURN count(rel) AS upserted
             }
             RETURN previous_active_keys AS previous_active_keys,
@@ -572,9 +528,8 @@ class Neo4jGraphMaterializer:
             raise ValueError("graph edge materialization could not resolve all endpoint entities")
         row = rows[0]
         previous_active = tuple(str(value) for value in (row.get("previous_active_keys") or []))
-        changed = set(previous_active) != set(desired_keys)
         return {
-            "changed": changed,
+            "changed": set(previous_active) != set(desired_keys),
             "retired": int(row.get("retired", 0) or 0),
             "upserted": int(row.get("upserted", 0) or 0),
             "projection_hash": projection_hash,
@@ -598,7 +553,7 @@ class Neo4jGraphMaterializer:
             predicates.append("r.slot_key = $slot_key")
             params["slot_key"] = slot_key
         if active is not None:
-            predicates.append("coalesce(r.active, false) = $active")
+            predicates.append("coalesce(r.active,false) = $active")
             params["active"] = bool(active)
         rows = self._neo4j.execute(
             f"""
@@ -612,7 +567,7 @@ class Neo4jGraphMaterializer:
                    target.entity_kind AS target_entity_kind,
                    r.materializer_id AS materializer_id,
                    r.slot_key AS slot_key,
-                   coalesce(r.active, false) AS active,
+                   coalesce(r.active,false) AS active,
                    r.valid_from AS valid_from,
                    r.retired_at AS retired_at,
                    r.contributor_ids_json AS contributor_ids_json,
@@ -623,45 +578,38 @@ class Neo4jGraphMaterializer:
             """,
             params,
         )
-        return [
-            PersistedEdge(
-                storage_key=str(row["storage_key"]),
-                edge_kind=str(row["edge_kind"]),
-                source_entity_id=str(row["source_entity_id"]),
-                source_entity_kind=str(row["source_entity_kind"]),
-                target_entity_id=str(row["target_entity_id"]),
-                target_entity_kind=str(row["target_entity_kind"]),
-                materializer_id=str(row["materializer_id"]),
-                slot_key=str(row["slot_key"]),
-                active=bool(row.get("active")),
-                valid_from=str(row["valid_from"]),
-                retired_at=(None if row.get("retired_at") is None else str(row["retired_at"])),
-                contributor_ids=tuple(
-                    str(value)
-                    for value in json.loads(str(row.get("contributor_ids_json") or "[]"))
-                ),
-                effective_authority=str(row.get("effective_authority") or "agent"),
-                confidence=float(row.get("confidence", 0.0) or 0.0),
-                properties=tuple(
-                    sorted(
-                        (
-                            (str(name), value)
-                            for name, value in json.loads(
-                                str(row.get("properties_json") or "{}")
-                            ).items()
-                        ),
-                        key=lambda item: item[0],
-                    )
-                ),
+        hydrated: list[PersistedEdge] = []
+        for row in rows:
+            props = json.loads(str(row.get("properties_json") or "{}"))
+            hydrated.append(
+                PersistedEdge(
+                    storage_key=str(row["storage_key"]),
+                    edge_kind=str(row["edge_kind"]),
+                    source_entity_id=str(row["source_entity_id"]),
+                    source_entity_kind=str(row["source_entity_kind"]),
+                    target_entity_id=str(row["target_entity_id"]),
+                    target_entity_kind=str(row["target_entity_kind"]),
+                    materializer_id=str(row["materializer_id"]),
+                    slot_key=str(row["slot_key"]),
+                    active=bool(row.get("active")),
+                    valid_from=str(row["valid_from"]),
+                    retired_at=None if row.get("retired_at") is None else str(row["retired_at"]),
+                    contributor_ids=tuple(
+                        str(value)
+                        for value in json.loads(str(row.get("contributor_ids_json") or "[]"))
+                    ),
+                    effective_authority=str(row.get("effective_authority") or "agent"),
+                    confidence=float(row.get("confidence", 0.0) or 0.0),
+                    properties=tuple(sorted(((str(k), v) for k, v in props.items()), key=lambda x: x[0])),
+                )
             )
-            for row in rows
-        ]
+        return hydrated
 
     def count_edges(self, *, active: bool | None = None) -> int:
         predicates = ["r.namespace = $namespace"]
         params: dict[str, Any] = {"namespace": self.namespace}
         if active is not None:
-            predicates.append("coalesce(r.active, false) = $active")
+            predicates.append("coalesce(r.active,false) = $active")
             params["active"] = bool(active)
         rows = self._neo4j.execute(
             f"MATCH ()-[r:MUTATION_EDGE]->() WHERE {' AND '.join(predicates)} RETURN count(r) AS n",
