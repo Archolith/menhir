@@ -10,9 +10,9 @@
 Can Menhir's durable memory/governance machinery become a domain-neutral substrate where coding is
 an extension rather than a core assumption?
 
-This spike uses **personality and learned behavior** as the first hostile/non-coding reference
-domain. It is not an attempt to turn Menhir into a chatbot. The personality extension exists to
-force useful abstraction boundaries.
+This spike uses **personality and learned behavior** as the hostile/non-coding reference domain. It is
+not an attempt to turn Menhir into a chatbot. Personality exists here to force useful abstraction
+boundaries.
 
 ## Hypothesis
 
@@ -26,10 +26,11 @@ Evidence
   -> rebuildable View
 ```
 
-The kernel should own identity, provenance, time, authority and supersession. An extension should
-own value semantics, admission, fold rules, relationship semantics and rendering.
+The kernel should own identity, provenance, time, authority and generic envelope mechanics. An
+extension should own value semantics, admission, fold rules, relationship semantics, serialization
+of opaque values, and rendering.
 
-## Experiment 1 — personality
+## Experiment 1 — personality semantics
 
 `kernel.py` provides domain-neutral:
 
@@ -38,7 +39,8 @@ own value semantics, admission, fold rules, relationship semantics and rendering
 - immutable `Assertion`
 - explicit supersession
 - weakest-contributor authority
-- `View` / `Abstention`
+- `View` / `Abstention` / `Retirement`
+- extension-owned slot `dimensions`
 - a minimal `Fold` protocol
 
 `personality.py` supplies the domain semantics:
@@ -60,14 +62,14 @@ person:<id> > group:<id> > global
 ```
 
 That precedence is only a mechanism in this spike. A real extension needs a separate admission
-policy defining which group scopes are appropriate to learn and what evidence is required.
+policy defining which scopes are lawful to learn and what evidence is required.
 
 ## Experiment 2 — production scalar compatibility
 
-`scalar_adapter.py` asks the harder question: can Menhir's existing typed-scalar machinery fit the
-same kernel without rewriting or weakening its semantics?
+`scalar_adapter.py` asks whether Menhir's existing typed-scalar machinery can fit the same kernel
+without rewriting or weakening scalar semantics.
 
-The adapter deliberately delegates all scalar meaning to production Menhir:
+The adapter delegates all scalar meaning to production Menhir:
 
 ```text
 frozen model response
@@ -79,68 +81,116 @@ frozen model response
   -> kernel View | Abstention | Retirement
 ```
 
-The external LLM and durable repository are injected seams in the fixture test. The parser, gate,
-binding logic, assertion construction, temporal/reference-time handling and scalar fold are the real
-Menhir implementations. This is therefore a deterministic ingest-contract test, **not** a claim that
-a live model or Neo4j-backed ingest was executed.
+The deterministic fixture freezes only the external model response. Menhir's parser, gate, binding,
+assertion construction, temporal/reference-time handling and scalar fold run unchanged.
 
-This second domain exposed two useful kernel corrections:
+`test_scalar_neo4j.py` then takes the same experiment through the real persistence/projection seam on
+a throwaway Neo4j service:
+
+```text
+frozen model response
+  -> production deterministic typed-scalar ingest
+  -> production TypedAssertionRepository
+  -> Neo4j
+  -> production ScalarStateService
+  -> production scalar_state View + contributor edges
+  -> generic kernel View
+```
+
+It checks durable assertion count, `10 + 3 -> 13`, weakest authority, the current View,
+`CURRENT_ANCHOR` / `CONTRIBUTED_TO` edges, and replay idempotency. It does not call a live LLM or
+Graphiti.
+
+This domain exposed two kernel corrections:
 
 1. **Extension-owned slot dimensions.** Scalar identity includes `value_kind` and `unit` in addition
-   to subject/attribute/scope. The kernel now preserves arbitrary named dimensions without knowing
-   what they mean. Personality currently needs none.
-2. **Retirement is not abstention.** Scalar `expire` means the prior value is known to have ended and
-   there is intentionally no current View. That is materially different from being unable to decide
-   current state, so the kernel now has a `Retirement` outcome beside `View` and `Abstention`.
+   to subject/attribute/scope. The kernel preserves arbitrary named dimensions without interpreting
+   them.
+2. **Retirement is not abstention.** Scalar `expire` means an earlier value is known to have ended.
+   That differs from being unable to determine current state, so the kernel has a `Retirement`
+   outcome beside `View` and `Abstention`.
 
-Blank scope is also valid: production scalars use `scope=""`, so the kernel no longer requires every
-domain to invent a synthetic scope name.
+Blank scope is valid because production scalar slots use it.
 
-## Fixture coverage
+## Experiment 3 — extension-neutral Neo4j persistence
 
-`fixtures/scalar_ingest_fixture.json` carries raw episode prose plus frozen three-sample model
-captures. Tests cover:
+`neo4j_store.py` tests a different boundary: can a non-scalar extension persist through Neo4j
+without either the store or Menhir production code learning personality concepts?
 
-- absolute + later delta (`10 + 3 -> 13`) through the real deterministic ingest boundary;
-- unanimous gate commit and canonical-self binding;
-- conflicting k-sample interpretations failing closed;
-- weakest-contributor authority preserved by the adapter;
-- equal-time conflicting absolutes remaining an abstention;
-- explicit expiry becoming retirement rather than an abstention;
-- scalar `value_kind`/`unit` remaining part of slot identity;
-- input-order invariance of the production fold and adapted output.
+`Neo4jEnvelopeStore` knows only kernel `Assertion`, `EvidenceRef`, and `View` envelopes. It:
+
+- stores immutable assertions under a namespace-scoped storage identity;
+- fingerprint-checks assertion replay and fails closed if the same identity carries a different
+  envelope;
+- stores one replaceable current View per generic slot
+  `(view_type, subject_id, scope, key, dimensions)`;
+- keeps namespace isolation in persistence rather than extension semantics;
+- delegates opaque `value` serialization to an injected extension codec.
+
+`personality_codec.py` owns the JSON mapping for `ContinuousSignal`, `PolicySignal`, and
+`PolicyDecision`. The Neo4j store never imports the personality extension.
+
+`test_personality_neo4j.py` exercises:
+
+```text
+Personality Incident
+  -> personality PolicySignal Assertion
+  -> generic Neo4jEnvelopeStore
+  -> reload generic Assertions
+  -> personality fold_policy
+  -> generic View persistence
+  -> reload generic View
+```
+
+The test also replays the same inputs, adds later evidence that changes the preferred behavior,
+checks that assertion history grows while the current View remains one row, checks namespace
+isolation, and verifies the experiment created no production `:TypedAssertion` or scalar-state View
+nodes.
+
+The spike-local `:MutationAssertion` / `:MutationView` labels and constraints exist only in the
+throwaway test database. This is intentionally **not** a proposal to add those labels to Menhir's
+production schema.
 
 ## What this deliberately does not do
 
-- no Neo4j schema or repository changes
+- no production Neo4j schema/repository changes
 - no Graphiti changes
 - no production extraction changes
 - no MCP tools
 - no recall integration
 - no plugin framework
 - no changes to current scalar activation
-- no live external LLM call in the fixture test
-- no claim that the proposed personality fold math is final personality science
+- no live external LLM call
+- no claim that the personality fold math is final personality science
+- no claim that the spike-local generic Neo4j schema is production-ready
 
-Those would contaminate the audit/remediation surface before this experiment has earned them.
+## Current boundary ledger
 
-## Evaluation rule
+Evidence from the spike now supports these narrower claims:
 
-The useful output is **not whether this toy personality model is good**. The useful output is a
-ledger of what an extension cannot express without changing the kernel.
+1. **Fold semantics can remain extension-owned.** Personality and production scalar folds coexist
+   behind the same outcome envelopes without a shared arithmetic model.
+2. **Additional slot axes can remain opaque to core.** `dimensions` was enough for scalar
+   `value_kind/unit` without scalar vocabulary in the kernel.
+3. **Opaque values require an extension codec.** Generic persistence cannot faithfully reconstruct
+   `Any` by itself. Injecting the codec keeps this responsibility with the extension.
+4. **Namespace can stay below extension semantics.** Storage can isolate identical assertion
+   identities in separate silos without changing the assertion contract.
+5. **Projection mutability differs from assertion durability.** Replay-safe immutable Assertions and
+   disposable replaceable Views need different persistence rules.
+6. **Production scalar persistence fits the conceptual contract, but not yet the generic store.**
+   Scalar deliberately continues using Menhir's production repositories; replacing those with the
+   spike schema would prove something different and is not justified by this experiment.
 
-Current seams to test after the audit:
+Still open:
 
 1. Can assertion authority remain generic while admission is extension-owned?
-2. Can Views expose exact contributors/counterevidence without knowing their domain?
-3. Can relationship/person/group scopes be represented without changing recall core?
-4. Can coding-specific belief evidence (`TEST_FAILED`, `SOURCE_IS_GIT`, etc.) become registered
+2. Can relationship/person/group scopes flow through production recall without changing recall core?
+3. Can coding-specific belief evidence (`TEST_FAILED`, `SOURCE_IS_GIT`, etc.) become registered
    extension signals rather than a closed core enum?
-5. Can production scalar persistence/rebuild plug into the generic contract without an adapter
-   needing repository-specific knowledge?
-6. Should abstentions expose their exact offending assertion IDs? Production scalar abstention
-   currently carries the slot/reason but not those IDs, so the adapter intentionally cannot invent
-   them.
+4. What generic lifecycle contract is needed for View retirement/reconciliation and crash repair?
+5. Should abstentions expose exact offending assertion IDs? Production scalar abstention currently
+   does not provide them.
 
 ## Run the spike tests
 
@@ -150,6 +200,6 @@ From the repository root:
 pytest -q spikes/mutation_kernel
 ```
 
-The research branch also has a branch-scoped GitHub Actions workflow that runs only this isolated
-spike. It exists so the production Menhir imports can be exercised even when the local ChatGPT shell
-cannot resolve GitHub or install the repository.
+The research branch also has a branch-scoped GitHub Actions workflow. It starts a throwaway Neo4j
+service and runs only this isolated spike. Graphiti is pinned to Menhir's locked `0.29.2` for
+environment parity, although these integration tests do not invoke Graphiti.
