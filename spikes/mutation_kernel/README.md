@@ -184,8 +184,57 @@ slots sharing subject/type/scope/key but differing on axes such as unit could mi
 - exact dimension filtering so extension-owned slot axes cannot bleed into one another;
 - idempotent reconciliation after the repaired projection already matches the fold.
 
-The spike-local `:MutationAssertion` / `:MutationProjection` labels and constraints exist only in the
-throwaway test database. They are intentionally **not** a proposal for Menhir's production schema.
+## Experiment 5 — dirty-slot discovery and optimistic generations
+
+`dirty.py` tests whether repair can scale without repeatedly scanning all assertions. A new immutable
+assertion can be committed together with one or more generic projection targets in **one Neo4j
+statement**. Each target has a monotonically increasing work generation:
+
+```text
+new Assertion + target ProjectionSlot(s)
+  -> atomic assertion/work commit
+  -> work generation N
+  -> discover only work_generation > projected_generation
+  -> extension fold for that slot
+  -> persist outcome tagged generation N
+```
+
+Replaying the same immutable assertion does not advance the work generation. A bounded worker can
+therefore read only dirty work metadata, rebuild those slots, and leave unrelated or unprocessed
+slots dirty.
+
+The generation is also an optimistic concurrency token. The current spike deliberately has no lease
+or exclusive claim:
+
+- if generation `N+1` arrives while a generation `N` worker is folding, the `N` result may still be
+  written, but the slot remains dirty because work is ahead of the projected generation;
+- once `N+1` is projected, a late generation `N` worker is rejected and cannot overwrite it;
+- the same generation producing two different projection hashes fails closed as nondeterministic.
+
+That means leases are not required for correctness in this model. They could still reduce duplicate
+work under contention.
+
+`test_dirty_neo4j.py` covers:
+
+- atomic assertion creation + dirty generation registration;
+- idempotent assertion replay not manufacturing new work;
+- generation advancement only when genuinely new evidence is created;
+- bounded dirty batches that do not clear unprocessed slots;
+- generation-backed repair removing a slot from the dirty set;
+- a late old worker being unable to overwrite a newer projection.
+
+This experiment also exposed a new extension boundary rather than hiding it: **the assertion write
+must know which projection definitions it dirties.** Registering a new View or changing projection
+mapping later therefore needs an explicit backfill/reindex mechanism for already-durable assertions.
+The current spike does not invent that mechanism yet.
+
+The generational layer currently subclasses the spike Neo4j store and reuses several private helper
+functions. If the design survives, those envelope/hash/slot helpers are candidates for promotion into
+a supported persistence interface; that coupling is spike debt, not a proposed production API.
+
+The spike-local `:MutationAssertion`, `:MutationProjection`, and `:MutationProjectionWork` labels and
+constraints exist only in the throwaway test database. They are intentionally **not** a proposal for
+Menhir's production schema.
 
 ## What this deliberately does not do
 
@@ -199,7 +248,10 @@ throwaway test database. They are intentionally **not** a proposal for Menhir's 
 - no live external LLM call
 - no claim that the personality fold math is final personality science
 - no claim that the spike-local generic Neo4j schema is production-ready
-- no distributed transaction between assertion admission and projection materialization
+- no distributed transaction between external source admission and Neo4j assertion persistence
+- no lease/exclusive projection-worker claim
+- no projection-definition registry migration or historical backfill
+- no multi-input projection whose fold consumes several assertion types at once
 
 ## Current boundary ledger
 
@@ -220,9 +272,16 @@ Evidence from the spike now supports these narrower claims:
 7. **Crash repair does not require domain-specific persistence logic.** Once assertion history is
    durable, a slot can be reselected, supersession applied, the extension fold rerun, and the current
    projection atomically reconciled without the store knowing the domain.
-8. **Production scalar persistence fits the conceptual contract, but not yet the generic store.**
-   Scalar deliberately continues using Menhir's production repositories; replacing those with the
-   spike schema would prove something different and is not justified by this experiment.
+8. **Dirty discovery can be metadata-driven.** Per-slot work generations avoid scanning all assertion
+   history just to discover what needs rebuilding.
+9. **Correctness does not require an exclusive worker lease in the tested model.** Optimistic
+   generations keep newer projections from being overwritten by late older work; leases would be an
+   efficiency mechanism.
+10. **Projection registration is part of the extension contract.** The system needs to know which
+    projection slots a new assertion invalidates, while the meaning and fold remain extension-owned.
+11. **Production scalar persistence fits the conceptual contract, but not yet the generic store.**
+    Scalar deliberately continues using Menhir's production repositories; replacing those with the
+    spike schema would prove something different and is not justified by this experiment.
 
 Still open:
 
@@ -230,12 +289,13 @@ Still open:
 2. Can relationship/person/group scopes flow through production recall without changing recall core?
 3. Can coding-specific belief evidence (`TEST_FAILED`, `SOURCE_IS_GIT`, etc.) become registered
    extension signals rather than a closed core enum?
-4. How should reconciliation discover *which* slots are dirty at production scale without scanning
-   every assertion/projection?
-5. Should abstentions expose exact offending assertion IDs? Production scalar abstention currently
+4. What should the projection-definition registry look like, and how does adding/changing a
+   projection backfill historical assertions without replaying domain semantics incorrectly?
+5. Can one projection safely consume several assertion types, or does the current one-assertion-type
+   `ProjectionSlot` need a more general input-set identity?
+6. Should abstentions expose exact offending assertion IDs? Production scalar abstention currently
    does not provide them.
-6. Does production need an explicit projection generation/checkpoint or dirty marker, or is
-   deterministic on-demand reconciliation sufficient?
+7. Are worker leases worth adding purely to reduce duplicate folds under high contention?
 
 ## Run the spike tests
 
