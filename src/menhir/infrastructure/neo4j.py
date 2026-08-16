@@ -6,7 +6,7 @@ import logging
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable, TypeVar
 
 try:
     from neo4j import GraphDatabase, Driver
@@ -25,6 +25,8 @@ _TRANSIENT_RETRIES = 3
 _TRANSIENT_BACKOFF_BASE = 0.5
 
 logger = logging.getLogger(__name__)
+
+_T = TypeVar("_T")
 
 
 @dataclass
@@ -96,3 +98,17 @@ class Neo4jRepository:
                 )
                 time.sleep(wait)
         raise last_exc  # type: ignore[misc]
+
+    def execute_write(self, work: Callable[[Any], _T]) -> _T:
+        """Run ``work`` inside one driver-managed write transaction.
+
+        This is the public transaction seam for operations whose correctness depends on several
+        graph statements committing atomically (for example projection-generation fencing plus the
+        View write it guards). The Neo4j driver may retry ``work`` on retryable transaction errors, so
+        callers must keep the callback limited to transaction-local, replay-safe graph operations;
+        external side effects do not belong inside it.
+        """
+        if not callable(work):
+            raise TypeError("execute_write requires a callable transaction body")
+        with self._get_driver().session(database=self.database) as session:
+            return session.execute_write(work)
