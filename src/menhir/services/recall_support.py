@@ -7,6 +7,7 @@ import logging
 import math
 import os
 from dataclasses import dataclass, field, replace
+from functools import partial
 from time import perf_counter
 from typing import TYPE_CHECKING, Any
 
@@ -228,6 +229,8 @@ class RecallSupportMixin:
         query: str,
         limit: int,
         timeout_s: float,
+        *,
+        namespace: str | None = None,
     ) -> tuple[list[dict[str, object]], list[str]]:
         """Wait for in-flight episodes to finish; return (visible_pending_rows, entity_uuids).
 
@@ -239,7 +242,12 @@ class RecallSupportMixin:
             return [], []
 
         pending_candidates = await asyncio.to_thread(
-            self.graph_adapter.fetch_relevant_pending_episodes, query, limit=3,
+            partial(
+                self.graph_adapter.fetch_relevant_pending_episodes,
+                query,
+                limit=3,
+                namespace=namespace,
+            ),
         )
         if not pending_candidates:
             return [], []
