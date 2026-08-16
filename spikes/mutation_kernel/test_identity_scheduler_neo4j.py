@@ -8,13 +8,13 @@ from menhir.infrastructure.neo4j import Neo4jRepository
 
 from spikes.mutation_kernel.identity import (
     IdentityMigrationPlan,
-    Neo4jIdentityEvolution,
     ReceiptIdentityAssignment,
 )
-from spikes.mutation_kernel.identity_scheduler import (
-    GuardedNeo4jGraphMaterializer,
-    IdentityDependencyScheduler,
+from spikes.mutation_kernel.identity_generation import GenerationalNeo4jIdentityEvolution
+from spikes.mutation_kernel.identity_generation_guard import (
+    GenerationalGuardedNeo4jGraphMaterializer,
 )
+from spikes.mutation_kernel.identity_scheduler import IdentityDependencyScheduler
 from spikes.mutation_kernel.investigation import (
     OWNERSHIP_ASSERTION,
     OWNERSHIP_MATERIALIZER,
@@ -54,13 +54,13 @@ def _repo() -> Neo4jRepository:
 
 def _setup(repo: Neo4jRepository):
     repo.execute("MATCH (n) DETACH DELETE n")
-    graph = GuardedNeo4jGraphMaterializer(
+    graph = GenerationalGuardedNeo4jGraphMaterializer(
         repo,
         namespace=NAMESPACE,
         schema=investigation_graph_schema(),
     )
     assertions = Neo4jEnvelopeStore(repo, namespace=NAMESPACE)
-    identity = Neo4jIdentityEvolution(graph)
+    identity = GenerationalNeo4jIdentityEvolution(graph)
     scheduler = IdentityDependencyScheduler(repo, namespace=NAMESPACE)
     graph.activate()
     assertions.activate()
@@ -69,7 +69,7 @@ def _setup(repo: Neo4jRepository):
     return graph, assertions, identity, scheduler
 
 
-def _parcel(graph: GuardedNeo4jGraphMaterializer, suffix: str = "123"):
+def _parcel(graph: GenerationalGuardedNeo4jGraphMaterializer, suffix: str = "123"):
     return graph.record_entity(
         parcel_proposal(
             EvidenceRef(f"parcel-{suffix}", "county_record"),
@@ -139,6 +139,7 @@ def test_identity_change_dirties_graph_work_and_stale_workers_cannot_restore_old
             _load_ownership(assertions, parcel.entity_id),
             identity,
         )
+        assert initial.guards[0].expected_identity_generation == 0
         initial_write = graph.reconcile_edges_guarded(initial.outcome, initial.guards)
         assert initial_write["changed"] is True
         active = graph.load_edges(
@@ -160,6 +161,7 @@ def test_identity_change_dirties_graph_work_and_stale_workers_cannot_restore_old
             identity,
         )
         assert stale_pre_migration.guards[0].expected_current_entity_id == historical_owner.entity_id
+        assert stale_pre_migration.guards[0].expected_identity_generation == 0
 
         first_migration = IdentityMigrationPlan(
             migration_id="owner-correction-a",
@@ -177,33 +179,34 @@ def test_identity_change_dirties_graph_work_and_stale_workers_cannot_restore_old
         )
         identity.apply(first_migration)
 
-        resolved_after_first = identity.resolve(
+        resolved_after_first = identity.resolve_receipt(
             entity_kind=historical_owner.entity_kind,
             entity_id=historical_owner.entity_id,
             source_key=historical_proposal.source_key,
         )
-        assert resolved_after_first.entity is not None
+        assert resolved_after_first is not None
         assert resolved_after_first.entity.entity_id == corrected_a.entity_id
+        assert resolved_after_first.identity_generation == 1
         guarded_receipt = repo.execute(
             """
             MATCH (receipt:MutationEntityReceipt {storage_key:$storage_key})
                   -[:CURRENT_IDENTITY]->(current:MutationEntity)
             RETURN receipt.source_key AS source_key,
-                   current.entity_id AS current_entity_id
+                   current.entity_id AS current_entity_id,
+                   coalesce(receipt.identity_generation,0) AS identity_generation
             """,
             {"storage_key": stale_pre_migration.guards[0].receipt_storage_key},
         )
         assert len(guarded_receipt) == 1
         assert str(guarded_receipt[0]["source_key"]) == historical_proposal.source_key
         assert str(guarded_receipt[0]["current_entity_id"]) == corrected_a.entity_id
+        assert int(guarded_receipt[0]["identity_generation"]) == 1
 
         with pytest.raises(ValueError, match="identity guard changed"):
             graph.reconcile_edges_guarded(
                 stale_pre_migration.outcome,
                 stale_pre_migration.guards,
             )
-        # Migration and graph repair are separate commits: old topology may remain until scheduled,
-        # but a stale worker cannot rewrite it after the identity change.
         active_before_repair = graph.load_edges(
             materializer_id=OWNERSHIP_MATERIALIZER,
             slot_key=ownership_slot_key(INVESTIGATION, parcel.entity_id),
@@ -229,6 +232,7 @@ def test_identity_change_dirties_graph_work_and_stale_workers_cannot_restore_old
             identity,
         )
         assert fresh_a.guards[0].expected_current_entity_id == corrected_a.entity_id
+        assert fresh_a.guards[0].expected_identity_generation == 1
         first_repair = graph.reconcile_edges_guarded(fresh_a.outcome, fresh_a.guards)
         assert first_repair["changed"] is True
         assert first_repair["retired"] == 1
@@ -251,6 +255,7 @@ def test_identity_change_dirties_graph_work_and_stale_workers_cannot_restore_old
             identity,
         )
         assert stale_a.guards[0].expected_current_entity_id == corrected_a.entity_id
+        assert stale_a.guards[0].expected_identity_generation == 1
 
         second_migration = IdentityMigrationPlan(
             migration_id="owner-correction-b",
@@ -267,6 +272,14 @@ def test_identity_change_dirties_graph_work_and_stale_workers_cannot_restore_old
             ),
         )
         identity.apply(second_migration)
+        resolved_after_second = identity.resolve_receipt(
+            entity_kind=historical_owner.entity_kind,
+            entity_id=historical_owner.entity_id,
+            source_key=historical_proposal.source_key,
+        )
+        assert resolved_after_second is not None
+        assert resolved_after_second.entity.entity_id == corrected_b.entity_id
+        assert resolved_after_second.identity_generation == 2
 
         with pytest.raises(ValueError, match="identity guard changed"):
             graph.reconcile_edges_guarded(stale_a.outcome, stale_a.guards)
@@ -285,6 +298,7 @@ def test_identity_change_dirties_graph_work_and_stale_workers_cannot_restore_old
             identity,
         )
         assert fresh_b.guards[0].expected_current_entity_id == corrected_b.entity_id
+        assert fresh_b.guards[0].expected_identity_generation == 2
         second_repair = graph.reconcile_edges_guarded(fresh_b.outcome, fresh_b.guards)
         assert second_repair["changed"] is True
         assert second_repair["retired"] == 1
