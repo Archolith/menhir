@@ -731,7 +731,9 @@ class EpisodeLifecycleRepository:
         rows = self.neo4j.execute(query, params={"episode_uuid": episode_uuid})
         return rows[0] if rows else None
 
-    def fetch_relevant_pending_episodes(self, query: str, limit: int = 3) -> list[dict[str, Any]]:
+    def fetch_relevant_pending_episodes(
+        self, query: str, limit: int = 3, *, namespace: str | None = None
+    ) -> list[dict[str, Any]]:
         tokens = [token.lower() for token in _PENDING_EPISODE_TOKEN_PATTERN.findall(query or "")]
         if not tokens:
             normalized = (query or "").strip().lower()
@@ -746,6 +748,7 @@ class EpisodeLifecycleRepository:
             .match("(n:Episodic)")
             .where(
                 "n.processing_state IN ['PENDING', 'ENRICHING']",
+                "($namespace IS NULL OR n.namespace = $namespace)",
                 "ANY(token IN $tokens"
                 " WHERE toLower(coalesce(n.content, '')) CONTAINS token"
                 " OR toLower(coalesce(n.name, '')) CONTAINS token)",
@@ -763,7 +766,10 @@ class EpisodeLifecycleRepository:
             .limit()
             .build()
         )
-        return self.neo4j.execute(cypher, params={"tokens": tokens, "limit": safe_limit})
+        return self.neo4j.execute(
+            cypher,
+            params={"tokens": tokens, "limit": safe_limit, "namespace": namespace},
+        )
 
     def fetch_linked_entity_uuids_for_episode(self, episode_uuid: str) -> list[str]:
         query = (

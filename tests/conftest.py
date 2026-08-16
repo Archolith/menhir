@@ -1017,7 +1017,12 @@ class StubMemoryGraphAdapter:
         row["processing_heartbeat_at"] = "2026-03-09T00:00:00+00:00"
         return True
 
-    def fetch_relevant_pending_episodes(self, query: str, limit: int = 3) -> list[dict[str, object]]:
+    def fetch_relevant_pending_episodes(
+        self, query: str, limit: int = 3, *, namespace: str | None = None
+    ) -> list[dict[str, object]]:
+        # `namespace` mirrors the real adapter signature (tenant scoping, CF-104). This stub
+        # serves canned rows for recall-wiring tests and does not model the filter; the
+        # predicate itself is covered by tests/test_pending_episode_namespace_isolation.py.
         token = (query or "").strip().lower()
         rows = []
         for row in self.pending_episode_rows.values():

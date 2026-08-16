@@ -120,7 +120,7 @@ async def run_recall(
         try:
             visible_pending_rows, pending_entity_uuids = (
                 await service._wait_for_pending_episodes(
-                    query, limit, pending_wait_timeout_s
+                    query, limit, pending_wait_timeout_s, namespace=namespace
                 )
             )
         except Exception:
