@@ -93,6 +93,27 @@ class ProjectionCoverageService:
             subject_uuid,
             namespace=namespace,
         )
+        actual_views = self._source.list_scalar_state_views_for_audit(
+            subject_uuid=subject_uuid,
+            namespace=namespace,
+        )
+
+        # A report slot deliberately excludes namespace because a scoped audit represents exactly one
+        # silo.  An unscoped read is safe only when all durable inputs resolve to that same single silo;
+        # otherwise folding them together could make one tenant's assertion satisfy another tenant's
+        # projection.  Refuse the ambiguous shape instead of manufacturing cross-namespace parity.
+        if namespace is None:
+            observed_namespaces = {
+                None if row.get("namespace") is None else str(row.get("namespace"))
+                for row in [*assertions, *actual_views]
+            }
+            if len(observed_namespaces) > 1:
+                rendered = ", ".join(sorted(repr(value) for value in observed_namespaces))
+                raise ValueError(
+                    "projection coverage audit requires an explicit namespace when one subject "
+                    f"spans multiple namespaces: {rendered}"
+                )
+
         cached_eligibility = _CachedEligibilitySource(
             eligibility_source or DefaultAssertionEligibilitySource()
         )
@@ -113,10 +134,6 @@ class ProjectionCoverageService:
         # Deliberately use the existing scalar fold unchanged. Projection Coverage v1 audits the same
         # durable set-fold contract used by the original P1 design; Views never choose these members.
         fold = fold_assertions(materializable)
-        actual_views = self._source.list_scalar_state_views_for_audit(
-            subject_uuid=subject_uuid,
-            namespace=namespace,
-        )
         return build_projection_coverage_report(
             subject_uuid=subject_uuid,
             namespace=namespace,

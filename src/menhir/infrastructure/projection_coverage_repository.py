@@ -79,6 +79,11 @@ class ProjectionCoverageRepository:
                        ELSE null
                    END AS head_current_assertion_id,
                    CASE
+                       WHEN size(currents) = 1
+                            AND h.subject_uuid IS NOT NULL
+                            AND currents[0].subject_uuid IS NOT NULL
+                            AND h.subject_uuid <> currents[0].subject_uuid
+                           THEN '__head_owner_mismatch__'
                        WHEN size(currents) = 1 THEN currents[0].subject_uuid
                        WHEN size(currents) > 1 THEN '__multiple_current__'
                        WHEN h IS NULL THEN '__missing_head__'
