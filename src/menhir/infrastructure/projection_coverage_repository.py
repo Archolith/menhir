@@ -51,7 +51,7 @@ class ProjectionCoverageRepository:
             WHERE $namespace IS NULL OR a.namespace = $namespace
             OPTIONAL MATCH (h:TypedAssertionHead {source_key: a.source_key})
             OPTIONAL MATCH (h)-[:CURRENT]->(cur:TypedAssertion)
-            WITH a, h, collect(DISTINCT cur) AS currents
+            WITH a, h, collect(cur) AS currents
             RETURN a.assertion_id AS assertion_id, a.assertion_key AS assertion_key,
                    a.claim_key AS claim_key, a.source_key AS source_key,
                    a.subject_uuid AS subject_uuid, a.subject_display AS subject_display,
