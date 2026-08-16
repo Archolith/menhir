@@ -1,9 +1,14 @@
 """Generation-based graph write fencing for identity-sensitive materializers.
 
-The earlier Experiment 10 attempts inferred freshness from ``CURRENT_IDENTITY`` endpoint equality.
-Those attempts are intentionally left in ``identity_scheduler.py`` as failed spike evidence. This
-variant uses the simpler CAS primitive supplied by ``identity_generation.py``: the exact receipt-local
-identity generation observed by the worker.
+The earlier Experiment 10 attempts inferred freshness from ``CURRENT_IDENTITY`` endpoint equality or
+tried to filter a compound Cypher statement by a guard predicate. Those attempts are intentionally
+left in ``identity_scheduler.py`` as failed spike evidence.
+
+This variant uses a receipt-local generation and an explicit Neo4j transaction. The worker acquires a
+write lock on every guarded receipt, checks the generation it derived against, reconciles graph edges,
+and releases the guard marker only at transaction completion. Identity migration also writes the
+receipt node when it advances the generation, so the two operations serialize on the same durable
+object.
 """
 
 from __future__ import annotations
@@ -11,6 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import json
+import uuid
 from typing import Any, Sequence
 
 from .graph import EdgeSet, GraphOutcome, Neo4jGraphMaterializer
@@ -50,14 +56,94 @@ class GenerationalGuardedGraphDerivation:
 
 
 class GenerationalGuardedNeo4jGraphMaterializer(Neo4jGraphMaterializer):
-    """Reconcile graph topology only if every source receipt is still at the observed generation."""
+    """Reconcile topology under receipt locks only at the generations the worker observed."""
+
+    _LOCK_QUERY = """
+        UNWIND $guards AS guard
+        MATCH (receipt:MutationEntityReceipt {storage_key:guard.receipt_storage_key})
+        WHERE receipt.namespace=$namespace
+          AND receipt.source_key=guard.source_key
+        WITH receipt, guard
+        ORDER BY receipt.storage_key ASC
+        SET receipt.mutation_identity_guard_token=$guard_token
+        RETURN receipt.storage_key AS receipt_storage_key,
+               receipt.source_key AS source_key,
+               coalesce(receipt.identity_generation,0) AS actual_generation,
+               guard.expected_identity_generation AS expected_generation
+    """
+
+    _EDGE_QUERY = """
+        UNWIND CASE WHEN size($edges)=0 THEN [null] ELSE $edges END AS candidate
+        OPTIONAL MATCH (source:MutationEntity)
+          WHERE candidate IS NOT NULL
+            AND source.storage_key=candidate.source_storage_key
+            AND source.namespace=$namespace
+            AND source.entity_kind=candidate.source_entity_kind
+        OPTIONAL MATCH (target:MutationEntity)
+          WHERE candidate IS NOT NULL
+            AND target.storage_key=candidate.target_storage_key
+            AND target.namespace=$namespace
+            AND target.entity_kind=candidate.target_entity_kind
+        WITH collect({edge:candidate, source:source, target:target}) AS candidates
+        WITH [row IN candidates WHERE row.edge IS NOT NULL] AS edge_rows
+        WITH edge_rows,
+             size([row IN edge_rows WHERE row.source IS NULL OR row.target IS NULL]) AS missing
+        WHERE missing=0
+        OPTIONAL MATCH ()-[current:MUTATION_EDGE]->()
+          WHERE current.namespace=$namespace
+            AND current.materializer_id=$materializer_id
+            AND current.slot_key=$slot_key
+            AND coalesce(current.active,false)=true
+        WITH edge_rows, collect(current) AS current_edges
+        WITH edge_rows,
+             [r IN current_edges WHERE NOT r.storage_key IN $desired_keys] AS retiring,
+             [r IN current_edges | r.storage_key] AS previous_active_keys
+        FOREACH (r IN retiring |
+            SET r.active=false,
+                r.retired_at=$effective_at,
+                r.updated_at=datetime()
+        )
+        WITH edge_rows, retiring, previous_active_keys
+        CALL (edge_rows) {
+            UNWIND edge_rows AS row
+            WITH row.edge AS edge, row.source AS source, row.target AS target
+            MERGE (source)-[rel:MUTATION_EDGE {storage_key:edge.storage_key}]->(target)
+              ON CREATE SET rel.created_at=datetime()
+            SET rel.namespace=$namespace,
+                rel.edge_kind=edge.edge_kind,
+                rel.materializer_id=$materializer_id,
+                rel.slot_key=$slot_key,
+                rel.active=true,
+                rel.valid_from=edge.valid_from,
+                rel.retired_at=null,
+                rel.contributor_ids_json=edge.contributor_ids_json,
+                rel.effective_authority=edge.effective_authority,
+                rel.confidence=edge.confidence,
+                rel.properties_json=edge.properties_json,
+                rel.projection_hash=$projection_hash,
+                rel.updated_at=datetime()
+            RETURN count(rel) AS upserted
+        }
+        RETURN previous_active_keys AS previous_active_keys,
+               size(retiring) AS retired,
+               upserted AS upserted
+    """
+
+    _UNLOCK_QUERY = """
+        UNWIND $guard_keys AS storage_key
+        MATCH (receipt:MutationEntityReceipt {storage_key:storage_key})
+        WHERE receipt.namespace=$namespace
+          AND receipt.mutation_identity_guard_token=$guard_token
+        REMOVE receipt.mutation_identity_guard_token
+        RETURN count(receipt) AS unlocked
+    """
 
     def reconcile_edges_guarded(
         self,
         outcome: GraphOutcome,
         guards: Sequence[GenerationReceiptIdentityGuard],
     ) -> dict[str, object]:
-        guards = tuple(guards)
+        guards = tuple(sorted(guards, key=lambda row: row.receipt_storage_key))
         guard_keys = [row.receipt_storage_key for row in guards]
         if len(guard_keys) != len(set(guard_keys)):
             raise ValueError("receipt identity guards must be unique")
@@ -127,89 +213,59 @@ class GenerationalGuardedNeo4jGraphMaterializer(Neo4jGraphMaterializer):
                 }
             )
         )
+        guard_token = uuid.uuid4().hex
 
-        rows = self._neo4j.execute(
-            """
-            WITH $guards AS guards
-            WHERE all(guard IN guards WHERE EXISTS {
-                MATCH (receipt:MutationEntityReceipt {
-                    storage_key:guard.receipt_storage_key
-                })
-                WHERE receipt.namespace=$namespace
-                  AND receipt.source_key=guard.source_key
-                  AND coalesce(receipt.identity_generation,0)=guard.expected_identity_generation
-            })
-            WITH 1 AS identity_guard_ok
-            UNWIND CASE WHEN size($edges)=0 THEN [null] ELSE $edges END AS candidate
-            OPTIONAL MATCH (source:MutationEntity)
-              WHERE candidate IS NOT NULL
-                AND source.storage_key=candidate.source_storage_key
-                AND source.namespace=$namespace
-                AND source.entity_kind=candidate.source_entity_kind
-            OPTIONAL MATCH (target:MutationEntity)
-              WHERE candidate IS NOT NULL
-                AND target.storage_key=candidate.target_storage_key
-                AND target.namespace=$namespace
-                AND target.entity_kind=candidate.target_entity_kind
-            WITH collect({edge:candidate, source:source, target:target}) AS candidates
-            WITH [row IN candidates WHERE row.edge IS NOT NULL] AS edge_rows
-            WITH edge_rows,
-                 size([row IN edge_rows WHERE row.source IS NULL OR row.target IS NULL]) AS missing
-            WHERE missing=0
-            OPTIONAL MATCH ()-[current:MUTATION_EDGE]->()
-              WHERE current.namespace=$namespace
-                AND current.materializer_id=$materializer_id
-                AND current.slot_key=$slot_key
-                AND coalesce(current.active,false)=true
-            WITH edge_rows, collect(current) AS current_edges
-            WITH edge_rows,
-                 [r IN current_edges WHERE NOT r.storage_key IN $desired_keys] AS retiring,
-                 [r IN current_edges | r.storage_key] AS previous_active_keys
-            FOREACH (r IN retiring |
-                SET r.active=false,
-                    r.retired_at=$effective_at,
-                    r.updated_at=datetime()
-            )
-            WITH edge_rows, retiring, previous_active_keys
-            CALL (edge_rows) {
-                UNWIND edge_rows AS row
-                WITH row.edge AS edge, row.source AS source, row.target AS target
-                MERGE (source)-[rel:MUTATION_EDGE {storage_key:edge.storage_key}]->(target)
-                  ON CREATE SET rel.created_at=datetime()
-                SET rel.namespace=$namespace,
-                    rel.edge_kind=edge.edge_kind,
-                    rel.materializer_id=$materializer_id,
-                    rel.slot_key=$slot_key,
-                    rel.active=true,
-                    rel.valid_from=edge.valid_from,
-                    rel.retired_at=null,
-                    rel.contributor_ids_json=edge.contributor_ids_json,
-                    rel.effective_authority=edge.effective_authority,
-                    rel.confidence=edge.confidence,
-                    rel.properties_json=edge.properties_json,
-                    rel.projection_hash=$projection_hash,
-                    rel.updated_at=datetime()
-                RETURN count(rel) AS upserted
-            }
-            RETURN previous_active_keys AS previous_active_keys,
-                   size(retiring) AS retired,
-                   upserted AS upserted
-            """,
-            {
-                "namespace": self.namespace,
-                "materializer_id": outcome.materializer_id,
-                "slot_key": outcome.slot_key,
-                "effective_at": outcome.effective_at,
-                "desired_keys": desired_keys,
-                "projection_hash": projection_hash,
-                "edges": edge_rows,
-                "guards": guard_rows,
-            },
-        )
-        if not rows:
-            raise ValueError(
-                "identity guard changed before graph write or graph endpoints are unresolved"
-            )
+        edge_params = {
+            "namespace": self.namespace,
+            "materializer_id": outcome.materializer_id,
+            "slot_key": outcome.slot_key,
+            "effective_at": outcome.effective_at,
+            "desired_keys": desired_keys,
+            "projection_hash": projection_hash,
+            "edges": edge_rows,
+        }
+
+        def _transaction(tx: Any) -> list[dict[str, Any]]:
+            locked = [
+                record.data()
+                for record in tx.run(
+                    self._LOCK_QUERY,
+                    guards=guard_rows,
+                    namespace=self.namespace,
+                    guard_token=guard_token,
+                )
+            ]
+            if len(locked) != len(guard_rows):
+                raise ValueError("identity guard changed before graph write: receipt missing")
+            for row in locked:
+                if int(row.get("actual_generation",0) or 0) != int(
+                    row.get("expected_generation",-1)
+                ):
+                    raise ValueError("identity guard changed before graph write: generation advanced")
+
+            rows = [record.data() for record in tx.run(self._EDGE_QUERY, **edge_params)]
+            if not rows:
+                raise ValueError("graph edge materialization could not resolve all endpoint entities")
+
+            unlocked = [
+                record.data()
+                for record in tx.run(
+                    self._UNLOCK_QUERY,
+                    guard_keys=guard_keys,
+                    namespace=self.namespace,
+                    guard_token=guard_token,
+                )
+            ]
+            if not unlocked or int(unlocked[0].get("unlocked",0) or 0) != len(guard_rows):
+                raise RuntimeError("identity guard lock cleanup did not cover every receipt")
+            return rows
+
+        # Spike-local use of the production adapter's private driver seam. This proves the transaction
+        # semantics we need; a promoted implementation should expose a supported transaction API.
+        driver = self._neo4j._get_driver()
+        with driver.session(database=self._neo4j.database) as session:
+            rows = session.execute_write(_transaction)
+
         row = rows[0]
         previous_active = tuple(str(value) for value in (row.get("previous_active_keys") or []))
         return {
