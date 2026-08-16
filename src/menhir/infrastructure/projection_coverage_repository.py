@@ -75,6 +75,7 @@ class ProjectionCoverageRepository:
                    CASE
                        WHEN size(currents) = 1 THEN currents[0].assertion_id
                        WHEN size(currents) > 1 THEN '__multiple_current__'
+                       WHEN h IS NOT NULL THEN '__missing_current__'
                        ELSE null
                    END AS head_current_assertion_id,
                    CASE

@@ -461,6 +461,21 @@ def build_projection_coverage_report(
 
         if (
             lifecycle is AssertionLifecycle.CURRENT
+            and binding is BindingStatus.BINDING_MISMATCH
+        ):
+            coverage_list.append(
+                ProjectionCoverageViolation(
+                    AuditFailureClassification.CORRUPT_OR_BYPASSED_WRITE_PATH,
+                    "current assertion binding does not match durable TypedAssertionHead authority",
+                    assertion_id=assertion_id,
+                    slot_key=slot,
+                    repairable=False,
+                    recommended_repair=RecommendedRepair.INSPECT_WRITE_PATH,
+                )
+            )
+
+        if (
+            lifecycle is AssertionLifecycle.CURRENT
             and binding is BindingStatus.BOUND
             and eligibility_role is EligibilityRole.MATERIALIZABLE
             and fold_role is None

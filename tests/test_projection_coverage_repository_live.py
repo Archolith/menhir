@@ -201,6 +201,32 @@ def test_projection_coverage_live_clean_pending_and_history(test_neo4j_repo) -> 
     assert records["new"].projection_status is ProjectionStatus.PROJECTED
 
 
+def test_projection_coverage_live_missing_current_head_fails_closed(test_neo4j_repo) -> None:
+    subject = "entity-live-missing-current"
+    _seed_assertion(
+        test_neo4j_repo,
+        "detached",
+        subject_uuid=subject,
+        make_current=False,
+    )
+
+    source = ProjectionCoverageRepository(test_neo4j_repo)
+    rows = source.assertions_for_projection_audit(subject, namespace=NS)
+    assert rows[0]["head_present"] is True
+    assert rows[0]["head_current_count"] == 0
+    assert rows[0]["head_current_assertion_id"] == "__missing_current__"
+
+    report = ProjectionCoverageService(source).audit_entity(subject, namespace=NS)
+    record = report.accounting[0]
+    assert record.binding_status is BindingStatus.BINDING_MISMATCH
+    assert record.fold_role is None
+    assert report.fold.fold.states == ()
+    assert report.clean is False
+    assert AuditFailureClassification.CORRUPT_OR_BYPASSED_WRITE_PATH in {
+        violation.classification for violation in report.coverage_violations
+    }
+
+
 def test_projection_coverage_live_binding_pending_and_parity_drift(test_neo4j_repo) -> None:
     sentinel = "unbound:source-live"
     _seed_assertion(
