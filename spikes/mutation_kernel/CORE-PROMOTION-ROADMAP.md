@@ -25,7 +25,7 @@ Clean tested implementation: `f49ac3aebeea4ca862e1b18f3851df7095234d3f`
 
 Goal: make the existing production `ViewKind` vocabulary injectable without changing default behavior.
 
-Expected/implemented properties:
+Implemented properties:
 
 - Existing built-in View kinds remain the default registry.
 - Existing callers can continue constructing `ViewRepository` normally.
@@ -33,45 +33,60 @@ Expected/implemented properties:
 - Injected registries are instance-local.
 - Registry key and `kind.name` mismatches fail closed.
 - A test-only non-coding `ViewKind` can be recorded without editing shared View persistence machinery.
-- No schema, scalar, writer, or query semantic changes are required.
+- No schema, scalar, writer, or query semantic changes were required.
 
-Exit criterion: focused registration tests execute green in CI and the clean implementation branch contains only the intended production seam plus tests.
+Exit criterion: **met**. Focused registration tests executed green in branch-only CI and the clean implementation branch contains only the intended production seam plus tests.
 
 ## Tranche 2 — Evidence-kind registration
 
-**Status: in progress**
+**Status: implemented and validated**
 
 Branch: `research/core-promotion-2`
 
+Clean tested implementation: `7dbadb76ab116815308d671d492c98b33b3055cd`
+
+Validation workflow run: `31921918167` (`core-promotion-2-validation`), successful on temporary validation SHA `86778149c644e401bd3e0f21b96e75b950c2b510`; the branch was then reset to the clean implementation SHA so the temporary workflow is not part of the tranche.
+
 Goal: replace the closed evidence/source-kind vocabulary with one immutable registration seam while preserving all current built-in compatibility surfaces.
 
-Target design:
+Implemented design:
 
-- Introduce a single `EvidenceKindRegistry` under `domain/truth/kinds.py`.
-- Each registered evidence kind may declare:
+- Added a single immutable `EvidenceKindRegistry` under `domain/truth/kinds.py`.
+- Each `EvidenceKindDefinition` may declare:
   - canonical kind ID,
   - accepted source-label aliases,
   - anchor/self-source classification,
-  - current-style belief signal value,
-  - diversity family.
-- Preserve current module-level constants/helpers as compatibility projections of the default registry:
+  - optional existing `EvidenceSignal`,
+  - optional diversity family.
+- Preserved current module-level constants as compatibility projections of the default registry:
   - `ANCHOR_KINDS`
   - `SELF_SOURCE_KINDS`
   - `SOURCE_LABEL_TO_KIND`
   - `KIND_TO_SIGNAL`
   - `DIVERSITY_FAMILY`
-  - existing helper functions
-- Built-in behavior must remain unchanged.
-- Extension registration must not mutate the default registry.
-- A test-only investigative evidence kind should be addable without editing core lookup tables.
+- Existing consumers remain unchanged.
+- Extension registration is additive and instance-local: `with_definition()` returns a new registry and never mutates `DEFAULT_EVIDENCE_KIND_REGISTRY`.
+- Duplicate canonical kinds, ambiguous aliases, aliases colliding with another canonical kind, and contradictory anchor/self-source classification fail closed.
+- Existing rule-zero source resolution remains unchanged: unknown/harness source labels collapse to `agent_inference`.
+- A non-coding `investigation.deed` evidence kind can be registered with deed aliases and a public-record diversity family without editing the default vocabulary.
+- A personality self-source kind can be registered without making it an external anchor.
+- Source-confidence thresholds, belief weights, admission policy, and purpose-specific trust semantics deliberately remain outside this registry.
 
-### Known pre-existing issue deliberately out of scope
+Compatibility note: an earlier planning note incorrectly described `KIND_TO_SIGNAL` as float-valued. Re-reading production before implementation confirmed it already maps to `EvidenceSignal` enum values. No scoring-type remediation was required or performed in this tranche.
 
-`KIND_TO_SIGNAL` currently contains float values while downstream `BeliefEvidence.signal` is typed as `EvidenceSignal`. Promotion Tranche 2 should preserve current behavior rather than silently combining remediation with abstraction. If confirmed as a correctness issue, fix it in a separate remediation change or explicitly expand the tranche with documented justification.
+Validation corpus:
 
-Exit criterion: existing truth/self-reinforcement/belief compatibility tests plus new registry tests execute green, and a non-coding evidence kind can be registered externally.
+- `tests/domain/test_evidence_kind_registry.py`
+- `tests/domain/test_self_reinforcement.py`
+- `tests/domain/test_belief.py`
+- `tests/domain/test_belief_currentness.py`
+- `tests/domain/test_diversity.py`
+
+Exit criterion: **met**. The validation workflow completed successfully, existing compatibility suites stayed green, and a non-coding evidence kind can be registered externally without mutating the built-in registry.
 
 ## Tranche 3 — Authority and admission policy boundary
+
+**Status: next**
 
 Goal: remove the assumption that one global authority hierarchy is semantically sufficient for every domain while retaining a hard core-controlled admission ceiling.
 
@@ -271,8 +286,8 @@ That distinction should guide promotion decisions: **keep domain meaning outside
 
 ```text
 1. Open ViewKind registration                         DONE
-2. Open evidence/source-kind registration             IN PROGRESS
-3. Promote authority/admission boundary
+2. Open evidence/source-kind registration             DONE
+3. Promote authority/admission boundary               NEXT
 4. Register projection definitions
 5. Promote lifecycle/versioning/fencing
 6. Prove investigation through public extension API
