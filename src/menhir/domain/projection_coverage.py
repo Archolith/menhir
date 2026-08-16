@@ -438,6 +438,12 @@ def build_projection_coverage_report(
     coverage_list = list(coverage)
 
     parity_slots = {item.slot_key for item in parity}
+    coverage_error_slots = {
+        item.slot_key
+        for item in coverage
+        if item.slot_key is not None
+        and item.classification is AuditFailureClassification.CORRUPT_OR_BYPASSED_WRITE_PATH
+    }
     view_slots = {
         _slot_of_view(view)
         for view in actual_views
@@ -481,7 +487,7 @@ def build_projection_coverage_report(
             projection_status = ProjectionStatus.NOT_REQUIRED
         elif pending:
             projection_status = ProjectionStatus.PROJECTION_PENDING
-        elif slot not in view_slots or slot in parity_slots:
+        elif slot not in view_slots or slot in parity_slots or slot in coverage_error_slots:
             projection_status = ProjectionStatus.PROJECTION_ERROR
         else:
             projection_status = ProjectionStatus.PROJECTED
