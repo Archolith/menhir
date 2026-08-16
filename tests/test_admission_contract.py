@@ -8,6 +8,7 @@ from menhir.domain.admission import (
     AdmissionPolicyDecision,
     AdmissionRequest,
     AdmissionStatus,
+    AuthorityRelation,
     OrderedAuthoritySemantics,
     SourceAuthorityGrant,
     SourceProvenance,
@@ -21,10 +22,19 @@ class StaticPolicy:
     def __init__(self, decision: AdmissionPolicyDecision) -> None:
         self.decision = decision
         self.calls = 0
+        self.last_call = None
 
-    def evaluate(self, *, request, source, grant):
+    def evaluate(self, *, request, sources, grants, ingress_ceiling):
         self.calls += 1
+        self.last_call = (request, sources, grants, ingress_ceiling)
         return self.decision
+
+
+class IncomparableSemantics:
+    def compare(self, left: str, right: str) -> AuthorityRelation:
+        if left == right:
+            return AuthorityRelation.EQUAL
+        return AuthorityRelation.INCOMPARABLE
 
 
 class FakeNeo4j:
@@ -37,15 +47,23 @@ class FakeNeo4j:
         return self.rows
 
 
+def _source(
+    source_id: str = "turn-1",
+    source_kind: str = "turn_evidence",
+) -> SourceProvenance:
+    return SourceProvenance(source_id, source_kind)
+
+
 def _grant(
     *,
     source_id: str = "turn-1",
     source_kind: str = "turn_evidence",
     provenance_class: str = "model_inference",
     ceiling: str = "observed",
+    grant_id: str | None = None,
 ) -> SourceAuthorityGrant:
     return SourceAuthorityGrant(
-        grant_id="grant-1",
+        grant_id=grant_id or f"grant:{source_id}:{source_kind}",
         source_id=source_id,
         source_kind=source_kind,
         provenance_class=provenance_class,
@@ -66,15 +84,12 @@ def _allow(*, ceiling: str | None = None, reason: str = "allowed") -> StaticPoli
 
 
 @pytest.mark.unit
-def test_requested_authority_is_untrusted_and_clamped_to_core_grant():
+def test_requested_authority_is_untrusted_and_clamped_to_ingress_ceiling():
     semantics = OrderedAuthoritySemantics(("observed", "reviewed", "operator"))
     decision = decide_admission(
-        request=AdmissionRequest(
-            requested_authority="operator",
-            purpose="current_fact",
-        ),
-        source=SourceProvenance("turn-1", "turn_evidence"),
-        grant=_grant(ceiling="observed"),
+        request=AdmissionRequest("operator", "current_fact"),
+        sources=(_source(),),
+        grants=(_grant(ceiling="observed"),),
         policy=_allow(),
         semantics=semantics,
     )
@@ -83,23 +98,145 @@ def test_requested_authority_is_untrusted_and_clamped_to_core_grant():
     assert decision.effective_authority == "observed"
     assert decision.requested_authority == "operator"
     assert decision.requested_promotion is True
-    assert decision.admission_ceiling == "observed"
+    assert decision.ingress_ceiling == "observed"
 
 
 @pytest.mark.unit
-def test_source_grant_binding_is_exact_and_rejects_before_policy():
+def test_complete_multi_source_grant_set_uses_weakest_ingress_and_stable_order():
+    semantics = OrderedAuthoritySemantics(
+        ("anonymous_tip", "media_report", "official_record")
+    )
+    source_a = _source("a-tip", "intake")
+    source_z = _source("z-deed", "county_record")
+    grant_a = _grant(
+        source_id="a-tip",
+        source_kind="intake",
+        provenance_class="anonymous_statement",
+        ceiling="anonymous_tip",
+    )
+    grant_z = _grant(
+        source_id="z-deed",
+        source_kind="county_record",
+        provenance_class="recorded_instrument",
+        ceiling="official_record",
+    )
+    policy = _allow()
+
+    decision = decide_admission(
+        request=AdmissionRequest("official_record", "ownership_hypothesis"),
+        sources=(source_z, source_a),
+        grants=(grant_z, grant_a),
+        policy=policy,
+        semantics=semantics,
+    )
+
+    assert decision.admitted is True
+    assert decision.ingress_ceiling == "anonymous_tip"
+    assert decision.effective_authority == "anonymous_tip"
+    assert decision.sources == (source_a, source_z)
+    assert decision.grants == (grant_a, grant_z)
+    assert policy.last_call is not None
+    _request, seen_sources, seen_grants, seen_ingress = policy.last_call
+    assert seen_sources == (source_a, source_z)
+    assert seen_grants == (grant_a, grant_z)
+    assert seen_ingress == "anonymous_tip"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("sources", "grants"),
+    [
+        ((_source(),), ()),
+        (
+            (_source(),),
+            (
+                _grant(),
+                _grant(source_id="extra", source_kind="tool_output"),
+            ),
+        ),
+        (
+            (_source("expected", "turn_evidence"),),
+            (_grant(source_id="other", source_kind="turn_evidence"),),
+        ),
+    ],
+)
+def test_source_grant_sets_must_match_exactly_before_policy(sources, grants):
     policy = _allow()
     decision = decide_admission(
         request=AdmissionRequest("reviewed", "current_fact"),
-        source=SourceProvenance("turn-OTHER", "turn_evidence"),
-        grant=_grant(ceiling="reviewed"),
+        sources=sources,
+        grants=grants,
         policy=policy,
         semantics=OrderedAuthoritySemantics(("observed", "reviewed")),
     )
 
     assert decision.status is AdmissionStatus.REJECTED
     assert decision.effective_authority is None
-    assert "does not match" in decision.reason
+    assert "sets do not match" in decision.reason
+    assert policy.calls == 0
+
+
+@pytest.mark.unit
+def test_missing_or_duplicate_foundation_inputs_fail_closed_before_policy():
+    policy = _allow()
+    semantics = OrderedAuthoritySemantics(("observed", "reviewed"))
+
+    missing = decide_admission(
+        request=AdmissionRequest("observed", "current_fact"),
+        sources=(),
+        grants=(),
+        policy=policy,
+        semantics=semantics,
+    )
+    duplicate_source = decide_admission(
+        request=AdmissionRequest("observed", "current_fact"),
+        sources=(_source(), _source()),
+        grants=(_grant(),),
+        policy=policy,
+        semantics=semantics,
+    )
+    duplicate_grant = decide_admission(
+        request=AdmissionRequest("observed", "current_fact"),
+        sources=(_source(),),
+        grants=(_grant(grant_id="g1"), _grant(grant_id="g2")),
+        policy=policy,
+        semantics=semantics,
+    )
+    duplicate_grant_id = decide_admission(
+        request=AdmissionRequest("observed", "current_fact"),
+        sources=(_source("a", "turn"), _source("b", "turn")),
+        grants=(
+            _grant(source_id="a", source_kind="turn", grant_id="same"),
+            _grant(source_id="b", source_kind="turn", grant_id="same"),
+        ),
+        policy=policy,
+        semantics=semantics,
+    )
+
+    assert missing.reason == "missing source provenance"
+    assert duplicate_source.reason == "duplicate source provenance"
+    assert duplicate_grant.reason == "duplicate source authority grant"
+    assert duplicate_grant_id.reason == "duplicate source authority grant id"
+    assert policy.calls == 0
+
+
+@pytest.mark.unit
+def test_incomparable_source_ceilings_fail_closed_before_policy():
+    policy = _allow()
+    decision = decide_admission(
+        request=AdmissionRequest("red", "current_fact"),
+        sources=(_source("a", "one"), _source("b", "two")),
+        grants=(
+            _grant(source_id="a", source_kind="one", ceiling="red"),
+            _grant(source_id="b", source_kind="two", ceiling="blue"),
+        ),
+        policy=policy,
+        semantics=IncomparableSemantics(),
+    )
+
+    assert decision.status is AdmissionStatus.REJECTED
+    assert decision.ingress_ceiling is None
+    assert decision.reason == "source authority ceilings are incomparable"
     assert policy.calls == 0
 
 
@@ -115,18 +252,16 @@ def test_investigation_policy_can_lower_official_record_for_beneficial_owner():
             "official_record",
         )
     )
+    grant = _grant(
+        source_id="deed-17",
+        source_kind="county_record",
+        provenance_class="recorded_instrument",
+        ceiling="official_record",
+    )
     decision = decide_admission(
-        request=AdmissionRequest(
-            requested_authority="official_record",
-            purpose="beneficial_owner",
-        ),
-        source=SourceProvenance("deed-17", "county_record"),
-        grant=_grant(
-            source_id="deed-17",
-            source_kind="county_record",
-            provenance_class="recorded_instrument",
-            ceiling="official_record",
-        ),
+        request=AdmissionRequest("official_record", "beneficial_owner"),
+        sources=(_source("deed-17", "county_record"),),
+        grants=(grant,),
         policy=_allow(
             ceiling="media_report",
             reason="record proves title, not beneficial ownership",
@@ -138,7 +273,7 @@ def test_investigation_policy_can_lower_official_record_for_beneficial_owner():
     assert decision.effective_authority == "media_report"
     assert decision.policy_ceiling == "media_report"
     assert decision.policy_attempted_promotion is False
-    assert decision.provenance_class == "recorded_instrument"
+    assert decision.grants[0].provenance_class == "recorded_instrument"
 
 
 @pytest.mark.unit
@@ -148,16 +283,15 @@ def test_personality_policy_uses_same_contract_with_different_authority_vocabula
         ("model_guess", "third_party_statement", "explicit_user_preference")
     )
     decision = decide_admission(
-        request=AdmissionRequest(
-            requested_authority="explicit_user_preference",
-            purpose="own_preference",
-        ),
-        source=SourceProvenance("turn-pref", "conversation_turn"),
-        grant=_grant(
-            source_id="turn-pref",
-            source_kind="conversation_turn",
-            provenance_class="explicit_user_statement",
-            ceiling="explicit_user_preference",
+        request=AdmissionRequest("explicit_user_preference", "own_preference"),
+        sources=(_source("turn-pref", "conversation_turn"),),
+        grants=(
+            _grant(
+                source_id="turn-pref",
+                source_kind="conversation_turn",
+                provenance_class="explicit_user_statement",
+                ceiling="explicit_user_preference",
+            ),
         ),
         policy=_allow(),
         semantics=semantics,
@@ -169,18 +303,20 @@ def test_personality_policy_uses_same_contract_with_different_authority_vocabula
 
 
 @pytest.mark.unit
-def test_policy_cannot_raise_above_core_admission_ceiling():
+def test_policy_cannot_raise_above_core_ingress_ceiling():
     semantics = OrderedAuthoritySemantics(
         ("model_inference", "anonymous_tip", "official_record")
     )
     decision = decide_admission(
         request=AdmissionRequest("anonymous_tip", "ownership_hypothesis"),
-        source=SourceProvenance("tip-1", "intake"),
-        grant=_grant(
-            source_id="tip-1",
-            source_kind="intake",
-            provenance_class="anonymous_statement",
-            ceiling="anonymous_tip",
+        sources=(_source("tip-1", "intake"),),
+        grants=(
+            _grant(
+                source_id="tip-1",
+                source_kind="intake",
+                provenance_class="anonymous_statement",
+                ceiling="anonymous_tip",
+            ),
         ),
         policy=_allow(ceiling="official_record"),
         semantics=semantics,
@@ -203,12 +339,14 @@ def test_policy_rejection_produces_no_effective_authority():
     )
     decision = decide_admission(
         request=AdmissionRequest("reviewed", "ownership_hypothesis"),
-        source=SourceProvenance("tip-2", "intake"),
-        grant=_grant(
-            source_id="tip-2",
-            source_kind="intake",
-            provenance_class="anonymous_statement",
-            ceiling="reviewed",
+        sources=(_source("tip-2", "intake"),),
+        grants=(
+            _grant(
+                source_id="tip-2",
+                source_kind="intake",
+                provenance_class="anonymous_statement",
+                ceiling="reviewed",
+            ),
         ),
         policy=policy,
         semantics=OrderedAuthoritySemantics(("observed", "reviewed")),
@@ -224,8 +362,8 @@ def test_policy_rejection_produces_no_effective_authority():
 def test_unknown_authority_fails_closed_as_incomparable():
     decision = decide_admission(
         request=AdmissionRequest("forged_superuser", "current_fact"),
-        source=SourceProvenance("turn-1", "turn_evidence"),
-        grant=_grant(ceiling="reviewed"),
+        sources=(_source(),),
+        grants=(_grant(ceiling="reviewed"),),
         policy=_allow(),
         semantics=OrderedAuthoritySemantics(("observed", "reviewed")),
     )
@@ -242,12 +380,14 @@ def test_legacy_scalar_order_is_consumed_without_moving_it_into_generic_core():
 
     decision = decide_admission(
         request=AdmissionRequest("user", "scalar_state"),
-        source=SourceProvenance("turn-scalar", "turn_evidence"),
-        grant=_grant(
-            source_id="turn-scalar",
-            source_kind="turn_evidence",
-            provenance_class="model_inference",
-            ceiling="agent",
+        sources=(_source("turn-scalar", "turn_evidence"),),
+        grants=(
+            _grant(
+                source_id="turn-scalar",
+                source_kind="turn_evidence",
+                provenance_class="model_inference",
+                ceiling="agent",
+            ),
         ),
         policy=_allow(),
         semantics=OrderedAuthoritySemantics(tuple(EVIDENCE_TIERS)),
@@ -262,8 +402,8 @@ def test_legacy_scalar_order_is_consumed_without_moving_it_into_generic_core():
 def test_admission_receipt_is_immutable():
     decision = decide_admission(
         request=AdmissionRequest("observed", "current_fact"),
-        source=SourceProvenance("turn-1", "turn_evidence"),
-        grant=_grant(ceiling="observed"),
+        sources=(_source(),),
+        grants=(_grant(ceiling="observed"),),
         policy=_allow(),
         semantics=OrderedAuthoritySemantics(("observed", "reviewed")),
     )
