@@ -8,6 +8,7 @@ the generic admission engine independently enforces the core-issued source ceili
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import ClassVar
 
 from .admission import ExtensionAdmission, SourceAuthorityGrant, weakest_authority
 from .investigation import OWNERSHIP_ASSERTION
@@ -70,7 +71,7 @@ class InvestigationAdmissionPolicy:
     policy_id: str = "investigation.admission"
     version: int = 1
 
-    _SOURCE_CEILINGS = {
+    _SOURCE_CEILINGS: ClassVar[dict[str, str]] = {
         "deed": "trusted_tool",
         "official_filing": "trusted_tool",
         "court_record": "trusted_tool",
