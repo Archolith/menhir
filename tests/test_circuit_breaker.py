@@ -406,3 +406,42 @@ async def test_trip_failure_increments_breaker():
 
     assert breaker._failures == 2
     assert breaker._state == CircuitState.CLOSED
+
+
+# ---------------------------------------------------------------------------
+# 10. A cancelled probe must not wedge the breaker permanently
+# ---------------------------------------------------------------------------
+
+async def _slow_probe() -> str:
+    await asyncio.sleep(3600.0)
+    return "never"
+
+
+@pytest.mark.asyncio
+async def test_cancelled_probe_does_not_wedge_breaker():
+    breaker = CircuitBreaker(name="test", failure_threshold=3, cooldown_seconds=30.0)
+
+    # 1. Trip the breaker with 3 trip-worthy failures
+    for _ in range(3):
+        with pytest.raises(asyncio.TimeoutError):
+            await breaker.call(_fail_timeout)
+
+    assert breaker._state == CircuitState.OPEN
+
+    # 2. Fast-forward past cooldown
+    breaker._opened_at = monotonic() - breaker.cooldown_seconds - 1.0
+
+    # 3. Probe is cancelled by an outer wait_for timeout
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(breaker.call(_slow_probe), timeout=0.05)
+
+    # 4. The in-flight flag must be cleared and state returned to OPEN
+    assert breaker._probe_in_flight is False
+    assert breaker._state == CircuitState.OPEN
+
+    # 5. Fast-forward past the restarted cooldown; a healthy call must succeed
+    breaker._opened_at = monotonic() - breaker.cooldown_seconds - 1.0
+    result = await breaker.call(_succeed)
+
+    assert result == "ok"
+    assert breaker._state == CircuitState.CLOSED

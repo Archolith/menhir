@@ -197,6 +197,21 @@ class CircuitBreaker:
                         self.name, type(exc).__name__,
                     )
             raise
+        except BaseException:
+            # CancelledError / KeyboardInterrupt / SystemExit: the probe never completed,
+            # so we learned nothing about backend health. Return to OPEN with a fresh
+            # cooldown timer so the next caller may probe again, and clear the in-flight
+            # flag that would otherwise wedge the breaker permanently.
+            #
+            # Deliberately does NOT acquire self._lock: this runs while the task is being
+            # cancelled, and awaiting the lock here can re-raise CancelledError before the
+            # cleanup executes, reintroducing the bug. These are plain attribute writes and
+            # only one probe can be in flight by construction, so nothing races them.
+            if is_probe:
+                self._state = CircuitState.OPEN
+                self._opened_at = monotonic()
+                self._probe_in_flight = False
+            raise
 
         # Success
         async with self._lock:
