@@ -1661,7 +1661,7 @@ class MemoryGraphAdapter:
     def promote_artifact(self, artifact_id: str, *, trusted_confidence: float = 0.9) -> bool:
         return self._artifacts.promote_artifact(artifact_id, trusted_confidence=trusted_confidence)
 
-    def supersede_artifact(self, old_id: str, new_id: str) -> bool:
+    def supersede_l4_artifact(self, old_id: str, new_id: str) -> bool:
         return self._artifacts.supersede_artifact(old_id, new_id)
 
     def find_artifacts(
