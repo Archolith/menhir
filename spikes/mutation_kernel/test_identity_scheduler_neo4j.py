@@ -121,6 +121,8 @@ def test_identity_change_dirties_graph_work_and_stale_workers_cannot_restore_old
                 authority="manual",
             )
         )
+        assert historical_owner.entity_id != corrected_a.entity_id
+        assert corrected_a.entity_id != corrected_b.entity_id
         parcel = _parcel(graph)
 
         claim = ownership_assertion(
@@ -174,6 +176,26 @@ def test_identity_change_dirties_graph_work_and_stale_workers_cannot_restore_old
             ),
         )
         identity.apply(first_migration)
+
+        resolved_after_first = identity.resolve(
+            entity_kind=historical_owner.entity_kind,
+            entity_id=historical_owner.entity_id,
+            source_key=historical_proposal.source_key,
+        )
+        assert resolved_after_first.entity is not None
+        assert resolved_after_first.entity.entity_id == corrected_a.entity_id
+        guarded_receipt = repo.execute(
+            """
+            MATCH (receipt:MutationEntityReceipt {storage_key:$storage_key})
+                  -[:CURRENT_IDENTITY]->(current:MutationEntity)
+            RETURN receipt.source_key AS source_key,
+                   current.entity_id AS current_entity_id
+            """,
+            {"storage_key": stale_pre_migration.guards[0].receipt_storage_key},
+        )
+        assert len(guarded_receipt) == 1
+        assert str(guarded_receipt[0]["source_key"]) == historical_proposal.source_key
+        assert str(guarded_receipt[0]["current_entity_id"]) == corrected_a.entity_id
 
         with pytest.raises(ValueError, match="identity guard changed"):
             graph.reconcile_edges_guarded(
