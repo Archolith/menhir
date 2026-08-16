@@ -220,7 +220,7 @@ def test_projection_coverage_live_missing_current_head_fails_closed(test_neo4j_r
     record = report.accounting[0]
     assert record.binding_status is BindingStatus.BINDING_MISMATCH
     assert record.fold_role is None
-    assert report.fold.fold.states == ()
+    assert report.fold.fold.states == []
     assert report.clean is False
     assert AuditFailureClassification.CORRUPT_OR_BYPASSED_WRITE_PATH in {
         violation.classification for violation in report.coverage_violations
