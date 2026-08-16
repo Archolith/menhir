@@ -13,7 +13,7 @@ from menhir.domain.admission import (
 
 
 class PolicyWithBogusComparator:
-    """Policy may propose a ceiling; it does not own the core comparison primitive."""
+    """Policy may propose a ceiling; it does not own the trusted comparison primitive."""
 
     def __init__(self) -> None:
         self.compare_calls = 0
@@ -22,7 +22,7 @@ class PolicyWithBogusComparator:
         self.compare_calls += 1
         raise AssertionError("admission must not use a policy-provided comparator")
 
-    def evaluate(self, *, request, source, grant):
+    def evaluate(self, *, request, sources, grants, ingress_ceiling):
         return AdmissionPolicyDecision(
             accepted=True,
             policy_id="domain-policy",
@@ -36,13 +36,15 @@ def test_policy_cannot_replace_trusted_authority_semantics():
     policy = PolicyWithBogusComparator()
     decision = decide_admission(
         request=AdmissionRequest("high", "current_fact"),
-        source=SourceProvenance("source-1", "captured_record"),
-        grant=SourceAuthorityGrant(
-            grant_id="grant-1",
-            source_id="source-1",
-            source_kind="captured_record",
-            provenance_class="machine_observation",
-            authority_ceiling="low",
+        sources=(SourceProvenance("source-1", "captured_record"),),
+        grants=(
+            SourceAuthorityGrant(
+                grant_id="grant-1",
+                source_id="source-1",
+                source_kind="captured_record",
+                provenance_class="machine_observation",
+                authority_ceiling="low",
+            ),
         ),
         policy=policy,
         semantics=OrderedAuthoritySemantics(("low", "high")),
