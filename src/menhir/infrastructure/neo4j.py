@@ -6,10 +6,10 @@ import logging
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable, TypeVar
 
 try:
-    from neo4j import GraphDatabase, Driver
+    from neo4j import Driver, GraphDatabase
     from neo4j.exceptions import ServiceUnavailable, SessionExpired, TransientError
 except ModuleNotFoundError as exc:  # pragma: no cover - import guard
     GraphDatabase = None  # type: ignore[assignment]
@@ -25,6 +25,28 @@ _TRANSIENT_RETRIES = 3
 _TRANSIENT_BACKOFF_BASE = 0.5
 
 logger = logging.getLogger(__name__)
+
+_T = TypeVar("_T")
+
+
+@dataclass(frozen=True)
+class Neo4jTransaction:
+    """Transaction-scoped adapter exposing the same ``execute`` shape as repositories use.
+
+    Existing repositories can be instantiated against this adapter inside ``execute_write`` without
+    reaching into driver-private APIs or opening a second session. The driver owns retry semantics;
+    this adapter only materializes query rows from the transaction it was handed.
+    """
+
+    _tx: Any = field(repr=False)
+
+    def execute(
+        self,
+        query: str,
+        params: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        result = self._tx.run(query, **(params or {}))
+        return [record.data() for record in result]
 
 
 @dataclass
@@ -92,7 +114,26 @@ class Neo4jRepository:
                 wait = _TRANSIENT_BACKOFF_BASE * (2 ** attempt)
                 logger.warning(
                     "Neo4j transient error (attempt %d/%d), retrying in %.1fs: %s",
-                    attempt + 1, _TRANSIENT_RETRIES, wait, exc,
+                    attempt + 1,
+                    _TRANSIENT_RETRIES,
+                    wait,
+                    exc,
                 )
                 time.sleep(wait)
         raise last_exc  # type: ignore[misc]
+
+    def execute_write(self, work: Callable[[Neo4jTransaction], _T]) -> _T:
+        """Run ``work`` inside one driver-managed write transaction.
+
+        The callback receives a transaction-scoped adapter with the same ``execute(query, params)``
+        surface used by Menhir repositories. That lets lifecycle code fence work and then reuse an
+        existing View repository against the same transaction rather than opening a second session.
+
+        The Neo4j driver may retry ``work`` on retryable transaction errors, so callers must keep the
+        callback limited to transaction-local, replay-safe graph operations; external side effects do
+        not belong inside it.
+        """
+        if not callable(work):
+            raise TypeError("execute_write requires a callable transaction body")
+        with self._get_driver().session(database=self.database) as session:
+            return session.execute_write(lambda tx: work(Neo4jTransaction(tx)))
