@@ -1,20 +1,22 @@
 """Source-bound admission authority contracts.
 
 The core rule is deliberately narrow: an untrusted claim may request authority, but it
-cannot mint authority. A core-issued :class:`SourceAuthorityGrant` caps that request for
-one exact source record, and a domain policy may reject the claim or lower the ceiling
-further.
+cannot mint authority. Trusted source grants cap that request for the complete set of
+durable source records behind the claim, and a domain policy may reject the claim or
+lower the ceiling further.
 
-This module intentionally defines no global authority hierarchy. Callers inject
-:class:`AuthoritySemantics`, so typed scalars can keep their existing total order while
-other domains use different labels or richer comparison rules.
+This module intentionally defines no global authority hierarchy. Callers supply trusted
+:class:`AuthoritySemantics` from the registered domain/deployment contract, so typed
+scalars can keep their existing total order while other domains use different labels or
+richer comparison rules. The comparator is governance configuration, not claim payload
+and not a per-decision policy response.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Protocol
+from typing import Protocol, Sequence
 
 __all__ = [
     "AdmissionDecision",
@@ -28,6 +30,7 @@ __all__ = [
     "SourceAuthorityGrant",
     "SourceProvenance",
     "decide_admission",
+    "weakest_authority",
 ]
 
 
@@ -41,7 +44,7 @@ class AuthorityRelation(str, Enum):
 
 
 class AuthoritySemantics(Protocol):
-    """Domain-owned comparison semantics for otherwise opaque authority labels."""
+    """Trusted comparison semantics for otherwise opaque authority labels."""
 
     def compare(self, left: str, right: str) -> AuthorityRelation:
         """Return how ``left`` relates to ``right``."""
@@ -73,9 +76,9 @@ class OrderedAuthoritySemantics:
         return AuthorityRelation.EQUAL
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, order=True)
 class SourceProvenance:
-    """Core-observed identity of the durable source record behind a claim."""
+    """Core-observed identity of one durable source record behind a claim."""
 
     source_id: str
     source_kind: str
@@ -84,10 +87,19 @@ class SourceProvenance:
         _require_token("source_id", self.source_id)
         _require_token("source_kind", self.source_kind)
 
+    @property
+    def source_key(self) -> tuple[str, str]:
+        return (self.source_id, self.source_kind)
+
 
 @dataclass(frozen=True)
 class SourceAuthorityGrant:
-    """Core-issued maximum authority for one exact source record."""
+    """Trusted maximum authority for one exact source record.
+
+    Grant issuance is deliberately outside this module. The admission engine treats a
+    supplied grant as trusted governance input and verifies only that the complete grant
+    set is bound exactly to the complete source-provenance set for the claim.
+    """
 
     grant_id: str
     source_id: str
@@ -101,6 +113,10 @@ class SourceAuthorityGrant:
         _require_token("source_kind", self.source_kind)
         _require_token("provenance_class", self.provenance_class)
         _require_token("authority_ceiling", self.authority_ceiling)
+
+    @property
+    def source_key(self) -> tuple[str, str]:
+        return (self.source_id, self.source_kind)
 
 
 @dataclass(frozen=True)
@@ -119,8 +135,8 @@ class AdmissionRequest:
 class AdmissionPolicyDecision:
     """Trusted domain-policy result.
 
-    ``authority_ceiling`` is optional. When present it may only constrain the core
-    grant; an attempted promotion is recorded and ignored.
+    ``authority_ceiling`` is optional. When present it may only constrain the trusted
+    ingress ceiling; an attempted promotion is recorded and ignored.
     """
 
     accepted: bool
@@ -143,10 +159,11 @@ class AdmissionPolicy(Protocol):
         self,
         *,
         request: AdmissionRequest,
-        source: SourceProvenance,
-        grant: SourceAuthorityGrant,
+        sources: tuple[SourceProvenance, ...],
+        grants: tuple[SourceAuthorityGrant, ...],
+        ingress_ceiling: str,
     ) -> AdmissionPolicyDecision:
-        """Return the domain policy decision for one source-bound claim."""
+        """Return the domain policy decision for one fully source-bound claim."""
 
 
 class AdmissionStatus(str, Enum):
@@ -159,13 +176,11 @@ class AdmissionDecision:
     """Immutable receipt of the authority boundary applied to one claim."""
 
     status: AdmissionStatus
-    source_id: str
-    source_kind: str
-    provenance_class: str
-    grant_id: str
+    sources: tuple[SourceProvenance, ...]
+    grants: tuple[SourceAuthorityGrant, ...]
     purpose: str
     requested_authority: str
-    admission_ceiling: str
+    ingress_ceiling: str | None
     policy_id: str | None
     policy_version: str | None
     policy_ceiling: str | None
@@ -174,14 +189,29 @@ class AdmissionDecision:
     policy_attempted_promotion: bool
     reason: str
 
+    def __post_init__(self) -> None:
+        if self.status is AdmissionStatus.ADMITTED:
+            if not self.sources or not self.grants or self.ingress_ceiling is None:
+                raise ValueError("admitted decision requires sources, grants, and ingress ceiling")
+            if self.effective_authority is None:
+                raise ValueError("admitted decision requires effective authority")
+        elif self.effective_authority is not None:
+            raise ValueError("rejected decision cannot carry effective authority")
+
     @property
     def admitted(self) -> bool:
         return self.status is AdmissionStatus.ADMITTED
+
+    @property
+    def grant_ids(self) -> tuple[str, ...]:
+        return tuple(grant.grant_id for grant in self.grants)
+
 
 
 def _require_token(name: str, value: object) -> None:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{name} must be a non-blank string")
+
 
 
 def _relation(
@@ -195,25 +225,69 @@ def _relation(
     return relation
 
 
+
+def weakest_authority(
+    authorities: Sequence[str],
+    *,
+    semantics: AuthoritySemantics,
+) -> str:
+    """Return the weakest authority when every encountered label is comparable.
+
+    Raises ``ValueError`` for an empty sequence or an incomparable pair. The caller may
+    convert that failure into an explicit rejection receipt at a governance boundary.
+    """
+
+    values = tuple(authorities)
+    if not values:
+        raise ValueError("weakest_authority requires at least one authority")
+    for value in values:
+        _require_token("authority", value)
+
+    weakest = values[0]
+    for value in values[1:]:
+        relation = _relation(semantics, value, weakest)
+        if relation is AuthorityRelation.INCOMPARABLE:
+            raise ValueError(f"authority labels are incomparable: {value!r} and {weakest!r}")
+        if relation is AuthorityRelation.WEAKER:
+            weakest = value
+    return weakest
+
+
+
+def _ordered_sources(
+    sources: Sequence[SourceProvenance],
+) -> tuple[SourceProvenance, ...]:
+    return tuple(sorted(tuple(sources), key=lambda source: source.source_key))
+
+
+
+def _ordered_grants(
+    grants: Sequence[SourceAuthorityGrant],
+) -> tuple[SourceAuthorityGrant, ...]:
+    return tuple(
+        sorted(tuple(grants), key=lambda grant: (grant.source_key, grant.grant_id))
+    )
+
+
+
 def _rejected(
     *,
-    source: SourceProvenance,
-    grant: SourceAuthorityGrant,
+    sources: Sequence[SourceProvenance],
+    grants: Sequence[SourceAuthorityGrant],
     request: AdmissionRequest,
     policy: AdmissionPolicyDecision | None,
+    ingress_ceiling: str | None = None,
     requested_promotion: bool = False,
     policy_attempted_promotion: bool = False,
     reason: str,
 ) -> AdmissionDecision:
     return AdmissionDecision(
         status=AdmissionStatus.REJECTED,
-        source_id=source.source_id,
-        source_kind=source.source_kind,
-        provenance_class=grant.provenance_class,
-        grant_id=grant.grant_id,
+        sources=_ordered_sources(sources),
+        grants=_ordered_grants(grants),
         purpose=request.purpose,
         requested_authority=request.requested_authority,
-        admission_ceiling=grant.authority_ceiling,
+        ingress_ceiling=ingress_ceiling,
         policy_id=policy.policy_id if policy else None,
         policy_version=policy.policy_version if policy else None,
         policy_ceiling=policy.authority_ceiling if policy else None,
@@ -224,66 +298,130 @@ def _rejected(
     )
 
 
+
 def decide_admission(
     *,
     request: AdmissionRequest,
-    source: SourceProvenance,
-    grant: SourceAuthorityGrant,
+    sources: Sequence[SourceProvenance],
+    grants: Sequence[SourceAuthorityGrant],
     policy: AdmissionPolicy,
     semantics: AuthoritySemantics,
 ) -> AdmissionDecision:
-    """Apply the source grant and domain policy without trusting requested authority.
+    """Apply complete source grants and domain policy without trusting requested authority.
 
-    Fail-closed cases are represented as ``REJECTED`` decisions: a source/grant
-    mismatch, an incomparable authority, or an explicit policy rejection. A stronger
-    requested authority is clamped to the core ceiling. A policy ceiling stronger than
-    the core ceiling is recorded as an attempted promotion and ignored.
+    Source and grant inputs are treated as sets keyed by ``(source_id, source_kind)``.
+    Admission requires a non-empty source set, no duplicate source/grant bindings, unique
+    grant IDs, and exact equality between source keys and grant keys. The ingress ceiling
+    is the weakest ceiling across every distinct source. Missing, extra, duplicate, or
+    incomparable grants fail closed before domain policy executes.
     """
 
-    if source.source_id != grant.source_id or source.source_kind != grant.source_kind:
+    sources = tuple(sources)
+    grants = tuple(grants)
+    if not sources:
         return _rejected(
-            source=source,
-            grant=grant,
+            sources=sources,
+            grants=grants,
             request=request,
             policy=None,
-            reason="source provenance does not match authority grant",
+            reason="missing source provenance",
+        )
+
+    source_keys = tuple(source.source_key for source in sources)
+    if len(set(source_keys)) != len(source_keys):
+        return _rejected(
+            sources=sources,
+            grants=grants,
+            request=request,
+            policy=None,
+            reason="duplicate source provenance",
+        )
+
+    grant_keys = tuple(grant.source_key for grant in grants)
+    if len(set(grant_keys)) != len(grant_keys):
+        return _rejected(
+            sources=sources,
+            grants=grants,
+            request=request,
+            policy=None,
+            reason="duplicate source authority grant",
+        )
+
+    grant_ids = tuple(grant.grant_id for grant in grants)
+    if len(set(grant_ids)) != len(grant_ids):
+        return _rejected(
+            sources=sources,
+            grants=grants,
+            request=request,
+            policy=None,
+            reason="duplicate source authority grant id",
+        )
+
+    if set(source_keys) != set(grant_keys):
+        return _rejected(
+            sources=sources,
+            grants=grants,
+            request=request,
+            policy=None,
+            reason="source provenance and authority grant sets do not match",
+        )
+
+    grant_by_key = {grant.source_key: grant for grant in grants}
+    ordered_sources = _ordered_sources(sources)
+    ordered_grants = tuple(grant_by_key[source.source_key] for source in ordered_sources)
+
+    try:
+        ingress_ceiling = weakest_authority(
+            tuple(grant.authority_ceiling for grant in ordered_grants),
+            semantics=semantics,
+        )
+    except ValueError:
+        return _rejected(
+            sources=ordered_sources,
+            grants=ordered_grants,
+            request=request,
+            policy=None,
+            reason="source authority ceilings are incomparable",
         )
 
     request_relation = _relation(
         semantics,
         request.requested_authority,
-        grant.authority_ceiling,
+        ingress_ceiling,
     )
     if request_relation is AuthorityRelation.INCOMPARABLE:
         return _rejected(
-            source=source,
-            grant=grant,
+            sources=ordered_sources,
+            grants=ordered_grants,
             request=request,
             policy=None,
-            reason="requested authority is incomparable with admission ceiling",
+            ingress_ceiling=ingress_ceiling,
+            reason="requested authority is incomparable with ingress ceiling",
         )
 
     requested_promotion = request_relation is AuthorityRelation.STRONGER
     effective = (
-        grant.authority_ceiling
+        ingress_ceiling
         if requested_promotion
         else request.requested_authority
     )
 
     policy_decision = policy.evaluate(
         request=request,
-        source=source,
-        grant=grant,
+        sources=ordered_sources,
+        grants=ordered_grants,
+        ingress_ceiling=ingress_ceiling,
     )
     if not isinstance(policy_decision, AdmissionPolicyDecision):
         raise TypeError("admission policy must return AdmissionPolicyDecision")
 
     if not policy_decision.accepted:
         return _rejected(
-            source=source,
-            grant=grant,
+            sources=ordered_sources,
+            grants=ordered_grants,
             request=request,
             policy=policy_decision,
+            ingress_ceiling=ingress_ceiling,
             requested_promotion=requested_promotion,
             reason=policy_decision.reason or "domain policy rejected admission",
         )
@@ -291,23 +429,24 @@ def decide_admission(
     policy_attempted_promotion = False
     policy_ceiling = policy_decision.authority_ceiling
     if policy_ceiling is not None:
-        policy_vs_core = _relation(
+        policy_vs_ingress = _relation(
             semantics,
             policy_ceiling,
-            grant.authority_ceiling,
+            ingress_ceiling,
         )
-        if policy_vs_core is AuthorityRelation.INCOMPARABLE:
+        if policy_vs_ingress is AuthorityRelation.INCOMPARABLE:
             return _rejected(
-                source=source,
-                grant=grant,
+                sources=ordered_sources,
+                grants=ordered_grants,
                 request=request,
                 policy=policy_decision,
+                ingress_ceiling=ingress_ceiling,
                 requested_promotion=requested_promotion,
-                reason="policy ceiling is incomparable with admission ceiling",
+                reason="policy ceiling is incomparable with ingress ceiling",
             )
 
         policy_attempted_promotion = (
-            policy_vs_core is AuthorityRelation.STRONGER
+            policy_vs_ingress is AuthorityRelation.STRONGER
         )
         if not policy_attempted_promotion:
             effective_vs_policy = _relation(
@@ -317,10 +456,11 @@ def decide_admission(
             )
             if effective_vs_policy is AuthorityRelation.INCOMPARABLE:
                 return _rejected(
-                    source=source,
-                    grant=grant,
+                    sources=ordered_sources,
+                    grants=ordered_grants,
                     request=request,
                     policy=policy_decision,
+                    ingress_ceiling=ingress_ceiling,
                     requested_promotion=requested_promotion,
                     reason="effective authority is incomparable with policy ceiling",
                 )
@@ -329,13 +469,11 @@ def decide_admission(
 
     return AdmissionDecision(
         status=AdmissionStatus.ADMITTED,
-        source_id=source.source_id,
-        source_kind=source.source_kind,
-        provenance_class=grant.provenance_class,
-        grant_id=grant.grant_id,
+        sources=ordered_sources,
+        grants=ordered_grants,
         purpose=request.purpose,
         requested_authority=request.requested_authority,
-        admission_ceiling=grant.authority_ceiling,
+        ingress_ceiling=ingress_ceiling,
         policy_id=policy_decision.policy_id,
         policy_version=policy_decision.policy_version,
         policy_ceiling=policy_ceiling,
