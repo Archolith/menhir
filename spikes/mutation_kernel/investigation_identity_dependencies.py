@@ -3,18 +3,20 @@
 The scheduler knows only that receipt identity changed. This extension adapter owns the meaning:
 which historical person IDs appear inside investigative ownership assertions, which ownership slots
 those assertions invalidate, and how a worker derives the current graph outcome plus exact receipt
-identity guards.
+identity generation guards.
 """
 
 from __future__ import annotations
 
-from .identity import Neo4jIdentityEvolution
+from .identity_generation import GenerationalNeo4jIdentityEvolution
+from .identity_generation_guard import (
+    GenerationReceiptIdentityGuard,
+    GenerationalGuardedGraphDerivation,
+)
 from .identity_scheduler import (
     GraphMaterializerTarget,
-    GuardedGraphDerivation,
     IdentityDependencyDefinition,
     IdentityMappingChange,
-    ReceiptIdentityGuard,
 )
 from .investigation import (
     OWNERSHIP_ASSERTION,
@@ -64,9 +66,9 @@ def ownership_identity_dependency_definition(
 
 def derive_ownership_with_identity_guards(
     assertions: list[Assertion],
-    identity: Neo4jIdentityEvolution,
-) -> GuardedGraphDerivation:
-    """Derive ownership and capture the exact receipt resolutions used by the latest evidence."""
+    identity: GenerationalNeo4jIdentityEvolution,
+) -> GenerationalGuardedGraphDerivation:
+    """Derive ownership and capture exact receipt generations used by the latest evidence."""
     rows = current_assertions(assertions)
     if not rows:
         raise ValueError("derive_ownership_with_identity_guards requires current assertions")
@@ -75,41 +77,42 @@ def derive_ownership_with_identity_guards(
     latest_time = max(parse_when(row.valid_at) for row in rows)
     latest = [row for row in rows if parse_when(row.valid_at) == latest_time]
 
-    guards: list[ReceiptIdentityGuard] = []
+    guards: list[GenerationReceiptIdentityGuard] = []
     seen_receipts: set[str] = set()
     for row in latest:
         if row.assertion_type != OWNERSHIP_ASSERTION:
             raise ValueError("identity-guard derivation received a non-ownership assertion")
         owner_kind = str(row.value.get("owner_entity_kind") or "")
         owner_id = str(row.value.get("owner_entity_id") or "")
-        resolution = identity.resolve(
+        receipt_state = identity.resolve_receipt(
             entity_kind=owner_kind,
             entity_id=owner_id,
             source_key=row.source_key,
         )
-        if resolution.entity is None:
+        if receipt_state is None:
             continue
-        receipt_key = identity._receipt_storage_key(owner_kind, owner_id, row.source_key)
-        if receipt_key in seen_receipts:
+        if receipt_state.receipt_storage_key in seen_receipts:
             continue
-        seen_receipts.add(receipt_key)
+        seen_receipts.add(receipt_state.receipt_storage_key)
         guards.append(
-            ReceiptIdentityGuard(
-                receipt_storage_key=receipt_key,
-                source_key=row.source_key,
-                expected_current_entity_id=resolution.entity.entity_id,
+            GenerationReceiptIdentityGuard(
+                receipt_storage_key=receipt_state.receipt_storage_key,
+                source_key=receipt_state.source_key,
+                expected_current_entity_id=receipt_state.entity.entity_id,
+                expected_identity_generation=receipt_state.identity_generation,
             )
         )
 
     def resolver(kind: str, entity_id: str, source_key: str):
-        return identity.resolve(
+        state = identity.resolve_receipt(
             entity_kind=kind,
             entity_id=entity_id,
             source_key=source_key,
-        ).entity
+        )
+        return None if state is None else state.entity
 
     outcome = fold_ownership_with_identity(rows, resolver)
-    return GuardedGraphDerivation(
+    return GenerationalGuardedGraphDerivation(
         outcome=outcome,
         guards=tuple(sorted(guards, key=lambda row: row.receipt_storage_key)),
     )
