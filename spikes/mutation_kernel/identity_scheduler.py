@@ -195,17 +195,13 @@ class GuardedNeo4jGraphMaterializer(Neo4jGraphMaterializer):
             """
             UNWIND $guards AS guard
             MATCH (receipt:MutationEntityReceipt {storage_key:guard.receipt_storage_key})
-                  -[:CURRENT_IDENTITY]->(current_identity:MutationEntity)
+                  -[:CURRENT_IDENTITY]->(current_identity:MutationEntity {
+                      entity_id:guard.expected_current_entity_id
+                  })
             WHERE receipt.namespace=$namespace
               AND current_identity.namespace=$namespace
-            WITH guard, collect(current_identity.entity_id) AS current_ids
-            WITH collect({expected:guard.expected_current_entity_id, current_ids:current_ids})
-                 AS guard_checks
-            WHERE size(guard_checks)=size($guards)
-              AND all(check IN guard_checks WHERE
-                  size(check.current_ids)=1
-                  AND check.current_ids[0]=check.expected
-              )
+            WITH count(*) AS matched_guards
+            WHERE matched_guards=size($guards)
             WITH 1 AS identity_guard_ok
             UNWIND CASE WHEN size($edges)=0 THEN [null] ELSE $edges END AS candidate
             OPTIONAL MATCH (source:MutationEntity)
