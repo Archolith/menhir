@@ -12,6 +12,7 @@ the v1 mistake this module exists to stop repeating.
 
 from __future__ import annotations
 
+import re
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -94,12 +95,14 @@ def collect_git_evidence(repo: Path, *, from_commit: str | None = None) -> GitEv
     renames: list[GitRename] = []
     rename_evidence_available = from_commit is None
     if from_commit:
-        diff = _run_git(
-            repo, ["diff", "--name-status", "-M", f"{from_commit}..HEAD"]
-        )
-        if diff is not None:
-            rename_evidence_available = True
-            renames.extend(parse_rename_status(diff))
+        if _is_valid_commit_cursor(from_commit):
+            diff = _run_git(
+                repo,
+                ["diff", "--name-status", "-M", "--end-of-options", f"{from_commit}..HEAD"],
+            )
+            if diff is not None:
+                rename_evidence_available = True
+                renames.extend(parse_rename_status(diff))
 
     return GitEvidence(
         observed_commit=observed_commit,
@@ -112,8 +115,19 @@ def collect_git_evidence(repo: Path, *, from_commit: str | None = None) -> GitEv
 
 def renames_in_commit(repo: Path, commit: str) -> tuple[GitRename, ...]:
     """Renames Git recognizes inside one commit. Used by the one-time repair."""
-    diff = _run_git(repo, ["show", "--name-status", "-M", "--format=", commit])
+    if not _is_valid_commit_cursor(commit):
+        return ()
+    diff = _run_git(
+        repo, ["show", "--name-status", "-M", "--format=", "--end-of-options", commit]
+    )
     return tuple(parse_rename_status(diff or ""))
+
+
+_COMMIT_CURSOR_RE = re.compile(r"^[0-9a-fA-F]{7,40}$")
+
+
+def _is_valid_commit_cursor(value: str) -> bool:
+    return bool(_COMMIT_CURSOR_RE.match(value))
 
 
 def parse_rename_status(text: str) -> list[GitRename]:
