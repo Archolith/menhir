@@ -64,9 +64,14 @@ def _fold(
     rows = [_row(assertion) for assertion in assertions]
     result = fold_assertions(rows, as_of=as_of)
     outcome_count = len(result.states) + len(result.abstentions) + len(result.expiries)
+    if outcome_count == 0:
+        # Existing ScalarStateService treats an absent desired slot as non-current and reconciles any
+        # stored View away. The common case here is a target whose only assertions are future-dated at
+        # ``as_of``. Preserve that semantics as an explicit desired retirement rather than an error.
+        return ProjectionRetirement(target=target, reason="no_active_assertions")
     if outcome_count != 1:
         raise ValueError(
-            "scalar projection target must fold to exactly one state, abstention, or expiry"
+            "scalar projection target must fold to at most one state, abstention, or expiry"
         )
 
     if result.states:
