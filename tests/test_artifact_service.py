@@ -47,7 +47,7 @@ class _FakeAdapter:
         a["source_confidence"] = trusted_confidence
         return True
 
-    def supersede_artifact(self, old_id, new_id):
+    def supersede_l4_artifact(self, old_id, new_id):
         if old_id not in self.store or new_id not in self.store:
             return False
         self.store[old_id]["status"] = "historical"

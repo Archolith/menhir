@@ -78,7 +78,7 @@ class _InMemoryArtifactGraph:
         n["source_confidence"] = trusted_confidence
         return True
 
-    def supersede_artifact(self, old_id, new_id):
+    def supersede_l4_artifact(self, old_id, new_id):
         if old_id == new_id or old_id not in self.nodes or new_id not in self.nodes:
             return False
         self.nodes[old_id]["status"] = "historical"   # never deleted (invariant 7)

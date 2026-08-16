@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from typing import Any
+
 import pytest
 
 from menhir.domain.work_artifact import (
@@ -21,6 +23,7 @@ from menhir.domain.work_artifact import (
     status_from_header,
     valid_statuses,
 )
+from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
 from menhir.infrastructure.work_artifact_repository import WorkArtifactRepository
 
 
@@ -902,3 +905,32 @@ def test_no_declarations_writes_nothing() -> None:
 
     assert out["declared"] == 0
     assert neo4j.calls == []
+
+
+class _StubWorkArtifactRepo:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+
+    def supersede_artifact(self, new_uuid: str, old_uuid: str) -> dict[str, Any]:
+        self.calls.append((new_uuid, old_uuid))
+        return {"applied": True, "artifact_uuid": new_uuid}
+
+
+@pytest.mark.unit
+def test_supersede_artifact_routes_to_work_artifacts_not_shadowed_by_l4() -> None:
+    """The L4 rename must leave the live supersede_artifact unshadowed.
+
+    Previously a second definition shadowed this one; calling it wrote to the
+    L4 Entity store and returned a bool instead of a dict. Now the adapter
+    must forward (new_uuid, old_uuid) to the WorkArtifact repository and
+    return its dict unchanged.
+    """
+    repo = _StubWorkArtifactRepo()
+    adapter = MemoryGraphAdapter.__new__(MemoryGraphAdapter)
+    adapter._work_artifacts = repo
+
+    result = adapter.supersede_artifact("new-uuid", "old-uuid")
+
+    assert repo.calls == [("new-uuid", "old-uuid")]
+    assert isinstance(result, dict)
+    assert result["applied"] is True

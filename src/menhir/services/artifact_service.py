@@ -111,7 +111,7 @@ class ArtifactService:
         """Mark old_id historical and link the superseding new_id. Never deletes."""
         if old_id == new_id:
             return {"status": "refused", "reason": "self_supersede", "artifact_id": old_id}
-        ok = await asyncio.to_thread(self.graph_adapter.supersede_artifact, old_id, new_id)
+        ok = await asyncio.to_thread(self.graph_adapter.supersede_l4_artifact, old_id, new_id)
         if not ok:
             return {"status": "not_found", "old_id": old_id, "new_id": new_id}
         return {"status": "superseded", "old_id": old_id, "new_id": new_id}
