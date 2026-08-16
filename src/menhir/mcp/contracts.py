@@ -173,6 +173,11 @@ class BaseJsonResource(ABC):
     description: str
     mime_type = "application/json"
 
+    #: Minimum tier required to read this resource. "readonly" is the floor tier, so this
+    #: is permissive by default and exists so an individual resource can raise its own bar
+    #: (and so an unrecognised tier string is refused -- see _tier_allows).
+    required_tier: str = "readonly"
+
     @property
     def kind(self) -> str:
         return "resource_template" if "{" in self.uri else "resource"
@@ -195,6 +200,11 @@ class BaseJsonResource(ABC):
 
     async def execute(self, *args: Any, **kwargs: Any) -> str:
         async def _run() -> str:
+            tier = get_request_tier()
+            if tier and not _tier_allows(tier, self.required_tier):
+                raise PermissionError(
+                    f"Token tier '{tier}' cannot read `{self.uri}` (requires '{self.required_tier}')"
+                )
             payload = await self.build_payload(*args, **kwargs)
             return render_json(payload)
 
