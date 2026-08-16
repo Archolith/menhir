@@ -1418,3 +1418,56 @@ def test_observing_a_source_clears_the_reason_it_went_missing() -> None:
     assert props["resolution_status"] == ResolutionStatus.RESOLVED
     assert "resolution_reason" in props and props["resolution_reason"] is None
     assert "version" not in props, "an unobserved leg is still left alone"
+
+
+@pytest.mark.unit
+def test_from_commit_option_injection_is_rejected(tmp_path: Path) -> None:
+    """A crafted from_commit must never become a git option with a filesystem effect."""
+    try:
+        _git(tmp_path, "init", "-q")
+    except (OSError, subprocess.CalledProcessError):
+        pytest.skip("git unavailable")
+    _git(tmp_path, "config", "user.email", "t@example.com")
+    _git(tmp_path, "config", "user.name", "t")
+    _write(tmp_path, ".agent/plans/a.md", "# A\n")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-q", "-m", "add")
+
+    evidence = collect_git_evidence(
+        tmp_path, from_commit="--output=" + str(tmp_path / "pwned.txt")
+    )
+    assert evidence.rename_evidence_available is False
+    assert not list(tmp_path.rglob("pwned.txt*")), (
+        "git option injection must not be able to create files"
+    )
+
+
+@pytest.mark.unit
+def test_valid_from_commit_still_produces_renames(tmp_path: Path) -> None:
+    """The --end-of-options fix must not break legitimate rename detection."""
+    try:
+        _git(tmp_path, "init", "-q")
+    except (OSError, subprocess.CalledProcessError):
+        pytest.skip("git unavailable")
+    _git(tmp_path, "config", "user.email", "t@example.com")
+    _git(tmp_path, "config", "user.name", "t")
+
+    _write(tmp_path, ".agent/plans/a.md", "# A\n")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-q", "-m", "add")
+    base = subprocess.run(
+        ["git", "-C", str(tmp_path), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    _git(tmp_path, "mv", ".agent/plans/a.md", ".agent/plans/b.md")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-q", "-m", "move")
+
+    evidence = collect_git_evidence(tmp_path, from_commit=base)
+    assert evidence.rename_evidence_available is True
+    assert any(
+        r.old_path == ".agent/plans/a.md" and r.new_path == ".agent/plans/b.md"
+        for r in evidence.renames
+    )
