@@ -62,6 +62,23 @@ def redact_text(value: object, *, reveal: bool = False) -> object:
     return value
 
 
+def _redact_value(value: object) -> object:
+    """Recursively mask non-empty text, preserving container shape.
+
+    ``str`` (non-empty) -> ``MASK``; ``list``/``tuple`` -> same type with each
+    element recursed; ``dict`` -> same keys with each value recursed (keys are
+    structural, never masked); anything else (int, None, bool, empty string) ->
+    unchanged, matching :func:`redact_text`'s passthrough.
+    """
+    if isinstance(value, list):
+        return [_redact_value(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_redact_value(item) for item in value)
+    if isinstance(value, dict):
+        return {key: _redact_value(item) for key, item in value.items()}
+    return redact_text(value, reveal=False)
+
+
 def redact_mapping(
     row: dict,
     *,
@@ -70,15 +87,16 @@ def redact_mapping(
 ) -> dict:
     """Return a shallow copy of ``row`` with configured free-text fields masked.
 
-    Structural fields are left intact. Nested dict/list values under a redacted
-    field key are masked wholesale (they are memory text if the key is redacted).
+    Structural fields are left intact. Nested dict/list/tuple values under a
+    redacted field key are recursed with their shape preserved, so consumers can
+    still iterate items or index into nested structures after redaction.
     """
     if reveal:
         return row
     out = dict(row)
     for key in list(out.keys()):
         if key in fields:
-            out[key] = redact_text(out[key], reveal=False)
+            out[key] = _redact_value(out[key])
     return out
 
 
@@ -107,8 +125,12 @@ _LOG_PREFIX = re.compile(
     re.DOTALL,
 )
 
-# Quoted strings frequently carry memory content.
-_QUOTED = re.compile(r"(['\"])(.*?)\1", re.DOTALL)
+# Quoted strings frequently carry memory content. The opening quote must sit at a
+# span boundary (start of string, or preceded by whitespace or a structural
+# separator) so a mid-word apostrophe -- an ordinary English possessive -- cannot
+# open a span. Two fixed-width lookbehinds are required because Python rejects a
+# variable-width lookbehind.
+_QUOTED = re.compile(r"(?:(?<=^)|(?<=[\s=(){}\[\],:]))(['\"])(.*?)\1", re.DOTALL)
 
 # Minimum length for a quoted string to be treated as free text worth masking.
 _MIN_FREE_TEXT_LEN = 12

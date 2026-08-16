@@ -128,3 +128,42 @@ def test_redact_log_line_masks_memory_text_but_keeps_uuid():
     assert out.count(MASK) == 2
     # uuid preserved so the line stays diagnosable
     assert "ab87a3cd-64c2-4ce2-96e4-7f0c790f73db" in out
+
+
+def test_possessive_apostrophe_does_not_shift_quote_pairing():
+    line = "user's note: password='hunter2' token='abc123'"
+    out = redact_log_line(line, reveal=False)
+    # the mid-word apostrophe must NOT open a span, so no 'user'[hidden]'' artifact
+    assert "user'[hidden]" not in out
+    # the two =-preceded quoted values survive as their own quoted spans
+    assert "'hunter2'" in out
+    assert "'abc123'" in out
+    assert "'hunter2' token='abc123'" in out
+
+
+def test_long_quoted_phrase_after_space_is_still_masked():
+    line = "He said 'this is a long secret sentence' loudly"
+    out = redact_log_line(line, reveal=False)
+    assert "this is a long secret sentence" not in out
+    assert MASK in out
+
+
+def test_list_under_redacted_key_is_masked_elementwise():
+    row = {"notes": ["secret one", "secret two"]}
+    out = redact_mapping(row, reveal=False)
+    assert out["notes"] == [MASK, MASK]
+    assert isinstance(out["notes"], list)
+    assert len(out["notes"]) == 2
+
+
+def test_dict_under_redacted_key_is_masked_by_value():
+    row = {"content": {"inner": "hidden"}}
+    out = redact_mapping(row, reveal=False)
+    assert out["content"] == {"inner": MASK}
+
+
+def test_non_redacted_key_with_nested_value_is_untouched():
+    row = {"labels": ["Entity", "Agent"], "extra": {"tags": ["x", "y"]}}
+    out = redact_mapping(row, reveal=False)
+    assert out["labels"] == ["Entity", "Agent"]
+    assert out["extra"] == {"tags": ["x", "y"]}
