@@ -158,8 +158,10 @@ class MemoryBackend(Protocol):
         read-only (does not bump access stats). Returns {"summary": ..., "views": [...]}."""
         ...
 
-    async def fetch_memory_by_uuid(self, node_uuid: str) -> dict[str, Any] | None:
-        """Fetch a single memory node by UUID."""
+    async def fetch_memory_by_uuid(
+        self, node_uuid: str, *, namespace: str | None = None
+    ) -> dict[str, Any] | None:
+        """Fetch a single memory node by UUID, optionally restricted to one namespace."""
         ...
 
     async def fetch_recent_memories(
@@ -181,15 +183,15 @@ class MemoryBackend(Protocol):
         ...
 
     async def fetch_memories_by_scope(
-        self, scope: str, limit: int = 20
+        self, scope: str, limit: int = 20, *, namespace: str | None = None
     ) -> list[dict[str, Any]]:
-        """Fetch memories filtered by scope."""
+        """Fetch memories filtered by scope, optionally restricted to one namespace."""
         ...
 
     async def fetch_memories_by_type(
-        self, memory_type: str, limit: int = 20
+        self, memory_type: str, limit: int = 20, *, namespace: str | None = None
     ) -> list[dict[str, Any]]:
-        """Fetch memories filtered by type."""
+        """Fetch memories filtered by type, optionally restricted to one namespace."""
         ...
 
     # ------------------------------------------------------------------
