@@ -227,10 +227,15 @@ class RuntimeProviderDataOpsMixin:
         )
         return _to_jsonable(result)
 
-    async def fetch_memory_by_uuid(self, node_uuid: str) -> dict[str, Any] | None:
+    async def fetch_memory_by_uuid(
+        self, node_uuid: str, *, namespace: str | None = None
+    ) -> dict[str, Any] | None:
+        kwargs: dict[str, Any] = {}
+        if namespace is not None:
+            kwargs["namespace"] = namespace
         return _to_jsonable(
             await self._off_loop(
-                self.built.graph_adapter.fetch_memory_by_uuid, node_uuid
+                self.built.graph_adapter.fetch_memory_by_uuid, node_uuid, **kwargs
             )
         )
 
@@ -278,22 +283,28 @@ class RuntimeProviderDataOpsMixin:
         )
 
     async def fetch_memories_by_scope(
-        self, scope: str, limit: int = 20
+        self, scope: str, limit: int = 20, *, namespace: str | None = None
     ) -> list[dict[str, Any]]:
+        kwargs: dict[str, Any] = {"limit": limit}
+        if namespace is not None:
+            kwargs["namespace"] = namespace
         return _to_jsonable(
             await self._off_loop(
-                self.built.graph_adapter.fetch_memories_by_scope, scope, limit=limit
+                self.built.graph_adapter.fetch_memories_by_scope, scope, **kwargs
             )
         )
 
     async def fetch_memories_by_type(
-        self, memory_type: str, limit: int = 20
+        self, memory_type: str, limit: int = 20, *, namespace: str | None = None
     ) -> list[dict[str, Any]]:
+        kwargs: dict[str, Any] = {"limit": limit}
+        if namespace is not None:
+            kwargs["namespace"] = namespace
         return _to_jsonable(
             await self._off_loop(
                 self.built.graph_adapter.fetch_memories_by_type,
                 memory_type,
-                limit=limit,
+                **kwargs,
             )
         )
 
