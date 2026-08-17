@@ -24,6 +24,7 @@ import sqlite3
 
 import pytest
 
+from menhir.domain import merge_snapshot as ms
 from menhir.infrastructure.graph_operations import GraphOperationsJournal
 from menhir.infrastructure.metric_receipts import MetricReceiptStore
 from menhir.services.delete_coordinator import DeleteCoordinator
@@ -39,6 +40,7 @@ from menhir.services.saga_reconcile_outcomes import (
     WOULD_MARK_ALREADY_APPLIED,
     WOULD_NEEDS_REVIEW,
     WOULD_REPLAY,
+    WOULD_RESTORE,
     summarize_outcomes,
 )
 from menhir.services.unmerge_coordinator import UnmergeCoordinator
@@ -318,6 +320,49 @@ def test_unmerge_dry_run_mutates_no_durable_state(journal):
 
 
 # --------------------------------------------------------------------------- cross-saga contract
+
+
+@pytest.mark.unit
+def test_unmerge_dry_run_builds_the_restore_plan_and_forecasts_restore(journal):
+    """The plan requires a dry-run to prove its pure reads SUCCEED, not just that it wrote nothing.
+
+    The previous test uses a row with no snapshot, which fails before the interesting work. This
+    one supplies a valid snapshot so the dry-run must actually load it and build the restore plan
+    -- and still reach WOULD_RESTORE without calling restore_merge_snapshot.
+    """
+    op_id = "unmerge-ok"
+    snapshot = ms.build_snapshot(
+        survivor=ms.encode_node(uuid="s1", labels=["Entity"], properties={}, relationships=[]),
+        absorbed=ms.encode_node(uuid="a1", labels=["Entity"], properties={}, relationships=[]),
+        similarity=0.97,
+    )
+    request = {
+        "op_id": op_id,
+        "survivor_uuid": "s1",
+        "absorbed_uuid": "a1",
+        "merge_op_id": "m1",
+        "expected_before_sha256": merge_state_fingerprint(_MERGED, op_id=op_id),
+    }
+    journal.prepare(
+        operation_kind="ENTITY_UNMERGE",
+        request_json=json.dumps(request),
+        target_key="pair-unmerge-ok",
+        before_snapshot_json=ms.dumps(snapshot),
+        op_id=op_id,
+    )
+    adapter = _MergeAdapter(_MERGED)
+    coord = UnmergeCoordinator(graph_adapter=adapter, journal=journal)
+
+    before = _dump(journal.db_path)
+    result = coord.reconcile(dry_run=True)
+    after = _dump(journal.db_path)
+
+    assert after == before, "dry-run mutated durable saga state"
+    assert adapter.mutations == 0, "dry-run must never call restore_merge_snapshot"
+    assert result["counts"][WOULD_RESTORE] == 1, (
+        "a restorable row must forecast WOULD_RESTORE, proving the snapshot loaded and the "
+        "restore plan was built"
+    )
 
 
 @pytest.mark.unit
