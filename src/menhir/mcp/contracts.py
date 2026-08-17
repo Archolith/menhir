@@ -189,6 +189,16 @@ class BaseJsonResource(ABC):
     def get_backend(self) -> MemoryBackend:
         return build_memory_backend()
 
+    def pinned_namespace(self) -> str | None:
+        """Return the server-side namespace pin for this resource read, if any.
+
+        Resource endpoint signatures expose URI-template arguments only, so the
+        tool path's signature-aware ``_apply_pinned_namespace`` cannot protect
+        them. Content-reading resources must pass this value into the backend read
+        explicitly; an unpinned client returns ``None`` and keeps legacy behavior.
+        """
+        return get_pinned_namespace() or None
+
     def error_mapper(self, error_text: str) -> str:
         return render_json(
             {
