@@ -242,7 +242,7 @@ class _FakeNeo4j:
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict]] = []
 
-    def execute(self, query: str, params: dict | None = None):
+    def execute(self, query: str, params: dict | None = None, **_kwargs):
         self.calls.append((query, params or {}))
         return []  # _current_by_key -> None -> CREATE
 
@@ -328,7 +328,7 @@ class _UnchangedSigNeo4j:
         self.calls: list[tuple[str, dict]] = []
         self._sig = sig
 
-    def execute(self, query: str, params: dict | None = None):
+    def execute(self, query: str, params: dict | None = None, **_kwargs):
         self.calls.append((query, params or {}))
         # _current_by_key: report an existing current version with a matching signature.
         if "coalesce(n.view_current, n.qs_current, true)" in query:
@@ -402,7 +402,7 @@ class _LwwFakeNeo4j:
         self.current = current
         self.calls: list[tuple[str, dict]] = []
 
-    def execute(self, query: str, params: dict | None = None):
+    def execute(self, query: str, params: dict | None = None, **_kwargs):
         self.calls.append((query, params or {}))
         if "coalesce(n.view_current, n.qs_current, true)" in query:  # _current_by_key
             return [self.current] if self.current else []
