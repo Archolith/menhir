@@ -17,6 +17,7 @@ from __future__ import annotations
 import pytest
 
 from menhir.infrastructure import neo4j as n4
+from menhir.infrastructure import operation_owner as oo
 
 
 class _FakeResult(list):
@@ -171,18 +172,66 @@ def test_statements_below_one_is_treated_as_one():
 
 
 @pytest.mark.unit
-def test_the_default_ownership_lease_is_currently_too_short_for_the_budget():
-    """Documents the live consequence rather than asserting a number that reads as fine.
+def test_the_ownership_lease_now_exceeds_the_mutation_window_by_construction():
+    """The inequality the whole safety argument rests on, asserted rather than assumed.
 
-    The CF-20b default lease is 120s. The bounded single-statement window already exceeds it, so
-    the lease CANNOT yet be justified by this budget -- which is exactly why CF-20c live replay
-    stays blocked. If a future change makes the lease sufficient, this test should fail and be
-    rewritten deliberately.
+    This test previously asserted the OPPOSITE -- that the hand-picked 120s lease was too short --
+    and said it should fail and be rewritten deliberately if the lease ever became sufficient. That
+    happened: the TTL is now derived from the window instead of being an independent constant, so
+    the relation holds by construction. Rewritten deliberately, as instructed.
     """
-    from menhir.infrastructure import operation_owner as oo
 
     window = n4.mutation_window_seconds(n4.SAGA_MUTATION_TIMEOUT_S)
-    assert window > oo.DEFAULT_LEASE_SECONDS, (
-        "if this fails, the lease now covers the mutation window -- re-derive the safety argument "
-        "before treating an expired claim as ABANDONED"
+    assert oo.DEFAULT_LEASE_SECONDS > window, (
+        "an expired claim may only be read as ABANDONED if the lease outlives the maximum time a "
+        "mutation can still be running"
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("kind", sorted(oo.SAGA_STATEMENT_COUNTS))
+def test_every_saga_kind_gets_a_lease_that_outlives_its_own_window(kind):
+    """Per-kind, not just the default: the metric path's two statements need a longer lease."""
+
+    statements = oo.SAGA_STATEMENT_COUNTS[kind]
+    window = n4.mutation_window_seconds(n4.SAGA_MUTATION_TIMEOUT_S, statements=statements)
+
+    assert oo.lease_seconds_for_kind(kind) > window
+
+
+@pytest.mark.unit
+def test_the_metric_kind_gets_a_longer_lease_than_a_single_statement_kind():
+    """Guards the specific mistake of applying a one-statement TTL to the two-statement path."""
+
+    assert oo.lease_seconds_for_kind("METRIC_WRITE") > oo.lease_seconds_for_kind("ENTITY_MERGE")
+    assert oo.SAGA_STATEMENT_COUNTS["METRIC_WRITE"] == 2
+
+
+@pytest.mark.unit
+def test_an_unknown_kind_gets_the_most_conservative_lease():
+    """A lease too long only delays recovery; too short lets a live writer be replayed."""
+
+    unknown = oo.lease_seconds_for_kind("SOME_FUTURE_KIND")
+    assert unknown == max(oo.lease_seconds_for_kind(k) for k in oo.SAGA_STATEMENT_COUNTS)
+
+
+@pytest.mark.unit
+def test_the_lease_is_derived_not_hardcoded():
+    """If the timeout changes, the lease must move with it, or the inequality silently breaks.
+
+    This test previously encoded the derivation as ``W + margin`` and FAILED when that formula was
+    corrected -- which is what it was written to do. The lease must outlive the heartbeat detection
+    lag as well as the mutation window, and since the lag is ``TTL / RENEW_DIVISOR`` the requirement
+    ``TTL > TTL/D + W + M`` solves to ``TTL > D/(D-1) * (W + M)``. Asserted against that formula
+    rather than a literal, so a future change to the timeout, the divisor or the margin moves the
+    lease with it instead of quietly invalidating the ABANDONED classification.
+    """
+    window = n4.mutation_window_seconds(n4.SAGA_MUTATION_TIMEOUT_S)
+    naive = window + oo.LEASE_SAFETY_MARGIN_S
+    expected = oo.RENEW_DIVISOR / (oo.RENEW_DIVISOR - 1) * naive
+
+    assert oo.DEFAULT_LEASE_SECONDS == oo.lease_seconds_for(statements=1)
+    assert oo.DEFAULT_LEASE_SECONDS == pytest.approx(expected, abs=1.0)
+    assert oo.DEFAULT_LEASE_SECONDS > naive, (
+        "the naive window-only bound is insufficient once detection lag is counted"
     )
