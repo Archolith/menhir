@@ -31,11 +31,13 @@ import logging
 import sqlite3
 import threading
 import uuid as uuidlib
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from menhir.infrastructure import operation_owner as oo
 from menhir.infrastructure.telemetry import default_telemetry_db_path
 
 logger = logging.getLogger(__name__)
@@ -172,10 +174,34 @@ class GraphOperationsJournal:
                         created_at            TEXT NOT NULL,
                         updated_at            TEXT NOT NULL,
                         committed_at          TEXT,
-                        reverses_op_id        TEXT
+                        reverses_op_id        TEXT,
+                        owner_token           TEXT,
+                        owner_heartbeat_at    TEXT,
+                        owner_lease_expires_at TEXT
                     )
                     """
                 )
+                # Additive ownership migration (CF-20b). CREATE TABLE IF NOT EXISTS does nothing to
+                # an ALREADY EXISTING table, so a sidecar created before this fence keeps its old
+                # column set and every ownership read would raise. Add the columns explicitly,
+                # following the PRAGMA-then-ALTER idiom used by the telemetry store.
+                #
+                # Nullable with no default, deliberately: a pre-existing PREPARED row genuinely has
+                # no owner, and backfilling a synthetic claim would fabricate exactly the liveness
+                # evidence recovery is supposed to reason about. Ownerless reads as OWNER_UNKNOWN.
+                operation_columns = {
+                    row[1] for row in conn.execute("PRAGMA table_info(graph_operations)")
+                }
+                for column in (
+                    "owner_token",
+                    "owner_heartbeat_at",
+                    "owner_lease_expires_at",
+                ):
+                    if column not in operation_columns:
+                        # Column names are literals from the tuple above, never caller input.
+                        conn.execute(
+                            f"ALTER TABLE graph_operations ADD COLUMN {column} TEXT"
+                        )
                 # Batch operations are unique per (kind, batch, target) so a migration
                 # cannot enqueue the same node twice.
                 conn.execute(
@@ -267,6 +293,7 @@ class GraphOperationsJournal:
         reverses_op_id: str | None = None,
         op_id: str | None = None,
         conn: sqlite3.Connection | None = None,
+        owner_token: str | None = None,
     ) -> str:
         """Insert a PREPARED operation and return its op_id.
 
@@ -289,6 +316,11 @@ class GraphOperationsJournal:
         # Per-participant fence (invariant 14): one lock row per participant, inserted in the SAME
         # transaction as the journal row so the fence and the intent commit atomically.
         participants = _participants_from_request_json(operation_kind, request_json)
+        # Live-owner claim (CF-20b): stamped in the SAME insert as the intent, so a PREPARED row
+        # is never briefly ownerless. A row that appears with no claim is therefore a legacy row,
+        # which is what lets OWNER_UNKNOWN mean something specific. Overridable so a test can
+        # impersonate another process, and so a future reconciler can claim an abandoned row.
+        claim_token = owner_token or oo.process_owner_token()
         owns = conn is None
         connection = sqlite3.connect(self.db_path) if owns else conn
         try:
@@ -298,13 +330,15 @@ class GraphOperationsJournal:
                     op_id, batch_id, operation_kind, target_uuid, target_key,
                     request_json, before_snapshot_json, expected_after_sha256,
                     state, attempt_count, last_error, created_at, updated_at,
-                    committed_at, reverses_op_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PREPARED', 0, NULL, ?, ?, NULL, ?)
+                    committed_at, reverses_op_id,
+                    owner_token, owner_heartbeat_at, owner_lease_expires_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PREPARED', 0, NULL, ?, ?, NULL, ?, ?, ?, ?)
                 """,
                 (
                     op_id, batch_id, operation_kind, target_uuid, target_key,
                     request_json, before_snapshot_json, expected_after_sha256,
                     now, now, reverses_op_id,
+                    claim_token, now, oo.lease_expiry_iso(),
                 ),
             )
             for entity_uuid in participants:
@@ -483,6 +517,23 @@ class GraphOperationsJournal:
             if last_error is not None:
                 sets.append("last_error = ?")
                 params.append(last_error)
+            # Retire the live-owner claim the moment the row leaves PREPARED (CF-20b). PREPARED is
+            # the only state in which "someone is executing this right now" can be true, so any
+            # transition out of it ends the claim.
+            #
+            # This deliberately differs from the participant fence below, which NEEDS_REVIEW keeps.
+            # The two answer different questions: the fence protects the node from competing
+            # writes while an operator adjudicates, whereas the owner claim only says whether a
+            # writer is still mid-flight. Leaving a fresh-looking heartbeat on a quarantined row
+            # would make it read as LIVE_OWNER indefinitely.
+            if current == "PREPARED":
+                sets.extend(
+                    [
+                        "owner_token = NULL",
+                        "owner_heartbeat_at = NULL",
+                        "owner_lease_expires_at = NULL",
+                    ]
+                )
             params.append(op_id)
             conn.execute(
                 f"UPDATE graph_operations SET {', '.join(sets)} WHERE op_id = ?", params
@@ -505,6 +556,86 @@ class GraphOperationsJournal:
                 "SELECT * FROM graph_operations WHERE op_id = ?", (op_id,)
             ).fetchone()
             return dict(row) if row else None
+
+    def renew_owner_heartbeat(
+        self,
+        op_id: str,
+        *,
+        seconds: int = oo.DEFAULT_LEASE_SECONDS,
+        owner_token: str | None = None,
+    ) -> bool:
+        """Extend this process's claim on a PREPARED operation. Returns whether it still holds it.
+
+        A single conditional UPDATE, so the check and the extension cannot interleave: it renews
+        only if the row is still PREPARED AND still carries this process's token. The boolean is
+        the point -- long-running saga code must be able to discover that it LOST its claim (the
+        row was quarantined, committed, or taken over) and stop before its next side effect,
+        rather than carrying on believing it owns work someone else may now be replaying.
+        """
+        self._ensure_ready()
+        now = _utc_now_iso()
+        token = owner_token or oo.process_owner_token()
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                "UPDATE graph_operations "
+                "SET owner_heartbeat_at = ?, owner_lease_expires_at = ? "
+                "WHERE op_id = ? AND state = 'PREPARED' AND owner_token = ?",
+                (now, oo.lease_expiry_iso(seconds=seconds), op_id, token),
+            )
+            conn.commit()
+            return cursor.rowcount == 1
+
+    def iter_by_state(
+        self, state: str, *, batch_size: int = 500
+    ) -> Iterator[dict[str, Any]]:
+        """Yield EVERY row in ``state``, oldest first, with no horizon that can hide rows.
+
+        ``list_by_state(limit=500)`` cannot be made exhaustive by calling it repeatedly: it always
+        returns the same oldest page, so any row that never leaves the state makes the caller loop
+        on it forever while newer rows are never seen. That is the deterministic starvation CF-20
+        has to remove before recovery can be trusted, and it is why this is a cursor, not a bigger
+        limit.
+
+        The keyset is ``(created_at, op_id)``, and the op_id half is load-bearing. ``created_at`` is
+        NOT unique -- operations prepared in the same instant share it -- so ordering by it alone is
+        not a total order, and a page boundary falling inside a group of ties would silently skip or
+        repeat rows. op_id is the PRIMARY KEY, so it breaks every tie.
+
+        Each page is a separate connection and the scan holds no snapshot: rows that leave ``state``
+        mid-scan simply stop appearing, and rows added with a later ``created_at`` will be picked up.
+        For an observation pass that is correct. A pass that must see a FIXED backlog has to close
+        the PREPARE gate first (CF-20c) -- the cursor guarantees progress, not isolation.
+        """
+        if state not in OPERATION_STATES:
+            raise GraphOperationError(f"unknown state {state!r}")
+        self._ensure_ready()
+        page_size = max(1, int(batch_size))
+        cursor_created_at: str | None = None
+        cursor_op_id: str | None = None
+        while True:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                if cursor_created_at is None:
+                    rows = conn.execute(
+                        "SELECT * FROM graph_operations WHERE state = ? "
+                        "ORDER BY created_at ASC, op_id ASC LIMIT ?",
+                        (state, page_size),
+                    ).fetchall()
+                else:
+                    rows = conn.execute(
+                        "SELECT * FROM graph_operations WHERE state = ? "
+                        "AND (created_at > ? OR (created_at = ? AND op_id > ?)) "
+                        "ORDER BY created_at ASC, op_id ASC LIMIT ?",
+                        (state, cursor_created_at, cursor_created_at, cursor_op_id, page_size),
+                    ).fetchall()
+            if not rows:
+                return
+            for row in rows:
+                yield dict(row)
+            cursor_created_at = rows[-1]["created_at"]
+            cursor_op_id = rows[-1]["op_id"]
+            if len(rows) < page_size:
+                return
 
     def list_by_state(self, state: str, *, limit: int = 500) -> list[dict[str, Any]]:
         if state not in OPERATION_STATES:
