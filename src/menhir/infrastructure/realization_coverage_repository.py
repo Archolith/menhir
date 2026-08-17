@@ -1,12 +1,11 @@
 """Read-only infrastructure adapters for Realization Coverage.
 
 This module exposes the complete durable T5 target snapshot and the scalar projection's canonical
-installed-state hash.  It never mutates projection lifecycle state or Views.
+installed-state hash. It never mutates projection lifecycle state or Views.
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
 from typing import Any
 
@@ -17,6 +16,10 @@ from menhir.domain.projection_lifecycle import (
     ProjectionWorkToken,
 )
 from menhir.infrastructure.projection_lifecycle_repository import ProjectionLifecycleRepository
+from menhir.services.scalar_projection_hash import (
+    scalar_projection_absent_hash,
+    scalar_projection_present_hash,
+)
 
 __all__ = ["RealizationLifecycleRepository", "ScalarStateProjectionHashSource"]
 
@@ -121,29 +124,11 @@ class RealizationLifecycleRepository:
         )
 
 
-def _stable_hash(payload: dict[str, object]) -> str:
-    encoded = json.dumps(
-        payload,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
-
-
-def _target_payload(target: ProjectionTarget) -> dict[str, object]:
-    return {
-        "namespace": target.namespace,
-        "subject_id": target.subject_id,
-        "key": list(target.key),
-    }
-
-
 class ScalarStateProjectionHashSource:
     """Canonical installed-state hash for ``typed_scalar.current_state``.
 
     The hash covers the parity-bearing persisted scalar-state surface, not incidental node identity.
-    Absence has its own canonical hash.  ``target_present`` is lifecycle membership and therefore does
+    Absence has its own canonical hash. ``target_present`` is lifecycle membership and therefore does
     not decide physical View presence; the graph read always hashes what is actually installed.
     """
 
@@ -193,24 +178,16 @@ class ScalarStateProjectionHashSource:
             raise ProjectionLifecycleCorruptionError(
                 "multiple current ScalarStateViews exist for one realization target"
             )
-        base = {
-            "definition_id": definition.definition_id,
-            "target": _target_payload(target),
-        }
         if not rows:
-            return _stable_hash({**base, "state": "absent"})
+            return scalar_projection_absent_hash(definition, target)
 
         row = dict(rows[0])
-        return _stable_hash(
-            {
-                **base,
-                "state": "present",
-                "value": row.get("value"),
-                "valid_at": str(row.get("valid_at") or ""),
-                "scalar_contributors": sorted(
-                    str(value) for value in (row.get("scalar_contributors") or [])
-                ),
-                "scalar_effective_tier": str(row.get("scalar_effective_tier") or ""),
-                "episode_uuids": sorted(str(value) for value in (row.get("episode_uuids") or [])),
-            }
+        return scalar_projection_present_hash(
+            definition,
+            target,
+            value=row.get("value"),
+            valid_at=row.get("valid_at"),
+            contributor_ids=row.get("scalar_contributors") or [],
+            effective_tier=row.get("scalar_effective_tier"),
+            episode_uuids=row.get("episode_uuids") or [],
         )

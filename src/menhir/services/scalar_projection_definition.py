@@ -20,7 +20,7 @@ from menhir.domain.projection import (
 )
 from menhir.domain.scalar_state_fold import fold_assertions
 
-__all__ = ["SCALAR_STATE_PROJECTION"]
+__all__ = ["SCALAR_STATE_PROJECTION", "scalar_projection_target"]
 
 _SCALAR_INPUT_TYPES = frozenset(
     {
@@ -42,7 +42,8 @@ def _assertion_type(assertion: object) -> str:
     return f"typed_scalar.{operation}"
 
 
-def _target(assertion: object) -> ProjectionTarget:
+def scalar_projection_target(assertion: object) -> ProjectionTarget:
+    """Return the canonical typed-scalar lifecycle target for one durable assertion row."""
     row = _row(assertion)
     return ProjectionTarget(
         subject_id=str(row.get("subject_uuid") or ""),
@@ -65,9 +66,6 @@ def _fold(
     result = fold_assertions(rows, as_of=as_of)
     outcome_count = len(result.states) + len(result.abstentions) + len(result.expiries)
     if outcome_count == 0:
-        # Existing ScalarStateService treats an absent desired slot as non-current and reconciles any
-        # stored View away. The common case here is a target whose only assertions are future-dated at
-        # ``as_of``. Preserve that semantics as an explicit desired retirement rather than an error.
         return ProjectionRetirement(target=target, reason="no_active_assertions")
     if outcome_count != 1:
         raise ValueError(
@@ -111,6 +109,6 @@ SCALAR_STATE_PROJECTION = ProjectionDefinition(
     output_view_kind="scalar_state",
     assertion_id_resolver=_assertion_id,
     assertion_type_resolver=_assertion_type,
-    target_resolver=_target,
+    target_resolver=scalar_projection_target,
     fold=_fold,
 )
