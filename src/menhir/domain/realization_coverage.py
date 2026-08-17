@@ -100,17 +100,23 @@ def _classify_desired(
     if assessment.definition_id != definition.definition_id:
         status = RealizationStatus.INVALID_PROOF
         reason = "freshness_identity_mismatch"
-    elif (
-        assessment.current_definition_version is not None
-        and assessment.current_definition_version != definition.version
-    ):
-        # Definition identity/version outranks state availability. A caller evaluating v2 must never
-        # treat an unavailable v1 assessment as merely missing projection state.
+    elif assessment.state == "unavailable":
+        # An unavailable assessment may legitimately have no published definition version. If it does
+        # name a version, however, it must still be the definition being audited.
+        if (
+            assessment.current_definition_version is not None
+            and assessment.current_definition_version != definition.version
+        ):
+            status = RealizationStatus.INVALID_PROOF
+            reason = "definition_version_mismatch"
+        else:
+            status = RealizationStatus.UNAVAILABLE
+            reason = assessment.reason
+    elif assessment.current_definition_version != definition.version:
+        # Fresh/stale are lifecycle claims about a published definition and therefore must be bound to
+        # the exact audited semantic version. ``None`` is not acceptable proof here.
         status = RealizationStatus.INVALID_PROOF
         reason = "definition_version_mismatch"
-    elif assessment.state == "unavailable":
-        status = RealizationStatus.UNAVAILABLE
-        reason = assessment.reason
     elif assessment.target_present is not True:
         status = RealizationStatus.INVALID_PROOF
         reason = "desired_target_not_present"
@@ -141,15 +147,19 @@ def _classify_removed(
     if assessment.definition_id != definition.definition_id:
         status = RealizationStatus.INVALID_PROOF
         reason = "freshness_identity_mismatch"
-    elif (
-        assessment.current_definition_version is not None
-        and assessment.current_definition_version != definition.version
-    ):
+    elif assessment.state == "unavailable":
+        if (
+            assessment.current_definition_version is not None
+            and assessment.current_definition_version != definition.version
+        ):
+            status = RealizationStatus.INVALID_PROOF
+            reason = "definition_version_mismatch"
+        else:
+            status = RealizationStatus.UNAVAILABLE
+            reason = assessment.reason
+    elif assessment.current_definition_version != definition.version:
         status = RealizationStatus.INVALID_PROOF
         reason = "definition_version_mismatch"
-    elif assessment.state == "unavailable":
-        status = RealizationStatus.UNAVAILABLE
-        reason = assessment.reason
     elif assessment.target_present is True:
         # The lifecycle still considers this target present even though the authoritative T4 outcome
         # set no longer contains it. Reconciliation has not carried the removal through yet.
