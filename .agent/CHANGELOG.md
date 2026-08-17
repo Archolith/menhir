@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-08-17 - Add the CF-20a saga reconciliation observation contract
+
+- Added `reconcile(dry_run=True)` to all four saga reconcilers (merge, unmerge, metric write,
+  delete). A dry-run performs the same journal and graph reads and reaches the same decision as a
+  live replay while making no durable mutation: no journal transition, no graph write, no attempt
+  recording, and no participant-lock change.
+- Extracted the pre-mutation decision out of `_apply` into a pure `_classify_replay` in the three
+  replay coordinators, so a dry-run forecast and a live replay cannot drift apart. `_apply` calls it
+  once and reuses the observed state, so there is still exactly one pre-mutation graph read.
+- Added `menhir.services.saga_reconcile_outcomes` as the shared outcome vocabulary. It deliberately
+  has no `WOULD_COMMIT`: a dry-run proves the deterministic decision path, not that the eventual
+  mutation would commit. `LIVE_OWNER` and `OWNER_UNKNOWN` are declared but unreachable until CF-20b
+  adds operation ownership, so a 20a summary never implies it checked liveness.
+- Dry-run adds `scanned`, `counts` and per-row `outcomes`. The live-action counters
+  (`replayed`/`drifted`/`failed`, `committed`/`needs_review`) stay 0 in dry-run because they count
+  work performed and a dry-run performs none. Live return shapes gained no keys, so existing callers
+  are unaffected.
+- A row the classifier cannot read is reported as `WOULD_NEEDS_REVIEW` and the scan continues, so one
+  malformed legacy row cannot hide the newer rows behind it.
+- CF-20 stays OPEN. This stage is observation only: nothing is wired into startup, the `limit=500`
+  recovery horizon is unchanged, and no reconciler is reachable at runtime yet.
+
 ## 2026-08-11 - Complete Phase 5 production repair and queue closeout refresh
 
 - Verified pre/post Neo4j dumps and consistency checks, repaired five stale standalone Entity RANGE
