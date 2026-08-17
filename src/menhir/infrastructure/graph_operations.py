@@ -196,7 +196,8 @@ class GraphOperationsJournal:
                         reverses_op_id        TEXT,
                         owner_token           TEXT,
                         owner_heartbeat_at    TEXT,
-                        owner_lease_expires_at TEXT
+                        owner_lease_expires_at TEXT,
+                        owner_death_attested_by TEXT
                     )
                     """
                 )
@@ -215,6 +216,7 @@ class GraphOperationsJournal:
                     "owner_token",
                     "owner_heartbeat_at",
                     "owner_lease_expires_at",
+                    "owner_death_attested_by",
                 ):
                     if column not in operation_columns:
                         # Column names are literals from the tuple above, never caller input.
@@ -340,6 +342,12 @@ class GraphOperationsJournal:
         # which is what lets OWNER_UNKNOWN mean something specific. Overridable so a test can
         # impersonate another process, and so a future reconciler can claim an abandoned row.
         claim_token = owner_token or oo.process_owner_token()
+        # The durable expiry must be derived from THIS operation's kind, not the single-statement
+        # default. A writer's local heartbeat computes its headroom from the kind, so a shorter
+        # durable stamp would let the writer believe it had more claim than the row actually
+        # carries -- and it would believe that in the DANGEROUS direction, passing its own
+        # pre-dispatch headroom check while the real claim was close to lapsing.
+        claim_seconds = oo.lease_seconds_for_kind(operation_kind)
         owns = conn is None
         connection = sqlite3.connect(self.db_path) if owns else conn
         try:
@@ -370,7 +378,7 @@ class GraphOperationsJournal:
                     op_id, batch_id, operation_kind, target_uuid, target_key,
                     request_json, before_snapshot_json, expected_after_sha256,
                     now, now, reverses_op_id,
-                    claim_token, now, oo.lease_expiry_iso(),
+                    claim_token, now, oo.lease_expiry_iso(seconds=claim_seconds),
                 ),
             )
             for entity_uuid in participants:
@@ -403,18 +411,32 @@ class GraphOperationsJournal:
         infrastructure and that store is a service; importing upward would invert the layering for a
         single SELECT. The coupling is the table name and its epoch-seconds expiry column.
 
-        A missing table means no gate has ever been created, which is the normal state on a fresh
-        database and must not fail a write. An unreadable table is treated the same way: this gate
-        exists to stop writes DURING recovery, and inventing a pause because a SELECT failed would
-        turn a query problem into an outage.
+        A MISSING table means no gate has ever been created -- the normal state on a fresh database,
+        and positive evidence of absence, so it fails open. Every other read failure means the gate
+        schema exists but cannot be read, which is NOT evidence of absence, so it fails closed for
+        the same reason a present-but-unparseable expiry does.
         """
         try:
             row = conn.execute(
                 "SELECT owner_id, lease_expires_at FROM scheduler_leases WHERE lease_name = ?",
                 (RECONCILIATION_LEASE_NAME,),
             ).fetchone()
-        except sqlite3.Error:
-            return
+        except sqlite3.OperationalError as exc:
+            # Fail OPEN only for a table that does not exist -- proof no gate was ever created, and
+            # the normal state of a fresh database. Any other operational error means the gate
+            # schema is present but unreadable, which is not evidence of absence, so it fails
+            # CLOSED like a present-but-unparseable row.
+            if "no such table" in str(exc).lower():
+                return
+            raise SagaWritesPausedError(
+                f"cannot read the reconciliation gate ({exc}); refusing to PREPARE while its "
+                "state is unknown"
+            ) from exc
+        except sqlite3.Error as exc:
+            raise SagaWritesPausedError(
+                f"cannot read the reconciliation gate ({exc}); refusing to PREPARE while its "
+                "state is unknown"
+            ) from exc
         if row is None:
             return
         try:
@@ -664,9 +686,12 @@ class GraphOperationsJournal:
         op_id: str,
         *,
         owner_token: str | None = None,
-        seconds: int = oo.DEFAULT_LEASE_SECONDS,
+        seconds: int | None = None,
     ) -> bool:
         """Take ownership of an ABANDONED PREPARED row before replaying it (CF-20c).
+
+        ``seconds`` defaults to the TTL derived from the row's OWN operation_kind, read inside the
+        same transaction as the claim.
 
         Returns True only if this call is the one that took it. The whole point is that the
         transfer happens BEFORE any graph side effect: without it, two reconcilers can both read a
@@ -694,6 +719,36 @@ class GraphOperationsJournal:
         now = _utc_now_iso()
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("BEGIN IMMEDIATE")
+            # Derive the new expiry from the ROW's own kind, inside the same transaction that reads
+            # it. A claimant that stamped the single-statement default onto a two-statement
+            # operation would hand itself a claim shorter than the work it is about to do.
+            kind_row = conn.execute(
+                "SELECT operation_kind FROM graph_operations WHERE op_id = ?", (op_id,)
+            ).fetchone()
+            claim_seconds = (
+                seconds if seconds is not None
+                else oo.lease_seconds_for_kind(kind_row[0] if kind_row else "")
+            )
+            # Enforce the SAME rule classification applies, inside the same transaction. Claiming
+            # on expiry alone would route straight past the death-evidence requirement and
+            # reintroduce exactly the unproven premise it exists to remove.
+            row = conn.execute(
+                "SELECT owner_token, owner_lease_expires_at, owner_death_attested_by, state "
+                "FROM graph_operations WHERE op_id = ?",
+                (op_id,),
+            ).fetchone()
+            if row is None or row[3] != "PREPARED":
+                conn.commit()
+                return False
+            candidate = {
+                "owner_token": row[0],
+                "owner_lease_expires_at": row[1],
+                "owner_death_attested_by": row[2],
+            }
+            if oo.classify_ownership(candidate) != oo.ABANDONED:
+                conn.commit()
+                return False
+
             cursor = conn.execute(
                 "UPDATE graph_operations "
                 "SET owner_token = ?, owner_heartbeat_at = ?, owner_lease_expires_at = ?, "
@@ -704,7 +759,30 @@ class GraphOperationsJournal:
                 "  AND owner_token != ? "
                 "  AND owner_lease_expires_at IS NOT NULL "
                 "  AND owner_lease_expires_at <= ?",
-                (token, now, oo.lease_expiry_iso(seconds=seconds), now, op_id, token, now),
+                (token, now, oo.lease_expiry_iso(seconds=claim_seconds), now, op_id, token, now),
+            )
+            conn.commit()
+            return cursor.rowcount == 1
+
+    def attest_owner_death(self, op_id: str, *, attested_by: str) -> bool:
+        """Record independent operator evidence that a PREPARED row's writer is gone.
+
+        The sanctioned path for the case automation cannot decide: an owner on another host, or one
+        whose PID has been recycled, where this process can never prove death by inspection. It is
+        deliberately a human act with a name attached -- the alternative is inferring death from a
+        clock, which is the premise this design removed.
+
+        Refuses on a row that is not PREPARED: a terminal operation has no writer to attest about.
+        """
+        if not str(attested_by or "").strip():
+            raise GraphOperationError("attested_by is required: attestation must name a person")
+        self._ensure_ready()
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            cursor = conn.execute(
+                "UPDATE graph_operations SET owner_death_attested_by = ?, updated_at = ? "
+                "WHERE op_id = ? AND state = 'PREPARED'",
+                (str(attested_by).strip(), _utc_now_iso(), op_id),
             )
             conn.commit()
             return cursor.rowcount == 1

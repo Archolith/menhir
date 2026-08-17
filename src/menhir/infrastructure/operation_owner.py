@@ -21,6 +21,7 @@ import os
 import uuid as uuidlib
 from datetime import datetime, timedelta, timezone
 
+from menhir.infrastructure import process_liveness
 from menhir.infrastructure.neo4j import (
     SAGA_MUTATION_TIMEOUT_S,
     mutation_window_seconds,
@@ -30,11 +31,15 @@ from menhir.infrastructure.neo4j import (
 #: heartbeat thread waking late, and clock granularity -- none of which the window itself models.
 LEASE_SAFETY_MARGIN_S = 30
 
-#: Bounded mutation statements each saga kind dispatches. The TTL must cover every one of them,
-#: because each is separately bounded AND separately retried.
+#: Upper BOUND on the bounded mutation statements each saga kind may dispatch. The TTL must cover
+#: every one of them, because each is separately bounded AND separately retried.
 #:
-#: METRIC_WRITE is 2: _write_version then _link_episodes. Getting this wrong in the low direction
-#: is the dangerous direction -- it yields a lease shorter than the work it must outlive.
+#: METRIC_WRITE is held at 2 deliberately, as a bound rather than a measurement. On the CURRENT
+#: source it issues one mutating statement: record_metric passes episode_uuids=[] and _link_episodes
+#: returns immediately on an empty list, so the second statement never runs. Keeping 2 costs only a
+#: longer lease -- which merely delays recovery -- while assuming 1 would break the moment a caller
+#: supplies episodes. Getting this wrong in the LOW direction is the dangerous one: it yields a
+#: lease shorter than the work it must outlive.
 SAGA_STATEMENT_COUNTS: dict[str, int] = {
     "ENTITY_MERGE": 1,
     "ENTITY_UNMERGE": 1,
@@ -146,12 +151,17 @@ def _instance_label() -> str:
 def process_owner_token() -> str:
     """A token identifying THIS process, stable for its lifetime and unique across processes.
 
-    Three components: the instance label (which deployment), the PID (which process on that
-    host), and a process-start nonce. The nonce is load-bearing: PIDs are recycled by the OS, so
-    label+PID alone can repeat after a restart and let a fresh process inherit a dead process's
-    claim on a PREPARED row.
+    Four components: the instance label (which deployment), the HOSTNAME (which machine), the PID
+    (which process on that machine), and a process-start nonce.
+
+    The hostname is what makes the PID usable as death evidence: a PID may only be inspected on the
+    host that recorded it, and asking locally about a remote PID answers about an unrelated process.
+
+    The nonce is load-bearing for the opposite reason: PIDs are recycled, so label+host+PID alone
+    can repeat after a restart. A recycled PID reads as ALIVE, which is the safe direction -- it
+    yields "cannot prove death" rather than a false claim of death.
     """
-    return f"{_instance_label()}:{os.getpid()}:{_PROCESS_NONCE}"
+    return f"{_instance_label()}:{process_liveness.hostname()}:{os.getpid()}:{_PROCESS_NONCE}"
 
 
 def lease_expiry_iso(*, seconds: int = DEFAULT_LEASE_SECONDS, now: datetime | None = None) -> str:
@@ -184,23 +194,44 @@ def _parse_iso(value: object) -> datetime | None:
     return parsed
 
 
-def classify_ownership(row: object, *, now: datetime | None = None) -> str:
-    """Decide whether a PREPARED row's original writer can be proven still alive.
+def _owner_parts(token: str) -> tuple[str, int] | None:
+    """(hostname, pid) from an owner token, or None if it is not in the current format."""
+    parts = token.split(":")
+    if len(parts) != 4:
+        return None
+    try:
+        return parts[1], int(parts[2])
+    except (TypeError, ValueError):
+        return None
 
-    Returns LIVE_OWNER (a hard veto on replay), OWNER_UNKNOWN (liveness unprovable -- also a
-    veto, but for a different reason and needing a different operator response), or ABANDONED
-    (no live claim; the row is a legitimate recovery candidate).
 
-    OWNER_UNKNOWN covers three genuinely different situations that share one property -- we
-    cannot prove the writer is gone:
+def classify_ownership(
+    row: object,
+    *,
+    now: datetime | None = None,
+    local_hostname: str | None = None,
+) -> str:
+    """Decide whether a PREPARED row may be recovered, requiring POSITIVE EVIDENCE of writer death.
 
-    * no owner token at all: a row written before this fence existed. During a mixed-version
-      rollout an older binary with no ownership support may still be running and may still own
-      it, so "ownerless" must NOT be read as "abandoned".
-    * a token but no lease expiry: nothing to compare against.
-    * a lease expiry that will not parse: a corrupt or hand-edited value.
+    An expired lease is deliberately NOT sufficient. The earlier design read "lease expired" as
+    "writer is gone", which silently depended on an unproven premise: that an already-dispatched
+    graph mutation must have returned within a bounded time. It need not. ``Query(timeout=...)``
+    bounds the SERVER transaction, while the client fetches records lazily over a socket that has
+    no comparable read deadline, so elapsed time alone cannot establish that the original writer
+    has stopped executing.
 
-    Only an owner whose lease has demonstrably passed is ABANDONED.
+    So expiry now demotes a claim from "fresh" to "stale", and something independent must prove the
+    writer is dead before recovery may act:
+
+    * fresh lease                                   -> LIVE_OWNER (a hard veto)
+    * expired, SAME host, PID demonstrably gone      -> ABANDONED (recoverable)
+    * expired, operator has attested the death       -> ABANDONED (recoverable)
+    * expired, remote host or PID still present      -> OWNER_UNKNOWN (fenced, needs a human)
+    * no token / no expiry / unreadable              -> OWNER_UNKNOWN
+
+    The asymmetry is the point: a false ABANDONED double-applies a graph mutation, while a false
+    LIVE_OWNER or OWNER_UNKNOWN only delays recovery. Every ambiguity therefore resolves away from
+    recovery.
     """
     if not isinstance(row, dict):
         return OWNER_UNKNOWN
@@ -209,11 +240,30 @@ def classify_ownership(row: object, *, now: datetime | None = None) -> str:
     if not isinstance(token, str) or not token.strip():
         return OWNER_UNKNOWN
 
+    # An operator attesting the writer is dead is independent evidence, and outranks the clock:
+    # it is the sanctioned path for a remote or unverifiable owner.
+    if str(row.get("owner_death_attested_by") or "").strip():
+        return ABANDONED
+
     expires_at = _parse_iso(row.get("owner_lease_expires_at"))
     if expires_at is None:
         return OWNER_UNKNOWN
+    if expires_at > (now or _utc_now()):
+        return LIVE_OWNER
 
-    return ABANDONED if expires_at <= (now or _utc_now()) else LIVE_OWNER
+    # Expired. That is a staleness signal, not a death certificate.
+    parts = _owner_parts(token)
+    if parts is None:
+        return OWNER_UNKNOWN
+    owner_host, owner_pid = parts
+    if owner_host != (local_hostname or process_liveness.hostname()):
+        # A remote PID cannot be inspected from here, so death is unprovable by this process.
+        return OWNER_UNKNOWN
+    if process_liveness.pid_alive(owner_pid):
+        # Either the original writer is still running, or its PID was recycled. Both read as
+        # "cannot prove death", and both must fence.
+        return OWNER_UNKNOWN
+    return ABANDONED
 
 
 def is_own_claim(row: object, *, token: str | None = None) -> bool:

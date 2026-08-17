@@ -91,6 +91,9 @@ class ReconciliationGate:
         Deliberately does not re-acquire. A gate that expired may already have been taken by another
         reconciler that has begun replaying the same backlog; silently taking it back would put two
         reconcilers on the same rows with neither aware of the other.
+
+        The store's UPDATE also requires the lease to be UNEXPIRED, so a lapsed claim cannot be
+        renewed back to life by its original owner during the window before someone else takes it.
         """
         renewed = self.lease_store.renew(
             lease_name=RECONCILIATION_LEASE_NAME,
@@ -119,6 +122,17 @@ class ReconciliationGate:
             raise ReconciliationLeaseLost(
                 f"reconciliation gate is no longer owned by {self.owner_id!r} "
                 f"(now {(holder or {}).get('owner_id')!r}); refusing to continue"
+            )
+        # Same owner but LAPSED is still loss. The row lingering with our name on it proves only
+        # that nobody has taken it yet, not that we still hold it -- and every other process
+        # (including the journal's PREPARE gate, which compares expiry directly) has already been
+        # treating it as free. Continuing here would act on a gate the rest of the system does not
+        # believe in.
+        if holder.get("expired"):
+            self._held = False
+            raise ReconciliationLeaseLost(
+                f"reconciliation gate held by {self.owner_id!r} has EXPIRED "
+                f"(expires_at={holder.get('lease_expires_at')}); refusing to continue"
             )
 
     def release(self) -> None:
