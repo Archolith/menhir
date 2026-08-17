@@ -1,5 +1,31 @@
 # Changelog
 
+## 2026-08-17 - Add the CF-20c reconciliation gate and global PREPARE pause
+
+- Added a named reconciliation lease that both gives one reconciler exclusive ownership of the
+  PREPARED backlog and pauses new saga PREPARE across the deployment while it is held. These are
+  two different hazards: the lease stops reconciler-vs-reconciler, while per-operation ownership
+  (CF-20b) stops reconciler-vs-a-still-live-writer. Holding the gate does not make a replay safe on
+  its own.
+- `GraphOperationsJournal.prepare` now opens `BEGIN IMMEDIATE` before checking the gate, so the
+  check and the insert are one atomic step. Without the write lock this was a check-then-insert
+  race: a deferred reader sees no lease, recovery acquires it and commits, and the PREPARED row
+  still lands after recovery has decided what the backlog contains. The lease row and the journal
+  share one SQLite database, which is what makes the pause real rather than advisory.
+- Refusal raises `SagaWritesPausedError`, a `GraphOperationError` subclass, so existing handlers keep
+  working while a caller that cares can distinguish "this target is fenced" from "this process is
+  not accepting new sagas".
+- Two deliberately asymmetric decisions: a MISSING `scheduler_leases` table allows writes (proof no
+  gate was ever created, the normal state of a fresh database), while a PRESENT lease row with an
+  unreadable expiry refuses them (positive evidence recovery is running, and it cannot be proven
+  expired).
+- `renew()` reports loss rather than re-acquiring, because a lapsed gate may already belong to a
+  reconciler that has begun replaying the same rows. `verify_still_held()` checks the durable row,
+  not local state, and the context manager releases in `finally` -- a leaked gate would pause every
+  saga writer until its TTL lapsed, turning a crashed recovery pass into an outage.
+- Still no replay. CF-20 remains OPEN: atomic claiming of an abandoned row and live activation are
+  not implemented, and activation stays contingent on a per-deployment preflight.
+
 ## 2026-08-17 - Add CF-20b saga ownership, exhaustive scan and central dispatcher
 
 - Added per-operation ownership so recovery can tell "crashed midway" from "still running in
