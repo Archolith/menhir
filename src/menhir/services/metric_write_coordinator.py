@@ -28,6 +28,7 @@ import json
 import logging
 import sqlite3
 import uuid as uuidlib
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Protocol
@@ -422,6 +423,33 @@ class MetricWriteCoordinator:
         # (2) MUTATE + (3) VERIFY + (4) COMMITTED
         return self._apply(request)
 
+    def classify_prepared_row(self, row: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
+        """Classify ONE PREPARED journal row. Pure: performs no durable mutation.
+
+        ``row`` is a journal row dict (``op_id``, ``operation_kind``, ``request_json``,
+        ...), NOT the parsed request. This thin wrapper layers the row-level concerns on
+        top of ``_classify_replay``: the kind check, the ``request_json`` parse, and the
+        "classifier raised" guard. A malformed row must never propagate an exception out
+        of here -- one bad old row must not abort a scan and hide every newer row behind it.
+        """
+        operation_kind = row.get("operation_kind")
+        if operation_kind != "METRIC_WRITE":
+            return SKIP, {}
+        try:
+            request = json.loads(row["request_json"])
+        except (TypeError, ValueError, KeyError):
+            return WOULD_NEEDS_REVIEW, {"observed_error": "unparseable request_json"}
+        # Narrow on purpose: these are the shapes a malformed ROW produces. A graph outage is not a
+        # row defect, and folding it in would let a caller acting on this outcome quarantine a good
+        # row over a transient failure. The dispatcher catches the rest, so an observe pass survives.
+        try:
+            return self._classify_replay(request)
+        except (KeyError, TypeError, ValueError, AttributeError) as exc:
+            return (
+                WOULD_NEEDS_REVIEW,
+                {"observed_error": f"unclassifiable row: {type(exc).__name__}: {exc}"},
+            )
+
     def _classify_replay(self, request: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         """Classify a PREPARED request WITHOUT mutating anything (CF-20a observation contract).
 
@@ -629,17 +657,10 @@ class MetricWriteCoordinator:
                 continue
             if dry_run:
                 # A malformed row must not abort the scan -- see the note in MergeCoordinator:
-                # one unclassifiable old row must never hide the newer rows behind it.
-                try:
-                    outcome, diag = self._classify_replay(request)
-                except Exception as exc:  # noqa: BLE001
-                    outcomes.append({
-                        "op_id": op_id,
-                        "operation_kind": operation_kind,
-                        "outcome": WOULD_NEEDS_REVIEW,
-                        "observed_error": f"unclassifiable row: {type(exc).__name__}: {exc}",
-                    })
-                    continue
+                # one unclassifiable old row must never hide the newer rows behind it. The
+                # row-level guard lives in classify_prepared_row so the dispatcher and a direct
+                # dry-run can never disagree.
+                outcome, diag = self.classify_prepared_row(row)
                 entry: dict[str, Any] = {
                     "op_id": op_id, "operation_kind": operation_kind, "outcome": outcome
                 }

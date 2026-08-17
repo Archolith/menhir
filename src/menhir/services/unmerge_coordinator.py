@@ -28,6 +28,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid as uuidlib
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -378,15 +379,70 @@ class UnmergeCoordinator:
             # audit-hygiene problem, not a correctness one. Report, do not raise.
             logger.warning("could not mark merge %s REVERSED: %s", merge_op_id, exc)
 
+    # ------------------------------------------------------------------ CF-20b seam
+    def classify_prepared_row(self, row: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
+        """Classify ONE PREPARED journal row. Pure: performs no durable mutation.
+
+        Returns ``(outcome, diagnostics)``. This is the single classification path shared with the
+        CF-20b dispatcher and ``reconcile(dry_run=True)``, so a direct dry-run can never disagree
+        with it. Outcomes come from ``saga_reconcile_outcomes``. ``observed_error`` is present in
+        the diagnostics whenever the outcome is ``WOULD_NEEDS_REVIEW``.
+        """
+        op_id = str(row["op_id"])
+        kind = row.get("operation_kind")
+        diagnostics: dict[str, Any] = {
+            "op_id": op_id,
+            "operation_kind": kind,
+        }
+
+        # 1. A row this coordinator does not handle (defensive only -- the dispatcher routes by
+        #    kind, and LEGACY_ENTITY_UNMERGE is a DIFFERENT kind a different coordinator owns).
+        if kind != "ENTITY_UNMERGE":
+            return (SKIP, diagnostics)
+
+        # 2. request_json that will not parse.
+        try:
+            request = json.loads(row["request_json"])
+        except (TypeError, ValueError, KeyError):
+            diagnostics["observed_error"] = "unparseable request_json"
+            return (WOULD_NEEDS_REVIEW, diagnostics)
+
+        # 3. The pure PREP -- this coordinator is the only one with this step. A dry-run must
+        #    prove these reads SUCCEED, not merely that nothing was written: a restorable row only
+        #    reaches WOULD_RESTORE if the snapshot loads AND the restore plan builds.
+        try:
+            body = ms.load_snapshot(ms.loads(row["before_snapshot_json"]))
+            _ = self._build_restore_plan(
+                ms.decode_node(body["survivor"]), ms.decode_node(body["absorbed"])
+            )
+        except (TypeError, ValueError, ms.SnapshotSchemaError) as exc:
+            diagnostics["observed_error"] = f"unreplayable row: {exc}"
+            return (WOULD_NEEDS_REVIEW, diagnostics)
+
+        # 4. The classification itself. A legacy row missing a field must never abort the scan and
+        #    hide every newer row behind it. Narrow on purpose: these are the shapes a malformed ROW
+        #    produces. A graph outage is not a row defect, and folding it in would let a caller
+        #    acting on this outcome quarantine a good row over a transient failure. The dispatcher
+        #    catches the rest, so an observe pass still cannot die on one handler.
+        try:
+            outcome, diag = self._classify_replay(request)
+        except (KeyError, TypeError, ValueError, AttributeError) as exc:
+            diagnostics["observed_error"] = f"unclassifiable row: {type(exc).__name__}: {exc}"
+            return (WOULD_NEEDS_REVIEW, diagnostics)
+
+        # 5. The coordinator's own classification. Ensure the shared keys reconcile needs are set.
+        if "operation_kind" not in diag:
+            diag["operation_kind"] = kind
+        return (outcome, diag)
+
     # ------------------------------------------------------------------ reconciliation
     def reconcile(self, *, limit: int = 500, dry_run: bool = False) -> dict[str, Any]:
         """Replay every ENTITY_UNMERGE left PREPARED by a crash, or report what WOULD happen.
 
-        ``dry_run=True`` still parses each request, loads the before-snapshot, and builds the
-        restore plan -- pure reads that must succeed -- then classifies each row via
-        ``_classify_replay`` and mutates nothing. The classification is the observation contract
-        (CF-20a); the counters stay at zero because nothing is replayed, and ``outcomes`` carries
-        the per-row decision.
+        ``dry_run=True`` routes every scanned row through ``classify_prepared_row`` -- the single
+        classification path shared with the CF-20b dispatcher -- and mutates nothing. The
+        classification is the observation contract (CF-20a); the counters stay at zero because
+        nothing is replayed, and ``outcomes`` carries the per-row decision.
         """
         replayed = 0
         drifted = 0
@@ -397,11 +453,21 @@ class UnmergeCoordinator:
             scanned += 1
             op_id = str(row["op_id"])
             kind = row.get("operation_kind")
+            if dry_run:
+                # Every scanned row gets exactly one outcome; a malformed row must not abort the
+                # scan (see the note in MergeCoordinator). classify_prepared_row handles the
+                # kind-mismatch SKIP, the unparseable request, the pure prep, and the classifier.
+                outcome, diag = self.classify_prepared_row(row)
+                entry: dict[str, Any] = {
+                    "op_id": op_id,
+                    "operation_kind": kind,
+                    "outcome": outcome,
+                }
+                if "observed_error" in diag:
+                    entry["observed_error"] = diag["observed_error"]
+                outcomes.append(entry)
+                continue
             if kind != "ENTITY_UNMERGE":
-                if dry_run:
-                    outcomes.append(
-                        {"op_id": op_id, "operation_kind": kind, "outcome": SKIP}
-                    )
                 continue
             try:
                 request = json.loads(row["request_json"])
@@ -410,42 +476,10 @@ class UnmergeCoordinator:
                     ms.decode_node(body["survivor"]), ms.decode_node(body["absorbed"])
                 )
             except (TypeError, ValueError, ms.SnapshotSchemaError) as exc:
-                if dry_run:
-                    outcomes.append(
-                        {
-                            "op_id": op_id,
-                            "operation_kind": kind,
-                            "outcome": WOULD_NEEDS_REVIEW,
-                            "observed_error": f"unreplayable row: {exc}",
-                        }
-                    )
-                else:
-                    self.journal.mark_needs_review(
-                        op_id, observed_error=f"unreplayable row: {exc}"
-                    )
-                    drifted += 1
-                continue
-            if dry_run:
-                # A malformed row must not abort the scan -- see the note in MergeCoordinator.
-                # This coordinator is the most exposed: _classify_replay reads merge_op_id
-                # directly, so a legacy row written without it would otherwise raise KeyError
-                # and take the rest of the preflight down with it.
-                try:
-                    outcome, diag = self._classify_replay(request)
-                except Exception as exc:  # noqa: BLE001
-                    outcomes.append({
-                        "op_id": op_id,
-                        "operation_kind": kind,
-                        "outcome": WOULD_NEEDS_REVIEW,
-                        "observed_error": f"unclassifiable row: {type(exc).__name__}: {exc}",
-                    })
-                    continue
-                entry: dict[str, Any] = {
-                    "op_id": op_id, "operation_kind": kind, "outcome": outcome
-                }
-                if "observed_error" in diag:
-                    entry["observed_error"] = diag["observed_error"]
-                outcomes.append(entry)
+                self.journal.mark_needs_review(
+                    op_id, observed_error=f"unreplayable row: {exc}"
+                )
+                drifted += 1
                 continue
             try:
                 self._apply(request, plan)

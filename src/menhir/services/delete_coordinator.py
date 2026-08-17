@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid as uuidlib
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -214,6 +215,50 @@ class DeleteCoordinator:
             raise ms.SnapshotSchemaError(f"operation {op_id!r} has no snapshot")
         return ms.loads(row["before_snapshot_json"])
 
+    def classify_prepared_row(self, row: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
+        """Classify ONE PREPARED journal row. Pure: performs no durable mutation.
+
+        A delete left PREPARED by a crash is never replayed -- re-running it would destroy nodes
+        that a crash spared. So this only OBSERVES whether the delete already happened: if every
+        target is gone the delete completed (mark already applied); if any survive an operator
+        decides (needs review).
+        """
+        operation_kind = row.get("operation_kind")
+        if operation_kind not in ("ENTITY_DELETE", "SESSION_TTL_DELETE"):
+            return SKIP, {}
+        # Structural problems with the ROW are classified; infrastructure failures are NOT.
+        #
+        # This method is the one seam used by BOTH the live sweep and the dry-run, so the catch here
+        # has to be narrow. A broad `except Exception` would fold a transient graph outage into
+        # WOULD_NEEDS_REVIEW, and in live mode that quarantines the row -- which fences its
+        # participants and demands an operator -- when the correct outcome is to leave it PREPARED
+        # and retry later. So capture_node_state below is deliberately OUTSIDE any handler. The
+        # central dispatcher wraps handler calls broadly, which is what keeps an OBSERVE pass alive
+        # without granting a live sweep permission to quarantine on an outage.
+        try:
+            request = json.loads(row["request_json"])
+        except (TypeError, ValueError, KeyError):
+            return WOULD_NEEDS_REVIEW, {"observed_error": "unparseable request_json"}
+        try:
+            targets = [str(t) for t in request.get("targets") or []]
+        except (AttributeError, TypeError) as exc:
+            return WOULD_NEEDS_REVIEW, {
+                "observed_error": f"unclassifiable row: {type(exc).__name__}: {exc}"
+            }
+        survivors = [
+            u for u in targets if self.graph_adapter.capture_node_state(u) is not None
+        ]
+        if survivors:
+            return WOULD_NEEDS_REVIEW, {
+                "survivors": survivors,
+                "observed_error": (
+                    f"crash left the delete incomplete; still present: {survivors}. "
+                    "NOT retried automatically -- deleting them now could destroy nodes the "
+                    "crash spared."
+                ),
+            }
+        return WOULD_MARK_ALREADY_APPLIED, {}
+
     def reconcile(self, *, limit: int = 500, dry_run: bool = False) -> dict[str, Any]:
         """A delete left PREPARED by a crash: determine whether it happened, and record the truth.
 
@@ -231,60 +276,27 @@ class DeleteCoordinator:
         for row in self.journal.list_by_state("PREPARED", limit=limit):
             scanned += 1
             op_id = str(row["op_id"])
-            operation_kind = row.get("operation_kind")
-            if operation_kind not in ("ENTITY_DELETE", "SESSION_TTL_DELETE"):
-                if dry_run:
-                    outcomes.append({
-                        "op_id": op_id,
-                        "operation_kind": operation_kind,
-                        "outcome": SKIP,
-                    })
+            outcome, diagnostics = self.classify_prepared_row(row)
+            if dry_run:
+                entry: dict[str, Any] = {
+                    "op_id": op_id,
+                    "operation_kind": row.get("operation_kind"),
+                    "outcome": outcome,
+                }
+                if "observed_error" in diagnostics:
+                    entry["observed_error"] = diagnostics["observed_error"]
+                if "survivors" in diagnostics:
+                    entry["survivors"] = diagnostics["survivors"]
+                outcomes.append(entry)
                 continue
-            try:
-                request = json.loads(row["request_json"])
-            except (TypeError, ValueError):
-                if dry_run:
-                    outcomes.append({
-                        "op_id": op_id,
-                        "operation_kind": operation_kind,
-                        "outcome": WOULD_NEEDS_REVIEW,
-                    })
-                else:
-                    self.journal.mark_needs_review(op_id, observed_error="unparseable request_json")
-                    review += 1
+            if outcome == SKIP:
                 continue
-            targets = [str(t) for t in request.get("targets") or []]
-            survivors = [
-                u for u in targets if self.graph_adapter.capture_node_state(u) is not None
-            ]
-            if survivors:
-                if dry_run:
-                    outcomes.append({
-                        "op_id": op_id,
-                        "operation_kind": operation_kind,
-                        "outcome": WOULD_NEEDS_REVIEW,
-                        "survivors": survivors,
-                    })
-                else:
-                    self.journal.mark_needs_review(
-                        op_id,
-                        observed_error=(
-                            f"crash left the delete incomplete; still present: {survivors}. "
-                            "NOT retried automatically -- deleting them now could destroy nodes the "
-                            "crash spared."
-                        ),
-                    )
-                    review += 1
-            else:
-                if dry_run:
-                    outcomes.append({
-                        "op_id": op_id,
-                        "operation_kind": operation_kind,
-                        "outcome": WOULD_MARK_ALREADY_APPLIED,
-                    })
-                else:
-                    self.journal.mark_committed(op_id)
-                    committed += 1
+            if outcome == WOULD_MARK_ALREADY_APPLIED:
+                self.journal.mark_committed(op_id)
+                committed += 1
+            elif outcome == WOULD_NEEDS_REVIEW:
+                self.journal.mark_needs_review(op_id, observed_error=diagnostics["observed_error"])
+                review += 1
         if dry_run:
             # committed/needs_review stay 0: they count journal transitions PERFORMED, and a
             # dry-run performs none. Reporting them as if they had happened is the same lie as

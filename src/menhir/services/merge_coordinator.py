@@ -25,6 +25,7 @@ import hashlib
 import json
 import logging
 import uuid as uuidlib
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Protocol
@@ -243,6 +244,32 @@ class MergeCoordinator:
 
         return (WOULD_REPLAY, diag)
 
+    def classify_prepared_row(self, row: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
+        """Classify ONE PREPARED journal row. Pure: performs no durable mutation.
+
+        Single classification entry point shared by a direct ``reconcile(dry_run=True)``
+        and the CF-20b dispatcher so the two can never disagree. Returns
+        ``(outcome, diagnostics)`` drawn from the shared saga-reconcile vocabulary. A
+        malformed row never propagates: one bad old row must not abort a scan and hide
+        every newer row behind it.
+        """
+        if row.get("operation_kind") != "ENTITY_MERGE":
+            return (SKIP, {})
+        try:
+            request = json.loads(row["request_json"])
+        except (TypeError, ValueError, KeyError):
+            return (WOULD_NEEDS_REVIEW, {"observed_error": "unparseable request_json"})
+        # Narrow on purpose: these are the shapes a malformed ROW produces (a legacy row missing a
+        # field the classifier reads). A graph outage is NOT a row defect, and folding it in here
+        # would let a caller that acts on this outcome quarantine a perfectly good row over a
+        # transient failure. The dispatcher catches the rest, so an observe pass still cannot die.
+        try:
+            return self._classify_replay(request)
+        except (KeyError, TypeError, ValueError, AttributeError) as exc:
+            return (WOULD_NEEDS_REVIEW, {
+                "observed_error": f"unclassifiable row: {type(exc).__name__}: {exc}",
+            })
+
     def _apply(self, request: dict[str, Any]) -> dict[str, Any]:
         """Mutate + verify for a PREPARED request. Used by BOTH the first attempt and replay, so a
         replay can never diverge from the original path."""
@@ -342,43 +369,8 @@ class MergeCoordinator:
             scanned += 1
             op_id = str(row["op_id"])
             operation_kind = row.get("operation_kind")
-            if operation_kind != "ENTITY_MERGE":
-                if dry_run:
-                    outcomes.append({
-                        "op_id": op_id,
-                        "operation_kind": operation_kind,
-                        "outcome": SKIP,
-                    })
-                continue
-            try:
-                request = json.loads(row["request_json"])
-            except (TypeError, ValueError):
-                if dry_run:
-                    outcomes.append({
-                        "op_id": op_id,
-                        "operation_kind": operation_kind,
-                        "outcome": WOULD_NEEDS_REVIEW,
-                        "observed_error": "unparseable request_json",
-                    })
-                else:
-                    self.journal.mark_needs_review(op_id, observed_error="unparseable request_json")
-                    drifted += 1
-                continue
             if dry_run:
-                # A malformed row must not abort the scan. Classification reads request fields
-                # directly, so a row missing one raises rather than returning an outcome -- and
-                # one bad old row killing the whole preflight is exactly the starvation the
-                # exhaustive-scan requirement exists to prevent. Report it and keep going.
-                try:
-                    outcome, diag = self._classify_replay(request)
-                except Exception as exc:  # noqa: BLE001
-                    outcomes.append({
-                        "op_id": op_id,
-                        "operation_kind": operation_kind,
-                        "outcome": WOULD_NEEDS_REVIEW,
-                        "observed_error": f"unclassifiable row: {type(exc).__name__}: {exc}",
-                    })
-                    continue
+                outcome, diag = self.classify_prepared_row(row)
                 entry: dict[str, Any] = {
                     "op_id": op_id,
                     "operation_kind": operation_kind,
@@ -387,6 +379,14 @@ class MergeCoordinator:
                 if "observed_error" in diag:
                     entry["observed_error"] = diag["observed_error"]
                 outcomes.append(entry)
+                continue
+            if operation_kind != "ENTITY_MERGE":
+                continue
+            try:
+                request = json.loads(row["request_json"])
+            except (TypeError, ValueError):
+                self.journal.mark_needs_review(op_id, observed_error="unparseable request_json")
+                drifted += 1
                 continue
             try:
                 self._apply(request)
