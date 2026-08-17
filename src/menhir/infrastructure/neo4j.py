@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -69,7 +71,37 @@ def mutation_window_seconds(timeout_s: float, *, statements: int = 1) -> float:
     per_statement = per_attempt * _TRANSIENT_RETRIES + backoff
     return per_statement * max(1, int(statements))
 
+
 logger = logging.getLogger(__name__)
+
+
+#: Ambient revocation predicate for the saga mutation currently in flight on this context.
+#:
+#: A ContextVar rather than a parameter threaded through the adapter and repository layers, and that
+#: is a correctness argument, not a convenience one. Reaching `execute` from a coordinator means
+#: crossing eight signatures across three layers; every one of them is a place a future change can
+#: forget to forward the predicate, and a forgotten forward is a SILENT loss of protection that no
+#: test of that layer would notice. Set once at the coordinator boundary, the signal cannot be
+#: dropped by an intermediate layer that does not know it exists.
+#:
+#: Copied into worker threads by asyncio.to_thread (which copies the context), so a coordinator
+#: dispatched off the event loop still carries it. Deliberately NOT inherited by the heartbeat
+#: thread, which is started directly and must not be governed by its own predicate.
+_revocation: ContextVar[Any] = ContextVar("menhir_saga_revocation", default=None)
+
+
+@contextmanager
+def revocation_scope(should_continue: Any) -> Any:
+    """Publish a revocation predicate for every ``execute`` on this context.
+
+    Restores the previous value on exit rather than clearing it, so nesting is safe and an inner
+    saga cannot silently un-protect an outer one.
+    """
+    token = _revocation.set(should_continue)
+    try:
+        yield
+    finally:
+        _revocation.reset(token)
 
 
 class SagaOwnershipRevoked(RuntimeError):
@@ -189,7 +221,8 @@ class Neo4jRepository:
             # Checked before EVERY attempt, including the first: ownership can be lost between the
             # caller's own check and this call, and the first statement is as capable of a
             # double-apply as the third.
-            if should_continue is not None and not should_continue():
+            revoked = should_continue if should_continue is not None else _revocation.get()
+            if revoked is not None and not revoked():
                 raise SagaOwnershipRevoked(
                     "ownership was lost before attempt "
                     f"{attempt + 1}/{_TRANSIENT_RETRIES}; refusing to dispatch further statements"

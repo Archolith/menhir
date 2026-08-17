@@ -16,12 +16,99 @@ misjudging an abandoned row as live merely defers recovery.
 
 from __future__ import annotations
 
+import math
 import os
 import uuid as uuidlib
 from datetime import datetime, timedelta, timezone
 
-#: Default lease window. A writer must renew within this or its claim looks abandoned.
-DEFAULT_LEASE_SECONDS = 120
+from menhir.infrastructure.neo4j import (
+    SAGA_MUTATION_TIMEOUT_S,
+    mutation_window_seconds,
+)
+
+#: Extra margin on top of the computed mutation window. Absorbs scheduling jitter, a slow
+#: heartbeat thread waking late, and clock granularity -- none of which the window itself models.
+LEASE_SAFETY_MARGIN_S = 30
+
+#: Bounded mutation statements each saga kind dispatches. The TTL must cover every one of them,
+#: because each is separately bounded AND separately retried.
+#:
+#: METRIC_WRITE is 2: _write_version then _link_episodes. Getting this wrong in the low direction
+#: is the dangerous direction -- it yields a lease shorter than the work it must outlive.
+SAGA_STATEMENT_COUNTS: dict[str, int] = {
+    "ENTITY_MERGE": 1,
+    "ENTITY_UNMERGE": 1,
+    "LEGACY_ENTITY_UNMERGE": 1,
+    "ENTITY_DELETE": 1,
+    "SESSION_TTL_DELETE": 1,
+    "METRIC_WRITE": 2,
+}
+
+#: Conservative fallback for a kind not listed above. Deliberately the LARGEST known count: a lease
+#: that is too long merely delays recovery, while one that is too short lets a live writer be
+#: declared abandoned and replayed underneath itself.
+_UNKNOWN_KIND_STATEMENTS = max(SAGA_STATEMENT_COUNTS.values())
+
+
+#: The heartbeat renews every ``lease / RENEW_DIVISOR`` seconds. It lives here, beside the TTL
+#: formula, because the two are not independent: the renewal cadence is the worst-case DETECTION LAG
+#: for a lost claim, and the TTL derivation below has to include it. Keeping them apart is what let
+#: the first version of this formula be wrong.
+RENEW_DIVISOR = 3
+
+
+def mutation_window_for_kind(operation_kind: str) -> float:
+    """Bounded mutation window for a saga kind, using its real statement count."""
+    statements = SAGA_STATEMENT_COUNTS.get(str(operation_kind), _UNKNOWN_KIND_STATEMENTS)
+    return mutation_window_seconds(SAGA_MUTATION_TIMEOUT_S, statements=statements)
+
+
+def lease_seconds_for(*, statements: int = 1) -> int:
+    """Ownership TTL DERIVED from the bounded mutation window AND the heartbeat cadence.
+
+    Not an independent constant. A hand-picked number cannot be audited against the thing it has to
+    outlive, and the original 120s was in fact shorter than a single statement's window -- so
+    "expired means abandoned" was invalid without anyone being able to see it from the constant.
+
+    ``TTL > W`` is NOT sufficient, and an earlier version of this function got that wrong. A writer
+    can legitimately dispatch a mutation just BEFORE the next heartbeat discovers that renewal is
+    failing, so with ``H`` the renewal interval:
+
+        last successful renewal   t0
+        mutation dispatches       ~t0 + H     (revocation not yet detected)
+        mutation still in flight  ~t0 + H + W
+
+    The claim must therefore outlive ``H + W + margin``, not ``W + margin``. Because ``H`` is itself
+    ``TTL / RENEW_DIVISOR`` that is circular, and solving it gives:
+
+        TTL > TTL/D + W + M   =>   TTL > D/(D - 1) * (W + M)
+
+    which is what this returns. For D = 3 that is 1.5x the naive figure.
+
+    This is belt-and-braces with the per-dispatch headroom check in ``WriterHeartbeat``: this makes
+    the SCHEDULE sound, while that check makes each individual dispatch locally provable even if the
+    heartbeat thread is late. Either alone leaves a hole; the scheduling argument depends on the
+    thread being timely, and a late thread is exactly what a GC pause or a starved interpreter
+    produces.
+
+    Unbounded READS in the saga do not enter the calculation: once ownership is lost the revocation
+    seam refuses to dispatch any further statement, so a hanging read can delay a writer but can
+    never let it mutate.
+    """
+    window = mutation_window_seconds(SAGA_MUTATION_TIMEOUT_S, statements=statements)
+    naive = window + LEASE_SAFETY_MARGIN_S
+    return int(math.ceil(RENEW_DIVISOR / (RENEW_DIVISOR - 1) * naive))
+
+
+def lease_seconds_for_kind(operation_kind: str) -> int:
+    """TTL for a specific saga kind, using its real statement count."""
+    statements = SAGA_STATEMENT_COUNTS.get(str(operation_kind), _UNKNOWN_KIND_STATEMENTS)
+    return lease_seconds_for(statements=statements)
+
+
+#: Default lease window, derived for a single-statement mutation. A writer must renew within this
+#: or its claim looks abandoned.
+DEFAULT_LEASE_SECONDS = lease_seconds_for(statements=1)
 
 #: Classification results. LIVE_OWNER and OWNER_UNKNOWN mirror the saga-reconcile vocabulary
 #: because they surface as dry-run outcomes; ABANDONED is internal -- an abandoned row carries
@@ -145,6 +232,12 @@ def is_own_claim(row: object, *, token: str | None = None) -> bool:
 __all__ = [
     "ABANDONED",
     "DEFAULT_LEASE_SECONDS",
+    "LEASE_SAFETY_MARGIN_S",
+    "RENEW_DIVISOR",
+    "SAGA_STATEMENT_COUNTS",
+    "mutation_window_for_kind",
+    "lease_seconds_for",
+    "lease_seconds_for_kind",
     "LIVE_OWNER",
     "OWNER_UNKNOWN",
     "classify_ownership",
