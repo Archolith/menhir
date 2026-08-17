@@ -200,11 +200,24 @@ class BaseJsonResource(ABC):
 
     async def execute(self, *args: Any, **kwargs: Any) -> str:
         async def _run() -> str:
+            # Query-string auth is a legacy compatibility exception for the tool
+            # surface. QUERY_AUTH_ALLOWED_TOOLS is built from ALL_TOOLS only, so
+            # resources have no established query-auth compatibility contract;
+            # refuse them outright instead of extending or overloading that policy.
+            if request_uses_query_auth():
+                raise PermissionError(
+                    f"query-string auth cannot read `{self.uri}`; use Authorization header for resources"
+                )
             tier = get_request_tier()
             if tier and not _tier_allows(tier, self.required_tier):
                 raise PermissionError(
                     f"Token tier '{tier}' cannot read `{self.uri}` (requires '{self.required_tier}')"
                 )
+            # MENHIR_CLIENT_TOOLS is intentionally not consulted here. Its values are
+            # tool names and its catalog counterpart filters tools/list only; matching
+            # those values against resource names or URI templates would silently deny
+            # all resources for restricted clients. A resource ACL, if introduced, must
+            # be a distinct policy/config surface with explicit resource semantics.
             payload = await self.build_payload(*args, **kwargs)
             return render_json(payload)
 
