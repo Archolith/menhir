@@ -154,8 +154,12 @@ class BackendClientOpsMixin:
             },
         )
 
-    async def fetch_memory_by_uuid(self, node_uuid: str) -> dict[str, Any] | None:
-        return await self._request("fetch_memory_by_uuid", {"node_uuid": node_uuid})
+    async def fetch_memory_by_uuid(
+        self, node_uuid: str, *, namespace: str | None = None
+    ) -> dict[str, Any] | None:
+        return await self._request(
+            "fetch_memory_by_uuid", {"node_uuid": node_uuid, "namespace": namespace}
+        )
 
     async def fetch_node_receipts(self, node_uuid: str) -> dict[str, Any] | None:
         return await self._request("fetch_node_receipts", {"node_uuid": node_uuid})
@@ -184,17 +188,19 @@ class BackendClientOpsMixin:
         )
 
     async def fetch_memories_by_scope(
-        self, scope: str, limit: int = 20
+        self, scope: str, limit: int = 20, *, namespace: str | None = None
     ) -> list[dict[str, Any]]:
         return await self._request(
-            "fetch_memories_by_scope", {"scope": scope, "limit": limit}
+            "fetch_memories_by_scope",
+            {"scope": scope, "limit": limit, "namespace": namespace},
         )
 
     async def fetch_memories_by_type(
-        self, memory_type: str, limit: int = 20
+        self, memory_type: str, limit: int = 20, *, namespace: str | None = None
     ) -> list[dict[str, Any]]:
         return await self._request(
-            "fetch_memories_by_type", {"memory_type": memory_type, "limit": limit}
+            "fetch_memories_by_type",
+            {"memory_type": memory_type, "limit": limit, "namespace": namespace},
         )
 
     async def get_scan_fingerprint(self, project_name: str) -> str | None:

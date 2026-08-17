@@ -144,43 +144,64 @@ class MemoryQueryRepository:
         digest = hashlib.sha256("|".join(uuids).encode("utf-8")).hexdigest()[:16]
         return f"{selection_key}:{len(uuids)}:{digest}"
 
-    def fetch_memory_by_uuid(self, node_uuid: str) -> dict[str, Any] | None:
-        """Return a single memory node by UUID."""
+    def fetch_memory_by_uuid(
+        self, node_uuid: str, *, namespace: str | None = None
+    ) -> dict[str, Any] | None:
+        """Return a single memory node by UUID, optionally restricted to one namespace."""
 
+        where = ["(n:Entity OR n:Episodic)", "n.uuid = $node_uuid"]
+        params: dict[str, Any] = {"node_uuid": node_uuid}
+        if namespace is not None and str(namespace).strip():
+            where.append("coalesce(n.namespace, 'default') = $namespace")
+            params["namespace"] = str(namespace).strip()
         query = (Cypher()
             .match("(n)")
-            .where("(n:Entity OR n:Episodic)", "n.uuid = $node_uuid")
+            .where(*where)
             .return_fields(MEMORY_RETURN_FIELDS)
             .limit("1")
             .build())
-        rows = self.neo4j.execute(query, params={"node_uuid": node_uuid})
+        rows = self.neo4j.execute(query, params=params)
         return rows[0] if rows else None
 
-    def fetch_memories_by_scope(self, scope: str, limit: int = 10) -> list[dict[str, Any]]:
-        """Return memory nodes filtered by scope."""
+    def fetch_memories_by_scope(
+        self, scope: str, limit: int = 10, *, namespace: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Return memory nodes filtered by scope, optionally restricted to one namespace."""
 
         safe_limit = max(1, min(limit, 50))
+        where = ["(n:Entity OR n:Episodic)", "n.scope = $scope"]
+        params: dict[str, Any] = {"scope": scope, "limit": safe_limit}
+        if namespace is not None and str(namespace).strip():
+            where.append("coalesce(n.namespace, 'default') = $namespace")
+            params["namespace"] = str(namespace).strip()
         query = (Cypher()
             .match("(n)")
-            .where("(n:Entity OR n:Episodic)", "n.scope = $scope")
+            .where(*where)
             .return_fields(MEMORY_RETURN_FIELDS)
             .order_by("coalesce(n.last_accessed, n.created_at) DESC, n.uuid")
             .limit()
             .build())
-        return self.neo4j.execute(query, params={"scope": scope, "limit": safe_limit})
+        return self.neo4j.execute(query, params=params)
 
-    def fetch_memories_by_type(self, memory_type: str, limit: int = 10) -> list[dict[str, Any]]:
-        """Return entity memories filtered by type."""
+    def fetch_memories_by_type(
+        self, memory_type: str, limit: int = 10, *, namespace: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Return entity memories filtered by type, optionally restricted to one namespace."""
 
         safe_limit = max(1, min(limit, 50))
+        where = ["n.type = $memory_type"]
+        params: dict[str, Any] = {"memory_type": memory_type, "limit": safe_limit}
+        if namespace is not None and str(namespace).strip():
+            where.append("coalesce(n.namespace, 'default') = $namespace")
+            params["namespace"] = str(namespace).strip()
         query = (Cypher()
             .match("(n:Entity)")
-            .where("n.type = $memory_type")
+            .where(*where)
             .return_fields(MEMORY_RETURN_FIELDS)
             .order_by("coalesce(n.last_accessed, n.created_at) DESC, n.uuid")
             .limit()
             .build())
-        return self.neo4j.execute(query, params={"memory_type": memory_type, "limit": safe_limit})
+        return self.neo4j.execute(query, params=params)
 
     # --- Recall scoring helpers ---------------------------------------------
 

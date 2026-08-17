@@ -800,21 +800,29 @@ class MemoryGraphAdapter:
         """One-time cleanup: remove user_flagged from structural graph nodes."""
         return self._memory_queries.unflag_structural_nodes()
 
-    def fetch_memory_by_uuid(self, node_uuid: str) -> dict[str, Any] | None:
-        """Return a single memory node by UUID."""
-        return self._memory_queries.fetch_memory_by_uuid(node_uuid)
+    def fetch_memory_by_uuid(
+        self, node_uuid: str, *, namespace: str | None = None
+    ) -> dict[str, Any] | None:
+        """Return a single memory node by UUID, optionally restricted to one namespace."""
+        return self._memory_queries.fetch_memory_by_uuid(
+            node_uuid, namespace=namespace
+        )
 
     def fetch_memories_by_scope(
-        self, scope: str, limit: int = 10
+        self, scope: str, limit: int = 10, *, namespace: str | None = None
     ) -> list[dict[str, Any]]:
-        """Return memory nodes filtered by scope."""
-        return self._memory_queries.fetch_memories_by_scope(scope, limit)
+        """Return memory nodes filtered by scope, optionally restricted to one namespace."""
+        return self._memory_queries.fetch_memories_by_scope(
+            scope, limit, namespace=namespace
+        )
 
     def fetch_memories_by_type(
-        self, memory_type: str, limit: int = 10
+        self, memory_type: str, limit: int = 10, *, namespace: str | None = None
     ) -> list[dict[str, Any]]:
-        """Return entity memories filtered by type."""
-        return self._memory_queries.fetch_memories_by_type(memory_type, limit)
+        """Return entity memories filtered by type, optionally restricted to one namespace."""
+        return self._memory_queries.fetch_memories_by_type(
+            memory_type, limit, namespace=namespace
+        )
 
     def fetch_session_entities(
         self,

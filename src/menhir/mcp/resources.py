@@ -339,7 +339,9 @@ class RecentMemoriesResource(BaseJsonResource):
 
     async def build_payload(self) -> dict[str, Any]:
         backend = self.get_backend()
-        rows = await backend.fetch_recent_memories(limit=10)
+        rows = await backend.fetch_recent_memories(
+            limit=10, namespace=self.pinned_namespace()
+        )
         return {"count": len(rows), "items": [_normalize_memory_row(row) for row in rows]}
 
 
@@ -417,7 +419,9 @@ class MemoryByUuidResource(BaseJsonResource):
     async def build_payload(self, node_uuid: str) -> dict[str, Any]:
         backend = self.get_backend()
         normalized_uuid = _require_uuid(node_uuid)
-        row = await backend.fetch_memory_by_uuid(normalized_uuid)
+        row = await backend.fetch_memory_by_uuid(
+            normalized_uuid, namespace=self.pinned_namespace()
+        )
         return {
             "found": row is not None,
             "memory": _normalize_memory_row(row, detail=True),
@@ -438,7 +442,9 @@ class MemoriesByScopeResource(BaseJsonResource):
     async def build_payload(self, scope: str) -> dict[str, Any]:
         backend = self.get_backend()
         normalized_scope = _require_scope(scope)
-        rows = await backend.fetch_memories_by_scope(normalized_scope, limit=10)
+        rows = await backend.fetch_memories_by_scope(
+            normalized_scope, limit=10, namespace=self.pinned_namespace()
+        )
         return {
             "scope": normalized_scope,
             "count": len(rows),
@@ -466,6 +472,7 @@ class MemoriesBySearchResource(BaseJsonResource):
             limit=5,
             include_session=True,
             wait_for_pending=True,
+            namespace=self.pinned_namespace(),
         )
         return {
             "query": normalized_term,
@@ -490,7 +497,9 @@ class MemoriesByTypeResource(BaseJsonResource):
     async def build_payload(self, memory_type: str) -> dict[str, Any]:
         backend = self.get_backend()
         normalized_type = _require_type(memory_type)
-        rows = await backend.fetch_memories_by_type(normalized_type, limit=10)
+        rows = await backend.fetch_memories_by_type(
+            normalized_type, limit=10, namespace=self.pinned_namespace()
+        )
         return {
             "type": normalized_type,
             "count": len(rows),
