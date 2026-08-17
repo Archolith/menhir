@@ -26,6 +26,7 @@ hook_app = typer.Typer(name="hook", help="Claude Code hook integration.")
 
 MIN_PROMPT_LEN = 15
 _HOOK_MARKER = "menhir.cli"
+CONTEXT_TIMEOUT_S: float = 8.0
 
 
 # ---------------------------------------------------------------------------
@@ -53,8 +54,9 @@ def run(
                 frequency=frequency,
                 workspace=workspace or None,
             )
-    except Exception:
+    except Exception as exc:
         # Never crash in hook mode — let Claude Code proceed
+        print(f"menhir hook: unexpected {type(exc).__name__}, emitting empty response", file=sys.stderr)
         print(wrap_hook_response(), flush=True)
 
 
@@ -155,16 +157,27 @@ def _run_prompt_impl(
             from menhir.domain.recall import QueryPreset
 
             result = asyncio.run(
-                svc.context_builder.build_context(
-                    effective_query,
-                    max_tokens=max_tokens,
-                    preset=QueryPreset.KNOWLEDGE,
-                    namespace=workspace,
+                asyncio.wait_for(
+                    svc.context_builder.build_context(
+                        effective_query,
+                        max_tokens=max_tokens,
+                        preset=QueryPreset.KNOWLEDGE,
+                        namespace=workspace,
+                    ),
+                    timeout=CONTEXT_TIMEOUT_S,
                 )
             )
             context_text = result.context
-        except Exception:
-            print("menhir hook: context recall failed, using flagged only", file=sys.stderr)
+        except TimeoutError:
+            print(
+                f"menhir hook: context recall timed out after {CONTEXT_TIMEOUT_S}s, using flagged only",
+                file=sys.stderr,
+            )
+        except Exception as exc:
+            print(
+                f"menhir hook: context recall failed ({type(exc).__name__}), using flagged only",
+                file=sys.stderr,
+            )
 
     output = format_hook_output(flagged, context_text, effective_query, write_nudge, temporal_line, todos=todos, temporal_memories=temporal_memories)
     print(wrap_hook_response(output or None), flush=True)
@@ -229,16 +242,27 @@ def _run_postcompact_impl(*, max_tokens: int, workspace: str | None = None) -> N
             from menhir.domain.recall import QueryPreset
 
             result = asyncio.run(
-                svc.context_builder.build_context(
-                    effective_query,
-                    max_tokens=max_tokens,
-                    preset=QueryPreset.KNOWLEDGE,
-                    namespace=workspace,
+                asyncio.wait_for(
+                    svc.context_builder.build_context(
+                        effective_query,
+                        max_tokens=max_tokens,
+                        preset=QueryPreset.KNOWLEDGE,
+                        namespace=workspace,
+                    ),
+                    timeout=CONTEXT_TIMEOUT_S,
                 )
             )
             context_text = result.context
-        except Exception:
-            print("menhir hook: postcompact recall failed", file=sys.stderr)
+        except TimeoutError:
+            print(
+                f"menhir hook: postcompact recall timed out after {CONTEXT_TIMEOUT_S}s, using flagged only",
+                file=sys.stderr,
+            )
+        except Exception as exc:
+            print(
+                f"menhir hook: postcompact recall failed ({type(exc).__name__})",
+                file=sys.stderr,
+            )
 
     output = format_hook_output(flagged, context_text, effective_query, None, temporal_line, todos=todos, temporal_memories=temporal_memories)
     print(wrap_hook_response(output or None), flush=True)
