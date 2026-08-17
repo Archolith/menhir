@@ -1,5 +1,33 @@
 # Changelog
 
+## 2026-08-17 - Require positive evidence of writer death before saga recovery
+
+- Replaced "ownership lease expired means the writer is gone" with a rule that does not rest on an
+  unproven premise. The old rule assumed an already-dispatched graph mutation must have returned
+  within a bounded time; it need not. A transaction timeout bounds the SERVER transaction, while the
+  client fetches records lazily over a socket with no comparable read deadline, so elapsed time
+  alone cannot establish that a writer stopped executing.
+- Expiry now demotes a claim to STALE. Recovery proceeds only on independent evidence: the owner is
+  on this host and its PID is demonstrably gone, or an operator has attested the death by name.
+  A remote owner, or one whose PID is still present, stays fenced as `OWNER_UNKNOWN`.
+- The asymmetry is deliberate and is the whole argument: a false ABANDONED double-applies a graph
+  mutation, while a false LIVE_OWNER only delays recovery. A recycled PID reads as alive, which is
+  also the safe direction -- "cannot prove death" rather than a false claim of death.
+- Owner tokens gained a hostname, because a PID is only meaningful on the machine that recorded it.
+  The liveness predicate moved to shared infrastructure so the scheduler lease and saga ownership
+  cannot drift apart.
+- Claiming an abandoned row now runs the same classification inside its own transaction. Claiming on
+  expiry alone would have bypassed the death-evidence requirement entirely.
+- Per-coordinator `reconcile()` is observation-only and now defaults to `dry_run=True`. There is one
+  live replay authority. The live sweep survives as a private method callable only by a caller that
+  has already established ownership, so crash-recovery invariants stay provable.
+- An expired reconciliation gate is now irreversible loss: it cannot be renewed back to life by its
+  original owner, and ownership verification rejects it.
+- Startup observation moved before `resume_pending_episodes`, which starts the enrichment worker --
+  the earliest local saga writer, since enrichment correlation can reach a merge.
+- The bounded-mutation work keeps a narrower, accurate claim: it reduces hangs and retries. It does
+  NOT establish writer death, and is no longer load-bearing for recovery safety.
+
 ## 2026-08-17 - Add the CF-20c reconciliation gate and global PREPARE pause
 
 - Added a named reconciliation lease that both gives one reconciler exclusive ownership of the
