@@ -30,6 +30,7 @@ import json
 import logging
 import sqlite3
 import threading
+import time
 import uuid as uuidlib
 from collections.abc import Iterator
 from dataclasses import dataclass, field
@@ -131,8 +132,26 @@ def _participants_from_request_json(operation_kind: str, request_json: str | Non
     return _participant_uuids(operation_kind, request)
 
 
+#: Lease name that pauses all saga PREPARE while recovery owns the backlog (CF-20c).
+#:
+#: The lease lives in `scheduler_leases`, in the SAME SQLite database as this journal. That shared
+#: database is what makes the gate correct rather than advisory: a writer's BEGIN IMMEDIATE and the
+#: recovery lease's BEGIN IMMEDIATE contend for the same write lock, so they serialise and neither
+#: can slip between the other's check and write.
+RECONCILIATION_LEASE_NAME = "saga-reconciliation"
+
+
 class GraphOperationError(RuntimeError):
     """Raised when a saga invariant would be violated (immutability, fencing, state)."""
+
+
+class SagaWritesPausedError(GraphOperationError):
+    """A new saga cannot PREPARE because recovery currently owns the backlog.
+
+    Distinct from the fencing errors so a caller can tell "this specific target is busy" (retry
+    later, or adjudicate) from "this process is not accepting new sagas at all" (wait for recovery
+    to finish). Subclasses GraphOperationError so existing handlers keep working unchanged.
+    """
 
 
 @dataclass
@@ -324,6 +343,19 @@ class GraphOperationsJournal:
         owns = conn is None
         connection = sqlite3.connect(self.db_path) if owns else conn
         try:
+            # BEGIN IMMEDIATE takes the write lock BEFORE the gate check, so the check and the
+            # insert are one atomic step against the recovery lease (CF-20c). Python's sqlite3
+            # otherwise starts a DEFERRED transaction on first DML, which would leave the gate check
+            # racing the lease acquisition: a deferred reader can see no lease, recovery can then
+            # acquire it and commit, and this insert still lands.
+            #
+            # This also covers the metric saga, which hands in its own connection but has not yet
+            # issued any DML when it calls us -- so the IMMEDIATE opened here becomes the
+            # transaction that its journal row AND its receipt both commit in. A connection already
+            # inside a transaction is left alone: it owns its own boundary.
+            if not connection.in_transaction:
+                connection.execute("BEGIN IMMEDIATE")
+            self._assert_saga_writes_allowed(connection)
             connection.execute(
                 """
                 INSERT INTO graph_operations (
@@ -358,6 +390,48 @@ class GraphOperationsJournal:
             if owns:
                 connection.close()
         return op_id
+
+    def _assert_saga_writes_allowed(self, conn: sqlite3.Connection) -> None:
+        """Refuse a new PREPARE while recovery holds the reconciliation lease (CF-20c).
+
+        MUST be called with a write lock already held (BEGIN IMMEDIATE), or this is a
+        check-then-insert race: a deferred reader could see no lease, recovery could then acquire it
+        and commit, and this insert would still land -- producing exactly the PREPARED row that
+        recovery has already decided it owns the complete set of.
+
+        Reads the lease table directly rather than through SchedulerLeaseStore because this module is
+        infrastructure and that store is a service; importing upward would invert the layering for a
+        single SELECT. The coupling is the table name and its epoch-seconds expiry column.
+
+        A missing table means no gate has ever been created, which is the normal state on a fresh
+        database and must not fail a write. An unreadable table is treated the same way: this gate
+        exists to stop writes DURING recovery, and inventing a pause because a SELECT failed would
+        turn a query problem into an outage.
+        """
+        try:
+            row = conn.execute(
+                "SELECT owner_id, lease_expires_at FROM scheduler_leases WHERE lease_name = ?",
+                (RECONCILIATION_LEASE_NAME,),
+            ).fetchone()
+        except sqlite3.Error:
+            return
+        if row is None:
+            return
+        try:
+            expires_at = float(row[1])
+        except (TypeError, ValueError):
+            # A lease row with an unreadable expiry cannot be proven expired. Fail CLOSED here --
+            # unlike a missing table, a PRESENT row is positive evidence that recovery is running.
+            raise SagaWritesPausedError(
+                "saga writes are paused: the reconciliation lease is held by "
+                f"{row[0]!r} with an unreadable expiry"
+            ) from None
+        if expires_at > time.time():
+            raise SagaWritesPausedError(
+                "saga writes are paused while recovery reconciles the PREPARED backlog "
+                f"(lease {RECONCILIATION_LEASE_NAME!r} held by {row[0]!r}); retry once the "
+                "instance reports write-ready"
+            )
 
     def _classify_conflict(
         self,
