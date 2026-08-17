@@ -282,7 +282,47 @@ class DeleteCoordinator:
             }
         return WOULD_MARK_ALREADY_APPLIED, {}
 
-    def reconcile(self, *, limit: int = 500, dry_run: bool = False) -> dict[str, Any]:
+    def reconcile(self, *, limit: int = 500, dry_run: bool = True) -> dict[str, Any]:
+        """Classify the PREPARED backlog for this saga kind. Observation only.
+
+        Live replay is NOT available here. A per-coordinator sweep cannot acquire the global
+        PREPARE gate, cannot establish that a row's original writer is gone, and cannot atomically
+        claim an abandoned row before touching the graph -- so replaying from here would mutate
+        rows another process may still be executing. There is exactly one live replay authority,
+        and it is the central dispatcher.
+
+        The heartbeat that ``_apply`` opens does not close that hole either: it renews on an
+        interval, so a reconciler acting on somebody else's row would dispatch its first mutation
+        before the first renewal discovered the row was never its to claim.
+
+        ``dry_run`` now defaults to True. Passing False raises rather than silently observing, so a
+        caller cannot believe recovery ran.
+        """
+        if not dry_run:
+            raise NotImplementedError(
+                "per-coordinator live reconciliation is disabled: recovery must go through the "
+                "central dispatcher, which holds the reconciliation gate, checks operation "
+                "ownership, and claims an abandoned row before mutating. Use reconcile() to "
+                "classify, or _replay_prepared() from an authority that already owns the rows."
+            )
+        return self._reconcile_sweep(limit=limit, dry_run=True)
+
+    def _replay_prepared(self, *, limit: int = 500) -> dict[str, Any]:
+        """The live replay sweep. Callable ONLY by an authority that already owns the rows.
+
+        Private and unreachable through reconcile(). A caller must have taken the reconciliation
+        gate, established that each row's original writer is gone, and claimed the row -- none of
+        which this method does or can check for itself.
+
+        It exists under a separate name rather than being deleted because it is the saga's only
+        executable replay implementation, and the crash-recovery invariants it satisfies still have
+        to be provable: a PREPARED row replays exactly once, drift quarantines without mutating, a
+        missing precondition fails closed. Deleting it would have removed that evidence along with
+        the unsafe entry point.
+        """
+        return self._reconcile_sweep(limit=limit, dry_run=False)
+
+    def _reconcile_sweep(self, *, limit: int = 500, dry_run: bool = False) -> dict[str, Any]:
         """A delete left PREPARED by a crash: determine whether it happened, and record the truth.
 
         There is nothing to replay -- re-running a delete would destroy nodes that a crash spared. So

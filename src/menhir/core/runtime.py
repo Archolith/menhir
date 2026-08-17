@@ -164,6 +164,11 @@ def _observe_saga_backlog(adapter: object) -> object:
 async def _run_startup_saga_observe(built: object, settings: object) -> None:
     """Classify the PREPARED saga backlog before local writers are admitted (CF-20b).
 
+    Called before resume_pending_episodes, which starts the enrichment worker -- the earliest local
+    saga writer, since enrichment correlation can reach MergeCoordinator.merge(). Running after it
+    (as an earlier version did) meant the pass observed a backlog that a live writer could already
+    be adding to.
+
     Awaited rather than backgrounded, unlike the artifact pass above. The point of this pass is the
     ORDERING -- it is the seed of the write-readiness barrier that CF-20c turns into a real gate --
     and a fire-and-forget task would race the writers it is supposed to precede, making the
@@ -574,6 +579,18 @@ async def _initialize_services(
         details={"session_id": session.session_id},
     )
 
+    # Observe the saga backlog BEFORE any local saga writer can start (CF-20b).
+    #
+    # This MUST precede resume_pending_episodes: that call starts the enrichment worker, enrichment
+    # performs correlation, and a sufficiently similar pair reaches MergeCoordinator.merge() through
+    # a worker thread. An earlier version of this ran after the scheduler instead and claimed to
+    # precede "a local writer", which was simply false -- the enrichment path had already been
+    # running for two init steps by then.
+    #
+    # For observation the consequence is only an inaccurate report. For CF-20c it is a hard ordering
+    # requirement: the gate and any recovery must close before workers exist to race them.
+    await _run_startup_saga_observe(built, settings)
+
     record_lifecycle_event(component="runtime_init", event="resume_pending_episodes", state="started")
     logger.info("[init 5/6] Resuming pending episodes...")
     orphan_result = None
@@ -606,11 +623,6 @@ async def _initialize_services(
             session.session_id,
         )
         return built, session
-    # Observe the saga backlog BEFORE the scheduler registers (CF-20b). The scheduler is itself a
-    # saga writer, so this is the earliest point that can honestly claim to have looked at the
-    # backlog before a local writer could add to it. Placed after the benchmark early-return so
-    # benchmark isolation skips it along with the scheduler.
-    await _run_startup_saga_observe(built, settings)
     # Start the in-process maintenance scheduler whenever enrichment is ready, regardless of
     # whether the *model endpoints* are managed by the external scheduler process
     # (uses_scheduler). Periodic maintenance — stale-lease recovery, failed-enrichment retry,
