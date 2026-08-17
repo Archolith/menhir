@@ -12,6 +12,8 @@ from enum import Enum
 from typing import Any
 from uuid import uuid4
 
+from menhir.infrastructure.neo4j import SAGA_MUTATION_TIMEOUT_S
+
 try:  # neo4j is a hard runtime dep; guard the import so unit imports without the driver still load.
     from neo4j.exceptions import ConstraintError as _Neo4jConstraintError
 except Exception:  # pragma: no cover - driver always present in the running service
@@ -233,6 +235,7 @@ class ViewWriteRepositoryMixin:
                     f"MATCH (n:{label} {{uuid:$u}}) SET n.last_accessed=$now, n += $refresh "
                     "RETURN n.uuid",
                     {"u": current["uuid"], "now": now, "refresh": dict(refresh_props or {})},
+                    timeout_s=SAGA_MUTATION_TIMEOUT_S,  # CF-211
                 )
                 prov = {}
             return {"uuid": current["uuid"], "view_key": key, "kind": kind,
@@ -321,7 +324,9 @@ class ViewWriteRepositoryMixin:
                   "old": old_uuid}
         if kind == "scalar_state":
             try:
-                self.neo4j.execute(create_and_supersede, params)
+                self.neo4j.execute(
+                    create_and_supersede, params, timeout_s=SAGA_MUTATION_TIMEOUT_S
+                )
             except _Neo4jConstraintError:
                 # A genuinely CONCURRENT writer won the current-key for this slot between our read and
                 # CREATE. Our node rolled back; converge on the committed winner instead of forking a
@@ -348,7 +353,9 @@ class ViewWriteRepositoryMixin:
                             "winner_sig": winner_sig}
                 raise
         else:
-            self.neo4j.execute(create_and_supersede, params)
+            self.neo4j.execute(
+                create_and_supersede, params, timeout_s=SAGA_MUTATION_TIMEOUT_S
+            )
         prov = self._link_episodes(new_uuid, eps, now, view_class=view_class)
 
         return {"uuid": new_uuid, "view_key": key, "kind": kind,

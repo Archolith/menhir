@@ -11,6 +11,7 @@ import logging
 from typing import Any
 
 from menhir.domain import merge_delta as md
+from menhir.infrastructure.neo4j import SAGA_MUTATION_TIMEOUT_S
 
 logger = logging.getLogger(__name__)
 
@@ -345,6 +346,7 @@ class CorrelationRepository:
                 "rebound_episodes": rebound_episodes,
                 "operation_id": operation_id,
             },
+            timeout_s=SAGA_MUTATION_TIMEOUT_S,  # bounded for ownership ageing (CF-211)
         )
         if not rows:
             return {"restored": 0}
@@ -692,6 +694,11 @@ class CorrelationRepository:
                 "expected_absorbed_confidence": snap.get("source_confidence"),
                 "expected_absorbed_corroboration": snap.get("corroboration"),
             },
+            # Bounded so an ownership claim on this saga can be aged out safely (CF-211). The
+            # read-only snapshot above is deliberately left unbounded: only the MUTATION needs a
+            # provable upper bound, and capping reads would be a behaviour change recovery has no
+            # reason to require.
+            timeout_s=SAGA_MUTATION_TIMEOUT_S,
         )
         if not rows:
             # The preflight passed but the mutation matched nothing: a concurrent writer changed a

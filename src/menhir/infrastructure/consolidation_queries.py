@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from menhir.infrastructure.cypher import Cypher
-from menhir.infrastructure.neo4j import Neo4jRepository
+from menhir.infrastructure.neo4j import SAGA_MUTATION_TIMEOUT_S, Neo4jRepository
 
 logger = logging.getLogger(__name__)
 
@@ -386,6 +386,7 @@ class ConsolidationRepository:
             RETURN deleted_uuids
             """,
             params=params,
+            timeout_s=SAGA_MUTATION_TIMEOUT_S,  # bounded for ownership ageing (CF-211)
         )
         return [str(u) for u in (rows[0].get("deleted_uuids") or [])] if rows else []
 
