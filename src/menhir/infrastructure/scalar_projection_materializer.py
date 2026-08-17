@@ -1,7 +1,7 @@
 """Transaction-scoped materializer for one typed-scalar projection target.
 
 This is deliberately slot-scoped: one T5 ProjectionWorkToken may mutate only its exact
-ProjectionTarget.  Entity-wide scalar rebuild remains a compatibility path until live cutover.
+ProjectionTarget. Entity-wide scalar rebuild remains a compatibility path until live cutover.
 """
 
 from __future__ import annotations
@@ -25,6 +25,10 @@ from menhir.infrastructure.view_repository import ViewRepository
 from menhir.services.scalar_projection_definition import (
     SCALAR_STATE_PROJECTION,
     scalar_projection_target,
+)
+from menhir.services.scalar_projection_hash import (
+    scalar_projection_absent_hash,
+    scalar_projection_present_hash,
 )
 
 logger = logging.getLogger(__name__)
@@ -91,8 +95,12 @@ class ScalarStateProjectionMaterializer:
             target_present=token.target_present,
         )
 
+        expected_hash: str
         if not token.target_present:
             self._retire_slot(tx, views, token)
+            expected_hash = scalar_projection_absent_hash(
+                SCALAR_STATE_PROJECTION, token.target
+            )
         else:
             assertions = TypedAssertionRepository(tx).materializable_assertions_for_entity(
                 token.target.subject_id,
@@ -103,13 +111,26 @@ class ScalarStateProjectionMaterializer:
             )
             outcome = SCALAR_STATE_PROJECTION.fold(token.target, slot_rows, self._as_of)
             if isinstance(outcome, ProjectionMaterialization):
-                self._materialize_state(views, outcome.payload, token)
+                state = outcome.payload
+                self._materialize_state(views, state, token)
                 if len(_current_view_keys(tx, token)) != 1:
                     raise ProjectionLifecycleCorruptionError(
                         "scalar materialization did not leave exactly one current View"
                     )
+                expected_hash = scalar_projection_present_hash(
+                    SCALAR_STATE_PROJECTION,
+                    token.target,
+                    value=state.value,
+                    valid_at=state.valid_at,
+                    contributor_ids=state.contributor_ids,
+                    effective_tier=state.effective_tier,
+                    episode_uuids=state.episode_uuids,
+                )
             elif isinstance(outcome, (ProjectionAbstention, ProjectionRetirement)):
                 self._retire_slot(tx, views, token)
+                expected_hash = scalar_projection_absent_hash(
+                    SCALAR_STATE_PROJECTION, token.target
+                )
             else:  # pragma: no cover - closed ProjectionOutcome union guard
                 raise TypeError("unsupported scalar projection outcome")
 
@@ -120,6 +141,10 @@ class ScalarStateProjectionMaterializer:
         )
         if not isinstance(projection_hash, str) or not projection_hash.strip():
             raise ProjectionLifecycleCorruptionError("scalar materialization produced no projection hash")
+        if projection_hash != expected_hash:
+            raise ProjectionLifecycleCorruptionError(
+                "installed ScalarStateView does not match the folded projection outcome"
+            )
         return projection_hash
 
     @staticmethod
