@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 import pytest
 
 from menhir.infrastructure import operation_owner as oo
+from menhir.infrastructure import process_liveness
 from menhir.infrastructure.graph_operations import (
     GraphOperationsJournal,
     GraphOperationError,
@@ -75,11 +76,11 @@ def test_owner_token_is_unique_when_instance_id_is_unset(monkeypatch):
     monkeypatch.delenv("MENHIR_INSTANCE_ID", raising=False)
     token = oo.process_owner_token()
 
-    assert token.count(":") == 2, "token must carry instance, pid and nonce"
-    label, pid, nonce = token.split(":")
+    assert token.count(":") == 3, "token must carry instance, host, pid and nonce"
+    label, host, pid, nonce = token.split(":")
     assert label == "instance-unset", "an unset instance must be named, not blank"
+    assert host, "the hostname is what makes the PID usable as death evidence"
     assert pid.isdigit() and nonce, "pid and nonce must both be populated"
-    assert token != "instance-unset::", "the token must not collapse to a constant"
 
 
 @pytest.mark.unit
@@ -99,7 +100,7 @@ def test_owner_token_uses_instance_label_when_set(monkeypatch):
 @pytest.mark.unit
 def test_fresh_claim_classifies_as_live_owner():
     row = {
-        "owner_token": "someone-else:99:abc",
+        "owner_token": "someone-else:host:99:abc",
         "owner_lease_expires_at": oo.lease_expiry_iso(seconds=300),
     }
     assert oo.classify_ownership(row) == oo.LIVE_OWNER
@@ -111,7 +112,8 @@ def test_expired_claim_classifies_as_abandoned():
     # duration to >= 1s on purpose, so a negative value still yields a FUTURE expiry.
     long_ago = datetime(2020, 1, 1, tzinfo=timezone.utc)
     row = {
-        "owner_token": "someone-else:99:abc",
+        # Same host, PID 999999 is not running -> death provable by inspection.
+        "owner_token": f"someone-else:{process_liveness.hostname()}:999999:abc",
         "owner_lease_expires_at": oo.lease_expiry_iso(seconds=60, now=long_ago),
     }
     assert oo.classify_ownership(row) == oo.ABANDONED
@@ -120,14 +122,17 @@ def test_expired_claim_classifies_as_abandoned():
 @pytest.mark.unit
 def test_a_nonpositive_lease_is_never_minted_already_dead():
     """A clamped-to-1s claim still reads live for a moment, rather than inviting instant replay."""
-    row = {"owner_token": "t:1:a", "owner_lease_expires_at": oo.lease_expiry_iso(seconds=0)}
+    row = {"owner_token": "t:h:1:a", "owner_lease_expires_at": oo.lease_expiry_iso(seconds=0)}
     assert oo.classify_ownership(row) == oo.LIVE_OWNER
 
 
 @pytest.mark.unit
 def test_naive_expiry_is_read_as_utc_not_crashed_on():
     """Every writer here stores aware UTC, so a naive value means a legacy or hand-edited row."""
-    row = {"owner_token": "t:1:a", "owner_lease_expires_at": "2020-01-01T00:00:00"}
+    row = {
+        "owner_token": f"t:{process_liveness.hostname()}:999999:a",
+        "owner_lease_expires_at": "2020-01-01T00:00:00",
+    }
     assert oo.classify_ownership(row) == oo.ABANDONED
 
 
@@ -138,9 +143,9 @@ def test_naive_expiry_is_read_as_utc_not_crashed_on():
         ({}, "no ownership fields at all"),
         ({"owner_token": None}, "explicit null token (a legacy row)"),
         ({"owner_token": "   "}, "blank token"),
-        ({"owner_token": "t:1:a"}, "token but no lease expiry to compare against"),
-        ({"owner_token": "t:1:a", "owner_lease_expires_at": "not-a-date"}, "unparseable expiry"),
-        ({"owner_token": "t:1:a", "owner_lease_expires_at": ""}, "empty expiry"),
+        ({"owner_token": "t:h:1:a"}, "token but no lease expiry to compare against"),
+        ({"owner_token": "t:h:1:a", "owner_lease_expires_at": "not-a-date"}, "unparseable expiry"),
+        ({"owner_token": "t:h:1:a", "owner_lease_expires_at": ""}, "empty expiry"),
         (None, "not a row at all"),
     ],
 )
@@ -157,7 +162,7 @@ def test_unprovable_liveness_fails_closed_to_owner_unknown(row, why):
 @pytest.mark.unit
 def test_is_own_claim_distinguishes_this_process_from_another():
     mine = {"owner_token": oo.process_owner_token()}
-    theirs = {"owner_token": "other-instance:1:deadbeef"}
+    theirs = {"owner_token": "other-instance:h:1:deadbeef"}
     assert oo.is_own_claim(mine) is True
     assert oo.is_own_claim(theirs) is False
 
@@ -224,7 +229,7 @@ def test_heartbeat_renewal_fails_when_the_claim_is_not_ours(journal):
     Returning True here would let a writer keep mutating while believing it still owns work
     another process may already be replaying.
     """
-    _prepare(journal, "op-1", owner_token="other-instance:1:deadbeef")
+    _prepare(journal, "op-1", owner_token="other-instance:h:1:deadbeef")
     assert journal.renew_owner_heartbeat("op-1") is False
 
 
@@ -354,3 +359,50 @@ def test_iter_by_state_rejects_an_unknown_state(journal):
 @pytest.mark.unit
 def test_iter_by_state_is_empty_on_a_clean_journal(journal):
     assert list(journal.iter_by_state("PREPARED")) == []
+
+
+@pytest.mark.unit
+def test_an_expired_remote_owner_is_owner_unknown_not_abandoned():
+    """The core of the redesign: expiry alone no longer authorises recovery.
+
+    The previous rule read "lease expired" as "writer is gone", which depended on an unproven
+    premise -- that an already-dispatched graph mutation must have returned within a bounded time.
+    A remote PID cannot be inspected, so death is unprovable and the row must fence.
+    """
+    row = {
+        "owner_token": "inst:some-other-host:4242:nonce",
+        "owner_lease_expires_at": "2020-01-01T00:00:00+00:00",
+    }
+    assert oo.classify_ownership(row) == oo.OWNER_UNKNOWN
+
+
+@pytest.mark.unit
+def test_an_expired_local_owner_whose_pid_is_alive_is_owner_unknown():
+    """A recycled PID reads as alive, which is the SAFE direction: cannot prove death."""
+    import os
+
+    row = {
+        "owner_token": f"inst:{process_liveness.hostname()}:{os.getpid()}:nonce",
+        "owner_lease_expires_at": "2020-01-01T00:00:00+00:00",
+    }
+    assert oo.classify_ownership(row) == oo.OWNER_UNKNOWN
+
+
+@pytest.mark.unit
+def test_an_operator_attestation_outranks_the_clock():
+    """Independent evidence is the sanctioned path for an owner this process cannot inspect."""
+    row = {
+        "owner_token": "inst:some-other-host:4242:nonce",
+        "owner_lease_expires_at": "2020-01-01T00:00:00+00:00",
+        "owner_death_attested_by": "ctharvey",
+    }
+    assert oo.classify_ownership(row) == oo.ABANDONED
+
+
+@pytest.mark.unit
+def test_a_fresh_lease_still_vetoes_even_with_an_attestation_absent():
+    row = {
+        "owner_token": "inst:any-host:1:nonce",
+        "owner_lease_expires_at": oo.lease_expiry_iso(seconds=300),
+    }
+    assert oo.classify_ownership(row) == oo.LIVE_OWNER

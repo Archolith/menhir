@@ -193,7 +193,7 @@ def test_merge_live_mode_does_mutate_the_same_fixture(journal):
     coord = MergeCoordinator(graph_adapter=_MergeAdapter(_DRIFTED), journal=journal)
 
     before = _dump(journal.db_path)
-    coord.reconcile()
+    coord._replay_prepared()
     after = _dump(journal.db_path)
 
     assert after != before, "live reconcile of a drifted row must quarantine it"
@@ -227,7 +227,7 @@ def test_delete_dry_run_prediction_matches_live_outcome(journal):
     predicted = forecast["outcomes"][0]["outcome"]
     assert predicted == WOULD_MARK_ALREADY_APPLIED
 
-    coord.reconcile()
+    coord._replay_prepared()
     assert journal.get(op_id)["state"] == "COMMITTED", (
         "dry-run predicted the row was already applied; live mode must agree"
     )
@@ -433,12 +433,12 @@ def test_live_mode_return_shape_gains_no_new_keys(journal):
     """Existing callers must not see dry-run bookkeeping leak into live results."""
     _prepare_delete(journal, "del-1", ["n1"])
     delete_coord = DeleteCoordinator(graph_adapter=_DeleteAdapter(present=()), journal=journal)
-    assert set(delete_coord.reconcile().keys()) == {"committed", "needs_review"}
+    assert set(delete_coord._replay_prepared().keys()) == {"committed", "needs_review"}
 
     op_id = "merge-1"
     _prepare_merge(journal, op_id, expected_before=merge_state_fingerprint(_MERGED, op_id=op_id))
     merge_coord = MergeCoordinator(graph_adapter=_MergeAdapter(_DRIFTED), journal=journal)
-    assert set(merge_coord.reconcile().keys()) == {"replayed", "drifted", "failed"}
+    assert set(merge_coord._replay_prepared().keys()) == {"replayed", "drifted", "failed"}
 
 
 # --------------------------------------------------------------------------- vocabulary

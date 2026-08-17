@@ -16,6 +16,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from menhir.infrastructure import operation_owner as oo
+from menhir.infrastructure import process_liveness
 from menhir.infrastructure.graph_operations import GraphOperationsJournal
 from menhir.services.saga_reconcile_dispatcher import (
     SagaReconcileDispatcher,
@@ -60,13 +61,16 @@ def journal(tmp_path):
 def _insert(journal, op_id, kind="ENTITY_MERGE", *, owner="expired", created_at=None):
     """Insert a PREPARED row with a chosen ownership posture.
 
-    owner="expired" -> abandoned, so it reaches a handler
+    owner="expired" -> abandoned (same host, dead PID), so it reaches a handler
     owner="live"    -> a fresh claim, so the ownership veto fires
     owner="none"    -> a legacy ownerless row
     """
+    # "expired" must be a writer whose death is PROVABLE: same host, PID gone. Expiry alone is no
+    # longer sufficient to reach a handler -- that is the point of the death-evidence rule.
+    dead_local = f"inst:{process_liveness.hostname()}:999999:deadnonce"
     token, expires = {
-        "expired": ("other:1:abc", _PAST),
-        "live": ("other:1:abc", _FUTURE),
+        "expired": (dead_local, _PAST),
+        "live": (dead_local, _FUTURE),
         "none": (None, None),
     }[owner]
     with sqlite3.connect(journal.db_path) as conn:

@@ -19,7 +19,14 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from menhir.infrastructure import operation_owner as oo
+from menhir.infrastructure import process_liveness
 from menhir.infrastructure.graph_operations import GraphOperationsJournal
+
+#: A writer on THIS host whose PID is gone -- the only automatically claimable shape, because
+#: death is provable by inspection. PID 999999 is not a live process.
+_DEAD_LOCAL = f"inst:{process_liveness.hostname()}:999999:deadnonce"
+#: A writer on another host. Its PID cannot be inspected from here, so death is NOT provable.
+_REMOTE = "inst:other-host:4242:remotenonce"
 
 _PAST = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
 _FUTURE = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
@@ -32,7 +39,7 @@ def journal(tmp_path):
     return j
 
 
-def _insert(journal, op_id, *, token="other:1:abc", expires=_PAST, state="PREPARED"):
+def _insert(journal, op_id, *, token=_DEAD_LOCAL, expires=_PAST, state="PREPARED"):
     with sqlite3.connect(journal.db_path) as conn:
         conn.execute(
             "INSERT INTO graph_operations (op_id, operation_kind, request_json, state, "
@@ -67,7 +74,7 @@ def test_a_live_claim_cannot_be_stolen(journal):
     _insert(journal, "op-1", expires=_FUTURE)
 
     assert journal.claim_abandoned_operation("op-1") is False
-    assert journal.get("op-1")["owner_token"] == "other:1:abc", "owner must be untouched"
+    assert journal.get("op-1")["owner_token"] == _DEAD_LOCAL, "owner must be untouched"
 
 
 @pytest.mark.unit
@@ -86,7 +93,7 @@ def test_an_ownerless_row_cannot_be_claimed(journal):
 @pytest.mark.unit
 def test_a_row_with_an_owner_but_no_expiry_cannot_be_claimed(journal):
     """Nothing to compare against, so liveness is unprovable -- fail closed."""
-    _insert(journal, "op-1", token="other:1:abc", expires=None)
+    _insert(journal, "op-1", token=_DEAD_LOCAL, expires=None)
 
     assert journal.claim_abandoned_operation("op-1") is False
 
@@ -98,6 +105,37 @@ def test_a_row_that_left_prepared_cannot_be_claimed(journal, state):
     _insert(journal, "op-1", expires=_PAST, state=state)
 
     assert journal.claim_abandoned_operation("op-1") is False
+
+
+@pytest.mark.unit
+def test_a_remote_expired_owner_is_not_claimable(journal):
+    """Expiry is a staleness signal, not a death certificate.
+
+    A PID on another host cannot be inspected from here, so this process can never prove the writer
+    stopped. It must fence and wait for a human rather than guess.
+    """
+    _insert(journal, "op-remote", token=_REMOTE, expires=_PAST)
+
+    assert journal.claim_abandoned_operation("op-remote") is False
+    assert oo.classify_ownership(journal.get("op-remote")) == oo.OWNER_UNKNOWN
+
+
+@pytest.mark.unit
+def test_an_operator_attestation_makes_a_remote_owner_claimable(journal):
+    """The sanctioned path for the case automation cannot decide."""
+    _insert(journal, "op-remote", token=_REMOTE, expires=_PAST)
+    assert journal.claim_abandoned_operation("op-remote") is False
+
+    assert journal.attest_owner_death("op-remote", attested_by="ctharvey") is True
+    assert journal.claim_abandoned_operation("op-remote") is True
+
+
+@pytest.mark.unit
+def test_attestation_requires_a_name(journal):
+    """Inferring death from a clock is what this replaced; an unsigned attestation is the same."""
+    _insert(journal, "op-remote", token=_REMOTE, expires=_PAST)
+    with pytest.raises(Exception, match="attested_by is required"):
+        journal.attest_owner_death("op-remote", attested_by="  ")
 
 
 @pytest.mark.unit
@@ -141,7 +179,7 @@ def test_only_one_of_two_concurrent_reconcilers_wins_the_claim(journal):
             results.append((token, won))
 
     threads = [
-        threading.Thread(target=_claim, args=(f"inst-{name}:1:{name * 3}",))
+        threading.Thread(target=_claim, args=(f"inst-{name}:h:1:{name * 3}",))
         for name in ("a", "b")
     ]
     for t in threads:
@@ -161,9 +199,9 @@ def test_a_second_claim_after_the_first_is_rejected(journal):
     """Sequential form of the same property, without thread timing."""
     _insert(journal, "op-1", expires=_PAST)
 
-    assert journal.claim_abandoned_operation("op-1", owner_token="inst-a:1:aaa") is True
-    assert journal.claim_abandoned_operation("op-1", owner_token="inst-b:2:bbb") is False
-    assert journal.get("op-1")["owner_token"] == "inst-a:1:aaa"
+    assert journal.claim_abandoned_operation("op-1", owner_token="inst-a:h:1:aaa") is True
+    assert journal.claim_abandoned_operation("op-1", owner_token="inst-b:h:2:bbb") is False
+    assert journal.get("op-1")["owner_token"] == "inst-a:h:1:aaa"
 
 
 # --------------------------------------------------------------------------- after claiming
@@ -185,10 +223,10 @@ def test_the_previous_owner_can_no_longer_renew_after_being_displaced(journal):
     If it could still renew, it would keep mutating while believing it owned work the claimant is
     now replaying -- the double-apply, just with the roles reversed.
     """
-    _insert(journal, "op-1", token="old-owner:1:aaa", expires=_PAST)
-    assert journal.claim_abandoned_operation("op-1", owner_token="new-owner:2:bbb") is True
+    _insert(journal, "op-1", token=_DEAD_LOCAL, expires=_PAST)
+    assert journal.claim_abandoned_operation("op-1", owner_token="new-owner:h:2:bbb") is True
 
-    assert journal.renew_owner_heartbeat("op-1", owner_token="old-owner:1:aaa") is False
+    assert journal.renew_owner_heartbeat("op-1", owner_token=_DEAD_LOCAL) is False
 
 
 @pytest.mark.unit

@@ -216,7 +216,7 @@ def test_crash_after_prepared_before_graph_write_is_replayed(coord):
     assert len(prepared) == 1  # durable intent survived the crash
     assert coord.graph_adapter.metrics == {}  # nothing landed in the graph
 
-    out = coord.reconcile()
+    out = coord._replay_prepared()
     assert out == {"replayed": 1, "drifted": 0, "failed": 0}
     assert coord.graph_adapter.metrics["ns::enrichment::stalled"]["value"] == 4.0
     assert coord.journal.list_by_state("PREPARED") == []
@@ -237,7 +237,7 @@ def test_crash_after_graph_write_before_committed_converges(coord):
         )
         conn.commit()
 
-    out = coord.reconcile()
+    out = coord._replay_prepared()
     assert out["replayed"] == 1 and out["drifted"] == 0
     # Value converges, and the row is COMMITTED again.
     assert coord.graph_adapter.metrics["ns::enrichment::retries"]["value"] == 7.0
@@ -257,7 +257,7 @@ def test_replay_uses_frozen_uuid_and_does_not_fork(coord):
     op = coord.journal.list_by_state("PREPARED")[0]
     frozen_uuid = op["target_uuid"]
 
-    coord.reconcile()
+    coord._replay_prepared()
     assert coord.graph_adapter.metrics["ns::s::c"]["uuid"] == frozen_uuid
 
 
@@ -281,7 +281,7 @@ def test_drift_marks_needs_review_and_does_not_mutate(coord):
         conn.execute("UPDATE graph_operations SET state='PREPARED' WHERE op_id=?", (op,))
         conn.commit()
 
-    out = coord.reconcile()
+    out = coord._replay_prepared()
 
     assert out["drifted"] == 1 and out["replayed"] == 0
     assert coord.journal.get(op)["state"] == "NEEDS_REVIEW"
@@ -315,7 +315,7 @@ def test_needs_review_is_not_auto_replayed(coord):
     op = coord.journal.list_by_state("PREPARED")[0]["op_id"]
     coord.journal.mark_needs_review(op, observed_error="operator hold")
 
-    out = coord.reconcile()
+    out = coord._replay_prepared()
     assert out == {"replayed": 0, "drifted": 0, "failed": 0}
     assert coord.journal.get(op)["state"] == "NEEDS_REVIEW"
     assert coord.graph_adapter.metrics == {}
@@ -392,7 +392,7 @@ def test_missing_precondition_fails_closed(coord):
         conn.commit()
 
     writes_before = coord.graph_adapter.write_calls
-    out = coord.reconcile()
+    out = coord._replay_prepared()
 
     assert out["drifted"] == 1 and out["replayed"] == 0
     assert coord.journal.get(op)["state"] == "NEEDS_REVIEW"
