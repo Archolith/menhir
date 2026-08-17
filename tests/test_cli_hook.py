@@ -3,6 +3,7 @@ pattern detection, stop checkpoint, install/uninstall."""
 
 from __future__ import annotations
 
+import io
 import json
 import shlex
 import time
@@ -616,3 +617,127 @@ def test_uninstall_no_settings_file(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     result = runner.invoke(hook_app, ["uninstall", "--location", "user"])
     assert result.exit_code == 0
     assert "No settings file" in result.output
+
+
+# ---------------------------------------------------------------------------
+# context recall timeout (CF-23)
+# ---------------------------------------------------------------------------
+
+
+class _FakeStdin(io.StringIO):
+    def isatty(self) -> bool:
+        return False
+
+
+def _fake_svc(context_builder) -> object:
+    import types
+
+    class _FakeGraphAdapter:
+        def fetch_flagged_memories(self, limit=10, workspace=None):
+            return [{"name": "flagged", "content": "flagged memory"}]
+
+        def list_todos(self, status="open", limit=5):
+            return []
+
+        def list_temporal_in_window(self, window_days=30):
+            return []
+
+    return types.SimpleNamespace(
+        graph_adapter=_FakeGraphAdapter(),
+        context_builder=context_builder,
+    )
+
+
+@pytest.mark.unit
+def test_context_recall_timeout_returns_flagged_only(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    import asyncio
+    import types
+    import sys
+
+    from menhir.cli import hook as hook_module
+
+    class _SlowBuilder:
+        async def build_context(self, *args, **kwargs):
+            await asyncio.sleep(10)
+            return types.SimpleNamespace(context="must not appear")
+
+    monkeypatch.setattr(hook_module, "CONTEXT_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(
+        "menhir.cli.bootstrap.build_hook_services",
+        lambda settings=None: _fake_svc(_SlowBuilder()),
+    )
+    monkeypatch.setattr(sys, "stdin", _FakeStdin("{}"))
+
+    hook_module._run_prompt_impl(
+        query="a sufficiently long prompt that triggers recall",
+        max_tokens=500,
+        frequency=0,
+        workspace=None,
+    )
+
+    captured = capsys.readouterr()
+    assert "timed out" in captured.err
+    assert "flagged memory" in captured.out
+    assert "must not appear" not in captured.out
+
+
+@pytest.mark.unit
+def test_normal_context_recall_returns_context_unchanged(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    import sys
+    import types
+
+    from menhir.cli import hook as hook_module
+
+    class _FastBuilder:
+        async def build_context(self, *args, **kwargs):
+            return types.SimpleNamespace(context="- [0.9] recalled context block")
+
+    monkeypatch.setattr(hook_module, "CONTEXT_TIMEOUT_S", 0.5)
+    monkeypatch.setattr(
+        "menhir.cli.bootstrap.build_hook_services",
+        lambda settings=None: _fake_svc(_FastBuilder()),
+    )
+    monkeypatch.setattr(sys, "stdin", _FakeStdin("{}"))
+
+    hook_module._run_prompt_impl(
+        query="a sufficiently long prompt that triggers recall",
+        max_tokens=500,
+        frequency=0,
+        workspace=None,
+    )
+
+    captured = capsys.readouterr()
+    assert "recalled context block" in captured.out
+
+
+@pytest.mark.unit
+def test_backend_context_builder_sends_namespace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import httpx
+
+    from menhir.cli import _backend_context
+
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = request.content
+        return httpx.Response(200, json={"context": "backend context"})
+
+    transport = httpx.MockTransport(handler)
+
+    original_async_client = httpx.AsyncClient
+    monkeypatch.setattr(httpx, "AsyncClient", lambda *a, **k: original_async_client(*a, **k, transport=transport))
+
+    builder = _backend_context.BackendContextBuilder("http://localhost:9000")
+    import asyncio
+
+    result = asyncio.run(builder.build_context("some query", namespace="some-ns"))
+    assert result.context == "backend context"
+
+    body = json.loads(captured["body"])
+    assert body["namespace"] == "some-ns"

@@ -21,6 +21,7 @@ class BackendContextBuilder:
         *,
         max_tokens: int = 1500,
         preset: object | None = None,
+        namespace: str | None = None,
     ) -> SimpleNamespace:
         headers: dict[str, str] = {}
         if self.api_key:
@@ -29,6 +30,7 @@ class BackendContextBuilder:
         payload = {
             "query": query,
             "max_tokens": max_tokens,
+            "namespace": namespace,
         }
         if preset is not None:
             payload["preset"] = preset.value if hasattr(preset, "value") else str(preset)
