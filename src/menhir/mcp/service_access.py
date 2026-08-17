@@ -215,6 +215,12 @@ def get_client_tool_allowlist(settings: MemorySettings | None = None) -> frozens
     namespace pin: a small-model client cannot be trusted to navigate the full
     catalog, so it is handed a tiny purpose-built toolset instead.
 
+    This policy is intentionally tool-only. MCP resources are not compared against
+    these values because operators configure tool names, not resource names or URI
+    templates; reusing this set for resources would deny every resource to a client
+    with a non-empty tool allowlist. If resource ACLs are needed, they require a
+    separate config surface with explicit resource matching semantics.
+
     An empty result (no request session, an unnamed caller, or a client with no
     configured entry) means "no restriction" -- the caller keeps the full,
     tier-filtered catalog, so default behavior is unchanged.
