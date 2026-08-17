@@ -659,6 +659,56 @@ class GraphOperationsJournal:
             conn.commit()
             return cursor.rowcount == 1
 
+    def claim_abandoned_operation(
+        self,
+        op_id: str,
+        *,
+        owner_token: str | None = None,
+        seconds: int = oo.DEFAULT_LEASE_SECONDS,
+    ) -> bool:
+        """Take ownership of an ABANDONED PREPARED row before replaying it (CF-20c).
+
+        Returns True only if this call is the one that took it. The whole point is that the
+        transfer happens BEFORE any graph side effect: without it, two reconcilers can both read a
+        row as abandoned, both begin mutating, and only discover the conflict at the journal
+        transition -- by which time both have already touched the graph.
+
+        One conditional UPDATE under BEGIN IMMEDIATE, so the liveness test and the transfer cannot
+        interleave. The WHERE clause is the guard, and each conjunct is load-bearing:
+
+        * ``state = 'PREPARED'`` -- a row that reached a terminal state is finished, not recoverable.
+        * ``owner_token IS NOT NULL`` -- an ownerless row is OWNER_UNKNOWN, never ABANDONED. During
+          a mixed-version rollout an older binary with no ownership support may still be executing
+          it, so claiming it is exactly the double-apply this design exists to prevent.
+        * ``owner_lease_expires_at <= now`` -- a live heartbeat is a hard veto. Comparison is done
+          in SQL against the stored ISO string so the read and the write are one statement; ISO-8601
+          UTC strings from ``_utc_now_iso`` sort lexicographically in timestamp order, which is what
+          makes that valid.
+
+        A row this process already owns is NOT claimable through here: it is not abandoned, and a
+        reconciler that finds its own live claim should be verifying its own state machine rather
+        than re-taking a lease it never lost.
+        """
+        self._ensure_ready()
+        token = owner_token or oo.process_owner_token()
+        now = _utc_now_iso()
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            cursor = conn.execute(
+                "UPDATE graph_operations "
+                "SET owner_token = ?, owner_heartbeat_at = ?, owner_lease_expires_at = ?, "
+                "    updated_at = ? "
+                "WHERE op_id = ? "
+                "  AND state = 'PREPARED' "
+                "  AND owner_token IS NOT NULL "
+                "  AND owner_token != ? "
+                "  AND owner_lease_expires_at IS NOT NULL "
+                "  AND owner_lease_expires_at <= ?",
+                (token, now, oo.lease_expiry_iso(seconds=seconds), now, op_id, token, now),
+            )
+            conn.commit()
+            return cursor.rowcount == 1
+
     def iter_by_state(
         self, state: str, *, batch_size: int = 500
     ) -> Iterator[dict[str, Any]]:
