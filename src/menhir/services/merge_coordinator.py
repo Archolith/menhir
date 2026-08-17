@@ -32,6 +32,13 @@ from typing import Any, Protocol
 from menhir.domain import merge_eligibility as me
 from menhir.domain import merge_snapshot as ms
 from menhir.infrastructure.graph_operations import GraphOperationsJournal
+from menhir.services.saga_reconcile_outcomes import (
+    SKIP,
+    WOULD_MARK_ALREADY_APPLIED,
+    WOULD_NEEDS_REVIEW,
+    WOULD_REPLAY,
+    summarize_outcomes,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -192,9 +199,14 @@ class MergeCoordinator:
         return self._apply(request)
 
     # ------------------------------------------------------------------ the saga body
-    def _apply(self, request: dict[str, Any]) -> dict[str, Any]:
-        """Mutate + verify for a PREPARED request. Used by BOTH the first attempt and replay, so a
-        replay can never diverge from the original path."""
+    def _classify_replay(self, request: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        """Classify a PREPARED request WITHOUT mutating anything (the observation contract).
+
+        Returns ``(outcome, diagnostics)`` drawn from the shared saga-reconcile vocabulary, so a
+        dry-run and a live replay reach identical decisions. This is pure decision: it performs no
+        journal writes, no graph mutation, and no attempt recording, so a dry-run can trust it as a
+        faithful forecast of live behaviour.
+        """
         op_id = str(request["op_id"])
         survivor_uuid = str(request["survivor_uuid"])
         absorbed_uuid = str(request["absorbed_uuid"])
@@ -205,22 +217,53 @@ class MergeCoordinator:
         observed = self.graph_adapter.fetch_merge_state(survivor_uuid, absorbed_uuid)
         observed_fp = merge_state_fingerprint(observed, op_id=op_id)
 
+        diag: dict[str, Any] = {
+            "op_id": op_id,
+            "survivor_uuid": survivor_uuid,
+            "absorbed_uuid": absorbed_uuid,
+            "observed": observed,
+            "observed_fp": observed_fp,
+            "expected_before": expected_before,
+            "expected_after": expected_after,
+        }
+
         # Already applied by an attempt that crashed before COMMITTED: the survivor carries THIS
         # op's marker, so replaying is a no-op.
         if expected_after and observed_fp == expected_after:
+            return (WOULD_MARK_ALREADY_APPLIED, diag)
+
+        # Neither expected state -> quarantine. A background replay must never paper over a graph
+        # that some other writer changed.
+        if observed_fp != expected_before:
+            diag["observed_error"] = (
+                f"merge drift: observed={observed_fp} expected_before={expected_before} "
+                f"expected_after={expected_after} state={observed}"
+            )
+            return (WOULD_NEEDS_REVIEW, diag)
+
+        return (WOULD_REPLAY, diag)
+
+    def _apply(self, request: dict[str, Any]) -> dict[str, Any]:
+        """Mutate + verify for a PREPARED request. Used by BOTH the first attempt and replay, so a
+        replay can never diverge from the original path."""
+        op_id = str(request["op_id"])
+        survivor_uuid = str(request["survivor_uuid"])
+        absorbed_uuid = str(request["absorbed_uuid"])
+
+        outcome, diag = self._classify_replay(request)
+        expected_before = diag["expected_before"]
+        expected_after = diag["expected_after"]
+
+        # Already applied by an attempt that crashed before COMMITTED: the survivor carries THIS
+        # op's marker, so replaying is a no-op.
+        if outcome == WOULD_MARK_ALREADY_APPLIED:
             self.journal.mark_committed(op_id)
             return {"merged": 1, "replayed": True, "op_id": op_id}
 
         # Neither expected state -> quarantine. A background replay must never paper over a graph
         # that some other writer changed.
-        if observed_fp != expected_before:
-            self.journal.mark_needs_review(
-                op_id,
-                observed_error=(
-                    f"merge drift: observed={observed_fp} expected_before={expected_before} "
-                    f"expected_after={expected_after} state={observed}"
-                ),
-            )
+        if outcome == WOULD_NEEDS_REVIEW:
+            self.journal.mark_needs_review(op_id, observed_error=diag["observed_error"])
             raise MergeDrift(
                 f"merge {survivor_uuid} <- {absorbed_uuid} (op {op_id}): the graph is in neither "
                 "the expected before- nor after-state; NOT mutating"
@@ -283,20 +326,67 @@ class MergeCoordinator:
         return out
 
     # ------------------------------------------------------------------ reconciliation
-    def reconcile(self, *, limit: int = 500) -> dict[str, int]:
-        """Replay every ENTITY_MERGE left PREPARED by a crash. Drift is reported, never repaired."""
+    def reconcile(self, *, limit: int = 500, dry_run: bool = False) -> dict[str, Any]:
+        """Replay every ENTITY_MERGE left PREPARED by a crash. Drift is reported, never repaired.
+
+        When ``dry_run=True``, classify each row but mutate NOTHING: the counters forecast what a
+        live replay would do, and ``outcomes`` records each row's decision (SKIP for non-ENTITY_MERGE
+        kinds, WOULD_NEEDS_REVIEW for an unparseable request).
+        """
         replayed = 0
         drifted = 0
         failed = 0
+        scanned = 0
+        outcomes: list[dict[str, Any]] = []
         for row in self.journal.list_by_state("PREPARED", limit=limit):
-            if row.get("operation_kind") != "ENTITY_MERGE":
-                continue
+            scanned += 1
             op_id = str(row["op_id"])
+            operation_kind = row.get("operation_kind")
+            if operation_kind != "ENTITY_MERGE":
+                if dry_run:
+                    outcomes.append({
+                        "op_id": op_id,
+                        "operation_kind": operation_kind,
+                        "outcome": SKIP,
+                    })
+                continue
             try:
                 request = json.loads(row["request_json"])
             except (TypeError, ValueError):
-                self.journal.mark_needs_review(op_id, observed_error="unparseable request_json")
-                drifted += 1
+                if dry_run:
+                    outcomes.append({
+                        "op_id": op_id,
+                        "operation_kind": operation_kind,
+                        "outcome": WOULD_NEEDS_REVIEW,
+                        "observed_error": "unparseable request_json",
+                    })
+                else:
+                    self.journal.mark_needs_review(op_id, observed_error="unparseable request_json")
+                    drifted += 1
+                continue
+            if dry_run:
+                # A malformed row must not abort the scan. Classification reads request fields
+                # directly, so a row missing one raises rather than returning an outcome -- and
+                # one bad old row killing the whole preflight is exactly the starvation the
+                # exhaustive-scan requirement exists to prevent. Report it and keep going.
+                try:
+                    outcome, diag = self._classify_replay(request)
+                except Exception as exc:  # noqa: BLE001
+                    outcomes.append({
+                        "op_id": op_id,
+                        "operation_kind": operation_kind,
+                        "outcome": WOULD_NEEDS_REVIEW,
+                        "observed_error": f"unclassifiable row: {type(exc).__name__}: {exc}",
+                    })
+                    continue
+                entry: dict[str, Any] = {
+                    "op_id": op_id,
+                    "operation_kind": operation_kind,
+                    "outcome": outcome,
+                }
+                if "observed_error" in diag:
+                    entry["observed_error"] = diag["observed_error"]
+                outcomes.append(entry)
                 continue
             try:
                 self._apply(request)
@@ -307,7 +397,15 @@ class MergeCoordinator:
             except Exception as exc:  # noqa: BLE001
                 failed += 1
                 logger.warning("merge saga: replay of op %s failed: %s", op_id, exc)
-        return {"replayed": replayed, "drifted": drifted, "failed": failed}
+        result: dict[str, Any] = {"replayed": replayed, "drifted": drifted, "failed": failed}
+        if dry_run:
+            # replayed/drifted/failed stay 0 in dry-run: they count actions PERFORMED, and a
+            # dry-run performs none. The forecast lives in counts/outcomes instead.
+            result["dry_run"] = True
+            result["scanned"] = scanned
+            result["counts"] = summarize_outcomes(outcomes)
+            result["outcomes"] = outcomes
+        return result
 
     # ------------------------------------------------------------------ recovery reads
     def load_snapshot(self, op_id: str) -> dict[str, Any]:

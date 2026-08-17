@@ -28,6 +28,12 @@ from typing import Any
 from menhir.domain import merge_snapshot as ms
 from menhir.infrastructure.graph_operations import GraphOperationsJournal
 from menhir.services.merge_coordinator import _canonical
+from menhir.services.saga_reconcile_outcomes import (
+    SKIP,
+    WOULD_MARK_ALREADY_APPLIED,
+    WOULD_NEEDS_REVIEW,
+    summarize_outcomes,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -208,42 +214,89 @@ class DeleteCoordinator:
             raise ms.SnapshotSchemaError(f"operation {op_id!r} has no snapshot")
         return ms.loads(row["before_snapshot_json"])
 
-    def reconcile(self, *, limit: int = 500) -> dict[str, int]:
+    def reconcile(self, *, limit: int = 500, dry_run: bool = False) -> dict[str, Any]:
         """A delete left PREPARED by a crash: determine whether it happened, and record the truth.
 
         There is nothing to replay -- re-running a delete would destroy nodes that a crash spared. So
         this only OBSERVES: if every target is gone, the delete completed and the row commits; if any
         survive, an operator decides.
+
+        ``dry_run`` performs every read exactly as live mode does but mutates nothing: no journal
+        write of any kind. It adds ``scanned``, ``counts`` and the per-row ``outcomes``.
         """
         committed = 0
         review = 0
+        scanned = 0
+        outcomes: list[dict[str, Any]] = []
         for row in self.journal.list_by_state("PREPARED", limit=limit):
-            if row.get("operation_kind") not in ("ENTITY_DELETE", "SESSION_TTL_DELETE"):
-                continue
+            scanned += 1
             op_id = str(row["op_id"])
+            operation_kind = row.get("operation_kind")
+            if operation_kind not in ("ENTITY_DELETE", "SESSION_TTL_DELETE"):
+                if dry_run:
+                    outcomes.append({
+                        "op_id": op_id,
+                        "operation_kind": operation_kind,
+                        "outcome": SKIP,
+                    })
+                continue
             try:
                 request = json.loads(row["request_json"])
             except (TypeError, ValueError):
-                self.journal.mark_needs_review(op_id, observed_error="unparseable request_json")
-                review += 1
+                if dry_run:
+                    outcomes.append({
+                        "op_id": op_id,
+                        "operation_kind": operation_kind,
+                        "outcome": WOULD_NEEDS_REVIEW,
+                    })
+                else:
+                    self.journal.mark_needs_review(op_id, observed_error="unparseable request_json")
+                    review += 1
                 continue
             targets = [str(t) for t in request.get("targets") or []]
             survivors = [
                 u for u in targets if self.graph_adapter.capture_node_state(u) is not None
             ]
             if survivors:
-                self.journal.mark_needs_review(
-                    op_id,
-                    observed_error=(
-                        f"crash left the delete incomplete; still present: {survivors}. "
-                        "NOT retried automatically -- deleting them now could destroy nodes the "
-                        "crash spared."
-                    ),
-                )
-                review += 1
+                if dry_run:
+                    outcomes.append({
+                        "op_id": op_id,
+                        "operation_kind": operation_kind,
+                        "outcome": WOULD_NEEDS_REVIEW,
+                        "survivors": survivors,
+                    })
+                else:
+                    self.journal.mark_needs_review(
+                        op_id,
+                        observed_error=(
+                            f"crash left the delete incomplete; still present: {survivors}. "
+                            "NOT retried automatically -- deleting them now could destroy nodes the "
+                            "crash spared."
+                        ),
+                    )
+                    review += 1
             else:
-                self.journal.mark_committed(op_id)
-                committed += 1
+                if dry_run:
+                    outcomes.append({
+                        "op_id": op_id,
+                        "operation_kind": operation_kind,
+                        "outcome": WOULD_MARK_ALREADY_APPLIED,
+                    })
+                else:
+                    self.journal.mark_committed(op_id)
+                    committed += 1
+        if dry_run:
+            # committed/needs_review stay 0: they count journal transitions PERFORMED, and a
+            # dry-run performs none. Reporting them as if they had happened is the same lie as
+            # calling the happy path WOULD_COMMIT. The forecast lives in counts/outcomes.
+            return {
+                "committed": committed,
+                "needs_review": review,
+                "dry_run": True,
+                "scanned": scanned,
+                "counts": summarize_outcomes(outcomes),
+                "outcomes": outcomes,
+            }
         return {"committed": committed, "needs_review": review}
 
 

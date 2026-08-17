@@ -34,6 +34,13 @@ from typing import Any, Protocol
 
 from menhir.infrastructure.graph_operations import GraphOperationsJournal
 from menhir.infrastructure.metric_receipts import MetricReceiptStore
+from menhir.services.saga_reconcile_outcomes import (
+    SKIP,
+    WOULD_MARK_ALREADY_APPLIED,
+    WOULD_NEEDS_REVIEW,
+    WOULD_REPLAY,
+    summarize_outcomes,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -415,6 +422,64 @@ class MetricWriteCoordinator:
         # (2) MUTATE + (3) VERIFY + (4) COMMITTED
         return self._apply(request)
 
+    def _classify_replay(self, request: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        """Classify a PREPARED request WITHOUT mutating anything (CF-20a observation contract).
+
+        Returns ``(outcome, diagnostics)`` where ``outcome`` is one of the CF-20a replay
+        vocabulary and ``diagnostics`` carries everything a live replay needs to act without
+        re-reading the graph: ``op_id``, ``view_key``, ``observed``, ``observed_fp``,
+        ``expected_before``, ``expected_after``, and for the two WOULD_NEEDS_REVIEW cases the
+        exact ``observed_error`` string a live replay would pass to ``mark_needs_review``.
+
+        Pure by construction: it only reads (the journal row and the graph) and never calls
+        ``mark_committed``, ``mark_needs_review``, ``record_attempt``, or ``record_metric``.
+        A dry-run can call it freely; ``_apply`` calls it exactly once and branches on the
+        outcome, so the decision and the mutation cannot drift apart.
+        """
+        op_id = str(request["op_id"])
+        key = str(request["view_key"])
+        row = self.journal.get(op_id) or {}
+        expected_after = row.get("expected_after_sha256")
+        expected_before = request.get("expected_before_sha256")
+
+        observed = self.graph_adapter.fetch_metric_state(view_key=key)
+        observed_fp = state_fingerprint(observed, view_key=key)
+
+        diag: dict[str, Any] = {
+            "op_id": op_id,
+            "view_key": key,
+            "observed": observed,
+            "observed_fp": observed_fp,
+            "expected_before": expected_before,
+            "expected_after": expected_after,
+        }
+
+        # (2) Already applied by a previous attempt that crashed before COMMITTED. The receipt
+        # pointer proves THIS op produced it, so replaying is a no-op, not a conflict.
+        if expected_after and observed_fp == expected_after:
+            return WOULD_MARK_ALREADY_APPLIED, diag
+
+        # (3) Neither expected state: refuse to mutate. A half-applied or externally-modified node
+        # is an operator decision, not something a background replay should paper over.
+        #
+        # FAIL CLOSED: a request with no frozen precondition cannot be verified, so it must NOT be
+        # applied. Waving it through would mutate a possibly-drifted graph with no check at all --
+        # the opposite of the guarantee this contract exists to provide.
+        if expected_before is None:
+            diag["observed_error"] = (
+                "request has no expected_before_sha256; cannot verify precondition"
+            )
+            return WOULD_NEEDS_REVIEW, diag
+        if observed_fp != expected_before:
+            diag["observed_error"] = (
+                f"precondition drift: observed={observed_fp} "
+                f"expected_before={expected_before} expected_after={expected_after}"
+            )
+            return WOULD_NEEDS_REVIEW, diag
+
+        # (1) Expected before-state -> apply.
+        return WOULD_REPLAY, diag
+
     def _apply(self, request: dict[str, Any]) -> dict[str, Any]:
         """Preconditioned, idempotent graph mutation for a PREPARED request (plan E3).
 
@@ -428,19 +493,21 @@ class MetricWriteCoordinator:
 
         Used by both the initial write and reconciliation replay -- one code path, so a replay
         cannot diverge from the original.
-        """
-        op_id = str(request["op_id"])
-        key = str(request["view_key"])
-        row = self.journal.get(op_id) or {}
-        expected_after = row.get("expected_after_sha256")
-        expected_before = request.get("expected_before_sha256")
 
-        observed = self.graph_adapter.fetch_metric_state(view_key=key)
-        observed_fp = state_fingerprint(observed, view_key=key)
+        The pre-mutation decision lives in ``_classify_replay``; this method calls it once,
+        branches on the outcome, and reuses the observed state out of the diagnostics so there
+        is exactly one ``fetch_metric_state`` call on the precondition path.
+        """
+        outcome, diag = self._classify_replay(request)
+        op_id = diag["op_id"]
+        key = diag["view_key"]
+        expected_after = diag["expected_after"]
+        expected_before = diag["expected_before"]
+        observed_fp = diag["observed_fp"]
 
         # (2) Already applied by a previous attempt that crashed before COMMITTED. The receipt
         # pointer proves THIS op produced it, so replaying is a no-op, not a conflict.
-        if expected_after and observed_fp == expected_after:
+        if outcome == WOULD_MARK_ALREADY_APPLIED:
             self.journal.mark_committed(op_id)
             return {
                 "uuid": str(request["metric_uuid"]), "view_key": key, "op_id": op_id,
@@ -453,21 +520,12 @@ class MetricWriteCoordinator:
         # FAIL CLOSED: a request with no frozen precondition cannot be verified, so it must NOT be
         # applied. Waving it through would mutate a possibly-drifted graph with no check at all --
         # the opposite of the guarantee this contract exists to provide.
-        if expected_before is None:
-            self.journal.mark_needs_review(
-                op_id, observed_error="request has no expected_before_sha256; cannot verify precondition"
-            )
-            raise MetricDrift(
-                f"op {op_id} for {key!r} has no frozen precondition; NOT mutating (fail closed)"
-            )
-        if observed_fp != expected_before:
-            self.journal.mark_needs_review(
-                op_id,
-                observed_error=(
-                    f"precondition drift: observed={observed_fp} "
-                    f"expected_before={expected_before} expected_after={expected_after}"
-                ),
-            )
+        if outcome == WOULD_NEEDS_REVIEW:
+            self.journal.mark_needs_review(op_id, observed_error=diag["observed_error"])
+            if expected_before is None:
+                raise MetricDrift(
+                    f"op {op_id} for {key!r} has no frozen precondition; NOT mutating (fail closed)"
+                )
             raise MetricDrift(
                 f"precondition drift for {key!r} (op {op_id}): the graph is in neither the "
                 f"expected before- nor after-state; NOT mutating"
@@ -525,7 +583,7 @@ class MetricWriteCoordinator:
         return res
 
     # ------------------------------------------------------------------ reconciliation
-    def reconcile(self, *, limit: int = 500) -> dict[str, int]:
+    def reconcile(self, *, limit: int = 500, dry_run: bool = False) -> dict[str, Any]:
         """Replay every PREPARED METRIC_WRITE left by a crash (plan E4).
 
         Runs at startup, AFTER schema readiness and BEFORE scheduler jobs register, so no new
@@ -534,19 +592,60 @@ class MetricWriteCoordinator:
         converges to the same node instead of creating a second version.
 
         Drift is reported, never repaired: a NEEDS_REVIEW row stays for an operator.
+
+        With ``dry_run=True`` the same deterministic decision is made via ``_classify_replay``
+        for every row but NOTHING is mutated -- no ``_apply``, no ``mark_needs_review``, no
+        graph write. Each row is classified and reported in ``outcomes``; live mode reaches the
+        same classification and then acts on it, so a dry-run summary and a live replay can
+        never diverge.
         """
         replayed = 0
         drifted = 0
         failed = 0
+        scanned = 0
+        outcomes: list[dict[str, Any]] = []
         for row in self.journal.list_by_state("PREPARED", limit=limit):
-            if row.get("operation_kind") != "METRIC_WRITE":
-                continue
+            scanned += 1
+            operation_kind = row.get("operation_kind")
             op_id = str(row["op_id"])
+            if operation_kind != "METRIC_WRITE":
+                if dry_run:
+                    outcomes.append(
+                        {"op_id": op_id, "operation_kind": operation_kind, "outcome": SKIP}
+                    )
+                continue
             try:
                 request = json.loads(row["request_json"])
             except (TypeError, ValueError):
-                self.journal.mark_needs_review(op_id, observed_error="unparseable request_json")
-                drifted += 1
+                if dry_run:
+                    outcomes.append(
+                        {"op_id": op_id, "operation_kind": operation_kind,
+                         "outcome": WOULD_NEEDS_REVIEW,
+                         "observed_error": "unparseable request_json"}
+                    )
+                else:
+                    self.journal.mark_needs_review(op_id, observed_error="unparseable request_json")
+                    drifted += 1
+                continue
+            if dry_run:
+                # A malformed row must not abort the scan -- see the note in MergeCoordinator:
+                # one unclassifiable old row must never hide the newer rows behind it.
+                try:
+                    outcome, diag = self._classify_replay(request)
+                except Exception as exc:  # noqa: BLE001
+                    outcomes.append({
+                        "op_id": op_id,
+                        "operation_kind": operation_kind,
+                        "outcome": WOULD_NEEDS_REVIEW,
+                        "observed_error": f"unclassifiable row: {type(exc).__name__}: {exc}",
+                    })
+                    continue
+                entry: dict[str, Any] = {
+                    "op_id": op_id, "operation_kind": operation_kind, "outcome": outcome
+                }
+                if "observed_error" in diag:
+                    entry["observed_error"] = diag["observed_error"]
+                outcomes.append(entry)
                 continue
             try:
                 self._apply(request)
@@ -558,4 +657,12 @@ class MetricWriteCoordinator:
             except Exception as exc:  # noqa: BLE001
                 failed += 1
                 logger.warning("metric saga: replay of op %s failed: %s", op_id, exc)
-        return {"replayed": replayed, "drifted": drifted, "failed": failed}
+        result: dict[str, Any] = {"replayed": replayed, "drifted": drifted, "failed": failed}
+        if dry_run:
+            # replayed/drifted/failed stay 0 in dry-run: they count actions PERFORMED, and a
+            # dry-run performs none. The forecast lives in counts/outcomes instead.
+            result["dry_run"] = True
+            result["scanned"] = scanned
+            result["counts"] = summarize_outcomes(outcomes)
+            result["outcomes"] = outcomes
+        return result

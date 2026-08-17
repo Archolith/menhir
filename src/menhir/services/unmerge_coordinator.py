@@ -41,6 +41,13 @@ from menhir.services.merge_coordinator import (
     merge_state_fingerprint,
     pair_key,
 )
+from menhir.services.saga_reconcile_outcomes import (
+    SKIP,
+    WOULD_MARK_ALREADY_APPLIED,
+    WOULD_NEEDS_REVIEW,
+    WOULD_RESTORE,
+    summarize_outcomes,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -251,10 +258,18 @@ class UnmergeCoordinator:
             "rebound_episodes": rebound,
         }
 
-    def _apply(self, request: dict[str, Any], plan: dict[str, Any]) -> dict[str, Any]:
+    def _classify_replay(self, request: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        """Classify a PREPARED unmerge row WITHOUT mutating anything.
+
+        Returns (outcome, diagnostics): exactly the pre-mutation decision that live replay would
+        make, so a dry-run can report it without touching the journal or the graph. This method is
+        PURE -- it must never call mark_committed / mark_needs_review / _mark_merge_reversed /
+        _fire_unmerge_hook / record_attempt / restore_merge_snapshot.
+        """
         op_id = str(request["op_id"])
         survivor_uuid = str(request["survivor_uuid"])
         absorbed_uuid = str(request["absorbed_uuid"])
+        merge_op_id = str(request["merge_op_id"])
         row = self.journal.get(op_id) or {}
         expected_after = row.get("expected_after_sha256")
         expected_before = request.get("expected_before_sha256")
@@ -262,7 +277,42 @@ class UnmergeCoordinator:
         observed_fp = merge_state_fingerprint(
             self.graph_adapter.fetch_merge_state(survivor_uuid, absorbed_uuid), op_id=op_id
         )
+
+        diagnostics = {
+            "op_id": op_id,
+            "survivor_uuid": survivor_uuid,
+            "absorbed_uuid": absorbed_uuid,
+            "merge_op_id": merge_op_id,
+            "observed_fp": observed_fp,
+            "expected_before": expected_before,
+            "expected_after": expected_after,
+        }
+
         if expected_after and observed_fp == expected_after:
+            return (WOULD_MARK_ALREADY_APPLIED, diagnostics)
+        if expected_before is None:
+            diagnostics["observed_error"] = (
+                "request has no expected_before_sha256; cannot verify precondition"
+            )
+            return (WOULD_NEEDS_REVIEW, diagnostics)
+        if observed_fp != expected_before:
+            diagnostics["observed_error"] = (
+                f"precondition drift: observed={observed_fp} "
+                f"expected_before={expected_before} expected_after={expected_after}"
+            )
+            return (WOULD_NEEDS_REVIEW, diagnostics)
+        return (WOULD_RESTORE, diagnostics)
+
+    def _apply(self, request: dict[str, Any], plan: dict[str, Any]) -> dict[str, Any]:
+        outcome, diag = self._classify_replay(request)
+        op_id = diag["op_id"]
+        survivor_uuid = diag["survivor_uuid"]
+        absorbed_uuid = diag["absorbed_uuid"]
+        expected_after = diag["expected_after"]
+        expected_before = diag["expected_before"]
+        observed_fp = diag["observed_fp"]
+
+        if outcome == WOULD_MARK_ALREADY_APPLIED:
             # A previous attempt already restored it and crashed before COMMITTED.
             self.journal.mark_committed(op_id)
             self._mark_merge_reversed(str(request["merge_op_id"]))
@@ -276,21 +326,12 @@ class UnmergeCoordinator:
         #
         # FAIL CLOSED: a request with no frozen precondition cannot be verified, so it must NOT be
         # applied. Waving it through would mutate a possibly-drifted graph with no check at all.
-        if expected_before is None:
-            self.journal.mark_needs_review(
-                op_id, observed_error="request has no expected_before_sha256; cannot verify precondition"
-            )
-            raise MergeDrift(
-                f"op {op_id} has no frozen precondition; NOT mutating (fail closed)"
-            )
-        if observed_fp != expected_before:
-            self.journal.mark_needs_review(
-                op_id,
-                observed_error=(
-                    f"precondition drift: observed={observed_fp} "
-                    f"expected_before={expected_before} expected_after={expected_after}"
-                ),
-            )
+        if outcome == WOULD_NEEDS_REVIEW:
+            self.journal.mark_needs_review(op_id, observed_error=diag["observed_error"])
+            if expected_before is None:
+                raise MergeDrift(
+                    f"op {op_id} has no frozen precondition; NOT mutating (fail closed)"
+                )
             raise MergeDrift(
                 f"precondition drift for {survivor_uuid} <- {absorbed_uuid} (op {op_id}): the graph "
                 f"is in neither the expected before- nor after-state; NOT restoring"
@@ -338,15 +379,30 @@ class UnmergeCoordinator:
             logger.warning("could not mark merge %s REVERSED: %s", merge_op_id, exc)
 
     # ------------------------------------------------------------------ reconciliation
-    def reconcile(self, *, limit: int = 500) -> dict[str, int]:
-        """Replay every ENTITY_UNMERGE left PREPARED by a crash."""
+    def reconcile(self, *, limit: int = 500, dry_run: bool = False) -> dict[str, Any]:
+        """Replay every ENTITY_UNMERGE left PREPARED by a crash, or report what WOULD happen.
+
+        ``dry_run=True`` still parses each request, loads the before-snapshot, and builds the
+        restore plan -- pure reads that must succeed -- then classifies each row via
+        ``_classify_replay`` and mutates nothing. The classification is the observation contract
+        (CF-20a); the counters stay at zero because nothing is replayed, and ``outcomes`` carries
+        the per-row decision.
+        """
         replayed = 0
         drifted = 0
         failed = 0
+        scanned = 0
+        outcomes: list[dict[str, Any]] = []
         for row in self.journal.list_by_state("PREPARED", limit=limit):
-            if row.get("operation_kind") != "ENTITY_UNMERGE":
-                continue
+            scanned += 1
             op_id = str(row["op_id"])
+            kind = row.get("operation_kind")
+            if kind != "ENTITY_UNMERGE":
+                if dry_run:
+                    outcomes.append(
+                        {"op_id": op_id, "operation_kind": kind, "outcome": SKIP}
+                    )
+                continue
             try:
                 request = json.loads(row["request_json"])
                 body = ms.load_snapshot(ms.loads(row["before_snapshot_json"]))
@@ -354,8 +410,42 @@ class UnmergeCoordinator:
                     ms.decode_node(body["survivor"]), ms.decode_node(body["absorbed"])
                 )
             except (TypeError, ValueError, ms.SnapshotSchemaError) as exc:
-                self.journal.mark_needs_review(op_id, observed_error=f"unreplayable row: {exc}")
-                drifted += 1
+                if dry_run:
+                    outcomes.append(
+                        {
+                            "op_id": op_id,
+                            "operation_kind": kind,
+                            "outcome": WOULD_NEEDS_REVIEW,
+                            "observed_error": f"unreplayable row: {exc}",
+                        }
+                    )
+                else:
+                    self.journal.mark_needs_review(
+                        op_id, observed_error=f"unreplayable row: {exc}"
+                    )
+                    drifted += 1
+                continue
+            if dry_run:
+                # A malformed row must not abort the scan -- see the note in MergeCoordinator.
+                # This coordinator is the most exposed: _classify_replay reads merge_op_id
+                # directly, so a legacy row written without it would otherwise raise KeyError
+                # and take the rest of the preflight down with it.
+                try:
+                    outcome, diag = self._classify_replay(request)
+                except Exception as exc:  # noqa: BLE001
+                    outcomes.append({
+                        "op_id": op_id,
+                        "operation_kind": kind,
+                        "outcome": WOULD_NEEDS_REVIEW,
+                        "observed_error": f"unclassifiable row: {type(exc).__name__}: {exc}",
+                    })
+                    continue
+                entry: dict[str, Any] = {
+                    "op_id": op_id, "operation_kind": kind, "outcome": outcome
+                }
+                if "observed_error" in diag:
+                    entry["observed_error"] = diag["observed_error"]
+                outcomes.append(entry)
                 continue
             try:
                 self._apply(request, plan)
@@ -365,6 +455,18 @@ class UnmergeCoordinator:
             except Exception as exc:  # noqa: BLE001
                 failed += 1
                 logger.warning("unmerge saga: replay of op %s failed: %s", op_id, exc)
+        if dry_run:
+            # replayed/drifted/failed stay 0 in dry-run: they count actions PERFORMED, and a
+            # dry-run performs none. The forecast lives in counts/outcomes instead.
+            return {
+                "replayed": replayed,
+                "drifted": drifted,
+                "failed": failed,
+                "dry_run": True,
+                "scanned": scanned,
+                "counts": summarize_outcomes(outcomes),
+                "outcomes": outcomes,
+            }
         return {"replayed": replayed, "drifted": drifted, "failed": failed}
 
 
