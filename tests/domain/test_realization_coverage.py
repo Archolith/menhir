@@ -151,6 +151,26 @@ def test_wrong_definition_version_outranks_unavailable_projection_state() -> Non
 
 
 @pytest.mark.unit
+def test_fresh_unversioned_assessments_are_invalid_proof() -> None:
+    desired = _target("desired")
+    removed = _target("removed")
+    report = build_realization_coverage_report(
+        definition=_definition(version=2),
+        outcomes=[ProjectionRetirement(target=desired, reason="expired")],
+        freshness=[
+            _assessment(desired, state="fresh", version=None, target_present=True),
+            _assessment(removed, state="fresh", version=None, target_present=False),
+        ],
+    )
+
+    by_subject = {record.target.subject_id: record for record in report.records}
+    assert by_subject["desired"].status is RealizationStatus.INVALID_PROOF
+    assert by_subject["desired"].reason == "definition_version_mismatch"
+    assert by_subject["removed"].status is RealizationStatus.INVALID_PROOF
+    assert by_subject["removed"].reason == "definition_version_mismatch"
+
+
+@pytest.mark.unit
 def test_wrong_definition_or_absent_desired_target_is_invalid_proof() -> None:
     wrong_definition = _target("a")
     wrong_version = _target("b")
