@@ -24,16 +24,19 @@ from __future__ import annotations
 
 import logging
 import threading
+from time import monotonic
 from contextlib import contextmanager
 from typing import Any, Iterator
 
 from menhir.infrastructure import operation_owner as oo
+from menhir.infrastructure.neo4j import revocation_scope
 
 logger = logging.getLogger(__name__)
 
-#: Renew at a third of the lease, so two consecutive renewals can fail before the claim lapses.
-#: Renewing at half-life leaves no margin: one missed tick and the row is already claimable.
-_RENEW_DIVISOR = 3
+#: Renew at ``lease / RENEW_DIVISOR``. Defined in operation_owner beside the TTL formula, because
+#: the two are coupled: this interval IS the worst-case detection lag for a lost claim, and the TTL
+#: derivation has to include it.
+_RENEW_DIVISOR = oo.RENEW_DIVISOR
 
 #: Consecutive renewal EXCEPTIONS tolerated before the claim is treated as lost. A raised renewal
 #: is ambiguous (the sidecar might be briefly locked), unlike a returned False, which is proof
@@ -65,16 +68,21 @@ class WriterHeartbeat:
         *,
         lease_seconds: int = oo.DEFAULT_LEASE_SECONDS,
         owner_token: str | None = None,
+        required_headroom_s: float | None = None,
     ) -> None:
         self._journal = journal
         self._op_id = str(op_id)
         self._lease_seconds = int(lease_seconds)
         self._owner_token = owner_token or oo.process_owner_token()
         self._interval = max(1.0, self._lease_seconds / _RENEW_DIVISOR)
+        self._required_headroom_s = float(required_headroom_s or 0.0)
         self._stop = threading.Event()
         self._lost = threading.Event()
         self._thread: threading.Thread | None = None
         self._renew_errors = 0
+        # Monotonic, so a wall-clock adjustment cannot appear to extend the claim. Seeded at
+        # construction because the claim was stamped at PREPARE, just before this object exists.
+        self._expires_at = monotonic() + self._lease_seconds
 
     # ------------------------------------------------------------------ state
 
@@ -83,9 +91,33 @@ class WriterHeartbeat:
         """Whether the claim is known to be gone. Latches once set."""
         return self._lost.is_set()
 
+    def remaining_lease_s(self) -> float:
+        """Seconds of claim left, by the monotonic clock. Never negative."""
+        return max(0.0, self._expires_at - monotonic())
+
     def should_continue(self) -> bool:
-        """False once ownership is lost. Passed to the driver so retries stop starting."""
-        return not self._lost.is_set()
+        """Whether a NEW statement may be dispatched. Passed to the driver as the revocation gate.
+
+        Two conditions, and the second is the one that makes the proof local:
+
+        1. the claim is not known lost; and
+        2. enough claim remains to outlive the mutation about to be dispatched.
+
+        Without (2) the argument rests entirely on the heartbeat thread being punctual: a writer
+        could dispatch just before a late thread notices renewal is failing, and the statement would
+        still be in flight when the lease expired -- exactly the window a reconciler would then
+        claim and replay. Checking remaining headroom AT DISPATCH makes that impossible regardless
+        of scheduling, GC pauses, or a starved interpreter.
+
+        The headroom required is the FULL mutation window for the kind, not the remainder of a
+        partially-completed one. That is deliberately conservative and much easier to audit than
+        tracking how many statements are left.
+        """
+        if self._lost.is_set():
+            return False
+        if self._required_headroom_s <= 0:
+            return True
+        return self.remaining_lease_s() > self._required_headroom_s
 
     def raise_if_lost(self) -> None:
         """Abort the writer's path if the claim is gone. Call before any new side effect."""
@@ -123,6 +155,9 @@ class WriterHeartbeat:
         # Event.wait doubles as the sleep and the stop signal, so stop() is immediate rather than
         # waiting out a full interval.
         while not self._stop.wait(self._interval):
+            # Taken BEFORE the call: if renewal takes a while, the local expiry under-estimates the
+            # true one rather than over-estimating it.
+            requested_at = monotonic()
             try:
                 renewed = self._journal.renew_owner_heartbeat(
                     self._op_id, seconds=self._lease_seconds, owner_token=self._owner_token
@@ -145,6 +180,8 @@ class WriterHeartbeat:
                 continue
 
             self._renew_errors = 0
+            if renewed:
+                self._expires_at = requested_at + self._lease_seconds
             if not renewed:
                 # Proof, not ambiguity: the row is no longer PREPARED-and-ours. Someone committed
                 # it, quarantined it, or claimed it.
@@ -185,4 +222,45 @@ def writer_heartbeat(
         beat.stop()
 
 
-__all__ = ["SagaOwnershipLost", "WriterHeartbeat", "writer_heartbeat"]
+@contextmanager
+def owned_mutation(
+    journal: Any,
+    op_id: str,
+    *,
+    operation_kind: str,
+    enabled: bool = True,
+) -> Iterator[WriterHeartbeat | None]:
+    """Hold the writer's claim AND publish its revocation predicate, for one saga operation.
+
+    The single entry point a coordinator needs. Both halves belong together, and separating them is
+    a footgun: a heartbeat without a published predicate detects revocation and cannot act on it,
+    while a predicate without a heartbeat never becomes false.
+
+    The lease is derived per saga kind via ``lease_seconds_for_kind``, so the two-statement
+    METRIC_WRITE path gets a longer TTL than the single-statement kinds instead of sharing one
+    constant that is wrong for at least one of them.
+    """
+    if not enabled:
+        yield None
+        return
+
+    beat = WriterHeartbeat(
+        journal,
+        op_id,
+        lease_seconds=oo.lease_seconds_for_kind(operation_kind),
+        required_headroom_s=oo.mutation_window_for_kind(operation_kind),
+    )
+    beat.start()
+    try:
+        with revocation_scope(beat.should_continue):
+            yield beat
+    finally:
+        beat.stop()
+
+
+__all__ = [
+    "SagaOwnershipLost",
+    "WriterHeartbeat",
+    "owned_mutation",
+    "writer_heartbeat",
+]

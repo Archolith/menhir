@@ -33,6 +33,7 @@ from typing import Any, Protocol
 from menhir.domain import merge_eligibility as me
 from menhir.domain import merge_snapshot as ms
 from menhir.infrastructure.graph_operations import GraphOperationsJournal
+from menhir.services.saga_writer_heartbeat import owned_mutation
 from menhir.services.saga_reconcile_outcomes import (
     SKIP,
     WOULD_MARK_ALREADY_APPLIED,
@@ -271,6 +272,23 @@ class MergeCoordinator:
             })
 
     def _apply(self, request: dict[str, Any]) -> dict[str, Any]:
+        """Run the saga body under this process's ownership heartbeat (CF-211 part 2).
+
+        The heartbeat is what lets a reconciler tell "still running here" from "crashed midway": it
+        renews the claim on a thread, independently of the blocking driver call, and publishes a
+        revocation predicate that stops any further statement being dispatched once the claim is
+        lost. Wrapping the whole body means the claim is held from PREPARE through the terminal
+        journal transition, which is the interval a reconciler must not replay across.
+
+        The TTL is derived for ENTITY_MERGE specifically, so its statement count -- not a shared
+        constant -- determines how long an expired claim takes to become recoverable.
+        """
+        with owned_mutation(
+            self.journal, str(request["op_id"]), operation_kind="ENTITY_MERGE"
+        ):
+            return self._apply_owned(request)
+
+    def _apply_owned(self, request: dict[str, Any]) -> dict[str, Any]:
         """Mutate + verify for a PREPARED request. Used by BOTH the first attempt and replay, so a
         replay can never diverge from the original path."""
         op_id = str(request["op_id"])

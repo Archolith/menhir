@@ -29,6 +29,7 @@ from typing import Any
 from menhir.domain import merge_snapshot as ms
 from menhir.infrastructure.graph_operations import GraphOperationsJournal
 from menhir.services.merge_coordinator import _canonical
+from menhir.services.saga_writer_heartbeat import owned_mutation
 from menhir.services.saga_reconcile_outcomes import (
     SKIP,
     WOULD_MARK_ALREADY_APPLIED,
@@ -175,6 +176,28 @@ class DeleteCoordinator:
             return {"deleted": [], "skipped": present, "reason": PREPARE_FAILED,
                     "diagnostics": {"error": str(exc)}}
 
+        # Everything from here to the terminal journal transition runs under this process's
+        # ownership heartbeat (CF-211 part 2), so a reconciler can tell "still deleting here" from
+        # "crashed midway". Unlike the other three coordinators the mutation is inline rather than in
+        # an _apply, so the scope is opened here -- immediately after PREPARE, which is the first
+        # moment a claim exists to hold.
+        with owned_mutation(self.journal, op_id, operation_kind=kind):
+            return self._mutate_and_verify(
+                op_id=op_id, kind=kind, present=present, require_scope=require_scope,
+                already_absent=already_absent, orphan_evidence=orphan_evidence,
+            )
+
+    def _mutate_and_verify(
+        self,
+        *,
+        op_id: str,
+        kind: str,
+        present: list[str],
+        require_scope: str | None,
+        already_absent: list[str],
+        orphan_evidence: list[str],
+    ) -> dict[str, Any]:
+        """Destroy, verify absence, then transition. Runs inside the ownership heartbeat scope."""
         # MUTATE -- the exact deleted set comes back FROM the mutation, not from our intent.
         try:
             deleted = self.graph_adapter.delete_entities_returning_uuids(

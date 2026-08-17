@@ -42,6 +42,7 @@ from menhir.services.merge_coordinator import (
     merge_state_fingerprint,
     pair_key,
 )
+from menhir.services.saga_writer_heartbeat import owned_mutation
 from menhir.services.saga_reconcile_outcomes import (
     SKIP,
     WOULD_MARK_ALREADY_APPLIED,
@@ -305,6 +306,23 @@ class UnmergeCoordinator:
         return (WOULD_RESTORE, diagnostics)
 
     def _apply(self, request: dict[str, Any], plan: dict[str, Any]) -> dict[str, Any]:
+        """Run the saga body under this process's ownership heartbeat (CF-211 part 2).
+
+        The heartbeat is what lets a reconciler tell "still running here" from "crashed midway": it
+        renews the claim on a thread, independently of the blocking driver call, and publishes a
+        revocation predicate that stops any further statement being dispatched once the claim is
+        lost. Wrapping the whole body means the claim is held from PREPARE through the terminal
+        journal transition, which is the interval a reconciler must not replay across.
+
+        The TTL is derived for ENTITY_UNMERGE specifically, so its statement count -- not a shared
+        constant -- determines how long an expired claim takes to become recoverable.
+        """
+        with owned_mutation(
+            self.journal, str(request["op_id"]), operation_kind="ENTITY_UNMERGE"
+        ):
+            return self._apply_owned(request, plan)
+
+    def _apply_owned(self, request: dict[str, Any], plan: dict[str, Any]) -> dict[str, Any]:
         outcome, diag = self._classify_replay(request)
         op_id = diag["op_id"]
         survivor_uuid = diag["survivor_uuid"]
