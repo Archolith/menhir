@@ -351,6 +351,12 @@ class MemorySettings:
     explorer_enabled: bool = True
     privacy_redact: bool = False
 
+    # Startup saga-recovery observation (CF-20b). "observe" classifies the PREPARED backlog and
+    # logs one summary; "off" skips the pass entirely. There is deliberately no value that REPLAYS:
+    # live recovery needs CF-20c's global PREPARE gate and reconciliation lease, so activating it
+    # must be a separate, explicit change rather than a config flip.
+    saga_reconcile_startup_mode: str = "observe"
+
     # OAuth resource server + embedded authorization server
     oauth_enabled: bool = False
     oauth_public_base_url: str = ""
@@ -701,6 +707,10 @@ class MemorySettings:
             instance_id=_getenv("MENHIR_INSTANCE_ID", default=cls.instance_id).strip(),
             explorer_enabled=parse_bool_env(_getenv("MENHIR_EXPLORER_ENABLED", default=str(cls.explorer_enabled))),
             privacy_redact=parse_bool_env(_getenv("MENHIR_PRIVACY_REDACT", default=str(cls.privacy_redact))),
+            saga_reconcile_startup_mode=_getenv(
+                "MENHIR_SAGA_RECONCILE_STARTUP_MODE",
+                default=cls.saga_reconcile_startup_mode,
+            ).strip().lower(),
             oauth_enabled=parse_bool_env(_getenv("MENHIR_OAUTH_ENABLED", default=str(cls.oauth_enabled))),
             oauth_public_base_url=_getenv("MENHIR_PUBLIC_BASE_URL", default=cls.oauth_public_base_url).rstrip("/"),
             oauth_resource=_getenv("MENHIR_OAUTH_RESOURCE", "MENHIR_MCP_RESOURCE", default=cls.oauth_resource).strip(),

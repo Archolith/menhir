@@ -131,6 +131,86 @@ async def _run_startup_artifact_reconcile(built: object, settings: object) -> No
         logger.warning("Startup artifact corpus safe_apply failed", exc_info=True)
 
 
+def _observe_saga_backlog(adapter: object) -> object:
+    """Build the four coordinators over the shared sidecar and classify the PREPARED backlog.
+
+    Synchronous: the journal and coordinators are blocking SQLite/Neo4j callers, so this runs on a
+    worker thread. Constructing the coordinators also runs the journal's schema migration, which is
+    idempotent and already happens on every other path that touches the sidecar.
+    """
+    from menhir.infrastructure.graph_operations import GraphOperationsJournal
+    from menhir.infrastructure.metric_receipts import MetricReceiptStore
+    from menhir.services.delete_coordinator import DeleteCoordinator
+    from menhir.services.merge_coordinator import MergeCoordinator
+    from menhir.services.metric_write_coordinator import MetricWriteCoordinator
+    from menhir.services.saga_reconcile_dispatcher import (
+        SagaReconcileDispatcher,
+        build_handlers,
+    )
+    from menhir.services.unmerge_coordinator import UnmergeCoordinator
+
+    journal = GraphOperationsJournal()
+    handlers = build_handlers(
+        merge=MergeCoordinator(graph_adapter=adapter, journal=journal),
+        unmerge=UnmergeCoordinator(graph_adapter=adapter, journal=journal),
+        metric_write=MetricWriteCoordinator(
+            graph_adapter=adapter, journal=journal, receipts=MetricReceiptStore()
+        ),
+        delete=DeleteCoordinator(graph_adapter=adapter, journal=journal),
+    )
+    return SagaReconcileDispatcher(journal=journal, handlers=handlers).observe()
+
+
+async def _run_startup_saga_observe(built: object, settings: object) -> None:
+    """Classify the PREPARED saga backlog before local writers are admitted (CF-20b).
+
+    Awaited rather than backgrounded, unlike the artifact pass above. The point of this pass is the
+    ORDERING -- it is the seed of the write-readiness barrier that CF-20c turns into a real gate --
+    and a fire-and-forget task would race the writers it is supposed to precede, making the
+    ordering meaningless. It is cheap enough to await: the backlog query is served by
+    idx_graph_ops_state, and on the overwhelmingly common zero-PREPARED startup no handler runs at
+    all, so the whole pass is one indexed read.
+
+    Strictly observational. Nothing here mutates, and `write_ready` is advisory: no writer consults
+    it yet, because refusing to serve on boot is a decision that needs the PREPARE gate and the
+    reconciliation lease behind it. Reporting the verdict now is what makes those safe to switch on
+    later, having seen what real deployments actually contain.
+    """
+    if str(getattr(settings, "saga_reconcile_startup_mode", "observe") or "").lower() == "off":
+        return
+
+    adapter = getattr(built, "graph_adapter", None)
+    if adapter is None:
+        return
+
+    try:
+        run = await asyncio.to_thread(_observe_saga_backlog, adapter)
+    except Exception:
+        # Never fail boot over an observation. The pass exists to make a latent hazard visible,
+        # so a bug in it must not become a new outage of its own.
+        logger.warning("Startup saga reconcile observation failed", exc_info=True)
+        return
+
+    scanned = getattr(run, "scanned", 0)
+    if not scanned:
+        logger.debug("Saga reconcile observation: no PREPARED operations")
+        return
+
+    logger.info(
+        "Saga reconcile observation (run %s): scanned=%s counts=%s by_kind=%s oldest_age_s=%s",
+        getattr(run, "run_id", "?"), scanned, getattr(run, "counts", {}),
+        getattr(run, "counts_by_kind", {}), getattr(run, "oldest_prepared_age_seconds", None),
+    )
+    if not getattr(run, "write_ready", True):
+        logger.warning(
+            "Saga reconcile observation (run %s) would NOT be write-ready: %s. Nothing is blocked "
+            "yet -- recovery is not active until CF-20c. Examples: %s",
+            getattr(run, "run_id", "?"),
+            "; ".join(getattr(run, "blocking_reasons", []) or []),
+            getattr(run, "examples", {}),
+        )
+
+
 async def _start_scheduler(built: object) -> MaintenanceScheduler:
     existing = _state.scheduler
     if isinstance(existing, MaintenanceScheduler):
@@ -526,6 +606,11 @@ async def _initialize_services(
             session.session_id,
         )
         return built, session
+    # Observe the saga backlog BEFORE the scheduler registers (CF-20b). The scheduler is itself a
+    # saga writer, so this is the earliest point that can honestly claim to have looked at the
+    # backlog before a local writer could add to it. Placed after the benchmark early-return so
+    # benchmark isolation skips it along with the scheduler.
+    await _run_startup_saga_observe(built, settings)
     # Start the in-process maintenance scheduler whenever enrichment is ready, regardless of
     # whether the *model endpoints* are managed by the external scheduler process
     # (uses_scheduler). Periodic maintenance — stale-lease recovery, failed-enrichment retry,
