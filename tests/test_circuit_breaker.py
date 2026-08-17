@@ -445,3 +445,84 @@ async def test_cancelled_probe_does_not_wedge_breaker():
 
     assert result == "ok"
     assert breaker._state == CircuitState.CLOSED
+
+
+# ---------------------------------------------------------------------------
+# 11. The same wedge at the two post-fn() lock acquires
+#
+# Test 10 only covers cancellation during `await fn()`. Both lock acquires that
+# run *after* fn() settles are equally suspendable under contention, and a
+# cancellation delivered there used to skip the state cleanup entirely --
+# leaving _probe_in_flight=True forever.
+# ---------------------------------------------------------------------------
+
+async def _open_the_breaker(breaker: CircuitBreaker) -> None:
+    """Trip to OPEN, then fast-forward past cooldown so the next call probes."""
+    for _ in range(breaker.failure_threshold):
+        with pytest.raises(asyncio.TimeoutError):
+            await breaker.call(_fail_timeout)
+    assert breaker._state == CircuitState.OPEN
+    breaker._opened_at = monotonic() - breaker.cooldown_seconds - 1.0
+
+
+async def _cancel_probe_contending_for_lock(
+    breaker: CircuitBreaker,
+    probe_result: BaseException | str,
+) -> None:
+    """Cancel a probe suspended on the post-fn() lock acquire.
+
+    Holds _lock from the outside while fn() settles, so the probe is guaranteed
+    to be waiting on the acquire -- the exact window the fix must cover -- and
+    only then delivers the cancellation.
+    """
+    fn_may_return = asyncio.Event()
+
+    async def _probe() -> str:
+        await fn_may_return.wait()
+        if isinstance(probe_result, BaseException):
+            raise probe_result
+        return probe_result
+
+    task = asyncio.create_task(breaker.call(_probe))
+    await asyncio.sleep(0.01)  # probe passes the entry gate, suspends inside fn()
+    assert breaker._probe_in_flight is True
+
+    await breaker._lock.acquire()  # contend the acquire the probe is about to make
+    try:
+        fn_may_return.set()
+        await asyncio.sleep(0.01)  # fn() settles; probe now blocks on the lock
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    finally:
+        breaker._lock.release()
+
+
+@pytest.mark.asyncio
+async def test_cancel_on_success_path_lock_does_not_wedge_breaker():
+    breaker = CircuitBreaker(name="test", failure_threshold=3, cooldown_seconds=30.0)
+    await _open_the_breaker(breaker)
+
+    await _cancel_probe_contending_for_lock(breaker, "ok")
+
+    # fn() returned before the cancellation, so the backend is known healthy.
+    assert breaker._probe_in_flight is False
+    assert breaker._state == CircuitState.CLOSED
+
+    assert await breaker.call(_succeed) == "ok"
+
+
+@pytest.mark.asyncio
+async def test_cancel_on_error_path_lock_does_not_wedge_breaker():
+    breaker = CircuitBreaker(name="test", failure_threshold=3, cooldown_seconds=30.0)
+    await _open_the_breaker(breaker)
+
+    await _cancel_probe_contending_for_lock(breaker, asyncio.TimeoutError())
+
+    # The probe failed, so OPEN with a fresh cooldown -- but never wedged.
+    assert breaker._probe_in_flight is False
+    assert breaker._state == CircuitState.OPEN
+
+    breaker._opened_at = monotonic() - breaker.cooldown_seconds - 1.0
+    assert await breaker.call(_succeed) == "ok"
+    assert breaker._state == CircuitState.CLOSED

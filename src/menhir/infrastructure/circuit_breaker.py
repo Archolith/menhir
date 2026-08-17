@@ -104,6 +104,43 @@ class CircuitBreaker:
             "cooldown_remaining_s": remaining,
         }
 
+    async def _acquire_or_abandon(self, is_probe: bool, *, healthy: bool) -> None:
+        """Acquire _lock, settling probe state first if cancellation lands on the wait.
+
+        The bare ``async with self._lock`` form leaks the same wedge ``_abandon_probe``
+        exists to close: under contention the acquire suspends, and a CancelledError
+        delivered there skips the state cleanup that was about to run.
+        """
+        try:
+            await self._lock.acquire()
+        except BaseException:
+            if is_probe:
+                self._abandon_probe(healthy=healthy)
+            raise
+
+    def _abandon_probe(self, *, healthy: bool) -> None:
+        """Settle probe state without the lock, for use on the cancellation path.
+
+        Deliberately does NOT acquire self._lock: this runs while the task is being
+        cancelled, and awaiting the lock here re-raises CancelledError before the
+        cleanup executes -- which is the very wedge this guards against. These are
+        plain attribute writes and only one probe can be in flight by construction,
+        so nothing races them.
+
+        ``healthy=True`` means fn() already returned, so the backend is known good
+        and the breaker closes. ``healthy=False`` means we learned nothing (or
+        learned it is down): return to OPEN with a fresh cooldown so the next
+        caller may probe again.
+        """
+        self._probe_in_flight = False
+        if healthy:
+            self._state = CircuitState.CLOSED
+            self._failures = 0
+            self._opened_at = None
+        else:
+            self._state = CircuitState.OPEN
+            self._opened_at = monotonic()
+
     async def call(self, fn: Callable[[], Awaitable[T]]) -> T:
         """Execute fn with circuit breaker state transitions.
 
@@ -150,7 +187,8 @@ class CircuitBreaker:
         try:
             result = await fn()
         except Exception as exc:
-            async with self._lock:
+            await self._acquire_or_abandon(is_probe, healthy=False)
+            try:
                 if should_trip_circuit(exc):
                     self._failures += 1
                     if is_probe:
@@ -196,25 +234,22 @@ class CircuitBreaker:
                         "Circuit breaker %s: non-trip failure %s (state unchanged)",
                         self.name, type(exc).__name__,
                     )
+            finally:
+                self._lock.release()
             raise
         except BaseException:
             # CancelledError / KeyboardInterrupt / SystemExit: the probe never completed,
             # so we learned nothing about backend health. Return to OPEN with a fresh
             # cooldown timer so the next caller may probe again, and clear the in-flight
             # flag that would otherwise wedge the breaker permanently.
-            #
-            # Deliberately does NOT acquire self._lock: this runs while the task is being
-            # cancelled, and awaiting the lock here can re-raise CancelledError before the
-            # cleanup executes, reintroducing the bug. These are plain attribute writes and
-            # only one probe can be in flight by construction, so nothing races them.
             if is_probe:
-                self._state = CircuitState.OPEN
-                self._opened_at = monotonic()
-                self._probe_in_flight = False
+                self._abandon_probe(healthy=False)
             raise
 
-        # Success
-        async with self._lock:
+        # Success. fn() already returned, so a cancellation landing on the lock wait
+        # settles the probe as healthy rather than discarding what we just learned.
+        await self._acquire_or_abandon(is_probe, healthy=True)
+        try:
             if is_probe:
                 # HALF_OPEN -> CLOSED on successful probe
                 previous = self._state
@@ -231,5 +266,7 @@ class CircuitBreaker:
             elif self._state == CircuitState.CLOSED:
                 # Reset consecutive failure counter on success
                 self._failures = 0
+        finally:
+            self._lock.release()
 
         return result
