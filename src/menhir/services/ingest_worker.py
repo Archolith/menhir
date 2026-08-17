@@ -70,6 +70,19 @@ class IngestWorkerMixin:
                     timeout=self._lease_recovery_poll_s,
                 )
             except asyncio.TimeoutError:
+                # A cancellation delivered while wait_for's OWN timeout is firing can be
+                # surfaced as TimeoutError rather than CancelledError. Swallowing it here
+                # restarts the loop, so the task never dies: it sits in state "cancelling"
+                # forever and asyncio's _cancel_all_tasks -- which gathers the cancelled
+                # tasks at loop teardown -- never returns. That wedges the interpreter, not
+                # just this worker.
+                #
+                # Task.cancelling() > 0 means a cancel was requested, so honour it rather
+                # than treating it as an idle poll. Only reached under that race; ordinary
+                # idle timeouts still fall through to lease recovery.
+                task = asyncio.current_task()
+                if task is not None and task.cancelling():
+                    raise asyncio.CancelledError from None
                 await self._recover_stale_episode_leases(limit=100)
                 continue
             try:

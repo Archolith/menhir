@@ -280,7 +280,7 @@ class IngestIntakeMixin:
 
         deadline = perf_counter() + max(0.0, timeout_s)
         while perf_counter() < deadline:
-            row = self.graph_adapter.fetch_episode_processing(episode_uuid)
+            row = await asyncio.to_thread(self.graph_adapter.fetch_episode_processing, episode_uuid)
             if row is None:
                 return None
             # ProcessingState is a (str, Enum) mixin. str(ProcessingState.READY) returns
@@ -294,7 +294,7 @@ class IngestIntakeMixin:
             if row.get("processing_state") in (ProcessingState.READY, ProcessingState.FAILED):
                 return row
             await asyncio.sleep(poll_interval_s)
-        return self.graph_adapter.fetch_episode_processing(episode_uuid)
+        return await asyncio.to_thread(self.graph_adapter.fetch_episode_processing, episode_uuid)
 
 
     async def ingest_episode(
