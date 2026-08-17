@@ -257,6 +257,7 @@ class UnmergeCoordinator:
         absorbed_uuid = str(request["absorbed_uuid"])
         row = self.journal.get(op_id) or {}
         expected_after = row.get("expected_after_sha256")
+        expected_before = request.get("expected_before_sha256")
 
         observed_fp = merge_state_fingerprint(
             self.graph_adapter.fetch_merge_state(survivor_uuid, absorbed_uuid), op_id=op_id
@@ -269,6 +270,31 @@ class UnmergeCoordinator:
                 survivor_uuid=survivor_uuid, absorbed_uuid=absorbed_uuid,
                 merge_op_id=str(request["merge_op_id"]), unmerge_op_id=op_id)
             return {"restored": 1, "replayed": True, "op_id": op_id}
+
+        # --- GUARD 4: only the merge's exact before-state may be unmerged. A graph that drifted
+        # since the snapshot is PRESERVED and routed to NEEDS_REVIEW, never overwritten (invariant 9).
+        #
+        # FAIL CLOSED: a request with no frozen precondition cannot be verified, so it must NOT be
+        # applied. Waving it through would mutate a possibly-drifted graph with no check at all.
+        if expected_before is None:
+            self.journal.mark_needs_review(
+                op_id, observed_error="request has no expected_before_sha256; cannot verify precondition"
+            )
+            raise MergeDrift(
+                f"op {op_id} has no frozen precondition; NOT mutating (fail closed)"
+            )
+        if observed_fp != expected_before:
+            self.journal.mark_needs_review(
+                op_id,
+                observed_error=(
+                    f"precondition drift: observed={observed_fp} "
+                    f"expected_before={expected_before} expected_after={expected_after}"
+                ),
+            )
+            raise MergeDrift(
+                f"precondition drift for {survivor_uuid} <- {absorbed_uuid} (op {op_id}): the graph "
+                f"is in neither the expected before- nor after-state; NOT restoring"
+            )
 
         try:
             result = self.graph_adapter.restore_merge_snapshot(
