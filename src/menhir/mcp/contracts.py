@@ -200,10 +200,10 @@ class BaseJsonResource(ABC):
 
     async def execute(self, *args: Any, **kwargs: Any) -> str:
         async def _run() -> str:
-            # Query-string auth is a legacy compatibility exception for a bounded set
-            # of tools, not a general MCP credential. Resources are refused outright:
-            # routing them through QUERY_AUTH_ALLOWED_TOOLS would expand the exception
-            # just because every resource currently has required_tier="readonly".
+            # Query-string auth is a legacy compatibility exception for the tool
+            # surface. QUERY_AUTH_ALLOWED_TOOLS is built from ALL_TOOLS only, so
+            # resources have no established query-auth compatibility contract;
+            # refuse them outright instead of extending or overloading that policy.
             if request_uses_query_auth():
                 raise PermissionError(
                     f"query-string auth cannot read `{self.uri}`; use Authorization header for resources"
