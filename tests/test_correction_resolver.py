@@ -49,8 +49,14 @@ def _rows(*texts):
     ("Actually it is 20, not 25.", (25.0, 20.0)),
     ("it's 20 not 25", (25.0, 20.0)),
     ("not 25, it's 20", (25.0, 20.0)),
-    ("changed from 25 to 20", (25.0, 20.0)),
-    ("20 instead of 25", (25.0, 20.0)),
+    # CF-129: these two established no correction intent -- "20 instead of 25" is a bare
+    # fragment, and "changed from 25 to 20" reads equally as an elided "[the temperature]
+    # changed from 25 to 20". Write authority is withdrawn from syntax that cannot establish
+    # intent; a cue re-authorizes them (see tests/test_correction_authorization.py).
+    ("changed from 25 to 20", None),
+    ("20 instead of 25", None),
+    ("Actually, 20 instead of 25", (25.0, 20.0)),
+    ("I meant changed from 25 to 20", (25.0, 20.0)),
     ("Actually it is 19.5, not 25", (25.0, 19.5)),
     # negative-correction: cessation filler between OLD and the connective
     ("Not 25 anymore, it is 20.", (25.0, 20.0)),

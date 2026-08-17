@@ -94,8 +94,12 @@ def test_new_correction_phrasings_detect(text, expected):
 def test_existing_correction_phrasings_still_detect():
     # guard: the additions did not disturb the original connectives.
     assert detect_correction("Actually it is 20, not 25.") == (25.0, 20.0)
-    assert detect_correction("changed from 25 to 20") == (25.0, 20.0)
     assert detect_correction("Not 25 anymore, it is 20.") == (25.0, 20.0)
+    # CF-129: "changed from 25 to 20" establishes no correction intent (it reads equally as an
+    # elided "[the temperature] changed from 25 to 20") and no longer authorizes a write. A cue
+    # re-authorizes it -- the phrasing is not lost, only its automatic write authority.
+    assert detect_correction("changed from 25 to 20") is None
+    assert detect_correction("I meant changed from 25 to 20") == (25.0, 20.0)
 
 
 @pytest.mark.unit
