@@ -1,5 +1,32 @@
 # Changelog
 
+## 2026-08-17 - Add CF-20b saga ownership, exhaustive scan and central dispatcher
+
+- Added per-operation ownership so recovery can tell "crashed midway" from "still running in
+  another process" -- the one question a reconciliation lease cannot answer, because the racing
+  writer is not a reconciler. The owner token is instance label + PID + process-start nonce; all
+  three are needed, since `MENHIR_INSTANCE_ID` defaults to empty and PIDs are recycled.
+- Ownership classification fails closed: only a demonstrably expired lease is `ABANDONED`. No
+  token, a token without an expiry, and an unparseable expiry are all `OWNER_UNKNOWN`, because
+  during a mixed-version rollout an older writer may still own an ownerless row.
+- `graph_operations` gained three nullable ownership columns with an additive migration. Existing
+  rows stay ownerless deliberately: backfilling a claim would fabricate the liveness evidence
+  recovery reasons about.
+- Replaced the `limit=500` recovery horizon with `iter_by_state`, a keyset cursor on
+  `(created_at, op_id)`. Re-calling `list_by_state` could never fix this -- it returns the same
+  oldest page forever, so a row that never leaves PREPARED hid every newer row. `op_id` is part of
+  the key because `created_at` is not unique.
+- Added a central PREPARED dispatcher (observe mode) that scans once and routes each row to exactly
+  one handler, applying the ownership veto before any saga logic. It reports unknown kinds as a
+  first-class outcome rather than a silent skip, which surfaces that `LEGACY_ENTITY_UNMERGE` rows
+  are written but claimed by no reconciler, so a crash leaving one PREPARED is currently invisible.
+- Every coordinator gained a uniform `classify_prepared_row` seam, so the dispatcher and a direct
+  `reconcile(dry_run=True)` share one classification path and cannot disagree.
+- CF-20 stays OPEN. Nothing is wired into startup, `run(dry_run=False)` is refused, and the
+  readiness verdict is advisory: live activation needs CF-20c's global PREPARE gate and lease.
+  `renew_owner_heartbeat` exists but has no callers yet -- no known saga operation outlives the
+  120s lease, and that must be confirmed before 20c replays anything.
+
 ## 2026-08-17 - Add the CF-20a saga reconciliation observation contract
 
 - Added `reconcile(dry_run=True)` to all four saga reconcilers (merge, unmerge, metric write,
