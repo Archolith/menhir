@@ -130,6 +130,27 @@ def test_missing_stale_and_unavailable_proofs_are_not_realized() -> None:
 
 
 @pytest.mark.unit
+def test_wrong_definition_version_outranks_unavailable_projection_state() -> None:
+    target = _target("a")
+    report = build_realization_coverage_report(
+        definition=_definition(version=2),
+        outcomes=[ProjectionRetirement(target=target, reason="expired")],
+        freshness=[
+            _assessment(
+                target,
+                state="unavailable",
+                reason="projection_state_unavailable",
+                version=1,
+            )
+        ],
+    )
+
+    record = report.records[0]
+    assert record.status is RealizationStatus.INVALID_PROOF
+    assert record.reason == "definition_version_mismatch"
+
+
+@pytest.mark.unit
 def test_wrong_definition_or_absent_desired_target_is_invalid_proof() -> None:
     wrong_definition = _target("a")
     wrong_version = _target("b")
@@ -157,6 +178,51 @@ def test_wrong_definition_or_absent_desired_target_is_invalid_proof() -> None:
     assert by_subject["b"].reason == "definition_version_mismatch"
     assert by_subject["c"].status is RealizationStatus.INVALID_PROOF
     assert by_subject["c"].reason == "desired_target_not_present"
+
+
+@pytest.mark.unit
+def test_removed_lifecycle_targets_are_accounted_instead_of_silently_ignored() -> None:
+    realized_removal = _target("removed")
+    unreconciled = _target("still-present")
+
+    report = build_realization_coverage_report(
+        definition=_definition(),
+        outcomes=[],
+        freshness=[
+            _assessment(realized_removal, target_present=False),
+            _assessment(unreconciled, target_present=True),
+        ],
+    )
+
+    by_subject = {record.target.subject_id: record for record in report.records}
+    assert report.clean is False
+    assert by_subject["removed"].outcome_kind is RealizationOutcomeKind.REMOVAL
+    assert by_subject["removed"].status is RealizationStatus.REALIZED
+    assert by_subject["still-present"].outcome_kind is RealizationOutcomeKind.REMOVAL
+    assert by_subject["still-present"].status is RealizationStatus.STALE
+    assert by_subject["still-present"].reason == "undesired_target_still_present"
+
+
+@pytest.mark.unit
+def test_stale_removed_target_preserves_lifecycle_failure_reason() -> None:
+    target = _target("removed")
+    report = build_realization_coverage_report(
+        definition=_definition(),
+        outcomes=[],
+        freshness=[
+            _assessment(
+                target,
+                state="stale",
+                reason="pending_generation",
+                target_present=False,
+            )
+        ],
+    )
+
+    record = report.records[0]
+    assert record.outcome_kind is RealizationOutcomeKind.REMOVAL
+    assert record.status is RealizationStatus.STALE
+    assert record.reason == "pending_generation"
 
 
 @pytest.mark.unit
