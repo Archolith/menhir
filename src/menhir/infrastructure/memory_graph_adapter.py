@@ -611,6 +611,32 @@ class MemoryGraphAdapter:
         )
         return int(rows[0].get("total", 0)) if rows else 0
 
+    def capture_namespace_uuids(
+        self, group_id: str, *, namespace: str | None = None
+    ) -> list[str]:
+        """Return the uuids in a namespace partition, for capture BEFORE erasure (CF-165).
+
+        Deliberately mirrors ``count_namespace``'s predicate rather than inventing its own: the
+        captured set is what a sidecar purge will be keyed on, so it must cover exactly what
+        ``delete_namespace`` is about to destroy. If the two predicates drifted, an erasure
+        would delete graph nodes whose sidecar content it never recorded a subject for.
+        """
+        namespace_clause = (
+            " OR (n:Episodic AND n.namespace = $namespace)"
+            " OR ((n:TypedAssertion OR n:TypedAssertionHead OR "
+            "n:ScalarConsolidationWatermark) AND n.namespace = $namespace)"
+            " OR (n:TypedEventAssertion AND n.namespace = $namespace)"
+            " OR (n:TypedEventAssertionHead AND EXISTS {"
+            " MATCH (n)-[:HAS_VERSION]->(ev:TypedEventAssertion) WHERE ev.namespace = $namespace})"
+            if namespace is not None else ""
+        )
+        rows = self.neo4j.execute(
+            f"MATCH (n) WHERE n.group_id = $group_id{namespace_clause} "
+            "AND n.uuid IS NOT NULL RETURN DISTINCT n.uuid AS uuid",
+            params={"group_id": group_id, "namespace": namespace},
+        )
+        return [str(r.get("uuid")) for r in (rows or []) if r.get("uuid")]
+
     def delete_namespace(self, group_id: str, *, namespace: str | None = None) -> int:
         """Delete every node in the given graphiti group partition; returns the count.
 

@@ -128,6 +128,39 @@ def _is_not_null(conn: sqlite3.Connection, table: str, column: str) -> bool:
     return False
 
 
+def count_residual_content(
+    conn: sqlite3.Connection, subjects: ErasureSubjects
+) -> dict[str, int]:
+    """Count rows still holding content for ``subjects``, per "table.column".
+
+    This is the verification step, and it is deliberately NOT ``purge_content(dry_run=True)``.
+    That counts rows the subject keys MATCH, which a purge never changes -- the key column is
+    not rewritten -- so it returns the same number before and after and could never witness
+    success. Residual content means the content column itself is still populated.
+
+    Redaction lands as NULL where the column allows it and as an empty string where the column
+    is NOT NULL, so both count as erased.
+    """
+    residual: dict[str, int] = {}
+    for entry in CONTENT_COLUMNS:
+        if entry.shape is ErasureShape.UNADDRESSABLE:
+            continue
+        clause = _where_clause_for(entry.shape, entry.key_columns, subjects)
+        if clause is None:
+            continue
+        where, params = clause
+        # Registry-provided identifiers; every value is bound.
+        row = conn.execute(
+            f"SELECT COUNT(*) FROM {entry.table} WHERE {where} "
+            f"AND {entry.column} IS NOT NULL AND {entry.column} != ''",
+            params,
+        ).fetchone()
+        count = int(row[0]) if row else 0
+        if count:
+            residual[f"{entry.table}.{entry.column}"] = count
+    return residual
+
+
 def purge_content(
     conn: sqlite3.Connection,
     subjects: ErasureSubjects,
