@@ -57,6 +57,7 @@ OPERATION_KINDS = frozenset(
         "METRIC_WRITE", "METRIC_MIGRATE", "METRIC_REVERSE",
         "ENTITY_MERGE", "ENTITY_UNMERGE", "LEGACY_ENTITY_UNMERGE",
         "ENTITY_DELETE", "SESSION_TTL_DELETE",
+        "EXPLICIT_ERASURE",
     }
 )
 # FAILED is terminal and means "no graph mutation occurred" (plan section 1's state list). It is
@@ -81,7 +82,14 @@ OPERATION_STATES = frozenset(
 _PARTICIPANT_PAIR_KINDS = frozenset(
     {"ENTITY_MERGE", "ENTITY_UNMERGE", "LEGACY_ENTITY_UNMERGE"}
 )
-_PARTICIPANT_DELETE_KINDS = frozenset({"ENTITY_DELETE", "SESSION_TTL_DELETE"})
+# EXPLICIT_ERASURE fences its participants for the same reason a delete does: while an
+# erasure is unresolved, a merge on one of its subjects could copy the content being erased
+# into a survivor's recovery snapshot. A NAMESPACE erasure carries no "targets" (membership
+# lives in the erasure_subjects inventory, not in request_json, so a large namespace stays
+# bounded), so it takes no participant lock and fences on its target_key instead.
+_PARTICIPANT_DELETE_KINDS = frozenset(
+    {"ENTITY_DELETE", "SESSION_TTL_DELETE", "EXPLICIT_ERASURE"}
+)
 _PARTICIPANT_KINDS = _PARTICIPANT_PAIR_KINDS | _PARTICIPANT_DELETE_KINDS
 
 # A lock is released only when its op reaches a terminal state. NEEDS_REVIEW keeps the fence

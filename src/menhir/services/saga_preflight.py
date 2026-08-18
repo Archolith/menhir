@@ -43,6 +43,7 @@ def build_default_dispatcher(adapter: Any) -> Any:
     from menhir.infrastructure.graph_operations import GraphOperationsJournal
     from menhir.infrastructure.metric_receipts import MetricReceiptStore
     from menhir.services.delete_coordinator import DeleteCoordinator
+    from menhir.services.erasure_coordinator import ErasureCoordinator
     from menhir.services.merge_coordinator import MergeCoordinator
     from menhir.services.metric_write_coordinator import MetricWriteCoordinator
     from menhir.services.saga_reconcile_dispatcher import (
@@ -59,6 +60,10 @@ def build_default_dispatcher(adapter: Any) -> Any:
             graph_adapter=adapter, journal=journal, receipts=MetricReceiptStore()
         ),
         delete=DeleteCoordinator(graph_adapter=adapter, journal=journal),
+        # Registered unconditionally with the rest: an EXPLICIT_ERASURE row left by a crash
+        # would otherwise report UNKNOWN_KIND and block write-readiness, which on a
+        # deployment running live recovery means refusing to boot.
+        erasure=ErasureCoordinator(graph_adapter=adapter, journal=journal),
     )
     return SagaReconcileDispatcher(journal=journal, handlers=handlers)
 

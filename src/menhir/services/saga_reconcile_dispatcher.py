@@ -124,6 +124,7 @@ def build_handlers(
     unmerge: Any = None,
     metric_write: Any = None,
     delete: Any = None,
+    erasure: Any = None,
 ) -> dict[str, Any]:
     """Map operation_kind -> the coordinator that owns it.
 
@@ -152,6 +153,8 @@ def build_handlers(
     if delete is not None:
         handlers["ENTITY_DELETE"] = delete
         handlers["SESSION_TTL_DELETE"] = delete
+    if erasure is not None:
+        handlers["EXPLICIT_ERASURE"] = erasure
     return handlers
 
 
