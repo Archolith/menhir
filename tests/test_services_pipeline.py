@@ -7,6 +7,7 @@ import contextlib
 import json
 import os
 import shutil
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
@@ -23,6 +24,25 @@ from menhir.infrastructure.scheduler_trace import build_episode_scheduler_task
 from menhir.services import IngestService, LifecycleService, MaintenanceScheduler, RecallService, ScoringService
 from menhir.services.enrichment_failures import classify_enrichment_failure
 from menhir.services.scheduler_lease import SchedulerLeaseStore
+
+
+async def _wait_until(predicate, *, timeout_s: float = 10.0, interval_s: float = 0.01) -> bool:
+    """Poll ``predicate`` until it holds, or ``timeout_s`` elapses. Returns the final value.
+
+    Exists because a fixed ``asyncio.sleep`` used as a synchronisation step encodes an
+    assumption about how fast this machine is right now. Lease acquisition happens after
+    ``start()`` returns, so "sleep 30ms and assume it acquired" holds on an idle box and
+    fails under CPU contention -- e.g. a parallel (``-n``) suite run -- with no scheduler
+    bug involved. Polling for the condition is fast when idle (it returns on the first
+    tick) and correct when loaded, which a longer sleep would not be: widening the window
+    only makes the race rarer and the suite slower.
+    """
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        await asyncio.sleep(interval_s)
+    return predicate()
 
 
 @pytest.mark.unit
@@ -1965,18 +1985,27 @@ async def test_maintenance_scheduler_allows_only_one_live_owner() -> None:
             graph_adapter=FakeGraphAdapter(),
             lease_store=SchedulerLeaseStore(db_path=run_dir / "scheduler-lock.db"),
             tick_interval_s=0.01,
-            lease_duration_s=1.0,
+            # Long on purpose: these tests assert mutual exclusion and forced transfer,
+            # not expiry. With a 1.0s lease, CPU starvation between acquiring and the
+            # next step let the lease lapse and a second scheduler legitimately take
+            # it -- a false failure about timing, not about the behaviour under test.
+            lease_duration_s=3600.0,
         )
         second = MaintenanceScheduler(
             ingest_service=FakeIngestService(),
             graph_adapter=FakeGraphAdapter(),
             lease_store=SchedulerLeaseStore(db_path=run_dir / "scheduler-lock.db"),
             tick_interval_s=0.01,
-            lease_duration_s=1.0,
+            # Long on purpose: these tests assert mutual exclusion and forced transfer,
+            # not expiry. With a 1.0s lease, CPU starvation between acquiring and the
+            # next step let the lease lapse and a second scheduler legitimately take
+            # it -- a false failure about timing, not about the behaviour under test.
+            lease_duration_s=3600.0,
         )
 
         await first.start()
-        await asyncio.sleep(0.03)
+        assert await _wait_until(lambda: first.status_snapshot()["lease"]["acquired"] is True)
+
         await second.start()
 
         first_snapshot = first.status_snapshot()
@@ -1990,7 +2019,7 @@ async def test_maintenance_scheduler_allows_only_one_live_owner() -> None:
 
         await first.stop()
         await second.start()
-        await asyncio.sleep(0.03)
+        assert await _wait_until(lambda: second.status_snapshot()["lease"]["acquired"] is True)
 
         second_after = second.status_snapshot()
         assert second_after["running"] is True
@@ -2043,7 +2072,11 @@ async def test_maintenance_scheduler_force_takeover_transfers_active_owner() -> 
             structure_watcher_enabled=False,
             experience_counter_enabled=False,
             tick_interval_s=0.01,
-            lease_duration_s=1.0,
+            # Long on purpose: these tests assert mutual exclusion and forced transfer,
+            # not expiry. With a 1.0s lease, CPU starvation between acquiring and the
+            # next step let the lease lapse and a second scheduler legitimately take
+            # it -- a false failure about timing, not about the behaviour under test.
+            lease_duration_s=3600.0,
             lease_heartbeat_s=0.1,
         )
         second = MaintenanceScheduler(
@@ -2053,12 +2086,17 @@ async def test_maintenance_scheduler_force_takeover_transfers_active_owner() -> 
             structure_watcher_enabled=False,
             experience_counter_enabled=False,
             tick_interval_s=0.01,
-            lease_duration_s=1.0,
+            # Long on purpose: these tests assert mutual exclusion and forced transfer,
+            # not expiry. With a 1.0s lease, CPU starvation between acquiring and the
+            # next step let the lease lapse and a second scheduler legitimately take
+            # it -- a false failure about timing, not about the behaviour under test.
+            lease_duration_s=3600.0,
             lease_heartbeat_s=0.1,
         )
 
         await first.start()
-        await asyncio.sleep(0.03)
+        assert await _wait_until(lambda: first.status_snapshot()["lease"]["acquired"] is True)
+
         await second.start()
         assert second.status_snapshot()["running"] is False
 
@@ -2085,6 +2123,7 @@ async def test_maintenance_scheduler_force_takeover_transfers_active_owner() -> 
 
 
 @pytest.mark.unit
+@pytest.mark.timing
 @pytest.mark.asyncio
 async def test_maintenance_scheduler_heartbeat_keeps_lease_alive_during_long_job() -> None:
     """Bug AR-02: the lease used to be renewed only once per loop iteration, so a job that ran
@@ -2180,7 +2219,11 @@ async def test_maintenance_scheduler_forced_takeover_fences_displaced_owner_mid_
     further maintenance after being taken over."""
 
     class SlowFirstJobIngestService:
+        def __init__(self) -> None:
+            self.started = asyncio.Event()
+
         async def recover_stale_enrichment_leases(self, limit: int = 100) -> tuple[int, int]:
+            self.started.set()
             await asyncio.sleep(0.4)  # takeover happens while this first job is in flight
             return 0, 0
 
@@ -2208,14 +2251,19 @@ async def test_maintenance_scheduler_forced_takeover_fences_displaced_owner_mid_
     run_dir = tmp_root / f"scheduler-fence-{uuid4()}"
     run_dir.mkdir()
     try:
+        first_ingest = SlowFirstJobIngestService()
         first = MaintenanceScheduler(
-            ingest_service=SlowFirstJobIngestService(),
+            ingest_service=first_ingest,
             graph_adapter=FakeGraphAdapter(),
             lease_store=SchedulerLeaseStore(db_path=run_dir / "scheduler-lock.db"),
             structure_watcher_enabled=False,
             experience_counter_enabled=False,
             tick_interval_s=0.01,
-            lease_duration_s=1.0,
+            # Long on purpose: these tests assert mutual exclusion and forced transfer,
+            # not expiry. With a 1.0s lease, CPU starvation between acquiring and the
+            # next step let the lease lapse and a second scheduler legitimately take
+            # it -- a false failure about timing, not about the behaviour under test.
+            lease_duration_s=3600.0,
             lease_heartbeat_s=0.1,
         )
         second = MaintenanceScheduler(
@@ -2225,15 +2273,23 @@ async def test_maintenance_scheduler_forced_takeover_fences_displaced_owner_mid_
             structure_watcher_enabled=False,
             experience_counter_enabled=False,
             tick_interval_s=0.01,
-            lease_duration_s=1.0,
+            # Long on purpose: these tests assert mutual exclusion and forced transfer,
+            # not expiry. With a 1.0s lease, CPU starvation between acquiring and the
+            # next step let the lease lapse and a second scheduler legitimately take
+            # it -- a false failure about timing, not about the behaviour under test.
+            lease_duration_s=3600.0,
             lease_heartbeat_s=0.1,
         )
 
         await first.start()
-        await asyncio.sleep(0.05)  # first is now inside recover_stale_leases (0.4s)
+        # The takeover must land while the first job is genuinely in flight. Waiting on lease
+        # acquisition is too early: the tick loop has not entered recover_stale_leases yet, so
+        # the batch gets fenced before it ever runs and the job records 0 runs instead of 1.
+        await asyncio.wait_for(first_ingest.started.wait(), timeout=10.0)
+
         forced = await second.force_takeover(reason="unit-test")
-        # Wait past the in-flight job so the fence has a chance to skip the rest of the batch.
-        await asyncio.sleep(0.6)
+        # Wait for the fence to actually take effect rather than for a fixed duration.
+        await _wait_until(lambda: first.status_snapshot()["running"] is False)
 
         first_snapshot = first.status_snapshot()
         assert forced is True

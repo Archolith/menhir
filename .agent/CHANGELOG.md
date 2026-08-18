@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026-08-18 - Fix the flaky scheduler-lease tests so the suite can run in parallel
+
+- Four `MaintenanceScheduler` lease tests failed intermittently under a parallel (`-n`) run and
+  passed serially. Measured baseline under deliberate CPU contention: 3 failures in 8 runs.
+- Two distinct causes, not one. First, `await asyncio.sleep(0.03)` was used as a synchronisation
+  step to mean "the scheduler has acquired its lease" -- but acquisition completes after `start()`
+  returns, so on a loaded box the assertion ran first. Replaced with `_wait_until(...)`, which
+  polls for the condition: fast when idle, correct when loaded.
+- Second, and the one the sleep fix did not cover: with `lease_duration_s=1.0`, starvation between
+  acquiring the lease and the next step let the lease lapse, so a second scheduler legitimately
+  took it and the ownership assertions inverted. Expiry is not what those three tests exercise, so
+  the lease is now long (matching the `3600.0` idiom already used elsewhere in the file).
+- `forced_takeover_fences_displaced_owner_mid_batch` now waits on an explicit "job started" event.
+  Waiting for lease acquisition alone was too early -- the takeover fenced the batch before the job
+  ran, recording 0 runs instead of 1.
+- Result: 0 failures in 12 contended runs, against 3-in-8 before.
+- `heartbeat_keeps_lease_alive_during_long_job` is NOT fixed by this and cannot be: it asserts that
+  a 0.1s heartbeat renews a 0.6s lease across a 1.2s job, which is a genuine wall-clock property.
+  A previous attempt (2026-07-12) doubled every window, which only made the race rarer and the test
+  slower. It is now marked `timing` and excluded from parallel runs:
+  parallel `-m "not online and not timing" -n 8`, serial `-m "timing"`.
+- Verified: parallel lane 6,310 passed / 0 failed in 85s; timing lane 1 passed in 4s.
+
 ## 2026-08-18 - Import the MCP framework by its real name; upgrade cryptography
 
 - `menhir.mcp.server` imported `cth_mcp_framework`, the pre-migration package name. That name only
