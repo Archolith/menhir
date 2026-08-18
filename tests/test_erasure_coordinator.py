@@ -104,7 +104,11 @@ def test_erasure_proceeds_when_graph_node_already_absent(tmp_path):
     out = coord.erase_memory("n-gone")
 
     assert out["reason"] == GRAPH_ALREADY_ABSENT
-    assert adapter.deleted_nodes == []
+    # The delete IS attempted and reports it touched nothing. Skipping it on a prior probe was
+    # the earlier design and it did not survive a live graph: the real adapter has no
+    # node_exists, so the probe's fallback claimed "present" every time and this outcome could
+    # never be reported outside tests.
+    assert adapter.deleted_nodes == ["n-gone"]
     assert _revision_values(db, "n-gone") == [(None, None)]
 
 

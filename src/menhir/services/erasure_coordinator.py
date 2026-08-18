@@ -108,7 +108,6 @@ class ErasureCoordinator:
         node_uuid = (node_uuid or "").strip()
         if not node_uuid:
             return {"reason": NOTHING_TO_ERASE, "subjects": 0}
-        graph_present = self._node_exists(node_uuid)
         return self._run(
             subjects=[("NODE_UUID", node_uuid)],
             purge=ErasureSubjects(node_uuids=frozenset({node_uuid})),
@@ -117,7 +116,6 @@ class ErasureCoordinator:
             # delete can hold this uuid while the erasure is unresolved.
             target_uuid=node_uuid,
             target_key=None,
-            graph_present=graph_present,
             delete_graph=lambda: (
                 1 if self.graph_adapter.delete_memory(node_uuid) else 0
             ),
@@ -159,12 +157,6 @@ class ErasureCoordinator:
             target_uuid=None,
             # A namespace erase is not a participant set, so it fences on its own key instead.
             target_key=f"erasure:namespace:{group_id}",
-            # ALWAYS attempt the graph delete, never conditioned on whether membership capture
-            # succeeded. Capture failure is deliberately non-fatal, so deriving presence from it
-            # meant a failed capture silently skipped the graph deletion and still reported
-            # success -- leaving exactly the nodes the operator asked to erase. An empty or
-            # already-deleted partition just deletes 0 rows.
-            graph_present=True,
             delete_graph=lambda: int(
                 self.graph_adapter.delete_namespace(group_id, namespace=namespace)
             ),
@@ -180,7 +172,6 @@ class ErasureCoordinator:
         request: dict[str, Any],
         target_uuid: str | None,
         target_key: str | None,
-        graph_present: bool,
         delete_graph: Any,
         dry_run: bool,
     ) -> dict[str, Any]:
@@ -189,7 +180,7 @@ class ErasureCoordinator:
                 preview = purge_content(conn, purge, dry_run=True)
                 conn.rollback()
             addressable = sum(preview.rows_affected.values())
-            if not graph_present and not addressable:
+            if not addressable:
                 return {
                     "reason": NOTHING_TO_ERASE,
                     "dry_run": True,
@@ -198,7 +189,6 @@ class ErasureCoordinator:
             return {
                 "reason": ERASED,
                 "dry_run": True,
-                "graph_present": graph_present,
                 "subjects": len(subjects),
                 "would_purge": preview.rows_affected,
                 "unaddressable": list(preview.skipped_unaddressable),
@@ -237,10 +227,7 @@ class ErasureCoordinator:
         # From here the intent is durable, so readers already suppress these subjects.
         with owned_mutation(self.journal, op_id, operation_kind=ERASURE_KIND):
             return self._erase_and_verify(
-                op_id=op_id,
-                purge=purge,
-                graph_present=graph_present,
-                delete_graph=delete_graph,
+                op_id=op_id, purge=purge, delete_graph=delete_graph
             )
 
     def _erase_and_verify(
@@ -248,17 +235,23 @@ class ErasureCoordinator:
         *,
         op_id: str,
         purge: ErasureSubjects,
-        graph_present: bool,
         delete_graph: Any,
     ) -> dict[str, Any]:
-        """Delete graph state, purge the sidecar, verify, then transition. Under the heartbeat."""
-        graph_deleted = 0
-        if graph_present:
-            try:
-                graph_deleted = int(delete_graph() or 0)
-            except Exception as exc:  # noqa: BLE001
-                self.journal.record_attempt(op_id, error=f"{type(exc).__name__}: {exc}")
-                raise
+        """Delete graph state, purge the sidecar, verify, then transition. Under the heartbeat.
+
+        The graph delete is ALWAYS attempted and its own return value decides whether the graph
+        held anything. An earlier version probed first with ``node_exists`` and skipped the
+        delete when the probe said absent -- but the real graph adapter has no such method, so
+        the probe's AttributeError fallback ("assume present") meant ``graph_already_absent``
+        could never be reported outside tests, where the fake adapter did have it. Asking the
+        mutation what it touched removes both the fake-only dependency and the window between
+        probing and deleting.
+        """
+        try:
+            graph_deleted = int(delete_graph() or 0)
+        except Exception as exc:  # noqa: BLE001
+            self.journal.record_attempt(op_id, error=f"{type(exc).__name__}: {exc}")
+            raise
 
         # Purge and verification share one transaction: a verification that ran outside it could
         # observe a partially applied purge and report residue that is about to disappear.
@@ -290,7 +283,7 @@ class ErasureCoordinator:
 
         self.journal.mark_committed(op_id)
         return {
-            "reason": ERASED if graph_present else GRAPH_ALREADY_ABSENT,
+            "reason": ERASED if graph_deleted else GRAPH_ALREADY_ABSENT,
             "op_id": op_id,
             "graph_deleted": graph_deleted,
             "purged": result.rows_affected,
@@ -369,7 +362,7 @@ class ErasureCoordinator:
                                exc_info=True)
 
         result = self._erase_and_verify(
-            op_id=op_id, purge=purge, graph_present=False, delete_graph=lambda: 0
+            op_id=op_id, purge=purge, delete_graph=lambda: 0
         )
         if result.get("reason") == RESIDUAL_CONTENT:
             return DRIFTED, {
@@ -381,17 +374,6 @@ class ErasureCoordinator:
     def _connect(self) -> sqlite3.Connection:
         """One connection over the shared sidecar file, so intent and inventory are atomic."""
         return sqlite3.connect(self.journal.db_path)
-
-    def _node_exists(self, node_uuid: str) -> bool:
-        try:
-            return bool(self.graph_adapter.node_exists(node_uuid))
-        except AttributeError:
-            # No probe available: assume present and let the delete report what it touched.
-            # Guessing "absent" would skip the graph step on a node that is actually there.
-            return True
-        except Exception:  # noqa: BLE001
-            logger.warning("erasure: node presence probe failed for %s", node_uuid, exc_info=True)
-            return True
 
     def _capture_namespace_uuids(self, group_id: str, namespace: str | None) -> list[str]:
         try:
