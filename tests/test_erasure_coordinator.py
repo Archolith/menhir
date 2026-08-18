@@ -482,3 +482,114 @@ def test_backend_reports_which_erasure_outcome_occurred(tmp_path, monkeypatch):
     # And a subject with nothing anywhere is the genuine negative.
     assert asyncio.run(provider.delete_memory("n-never-existed")) is False
     assert asyncio.run(provider.erase_memory("n-never-existed"))["reason"] == NOTHING_TO_ERASE
+
+
+# --------------------------------------------------------------------------- CF-165 closure
+#
+# Counterexamples for the two holes the closure review found: an erasure that reports success
+# after failing to learn who its subjects were, and an erasure that reports success while
+# content sits in rows no subject key can reach.
+
+
+class UnenumerableAdapter(FakeAdapter):
+    """Graph that cannot answer "who is in this namespace?" but would happily delete it."""
+
+    def capture_namespace_uuids(self, group_id: str, *, namespace: str | None = None):
+        raise ConnectionError("neo4j unreachable")
+
+
+def _seed_mcp_event(db, *, node_uuid, preview="secret preview text"):
+    """One mcp_events row. ``node_uuid=None`` mimics a pre-lineage-migration row."""
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "INSERT INTO mcp_events "
+            "(started_at, completed_at, duration_ms, operation, kind, success, "
+            "payload_preview, node_uuid) VALUES (?,?,?,?,?,?,?,?)",
+            ("t", "t", 1, "add_memory", "tool", 1, preview, node_uuid),
+        )
+        conn.commit()
+
+
+def test_membership_capture_failure_abstains_and_deletes_nothing(tmp_path):
+    """A failed enumeration must not be read as an empty partition.
+
+    The old behaviour returned [], deleted the graph partition, purged only namespace-keyed
+    rows and reported ``erased`` -- after which the member uuids were unknowable forever,
+    because the graph that could name them had just been destroyed.
+    """
+    from menhir.services.erasure_coordinator import MEMBERSHIP_CAPTURE_FAILED
+
+    adapter = UnenumerableAdapter(members=["m-1", "m-2"])
+    coord = _coordinator(tmp_path, adapter)
+
+    out = coord.erase_namespace("group-x", namespace="ns-x")
+
+    assert out["reason"] == MEMBERSHIP_CAPTURE_FAILED
+    # The point of failing closed: nothing was destroyed, so a retry is safe.
+    assert adapter.deleted_namespaces == []
+    # And no durable intent was left behind for a reconciler to resume.
+    with sqlite3.connect(tmp_path / "t.db") as conn:
+        rows = conn.execute(
+            "SELECT COUNT(*) FROM graph_operations WHERE operation_kind = 'EXPLICIT_ERASURE'"
+        ).fetchone()
+    assert rows[0] == 0
+
+
+def test_unaddressable_rows_refuse_a_plain_erased_verdict(tmp_path):
+    """Content in a keyed column whose key is NULL is unreachable, and must be reported."""
+    from menhir.services.erasure_coordinator import ERASED_INCOMPLETE
+
+    db = tmp_path / "t.db"
+    adapter = FakeAdapter(present=True)
+    coord = _coordinator(tmp_path, adapter)
+    _seed_revision(db, "n-1")
+    # A pre-migration row: carries memory text, has no lineage, so no subject addresses it.
+    _seed_mcp_event(db, node_uuid=None)
+
+    out = coord.erase_memory("n-1")
+
+    assert out["reason"] == ERASED_INCOMPLETE
+    assert out["unaddressable_rows"]["mcp_events.payload_preview"] == 1
+    assert "mcp_events.payload_preview" in out["unaddressable"]
+    # The addressable half still actually happened -- this is not a refusal to erase.
+    assert out["purged"]
+
+
+def test_clean_corpus_still_reports_plain_erased(tmp_path):
+    """The incompleteness signal must not be permanently stuck on."""
+    db = tmp_path / "t.db"
+    coord = _coordinator(tmp_path, FakeAdapter(present=True))
+    _seed_revision(db, "n-1")
+    # Same table, but this row carries lineage, so a subject CAN address it.
+    _seed_mcp_event(db, node_uuid="n-2")
+
+    out = coord.erase_memory("n-1")
+
+    assert out["reason"] == ERASED
+    assert out["unaddressable_rows"] == {}
+
+
+def test_unaddressable_census_covers_the_dry_run_too(tmp_path):
+    """A preview must predict the verdict the real run will give, not a cleaner one."""
+    from menhir.services.erasure_coordinator import ERASED_INCOMPLETE
+
+    db = tmp_path / "t.db"
+    coord = _coordinator(tmp_path, FakeAdapter(present=True))
+    _seed_revision(db, "n-1")
+    _seed_mcp_event(db, node_uuid=None)
+
+    out = coord.erase_memory("n-1", dry_run=True)
+
+    assert out["reason"] == ERASED_INCOMPLETE
+    assert out["unaddressable_rows"]["mcp_events.payload_preview"] == 1
+
+
+def test_erased_marker_and_blank_rows_are_not_counted_as_stranded(tmp_path):
+    """Already-erased content is not residue; only populated content strands."""
+    from menhir.infrastructure.telemetry.erasure_purge import count_unaddressable_content
+
+    db = tmp_path / "t.db"
+    _coordinator(tmp_path, FakeAdapter())
+    _seed_mcp_event(db, node_uuid=None, preview="")
+    with sqlite3.connect(db) as conn:
+        assert count_unaddressable_content(conn) == {}

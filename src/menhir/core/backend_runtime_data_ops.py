@@ -111,11 +111,14 @@ class RuntimeProviderDataOpsMixin:
         ``graph_already_absent`` from ``nothing_to_erase`` internally, but callers currently
         cannot see which -- recorded as a known gap rather than smuggled through this signature.
         """
-        from menhir.services.erasure_coordinator import NOTHING_TO_ERASE
+        from menhir.services.erasure_coordinator import DELETION_SUCCEEDED_REASONS
 
         outcome = await self.erase_memory(node_uuid)
-        reason = outcome.get("reason")
-        return bool(reason and reason != NOTHING_TO_ERASE)
+        # Allowlist, not "anything except nothing_to_erase". That predicate answered True for
+        # every reason it did not know about, so a failed PREPARE and a quarantined
+        # residual-content outcome both reported the memory as deleted, and each reason added
+        # later inherited the same default. Unknown reasons now read as failure.
+        return outcome.get("reason") in DELETION_SUCCEEDED_REASONS
 
     async def erase_memory(self, node_uuid: str) -> dict[str, Any]:
         """Erase a memory and report which outcome occurred (CF-165).
@@ -176,6 +179,18 @@ class RuntimeProviderDataOpsMixin:
         outcome = await self._off_loop(
             self._erasure().erase_namespace, group_id, namespace=namespace
         )
+        # An abstain must not reduce to ``deleted: 0``. That is the same "failed read reads as
+        # an empty set" conflation the coordinator now refuses, one layer up: the response shape
+        # below cannot express "did not run", so an operator would see a namespace reported as
+        # empty when in fact nothing was attempted. Raise instead -- the erasure touched nothing,
+        # so retrying once the graph is reachable is safe.
+        from menhir.services.erasure_coordinator import MEMBERSHIP_CAPTURE_FAILED
+
+        if outcome.get("reason") == MEMBERSHIP_CAPTURE_FAILED:
+            raise RuntimeError(
+                f"erasure of namespace {namespace!r} abstained: its membership could not be "
+                f"enumerated, so nothing was deleted. Retry when the graph is reachable."
+            )
         # The return shape is deliberately unchanged. A documented response contract is not the
         # place to smuggle new fields, and an existing test asserts this dict exactly. The erasure
         # detail goes to the log instead -- including any content the registry could not address,

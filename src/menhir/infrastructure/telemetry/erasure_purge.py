@@ -185,6 +185,58 @@ def count_residual_content(
     return residual
 
 
+def count_unaddressable_content(conn: sqlite3.Connection) -> dict[str, int]:
+    """Count content-bearing rows NO subject key can ever reach, per ``"table.column"``.
+
+    Required because ``PurgeResult.skipped_unaddressable`` does not answer this question. It
+    reports entries whose declared *shape* is ``UNADDRESSABLE``, and today **no entry in the
+    registry carries that shape** -- so it is always empty, and the promise in this module's
+    docstring that unreachable content is "reported rather than silently skipped" currently
+    reports nothing at all.
+
+    The content that is actually stranded sits in *keyed* columns whose key is NULL: rows
+    written before the lineage migration that added the key column (see the CF-165 Phase C
+    notes on ``mcp_events``). Such a row matches no ``key IN (...)`` predicate, so it is
+    invisible three times over -- ``purge_content`` never rewrites it, ``count_residual_content``
+    never counts it, and the skipped list never names it -- and an erasure can therefore report
+    success over content it did not touch.
+
+    Counting rather than shape-listing also keeps the signal usable: a column with no subject
+    key that happens to hold no content strands nothing, and must not make every erasure look
+    incomplete forever.
+
+    Takes no subject set. This is a property of the corpus, not of one erasure, so it needs no
+    transactional consistency with a purge and must not run inside one -- the purge never
+    rewrites a key column, so this count cannot change across it.
+    """
+    out: dict[str, int] = {}
+    for entry in CONTENT_COLUMNS:
+        if not _table_exists(conn, entry.table):
+            continue
+        # Registry-provided identifiers; the one VALUE is bound.
+        populated = (
+            f"{entry.column} IS NOT NULL AND {entry.column} != '' AND {entry.column} != ?"
+        )
+        if entry.shape is ErasureShape.UNADDRESSABLE:
+            where = populated
+        else:
+            # Stranded only when EVERY key column is empty. One populated key still lets some
+            # subject set address the row, so it is reachable in principle and not counted here.
+            key_empty = " AND ".join(
+                f"({col} IS NULL OR {col} = '')" for col in entry.key_columns
+            )
+            if not key_empty:
+                continue
+            where = f"{populated} AND {key_empty}"
+        row = conn.execute(
+            f"SELECT COUNT(*) FROM {entry.table} WHERE {where}", [ERASED_MARKER]
+        ).fetchone()
+        count = int(row[0]) if row else 0
+        if count:
+            out[f"{entry.table}.{entry.column}"] = count
+    return out
+
+
 def purge_content(
     conn: sqlite3.Connection,
     subjects: ErasureSubjects,

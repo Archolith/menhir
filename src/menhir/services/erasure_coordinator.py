@@ -51,6 +51,7 @@ from menhir.infrastructure.graph_operations import GraphOperationsJournal
 from menhir.infrastructure.telemetry.erasure_purge import (
     ErasureSubjects,
     count_residual_content,
+    count_unaddressable_content,
     purge_content,
 )
 from menhir.services.saga_reconcile_outcomes import (
@@ -74,6 +75,24 @@ GRAPH_ALREADY_ABSENT = "graph_already_absent"
 ERASED = "erased"
 PREPARE_FAILED = "prepare_failed"
 RESIDUAL_CONTENT = "residual_content_after_purge"
+#: Membership enumeration failed, so the erasure abstained before touching anything. Distinct
+#: from "the namespace was empty": a failed read is not evidence of an empty partition, and
+#: proceeding on it deletes the graph that is the only remaining way to learn the subject set.
+MEMBERSHIP_CAPTURE_FAILED = "membership_capture_failed"
+#: Everything addressable was erased, but the sidecar still holds content no subject key can
+#: reach, so completeness cannot be claimed. Not a quarantine case -- the saga did its job --
+#: but it must never be reported as a plain ``erased``.
+ERASED_INCOMPLETE = "erased_incomplete"
+
+#: Reasons under which the target is actually gone from the graph, for callers reduced to a
+#: bool. An allowlist rather than ``!= NOTHING_TO_ERASE``: that predicate reported success for
+#: every failure reason it had not heard of, so ``prepare_failed`` and
+#: ``residual_content_after_purge`` both returned True, and any reason added later inherited
+#: the same bug by default. Membership/prepare failures touched nothing; residual content is
+#: quarantined for review and must not read as done. ``erased_incomplete`` DOES belong here:
+#: the node itself is gone, and the incompleteness is about unattributable corpus-wide content
+#: rather than about this target -- callers needing that distinction must read ``reason``.
+DELETION_SUCCEEDED_REASONS = frozenset({ERASED, GRAPH_ALREADY_ABSENT, ERASED_INCOMPLETE})
 
 
 def _utc_now_iso() -> str:
@@ -134,6 +153,19 @@ class ErasureCoordinator:
         # normalized rows rather than a JSON blob in request_json, so a large namespace stays
         # bounded and resumable.
         member_uuids = self._capture_namespace_uuids(group_id, namespace)
+        if member_uuids is None:
+            # Abstain here, before PREPARE and before any graph mutation, so there is no durable
+            # state to resume and nothing has been destroyed. Retrying once the graph is
+            # reachable again is safe precisely because this path touched nothing.
+            return {
+                "reason": MEMBERSHIP_CAPTURE_FAILED,
+                "namespace": group_id,
+                "scoped_namespace": namespace,
+                "diagnostics": {
+                    "error": "namespace membership could not be enumerated; erasure abstained "
+                    "rather than deleting the graph that is the only source of the subject set"
+                },
+            }
         subject_rows: list[tuple[str, str]] = [("NAMESPACE", group_id)]
         if namespace and namespace != group_id:
             subject_rows.append(("NAMESPACE", namespace))
@@ -179,19 +211,24 @@ class ErasureCoordinator:
             with self._connect() as conn:
                 preview = purge_content(conn, purge, dry_run=True)
                 conn.rollback()
+                # Same census the real run performs, so a preview predicts the outcome an
+                # operator will actually get instead of a cleaner one.
+                stranded = count_unaddressable_content(conn)
             addressable = sum(preview.rows_affected.values())
             if not addressable:
                 return {
                     "reason": NOTHING_TO_ERASE,
                     "dry_run": True,
                     "subjects": len(subjects),
+                    "unaddressable_rows": stranded,
                 }
             return {
-                "reason": ERASED,
+                "reason": ERASED_INCOMPLETE if stranded else ERASED,
                 "dry_run": True,
                 "subjects": len(subjects),
                 "would_purge": preview.rows_affected,
-                "unaddressable": list(preview.skipped_unaddressable),
+                "unaddressable": sorted({*preview.skipped_unaddressable, *stranded}),
+                "unaddressable_rows": stranded,
             }
 
         op_id = uuidlib.uuid4().hex
@@ -281,6 +318,23 @@ class ErasureCoordinator:
                 "residual": leftover,
             }
 
+        # Corpus-wide census, deliberately OUTSIDE the purge transaction: a purge never rewrites
+        # a key column, so this count cannot change across it, and the sidecar is one shared
+        # database file (CF-144) whose write lock should not be held for extra scans.
+        try:
+            with self._connect() as conn:
+                stranded = count_unaddressable_content(conn)
+            stranded_known = True
+        except Exception as exc:  # noqa: BLE001
+            # Cannot prove the corpus is clean, so do not claim it is. Same rule as the
+            # membership capture above: an unanswered question is not a negative answer.
+            logger.warning(
+                "erasure %s: unaddressable census failed, refusing to report completeness: %s",
+                op_id,
+                exc,
+            )
+            stranded, stranded_known = {}, False
+
         self.journal.mark_committed(op_id)
         # Three outcomes, not two. "The graph had nothing" and "nothing existed anywhere" are
         # different answers: the first still erased stored content, the second erased nothing at
@@ -293,14 +347,25 @@ class ErasureCoordinator:
             reason = GRAPH_ALREADY_ABSENT
         else:
             reason = NOTHING_TO_ERASE
+
+        # A success flavour may not stand while content sits beyond every subject key, or while
+        # it is unknown whether it does. The operation is still COMMITTED -- it did everything
+        # it could reach, which is what separates this from RESIDUAL_CONTENT's quarantine -- but
+        # the word it reports must not be one an operator reads as "complete".
+        if reason in (ERASED, GRAPH_ALREADY_ABSENT) and (stranded or not stranded_known):
+            reason = ERASED_INCOMPLETE
+
         return {
             "reason": reason,
             "op_id": op_id,
             "graph_deleted": graph_deleted,
             "purged": result.rows_affected,
             # Reported, never silently dropped: content the registry cannot address is content
-            # this erasure did not remove.
-            "unaddressable": list(result.skipped_unaddressable),
+            # this erasure did not remove. Two different gaps, kept apart on purpose -- columns
+            # DECLARED unaddressable, and rows stranded because a keyed column's key is NULL.
+            "unaddressable": sorted({*result.skipped_unaddressable, *stranded}),
+            "unaddressable_rows": stranded,
+            "unaddressable_known": stranded_known,
         }
 
     # ------------------------------------------------------------------ recovery
@@ -386,7 +451,15 @@ class ErasureCoordinator:
         """One connection over the shared sidecar file, so intent and inventory are atomic."""
         return sqlite3.connect(self.journal.db_path)
 
-    def _capture_namespace_uuids(self, group_id: str, namespace: str | None) -> list[str]:
+    def _capture_namespace_uuids(
+        self, group_id: str, namespace: str | None
+    ) -> list[str] | None:
+        """Enumerate the partition's uuids, or ``None`` if it could not be enumerated.
+
+        ``None`` and ``[]`` are different facts and the caller must not conflate them. ``[]``
+        is positive evidence that the partition holds no addressable members; ``None`` means
+        the question was not answered.
+        """
         try:
             return [
                 str(u)
@@ -396,17 +469,27 @@ class ErasureCoordinator:
                 )
                 if u
             ]
+        except AttributeError:
+            # An adapter with no membership query is a wiring bug, not a transient failure, and
+            # "retry when the graph is reachable" would be false advice. Surface it. This is
+            # also the shape that hid the defect in tests: a hand-built fake missing the method
+            # raised AttributeError, the old blanket handler turned it into [], and the erasure
+            # then ran with an empty member set while its test asserted success.
+            raise
         except Exception:  # noqa: BLE001
-            # Membership capture failing is not fatal: the namespace-keyed purge still reaches
-            # namespace-keyed rows. It does mean uuid-keyed rows for members may be missed, so
-            # it is logged loudly rather than swallowed.
+            # Fails CLOSED (CF-165). This previously returned [] and let the erasure continue,
+            # reasoning that the namespace-keyed purge still reached namespace-keyed rows. That
+            # is true and it is not enough: the uuid-keyed rows for the members were then never
+            # purged, and step 4 destroys the only thing that could still enumerate them, so the
+            # miss is permanent and the caller was told "erased". A read that failed is not
+            # evidence of an empty partition.
             logger.warning(
-                "erasure: could not capture namespace membership for %s; uuid-keyed sidecar "
-                "rows for its members may survive",
+                "erasure: could not capture namespace membership for %s; abstaining before "
+                "any graph deletion",
                 group_id,
                 exc_info=True,
             )
-            return []
+            return None
 
 
 def _canonical(payload: dict[str, Any]) -> str:
@@ -416,10 +499,13 @@ def _canonical(payload: dict[str, Any]) -> str:
 
 
 __all__ = [
+    "DELETION_SUCCEEDED_REASONS",
     "ERASED",
+    "ERASED_INCOMPLETE",
     "ERASURE_KIND",
     "ErasureCoordinator",
     "GRAPH_ALREADY_ABSENT",
+    "MEMBERSHIP_CAPTURE_FAILED",
     "NOTHING_TO_ERASE",
     "PREPARE_FAILED",
     "RESIDUAL_CONTENT",

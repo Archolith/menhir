@@ -13,6 +13,17 @@ from menhir.infrastructure.telemetry.helpers import _json_default, _span_days, _
 
 logger = logging.getLogger(__name__)
 
+
+class MergeAuditUnavailable(RuntimeError):
+    """The merge-audit read failed, so its result is unknown rather than empty (CF-205).
+
+    Exists so a caller cannot accidentally treat a failed read as "no snapshot recorded". Any
+    handler catching this must report the merge's recoverability as UNKNOWN; reporting it as
+    unrecoverable is the exact wrong answer, because it discards recovery material that may
+    well be sitting in the sidecar.
+    """
+
+
 class TelemetryLifecycleStoreMixin:
     def record_lifecycle_event(
         self,
@@ -239,9 +250,21 @@ class TelemetryLifecycleStoreMixin:
                     tuple(params),
                 ).fetchall()
                 out = [dict(r) for r in rows]
-        except sqlite3.Error:
+        except sqlite3.Error as exc:
+            # CF-205: this used to log and return []. An empty list is the caller's evidence that
+            # NO snapshot exists, and both consumers turn that into a confident verdict --
+            # ``legacy_unmerge_coordinator`` reports "this merge is NOT recoverable", and
+            # ``merge_recoverability`` silently omits the merge from its degraded lane. A read
+            # that failed is not evidence of absence, and here the wrong answer is the one that
+            # discards recovery material. Raising is loud and correct; the caller may catch it
+            # and report "unknown", but it can no longer mistake it for "none".
+            #
+            # Made reachable by the CF-1 logger fix: before that, this handler raised NameError
+            # on the unbound logger, so the swallow never actually completed.
             logger.warning("Failed to fetch merge audit", exc_info=True)
-            return []
+            raise MergeAuditUnavailable(
+                "merge audit read failed; this is not evidence that no snapshot exists"
+            ) from exc
 
         # snapshot_json holds the absorbed node's content, and this read is keyed on uuids with
         # no graph-existence check -- the row outlives the node by design, which is what made it

@@ -163,6 +163,11 @@ def _backend_with_adapter(delete_count: int = 5, node_count: int | None = None):
     adapter = SimpleNamespace(
         delete_namespace=MagicMock(return_value=delete_count),
         count_namespace=MagicMock(return_value=node_count if node_count is not None else delete_count),
+        # Required by the erasure saga, which captures membership before destroying the
+        # partition. Omitting it used to be invisible: the coordinator swallowed the
+        # AttributeError into an empty member set and erased anyway, so these tests asserted a
+        # successful deletion over a subject set that was never actually collected (CF-165).
+        capture_namespace_uuids=MagicMock(return_value=[]),
     )
     backend = RuntimeProvider(built=SimpleNamespace(graph_adapter=adapter), process_session=None)
     return backend, adapter

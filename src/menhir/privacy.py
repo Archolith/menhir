@@ -135,11 +135,39 @@ _QUOTED = re.compile(r"(?:(?<=^)|(?<=[\s=(){}\[\],:]))(['\"])(.*?)\1", re.DOTALL
 # Minimum length for a quoted string to be treated as free text worth masking.
 _MIN_FREE_TEXT_LEN = 12
 
+# Key names whose assigned value is a credential regardless of how short or identifier-like it
+# looks. Matched against the tail of the text preceding a ``=``/``:``, so ``api_key``,
+# `"password"`, and ``X-Auth-Token`` all hit. REDACTED_FIELDS covers the mapping path; this is
+# the log-line equivalent and the two are deliberately kept in the same shape.
+_SECRET_KEY_TAIL = re.compile(
+    r"(?:^|[\s,{\[(\"'])[\w.\-]*"
+    r"(?:passwd|password|secret|token|api[_\-]?key|apikey|auth|credential|bearer|"
+    r"private[_\-]?key|session[_\-]?id|cookie|signature)"
+    r"[\w.\-]*[\"']?$",
+    re.IGNORECASE,
+)
+
 # Identifier-ish quoted values that are structural noise, not memory content:
 # enum tokens, dict keys, status codes, snake/UPPER identifiers, uuids, numbers.
 _IDENTIFIER_LIKE = re.compile(
     r"^(?:[A-Za-z_][A-Za-z0-9_.:/-]*|\d+|[0-9a-fA-F-]{8,})$"
 )
+
+
+def _is_secret_slot(body: str, start: int) -> bool:
+    """True if the quote at ``start`` closes a ``key=`` / ``key:`` assignment.
+
+    CF-24's registered reproducer is ``password='hunter2' token='abc123'``. Both values are
+    too short and too identifier-like for :func:`_is_free_text`, which is tuned for memory
+    content -- a credential is precisely the thing that does NOT look like a sentence. Length
+    heuristics cannot separate a secret from an enum token, so this asks a structural question
+    instead: what is the value assigned to?
+    """
+    prefix = body[:start].rstrip()
+    if not prefix or prefix[-1] not in "=:":
+        return False
+    key = _SECRET_KEY_TAIL.search(prefix[:-1].rstrip())
+    return key is not None
 
 
 def _is_free_text(value: str) -> bool:
@@ -160,12 +188,16 @@ def _is_free_text(value: str) -> bool:
 def redact_log_line(line: str, *, reveal: bool = False) -> str:
     """Best-effort masking of memory content embedded in a single log line.
 
-    Keeps the structural prefix (timestamp/logger/level) and masks quoted strings that
-    look like free text (see :func:`_is_free_text`). Short identifiers, enum tokens,
-    dict keys, uuids, and numbers are preserved so the line stays diagnosable.
+    Keeps the structural prefix (timestamp/logger/level) and masks two disjoint classes:
+    quoted strings that look like free text (:func:`_is_free_text`), and quoted values
+    assigned to a credential-shaped key (:func:`_is_secret_slot`). Short identifiers, enum
+    tokens, dict keys, uuids, and numbers are otherwise preserved so the line stays
+    diagnosable.
 
-    Conservative and heuristic -- a display aid for screen-sharing, NOT a hard guarantee
-    for arbitrary log text.
+    Conservative and heuristic for MEMORY CONTENT -- a display aid for screen-sharing, not a
+    hard guarantee for arbitrary prose. The credential path is narrower and stricter: it is
+    keyed on the assignment target rather than on what the value looks like, because a secret
+    is indistinguishable from an enum token by shape alone (CF-24).
     """
     if reveal or not line:
         return line
@@ -177,7 +209,10 @@ def redact_log_line(line: str, *, reveal: bool = False) -> str:
 
     def _sub(mo: re.Match[str]) -> str:
         quote, value = mo.group(1), mo.group(2)
-        if _is_free_text(value):
+        # Two independent reasons to mask, and they catch opposite shapes: free text is long
+        # and sentence-like, a credential is short and token-like. CF-24's reproducer needs the
+        # second, which is why the length gate alone left both of its secrets in the clear.
+        if _is_free_text(value) or _is_secret_slot(body, mo.start()):
             return f"{quote}{MASK}{quote}"
         return mo.group(0)
 

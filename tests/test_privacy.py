@@ -135,10 +135,31 @@ def test_possessive_apostrophe_does_not_shift_quote_pairing():
     out = redact_log_line(line, reveal=False)
     # the mid-word apostrophe must NOT open a span, so no 'user'[hidden]'' artifact
     assert "user'[hidden]" not in out
-    # the two =-preceded quoted values survive as their own quoted spans
-    assert "'hunter2'" in out
-    assert "'abc123'" in out
-    assert "'hunter2' token='abc123'" in out
+    # the two =-preceded values are still parsed as their own quoted spans -- which is what
+    # this test is actually about. Span pairing is asserted via the surviving structure, not
+    # via the secrets being readable.
+    assert f"password='{MASK}' token='{MASK}'" in out
+
+
+def test_cf24_reproducer_masks_both_secrets():
+    """CF-24's registered reproducer: two secrets in one line, neither long enough to be
+    free text. Length heuristics cannot see these -- the assignment key can."""
+    line = "user's note: password='hunter2' token='abc123'"
+    out = redact_log_line(line, reveal=False)
+    assert "hunter2" not in out
+    assert "abc123" not in out
+    assert out.count(MASK) == 2
+
+
+def test_secret_slot_masking_is_keyed_on_the_key_not_the_value():
+    # same short identifier-like value; masked only where it is assigned to a secret key
+    assert "abc123" not in redact_log_line("api_key='abc123'", reveal=False)
+    assert "abc123" in redact_log_line("stage='abc123'", reveal=False)
+
+
+def test_secret_slot_respects_reveal():
+    line = "password='hunter2'"
+    assert redact_log_line(line, reveal=True) == line
 
 
 def test_long_quoted_phrase_after_space_is_still_masked():
