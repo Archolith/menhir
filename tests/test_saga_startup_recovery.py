@@ -314,6 +314,112 @@ def test_a_recovery_failure_is_fatal_unlike_an_observation_failure(monkeypatch):
         asyncio.run(rt._run_startup_saga_recovery(object()))
 
 
+# ------------------------------------------------- the refusal is a process fact, not an exception
+
+
+@pytest.mark.unit
+def test_a_refusal_latches_this_process_out_of_every_later_initialisation(monkeypatch):
+    """Raising was never enough on its own.
+
+    ``_bootstrap_runtime_on_startup`` swallowed ordinary exceptions and ``_get_services`` cleared
+    the failed init task, so a second initialisation in the SAME process could run the whole
+    startup again. That second pass examines a backlog whose unresolved rows now carry this
+    process's own fresh claims, which classify LIVE_OWNER and do not block -- so the startup that
+    correctly refused could succeed on its next attempt with nothing having been resolved.
+
+    So the refusal has to outlive the attempt that produced it.
+    """
+    monkeypatch.setattr(rt, "_saga_admission_refusal", None)
+    monkeypatch.setattr(
+        rt, "_recover_saga_backlog",
+        lambda a: _Run(write_ready=False, blocking_reasons=["1 row whose replay failed"]),
+    )
+
+    with pytest.raises(rt.SagaRecoveryNotWriteReady, match="replay failed"):
+        asyncio.run(rt._run_startup_saga_recovery(object()))
+
+    reached = []
+    monkeypatch.setattr(rt, "_run_startup_saga_observe", lambda *a: reached.append("barrier"))
+
+    with pytest.raises(rt.SagaRecoveryNotWriteReady, match="already refused"):
+        asyncio.run(rt._initialize_services(_settings("live")))
+
+    assert reached == [], "a latched process must refuse before it rebuilds anything"
+
+
+@pytest.mark.unit
+def test_the_refusal_names_the_condition_that_actually_broke_readiness(monkeypatch):
+    """The first reason is kept; a later one is a consequence of already being latched."""
+    monkeypatch.setattr(rt, "_saga_admission_refusal", None)
+
+    rt._refuse_saga_write_admission("the original blocker")
+    rt._refuse_saga_write_admission("a later consequence")
+
+    assert rt._saga_write_admission_refused() == "the original blocker"
+
+
+@pytest.mark.unit
+def test_mcp_lifespan_never_yields_a_service_after_a_refusal(monkeypatch):
+    """"Refusing startup" must not mean "logging that startup failed while staying available".
+
+    The bootstrap is backgrounded so stdio startup is not blocked by a slow init, which is right
+    for observe mode where the pass is advisory. In live mode the bootstrap IS the write-readiness
+    barrier, so yielding before it resolves serves a process that never established one.
+    """
+    monkeypatch.setattr(rt, "_saga_admission_refusal", None)
+    monkeypatch.setattr(rt, "_saga_recovery_is_armed", lambda: True)
+
+    async def _refuse():
+        raise rt.SagaRecoveryNotWriteReady("recovery refused")
+
+    monkeypatch.setattr(rt, "_bootstrap_runtime_on_startup", _refuse)
+
+    async def _drive():
+        yielded = False
+        with pytest.raises(rt.SagaRecoveryNotWriteReady):
+            async with rt.mcp_lifespan(object()):
+                yielded = True
+        return yielded
+
+    assert asyncio.run(_drive()) is False, "the lifespan must not yield after a refusal"
+
+
+@pytest.mark.unit
+def test_observe_mode_still_starts_without_waiting_for_the_bootstrap(monkeypatch):
+    """The behaviour the live barrier must not cost everyone else.
+
+    Observe mode has no readiness verdict to wait for, so its bootstrap stays in the background
+    and startup is not held behind a full init.
+    """
+    monkeypatch.setattr(rt, "_saga_admission_refusal", None)
+    monkeypatch.setattr(rt, "_saga_recovery_is_armed", lambda: False)
+
+    started = asyncio.Event()
+
+    async def _slow():
+        started.set()
+        await asyncio.sleep(3600)
+
+    monkeypatch.setattr(rt, "_bootstrap_runtime_on_startup", _slow)
+
+    async def _drive():
+        async with rt.mcp_lifespan(object()):
+            return started.is_set() or True
+
+    assert asyncio.run(_drive()) is True
+
+
+@pytest.mark.unit
+def test_an_unreadable_mode_waits_rather_than_guessing(monkeypatch):
+    """Fail closed: not knowing whether recovery was armed must not mean serving as if it was not."""
+    def _boom():
+        raise RuntimeError("settings unreadable")
+
+    monkeypatch.setattr(rt.MemorySettings, "from_env", staticmethod(_boom))
+
+    assert rt._saga_recovery_is_armed() is True
+
+
 # ------------------------------------------------------- the real gate lifecycle, unmocked
 
 

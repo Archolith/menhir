@@ -153,6 +153,33 @@ class SagaRecoveryNotWriteReady(RuntimeError):
     """
 
 
+#: Why this process refused saga write admission, or None. Set once, never cleared.
+#:
+#: Deliberately NOT a RuntimeState field: ``clear_all()`` runs on every shutdown, and a refusal a
+#: shutdown can erase is not a process-lifetime fact. Raising was never sufficient on its own --
+#: every caller between the raise and the process boundary may swallow or retry it, and
+#: ``_bootstrap_runtime_on_startup`` did exactly that while ``_get_services`` cleared the failed
+#: init task, so a second attempt in the same PID could reach a different verdict about the same
+#: unresolved backlog.
+_saga_admission_refusal: str | None = None
+
+
+def _refuse_saga_write_admission(reason: str) -> None:
+    """Latch this process out of saga writes for the rest of its life.
+
+    Idempotent, and the FIRST reason is the one kept: it names the condition that actually broke
+    readiness, while any later one is a consequence of already being latched.
+    """
+    global _saga_admission_refusal
+    if _saga_admission_refusal is None:
+        _saga_admission_refusal = reason
+
+
+def _saga_write_admission_refused() -> str | None:
+    """The standing refusal, if this process has one."""
+    return _saga_admission_refusal
+
+
 #: How long a starting instance waits for a peer to finish recovery before giving up.
 #: Generous, because the alternative to waiting is refusing to boot: a peer draining a large
 #: backlog is normal, and a short timeout would turn ordinary simultaneous startup into an outage.
@@ -297,7 +324,21 @@ async def _run_startup_saga_recovery(adapter: object) -> None:
     hazard visible and must never become an outage of its own; recovery is the opposite, because a
     deployment that asked for live recovery and silently did not get it is running with a backlog
     it believes was cleared.
+
+    Every refusal raised anywhere under this call latches the process (see
+    ``_refuse_saga_write_admission``). Fatal here means fatal for the process, not fatal for this
+    attempt: the caller chain may swallow the exception or retry initialisation, and a retry would
+    re-examine the same unresolved backlog with this process's own fresh claims on it.
     """
+    try:
+        await _run_startup_saga_recovery_inner(adapter)
+    except SagaRecoveryNotWriteReady as exc:
+        _refuse_saga_write_admission(str(exc))
+        raise
+
+
+async def _run_startup_saga_recovery_inner(adapter: object) -> None:
+    """The recovery pass itself. Separated so one place latches every refusal it can raise."""
     run = await asyncio.to_thread(_recover_saga_backlog, adapter)
     if run is None:
         # No longer reachable: a held gate is waited out rather than skipped, so every live start
@@ -607,6 +648,16 @@ def _shutdown_runtime_sync() -> None:
 async def _initialize_services(
     settings: MemorySettings | None = None,
 ) -> tuple[object, object]:
+    # Before anything else. A process that already refused write admission may not rebuild the
+    # services that admit writers -- not on a retry, not through a second entry point, not after a
+    # shutdown. The refusal outlives every one of those.
+    refusal = _saga_write_admission_refused()
+    if refusal is not None:
+        raise SagaRecoveryNotWriteReady(
+            "this process already refused saga write admission and will not initialise again: "
+            + refusal
+        )
+
     settings = settings or MemorySettings.from_env()
     enable_llm_usage_telemetry()
 
@@ -792,6 +843,21 @@ async def _bootstrap_runtime_on_startup() -> None:
         )
         logger.info("Runtime bootstrap during MCP stdio startup was cancelled after %dms", elapsed_ms)
         raise
+    except SagaRecoveryNotWriteReady as exc:
+        # NOT swallowed like an ordinary bootstrap failure. An ordinary failure leaves a service
+        # that cannot serve; this one leaves a backlog whose safety depends on no writer starting.
+        # It must reach the lifespan so the process refuses to serve at all.
+        elapsed_ms = int((perf_counter() - started_at) * 1000)
+        record_lifecycle_event(
+            component="mcp_stdio_boot",
+            event="runtime_bootstrap",
+            state="refused",
+            details={"elapsed_ms": elapsed_ms, "error": str(exc)},
+        )
+        logger.error(
+            "Runtime bootstrap REFUSED saga write admission after %dms: %s", elapsed_ms, exc
+        )
+        raise
     except Exception as exc:
         elapsed_ms = int((perf_counter() - started_at) * 1000)
         record_lifecycle_event(
@@ -816,6 +882,20 @@ async def _bootstrap_runtime_on_startup() -> None:
             _state.startup_runtime_task = None
 
 
+def _saga_recovery_is_armed() -> bool:
+    """Whether this deployment asked for live recovery, so startup must wait for its verdict.
+
+    Fails closed: a settings read that raises answers True, because the alternative is serving
+    without knowing whether recovery was armed. Waiting costs startup latency; guessing wrong
+    costs the invariant.
+    """
+    try:
+        return str(MemorySettings.from_env().saga_reconcile_startup_mode or "").lower() == "live"
+    except Exception:
+        logger.warning("Could not read saga_reconcile_startup_mode; assuming live", exc_info=True)
+        return True
+
+
 @asynccontextmanager
 async def mcp_lifespan(_app: object) -> AsyncIterator[dict[str, object]]:
     startup_task = asyncio.create_task(
@@ -824,6 +904,12 @@ async def mcp_lifespan(_app: object) -> AsyncIterator[dict[str, object]]:
     )
     _state.startup_runtime_task = startup_task
     try:
+        # In live mode the bootstrap IS the write-readiness barrier, so it has to finish before
+        # anything is served. Backgrounding it and yielding immediately -- correct for observe
+        # mode, where the pass is advisory -- turned "refusing startup" into "logging that startup
+        # failed while remaining available", which is not a refusal at all.
+        if _saga_recovery_is_armed():
+            await startup_task
         yield {}
     finally:
         if _state.startup_runtime_task is startup_task:

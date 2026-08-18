@@ -491,6 +491,24 @@ class SagaReconcileDispatcher:
             count = run.counts.get(name, 0)
             if count:
                 reasons.append(f"{count} {why}")
+
+        # A row THIS process still claims is not the healthy transient that a LIVE_OWNER row
+        # normally is. Recovery runs before any local writer is admitted, so this process has no
+        # legitimate way to own a PREPARED row: such a row can only be residue from an earlier
+        # initialisation attempt in the same PID whose replay left it PREPARED. Reading it as a
+        # live peer is what let a first startup fail on a FAILED replay and a second startup
+        # succeed on the same unresolved row, its claim now fresh and its outcome LIVE_OWNER.
+        own_claims = sum(
+            1
+            for entry in run.rows
+            if entry.get("outcome") == LIVE_OWNER and entry.get("own_claim")
+        )
+        if own_claims:
+            reasons.append(
+                f"{own_claims} PREPARED row(s) still claimed by this process from an earlier "
+                "startup attempt"
+            )
+
         run.blocking_reasons = reasons
         run.write_ready = not reasons
 

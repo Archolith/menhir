@@ -503,6 +503,66 @@ def test_a_live_owner_still_vetoes_a_legacy_row_before_quarantine(journal):
     assert LEGACY_UNMERGE_DISPOSITION.kind == "LEGACY_ENTITY_UNMERGE"
 
 
+# ------------------------------------------------- a second pass in the same process
+
+
+@pytest.mark.unit
+def test_a_row_this_process_already_claimed_does_not_read_as_a_live_peer(journal):
+    """The bypass that a swallowed startup failure opened.
+
+    Pass 1 claims an abandoned row and its replay FAILS, which deliberately leaves the row
+    PREPARED -- a transient Neo4j outage must not become a permanent operator ticket. But the
+    claim now names THIS process and carries a fresh lease, so on pass 2 the same row classifies
+    LIVE_OWNER, the one outcome that does not block readiness because a live writer is normally a
+    healthy transient.
+
+    It is not a healthy transient here. Recovery runs before any local writer is admitted, so this
+    process cannot legitimately own a PREPARED row; this one is residue from its own failed
+    attempt. Without the own-claim rule, pass 2 reports write_ready over the very row that refused
+    pass 1, and the failed replay is never resolved by anyone.
+    """
+    _insert(journal, "op-stuck")
+
+    first = SagaReconcileDispatcher(
+        journal=journal,
+        handlers=build_handlers(merge=_Replayer(raises=RuntimeError("neo4j unreachable"))),
+    ).run(dry_run=False, gate=_Gate())
+
+    assert first.counts[FAILED] == 1
+    assert first.write_ready is False, "a failed replay must refuse the first startup"
+
+    second = SagaReconcileDispatcher(
+        journal=journal, handlers=build_handlers(merge=_Replayer())
+    ).run(dry_run=False, gate=_Gate())
+
+    assert _state(journal, "op-stuck") == "PREPARED", "the failed row is still unresolved"
+    assert second.counts[LIVE_OWNER] == 1, "the row is still claimed, so it is vetoed not replayed"
+    assert second.write_ready is False, (
+        f"a row this process still claims may not pass as a live peer: {second.blocking_reasons}"
+    )
+    assert any("claimed by this process" in r for r in second.blocking_reasons), (
+        second.blocking_reasons
+    )
+
+
+@pytest.mark.unit
+def test_a_genuine_peers_live_row_still_does_not_block(journal):
+    """The other half of the rule, or it would just be "LIVE_OWNER blocks", which is wrong.
+
+    A row owned by a DIFFERENT live process is the healthy transient the outcome was designed for:
+    that writer is mid-flight and will finish. Blocking on it would turn every ordinary concurrent
+    write into a refused startup.
+    """
+    _insert(journal, "op-peer", owner="live")
+
+    run = SagaReconcileDispatcher(
+        journal=journal, handlers=build_handlers(merge=_Replayer())
+    ).run(dry_run=False, gate=_Gate())
+
+    assert run.counts[LIVE_OWNER] == 1
+    assert run.write_ready is True, run.blocking_reasons
+
+
 # --------------------------------------------------------------------- reporting honesty
 
 
