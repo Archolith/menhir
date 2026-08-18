@@ -8,6 +8,7 @@ import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from time import perf_counter
+from typing import Any
 
 from menhir.config import MemorySettings
 from menhir.core import build_memory_services, prepare_memory_runtime
@@ -131,38 +132,67 @@ async def _run_startup_artifact_reconcile(built: object, settings: object) -> No
         logger.warning("Startup artifact corpus safe_apply failed", exc_info=True)
 
 
+def _build_saga_dispatcher(adapter: object) -> Any:
+    """The shared dispatcher wiring, re-exported so startup and the CLI cannot diverge."""
+    from menhir.services.saga_preflight import build_default_dispatcher
+
+    return build_default_dispatcher(adapter)
+
+
 def _observe_saga_backlog(adapter: object) -> object:
-    """Build the four coordinators over the shared sidecar and classify the PREPARED backlog.
+    """Classify the PREPARED backlog without mutating anything."""
+    return _build_saga_dispatcher(adapter).observe()
 
-    Synchronous: the journal and coordinators are blocking SQLite/Neo4j callers, so this runs on a
-    worker thread. Constructing the coordinators also runs the journal's schema migration, which is
-    idempotent and already happens on every other path that touches the sidecar.
+
+class SagaRecoveryNotWriteReady(RuntimeError):
+    """Live recovery could not clear the backlog, so this instance must not admit saga writers.
+
+    Raised during startup, deliberately fatal. The circuit-breaker rule is that a systemic recovery
+    failure means "stop recovery and keep the writer gate closed", never "stop recovery and start
+    normally" -- and the only way to keep it closed for this process is to refuse to finish booting.
     """
-    from menhir.infrastructure.graph_operations import GraphOperationsJournal
-    from menhir.infrastructure.metric_receipts import MetricReceiptStore
-    from menhir.services.delete_coordinator import DeleteCoordinator
-    from menhir.services.merge_coordinator import MergeCoordinator
-    from menhir.services.metric_write_coordinator import MetricWriteCoordinator
-    from menhir.services.saga_reconcile_dispatcher import (
-        SagaReconcileDispatcher,
-        build_handlers,
-    )
-    from menhir.services.unmerge_coordinator import UnmergeCoordinator
 
-    journal = GraphOperationsJournal()
-    handlers = build_handlers(
-        merge=MergeCoordinator(graph_adapter=adapter, journal=journal),
-        unmerge=UnmergeCoordinator(graph_adapter=adapter, journal=journal),
-        metric_write=MetricWriteCoordinator(
-            graph_adapter=adapter, journal=journal, receipts=MetricReceiptStore()
-        ),
-        delete=DeleteCoordinator(graph_adapter=adapter, journal=journal),
-    )
-    return SagaReconcileDispatcher(journal=journal, handlers=handlers).observe()
+
+def _recover_saga_backlog(adapter: object) -> object | None:
+    """Acquire the reconciliation gate, preflight, and drain the abandoned backlog. Live (CF-20c).
+
+    Returns None when another instance already holds the gate. That is a normal outcome, not an
+    error: the other instance is doing the work, and contending for it would be worse than skipping.
+
+    **On failure this releases the gate and lets the caller refuse to boot.** The rule being
+    honoured is "keep the writer gate closed", and an instance that does not finish starting admits
+    no writers at all -- which is what that rule protects. Holding the SQLite lease as well would
+    add nothing for this process while blocking healthy peers and the very operator tooling needed
+    to fix the problem, and it would outlive the process by its entire TTL.
+    """
+    from menhir.services.saga_preflight import build_default_dispatcher, run_preflight
+    from menhir.services.saga_reconcile_gate import ReconciliationGate
+
+    dispatcher = build_default_dispatcher(adapter)
+    gate = ReconciliationGate()
+    if not gate.acquire():
+        logger.info("Saga recovery: reconciliation gate held elsewhere; skipping recovery")
+        return None
+    try:
+        report = run_preflight(dispatcher)
+        if not report.clean:
+            raise SagaRecoveryNotWriteReady(
+                "saga recovery preflight is NOT clean; refusing to replay:\n" + report.render()
+            )
+        return dispatcher.run(dry_run=False, gate=gate)
+    finally:
+        gate.release()
 
 
 async def _run_startup_saga_observe(built: object, settings: object) -> None:
-    """Classify the PREPARED saga backlog before local writers are admitted (CF-20b).
+    """The startup saga barrier: dispatches on ``saga_reconcile_startup_mode`` (CF-20b/CF-20c).
+
+    NOT observation-only despite the name, which predates live mode and is kept because it is the
+    documented startup hook:
+
+    * ``off``     -- skip entirely.
+    * ``observe`` -- classify the backlog and log one summary. Mutates nothing. The DEFAULT.
+    * ``live``    -- take the reconciliation gate, preflight, and replay abandoned rows.
 
     Called before resume_pending_episodes, which starts the enrichment worker -- the earliest local
     saga writer, since enrichment correlation can reach MergeCoordinator.merge(). Running after it
@@ -170,22 +200,27 @@ async def _run_startup_saga_observe(built: object, settings: object) -> None:
     be adding to.
 
     Awaited rather than backgrounded, unlike the artifact pass above. The point of this pass is the
-    ORDERING -- it is the seed of the write-readiness barrier that CF-20c turns into a real gate --
-    and a fire-and-forget task would race the writers it is supposed to precede, making the
-    ordering meaningless. It is cheap enough to await: the backlog query is served by
-    idx_graph_ops_state, and on the overwhelmingly common zero-PREPARED startup no handler runs at
-    all, so the whole pass is one indexed read.
+    ORDERING -- it is the write-readiness barrier -- and a fire-and-forget task would race the
+    writers it is supposed to precede, making the ordering meaningless. It is cheap enough to
+    await: the backlog query is served by idx_graph_ops_state, and on the overwhelmingly common
+    zero-PREPARED startup no handler runs at all, so the whole pass is one indexed read.
 
-    Strictly observational. Nothing here mutates, and `write_ready` is advisory: no writer consults
-    it yet, because refusing to serve on boot is a decision that needs the PREPARE gate and the
-    reconciliation lease behind it. Reporting the verdict now is what makes those safe to switch on
-    later, having seen what real deployments actually contain.
+    **The two modes fail in opposite directions, deliberately.** An observation failure is
+    swallowed: the pass exists to make a latent hazard visible and must never become an outage of
+    its own, and its `write_ready` verdict is advisory because no writer consults it. A recovery
+    failure is fatal: a deployment that asked for live recovery and silently did not get it is
+    running with a backlog it believes was cleared.
     """
-    if str(getattr(settings, "saga_reconcile_startup_mode", "observe") or "").lower() == "off":
+    mode = str(getattr(settings, "saga_reconcile_startup_mode", "observe") or "").lower()
+    if mode == "off":
         return
 
     adapter = getattr(built, "graph_adapter", None)
     if adapter is None:
+        return
+
+    if mode == "live":
+        await _run_startup_saga_recovery(adapter)
         return
 
     try:
@@ -213,6 +248,36 @@ async def _run_startup_saga_observe(built: object, settings: object) -> None:
             getattr(run, "run_id", "?"),
             "; ".join(getattr(run, "blocking_reasons", []) or []),
             getattr(run, "examples", {}),
+        )
+
+
+async def _run_startup_saga_recovery(adapter: object) -> None:
+    """Drain the abandoned PREPARED backlog before local writers are admitted (CF-20c, live).
+
+    Opt-in: reached only when ``saga_reconcile_startup_mode`` is "live". The default stays
+    "observe", so no existing deployment changes behaviour merely by upgrading -- activating
+    recovery remains a deliberate per-deployment act taken after a clean preflight.
+
+    Unlike the observation pass, failures here are FATAL. Observation exists to make a latent
+    hazard visible and must never become an outage of its own; recovery is the opposite, because a
+    deployment that asked for live recovery and silently did not get it is running with a backlog
+    it believes was cleared.
+    """
+    run = await asyncio.to_thread(_recover_saga_backlog, adapter)
+    if run is None:
+        return
+
+    logger.info(
+        "Saga recovery (run %s): scanned=%s counts=%s by_kind=%s aborted=%s write_ready=%s",
+        getattr(run, "run_id", "?"), getattr(run, "scanned", 0), getattr(run, "counts", {}),
+        getattr(run, "counts_by_kind", {}), getattr(run, "aborted", False),
+        getattr(run, "write_ready", True),
+    )
+    if not getattr(run, "write_ready", True):
+        raise SagaRecoveryNotWriteReady(
+            "saga recovery finished NOT write-ready (run "
+            f"{getattr(run, 'run_id', '?')}): "
+            + "; ".join(getattr(run, "blocking_reasons", []) or [])
         )
 
 

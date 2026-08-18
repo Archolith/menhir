@@ -351,10 +351,16 @@ class MemorySettings:
     explorer_enabled: bool = True
     privacy_redact: bool = False
 
-    # Startup saga-recovery observation (CF-20b). "observe" classifies the PREPARED backlog and
-    # logs one summary; "off" skips the pass entirely. There is deliberately no value that REPLAYS:
-    # live recovery needs CF-20c's global PREPARE gate and reconciliation lease, so activating it
-    # must be a separate, explicit change rather than a config flip.
+    # Startup saga recovery. "observe" (default) classifies the PREPARED backlog and logs one
+    # summary, mutating nothing; "off" skips the pass entirely; "live" (CF-20c) takes the
+    # reconciliation gate, runs the preflight, and replays abandoned rows before any local writer
+    # is admitted.
+    #
+    # "live" is deliberately NOT the default and never becomes one by upgrading. Whether replay is
+    # safe is a property of the DEPLOYMENT, not of the code -- what is in this journal, and whether
+    # this host can be trusted to prove a writer is dead -- so it stays an explicit per-deployment
+    # act taken after a clean preflight. In live mode a failed preflight or a not-write-ready run
+    # is FATAL to startup: an instance that cannot clear its backlog must admit no writers.
     saga_reconcile_startup_mode: str = "observe"
 
     # OAuth resource server + embedded authorization server
