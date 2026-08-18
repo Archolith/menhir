@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-08-17 - Gate PID death evidence on a stated deployment invariant
+
+- Hostname equality is not PID-namespace equality, and recovery had been treating it as if it were.
+  A same-hostname owner licensed a local PID lookup, but containers on a shared kernel, cloned
+  images, and two nodes mounting one journal volume can all report the same hostname while their
+  PIDs are unrelated. Answering "that PID is not running" about the wrong namespace fabricates a
+  death certificate -- the exact failure the death-evidence rule exists to remove.
+- A process cannot verify the property about itself, so it is now an explicit operator assertion:
+  `MENHIR_HOST_PID_NAMESPACE_VERIFIABLE`, **default off**, checked by the per-deployment preflight.
+  Unset, automatic PID-based recovery is disabled and expired local rows fence as `OWNER_UNKNOWN`.
+  That costs automatic recovery in an unconfigured deployment and never costs correctness.
+- The assertion binds on the claim path as well as the observer. A gate the observer applies but the
+  mutating path skips is not a gate.
+- Attestation is an override, not a faster clock. Expiry is now evaluated BEFORE attestation, so a
+  fresh heartbeat outranks an attestation rather than the other way round, and `attest_owner_death`
+  durably refuses a row that is not PREPARED, is ownerless, or still holds a live lease.
+- Attestations now record the instant alongside the attesting name. An override that cannot be
+  audited afterwards is indistinguishable from a guess.
+
 ## 2026-08-17 - Require positive evidence of writer death before saga recovery
 
 - Replaced "ownership lease expired means the writer is gone" with a rule that does not rest on an
