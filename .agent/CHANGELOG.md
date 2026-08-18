@@ -1,5 +1,35 @@
 # Changelog
 
+## 2026-08-18 - CF-165 wave 3: explicit erasure becomes a durable cross-store saga
+
+- Neo4j and the SQLite sidecar cannot commit one transaction together, so "delete the graph, then
+  purge SQLite" was never a fix: a crash between the steps recreates the finding, and reversing the
+  order only moves the window. Erasure is now a journaled operation with an `EXPLICIT_ERASURE`
+  kind -- capture the subject set while the graph can still be asked, PREPARE the intent and the
+  subject inventory in ONE SQLite transaction, delete graph state, purge through the registry,
+  verify, then COMMIT. A crash after PREPARE leaves enough non-content state to resume.
+- The subject inventory is normalized and keyed by operation id rather than a JSON blob, so a large
+  namespace erase stays bounded. It holds identifiers and status only; a test pins its column set,
+  because an erasure record that retained the erased content would defeat the point.
+- A committed intent is immediately a read veto. The saga guarantees the purge finishes eventually;
+  the veto covers the window before it, so another live process cannot read still-unpurged content.
+  It fails CLOSED -- a failed lookup means suppressed, since a veto that failed open would leak
+  exactly what it exists to hide -- and a node never named individually is still suppressed when
+  its namespace is being erased.
+- Erasure is sidecar-authoritative: an erase of uuid X proceeds even when X is already gone from the
+  graph. A merge removes the absorbed node while keeping its recovery snapshot, so "the graph node
+  is gone" is precisely when sidecar content most needs erasing. The old path returned "nothing to
+  delete" and journaled nothing in that case; the outcome now distinguishes `graph_already_absent`
+  from `nothing_to_erase`.
+- Fencing differs by shape, deliberately: a single-node erase takes participant locks so no merge
+  can copy the content being erased into a survivor's snapshot mid-flight; a namespace erase fences
+  on its own key, because enumerating members in `request_json` is what the inventory table exists
+  to avoid.
+- Verification needed its own query. Reusing the purge's dry-run counted rows the subject keys
+  MATCH, which a purge never changes, so it reported residue after every successful erasure --
+  caught by the saga tests, fixed with `count_residual_content()`.
+- Not yet wired to the `delete_memory` / `delete_namespace` entry points, so CF-165 stays open.
+
 ## 2026-08-18 - CF-165 wave 2: the sidecar content is now reachable, and purgeable
 
 - Wave 1 proved `mcp_events` and `extraction_lab_runs` carry memory text with no namespace and no
