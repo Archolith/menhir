@@ -162,6 +162,8 @@ class TelemetryLifecycleStoreMixin:
         absorbed_uuid: str,
         similarity: float | None,
         snapshot_json: str,
+        survivor_namespace: str | None = None,
+        absorbed_namespace: str | None = None,
     ) -> None:
         """Persist a merge to the durable sidecar audit.
 
@@ -177,8 +179,9 @@ class TelemetryLifecycleStoreMixin:
                 conn.execute(
                     """
                     INSERT INTO merge_audit (
-                        recorded_at, survivor_uuid, absorbed_uuid, similarity, snapshot_json
-                    ) VALUES (?, ?, ?, ?, ?)
+                        recorded_at, survivor_uuid, absorbed_uuid, similarity, snapshot_json,
+                        survivor_namespace, absorbed_namespace
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         _utc_now_iso(),
@@ -186,6 +189,8 @@ class TelemetryLifecycleStoreMixin:
                         absorbed_uuid,
                         float(similarity) if similarity is not None else None,
                         snapshot_json,
+                        survivor_namespace,
+                        absorbed_namespace,
                     ),
                 )
                 conn.commit()

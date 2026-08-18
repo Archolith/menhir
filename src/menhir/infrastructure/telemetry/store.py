@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from menhir.infrastructure.paths import telemetry_db_path
+from menhir.infrastructure.telemetry.schema_migrations import ensure_merge_audit_namespace_columns
 
 logger = logging.getLogger(__name__)
 
@@ -264,7 +265,9 @@ class McpTelemetryStore(
                         survivor_uuid TEXT NOT NULL,
                         absorbed_uuid TEXT NOT NULL,
                         similarity REAL,
-                        snapshot_json TEXT NOT NULL
+                        snapshot_json TEXT NOT NULL,
+                        survivor_namespace TEXT,
+                        absorbed_namespace TEXT
                     )
                     """
                 )
@@ -280,6 +283,9 @@ class McpTelemetryStore(
                     ON merge_audit(absorbed_uuid)
                     """
                 )
+                # CF-165 durable namespace lineage. Lives in schema_migrations because
+                # this module is budgeted as a thin connection+schema owner.
+                ensure_merge_audit_namespace_columns(conn)
                 conn.execute(
                     """
                     CREATE TABLE IF NOT EXISTS conflict_resolutions (
