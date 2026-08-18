@@ -28,12 +28,18 @@ _TRANSIENT_RETRIES = 3
 _TRANSIENT_BACKOFF_BASE = 0.5
 
 #: Transaction timeout applied to the four SAGA MUTATIONS only (CF-211). Not a global default:
-#: recovery needs a provable bound on the mutations whose ownership it ages out, while unrelated
-#: long-running reads, scans and maintenance queries must not start failing because of it.
+#: saga mutations should not occupy the server indefinitely, while unrelated long-running reads,
+#: scans and maintenance queries must not start failing because of it.
 #:
-#: 30s is well above any observed saga mutation and still finite, which is the only property the
-#: safety argument needs. Raising it is safe as long as the ownership TTL is recomputed from
-#: mutation_window_seconds(); lowering it risks aborting legitimate work on a large hub.
+#: **Recovery does not depend on this value.** Ownership is not aged out on elapsed time -- an
+#: abandonment requires positive evidence that the writer process is dead (see
+#: operation_owner.classify_ownership). An earlier version of this comment said recovery "needs a
+#: provable bound on the mutations whose ownership it ages out"; that theorem was withdrawn, and
+#: nothing in the safety argument now rests on this number.
+#:
+#: 30s is well above any observed saga mutation. Raising it is safe (recompute the ownership TTL
+#: from mutation_window_seconds() so healthy writers are not asked to renew unnecessarily);
+#: lowering it risks aborting legitimate work on a large hub.
 SAGA_MUTATION_TIMEOUT_S = 30.0
 
 #: Driver-level acquisition budget (neo4j WorkspaceConfig default, 6.2.0). Named here because the
@@ -149,11 +155,16 @@ class Neo4jRepository:
                     # disable_auto_commit_retries: Session.run() otherwise retries once on its own
                     # (MAX_AUTO_COMMIT_RETRIES = 1, for errors the server marks _idempotent), which
                     # is a retry layer OUTSIDE this class's loop and therefore outside the budget
-                    # mutation_window_seconds() computes. With it on, a "3 attempt" mutation could
-                    # execute up to 6 times, and an ownership TTL derived from that budget would be
-                    # too short -- so a live writer's row could be aged out and replayed underneath
-                    # it (CF-211). Menhir's own loop already covers the transient errors, so this
-                    # removes a duplicate layer rather than removing resilience.
+                    # mutation_window_seconds() computes -- a "3 attempt" mutation could execute up
+                    # to 6 times. Menhir's own loop already covers those transient errors, so this
+                    # removes a duplicate layer rather than removing resilience, and keeps the
+                    # attempt count matching the one this class reports.
+                    #
+                    # NOT a safety control: an earlier version of this comment said a TTL derived
+                    # from an under-counted budget would be "too short -- so a live writer's row
+                    # could be aged out and replayed underneath it". Rows are no longer aged out on
+                    # elapsed time at all, so a miscounted budget costs renewal churn, not a
+                    # double-apply.
                     self._driver = GraphDatabase.driver(
                         self.uri,
                         auth=(self.user, self.password),

@@ -39,7 +39,8 @@ LEASE_SAFETY_MARGIN_S = 30
 #: returns immediately on an empty list, so the second statement never runs. Keeping 2 costs only a
 #: longer lease -- which merely delays recovery -- while assuming 1 would break the moment a caller
 #: supplies episodes. Getting this wrong in the LOW direction is the dangerous one: it yields a
-#: lease shorter than the work it must outlive.
+#: lease shorter than the work it comfortably covers. (Sizing only -- an undersized lease costs
+#: renewal churn and delayed recovery, never a replay underneath a live writer.)
 SAGA_STATEMENT_COUNTS: dict[str, int] = {
     "ENTITY_MERGE": 1,
     "ENTITY_UNMERGE": 1,
@@ -50,8 +51,9 @@ SAGA_STATEMENT_COUNTS: dict[str, int] = {
 }
 
 #: Conservative fallback for a kind not listed above. Deliberately the LARGEST known count: a lease
-#: that is too long merely delays recovery, while one that is too short lets a live writer be
-#: declared abandoned and replayed underneath itself.
+#: that is too long merely delays recovery, while one that is too short causes needless renewal
+#: churn. Neither can produce a replay underneath a live writer: abandonment requires positive
+#: death evidence, not an expired clock.
 _UNKNOWN_KIND_STATEMENTS = max(SAGA_STATEMENT_COUNTS.values())
 
 
@@ -90,11 +92,15 @@ def lease_seconds_for(*, statements: int = 1) -> int:
 
     which is what this returns. For D = 3 that is 1.5x the naive figure.
 
-    This is belt-and-braces with the per-dispatch headroom check in ``WriterHeartbeat``: this makes
-    the SCHEDULE sound, while that check makes each individual dispatch locally provable even if the
-    heartbeat thread is late. Either alone leaves a hole; the scheduling argument depends on the
-    thread being timely, and a late thread is exactly what a GC pause or a starved interpreter
-    produces.
+    Pairs with the per-dispatch headroom check in ``WriterHeartbeat``: this keeps the renewal
+    SCHEDULE comfortable, while that check stops a writer dispatching new work when its own claim is
+    nearly spent even if the heartbeat thread ran late (a GC pause or a starved interpreter).
+
+    **Neither is a proof of anything, and an earlier version of this docstring said otherwise.** It
+    claimed the headroom check made each dispatch "locally provable" and that the pair closed a
+    hole. Recovery no longer infers abandonment from a clock, so there is no hole here to close:
+    both mechanisms reduce churn and avoid pointless work, and abandonment authority rests entirely
+    on positive death evidence.
 
     Unbounded READS in the saga do not enter the calculation: once ownership is lost the revocation
     seam refuses to dispatch any further statement, so a hanging read can delay a writer but can
@@ -234,13 +240,19 @@ def host_pid_namespace_is_verifiable() -> bool:
     return os.environ.get(HOST_PID_NAMESPACE_ENV, "").strip().lower() in _TRUTHY
 
 
-#: Deployment assertion: every saga writer here is stopped, or runs a build whose
-#: ``GraphOperationsJournal.prepare()`` honours the reconciliation gate.
-SAGA_WRITERS_QUIESCED_ENV = "MENHIR_SAGA_WRITERS_QUIESCED"
+#: Deployment assertion: NO GATE-UNAWARE SAGA WRITER CAN BE RUNNING here -- every saga writer is
+#: either stopped or runs a build whose ``GraphOperationsJournal.prepare()`` honours the
+#: reconciliation gate.
+#:
+#: Named for the invariant rather than for one way of reaching it. An earlier name
+#: (``..._WRITERS_QUIESCED``) implied every writer must be stopped, which is stronger than what is
+#: required and would read as false on a healthy single-version deployment whose writers are simply
+#: running current code. Current-version peers need not be quiesced at all.
+SAGA_WRITERS_GATE_AWARE_ENV = "MENHIR_SAGA_ALL_WRITERS_GATE_AWARE"
 
 
-def saga_writers_are_quiesced() -> bool:
-    """Whether this deployment asserts it has no gate-unaware saga writers.
+def all_saga_writers_are_gate_aware() -> bool:
+    """Whether this deployment asserts no gate-unaware saga writer can be running.
 
     The global PREPARE pause is enforced INSIDE ``prepare()``, so it binds only writers whose code
     knows to check the reconciliation lease. An older binary with the journal protocol but without
@@ -262,7 +274,7 @@ def saga_writers_are_quiesced() -> bool:
     warning -- unlike the PID-namespace assertion, whose absence merely narrows recovery, this one
     admits a writer racing recovery.
     """
-    return os.environ.get(SAGA_WRITERS_QUIESCED_ENV, "").strip().lower() in _TRUTHY
+    return os.environ.get(SAGA_WRITERS_GATE_AWARE_ENV, "").strip().lower() in _TRUTHY
 
 
 def classify_ownership(
@@ -374,8 +386,8 @@ __all__ = [
     "OWNER_UNKNOWN",
     "classify_ownership",
     "host_pid_namespace_is_verifiable",
-    "saga_writers_are_quiesced",
-    "SAGA_WRITERS_QUIESCED_ENV",
+    "all_saga_writers_are_gate_aware",
+    "SAGA_WRITERS_GATE_AWARE_ENV",
     "HOST_PID_NAMESPACE_ENV",
     "is_own_claim",
     "lease_expiry_iso",
