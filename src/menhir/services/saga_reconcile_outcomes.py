@@ -106,6 +106,32 @@ CF20A_REACHABLE_OUTCOMES: frozenset[str] = frozenset(
 )
 
 
+#: Outcomes a LIVE reconciliation pass can emit. The forecast vocabulary is deliberately not a
+#: subset: a live run never emits WOULD_*, and a dry-run never emits REPLAYED. Seeding a live
+#: summary with forecast keys (or the reverse) would put a permanent row of zeros in every report
+#: for outcomes that mode cannot produce, which reads as "checked and found none" rather than
+#: "not applicable here".
+LIVE_REACHABLE_OUTCOMES: frozenset[str] = frozenset(
+    {REPLAYED, DRIFTED, FAILED, SKIPPED, LIVE_OWNER, OWNER_UNKNOWN, UNKNOWN_KIND}
+)
+
+
+def summarize_live_outcomes(outcomes: Sequence[Mapping[str, Any]]) -> dict[str, int]:
+    """Count a live pass's per-row outcomes, every reachable one present with an explicit zero.
+
+    Same contract as :func:`summarize_outcomes`, over the live vocabulary: an absent key cannot
+    express the difference between "nothing drifted" and "drift is not reported here", and an
+    operator reading a recovery report needs that distinction. Unrecognised outcomes are counted
+    under their own key rather than dropped, because a coordinator returning something outside the
+    vocabulary is a defect that must be visible.
+    """
+    counts: dict[str, int] = {name: 0 for name in sorted(LIVE_REACHABLE_OUTCOMES)}
+    for entry in outcomes:
+        name = str(entry.get("outcome"))
+        counts[name] = counts.get(name, 0) + 1
+    return counts
+
+
 def summarize_outcomes(outcomes: Sequence[Mapping[str, Any]]) -> dict[str, int]:
     """Count a dry-run's per-row outcomes by kind.
 
@@ -142,4 +168,6 @@ __all__ = [
     "FAILED",
     "SKIPPED",
     "LIVE_OUTCOMES",
+    "LIVE_REACHABLE_OUTCOMES",
+    "summarize_live_outcomes",
 ]

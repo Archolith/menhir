@@ -36,11 +36,18 @@ from typing import Any
 
 from menhir.infrastructure import operation_owner as oo
 from menhir.infrastructure.graph_operations import GraphOperationsJournal
+from menhir.services.saga_reconcile_gate import (
+    ReconciliationGate,
+    ReconciliationLeaseLost,
+)
 from menhir.services.saga_reconcile_outcomes import (
+    DRIFTED,
+    FAILED,
     LIVE_OWNER,
     OWNER_UNKNOWN,
     UNKNOWN_KIND,
     WOULD_NEEDS_REVIEW,
+    summarize_live_outcomes,
     summarize_outcomes,
 )
 
@@ -165,11 +172,21 @@ class ReconcileRun:
     rows: list[dict[str, Any]] = field(default_factory=list)
     write_ready: bool = True
     blocking_reasons: list[str] = field(default_factory=list)
+    #: False for a live pass. Reported rather than hardcoded, because a summary that always claims
+    #: dry_run=True makes a live recovery report indistinguishable from a forecast.
+    dry_run: bool = True
+    #: True when the pass stopped early on a systemic condition. An aborted run is NEVER
+    #: write-ready: the rule is "stop recovery and keep the writer gate closed", never "stop
+    #: recovery and start normally".
+    aborted: bool = False
+    abort_reason: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "run_id": self.run_id,
-            "dry_run": True,
+            "dry_run": self.dry_run,
+            "aborted": self.aborted,
+            "abort_reason": self.abort_reason,
             "scanned": self.scanned,
             "counts": self.counts,
             "counts_by_kind": self.counts_by_kind,
@@ -241,7 +258,13 @@ class SagaReconcileDispatcher:
         )
         return run
 
-    def run(self, *, dry_run: bool = True, now: datetime | None = None) -> ReconcileRun:
+    def run(
+        self,
+        *,
+        dry_run: bool = True,
+        now: datetime | None = None,
+        gate: ReconciliationGate | None = None,
+    ) -> ReconcileRun:
         """Observe-only entry point. ``dry_run=False`` is refused, not silently downgraded.
 
         Live replay needs the global PREPARE gate and the reconciliation lease from CF-20c. Without
@@ -250,11 +273,184 @@ class SagaReconcileDispatcher:
         response: quietly observing instead would let a caller believe recovery had run.
         """
         if not dry_run:
-            raise NotImplementedError(
-                "live saga reconciliation is not enabled: it requires the CF-20c global PREPARE "
-                "gate and reconciliation lease. Use observe() / run(dry_run=True)."
-            )
+            if gate is None:
+                raise NotImplementedError(
+                    "live saga reconciliation requires the CF-20c reconciliation gate: pass a HELD "
+                    "ReconciliationGate. Without it the global PREPARE pause is not in force, so a "
+                    "writer could insert a PREPARED row after recovery started reading the "
+                    "backlog. Use observe() / run(dry_run=True) to classify instead."
+                )
+            return self.replay(gate=gate, now=now)
         return self.observe(now=now)
+
+    def replay(
+        self,
+        *,
+        gate: ReconciliationGate,
+        now: datetime | None = None,
+    ) -> ReconcileRun:
+        """Drain the abandoned PREPARED backlog for real (CF-20c). Requires a HELD gate.
+
+        The order of operations per row is the whole safety argument, and none of it is
+        rearrangeable:
+
+        1. **Verify the gate before every side effect.** Not once at the top: a pass over a large
+           backlog can outlive a lease, and the interesting failure is losing the gate midway while
+           still believing we hold it. Losing it aborts, because another reconciler may already
+           have taken it and begun replaying these same rows.
+        2. **Classify ownership before touching the graph.** A row a live writer still owns has
+           mid-flight graph state, so reading it proves nothing and acting on it double-applies.
+        3. **Claim the row atomically before any graph access.** The claim converts "this looks
+           abandoned" into "this is mine". Replaying first and claiming afterwards would let two
+           reconcilers both mutate before either journal transition resolved the conflict.
+        4. **Only then replay.**
+
+        A lost claim is a normal outcome, not an error: another reconciler legitimately took the
+        row between our classification and our claim, and it will handle it.
+
+        Row-local failures continue the pass; systemic ones stop it. That distinction is the
+        circuit breaker -- one irreconcilable operation must not block recovery of the rest, while
+        lease loss or a quarantine storm means the deployment's assumptions are wrong and startup
+        must not proceed.
+        """
+        run = ReconcileRun(run_id=uuidlib.uuid4().hex, dry_run=False)
+        moment = now or datetime.now(timezone.utc)
+        oldest: str | None = None
+        quarantined = 0
+
+        for row in self.journal.iter_by_state("PREPARED", batch_size=self.batch_size):
+            run.scanned += 1
+            op_id = str(row.get("op_id"))
+            kind = str(row.get("operation_kind"))
+
+            created_at = row.get("created_at")
+            if isinstance(created_at, str) and created_at and (
+                oldest is None or created_at < oldest
+            ):
+                oldest = created_at
+
+            try:
+                gate.verify_still_held()
+            except ReconciliationLeaseLost as exc:
+                run.aborted = True
+                run.abort_reason = f"reconciliation gate lost mid-pass: {exc}"
+                logger.error(
+                    "saga reconcile run %s ABORTED before op %s: %s", run.run_id, op_id, exc
+                )
+                break
+
+            outcome, diagnostics = self._replay_one(row, op_id=op_id, kind=kind)
+            self._record(run, op_id=op_id, kind=kind, outcome=outcome, diagnostics=diagnostics)
+
+            if outcome == DRIFTED:
+                quarantined += 1
+                if quarantined > self.max_needs_review:
+                    run.aborted = True
+                    run.abort_reason = (
+                        f"{quarantined} rows quarantined, above the {self.max_needs_review} "
+                        "ceiling; treating as systemic rather than row-local"
+                    )
+                    logger.error(
+                        "saga reconcile run %s ABORTED: %s", run.run_id, run.abort_reason
+                    )
+                    break
+
+        run.counts = summarize_live_outcomes(run.rows)
+        run.oldest_prepared_at = oldest
+        run.oldest_prepared_age_seconds = self._age_seconds(oldest, moment)
+        self._assess_live_readiness(run)
+
+        logger.info(
+            "saga reconcile run %s (live): scanned=%d counts=%s aborted=%s write_ready=%s "
+            "reasons=%s",
+            run.run_id, run.scanned, run.counts, run.aborted, run.write_ready,
+            run.blocking_reasons,
+        )
+        return run
+
+    def _replay_one(
+        self, row: Mapping[str, Any], *, op_id: str, kind: str
+    ) -> tuple[str, dict[str, Any]]:
+        """Ownership veto, atomic claim, then the handler's live action, for exactly one row."""
+        ownership = oo.classify_ownership(row)
+        if ownership == LIVE_OWNER:
+            return LIVE_OWNER, {"own_claim": oo.is_own_claim(row)}
+        if ownership == OWNER_UNKNOWN:
+            return OWNER_UNKNOWN, {}
+
+        handler = self.handlers.get(kind)
+        if handler is None:
+            return UNKNOWN_KIND, {
+                "observed_error": f"no reconciler claims operation_kind {kind!r}"
+            }
+
+        # Claim BEFORE any graph access. The classification above is advisory; the claim re-runs
+        # the same rule inside its own transaction and is the only authoritative answer.
+        if not self.journal.claim_abandoned_operation(op_id):
+            return LIVE_OWNER, {
+                "observed_error": (
+                    "claim lost between classification and claim; another reconciler owns this row"
+                )
+            }
+
+        # A recorded non-replayable kind quarantines here rather than inside the handler: the
+        # disposition is pure data with no journal of its own, and the dispatcher owns the journal.
+        # Keeping the write here means exactly one place performs it.
+        if isinstance(handler, NonReplayableKind):
+            self.journal.mark_needs_review(op_id, observed_error=handler.reason)
+            return DRIFTED, {"observed_error": handler.reason, "non_replayable": True}
+
+        try:
+            return handler.replay_prepared_row(row)
+        except Exception as exc:  # noqa: BLE001 -- one defective handler must not abort the pass
+            logger.warning(
+                "saga reconcile: handler for %s raised on op %s: %s", kind, op_id, exc
+            )
+            return FAILED, {
+                "observed_error": f"handler for {kind!r} raised: {type(exc).__name__}: {exc}"
+            }
+
+    @staticmethod
+    def _record(
+        run: ReconcileRun,
+        *,
+        op_id: str,
+        kind: str,
+        outcome: str,
+        diagnostics: Mapping[str, Any],
+    ) -> None:
+        entry: dict[str, Any] = {"op_id": op_id, "operation_kind": kind, "outcome": outcome}
+        if "observed_error" in diagnostics:
+            entry["observed_error"] = diagnostics["observed_error"]
+        if diagnostics.get("own_claim"):
+            entry["own_claim"] = True
+        run.rows.append(entry)
+        run.counts_by_kind[kind] = run.counts_by_kind.get(kind, 0) + 1
+        examples = run.examples.setdefault(outcome, [])
+        if len(examples) < _EXAMPLES_PER_OUTCOME:
+            examples.append(op_id)
+
+    def _assess_live_readiness(self, run: ReconcileRun) -> None:
+        """Whether saga writers may be admitted after this pass.
+
+        Stricter than the observe-mode verdict, deliberately: after a live pass a residual blocker
+        means recovery could NOT resolve the backlog, which is a stronger statement than a forecast
+        that it might not. DRIFTED does not block on its own -- a quarantined row is recovery
+        working correctly, and the storm ceiling above is what turns volume into a systemic verdict.
+        """
+        reasons: list[str] = []
+        if run.aborted:
+            reasons.append(run.abort_reason or "recovery aborted")
+        for name, why in (
+            (UNKNOWN_KIND, "PREPARED row(s) of a kind no reconciler claims"),
+            (OWNER_UNKNOWN, "PREPARED row(s) with unprovable ownership"),
+            (FAILED, "PREPARED row(s) whose replay failed and remain unresolved"),
+        ):
+            count = run.counts.get(name, 0)
+            if count:
+                reasons.append(f"{count} {why}")
+        run.blocking_reasons = reasons
+        run.write_ready = not reasons
 
     # ------------------------------------------------------------------ internals
 
