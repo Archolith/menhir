@@ -33,6 +33,52 @@ class ErasureSubjectError(Exception):
     """Raised when a subject_type is not one of the recognised SUBJECT_TYPES."""
 
 
+def suppressed_node_uuids(db_path, candidates) -> frozenset[str]:
+    """Of ``candidates``, which node uuids a live (unpurged) erasure covers.
+
+    One query for the whole set, so a page of rows costs a single lookup instead of one per
+    row. Used by sidecar readers that return content keyed by node uuid: between a committed
+    erasure intent and a finished purge the rows still hold the text, and that window is
+    exactly when the supposedly erased content would otherwise be served.
+
+    Fails CLOSED -- an error suppresses every candidate. Serving content this exists to
+    withhold is worse than a read returning nothing.
+    """
+    import logging
+    import sqlite3 as _sqlite3
+
+    wanted = [str(c) for c in candidates if c]
+    if not wanted:
+        return frozenset()
+    try:
+        with _sqlite3.connect(db_path) as conn:
+            # No table means no erasure has ever been recorded against this database, so
+            # nothing is suppressed. That is positive evidence, not a failure -- unlike a query
+            # error, which cannot distinguish "no erasures" from "cannot tell". Treating the
+            # missing table as fail-closed suppressed EVERY content read on any deployment
+            # where erasure had never run.
+            exists = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='erasure_subjects'"
+            ).fetchone()
+            if exists is None:
+                return frozenset()
+            placeholders = ",".join("?" for _ in wanted)
+            rows = conn.execute(
+                "SELECT DISTINCT subject_value FROM erasure_subjects "
+                f"WHERE subject_type = 'NODE_UUID' AND purged_at IS NULL "
+                f"AND subject_value IN ({placeholders})",
+                wanted,
+            ).fetchall()
+        return frozenset(str(r[0]) for r in rows)
+    except Exception:  # noqa: BLE001
+        logging.getLogger(__name__).warning(
+            "erasure suppression lookup failed; suppressing all %d candidates",
+            len(wanted),
+            exc_info=True,
+        )
+        return frozenset(wanted)
+
+
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 

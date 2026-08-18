@@ -367,3 +367,44 @@ def test_completed_erasure_leaves_nothing_for_the_archive_read(tmp_path):
 
     assert store.get_original_content("n-erased") is None
     assert _revision_values(db, "n-erased") == [(None, None)]
+
+
+def test_every_sidecar_content_reader_honours_the_veto(tmp_path):
+    """All four readers that can return memory text must suppress an in-flight erasure.
+
+    Each is keyed on a uuid with no graph-existence check, so each answers for a node that is
+    already deleted. Installing the veto on one of them would only narrow the window.
+    """
+    coord = _coordinator(tmp_path, FakeAdapter(present=True))
+    db = tmp_path / "t.db"
+    store = McpTelemetryStore(db_path=db)
+    _seed_revision(db, "n-hot", "still-readable")
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "INSERT INTO merge_audit "
+            "(recorded_at, survivor_uuid, absorbed_uuid, similarity, snapshot_json) "
+            "VALUES (?,?,?,?,?)",
+            ("t", "surv-hot", "n-hot", 0.9, '{"content":"absorbed secret"}'),
+        )
+        conn.commit()
+
+    # Visible before any erasure intent exists.
+    assert store.get_original_content("n-hot") == "still-readable"
+    assert any(r["node_uuid"] == "n-hot" for r in store.fold_revisions_by_field(min_count=1))
+    assert store.fold_revisions_bounded()["groups"]
+    assert store.fetch_merge_audit(absorbed_uuid="n-hot")
+
+    # Intent committed, purge deliberately not run.
+    coord.subjects.record_subjects("op-hot", [("NODE_UUID", "n-hot")])
+
+    assert store.get_original_content("n-hot") is None
+    assert not [r for r in store.fold_revisions_by_field(min_count=1) if r["node_uuid"] == "n-hot"]
+    assert not [
+        g for g in store.fold_revisions_bounded()["groups"] if g["node_uuid"] == "n-hot"
+    ]
+    # Two-party: erasing the ABSORBED side must hide the row the survivor also points at.
+    assert store.fetch_merge_audit(absorbed_uuid="n-hot") == []
+    assert store.fetch_merge_audit(survivor_uuid="surv-hot") == []
+
+    # The rows are all still present -- suppression, not deletion, is doing the work.
+    assert _revision_values(db, "n-hot") == [("still-readable", "still-readable")]

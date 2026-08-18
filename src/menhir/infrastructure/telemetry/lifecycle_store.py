@@ -238,10 +238,28 @@ class TelemetryLifecycleStoreMixin:
                     """,
                     tuple(params),
                 ).fetchall()
-                return [dict(r) for r in rows]
+                out = [dict(r) for r in rows]
         except sqlite3.Error:
             logger.warning("Failed to fetch merge audit", exc_info=True)
             return []
+
+        # snapshot_json holds the absorbed node's content, and this read is keyed on uuids with
+        # no graph-existence check -- the row outlives the node by design, which is what made it
+        # readable after deletion. An erasure of EITHER participant suppresses it, matching the
+        # two-party rule the purge uses; matching one side would serve the other's copy.
+        from menhir.infrastructure.erasure_subjects import suppressed_node_uuids
+
+        candidates = [r.get("survivor_uuid") for r in out]
+        candidates += [r.get("absorbed_uuid") for r in out]
+        suppressed = suppressed_node_uuids(self.db_path, candidates)
+        if not suppressed:
+            return out
+        return [
+            r
+            for r in out
+            if r.get("survivor_uuid") not in suppressed
+            and r.get("absorbed_uuid") not in suppressed
+        ]
 
     def record_memory_revision(
         self,

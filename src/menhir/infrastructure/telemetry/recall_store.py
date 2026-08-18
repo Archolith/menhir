@@ -240,7 +240,9 @@ class TelemetryRecallStoreMixin:
             eps = [e for e in (r["episodes"] or "").split(",") if e]
             out.append({"node_uuid": r["node_uuid"], "field": r["field"], "count": int(r["cnt"]),
                         "latest_value": r["latest_value"], "episode_uuids": eps})
-        return out
+        # latest_value is memory text keyed by node_uuid with no graph-existence check, so an
+        # in-flight erasure must suppress it here too.
+        return self._drop_erased_rows(out)
 
     # ---------------------------------------------------------------- cutoff-bound folds (Metric)
 
@@ -350,7 +352,7 @@ class TelemetryRecallStoreMixin:
             }
             for r in rows
         ]
-        return {"cutoff_id": int(cutoff_id), "groups": groups}
+        return {"cutoff_id": int(cutoff_id), "groups": self._drop_erased_rows(groups)}
 
     def fetch_enrichment_rate(self, *, since_hours: int = 24) -> dict[str, Any]:
         """Ingestion volume, enrichment success rate, avg/p95 enrichment latency."""
@@ -571,25 +573,33 @@ class TelemetryRecallStoreMixin:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def _drop_erased_rows(self, rows: list) -> list:
+        """Remove rows whose node_uuid a live erasure covers, in one bulk lookup.
+
+        These folds return ``latest_value`` -- actual memory text -- keyed by node_uuid with no
+        graph-existence check, so they answer for a node that has already been deleted. Between
+        a committed erasure intent and a finished purge the row still holds that text.
+        """
+        from menhir.infrastructure.erasure_subjects import suppressed_node_uuids
+
+        if not rows:
+            return rows
+        suppressed = suppressed_node_uuids(
+            self.db_path, [r.get("node_uuid") for r in rows]
+        )
+        if not suppressed:
+            return rows
+        return [r for r in rows if r["node_uuid"] not in suppressed]
+
     def _erasure_suppresses(self, node_uuid: str) -> bool:
         """Whether a live erasure covers this node. Fails CLOSED.
 
         A lookup that raises means suppressed: a veto that failed open would serve exactly the
         content it exists to withhold, which is a worse outcome than a missing archive read.
         """
-        try:
-            from menhir.infrastructure.erasure_subjects import ErasureSubjectStore
+        from menhir.infrastructure.erasure_subjects import suppressed_node_uuids
 
-            return ErasureSubjectStore(db_path=self.db_path).has_live_erasure(
-                subject_type="NODE_UUID", subject_value=node_uuid
-            )
-        except Exception:  # noqa: BLE001
-            logger.warning(
-                "erasure veto lookup failed for node=%s; suppressing the read",
-                node_uuid,
-                exc_info=True,
-            )
-            return True
+        return bool(suppressed_node_uuids(self.db_path, [node_uuid]))
 
     def get_original_content(self, node_uuid: str) -> str | None:
         """Retrieve the original (pre-compression) content for a node from the revision archive.
