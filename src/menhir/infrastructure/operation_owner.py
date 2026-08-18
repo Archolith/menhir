@@ -117,8 +117,9 @@ def lease_seconds_for_kind(operation_kind: str) -> int:
     return lease_seconds_for(statements=statements)
 
 
-#: Default lease window, derived for a single-statement mutation. A writer must renew within this
-#: or its claim looks abandoned.
+#: Default lease window, derived for a single-statement mutation. A writer renews within this to
+#: keep its claim fresh; letting it lapse makes the claim STALE, which is not the same as abandoned
+#: -- recovery still needs positive evidence the writer died before it may act.
 DEFAULT_LEASE_SECONDS = lease_seconds_for(statements=1)
 
 #: Classification results. LIVE_OWNER and OWNER_UNKNOWN mirror the saga-reconcile vocabulary
@@ -173,10 +174,11 @@ def process_owner_token() -> str:
 def lease_expiry_iso(*, seconds: int = DEFAULT_LEASE_SECONDS, now: datetime | None = None) -> str:
     """The ISO instant at which a claim taken/renewed now stops proving liveness.
 
-    ``seconds`` is clamped to at least 1: minting a zero or negative lease would create a claim
-    that is already dead on arrival, which reads as an abandoned row and invites a replay of work
-    that is actually starting up. Because of that clamp this cannot be used to construct a PAST
-    expiry -- pass an earlier ``now`` for that.
+    ``seconds`` is clamped to at least 1: minting a zero or negative lease would create a claim that
+    is stale on arrival, so work that is actually starting up would present as unowned and need
+    death evidence it cannot supply -- fenced as OWNER_UNKNOWN rather than replayed, but wrong
+    either way. Because of that clamp this cannot be used to construct a PAST expiry -- pass an
+    earlier ``now`` for that.
     """
     base = now or _utc_now()
     return (base + timedelta(seconds=max(1, int(seconds)))).isoformat()
