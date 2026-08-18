@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+from menhir.infrastructure import operation_owner
 from menhir.infrastructure import process_liveness
 from menhir.infrastructure.telemetry import default_telemetry_db_path
 
@@ -103,10 +104,23 @@ class SchedulerLeaseStore:
             # lived on THIS host (so we can actually check its PID) and that PID is no longer alive.
             # This makes restart self-healing without waiting for expiry or a manual takeover, while
             # never displacing a live owner (local live PID, or any owner on another host).
+            #
+            # Gated on the SAME deployment assertion that governs saga ownership, and for the same
+            # reason: hostname equality does not establish that the recorded PID belongs to the
+            # namespace this process can inspect. Where it does not -- containers on a shared
+            # kernel, cloned images, a lease database mounted by several nodes -- "that PID is not
+            # running here" is a statement about an unrelated process, and acting on it displaces a
+            # LIVE lease holder before its TTL.
+            #
+            # Leaving the two layers on different policies was the hole: per-operation ownership
+            # would correctly refuse to infer death while this fast path silently handed the global
+            # reconciliation lease to a second reconciler. Unasserted, this simply waits for the
+            # TTL, which costs restart latency and never costs correctness.
             dead_local_owner = (
                 existing_owner_id != owner_id
                 and existing_expires_at > now
                 and existing_host == hostname
+                and operation_owner.host_pid_namespace_is_verifiable()
                 and not self._pid_alive(existing_pid)
             )
             if dead_local_owner:
