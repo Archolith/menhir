@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-08-18 - CF-165 wave 2: the sidecar content is now reachable, and purgeable
+
+- Wave 1 proved `mcp_events` and `extraction_lab_runs` carry memory text with no namespace and no
+  uuid column, so nothing could address them for erasure. Both now carry durable lineage
+  (`namespace`, plus `node_uuid` on `mcp_events`) and are reclassified out of `UNADDRESSABLE`.
+- New columns are added through a generalized `ensure_lineage_columns()` rather than by editing any
+  `CREATE TABLE`, so `store.py` stays inside the thin connection+schema budget as lineage grows.
+  That call must run after the `CREATE TABLE` block -- on a fresh database an earlier call would
+  ALTER a table that does not exist yet.
+- Adds `purge_content()`: given a subject set, it erases the content those subjects address, driven
+  off the classification registry so a newly classified column is covered without touching the
+  purge code.
+- Details that are correctness, not taste: two-party rows match EITHER uuid column (one-sided
+  matching leaves recovery material for the erased subject); content is redacted in place rather
+  than rows deleted, so operational history survives; `merge_audit.snapshot_json` is NOT NULL and
+  therefore redacts to an empty string; unreachable content is reported, never guessed at; and the
+  function never commits, because it will run inside the erasure saga.
+- Writers take lineage as optional kwargs, so existing callers are untouched and write NULL. Rows
+  predating the migration keep NULL lineage and remain unaddressable -- recorded, not backfilled.
+- Still not wired to `delete_memory` / `delete_namespace`. CF-165 stays open; the durable
+  EXPLICIT_ERASURE saga and read suppression are wave 3.
+
 ## 2026-08-18 - CF-165 wave 1: make sidecar content addressable before erasing it
 
 - Deleting a memory is still graph-only, so its content survives in the SQLite sidecar. Before a
