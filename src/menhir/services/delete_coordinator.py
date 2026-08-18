@@ -31,7 +31,11 @@ from menhir.infrastructure.graph_operations import GraphOperationsJournal
 from menhir.services.merge_coordinator import _canonical
 from menhir.services.saga_writer_heartbeat import owned_mutation
 from menhir.services.saga_reconcile_outcomes import (
+    DRIFTED,
+    FAILED,
+    REPLAYED,
     SKIP,
+    SKIPPED,
     WOULD_MARK_ALREADY_APPLIED,
     WOULD_NEEDS_REVIEW,
     summarize_outcomes,
@@ -322,6 +326,36 @@ class DeleteCoordinator:
         """
         return self._reconcile_sweep(limit=limit, dry_run=False)
 
+    def replay_prepared_row(self, row: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
+        """Resolve ONE PREPARED delete row. The live counterpart to :meth:`classify_prepared_row`.
+
+        Nothing is ever re-executed here, and that is the point: re-running a delete would destroy
+        nodes a crash spared. This only records the truth the graph already tells -- every target
+        gone means the delete completed and the row commits; any survivor means an operator decides.
+        REPLAYED therefore reports "reached a terminal state", not "mutated the graph".
+
+        **The caller must already hold the right to touch this row.** Ownership is deliberately not
+        re-checked here; the only sound place for that check is inside the claim transaction the
+        caller holds.
+        """
+        op_id = str(row["op_id"])
+        outcome, diagnostics = self.classify_prepared_row(row)
+        if outcome == SKIP:
+            return SKIPPED, {}
+        if outcome == WOULD_MARK_ALREADY_APPLIED:
+            self.journal.mark_committed(op_id)
+            return REPLAYED, {}
+        if outcome == WOULD_NEEDS_REVIEW:
+            observed = diagnostics["observed_error"]
+            self.journal.mark_needs_review(op_id, observed_error=observed)
+            diag: dict[str, Any] = {"observed_error": observed}
+            if "survivors" in diagnostics:
+                diag["survivors"] = diagnostics["survivors"]
+            return DRIFTED, diag
+        # A classification this coordinator does not emit. The sweep used to fall through silently;
+        # surfacing it is what lets the dispatcher notice a contract break instead of a quiet no-op.
+        return FAILED, {"observed_error": f"unhandled delete classification {outcome!r}"}
+
     def _reconcile_sweep(self, *, limit: int = 500, dry_run: bool = False) -> dict[str, Any]:
         """A delete left PREPARED by a crash: determine whether it happened, and record the truth.
 
@@ -339,8 +373,11 @@ class DeleteCoordinator:
         for row in self.journal.list_by_state("PREPARED", limit=limit):
             scanned += 1
             op_id = str(row["op_id"])
-            outcome, diagnostics = self.classify_prepared_row(row)
             if dry_run:
+                # Classified here rather than above the branch so each mode performs EXACTLY one
+                # classification per row. classify_prepared_row reads graph state; running it in
+                # both the forecast and the action path would double every read in live mode.
+                outcome, diagnostics = self.classify_prepared_row(row)
                 entry: dict[str, Any] = {
                     "op_id": op_id,
                     "operation_kind": row.get("operation_kind"),
@@ -352,13 +389,10 @@ class DeleteCoordinator:
                     entry["survivors"] = diagnostics["survivors"]
                 outcomes.append(entry)
                 continue
-            if outcome == SKIP:
-                continue
-            if outcome == WOULD_MARK_ALREADY_APPLIED:
-                self.journal.mark_committed(op_id)
+            live = self.replay_prepared_row(row)[0]
+            if live == REPLAYED:
                 committed += 1
-            elif outcome == WOULD_NEEDS_REVIEW:
-                self.journal.mark_needs_review(op_id, observed_error=diagnostics["observed_error"])
+            elif live == DRIFTED:
                 review += 1
         if dry_run:
             # committed/needs_review stay 0: they count journal transitions PERFORMED, and a

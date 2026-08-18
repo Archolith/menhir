@@ -52,6 +52,33 @@ LIVE_OWNER = "LIVE_OWNER"
 OWNER_UNKNOWN = "OWNER_UNKNOWN"
 
 
+# --- live replay results (CF-20c) ----------------------------------------------------
+# Distinct from the WOULD_* vocabulary on purpose: those forecast a decision, these report an
+# action that has already happened to the graph. Collapsing the two would make a dry-run summary
+# and a live summary indistinguishable at a glance, which is exactly the confusion an operator
+# reading a recovery report cannot afford.
+
+#: The row's mutation was applied (or recognised as already applied) and the journal reached a
+#: terminal state. The only outcome that may report progress.
+REPLAYED = "REPLAYED"
+
+#: The graph was in neither expected state, so the row was quarantined. NOT a failure of recovery:
+#: recovery did its job by refusing to paper over a graph some other writer changed.
+DRIFTED = "DRIFTED"
+
+#: Replay raised something unexpected. The row stays PREPARED and is retried on a later pass --
+#: deliberately NOT quarantined, because a transient Neo4j outage must not become a permanent
+#: operator ticket.
+FAILED = "FAILED"
+
+#: The row belongs to a different saga type than the coordinator asked. Mirrors SKIP in the
+#: forecast vocabulary and increments no counter.
+SKIPPED = "SKIPPED"
+
+#: Every live outcome. A replay result outside this set is a defect, not a new case.
+LIVE_OUTCOMES: frozenset[str] = frozenset({REPLAYED, DRIFTED, FAILED, SKIPPED})
+
+
 #: Every defined outcome. Useful for asserting a summary covers the whole vocabulary.
 ALL_OUTCOMES: frozenset[str] = frozenset(
     {
@@ -110,4 +137,9 @@ __all__ = [
     "OWNER_UNKNOWN",
     "ALL_OUTCOMES",
     "CF20A_REACHABLE_OUTCOMES",
+    "REPLAYED",
+    "DRIFTED",
+    "FAILED",
+    "SKIPPED",
+    "LIVE_OUTCOMES",
 ]

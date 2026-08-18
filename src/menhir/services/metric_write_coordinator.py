@@ -37,7 +37,11 @@ from menhir.infrastructure.graph_operations import GraphOperationsJournal
 from menhir.infrastructure.metric_receipts import MetricReceiptStore
 from menhir.services.saga_writer_heartbeat import owned_mutation
 from menhir.services.saga_reconcile_outcomes import (
+    DRIFTED,
+    FAILED,
+    REPLAYED,
     SKIP,
+    SKIPPED,
     WOULD_MARK_ALREADY_APPLIED,
     WOULD_NEEDS_REVIEW,
     WOULD_REPLAY,
@@ -669,6 +673,38 @@ class MetricWriteCoordinator:
         """
         return self._reconcile_sweep(limit=limit, dry_run=False)
 
+    def replay_prepared_row(self, row: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
+        """Replay ONE PREPARED metric write. The live counterpart to :meth:`classify_prepared_row`.
+
+        Extracted so the central dispatcher can replay a row it has just CLAIMED. A whole-backlog
+        sweep cannot serve that purpose: ownership belongs to an individual row, and the claim that
+        authorises a mutation has to immediately precede that mutation.
+
+        **The caller must already hold the right to touch this row.** Ownership is deliberately not
+        re-checked here; the only sound place for that check is inside the claim transaction the
+        caller holds.
+        """
+        op_id = str(row["op_id"])
+        if row.get("operation_kind") != "METRIC_WRITE":
+            return SKIPPED, {}
+        try:
+            request = json.loads(row["request_json"])
+        except (TypeError, ValueError):
+            self.journal.mark_needs_review(op_id, observed_error="unparseable request_json")
+            return DRIFTED, {"observed_error": "unparseable request_json"}
+        try:
+            self._apply(request)
+            logger.info(
+                "metric saga: replayed PREPARED op %s (%s)", op_id, request.get("view_key")
+            )
+            return REPLAYED, {}
+        except MetricDrift as exc:
+            logger.warning("metric saga: op %s drifted; left NEEDS_REVIEW", op_id)
+            return DRIFTED, {"observed_error": str(exc)}
+        except Exception as exc:  # noqa: BLE001 -- reported per row; one bad row must not abort
+            logger.warning("metric saga: replay of op %s failed: %s", op_id, exc)
+            return FAILED, {"observed_error": f"{type(exc).__name__}: {exc}"}
+
     def _reconcile_sweep(self, *, limit: int = 500, dry_run: bool = False) -> dict[str, Any]:
         """Replay every PREPARED METRIC_WRITE left by a crash (plan E4).
 
@@ -694,26 +730,21 @@ class MetricWriteCoordinator:
             scanned += 1
             operation_kind = row.get("operation_kind")
             op_id = str(row["op_id"])
-            if operation_kind != "METRIC_WRITE":
-                if dry_run:
+            if dry_run:
+                if operation_kind != "METRIC_WRITE":
                     outcomes.append(
                         {"op_id": op_id, "operation_kind": operation_kind, "outcome": SKIP}
                     )
-                continue
-            try:
-                request = json.loads(row["request_json"])
-            except (TypeError, ValueError):
-                if dry_run:
+                    continue
+                try:
+                    json.loads(row["request_json"])
+                except (TypeError, ValueError):
                     outcomes.append(
                         {"op_id": op_id, "operation_kind": operation_kind,
                          "outcome": WOULD_NEEDS_REVIEW,
                          "observed_error": "unparseable request_json"}
                     )
-                else:
-                    self.journal.mark_needs_review(op_id, observed_error="unparseable request_json")
-                    drifted += 1
-                continue
-            if dry_run:
+                    continue
                 # A malformed row must not abort the scan -- see the note in MergeCoordinator:
                 # one unclassifiable old row must never hide the newer rows behind it. The
                 # row-level guard lives in classify_prepared_row so the dispatcher and a direct
@@ -726,16 +757,13 @@ class MetricWriteCoordinator:
                     entry["observed_error"] = diag["observed_error"]
                 outcomes.append(entry)
                 continue
-            try:
-                self._apply(request)
+            live = self.replay_prepared_row(row)[0]
+            if live == REPLAYED:
                 replayed += 1
-                logger.info("metric saga: replayed PREPARED op %s (%s)", op_id, request.get("view_key"))
-            except MetricDrift:
+            elif live == DRIFTED:
                 drifted += 1
-                logger.warning("metric saga: op %s drifted; left NEEDS_REVIEW", op_id)
-            except Exception as exc:  # noqa: BLE001
+            elif live == FAILED:
                 failed += 1
-                logger.warning("metric saga: replay of op %s failed: %s", op_id, exc)
         result: dict[str, Any] = {"replayed": replayed, "drifted": drifted, "failed": failed}
         if dry_run:
             # replayed/drifted/failed stay 0 in dry-run: they count actions PERFORMED, and a

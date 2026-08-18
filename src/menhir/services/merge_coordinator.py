@@ -35,7 +35,11 @@ from menhir.domain import merge_snapshot as ms
 from menhir.infrastructure.graph_operations import GraphOperationsJournal
 from menhir.services.saga_writer_heartbeat import owned_mutation
 from menhir.services.saga_reconcile_outcomes import (
+    DRIFTED,
+    FAILED,
+    REPLAYED,
     SKIP,
+    SKIPPED,
     WOULD_MARK_ALREADY_APPLIED,
     WOULD_NEEDS_REVIEW,
     WOULD_REPLAY,
@@ -411,6 +415,41 @@ class MergeCoordinator:
         """
         return self._reconcile_sweep(limit=limit, dry_run=False)
 
+    def replay_prepared_row(self, row: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
+        """Replay ONE PREPARED row. The live counterpart to :meth:`classify_prepared_row`.
+
+        Extracted so the central dispatcher can replay a row it has just CLAIMED. A whole-backlog
+        sweep structurally cannot serve that purpose: ownership is a property of an individual row,
+        and the claim that authorises a mutation has to immediately precede that mutation. A sweep
+        would replay rows it never claimed.
+
+        **The caller must already hold the right to touch this row.** Ownership is deliberately NOT
+        re-checked here: the only place that check is sound is inside the claim transaction, which
+        the caller holds and this method does not. Re-checking here would read as a safety net while
+        actually being a race -- the row could be claimed by someone else between the two reads.
+
+        Returns ``(outcome, diagnostics)`` from the live vocabulary. FAILED leaves the row PREPARED
+        for a later pass rather than quarantining it, so a transient Neo4j outage does not become a
+        permanent operator ticket; DRIFTED has already been quarantined by ``_apply``.
+        """
+        op_id = str(row["op_id"])
+        if row.get("operation_kind") != "ENTITY_MERGE":
+            return SKIPPED, {}
+        try:
+            request = json.loads(row["request_json"])
+        except (TypeError, ValueError):
+            self.journal.mark_needs_review(op_id, observed_error="unparseable request_json")
+            return DRIFTED, {"observed_error": "unparseable request_json"}
+        try:
+            self._apply(request)
+            return REPLAYED, {}
+        except MergeDrift as exc:
+            logger.warning("merge saga: op %s drifted; left NEEDS_REVIEW", op_id)
+            return DRIFTED, {"observed_error": str(exc)}
+        except Exception as exc:  # noqa: BLE001 -- reported per row; one bad row must not abort
+            logger.warning("merge saga: replay of op %s failed: %s", op_id, exc)
+            return FAILED, {"observed_error": f"{type(exc).__name__}: {exc}"}
+
     def _reconcile_sweep(self, *, limit: int = 500, dry_run: bool = False) -> dict[str, Any]:
         """Replay every ENTITY_MERGE left PREPARED by a crash. Drift is reported, never repaired.
 
@@ -438,23 +477,13 @@ class MergeCoordinator:
                     entry["observed_error"] = diag["observed_error"]
                 outcomes.append(entry)
                 continue
-            if operation_kind != "ENTITY_MERGE":
-                continue
-            try:
-                request = json.loads(row["request_json"])
-            except (TypeError, ValueError):
-                self.journal.mark_needs_review(op_id, observed_error="unparseable request_json")
-                drifted += 1
-                continue
-            try:
-                self._apply(request)
+            outcome = self.replay_prepared_row(row)[0]
+            if outcome == REPLAYED:
                 replayed += 1
-            except MergeDrift:
+            elif outcome == DRIFTED:
                 drifted += 1
-                logger.warning("merge saga: op %s drifted; left NEEDS_REVIEW", op_id)
-            except Exception as exc:  # noqa: BLE001
+            elif outcome == FAILED:
                 failed += 1
-                logger.warning("merge saga: replay of op %s failed: %s", op_id, exc)
         result: dict[str, Any] = {"replayed": replayed, "drifted": drifted, "failed": failed}
         if dry_run:
             # replayed/drifted/failed stay 0 in dry-run: they count actions PERFORMED, and a

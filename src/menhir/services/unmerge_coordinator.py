@@ -44,7 +44,11 @@ from menhir.services.merge_coordinator import (
 )
 from menhir.services.saga_writer_heartbeat import owned_mutation
 from menhir.services.saga_reconcile_outcomes import (
+    DRIFTED,
+    FAILED,
+    REPLAYED,
     SKIP,
+    SKIPPED,
     WOULD_MARK_ALREADY_APPLIED,
     WOULD_NEEDS_REVIEW,
     WOULD_RESTORE,
@@ -494,6 +498,43 @@ class UnmergeCoordinator:
         """
         return self._reconcile_sweep(limit=limit, dry_run=False)
 
+    def replay_prepared_row(self, row: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
+        """Restore ONE PREPARED unmerge row. The live counterpart to :meth:`classify_prepared_row`.
+
+        Extracted so the central dispatcher can act on a row it has just CLAIMED. A whole-backlog
+        sweep cannot do that: ownership belongs to an individual row, and the claim authorising a
+        mutation must immediately precede it.
+
+        **The caller must already hold the right to touch this row.** Ownership is deliberately not
+        re-checked here; the only sound place for that check is inside the claim transaction the
+        caller holds, and repeating it here would look like a safety net while being a race.
+
+        An unreplayable snapshot quarantines rather than failing: unlike a transient outage, a
+        snapshot that cannot be decoded will never decode on a later pass, so retrying it forever
+        would starve the backlog instead of surfacing the problem.
+        """
+        op_id = str(row["op_id"])
+        if row.get("operation_kind") != "ENTITY_UNMERGE":
+            return SKIPPED, {}
+        try:
+            request = json.loads(row["request_json"])
+            body = ms.load_snapshot(ms.loads(row["before_snapshot_json"]))
+            plan = self._build_restore_plan(
+                ms.decode_node(body["survivor"]), ms.decode_node(body["absorbed"])
+            )
+        except (TypeError, ValueError, ms.SnapshotSchemaError) as exc:
+            observed = f"unreplayable row: {exc}"
+            self.journal.mark_needs_review(op_id, observed_error=observed)
+            return DRIFTED, {"observed_error": observed}
+        try:
+            self._apply(request, plan)
+            return REPLAYED, {}
+        except MergeDrift as exc:
+            return DRIFTED, {"observed_error": str(exc)}
+        except Exception as exc:  # noqa: BLE001 -- reported per row; one bad row must not abort
+            logger.warning("unmerge saga: replay of op %s failed: %s", op_id, exc)
+            return FAILED, {"observed_error": f"{type(exc).__name__}: {exc}"}
+
     def _reconcile_sweep(self, *, limit: int = 500, dry_run: bool = False) -> dict[str, Any]:
         """Replay every ENTITY_UNMERGE left PREPARED by a crash, or report what WOULD happen.
 
@@ -525,28 +566,13 @@ class UnmergeCoordinator:
                     entry["observed_error"] = diag["observed_error"]
                 outcomes.append(entry)
                 continue
-            if kind != "ENTITY_UNMERGE":
-                continue
-            try:
-                request = json.loads(row["request_json"])
-                body = ms.load_snapshot(ms.loads(row["before_snapshot_json"]))
-                plan = self._build_restore_plan(
-                    ms.decode_node(body["survivor"]), ms.decode_node(body["absorbed"])
-                )
-            except (TypeError, ValueError, ms.SnapshotSchemaError) as exc:
-                self.journal.mark_needs_review(
-                    op_id, observed_error=f"unreplayable row: {exc}"
-                )
-                drifted += 1
-                continue
-            try:
-                self._apply(request, plan)
+            outcome = self.replay_prepared_row(row)[0]
+            if outcome == REPLAYED:
                 replayed += 1
-            except MergeDrift:
+            elif outcome == DRIFTED:
                 drifted += 1
-            except Exception as exc:  # noqa: BLE001
+            elif outcome == FAILED:
                 failed += 1
-                logger.warning("unmerge saga: replay of op %s failed: %s", op_id, exc)
         if dry_run:
             # replayed/drifted/failed stay 0 in dry-run: they count actions PERFORMED, and a
             # dry-run performs none. The forecast lives in counts/outcomes instead.
