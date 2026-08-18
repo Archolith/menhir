@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -306,3 +307,73 @@ def test_metric_statement_count_is_documented_as_a_bound_not_a_measurement():
         "the early return this bound reasons about no longer exists; re-derive the count"
     )
     assert oo.SAGA_STATEMENT_COUNTS["METRIC_WRITE"] == 2
+
+
+class TestClientReadDeadlineIsMeasured:
+    """CF-211: whether Menhir has a client read bound is a property of the SERVER.
+
+    execute() sets a server transaction timeout, then materialises a lazy result over a socket.
+    The driver applies a socket read deadline ONLY from the server's
+    connection.recv_timeout_seconds hint, so the bound can vanish by changing database rather
+    than by changing this code. Preflight therefore measures it instead of assuming it.
+    """
+
+    def test_absent_deadline_is_reported_as_a_warning(self):
+        from menhir.services.saga_preflight import preflight_from_run
+
+        run = SimpleNamespace(
+            run_id="r", scanned=0, counts={}, counts_by_kind={},
+            oldest_prepared_age_seconds=None, examples={}, write_ready=True,
+            blocking_reasons=[],
+        )
+        report = preflight_from_run(
+            run, client_read_timeout_s=None, client_read_timeout_measured=True
+        )
+
+        assert report.client_read_timeout_s is None
+        assert any("NO client-side read deadline" in w for w in report.warnings)
+        # A warning, never a blocker: recovery stays correct because ownership needs positive
+        # death evidence, not elapsed time. What is at risk is availability.
+        assert report.clean is True
+
+    def test_present_deadline_produces_no_warning(self):
+        from menhir.services.saga_preflight import preflight_from_run
+
+        run = SimpleNamespace(
+            run_id="r", scanned=0, counts={}, counts_by_kind={},
+            oldest_prepared_age_seconds=None, examples={}, write_ready=True,
+            blocking_reasons=[],
+        )
+        report = preflight_from_run(
+            run, client_read_timeout_s=120.0, client_read_timeout_measured=True
+        )
+
+        assert report.client_read_timeout_s == 120.0
+        assert not any("read deadline" in w for w in report.warnings)
+
+    def test_unmeasured_is_not_treated_as_absent(self):
+        """Not probing is not evidence of no deadline, and must not raise a false warning."""
+        from menhir.services.saga_preflight import preflight_from_run
+
+        run = SimpleNamespace(
+            run_id="r", scanned=0, counts={}, counts_by_kind={},
+            oldest_prepared_age_seconds=None, examples={}, write_ready=True,
+            blocking_reasons=[],
+        )
+        report = preflight_from_run(run)
+
+        assert report.client_read_timeout_measured is False
+        assert report.warnings == [] or not any("read deadline" in w for w in report.warnings)
+
+    def test_probe_returns_none_when_it_cannot_measure(self):
+        """An unmeasurable bound is not a bound: the probe must not invent one."""
+        from menhir.infrastructure.neo4j import Neo4jRepository
+
+        repo = Neo4jRepository.__new__(Neo4jRepository)
+        repo.database = "neo4j"
+
+        def _boom():
+            raise RuntimeError("no driver")
+
+        repo._get_driver = _boom
+        assert repo.client_read_timeout_seconds() is None

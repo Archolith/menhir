@@ -83,6 +83,10 @@ class PreflightReport:
     hostname: str = ""
     pid_namespace_asserted: bool = False
     writers_gate_aware: bool = False
+    client_read_timeout_s: float | None = None
+    #: Whether the read deadline was actually PROBED. 'Not measured' is not evidence of
+    #: absence, and warning on it would fire on every caller that does not probe.
+    client_read_timeout_measured: bool = False
 
     @property
     def clean(self) -> bool:
@@ -103,6 +107,8 @@ class PreflightReport:
             "hostname": self.hostname,
             "pid_namespace_asserted": self.pid_namespace_asserted,
             "writers_gate_aware": self.writers_gate_aware,
+            "client_read_timeout_s": self.client_read_timeout_s,
+            "client_read_timeout_measured": self.client_read_timeout_measured,
         }
 
     def render(self) -> str:
@@ -114,6 +120,7 @@ class PreflightReport:
             f"  oldest PREPARED age    : {self.oldest_prepared_age_seconds}",
             f"  PID namespace asserted : {self.pid_namespace_asserted}",
             f"  writers gate-aware     : {self.writers_gate_aware}",
+            f"  client read timeout    : {self.client_read_timeout_s}",
             f"  by kind                : {self.counts_by_kind or '{}'}",
             f"  by outcome             : {self.counts or '{}'}",
         ]
@@ -125,7 +132,12 @@ class PreflightReport:
         return "\n".join(lines)
 
 
-def preflight_from_run(run: Any) -> PreflightReport:
+def preflight_from_run(
+    run: Any,
+    *,
+    client_read_timeout_s: float | None = None,
+    client_read_timeout_measured: bool = False,
+) -> PreflightReport:
     """Build a report from a completed observe() pass. Pure; performs no I/O of its own.
 
     Split out so the environmental checks can be tested without a journal, and so the caller
@@ -142,6 +154,8 @@ def preflight_from_run(run: Any) -> PreflightReport:
         hostname=process_liveness.hostname(),
         pid_namespace_asserted=oo.host_pid_namespace_is_verifiable(),
         writers_gate_aware=oo.all_saga_writers_are_gate_aware(),
+        client_read_timeout_s=client_read_timeout_s,
+        client_read_timeout_measured=client_read_timeout_measured,
     )
 
     # The observation's own verdict is the primary blocker: unknown kinds, unprovable ownership,
@@ -177,7 +191,31 @@ def preflight_from_run(run: Any) -> PreflightReport:
             "do not need to be stopped."
         )
 
+    # CF-211. A warning, not a blocker: recovery is correct either way, because ownership is
+    # decided by positive death evidence rather than by elapsed time. What an unbounded client
+    # read costs is AVAILABILITY -- a caller hangs with its operation PREPARED and its
+    # participants fenced. Worth surfacing because the bound is supplied by the SERVER, so it can
+    # disappear by changing database, not by changing this code.
+    if report.client_read_timeout_measured and not report.client_read_timeout_s:
+        report.warnings.append(
+            "the Neo4j connection has NO client-side read deadline, so a stalled or black-holed "
+            "read can hang a saga writer indefinitely with its operation PREPARED and its "
+            "participants fenced. The driver takes this bound only from the server's "
+            "connection.recv_timeout_seconds hint; this server is not sending one."
+        )
+
     return report
+
+
+def _probe_client_read_timeout(dispatcher: Any) -> float | None:
+    """Measure the connection's read deadline via whatever repository the handlers hold."""
+    for handler in getattr(dispatcher, "handlers", {}).values():
+        adapter = getattr(handler, "graph_adapter", None)
+        repo = getattr(adapter, "neo4j", None)
+        probe = getattr(repo, "client_read_timeout_seconds", None)
+        if callable(probe):
+            return probe()
+    return None
 
 
 def run_preflight(dispatcher: Any) -> PreflightReport:
@@ -188,7 +226,11 @@ def run_preflight(dispatcher: Any) -> PreflightReport:
     answering a question about a system that is not the one about to run.
     """
     run = dispatcher.observe()
-    report = preflight_from_run(run)
+    report = preflight_from_run(
+        run,
+        client_read_timeout_s=_probe_client_read_timeout(dispatcher),
+        client_read_timeout_measured=True,
+    )
     logger.info("Saga recovery preflight:\n%s", report.render())
     return report
 

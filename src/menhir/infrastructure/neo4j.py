@@ -184,6 +184,38 @@ class Neo4jRepository:
     def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
         self.close()
 
+    def client_read_timeout_seconds(self) -> float | None:
+        """The client-side socket read deadline actually in force, or None if there is none.
+
+        CF-211's remaining half. ``execute()`` sets a SERVER transaction timeout and then
+        materialises a lazy result over a socket; if that read has no deadline, a stalled or
+        black-holed connection hangs the caller with its operation PREPARED and its participants
+        fenced.
+
+        The driver does apply a socket read timeout -- but ONLY from a hint the server volunteers
+        during the handshake (``connection.recv_timeout_seconds``, applied in ``Bolt.hello``).
+        Nothing in the driver's own configuration sets one, so whether Menhir has any client
+        bound at all is a property of the SERVER, not of this code. That is worth measuring
+        rather than assuming: against a server that sends the hint the bound is real, and against
+        one that does not there is no client deadline whatsoever.
+
+        Returns the effective timeout in seconds, or None when the connection has no read
+        deadline. Returns None on any probe failure too -- an unmeasurable bound is not a bound.
+        """
+        try:
+            with self._get_driver().session(database=self.database) as session:
+                result = session.run("RETURN 1 AS ok")
+                next(iter(result), None)  # force a live connection to be attached
+                connection = getattr(session, "_connection", None)
+                socket = getattr(connection, "socket", None)
+                raw = getattr(socket, "_socket", None)
+                timeout = raw.gettimeout() if raw is not None else None
+                result.consume()
+                return float(timeout) if timeout else None
+        except Exception:  # noqa: BLE001
+            logger.warning("Could not probe the client read timeout", exc_info=True)
+            return None
+
     def ping(self) -> bool:
         """Quick connectivity check used by scaffolded startup checks."""
         try:
