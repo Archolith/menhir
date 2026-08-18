@@ -146,22 +146,84 @@ def test_an_abandoned_row_reaches_its_handler(journal):
 
 
 @pytest.mark.unit
-def test_legacy_entity_unmerge_is_unknown_kind_not_silently_skipped(journal):
-    """The concrete gap this dispatcher closes.
+def test_legacy_entity_unmerge_quarantines_rather_than_replaying(journal):
+    """The concrete gap this dispatcher closes, with its CF-209 disposition.
 
-    LEGACY_ENTITY_UNMERGE rows ARE written by the legacy coordinator, and no reconciler claims
-    them, so today a crash leaving one PREPARED is invisible to every reconciler in the system. A
-    per-coordinator scan expresses "not mine" and "not anyone's" identically, as a silent continue.
+    LEGACY_ENTITY_UNMERGE rows ARE written by the legacy coordinator and no coordinator claims
+    them, so before CF-20b a crash leaving one PREPARED was invisible to every reconciler in the
+    system: a per-coordinator scan expresses "not mine" and "not anyone's" identically, as a silent
+    continue.
+
+    They are now claimed, by a recorded decision NOT to replay them. Quarantine is the whole point
+    -- the legacy restore is degraded, never exact, and gated on a per-invocation operator
+    acknowledgement, so recovery must hand it to a human rather than re-assert it unattended.
     """
     _insert(journal, "op-legacy-unmerge", kind="LEGACY_ENTITY_UNMERGE")
     run = SagaReconcileDispatcher(
         journal=journal, handlers=build_handlers(merge=_Handler())
     ).observe()
 
-    assert run.counts[UNKNOWN_KIND] == 1
-    assert run.rows[0]["outcome"] == UNKNOWN_KIND
-    assert "no reconciler claims" in run.rows[0]["observed_error"]
-    assert run.write_ready is False, "an unclassifiable kind must block readiness"
+    assert run.counts[WOULD_NEEDS_REVIEW] == 1
+    assert run.counts[UNKNOWN_KIND] == 0, (
+        "an expected kind with a recorded disposition is not an unaccountable row"
+    )
+    assert run.rows[0]["outcome"] == WOULD_NEEDS_REVIEW
+    assert "non-replayable" in run.rows[0]["observed_error"]
+
+
+@pytest.mark.unit
+def test_a_lone_legacy_row_no_longer_blocks_recovery_of_the_whole_backlog(journal):
+    """Why CF-209 was High rather than a stuck-row curiosity.
+
+    UNKNOWN_KIND sets write_ready=False for the ENTIRE run, so one unclaimed legacy row would stall
+    recovery of every other row in the backlog -- including rows that were perfectly replayable.
+    Giving the kind a disposition converts a global blocker into one row-local quarantine.
+    """
+    _insert(journal, "op-legacy-unmerge", kind="LEGACY_ENTITY_UNMERGE")
+    _insert(journal, "op-merge")
+    run = SagaReconcileDispatcher(
+        journal=journal, handlers=build_handlers(merge=_Handler())
+    ).observe()
+
+    assert run.write_ready is True, f"a quarantined legacy row must not block: {run.blocking_reasons}"
+    assert run.counts[WOULD_NEEDS_REVIEW] == 1
+
+
+@pytest.mark.unit
+def test_a_legacy_quarantine_storm_is_still_systemic(journal):
+    """The ceiling still applies. Row-local is not a licence to ignore volume."""
+    for i in range(4):
+        _insert(journal, f"op-legacy-{i}", kind="LEGACY_ENTITY_UNMERGE")
+    run = SagaReconcileDispatcher(
+        journal=journal, handlers=build_handlers(merge=_Handler()), max_needs_review=2
+    ).observe()
+
+    assert run.write_ready is False
+    assert any("above the 2 ceiling" in r for r in run.blocking_reasons), run.blocking_reasons
+
+
+@pytest.mark.unit
+def test_the_legacy_disposition_is_registered_without_any_coordinator(journal):
+    """It is a property of the KIND, not of whether some service happens to be wired up.
+
+    A caller observing a subset (every coordinator None) must still get the recorded decision,
+    otherwise the disposition would silently depend on startup wiring.
+    """
+    _insert(journal, "op-legacy-unmerge", kind="LEGACY_ENTITY_UNMERGE")
+    run = SagaReconcileDispatcher(journal=journal, handlers=build_handlers()).observe()
+
+    assert run.rows[0]["outcome"] == WOULD_NEEDS_REVIEW
+
+
+@pytest.mark.unit
+def test_a_live_owner_still_vetoes_a_legacy_row(journal):
+    """The ownership veto runs before routing, and nothing about this disposition may bypass it."""
+    _insert(journal, "op-legacy-unmerge", kind="LEGACY_ENTITY_UNMERGE", owner="live")
+    run = SagaReconcileDispatcher(
+        journal=journal, handlers=build_handlers(merge=_Handler())
+    ).observe()
+
+    assert run.rows[0]["outcome"] == LIVE_OWNER
 
 
 @pytest.mark.unit
