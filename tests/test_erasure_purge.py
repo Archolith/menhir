@@ -63,13 +63,15 @@ def _insert_recall_lab_run(conn, namespace, query):
 
 
 def _erased(value) -> bool:
-    """Content is gone. NULL where the column allows it, '' where it is NOT NULL.
+    """Content is gone. NULL where the column allows it, the erasure marker where it does not.
 
-    merge_audit.snapshot_json is declared NOT NULL, so it cannot be set to NULL; the
-    purge redacts it to an empty string instead. Both mean the same thing here: the
-    content is unrecoverable while the row keeps its operational shape.
+    merge_audit.snapshot_json is declared NOT NULL, so it cannot be set to NULL. It gets the
+    marker instead -- valid JSON carrying no content -- so a consumer can tell an erasure from
+    a corrupt row, which an empty string could not.
     """
-    return value is None or value == ""
+    from menhir.domain.erasure import is_erased_marker
+
+    return value is None or is_erased_marker(value)
 
 
 class TestErasurePurge:

@@ -408,3 +408,38 @@ def test_every_sidecar_content_reader_honours_the_veto(tmp_path):
 
     # The rows are all still present -- suppression, not deletion, is doing the work.
     assert _revision_values(db, "n-hot") == [("still-readable", "still-readable")]
+
+
+def test_erased_merge_snapshot_reads_as_erased_not_corrupt(tmp_path):
+    """The plan's requirement: erasure must be distinguishable from corruption.
+
+    An empty string made the parser fail exactly as it does on a malformed row, sending an
+    operator after a data-integrity bug that does not exist.
+    """
+    from menhir.domain.legacy_snapshot import LegacySnapshotError, SnapshotErasedError, parse
+
+    coord = _coordinator(tmp_path, FakeAdapter(present=True))
+    db = tmp_path / "t.db"
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "INSERT INTO merge_audit "
+            "(recorded_at, survivor_uuid, absorbed_uuid, similarity, snapshot_json) "
+            "VALUES (?,?,?,?,?)",
+            ("t", "surv-p", "abs-p", 0.9, '{"content":"secret"}'),
+        )
+        conn.commit()
+
+    coord.erase_memory("abs-p")
+
+    with sqlite3.connect(db) as conn:
+        snapshot = conn.execute(
+            "SELECT snapshot_json FROM merge_audit WHERE absorbed_uuid = ?", ("abs-p",)
+        ).fetchone()[0]
+
+    assert "secret" not in snapshot
+    with pytest.raises(SnapshotErasedError):
+        parse(snapshot)
+    # A genuinely corrupt row still reports as malformed, so the two stay separable.
+    with pytest.raises(LegacySnapshotError) as corrupt:
+        parse("{not json")
+    assert not isinstance(corrupt.value, SnapshotErasedError)

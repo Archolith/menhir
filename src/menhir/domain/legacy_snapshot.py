@@ -23,6 +23,8 @@ acknowledge them. We never silently hand back a damaged graph and call it repair
 from __future__ import annotations
 
 import json
+
+from menhir.domain.erasure import is_erased_marker
 from typing import Any
 
 #: The node properties a graph/sidecar audit entry can carry, across BOTH vintages.
@@ -58,8 +60,22 @@ class LegacySnapshotError(ValueError):
     """The legacy audit entry is malformed and cannot be used."""
 
 
+class SnapshotErasedError(LegacySnapshotError):
+    """The audit entry was erased on request, so this merge is deliberately unrecoverable.
+
+    A subclass so existing handlers keep working, but a distinct type so a caller that cares
+    can tell "erased under CF-165" from "corrupt". Reporting an erasure as corruption sends an
+    operator hunting a data-integrity bug that does not exist.
+    """
+
+
 def parse(snapshot_json: str) -> dict[str, Any]:
     """Parse a legacy audit entry. Raises rather than guessing at a malformed one."""
+    if is_erased_marker(snapshot_json):
+        raise SnapshotErasedError(
+            "legacy snapshot was erased on request (CF-165); this merge is intentionally "
+            "unrecoverable, not corrupt"
+        )
     try:
         entry = json.loads(snapshot_json)
     except (TypeError, ValueError) as exc:

@@ -2211,6 +2211,11 @@ async def test_maintenance_scheduler_heartbeat_keeps_lease_alive_during_long_job
 
 
 @pytest.mark.unit
+# Wall-clock bound like the heartbeat test: the takeover has to land while a 0.4s job is still
+# in flight, and CPU contention can push it past that window. The job-started event removed the
+# guesswork about WHEN to fire it, but not the requirement that it land inside a real interval.
+# Lengthening the job would only make the race rarer, which is the fix that already failed here.
+@pytest.mark.timing
 @pytest.mark.asyncio
 async def test_maintenance_scheduler_forced_takeover_fences_displaced_owner_mid_batch() -> None:
     """Bug FC-02/AR-04: a forced takeover overwrote the lease but the displaced owner kept

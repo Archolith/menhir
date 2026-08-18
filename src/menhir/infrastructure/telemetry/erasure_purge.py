@@ -41,6 +41,7 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass
 
+from menhir.domain.erasure import ERASED_MARKER
 from menhir.infrastructure.telemetry.erasure_inventory import (
     CONTENT_COLUMNS,
     ErasureShape,
@@ -170,10 +171,13 @@ def count_residual_content(
             continue
         where, params = clause
         # Registry-provided identifiers; every value is bound.
+        # The marker counts as erased, not as residue: a NOT NULL column holds it precisely
+        # because it could not hold NULL.
         row = conn.execute(
             f"SELECT COUNT(*) FROM {entry.table} WHERE {where} "
-            f"AND {entry.column} IS NOT NULL AND {entry.column} != ''",
-            params,
+            f"AND {entry.column} IS NOT NULL AND {entry.column} != '' "
+            f"AND {entry.column} != ?",
+            [*params, ERASED_MARKER],
         ).fetchone()
         count = int(row[0]) if row else 0
         if count:
@@ -221,11 +225,15 @@ def purge_content(
             ).fetchone()
             rows_affected[key] = int(row[0])
         else:
-            # A content column declared NOT NULL (merge_audit.snapshot_json) cannot be
-            # set to NULL. Redact it to an empty string instead: the content is gone
-            # either way, and the row keeps the operational shape other findings rely
-            # on. Deleting the row would destroy that record too.
-            blank = "" if _is_not_null(conn, entry.table, entry.column) else None
+            # A content column declared NOT NULL (merge_audit.snapshot_json) cannot be set
+            # to NULL, so it gets the erasure marker: valid JSON carrying no content, which a
+            # consumer can recognise. An empty string was the first approach and it made an
+            # erased record indistinguishable from a corrupt one -- the parser failed either
+            # way. Deleting the row is not an option either; the operational columns are
+            # depended on elsewhere.
+            blank = (
+                ERASED_MARKER if _is_not_null(conn, entry.table, entry.column) else None
+            )
             cursor = conn.execute(
                 f"UPDATE {entry.table} SET {entry.column} = ? WHERE {where}",
                 [blank, *params],

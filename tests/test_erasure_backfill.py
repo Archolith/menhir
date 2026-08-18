@@ -215,4 +215,7 @@ def test_backfilled_lineage_is_what_reaches_an_orphaned_merge_row(db):
         purge_content(conn, subjects, dry_run=False)
         conn.commit()
         snapshot = conn.execute("SELECT snapshot_json FROM merge_audit").fetchone()[0]
-    assert snapshot == ""
+    from menhir.domain.erasure import is_erased_marker
+
+    assert is_erased_marker(snapshot)
+    assert "x" not in snapshot
