@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-08-18 - CF-165 wave 1: make sidecar content addressable before erasing it
+
+- Deleting a memory is still graph-only, so its content survives in the SQLite sidecar. Before a
+  purge can be written, every sidecar column carrying user or memory content has to be classified
+  with the subject key that addresses it -- otherwise a UUID-keyed purge misses content silently.
+- Adds `telemetry/erasure_inventory.py` (the classification registry) and a test that walks the
+  REAL schema and fails on any TEXT column that is neither classified nor explicitly allowlisted.
+  The failure mode is the point: a new content-bearing column breaks the build until classified.
+- Two findings the classification forced into the open. `mcp_events` and `extraction_lab_runs`
+  both carry memory text and have NO namespace and NO uuid column, so no subject-keyed purge can
+  reach them. They are recorded as `UNADDRESSABLE` with a regression guard rather than given an
+  invented key. These are schema defects CF-165 must fix before it can close.
+- Adds durable `survivor_namespace`/`absorbed_namespace` lineage to `merge_audit`, so a namespace
+  erasure can find merge recovery rows without parsing `snapshot_json` or assuming the survivor's
+  graph node still exists. Additive PRAGMA-then-ALTER migration; `record_merge` takes both as
+  optional kwargs so existing callers are unaffected. No backfill -- only sound where derivation
+  is provable.
+- No erasure behaviour ships in this wave. CF-165 stays open.
+
 ## 2026-08-18 - Fix the flaky scheduler-lease tests so the suite can run in parallel
 
 - Four `MaintenanceScheduler` lease tests failed intermittently under a parallel (`-n`) run and
