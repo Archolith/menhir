@@ -58,6 +58,12 @@ def journal(tmp_path):
     return j
 
 
+#: Every test below that reaches the PID-evidence path needs the deployment assertion that
+#: makes a local PID lookup meaningful for a same-hostname owner. Without it the classifier
+#: fences at OWNER_UNKNOWN by design; see ``operation_owner.host_pid_namespace_is_verifiable``.
+pytestmark = pytest.mark.usefixtures("pid_namespace_verifiable")
+
+
 def _insert(journal, op_id, kind="ENTITY_MERGE", *, owner="expired", created_at=None):
     """Insert a PREPARED row with a chosen ownership posture.
 

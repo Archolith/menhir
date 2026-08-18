@@ -62,6 +62,12 @@ def _expire_gate(db, owner):
 # --------------------------------------------------------------- gate expiry is irreversible loss
 
 
+#: Every test below that reaches the PID-evidence path needs the deployment assertion that
+#: makes a local PID lookup meaningful for a same-hostname owner. Without it the classifier
+#: fences at OWNER_UNKNOWN by design; see ``operation_owner.host_pid_namespace_is_verifiable``.
+pytestmark = pytest.mark.usefixtures("pid_namespace_verifiable")
+
+
 @pytest.mark.unit
 def test_an_expired_gate_cannot_be_renewed_by_its_own_owner(lease_store, shared_db):
     """The uncovered case: same owner, lapsed lease, nobody else has taken it yet.

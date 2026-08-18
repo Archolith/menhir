@@ -66,6 +66,12 @@ def _prepare(journal, op_id, **kw):
 # --------------------------------------------------------------------------- token identity
 
 
+#: Every test below that reaches the PID-evidence path needs the deployment assertion that
+#: makes a local PID lookup meaningful for a same-hostname owner. Without it the classifier
+#: fences at OWNER_UNKNOWN by design; see ``operation_owner.host_pid_namespace_is_verifiable``.
+pytestmark = pytest.mark.usefixtures("pid_namespace_verifiable")
+
+
 @pytest.mark.unit
 def test_owner_token_is_unique_when_instance_id_is_unset(monkeypatch):
     """MENHIR_INSTANCE_ID defaults to "" and is routinely unset.

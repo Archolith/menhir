@@ -13,6 +13,7 @@ import pytest
 
 from menhir.domain.models import FreshnessState, NodeScope, ProcessingState
 from menhir.infrastructure import LLMAdapter, PhaseOneSchemaResult, PolicyStampResult
+from menhir.infrastructure import operation_owner as _operation_owner
 from menhir.infrastructure.memory_graph_adapter import is_context_window_error_text
 
 
@@ -1642,3 +1643,16 @@ def _reset_oauth_as_rate_limits():
     oauth_authorize._approve_limiter = oauth_authorize.build_approve_limiter()
     oauth_authorize._spent_consent_jtis.clear()
     yield
+
+
+@pytest.fixture
+def pid_namespace_verifiable(monkeypatch):
+    """Declare, for this test, the deployment property that licenses PID-based death evidence.
+
+    ``classify_ownership`` inspects a local PID only when the deployment has asserted that a
+    hostname identifies exactly one PID namespace. The default is NOT asserted, so any test that
+    exercises the PID-evidence path must say so explicitly. Keeping it a fixture rather than an
+    ambient environment value is deliberate: the precondition stays visible in the tests that
+    depend on it, and a test that forgets it fences instead of silently passing.
+    """
+    monkeypatch.setenv(_operation_owner.HOST_PID_NAMESPACE_ENV, "1")

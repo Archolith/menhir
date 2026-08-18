@@ -32,6 +32,12 @@ _PAST = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
 _FUTURE = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
 
 
+#: Every test below that reaches the PID-evidence path needs the deployment assertion that
+#: makes a local PID lookup meaningful for a same-hostname owner. Without it the classifier
+#: fences at OWNER_UNKNOWN by design; see ``operation_owner.host_pid_namespace_is_verifiable``.
+pytestmark = pytest.mark.usefixtures("pid_namespace_verifiable")
+
+
 @pytest.fixture()
 def journal(tmp_path):
     j = GraphOperationsJournal(db_path=tmp_path / "ops.db")
