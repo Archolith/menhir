@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-08-17 - Legacy unmerge rows quarantine instead of vanishing
+
+- `LEGACY_ENTITY_UNMERGE` rows were written by the legacy coordinator and claimed by no reconciler,
+  so a crash mid-operation fenced two entity UUIDs with no code path that could ever release them.
+  The kind now has a recorded disposition: quarantine, never replay.
+- The decision follows the legacy lane's own contract. Its forward operation requires an explicit
+  per-invocation operator acknowledgement of degradation, and its restore is never exact -- so an
+  unattended replay would re-assert a human's acknowledgement in a situation they never saw, and
+  produce exactly the partially-restored-but-believed-repaired graph that lane exists to prevent.
+- Those rows now route to NEEDS_REVIEW, where an operator can adjudicate them through the existing
+  clearance path; the participant fence releases on the terminal transition. The UUIDs stay fenced
+  until then, deliberately: the graph really is in an unknown partial state.
+- This was a GLOBAL recovery blocker, not one stuck row. An unclaimed kind sets `write_ready=False`
+  for the entire run, so a single legacy row stalled recovery of every other row in the backlog --
+  meaning no deployment that had ever run a legacy unmerge could have been activated for live
+  replay.
+- `METRIC_MIGRATE` and `METRIC_REVERSE` stay unmapped and keep reporting an unknown kind. "We
+  decided this cannot be replayed" and "we do not know what this is" are different facts.
+
 ## 2026-08-17 - Gate PID death evidence on a stated deployment invariant
 
 - Hostname equality is not PID-namespace equality, and recovery had been treating it as if it were.
