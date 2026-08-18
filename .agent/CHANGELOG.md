@@ -1,5 +1,32 @@
 # Changelog
 
+## 2026-08-18 - CF-165 wave 4: erasure is wired, recoverable, and enforced on read
+
+- `delete_memory` and `delete_namespace` now run the erasure saga instead of issuing graph-only
+  Cypher. This is the change that closes the finding: deleting a memory erases its sidecar content
+  rather than leaving the verbatim prior value in `memory_revisions` and its snapshot in
+  `merge_audit`.
+- Dispatcher registration landed in its own commit BEFORE the wiring, deliberately. An
+  `EXPLICIT_ERASURE` row left by a crash with no registered handler reports UNKNOWN_KIND and blocks
+  write-readiness -- and with live saga recovery armed, that means refusing to boot. Wiring first
+  would have turned a crashed erasure into an outage.
+- Erasure replay genuinely re-executes, unlike delete replay. Re-purging already-redacted content
+  is a no-op and the subject inventory says what to purge without asking a graph that may be gone,
+  so a crashed erasure resumes from the inventory rather than merely being observed.
+- The read veto is now enforced on `get_original_content` -- the query the finding cited as proof
+  that erased content stayed readable. It closes the window between a committed intent and a
+  finished purge, where the row still holds the text. Fails closed.
+- `delete_memory` returns True when sidecar content was erased even if the graph node was already
+  absent; an absorbed merge participant is gone from the graph while its recovery snapshot
+  survives, so that is a real erasure, not a "not found". The `bool` return is kept so the
+  Protocol, HTTP client, and MCP callers are unaffected.
+- `delete_namespace` keeps its blast-radius gate and its exact response shape; erasure detail,
+  including unaddressable content, is logged rather than added to a documented contract.
+- Two bugs found and fixed while wiring: `graph_present` was derived from whether namespace
+  membership capture succeeded, so a failed capture silently skipped the graph delete and still
+  reported success; and the coordinator ensured the journal schema while the purge queries the
+  telemetry tables, raising "no such table" where only the journal existed.
+
 ## 2026-08-18 - CF-165 wave 3: explicit erasure becomes a durable cross-store saga
 
 - Neo4j and the SQLite sidecar cannot commit one transaction together, so "delete the graph, then
