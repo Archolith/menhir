@@ -30,12 +30,15 @@ import json
 import logging
 import sqlite3
 import threading
+import time
 import uuid as uuidlib
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from menhir.infrastructure import operation_owner as oo
 from menhir.infrastructure.telemetry import default_telemetry_db_path
 
 logger = logging.getLogger(__name__)
@@ -129,8 +132,26 @@ def _participants_from_request_json(operation_kind: str, request_json: str | Non
     return _participant_uuids(operation_kind, request)
 
 
+#: Lease name that pauses all saga PREPARE while recovery owns the backlog (CF-20c).
+#:
+#: The lease lives in `scheduler_leases`, in the SAME SQLite database as this journal. That shared
+#: database is what makes the gate correct rather than advisory: a writer's BEGIN IMMEDIATE and the
+#: recovery lease's BEGIN IMMEDIATE contend for the same write lock, so they serialise and neither
+#: can slip between the other's check and write.
+RECONCILIATION_LEASE_NAME = "saga-reconciliation"
+
+
 class GraphOperationError(RuntimeError):
     """Raised when a saga invariant would be violated (immutability, fencing, state)."""
+
+
+class SagaWritesPausedError(GraphOperationError):
+    """A new saga cannot PREPARE because recovery currently owns the backlog.
+
+    Distinct from the fencing errors so a caller can tell "this specific target is busy" (retry
+    later, or adjudicate) from "this process is not accepting new sagas at all" (wait for recovery
+    to finish). Subclasses GraphOperationError so existing handlers keep working unchanged.
+    """
 
 
 @dataclass
@@ -172,10 +193,40 @@ class GraphOperationsJournal:
                         created_at            TEXT NOT NULL,
                         updated_at            TEXT NOT NULL,
                         committed_at          TEXT,
-                        reverses_op_id        TEXT
+                        reverses_op_id        TEXT,
+                        owner_token           TEXT,
+                        owner_heartbeat_at    TEXT,
+                        owner_lease_expires_at TEXT,
+                        owner_death_attested_by TEXT,
+                        owner_death_attested_at TEXT,
+                        owner_death_attested_for_token TEXT
                     )
                     """
                 )
+                # Additive ownership migration (CF-20b). CREATE TABLE IF NOT EXISTS does nothing to
+                # an ALREADY EXISTING table, so a sidecar created before this fence keeps its old
+                # column set and every ownership read would raise. Add the columns explicitly,
+                # following the PRAGMA-then-ALTER idiom used by the telemetry store.
+                #
+                # Nullable with no default, deliberately: a pre-existing PREPARED row genuinely has
+                # no owner, and backfilling a synthetic claim would fabricate exactly the liveness
+                # evidence recovery is supposed to reason about. Ownerless reads as OWNER_UNKNOWN.
+                operation_columns = {
+                    row[1] for row in conn.execute("PRAGMA table_info(graph_operations)")
+                }
+                for column in (
+                    "owner_token",
+                    "owner_heartbeat_at",
+                    "owner_lease_expires_at",
+                    "owner_death_attested_by",
+                    "owner_death_attested_at",
+                    "owner_death_attested_for_token",
+                ):
+                    if column not in operation_columns:
+                        # Column names are literals from the tuple above, never caller input.
+                        conn.execute(
+                            f"ALTER TABLE graph_operations ADD COLUMN {column} TEXT"
+                        )
                 # Batch operations are unique per (kind, batch, target) so a migration
                 # cannot enqueue the same node twice.
                 conn.execute(
@@ -267,6 +318,7 @@ class GraphOperationsJournal:
         reverses_op_id: str | None = None,
         op_id: str | None = None,
         conn: sqlite3.Connection | None = None,
+        owner_token: str | None = None,
     ) -> str:
         """Insert a PREPARED operation and return its op_id.
 
@@ -289,22 +341,48 @@ class GraphOperationsJournal:
         # Per-participant fence (invariant 14): one lock row per participant, inserted in the SAME
         # transaction as the journal row so the fence and the intent commit atomically.
         participants = _participants_from_request_json(operation_kind, request_json)
+        # Live-owner claim (CF-20b): stamped in the SAME insert as the intent, so a PREPARED row
+        # is never briefly ownerless. A row that appears with no claim is therefore a legacy row,
+        # which is what lets OWNER_UNKNOWN mean something specific. Overridable so a test can
+        # impersonate another process, and so a future reconciler can claim an abandoned row.
+        claim_token = owner_token or oo.process_owner_token()
+        # The durable expiry must be derived from THIS operation's kind, not the single-statement
+        # default. A writer's local heartbeat computes its headroom from the kind, so a shorter
+        # durable stamp would let the writer believe it had more claim than the row actually
+        # carries -- and it would believe that in the DANGEROUS direction, passing its own
+        # pre-dispatch headroom check while the real claim was close to lapsing.
+        claim_seconds = oo.lease_seconds_for_kind(operation_kind)
         owns = conn is None
         connection = sqlite3.connect(self.db_path) if owns else conn
         try:
+            # BEGIN IMMEDIATE takes the write lock BEFORE the gate check, so the check and the
+            # insert are one atomic step against the recovery lease (CF-20c). Python's sqlite3
+            # otherwise starts a DEFERRED transaction on first DML, which would leave the gate check
+            # racing the lease acquisition: a deferred reader can see no lease, recovery can then
+            # acquire it and commit, and this insert still lands.
+            #
+            # This also covers the metric saga, which hands in its own connection but has not yet
+            # issued any DML when it calls us -- so the IMMEDIATE opened here becomes the
+            # transaction that its journal row AND its receipt both commit in. A connection already
+            # inside a transaction is left alone: it owns its own boundary.
+            if not connection.in_transaction:
+                connection.execute("BEGIN IMMEDIATE")
+            self._assert_saga_writes_allowed(connection)
             connection.execute(
                 """
                 INSERT INTO graph_operations (
                     op_id, batch_id, operation_kind, target_uuid, target_key,
                     request_json, before_snapshot_json, expected_after_sha256,
                     state, attempt_count, last_error, created_at, updated_at,
-                    committed_at, reverses_op_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PREPARED', 0, NULL, ?, ?, NULL, ?)
+                    committed_at, reverses_op_id,
+                    owner_token, owner_heartbeat_at, owner_lease_expires_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PREPARED', 0, NULL, ?, ?, NULL, ?, ?, ?, ?)
                 """,
                 (
                     op_id, batch_id, operation_kind, target_uuid, target_key,
                     request_json, before_snapshot_json, expected_after_sha256,
                     now, now, reverses_op_id,
+                    claim_token, now, oo.lease_expiry_iso(seconds=claim_seconds),
                 ),
             )
             for entity_uuid in participants:
@@ -324,6 +402,62 @@ class GraphOperationsJournal:
             if owns:
                 connection.close()
         return op_id
+
+    def _assert_saga_writes_allowed(self, conn: sqlite3.Connection) -> None:
+        """Refuse a new PREPARE while recovery holds the reconciliation lease (CF-20c).
+
+        MUST be called with a write lock already held (BEGIN IMMEDIATE), or this is a
+        check-then-insert race: a deferred reader could see no lease, recovery could then acquire it
+        and commit, and this insert would still land -- producing exactly the PREPARED row that
+        recovery has already decided it owns the complete set of.
+
+        Reads the lease table directly rather than through SchedulerLeaseStore because this module is
+        infrastructure and that store is a service; importing upward would invert the layering for a
+        single SELECT. The coupling is the table name and its epoch-seconds expiry column.
+
+        A MISSING table means no gate has ever been created -- the normal state on a fresh database,
+        and positive evidence of absence, so it fails open. Every other read failure means the gate
+        schema exists but cannot be read, which is NOT evidence of absence, so it fails closed for
+        the same reason a present-but-unparseable expiry does.
+        """
+        try:
+            row = conn.execute(
+                "SELECT owner_id, lease_expires_at FROM scheduler_leases WHERE lease_name = ?",
+                (RECONCILIATION_LEASE_NAME,),
+            ).fetchone()
+        except sqlite3.OperationalError as exc:
+            # Fail OPEN only for a table that does not exist -- proof no gate was ever created, and
+            # the normal state of a fresh database. Any other operational error means the gate
+            # schema is present but unreadable, which is not evidence of absence, so it fails
+            # CLOSED like a present-but-unparseable row.
+            if "no such table" in str(exc).lower():
+                return
+            raise SagaWritesPausedError(
+                f"cannot read the reconciliation gate ({exc}); refusing to PREPARE while its "
+                "state is unknown"
+            ) from exc
+        except sqlite3.Error as exc:
+            raise SagaWritesPausedError(
+                f"cannot read the reconciliation gate ({exc}); refusing to PREPARE while its "
+                "state is unknown"
+            ) from exc
+        if row is None:
+            return
+        try:
+            expires_at = float(row[1])
+        except (TypeError, ValueError):
+            # A lease row with an unreadable expiry cannot be proven expired. Fail CLOSED here --
+            # unlike a missing table, a PRESENT row is positive evidence that recovery is running.
+            raise SagaWritesPausedError(
+                "saga writes are paused: the reconciliation lease is held by "
+                f"{row[0]!r} with an unreadable expiry"
+            ) from None
+        if expires_at > time.time():
+            raise SagaWritesPausedError(
+                "saga writes are paused while recovery reconciles the PREPARED backlog "
+                f"(lease {RECONCILIATION_LEASE_NAME!r} held by {row[0]!r}); retry once the "
+                "instance reports write-ready"
+            )
 
     def _classify_conflict(
         self,
@@ -483,6 +617,23 @@ class GraphOperationsJournal:
             if last_error is not None:
                 sets.append("last_error = ?")
                 params.append(last_error)
+            # Retire the live-owner claim the moment the row leaves PREPARED (CF-20b). PREPARED is
+            # the only state in which "someone is executing this right now" can be true, so any
+            # transition out of it ends the claim.
+            #
+            # This deliberately differs from the participant fence below, which NEEDS_REVIEW keeps.
+            # The two answer different questions: the fence protects the node from competing
+            # writes while an operator adjudicates, whereas the owner claim only says whether a
+            # writer is still mid-flight. Leaving a fresh-looking heartbeat on a quarantined row
+            # would make it read as LIVE_OWNER indefinitely.
+            if current == "PREPARED":
+                sets.extend(
+                    [
+                        "owner_token = NULL",
+                        "owner_heartbeat_at = NULL",
+                        "owner_lease_expires_at = NULL",
+                    ]
+                )
             params.append(op_id)
             conn.execute(
                 f"UPDATE graph_operations SET {', '.join(sets)} WHERE op_id = ?", params
@@ -505,6 +656,232 @@ class GraphOperationsJournal:
                 "SELECT * FROM graph_operations WHERE op_id = ?", (op_id,)
             ).fetchone()
             return dict(row) if row else None
+
+    def renew_owner_heartbeat(
+        self,
+        op_id: str,
+        *,
+        seconds: int = oo.DEFAULT_LEASE_SECONDS,
+        owner_token: str | None = None,
+    ) -> bool:
+        """Extend this process's claim on a PREPARED operation. Returns whether it still holds it.
+
+        A single conditional UPDATE, so the check and the extension cannot interleave: it renews
+        only if the row is still PREPARED AND still carries this process's token. The boolean is
+        the point -- long-running saga code must be able to discover that it LOST its claim (the
+        row was quarantined, committed, or taken over) and stop before its next side effect,
+        rather than carrying on believing it owns work someone else may now be replaying.
+        """
+        self._ensure_ready()
+        now = _utc_now_iso()
+        token = owner_token or oo.process_owner_token()
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                "UPDATE graph_operations "
+                "SET owner_heartbeat_at = ?, owner_lease_expires_at = ?, "
+                # A renewal is the owner proving it is alive, which DISPROVES any attestation of its
+                # death. Leaving one in place would let it reactivate the moment this fresh lease
+                # later expired.
+                "    owner_death_attested_by = NULL, owner_death_attested_at = NULL, "
+                "    owner_death_attested_for_token = NULL "
+                "WHERE op_id = ? AND state = 'PREPARED' AND owner_token = ?",
+                (now, oo.lease_expiry_iso(seconds=seconds), op_id, token),
+            )
+            conn.commit()
+            return cursor.rowcount == 1
+
+    def claim_abandoned_operation(
+        self,
+        op_id: str,
+        *,
+        owner_token: str | None = None,
+        seconds: int | None = None,
+    ) -> bool:
+        """Take ownership of an ABANDONED PREPARED row before replaying it (CF-20c).
+
+        ``seconds`` defaults to the TTL derived from the row's OWN operation_kind, read inside the
+        same transaction as the claim.
+
+        Returns True only if this call is the one that took it. The whole point is that the
+        transfer happens BEFORE any graph side effect: without it, two reconcilers can both read a
+        row as abandoned, both begin mutating, and only discover the conflict at the journal
+        transition -- by which time both have already touched the graph.
+
+        One conditional UPDATE under BEGIN IMMEDIATE, so the liveness test and the transfer cannot
+        interleave. The WHERE clause is the guard, and each conjunct is load-bearing:
+
+        * ``state = 'PREPARED'`` -- a row that reached a terminal state is finished, not recoverable.
+        * ``owner_token IS NOT NULL`` -- an ownerless row is OWNER_UNKNOWN, never ABANDONED. During
+          a mixed-version rollout an older binary with no ownership support may still be executing
+          it, so claiming it is exactly the double-apply this design exists to prevent.
+        * ``owner_lease_expires_at <= now`` -- a live heartbeat is a hard veto. Comparison is done
+          in SQL against the stored ISO string so the read and the write are one statement; ISO-8601
+          UTC strings from ``_utc_now_iso`` sort lexicographically in timestamp order, which is what
+          makes that valid.
+
+        Those conjuncts are NECESSARY but not SUFFICIENT. Expiry alone is a staleness signal, never
+        a death certificate, so the same :func:`classify_ownership` rule the observer applies is
+        re-evaluated inside this transaction and must return ABANDONED before the UPDATE runs.
+
+        A row this process already owns is NOT claimable through here: it is not abandoned, and a
+        reconciler that finds its own live claim should be verifying its own state machine rather
+        than re-taking a lease it never lost.
+        """
+        self._ensure_ready()
+        token = owner_token or oo.process_owner_token()
+        now = _utc_now_iso()
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            # Derive the new expiry from the ROW's own kind, inside the same transaction that reads
+            # it. A claimant that stamped the single-statement default onto a two-statement
+            # operation would hand itself a claim shorter than the work it is about to do.
+            kind_row = conn.execute(
+                "SELECT operation_kind FROM graph_operations WHERE op_id = ?", (op_id,)
+            ).fetchone()
+            claim_seconds = (
+                seconds if seconds is not None
+                else oo.lease_seconds_for_kind(kind_row[0] if kind_row else "")
+            )
+            # Enforce the SAME rule classification applies, inside the same transaction. Claiming
+            # on expiry alone would route straight past the death-evidence requirement and
+            # reintroduce exactly the unproven premise it exists to remove.
+            row = conn.execute(
+                "SELECT owner_token, owner_lease_expires_at, owner_death_attested_by, state, "
+                "owner_death_attested_for_token "
+                "FROM graph_operations WHERE op_id = ?",
+                (op_id,),
+            ).fetchone()
+            if row is None or row[3] != "PREPARED":
+                conn.commit()
+                return False
+            candidate = {
+                "owner_token": row[0],
+                "owner_lease_expires_at": row[1],
+                "owner_death_attested_by": row[2],
+                "owner_death_attested_for_token": row[4],
+            }
+            if oo.classify_ownership(candidate) != oo.ABANDONED:
+                conn.commit()
+                return False
+
+            cursor = conn.execute(
+                "UPDATE graph_operations "
+                "SET owner_token = ?, owner_heartbeat_at = ?, owner_lease_expires_at = ?, "
+                "    updated_at = ?, "
+                # The attestation dies with the owner it named. Carrying it across a transfer would
+                # make it evidence about the CLAIMANT: once this new lease later went stale, the
+                # stale attestation would declare a possibly-live reconciler ABANDONED and invite a
+                # third process to replay underneath it -- the exact false-death path Option 3
+                # exists to remove.
+                "    owner_death_attested_by = NULL, owner_death_attested_at = NULL, "
+                "    owner_death_attested_for_token = NULL "
+                "WHERE op_id = ? "
+                "  AND state = 'PREPARED' "
+                "  AND owner_token IS NOT NULL "
+                "  AND owner_token != ? "
+                "  AND owner_lease_expires_at IS NOT NULL "
+                "  AND owner_lease_expires_at <= ?",
+                (token, now, oo.lease_expiry_iso(seconds=claim_seconds), now, op_id, token, now),
+            )
+            conn.commit()
+            return cursor.rowcount == 1
+
+    def attest_owner_death(self, op_id: str, *, attested_by: str) -> bool:
+        """Record independent operator evidence that a PREPARED row's writer is gone.
+
+        The sanctioned path for the case automation cannot decide: an owner on another host, or one
+        whose PID has been recycled, where this process can never prove death by inspection. It is
+        deliberately a human act with a name attached -- the alternative is inferring death from a
+        clock, which is the premise this design removed.
+
+        An attestation is a safety OVERRIDE for evidence automation cannot gather -- it is not a
+        faster clock, and each WHERE conjunct keeps it from becoming one:
+
+        * ``state = 'PREPARED'`` -- a terminal operation has no writer to attest about.
+        * ``owner_token IS NOT NULL`` -- an ownerless row names no writer, so there is nobody to
+          attest the death OF. Those rows stay OWNER_UNKNOWN and need direct repair.
+        * ``owner_lease_expires_at IS NOT NULL AND <= now`` -- the claim must ALREADY be stale.
+          Attesting against a live heartbeat would let a mistaken operator authorise a replay
+          underneath a writer that renewed its lease seconds ago. :func:`classify_ownership`
+          independently refuses to read an attestation on a fresh lease, so this is the durable
+          half of a check enforced on both the write and the read side.
+
+        Both the name and the instant are stored, because an override that cannot be audited after
+        the fact is indistinguishable from the clock-based inference this replaced.
+        """
+        if not str(attested_by or "").strip():
+            raise GraphOperationError("attested_by is required: attestation must name a person")
+        self._ensure_ready()
+        now = _utc_now_iso()
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            cursor = conn.execute(
+                "UPDATE graph_operations "
+                "SET owner_death_attested_by = ?, owner_death_attested_at = ?, updated_at = ?, "
+                # Bind the attestation to the EXACT token it is about. An operator attests that one
+                # named process is dead, never that "whoever holds this row" is dead.
+                "    owner_death_attested_for_token = owner_token "
+                "WHERE op_id = ? "
+                "  AND state = 'PREPARED' "
+                "  AND owner_token IS NOT NULL "
+                "  AND owner_lease_expires_at IS NOT NULL "
+                "  AND owner_lease_expires_at <= ?",
+                (str(attested_by).strip(), now, now, op_id, now),
+            )
+            conn.commit()
+            return cursor.rowcount == 1
+
+    def iter_by_state(
+        self, state: str, *, batch_size: int = 500
+    ) -> Iterator[dict[str, Any]]:
+        """Yield EVERY row in ``state``, oldest first, with no horizon that can hide rows.
+
+        ``list_by_state(limit=500)`` cannot be made exhaustive by calling it repeatedly: it always
+        returns the same oldest page, so any row that never leaves the state makes the caller loop
+        on it forever while newer rows are never seen. That is the deterministic starvation CF-20
+        has to remove before recovery can be trusted, and it is why this is a cursor, not a bigger
+        limit.
+
+        The keyset is ``(created_at, op_id)``, and the op_id half is load-bearing. ``created_at`` is
+        NOT unique -- operations prepared in the same instant share it -- so ordering by it alone is
+        not a total order, and a page boundary falling inside a group of ties would silently skip or
+        repeat rows. op_id is the PRIMARY KEY, so it breaks every tie.
+
+        Each page is a separate connection and the scan holds no snapshot: rows that leave ``state``
+        mid-scan simply stop appearing, and rows added with a later ``created_at`` will be picked up.
+        For an observation pass that is correct. A pass that must see a FIXED backlog has to close
+        the PREPARE gate first (CF-20c) -- the cursor guarantees progress, not isolation.
+        """
+        if state not in OPERATION_STATES:
+            raise GraphOperationError(f"unknown state {state!r}")
+        self._ensure_ready()
+        page_size = max(1, int(batch_size))
+        cursor_created_at: str | None = None
+        cursor_op_id: str | None = None
+        while True:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                if cursor_created_at is None:
+                    rows = conn.execute(
+                        "SELECT * FROM graph_operations WHERE state = ? "
+                        "ORDER BY created_at ASC, op_id ASC LIMIT ?",
+                        (state, page_size),
+                    ).fetchall()
+                else:
+                    rows = conn.execute(
+                        "SELECT * FROM graph_operations WHERE state = ? "
+                        "AND (created_at > ? OR (created_at = ? AND op_id > ?)) "
+                        "ORDER BY created_at ASC, op_id ASC LIMIT ?",
+                        (state, cursor_created_at, cursor_created_at, cursor_op_id, page_size),
+                    ).fetchall()
+            if not rows:
+                return
+            for row in rows:
+                yield dict(row)
+            cursor_created_at = rows[-1]["created_at"]
+            cursor_op_id = rows[-1]["op_id"]
+            if len(rows) < page_size:
+                return
 
     def list_by_state(self, state: str, *, limit: int = 500) -> list[dict[str, Any]]:
         if state not in OPERATION_STATES:

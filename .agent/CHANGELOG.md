@@ -1,5 +1,185 @@
 # Changelog
 
+## 2026-08-17 - Live saga recovery, behind a per-deployment preflight
+
+- Crashed saga operations now have a recovery path that actually runs. A PREPARED row left by a
+  dead writer is claimed and replayed instead of fencing its entity UUIDs forever, which was the
+  original defect.
+- Recovery is opt-in per deployment and OFF by default. `MENHIR_SAGA_RECONCILE_STARTUP_MODE`
+  stays `observe`, so upgrading changes nothing; `live` is a deliberate act taken after a clean
+  preflight. Whether replay is safe depends on what is in a deployment's journal and whether its
+  host can prove a writer dead -- neither is a property of the build.
+- Added `menhir saga-preflight`, the read-only command that answers those questions and gives a
+  CLEAN / NOT CLEAN verdict. Exit 0 clean, 1 blocked. Warnings do not affect the exit code: a
+  narrowed capability is a legitimate configuration, not grounds to refuse.
+- In live mode a failed preflight or a not-write-ready run is FATAL to startup. An instance that
+  cannot clear its backlog must admit no writers -- never "stop recovery and start normally". The
+  reconciliation gate is still released on that path, because refusing to boot is what keeps
+  writers out of this instance, while a lingering lease would block healthy peers and the operator
+  tooling needed to fix the problem.
+- Observation failures remain non-fatal, deliberately. The observe pass exists to make a latent
+  hazard visible and must never become an outage of its own; recovery is the opposite.
+
+## 2026-08-17 - Restore live crash-recovery coverage broken by the CF-20a refactor
+
+- CF-20a made `reconcile()` observation-only. Seven call sites across four live coordinator test
+  files still asserted real replay, so all seven had been failing since that change -- unseen,
+  because online tests are deselected by default and every suite run reported green with
+  `190 deselected`.
+- The invariants those tests own are the ones live activation rests on: a PREPARED row replays
+  exactly once, drift quarantines without mutating, a missing precondition fails closed. The
+  refactor had removed the evidence for its own safety argument.
+- The seven sites now call `_replay_prepared()`, the live sweep kept under a private name for
+  exactly this reason. Assertions are unchanged; the return shape already matched.
+- Added live-graph coverage for the dispatcher, which had none: it was exercised only against stub
+  handlers offline, despite being the single live replay authority. Five online tests cover the
+  live-writer veto, real classification reaching already-applied and drift verdicts through the
+  dispatcher against a real graph, the legacy quarantine inside a real mixed backlog, and the
+  refusal of live replay so activation cannot happen silently.
+- Live replay THROUGH the dispatcher remains uncovered because no such path exists yet.
+  `_replay_prepared` still has no production caller.
+
+## 2026-08-17 - Legacy unmerge rows quarantine instead of vanishing
+
+- `LEGACY_ENTITY_UNMERGE` rows were written by the legacy coordinator and claimed by no reconciler,
+  so a crash mid-operation fenced two entity UUIDs with no code path that could ever release them.
+  The kind now has a recorded disposition: quarantine, never replay.
+- The decision follows the legacy lane's own contract. Its forward operation requires an explicit
+  per-invocation operator acknowledgement of degradation, and its restore is never exact -- so an
+  unattended replay would re-assert a human's acknowledgement in a situation they never saw, and
+  produce exactly the partially-restored-but-believed-repaired graph that lane exists to prevent.
+- Those rows now route to NEEDS_REVIEW, where an operator can adjudicate them through the existing
+  clearance path; the participant fence releases on the terminal transition. The UUIDs stay fenced
+  until then, deliberately: the graph really is in an unknown partial state.
+- This was a GLOBAL recovery blocker, not one stuck row. An unclaimed kind sets `write_ready=False`
+  for the entire run, so a single legacy row stalled recovery of every other row in the backlog --
+  meaning no deployment that had ever run a legacy unmerge could have been activated for live
+  replay.
+- `METRIC_MIGRATE` and `METRIC_REVERSE` stay unmapped and keep reporting an unknown kind. "We
+  decided this cannot be replayed" and "we do not know what this is" are different facts.
+
+## 2026-08-17 - Gate PID death evidence on a stated deployment invariant
+
+- Hostname equality is not PID-namespace equality, and recovery had been treating it as if it were.
+  A same-hostname owner licensed a local PID lookup, but containers on a shared kernel, cloned
+  images, and two nodes mounting one journal volume can all report the same hostname while their
+  PIDs are unrelated. Answering "that PID is not running" about the wrong namespace fabricates a
+  death certificate -- the exact failure the death-evidence rule exists to remove.
+- A process cannot verify the property about itself, so it is now an explicit operator assertion:
+  `MENHIR_HOST_PID_NAMESPACE_VERIFIABLE`, **default off**, checked by the per-deployment preflight.
+  Unset, automatic PID-based recovery is disabled and expired local rows fence as `OWNER_UNKNOWN`.
+  That costs automatic recovery in an unconfigured deployment and never costs correctness.
+- The assertion binds on the claim path as well as the observer. A gate the observer applies but the
+  mutating path skips is not a gate.
+- Attestation is an override, not a faster clock. Expiry is now evaluated BEFORE attestation, so a
+  fresh heartbeat outranks an attestation rather than the other way round, and `attest_owner_death`
+  durably refuses a row that is not PREPARED, is ownerless, or still holds a live lease.
+- Attestations now record the instant alongside the attesting name. An override that cannot be
+  audited afterwards is indistinguishable from a guess.
+
+## 2026-08-17 - Require positive evidence of writer death before saga recovery
+
+- Replaced "ownership lease expired means the writer is gone" with a rule that does not rest on an
+  unproven premise. The old rule assumed an already-dispatched graph mutation must have returned
+  within a bounded time; it need not. A transaction timeout bounds the SERVER transaction, while the
+  client fetches records lazily over a socket with no comparable read deadline, so elapsed time
+  alone cannot establish that a writer stopped executing.
+- Expiry now demotes a claim to STALE. Recovery proceeds only on independent evidence: the owner is
+  on this host and its PID is demonstrably gone, or an operator has attested the death by name.
+  A remote owner, or one whose PID is still present, stays fenced as `OWNER_UNKNOWN`.
+- The asymmetry is deliberate and is the whole argument: a false ABANDONED double-applies a graph
+  mutation, while a false LIVE_OWNER only delays recovery. A recycled PID reads as alive, which is
+  also the safe direction -- "cannot prove death" rather than a false claim of death.
+- Owner tokens gained a hostname, because a PID is only meaningful on the machine that recorded it.
+  The liveness predicate moved to shared infrastructure so the scheduler lease and saga ownership
+  cannot drift apart.
+- Claiming an abandoned row now runs the same classification inside its own transaction. Claiming on
+  expiry alone would have bypassed the death-evidence requirement entirely.
+- Per-coordinator `reconcile()` is observation-only and now defaults to `dry_run=True`. There is one
+  live replay authority. The live sweep survives as a private method callable only by a caller that
+  has already established ownership, so crash-recovery invariants stay provable.
+- An expired reconciliation gate is now irreversible loss: it cannot be renewed back to life by its
+  original owner, and ownership verification rejects it.
+- Startup observation moved before `resume_pending_episodes`, which starts the enrichment worker --
+  the earliest local saga writer, since enrichment correlation can reach a merge.
+- The bounded-mutation work keeps a narrower, accurate claim: it reduces hangs and retries. It does
+  NOT establish writer death, and is no longer load-bearing for recovery safety.
+
+## 2026-08-17 - Add the CF-20c reconciliation gate and global PREPARE pause
+
+- Added a named reconciliation lease that both gives one reconciler exclusive ownership of the
+  PREPARED backlog and pauses new saga PREPARE across the deployment while it is held. These are
+  two different hazards: the lease stops reconciler-vs-reconciler, while per-operation ownership
+  (CF-20b) stops reconciler-vs-a-still-live-writer. Holding the gate does not make a replay safe on
+  its own.
+- `GraphOperationsJournal.prepare` now opens `BEGIN IMMEDIATE` before checking the gate, so the
+  check and the insert are one atomic step. Without the write lock this was a check-then-insert
+  race: a deferred reader sees no lease, recovery acquires it and commits, and the PREPARED row
+  still lands after recovery has decided what the backlog contains. The lease row and the journal
+  share one SQLite database, which is what makes the pause real rather than advisory.
+- Refusal raises `SagaWritesPausedError`, a `GraphOperationError` subclass, so existing handlers keep
+  working while a caller that cares can distinguish "this target is fenced" from "this process is
+  not accepting new sagas".
+- Two deliberately asymmetric decisions: a MISSING `scheduler_leases` table allows writes (proof no
+  gate was ever created, the normal state of a fresh database), while a PRESENT lease row with an
+  unreadable expiry refuses them (positive evidence recovery is running, and it cannot be proven
+  expired).
+- `renew()` reports loss rather than re-acquiring, because a lapsed gate may already belong to a
+  reconciler that has begun replaying the same rows. `verify_still_held()` checks the durable row,
+  not local state, and the context manager releases in `finally` -- a leaked gate would pause every
+  saga writer until its TTL lapsed, turning a crashed recovery pass into an outage.
+- Still no replay. CF-20 remains OPEN: atomic claiming of an abandoned row and live activation are
+  not implemented, and activation stays contingent on a per-deployment preflight.
+
+## 2026-08-17 - Add CF-20b saga ownership, exhaustive scan and central dispatcher
+
+- Added per-operation ownership so recovery can tell "crashed midway" from "still running in
+  another process" -- the one question a reconciliation lease cannot answer, because the racing
+  writer is not a reconciler. The owner token is instance label + PID + process-start nonce; all
+  three are needed, since `MENHIR_INSTANCE_ID` defaults to empty and PIDs are recycled.
+- Ownership classification fails closed: only a demonstrably expired lease is `ABANDONED`. No
+  token, a token without an expiry, and an unparseable expiry are all `OWNER_UNKNOWN`, because
+  during a mixed-version rollout an older writer may still own an ownerless row.
+- `graph_operations` gained three nullable ownership columns with an additive migration. Existing
+  rows stay ownerless deliberately: backfilling a claim would fabricate the liveness evidence
+  recovery reasons about.
+- Replaced the `limit=500` recovery horizon with `iter_by_state`, a keyset cursor on
+  `(created_at, op_id)`. Re-calling `list_by_state` could never fix this -- it returns the same
+  oldest page forever, so a row that never leaves PREPARED hid every newer row. `op_id` is part of
+  the key because `created_at` is not unique.
+- Added a central PREPARED dispatcher (observe mode) that scans once and routes each row to exactly
+  one handler, applying the ownership veto before any saga logic. It reports unknown kinds as a
+  first-class outcome rather than a silent skip, which surfaces that `LEGACY_ENTITY_UNMERGE` rows
+  are written but claimed by no reconciler, so a crash leaving one PREPARED is currently invisible.
+- Every coordinator gained a uniform `classify_prepared_row` seam, so the dispatcher and a direct
+  `reconcile(dry_run=True)` share one classification path and cannot disagree.
+- CF-20 stays OPEN. Nothing is wired into startup, `run(dry_run=False)` is refused, and the
+  readiness verdict is advisory: live activation needs CF-20c's global PREPARE gate and lease.
+  `renew_owner_heartbeat` exists but has no callers yet -- no known saga operation outlives the
+  120s lease, and that must be confirmed before 20c replays anything.
+
+## 2026-08-17 - Add the CF-20a saga reconciliation observation contract
+
+- Added `reconcile(dry_run=True)` to all four saga reconcilers (merge, unmerge, metric write,
+  delete). A dry-run performs the same journal and graph reads and reaches the same decision as a
+  live replay while making no durable mutation: no journal transition, no graph write, no attempt
+  recording, and no participant-lock change.
+- Extracted the pre-mutation decision out of `_apply` into a pure `_classify_replay` in the three
+  replay coordinators, so a dry-run forecast and a live replay cannot drift apart. `_apply` calls it
+  once and reuses the observed state, so there is still exactly one pre-mutation graph read.
+- Added `menhir.services.saga_reconcile_outcomes` as the shared outcome vocabulary. It deliberately
+  has no `WOULD_COMMIT`: a dry-run proves the deterministic decision path, not that the eventual
+  mutation would commit. `LIVE_OWNER` and `OWNER_UNKNOWN` are declared but unreachable until CF-20b
+  adds operation ownership, so a 20a summary never implies it checked liveness.
+- Dry-run adds `scanned`, `counts` and per-row `outcomes`. The live-action counters
+  (`replayed`/`drifted`/`failed`, `committed`/`needs_review`) stay 0 in dry-run because they count
+  work performed and a dry-run performs none. Live return shapes gained no keys, so existing callers
+  are unaffected.
+- A row the classifier cannot read is reported as `WOULD_NEEDS_REVIEW` and the scan continues, so one
+  malformed legacy row cannot hide the newer rows behind it.
+- CF-20 stays OPEN. This stage is observation only: nothing is wired into startup, the `limit=500`
+  recovery horizon is unchanged, and no reconciler is reachable at runtime yet.
+
 ## 2026-08-11 - Complete Phase 5 production repair and queue closeout refresh
 
 - Verified pre/post Neo4j dumps and consistency checks, repaired five stale standalone Entity RANGE

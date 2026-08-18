@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid as uuidlib
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -28,6 +29,17 @@ from typing import Any
 from menhir.domain import merge_snapshot as ms
 from menhir.infrastructure.graph_operations import GraphOperationsJournal
 from menhir.services.merge_coordinator import _canonical
+from menhir.services.saga_writer_heartbeat import owned_mutation
+from menhir.services.saga_reconcile_outcomes import (
+    DRIFTED,
+    FAILED,
+    REPLAYED,
+    SKIP,
+    SKIPPED,
+    WOULD_MARK_ALREADY_APPLIED,
+    WOULD_NEEDS_REVIEW,
+    summarize_outcomes,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -168,6 +180,28 @@ class DeleteCoordinator:
             return {"deleted": [], "skipped": present, "reason": PREPARE_FAILED,
                     "diagnostics": {"error": str(exc)}}
 
+        # Everything from here to the terminal journal transition runs under this process's
+        # ownership heartbeat (CF-211 part 2), so a reconciler can tell "still deleting here" from
+        # "crashed midway". Unlike the other three coordinators the mutation is inline rather than in
+        # an _apply, so the scope is opened here -- immediately after PREPARE, which is the first
+        # moment a claim exists to hold.
+        with owned_mutation(self.journal, op_id, operation_kind=kind):
+            return self._mutate_and_verify(
+                op_id=op_id, kind=kind, present=present, require_scope=require_scope,
+                already_absent=already_absent, orphan_evidence=orphan_evidence,
+            )
+
+    def _mutate_and_verify(
+        self,
+        *,
+        op_id: str,
+        kind: str,
+        present: list[str],
+        require_scope: str | None,
+        already_absent: list[str],
+        orphan_evidence: list[str],
+    ) -> dict[str, Any]:
+        """Destroy, verify absence, then transition. Runs inside the ownership heartbeat scope."""
         # MUTATE -- the exact deleted set comes back FROM the mutation, not from our intent.
         try:
             deleted = self.graph_adapter.delete_entities_returning_uuids(
@@ -208,42 +242,170 @@ class DeleteCoordinator:
             raise ms.SnapshotSchemaError(f"operation {op_id!r} has no snapshot")
         return ms.loads(row["before_snapshot_json"])
 
-    def reconcile(self, *, limit: int = 500) -> dict[str, int]:
+    def classify_prepared_row(self, row: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
+        """Classify ONE PREPARED journal row. Pure: performs no durable mutation.
+
+        A delete left PREPARED by a crash is never replayed -- re-running it would destroy nodes
+        that a crash spared. So this only OBSERVES whether the delete already happened: if every
+        target is gone the delete completed (mark already applied); if any survive an operator
+        decides (needs review).
+        """
+        operation_kind = row.get("operation_kind")
+        if operation_kind not in ("ENTITY_DELETE", "SESSION_TTL_DELETE"):
+            return SKIP, {}
+        # Structural problems with the ROW are classified; infrastructure failures are NOT.
+        #
+        # This method is the one seam used by BOTH the live sweep and the dry-run, so the catch here
+        # has to be narrow. A broad `except Exception` would fold a transient graph outage into
+        # WOULD_NEEDS_REVIEW, and in live mode that quarantines the row -- which fences its
+        # participants and demands an operator -- when the correct outcome is to leave it PREPARED
+        # and retry later. So capture_node_state below is deliberately OUTSIDE any handler. The
+        # central dispatcher wraps handler calls broadly, which is what keeps an OBSERVE pass alive
+        # without granting a live sweep permission to quarantine on an outage.
+        try:
+            request = json.loads(row["request_json"])
+        except (TypeError, ValueError, KeyError):
+            return WOULD_NEEDS_REVIEW, {"observed_error": "unparseable request_json"}
+        try:
+            targets = [str(t) for t in request.get("targets") or []]
+        except (AttributeError, TypeError) as exc:
+            return WOULD_NEEDS_REVIEW, {
+                "observed_error": f"unclassifiable row: {type(exc).__name__}: {exc}"
+            }
+        survivors = [
+            u for u in targets if self.graph_adapter.capture_node_state(u) is not None
+        ]
+        if survivors:
+            return WOULD_NEEDS_REVIEW, {
+                "survivors": survivors,
+                "observed_error": (
+                    f"crash left the delete incomplete; still present: {survivors}. "
+                    "NOT retried automatically -- deleting them now could destroy nodes the "
+                    "crash spared."
+                ),
+            }
+        return WOULD_MARK_ALREADY_APPLIED, {}
+
+    def reconcile(self, *, limit: int = 500, dry_run: bool = True) -> dict[str, Any]:
+        """Classify the PREPARED backlog for this saga kind. Observation only.
+
+        Live replay is NOT available here. A per-coordinator sweep cannot acquire the global
+        PREPARE gate, cannot establish that a row's original writer is gone, and cannot atomically
+        claim an abandoned row before touching the graph -- so replaying from here would mutate
+        rows another process may still be executing. There is exactly one live replay authority,
+        and it is the central dispatcher.
+
+        The heartbeat that ``_apply`` opens does not close that hole either: it renews on an
+        interval, so a reconciler acting on somebody else's row would dispatch its first mutation
+        before the first renewal discovered the row was never its to claim.
+
+        ``dry_run`` now defaults to True. Passing False raises rather than silently observing, so a
+        caller cannot believe recovery ran.
+        """
+        if not dry_run:
+            raise NotImplementedError(
+                "per-coordinator live reconciliation is disabled: recovery must go through the "
+                "central dispatcher, which holds the reconciliation gate, checks operation "
+                "ownership, and claims an abandoned row before mutating. Use reconcile() to "
+                "classify, or _replay_prepared() from an authority that already owns the rows."
+            )
+        return self._reconcile_sweep(limit=limit, dry_run=True)
+
+    def _replay_prepared(self, *, limit: int = 500) -> dict[str, Any]:
+        """The live replay sweep. Callable ONLY by an authority that already owns the rows.
+
+        Private and unreachable through reconcile(). A caller must have taken the reconciliation
+        gate, established that each row's original writer is gone, and claimed the row -- none of
+        which this method does or can check for itself.
+
+        It exists under a separate name rather than being deleted because it is the saga's only
+        executable replay implementation, and the crash-recovery invariants it satisfies still have
+        to be provable: a PREPARED row replays exactly once, drift quarantines without mutating, a
+        missing precondition fails closed. Deleting it would have removed that evidence along with
+        the unsafe entry point.
+        """
+        return self._reconcile_sweep(limit=limit, dry_run=False)
+
+    def replay_prepared_row(self, row: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
+        """Resolve ONE PREPARED delete row. The live counterpart to :meth:`classify_prepared_row`.
+
+        Nothing is ever re-executed here, and that is the point: re-running a delete would destroy
+        nodes a crash spared. This only records the truth the graph already tells -- every target
+        gone means the delete completed and the row commits; any survivor means an operator decides.
+        REPLAYED therefore reports "reached a terminal state", not "mutated the graph".
+
+        **The caller must already hold the right to touch this row.** Ownership is deliberately not
+        re-checked here; the only sound place for that check is inside the claim transaction the
+        caller holds.
+        """
+        op_id = str(row["op_id"])
+        outcome, diagnostics = self.classify_prepared_row(row)
+        if outcome == SKIP:
+            return SKIPPED, {}
+        if outcome == WOULD_MARK_ALREADY_APPLIED:
+            self.journal.mark_committed(op_id)
+            return REPLAYED, {}
+        if outcome == WOULD_NEEDS_REVIEW:
+            observed = diagnostics["observed_error"]
+            self.journal.mark_needs_review(op_id, observed_error=observed)
+            diag: dict[str, Any] = {"observed_error": observed}
+            if "survivors" in diagnostics:
+                diag["survivors"] = diagnostics["survivors"]
+            return DRIFTED, diag
+        # A classification this coordinator does not emit. The sweep used to fall through silently;
+        # surfacing it is what lets the dispatcher notice a contract break instead of a quiet no-op.
+        return FAILED, {"observed_error": f"unhandled delete classification {outcome!r}"}
+
+    def _reconcile_sweep(self, *, limit: int = 500, dry_run: bool = False) -> dict[str, Any]:
         """A delete left PREPARED by a crash: determine whether it happened, and record the truth.
 
         There is nothing to replay -- re-running a delete would destroy nodes that a crash spared. So
         this only OBSERVES: if every target is gone, the delete completed and the row commits; if any
         survive, an operator decides.
+
+        ``dry_run`` performs every read exactly as live mode does but mutates nothing: no journal
+        write of any kind. It adds ``scanned``, ``counts`` and the per-row ``outcomes``.
         """
         committed = 0
         review = 0
+        scanned = 0
+        outcomes: list[dict[str, Any]] = []
         for row in self.journal.list_by_state("PREPARED", limit=limit):
-            if row.get("operation_kind") not in ("ENTITY_DELETE", "SESSION_TTL_DELETE"):
-                continue
+            scanned += 1
             op_id = str(row["op_id"])
-            try:
-                request = json.loads(row["request_json"])
-            except (TypeError, ValueError):
-                self.journal.mark_needs_review(op_id, observed_error="unparseable request_json")
-                review += 1
+            if dry_run:
+                # Classified here rather than above the branch so each mode performs EXACTLY one
+                # classification per row. classify_prepared_row reads graph state; running it in
+                # both the forecast and the action path would double every read in live mode.
+                outcome, diagnostics = self.classify_prepared_row(row)
+                entry: dict[str, Any] = {
+                    "op_id": op_id,
+                    "operation_kind": row.get("operation_kind"),
+                    "outcome": outcome,
+                }
+                if "observed_error" in diagnostics:
+                    entry["observed_error"] = diagnostics["observed_error"]
+                if "survivors" in diagnostics:
+                    entry["survivors"] = diagnostics["survivors"]
+                outcomes.append(entry)
                 continue
-            targets = [str(t) for t in request.get("targets") or []]
-            survivors = [
-                u for u in targets if self.graph_adapter.capture_node_state(u) is not None
-            ]
-            if survivors:
-                self.journal.mark_needs_review(
-                    op_id,
-                    observed_error=(
-                        f"crash left the delete incomplete; still present: {survivors}. "
-                        "NOT retried automatically -- deleting them now could destroy nodes the "
-                        "crash spared."
-                    ),
-                )
-                review += 1
-            else:
-                self.journal.mark_committed(op_id)
+            live = self.replay_prepared_row(row)[0]
+            if live == REPLAYED:
                 committed += 1
+            elif live == DRIFTED:
+                review += 1
+        if dry_run:
+            # committed/needs_review stay 0: they count journal transitions PERFORMED, and a
+            # dry-run performs none. Reporting them as if they had happened is the same lie as
+            # calling the happy path WOULD_COMMIT. The forecast lives in counts/outcomes.
+            return {
+                "committed": committed,
+                "needs_review": review,
+                "dry_run": True,
+                "scanned": scanned,
+                "counts": summarize_outcomes(outcomes),
+                "outcomes": outcomes,
+            }
         return {"committed": committed, "needs_review": review}
 
 

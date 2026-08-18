@@ -351,6 +351,18 @@ class MemorySettings:
     explorer_enabled: bool = True
     privacy_redact: bool = False
 
+    # Startup saga recovery. "observe" (default) classifies the PREPARED backlog and logs one
+    # summary, mutating nothing; "off" skips the pass entirely; "live" (CF-20c) takes the
+    # reconciliation gate, runs the preflight, and replays abandoned rows before any local writer
+    # is admitted.
+    #
+    # "live" is deliberately NOT the default and never becomes one by upgrading. Whether replay is
+    # safe is a property of the DEPLOYMENT, not of the code -- what is in this journal, and whether
+    # this host can be trusted to prove a writer is dead -- so it stays an explicit per-deployment
+    # act taken after a clean preflight. In live mode a failed preflight or a not-write-ready run
+    # is FATAL to startup: an instance that cannot clear its backlog must admit no writers.
+    saga_reconcile_startup_mode: str = "observe"
+
     # OAuth resource server + embedded authorization server
     oauth_enabled: bool = False
     oauth_public_base_url: str = ""
@@ -701,6 +713,10 @@ class MemorySettings:
             instance_id=_getenv("MENHIR_INSTANCE_ID", default=cls.instance_id).strip(),
             explorer_enabled=parse_bool_env(_getenv("MENHIR_EXPLORER_ENABLED", default=str(cls.explorer_enabled))),
             privacy_redact=parse_bool_env(_getenv("MENHIR_PRIVACY_REDACT", default=str(cls.privacy_redact))),
+            saga_reconcile_startup_mode=_getenv(
+                "MENHIR_SAGA_RECONCILE_STARTUP_MODE",
+                default=cls.saga_reconcile_startup_mode,
+            ).strip().lower(),
             oauth_enabled=parse_bool_env(_getenv("MENHIR_OAUTH_ENABLED", default=str(cls.oauth_enabled))),
             oauth_public_base_url=_getenv("MENHIR_PUBLIC_BASE_URL", default=cls.oauth_public_base_url).rstrip("/"),
             oauth_resource=_getenv("MENHIR_OAUTH_RESOURCE", "MENHIR_MCP_RESOURCE", default=cls.oauth_resource).strip(),

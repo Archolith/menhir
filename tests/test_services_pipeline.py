@@ -3031,7 +3031,15 @@ def test_lease_reclaimed_from_dead_local_owner_before_expiry(
 ) -> None:
     """A restart hard-kills the old server (Windows TerminateProcess) so it never releases its
     lease, and on a fast restart the TTL has not expired. The successor on the same host must
-    reclaim the lease immediately once the prior owner's PID is dead."""
+    reclaim the lease immediately once the prior owner's PID is dead.
+
+    Requires the PID-namespace assertion: reclaiming an UNEXPIRED lease on the strength of a local
+    PID lookup is only sound where a hostname identifies exactly one inspectable PID namespace. The
+    assertion is set here because that is the deployment this test describes -- a single host
+    restarting its own server."""
+    from menhir.infrastructure import operation_owner as _oo
+
+    monkeypatch.setenv(_oo.HOST_PID_NAMESPACE_ENV, "1")
     store = SchedulerLeaseStore(db_path=tmp_path / "lease.db")
 
     # Prior owner takes a long (non-expiring) lease, then "dies".
@@ -3049,6 +3057,39 @@ def test_lease_reclaimed_from_dead_local_owner_before_expiry(
         owner_pid=os.getpid(), lease_duration_s=3600.0,
     ) is True
     assert store.fetch(lease_name="maintenance_scheduler")["owner_id"] == "new-owner"
+
+
+@pytest.mark.unit
+def test_unexpired_lease_is_not_reclaimed_without_the_pid_namespace_assertion(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Same policy as saga ownership, at the lease layer.
+
+    Hostname equality does not establish that the recorded PID belongs to the namespace this
+    process can inspect. Where it does not -- containers on a shared kernel, cloned images, a lease
+    database mounted by several nodes -- "that PID is not running here" describes an unrelated
+    process, and acting on it displaces a LIVE holder before its TTL.
+
+    Leaving the layers on different policies was the actual hole: per-operation ownership refused
+    to infer death while this path silently handed the global reconciliation lease to a second
+    reconciler. Unasserted, the successor now waits for the TTL.
+    """
+    from menhir.infrastructure import operation_owner as _oo
+
+    monkeypatch.delenv(_oo.HOST_PID_NAMESPACE_ENV, raising=False)
+    store = SchedulerLeaseStore(db_path=tmp_path / "lease.db")
+
+    assert store.try_acquire(
+        lease_name="saga-reconciliation", owner_id="old-owner",
+        owner_pid=424242, lease_duration_s=3600.0,
+    ) is True
+    monkeypatch.setattr(SchedulerLeaseStore, "_pid_alive", staticmethod(lambda pid: False))
+
+    assert store.try_acquire(
+        lease_name="saga-reconciliation", owner_id="new-owner",
+        owner_pid=os.getpid(), lease_duration_s=3600.0,
+    ) is False, "an unexpired lease must not be reclaimed on unverifiable PID evidence"
+    assert store.fetch(lease_name="saga-reconciliation")["owner_id"] == "old-owner"
 
 
 @pytest.mark.unit

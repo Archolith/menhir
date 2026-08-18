@@ -13,6 +13,7 @@ import pytest
 
 from menhir.domain.models import FreshnessState, NodeScope, ProcessingState
 from menhir.infrastructure import LLMAdapter, PhaseOneSchemaResult, PolicyStampResult
+from menhir.infrastructure import operation_owner as _operation_owner
 from menhir.infrastructure.memory_graph_adapter import is_context_window_error_text
 
 
@@ -43,7 +44,19 @@ def pytest_configure(config: pytest.Config) -> None:
 
     from menhir.config import MemorySettings
 
-    real_prod_uri = MemorySettings.from_env().neo4j_uri  # capture BEFORE override
+    # The real prod URI. Normally read from the environment before this function overrides it --
+    # but under pytest-xdist this runs again in every WORKER, which inherits the parent's already
+    # overridden NEO4J_URI. Reading it fresh there yields the TEST uri, the guard below compares it
+    # against itself, and every worker aborts with "the test URI is the PRODUCTION graph". That
+    # false positive is why xdist could not be used on this suite at all.
+    #
+    # The snapshot the parent exports is the authority whenever it exists, and using it makes the
+    # guard STRONGER, not weaker: it is the genuine pre-override prod URI rather than whatever
+    # NEO4J_URI happens to say by the time a worker starts.
+    real_prod_uri = (
+        os.environ.get("MENHIR_PROD_NEO4J_URI_SNAPSHOT")
+        or MemorySettings.from_env().neo4j_uri
+    )
     test_uri = os.getenv("MENHIR_TEST_NEO4J_URI", "bolt://localhost:7688")
     test_user = os.getenv("MENHIR_TEST_NEO4J_USER", "neo4j")
     test_password = os.getenv("MENHIR_TEST_NEO4J_PASSWORD", "testpassword")
@@ -1642,3 +1655,42 @@ def _reset_oauth_as_rate_limits():
     oauth_authorize._approve_limiter = oauth_authorize.build_approve_limiter()
     oauth_authorize._spent_consent_jtis.clear()
     yield
+
+
+@pytest.fixture
+def pid_namespace_verifiable(monkeypatch):
+    """Declare, for this test, the deployment property that licenses PID-based death evidence.
+
+    ``classify_ownership`` inspects a local PID only when the deployment has asserted that a
+    hostname identifies exactly one PID namespace. The default is NOT asserted, so any test that
+    exercises the PID-evidence path must say so explicitly. Keeping it a fixture rather than an
+    ambient environment value is deliberate: the precondition stays visible in the tests that
+    depend on it, and a test that forgets it fences instead of silently passing.
+    """
+    monkeypatch.setenv(_operation_owner.HOST_PID_NAMESPACE_ENV, "1")
+
+
+@pytest.fixture(autouse=True)
+def _clear_saga_admission_refusal():
+    """Reset the process-lifetime saga refusal latch around EVERY test.
+
+    ``runtime._saga_admission_refusal`` is deliberately a module global that is never cleared in
+    production: a refusal to admit saga writers is a fact about the process, and a shutdown must not
+    be able to erase it. Under pytest the whole suite is one process, so any test that triggers a
+    refusal permanently poisons every later test that reaches ``_initialize_services`` -- which is
+    exactly what happened: two startup-refusal tests latched it, and the M0 retrieval and sidecar
+    consistency tests then failed with "already refused saga write admission" instead of running.
+
+    ``monkeypatch.setattr(rt, "_saga_admission_refusal", None)`` inside a test is not a substitute.
+    It restores whatever the value was on entry, so once the latch is set it puts the poison back.
+
+    autouse and reset on BOTH sides: before, so a test never inherits a neighbour's refusal; after,
+    so a test that legitimately triggers one does not leak it forward.
+    """
+    from menhir.core import runtime as _runtime
+
+    _runtime._saga_admission_refusal = None
+    try:
+        yield
+    finally:
+        _runtime._saga_admission_refusal = None

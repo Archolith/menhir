@@ -376,7 +376,7 @@ def test_crash_before_commit_replays_as_committed(merger, unmerger, live_repo, p
     )[0]["c"] == 1
     assert len(unmerger.journal.list_by_state("PREPARED")) == 1
 
-    out = unmerger.reconcile()
+    out = unmerger._replay_prepared()  # live sweep: reconcile() is observation-only since CF-20a
     assert out == {"replayed": 1, "drifted": 0, "failed": 0}
     assert unmerger.journal.list_by_state("PREPARED") == []
 

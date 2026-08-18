@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+from menhir.infrastructure import operation_owner
+from menhir.infrastructure import process_liveness
 from menhir.infrastructure.telemetry import default_telemetry_db_path
 
 logger = logging.getLogger(__name__)
@@ -60,63 +62,12 @@ class SchedulerLeaseStore:
 
     @staticmethod
     def _hostname() -> str:
-        return socket.gethostname()
+        return process_liveness.hostname()
 
     @staticmethod
     def _pid_alive(pid: int) -> bool:
-        """True if a process with this PID is currently running on the local host.
-
-        Used to reclaim a lease whose owner was hard-killed before its TTL expired. On Windows a
-        restart terminates the old server with TerminateProcess (not a graceful signal), so its
-        shutdown hook never runs and the lease is never released; on a fast restart the TTL has not
-        expired either, so the successor would otherwise be blocked until expiry (or a manual
-        takeover). Conservative by design: any uncertainty (permission error, unexpected platform
-        result) is treated as ALIVE, so a genuinely live owner is never displaced.
-        """
-        try:
-            pid = int(pid)
-        except (TypeError, ValueError):
-            return False
-        if pid <= 0:
-            return False
-        if sys.platform == "win32":
-            import ctypes
-            from ctypes import wintypes
-
-            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-            STILL_ACTIVE = 259
-            ERROR_INVALID_PARAMETER = 87  # PID does not exist
-            # Declare signatures: a HANDLE is pointer-sized, so the default 32-bit c_int restype
-            # would TRUNCATE it on Win64 and corrupt the handle. Set restype/argtypes explicitly.
-            # GetExitCodeProcess (not WaitForSingleObject) is used because the query-limited access
-            # right does not grant SYNCHRONIZE, which Wait* requires.
-            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-            kernel32.OpenProcess.restype = wintypes.HANDLE
-            kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
-            kernel32.GetExitCodeProcess.restype = wintypes.BOOL
-            kernel32.GetExitCodeProcess.argtypes = (wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD))
-            kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
-            handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
-            if not handle:
-                # No handle: invalid-parameter => the PID does not exist (dead). Any other error
-                # (e.g. access-denied) => it exists but we cannot inspect it, so treat as alive.
-                return ctypes.get_last_error() != ERROR_INVALID_PARAMETER
-            try:
-                exit_code = wintypes.DWORD()
-                if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
-                    return True  # cannot read status — do not displace
-                return exit_code.value == STILL_ACTIVE
-            finally:
-                kernel32.CloseHandle(handle)
-        try:
-            os.kill(pid, 0)
-        except ProcessLookupError:
-            return False
-        except PermissionError:
-            return True  # exists but owned by another user
-        except OSError:
-            return True  # unknown — do not displace
-        return True
+        """Delegates to the shared predicate so lease and saga ownership cannot drift apart."""
+        return process_liveness.pid_alive(pid)
 
     def try_acquire(self, *, lease_name: str, owner_id: str, owner_pid: int, lease_duration_s: float) -> bool:
         self._ensure_ready()
@@ -153,10 +104,23 @@ class SchedulerLeaseStore:
             # lived on THIS host (so we can actually check its PID) and that PID is no longer alive.
             # This makes restart self-healing without waiting for expiry or a manual takeover, while
             # never displacing a live owner (local live PID, or any owner on another host).
+            #
+            # Gated on the SAME deployment assertion that governs saga ownership, and for the same
+            # reason: hostname equality does not establish that the recorded PID belongs to the
+            # namespace this process can inspect. Where it does not -- containers on a shared
+            # kernel, cloned images, a lease database mounted by several nodes -- "that PID is not
+            # running here" is a statement about an unrelated process, and acting on it displaces a
+            # LIVE lease holder before its TTL.
+            #
+            # Leaving the two layers on different policies was the hole: per-operation ownership
+            # would correctly refuse to infer death while this fast path silently handed the global
+            # reconciliation lease to a second reconciler. Unasserted, this simply waits for the
+            # TTL, which costs restart latency and never costs correctness.
             dead_local_owner = (
                 existing_owner_id != owner_id
                 and existing_expires_at > now
                 and existing_host == hostname
+                and operation_owner.host_pid_namespace_is_verifiable()
                 and not self._pid_alive(existing_pid)
             )
             if dead_local_owner:
@@ -184,6 +148,14 @@ class SchedulerLeaseStore:
         return False
 
     def renew(self, *, lease_name: str, owner_id: str, owner_pid: int, lease_duration_s: float) -> bool:
+        """Extend a lease this owner still holds. False if it lapsed or moved.
+
+        The expiry predicate is load-bearing: without it an owner whose lease had ALREADY lapsed
+        could renew it back to life merely because nobody else had taken it yet. Any process that
+        checked the gate during that window -- including the journal's PREPARE check, which reads
+        expiry directly -- would legitimately have treated it as free, so resurrecting it
+        retroactively invalidates their decision.
+        """
         self._ensure_ready()
         now = self._now_epoch()
         heartbeat_at = _utc_now_iso()
@@ -197,8 +169,9 @@ class SchedulerLeaseStore:
                     lease_expires_at = ?
                 WHERE lease_name = ?
                   AND owner_id = ?
+                  AND lease_expires_at > ?
                 """,
-                (owner_pid, heartbeat_at, expires_at, lease_name, owner_id),
+                (owner_pid, heartbeat_at, expires_at, lease_name, owner_id, now),
             ).rowcount
             conn.commit()
             return updated > 0

@@ -8,6 +8,7 @@ import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from time import perf_counter
+from typing import Any
 
 from menhir.config import MemorySettings
 from menhir.core import build_memory_services, prepare_memory_runtime
@@ -129,6 +130,237 @@ async def _run_startup_artifact_reconcile(built: object, settings: object) -> No
         )
     except Exception:
         logger.warning("Startup artifact corpus safe_apply failed", exc_info=True)
+
+
+def _build_saga_dispatcher(adapter: object) -> Any:
+    """The shared dispatcher wiring, re-exported so startup and the CLI cannot diverge."""
+    from menhir.services.saga_preflight import build_default_dispatcher
+
+    return build_default_dispatcher(adapter)
+
+
+def _observe_saga_backlog(adapter: object) -> object:
+    """Classify the PREPARED backlog without mutating anything."""
+    return _build_saga_dispatcher(adapter).observe()
+
+
+class SagaRecoveryNotWriteReady(RuntimeError):
+    """Live recovery could not clear the backlog, so this instance must not admit saga writers.
+
+    Raised during startup, deliberately fatal. The circuit-breaker rule is that a systemic recovery
+    failure means "stop recovery and keep the writer gate closed", never "stop recovery and start
+    normally" -- and the only way to keep it closed for this process is to refuse to finish booting.
+    """
+
+
+#: Why this process refused saga write admission, or None. Set once, never cleared.
+#:
+#: Deliberately NOT a RuntimeState field: ``clear_all()`` runs on every shutdown, and a refusal a
+#: shutdown can erase is not a process-lifetime fact. Raising was never sufficient on its own --
+#: every caller between the raise and the process boundary may swallow or retry it, and
+#: ``_bootstrap_runtime_on_startup`` did exactly that while ``_get_services`` cleared the failed
+#: init task, so a second attempt in the same PID could reach a different verdict about the same
+#: unresolved backlog.
+_saga_admission_refusal: str | None = None
+
+
+def _refuse_saga_write_admission(reason: str) -> None:
+    """Latch this process out of saga writes for the rest of its life.
+
+    Idempotent, and the FIRST reason is the one kept: it names the condition that actually broke
+    readiness, while any later one is a consequence of already being latched.
+    """
+    global _saga_admission_refusal
+    if _saga_admission_refusal is None:
+        _saga_admission_refusal = reason
+
+
+def _saga_write_admission_refused() -> str | None:
+    """The standing refusal, if this process has one."""
+    return _saga_admission_refusal
+
+
+#: How long a starting instance waits for a peer to finish recovery before giving up.
+#: Generous, because the alternative to waiting is refusing to boot: a peer draining a large
+#: backlog is normal, and a short timeout would turn ordinary simultaneous startup into an outage.
+SAGA_GATE_WAIT_SECONDS = 300.0
+
+#: Poll interval while waiting for the gate.
+_SAGA_GATE_POLL_SECONDS = 2.0
+
+
+def _recover_saga_backlog(adapter: object) -> object | None:
+    """Acquire the reconciliation gate, preflight, and drain the abandoned backlog. Live (CF-20c).
+
+    **This process must establish readiness itself; a peer holding the gate is not a verdict.**
+    An earlier version returned None as soon as the gate was held elsewhere and let startup
+    continue, which is unsound: while the peer holds the gate this instance's PREPAREs are blocked,
+    but if the peer then finds an unresolvable backlog, refuses its own startup and releases the
+    gate in its ``finally``, THIS instance is already alive and begins admitting writes against a
+    dirty backlog. Nothing ever told it recovery had failed.
+
+    So a held gate means wait, not proceed: poll until the peer releases it, then run recovery here
+    and reach a verdict of our own. If the gate never comes free within
+    ``SAGA_GATE_WAIT_SECONDS``, that is itself a failure to establish readiness and startup is
+    refused -- fail closed, like every other ambiguity in this subsystem.
+
+    **On failure this releases the gate and lets the caller refuse to boot.** The rule being
+    honoured is "keep the writer gate closed", and an instance that does not finish starting admits
+    no writers at all -- which is what that rule protects. Holding the SQLite lease as well would
+    add nothing for this process while blocking healthy peers and the very operator tooling needed
+    to fix the problem, and it would outlive the process by its entire TTL.
+    """
+    from time import monotonic, sleep
+
+    from menhir.services.saga_preflight import build_default_dispatcher, run_preflight
+    from menhir.services.saga_reconcile_gate import ReconciliationGate
+
+    dispatcher = build_default_dispatcher(adapter)
+    gate = ReconciliationGate()
+
+    deadline = monotonic() + SAGA_GATE_WAIT_SECONDS
+    waited = False
+    while not gate.acquire():
+        if monotonic() >= deadline:
+            raise SagaRecoveryNotWriteReady(
+                "another instance held the saga reconciliation gate for "
+                f"{SAGA_GATE_WAIT_SECONDS:.0f}s and this instance never established its own "
+                "recovery verdict; refusing to admit saga writers"
+            )
+        if not waited:
+            waited = True
+            logger.info(
+                "Saga recovery: reconciliation gate held elsewhere; waiting for the peer to "
+                "finish before establishing readiness here"
+            )
+        sleep(_SAGA_GATE_POLL_SECONDS)
+
+    try:
+        report = run_preflight(dispatcher)
+        if not report.clean:
+            raise SagaRecoveryNotWriteReady(
+                "saga recovery preflight is NOT clean; refusing to replay:\n" + report.render()
+            )
+        return dispatcher.run(dry_run=False, gate=gate)
+    finally:
+        gate.release()
+
+
+async def _run_startup_saga_observe(built: object, settings: object) -> None:
+    """The startup saga barrier: dispatches on ``saga_reconcile_startup_mode`` (CF-20b/CF-20c).
+
+    NOT observation-only despite the name, which predates live mode and is kept because it is the
+    documented startup hook:
+
+    * ``off``     -- skip entirely.
+    * ``observe`` -- classify the backlog and log one summary. Mutates nothing. The DEFAULT.
+    * ``live``    -- take the reconciliation gate, preflight, and replay abandoned rows.
+
+    Called before resume_pending_episodes, which starts the enrichment worker -- the earliest local
+    saga writer, since enrichment correlation can reach MergeCoordinator.merge(). Running after it
+    (as an earlier version did) meant the pass observed a backlog that a live writer could already
+    be adding to.
+
+    Awaited rather than backgrounded, unlike the artifact pass above. The point of this pass is the
+    ORDERING -- it is the write-readiness barrier -- and a fire-and-forget task would race the
+    writers it is supposed to precede, making the ordering meaningless. It is cheap enough to
+    await: the backlog query is served by idx_graph_ops_state, and on the overwhelmingly common
+    zero-PREPARED startup no handler runs at all, so the whole pass is one indexed read.
+
+    **The two modes fail in opposite directions, deliberately.** An observation failure is
+    swallowed: the pass exists to make a latent hazard visible and must never become an outage of
+    its own, and its `write_ready` verdict is advisory because no writer consults it. A recovery
+    failure is fatal: a deployment that asked for live recovery and silently did not get it is
+    running with a backlog it believes was cleared.
+    """
+    mode = str(getattr(settings, "saga_reconcile_startup_mode", "observe") or "").lower()
+    if mode == "off":
+        return
+
+    adapter = getattr(built, "graph_adapter", None)
+    if adapter is None:
+        return
+
+    if mode == "live":
+        await _run_startup_saga_recovery(adapter)
+        return
+
+    try:
+        run = await asyncio.to_thread(_observe_saga_backlog, adapter)
+    except Exception:
+        # Never fail boot over an observation. The pass exists to make a latent hazard visible,
+        # so a bug in it must not become a new outage of its own.
+        logger.warning("Startup saga reconcile observation failed", exc_info=True)
+        return
+
+    scanned = getattr(run, "scanned", 0)
+    if not scanned:
+        logger.debug("Saga reconcile observation: no PREPARED operations")
+        return
+
+    logger.info(
+        "Saga reconcile observation (run %s): scanned=%s counts=%s by_kind=%s oldest_age_s=%s",
+        getattr(run, "run_id", "?"), scanned, getattr(run, "counts", {}),
+        getattr(run, "counts_by_kind", {}), getattr(run, "oldest_prepared_age_seconds", None),
+    )
+    if not getattr(run, "write_ready", True):
+        logger.warning(
+            "Saga reconcile observation (run %s) would NOT be write-ready: %s. Nothing is blocked "
+            "yet -- recovery is not active until CF-20c. Examples: %s",
+            getattr(run, "run_id", "?"),
+            "; ".join(getattr(run, "blocking_reasons", []) or []),
+            getattr(run, "examples", {}),
+        )
+
+
+async def _run_startup_saga_recovery(adapter: object) -> None:
+    """Drain the abandoned PREPARED backlog before local writers are admitted (CF-20c, live).
+
+    Opt-in: reached only when ``saga_reconcile_startup_mode`` is "live". The default stays
+    "observe", so no existing deployment changes behaviour merely by upgrading -- activating
+    recovery remains a deliberate per-deployment act taken after a clean preflight.
+
+    Unlike the observation pass, failures here are FATAL. Observation exists to make a latent
+    hazard visible and must never become an outage of its own; recovery is the opposite, because a
+    deployment that asked for live recovery and silently did not get it is running with a backlog
+    it believes was cleared.
+
+    Every refusal raised anywhere under this call latches the process (see
+    ``_refuse_saga_write_admission``). Fatal here means fatal for the process, not fatal for this
+    attempt: the caller chain may swallow the exception or retry initialisation, and a retry would
+    re-examine the same unresolved backlog with this process's own fresh claims on it.
+    """
+    try:
+        await _run_startup_saga_recovery_inner(adapter)
+    except SagaRecoveryNotWriteReady as exc:
+        _refuse_saga_write_admission(str(exc))
+        raise
+
+
+async def _run_startup_saga_recovery_inner(adapter: object) -> None:
+    """The recovery pass itself. Separated so one place latches every refusal it can raise."""
+    run = await asyncio.to_thread(_recover_saga_backlog, adapter)
+    if run is None:
+        # No longer reachable: a held gate is waited out rather than skipped, so every live start
+        # produces a verdict of its own. Kept as a fail-closed guard -- a None here would mean some
+        # future path returned without establishing readiness, and continuing would admit writers
+        # on no evidence at all.
+        raise SagaRecoveryNotWriteReady(
+            "saga recovery returned no verdict; refusing to admit saga writers"
+        )
+
+    logger.info(
+        "Saga recovery (run %s): scanned=%s counts=%s by_kind=%s aborted=%s write_ready=%s",
+        getattr(run, "run_id", "?"), getattr(run, "scanned", 0), getattr(run, "counts", {}),
+        getattr(run, "counts_by_kind", {}), getattr(run, "aborted", False),
+        getattr(run, "write_ready", True),
+    )
+    if not getattr(run, "write_ready", True):
+        raise SagaRecoveryNotWriteReady(
+            "saga recovery finished NOT write-ready (run "
+            f"{getattr(run, 'run_id', '?')}): "
+            + "; ".join(getattr(run, "blocking_reasons", []) or [])
+        )
 
 
 async def _start_scheduler(built: object) -> MaintenanceScheduler:
@@ -416,6 +648,16 @@ def _shutdown_runtime_sync() -> None:
 async def _initialize_services(
     settings: MemorySettings | None = None,
 ) -> tuple[object, object]:
+    # Before anything else. A process that already refused write admission may not rebuild the
+    # services that admit writers -- not on a retry, not through a second entry point, not after a
+    # shutdown. The refusal outlives every one of those.
+    refusal = _saga_write_admission_refused()
+    if refusal is not None:
+        raise SagaRecoveryNotWriteReady(
+            "this process already refused saga write admission and will not initialise again: "
+            + refusal
+        )
+
     settings = settings or MemorySettings.from_env()
     enable_llm_usage_telemetry()
 
@@ -493,6 +735,18 @@ async def _initialize_services(
         state="completed",
         details={"session_id": session.session_id},
     )
+
+    # Observe the saga backlog BEFORE any local saga writer can start (CF-20b).
+    #
+    # This MUST precede resume_pending_episodes: that call starts the enrichment worker, enrichment
+    # performs correlation, and a sufficiently similar pair reaches MergeCoordinator.merge() through
+    # a worker thread. An earlier version of this ran after the scheduler instead and claimed to
+    # precede "a local writer", which was simply false -- the enrichment path had already been
+    # running for two init steps by then.
+    #
+    # For observation the consequence is only an inaccurate report. For CF-20c it is a hard ordering
+    # requirement: the gate and any recovery must close before workers exist to race them.
+    await _run_startup_saga_observe(built, settings)
 
     record_lifecycle_event(component="runtime_init", event="resume_pending_episodes", state="started")
     logger.info("[init 5/6] Resuming pending episodes...")
@@ -589,6 +843,21 @@ async def _bootstrap_runtime_on_startup() -> None:
         )
         logger.info("Runtime bootstrap during MCP stdio startup was cancelled after %dms", elapsed_ms)
         raise
+    except SagaRecoveryNotWriteReady as exc:
+        # NOT swallowed like an ordinary bootstrap failure. An ordinary failure leaves a service
+        # that cannot serve; this one leaves a backlog whose safety depends on no writer starting.
+        # It must reach the lifespan so the process refuses to serve at all.
+        elapsed_ms = int((perf_counter() - started_at) * 1000)
+        record_lifecycle_event(
+            component="mcp_stdio_boot",
+            event="runtime_bootstrap",
+            state="refused",
+            details={"elapsed_ms": elapsed_ms, "error": str(exc)},
+        )
+        logger.error(
+            "Runtime bootstrap REFUSED saga write admission after %dms: %s", elapsed_ms, exc
+        )
+        raise
     except Exception as exc:
         elapsed_ms = int((perf_counter() - started_at) * 1000)
         record_lifecycle_event(
@@ -613,6 +882,20 @@ async def _bootstrap_runtime_on_startup() -> None:
             _state.startup_runtime_task = None
 
 
+def _saga_recovery_is_armed() -> bool:
+    """Whether this deployment asked for live recovery, so startup must wait for its verdict.
+
+    Fails closed: a settings read that raises answers True, because the alternative is serving
+    without knowing whether recovery was armed. Waiting costs startup latency; guessing wrong
+    costs the invariant.
+    """
+    try:
+        return str(MemorySettings.from_env().saga_reconcile_startup_mode or "").lower() == "live"
+    except Exception:
+        logger.warning("Could not read saga_reconcile_startup_mode; assuming live", exc_info=True)
+        return True
+
+
 @asynccontextmanager
 async def mcp_lifespan(_app: object) -> AsyncIterator[dict[str, object]]:
     startup_task = asyncio.create_task(
@@ -621,6 +904,12 @@ async def mcp_lifespan(_app: object) -> AsyncIterator[dict[str, object]]:
     )
     _state.startup_runtime_task = startup_task
     try:
+        # In live mode the bootstrap IS the write-readiness barrier, so it has to finish before
+        # anything is served. Backgrounding it and yielding immediately -- correct for observe
+        # mode, where the pass is advisory -- turned "refusing startup" into "logging that startup
+        # failed while remaining available", which is not a refusal at all.
+        if _saga_recovery_is_armed():
+            await startup_task
         yield {}
     finally:
         if _state.startup_runtime_task is startup_task:

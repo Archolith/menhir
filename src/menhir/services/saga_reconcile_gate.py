@@ -1,0 +1,247 @@
+"""The reconciliation gate: exclusive backlog ownership plus a global PREPARE pause (CF-20c).
+
+Two different hazards need two different controls, and conflating them is how a recovery pass ends
+up looking safe while being wrong:
+
+* **reconciler vs reconciler** -- two instances restarting together both see operation X as PREPARED.
+  Final-state CAS does not save this, because both may perform graph side effects before either
+  journal transition wins. Solved by holding a named lease, which is what this module owns.
+* **reconciler vs a still-live writer** -- process A prepared X and is mid-mutation while process B
+  starts recovery. Solved by per-operation ownership (`infrastructure/operation_owner.py`), NOT by
+  this lease. A reconciler can hold this gate legitimately and still be wrong to replay X.
+
+Holding this gate additionally *pauses new saga PREPARE across the deployment*: the journal checks
+the same lease row inside its own BEGIN IMMEDIATE, so a writer cannot slip a new PREPARED row in
+after recovery has decided what the backlog contains. Both sides contend for one SQLite write lock,
+which is what makes the pause real rather than advisory.
+
+Nothing here replays anything. Acquiring the gate is what makes replay *safe to attempt*; the
+attempt itself is still gated on live activation.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+import threading
+from contextlib import contextmanager
+from dataclasses import dataclass, field
+from typing import Any, Iterator
+
+from menhir.infrastructure import operation_owner as oo
+from menhir.infrastructure.graph_operations import RECONCILIATION_LEASE_NAME
+from menhir.services.scheduler_lease import SchedulerLeaseStore
+
+logger = logging.getLogger(__name__)
+
+#: Default gate TTL. Long enough that a normal recovery pass never has to renew mid-flight, short
+#: enough that a hard-killed reconciler stops pausing writes on its own. Renewal exists for the
+#: passes that do run long; see `renew`.
+DEFAULT_GATE_SECONDS = 120.0
+
+
+class ReconciliationLeaseLost(RuntimeError):
+    """This process no longer owns the reconciliation gate and must stop before its next effect.
+
+    Raised rather than returned in the paths where continuing would be a correctness violation:
+    once the gate is gone, another reconciler may already be replaying the same rows, and the
+    PREPARE pause this process was relying on is no longer in force.
+    """
+
+
+@dataclass
+class ReconciliationGate:
+    """Holds the named reconciliation lease for this process."""
+
+    lease_store: SchedulerLeaseStore = field(default_factory=SchedulerLeaseStore)
+    owner_id: str = field(default_factory=oo.process_owner_token)
+    lease_duration_s: float = DEFAULT_GATE_SECONDS
+    _held: bool = field(default=False, init=False, repr=False)
+
+    @property
+    def held(self) -> bool:
+        """Whether THIS object believes it holds the gate. Not proof -- see `verify_still_held`."""
+        return self._held
+
+    def acquire(self) -> bool:
+        """Take the gate. False means another reconciler already owns it.
+
+        False is a normal outcome, not an error: the other instance is doing the work, and the
+        correct response is to skip recovery rather than to contend for it.
+        """
+        acquired = self.lease_store.try_acquire(
+            lease_name=RECONCILIATION_LEASE_NAME,
+            owner_id=self.owner_id,
+            owner_pid=os.getpid(),
+            lease_duration_s=self.lease_duration_s,
+        )
+        self._held = bool(acquired)
+        if acquired:
+            logger.info("Acquired reconciliation gate as %s; saga PREPARE is paused", self.owner_id)
+        else:
+            holder = self.holder() or {}
+            logger.info(
+                "Reconciliation gate already held by %s (pid %s); skipping recovery this start",
+                holder.get("owner_id"), holder.get("owner_pid"),
+            )
+        return bool(acquired)
+
+    def renew(self) -> bool:
+        """Extend the gate. False means it was LOST, which the caller must treat as fatal.
+
+        Deliberately does not re-acquire. A gate that expired may already have been taken by another
+        reconciler that has begun replaying the same backlog; silently taking it back would put two
+        reconcilers on the same rows with neither aware of the other.
+
+        The store's UPDATE also requires the lease to be UNEXPIRED, so a lapsed claim cannot be
+        renewed back to life by its original owner during the window before someone else takes it.
+        """
+        renewed = self.lease_store.renew(
+            lease_name=RECONCILIATION_LEASE_NAME,
+            owner_id=self.owner_id,
+            owner_pid=os.getpid(),
+            lease_duration_s=self.lease_duration_s,
+        )
+        if not renewed:
+            self._held = False
+            logger.warning(
+                "Lost the reconciliation gate (owner %s); recovery must stop before its next effect",
+                self.owner_id,
+            )
+        return bool(renewed)
+
+    def verify_still_held(self) -> None:
+        """Assert ownership before a side effect. Raises ReconciliationLeaseLost if it is gone.
+
+        Checks the durable row rather than `self._held`, because the interesting failure is exactly
+        the one this object cannot observe locally: the TTL lapsed, or an operator forced a takeover,
+        while this process believed it still owned the gate.
+        """
+        holder = self.holder()
+        if holder is None or holder.get("owner_id") != self.owner_id:
+            self._held = False
+            raise ReconciliationLeaseLost(
+                f"reconciliation gate is no longer owned by {self.owner_id!r} "
+                f"(now {(holder or {}).get('owner_id')!r}); refusing to continue"
+            )
+        # Same owner but LAPSED is still loss. The row lingering with our name on it proves only
+        # that nobody has taken it yet, not that we still hold it -- and every other process
+        # (including the journal's PREPARE gate, which compares expiry directly) has already been
+        # treating it as free. Continuing here would act on a gate the rest of the system does not
+        # believe in.
+        if holder.get("expired"):
+            self._held = False
+            raise ReconciliationLeaseLost(
+                f"reconciliation gate held by {self.owner_id!r} has EXPIRED "
+                f"(expires_at={holder.get('lease_expires_at')}); refusing to continue"
+            )
+
+    def release(self) -> None:
+        """Give up the gate, re-admitting saga writers. Safe to call when not held."""
+        self.lease_store.release(
+            lease_name=RECONCILIATION_LEASE_NAME, owner_id=self.owner_id
+        )
+        if self._held:
+            logger.info("Released reconciliation gate; saga PREPARE is admitted again")
+        self._held = False
+
+    def holder(self) -> dict[str, Any] | None:
+        """The current lease row, whoever owns it, or None if the gate is free."""
+        row = self.lease_store.fetch(lease_name=RECONCILIATION_LEASE_NAME)
+        return dict(row) if row else None
+
+
+class GateHeartbeat:
+    """Keeps the reconciliation gate fresh for as long as recovery is running.
+
+    Checking the gate between rows is NOT sufficient on its own, and that gap was a real hole: a
+    single replay can begin with seconds left on the lease, block for longer than the whole TTL,
+    and finish after the gate lapsed and new writers were admitted. On a one-row backlog there is
+    no "next row" at which the expiry would ever be noticed.
+
+    That matters here more than in most lease code, because the premise this subsystem now works
+    from is precisely that a synchronous Neo4j call has NO proven wall-clock completion bound. A
+    renewal that only happens between rows inherits exactly the assumption Option 3 discarded.
+
+    So renewal runs on its own thread, independent of how long any single row takes. ``lost``
+    latches: once the gate is gone it is never silently reacquired, because another reconciler may
+    already hold it and be replaying the same backlog.
+    """
+
+    def __init__(self, gate: "ReconciliationGate", *, interval_s: float | None = None) -> None:
+        self._gate = gate
+        # Renew at a third of the TTL, so two consecutive failures still leave time to notice.
+        self._interval = float(interval_s or max(1.0, gate.lease_duration_s / 3.0))
+        self._stop = threading.Event()
+        self._lost = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    @property
+    def lost(self) -> bool:
+        return self._lost.is_set()
+
+    def start(self) -> "GateHeartbeat":
+        if self._thread is None:
+            self._thread = threading.Thread(
+                target=self._loop, name="saga-gate-heartbeat", daemon=True
+            )
+            self._thread.start()
+        return self
+
+    def stop(self) -> None:
+        self._stop.set()
+        thread, self._thread = self._thread, None
+        if thread is not None:
+            thread.join(timeout=5.0)
+
+    def _loop(self) -> None:
+        while not self._stop.wait(self._interval):
+            try:
+                renewed = self._gate.renew()
+            except Exception:  # noqa: BLE001 -- a renewal error is indistinguishable from loss here
+                logger.warning("Reconciliation gate renewal raised; treating as lost", exc_info=True)
+                renewed = False
+            if not renewed:
+                self._lost.set()
+                return
+
+    def __enter__(self) -> "GateHeartbeat":
+        return self.start()
+
+    def __exit__(self, *exc: object) -> None:
+        self.stop()
+
+
+@contextmanager
+def reconciliation_gate(
+    *,
+    lease_store: SchedulerLeaseStore | None = None,
+    lease_duration_s: float = DEFAULT_GATE_SECONDS,
+) -> Iterator[ReconciliationGate | None]:
+    """Hold the gate for the duration of the block, releasing it even on failure.
+
+    Yields None when the gate could not be taken, so a caller can skip recovery without
+    distinguishing exception types. The release in `finally` is the important part: a leaked gate
+    pauses saga PREPARE across the whole deployment until its TTL lapses, which turns a crashed
+    recovery pass into an outage for every writer.
+    """
+    gate = ReconciliationGate(
+        lease_store=lease_store or SchedulerLeaseStore(),
+        lease_duration_s=lease_duration_s,
+    )
+    if not gate.acquire():
+        yield None
+        return
+    try:
+        yield gate
+    finally:
+        gate.release()
+
+
+__all__ = [
+    "DEFAULT_GATE_SECONDS",
+    "GateHeartbeat",
+    "ReconciliationGate",
+    "ReconciliationLeaseLost",
+    "reconciliation_gate",
+]

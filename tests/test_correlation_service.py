@@ -1040,7 +1040,11 @@ class _GuardEnforcingNeo4j:
         }
         self.mutate_params: dict | None = None
 
-    def execute(self, query: str, params: dict | None = None):
+    def execute(self, query: str, params: dict | None = None, **_kwargs):
+        # **_kwargs absorbs execution OPTIONS the production client accepts (timeout_s,
+        # should_continue -- CF-211) without this stub having to track them. They govern how a
+        # statement is dispatched, never what it returns, so ignoring them here leaves every
+        # assertion below testing exactly what it tested before.
         params = params or {}
         if "ineligible_role" in query:                       # Phase 0: eligibility preflight
             return [
@@ -1104,9 +1108,9 @@ class TestMergeProvenanceContract:
         captured: list[str] = []
         original = neo4j.execute
 
-        def _spy(query, params=None):
+        def _spy(query, params=None, **kwargs):
             captured.append(query)
-            return original(query, params)
+            return original(query, params, **kwargs)
 
         neo4j.execute = _spy  # type: ignore[method-assign]
         assert CorrelationRepository(neo4j).merge_entity(

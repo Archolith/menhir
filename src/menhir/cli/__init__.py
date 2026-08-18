@@ -187,6 +187,38 @@ def ingest_wiki(
     )
 
 
+@app.command("saga-preflight")
+def saga_preflight(
+    json_mode: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Judge whether live saga recovery may be switched on for THIS deployment (CF-20c).
+
+    Read-only. Reports what is sitting in the PREPARED backlog and whether this host can be trusted
+    to prove a writer dead, then gives a CLEAN / NOT CLEAN verdict. Run it before setting
+    MENHIR_SAGA_RECONCILE_STARTUP_MODE=live, and run it again on every deployment separately --
+    the answer is a property of the deployment, not of the build.
+
+    Exit code 0 means clean, 1 means blocked. Warnings do not affect the exit code: a narrowed
+    capability is a legitimate configuration, not a reason to refuse.
+    """
+    import json
+
+    configure_logging()
+    from menhir.config import MemorySettings
+    from menhir.core import build_memory_services
+    from menhir.services.saga_preflight import build_default_dispatcher, run_preflight
+
+    settings = MemorySettings.from_env()
+    built = build_memory_services(settings)
+    report = run_preflight(build_default_dispatcher(built.graph_adapter))
+
+    if json_mode:
+        typer.echo(json.dumps(report.as_dict(), indent=2, sort_keys=True))
+    else:
+        typer.echo(report.render())
+    raise SystemExit(0 if report.clean else 1)
+
+
 @app.command()
 def check() -> None:
     """Run service dependency health checks."""
