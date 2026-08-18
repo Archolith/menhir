@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-08-17 - Live saga recovery, behind a per-deployment preflight
+
+- Crashed saga operations now have a recovery path that actually runs. A PREPARED row left by a
+  dead writer is claimed and replayed instead of fencing its entity UUIDs forever, which was the
+  original defect.
+- Recovery is opt-in per deployment and OFF by default. `MENHIR_SAGA_RECONCILE_STARTUP_MODE`
+  stays `observe`, so upgrading changes nothing; `live` is a deliberate act taken after a clean
+  preflight. Whether replay is safe depends on what is in a deployment's journal and whether its
+  host can prove a writer dead -- neither is a property of the build.
+- Added `menhir saga-preflight`, the read-only command that answers those questions and gives a
+  CLEAN / NOT CLEAN verdict. Exit 0 clean, 1 blocked. Warnings do not affect the exit code: a
+  narrowed capability is a legitimate configuration, not grounds to refuse.
+- In live mode a failed preflight or a not-write-ready run is FATAL to startup. An instance that
+  cannot clear its backlog must admit no writers -- never "stop recovery and start normally". The
+  reconciliation gate is still released on that path, because refusing to boot is what keeps
+  writers out of this instance, while a lingering lease would block healthy peers and the operator
+  tooling needed to fix the problem.
+- Observation failures remain non-fatal, deliberately. The observe pass exists to make a latent
+  hazard visible and must never become an outage of its own; recovery is the opposite.
+
 ## 2026-08-17 - Restore live crash-recovery coverage broken by the CF-20a refactor
 
 - CF-20a made `reconcile()` observation-only. Seven call sites across four live coordinator test
