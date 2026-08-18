@@ -27,6 +27,8 @@ class TelemetryEventStoreMixin:
         input_size: int | None,
         result_size: int | None,
         payload_preview: str | None,
+        namespace: str | None = None,
+        node_uuid: str | None = None,
     ) -> None:
         """Persist a single MCP event."""
 
@@ -44,8 +46,10 @@ class TelemetryEventStoreMixin:
                     error,
                     input_size,
                     result_size,
-                    payload_preview
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    payload_preview,
+                    namespace,
+                    node_uuid
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     started_at,
@@ -58,6 +62,8 @@ class TelemetryEventStoreMixin:
                     input_size,
                     result_size,
                     payload_preview,
+                    namespace,
+                    node_uuid,
                 ),
             )
             conn.commit()
@@ -186,6 +192,7 @@ class TelemetryEventStoreMixin:
         *,
         request_payload: dict[str, Any],
         result_payload: dict[str, Any],
+        namespace: str | None = None,
     ) -> int | None:
         """Persist one Extraction Lab run and return its run id.
 
@@ -210,8 +217,9 @@ class TelemetryEventStoreMixin:
                 cursor = conn.execute(
                     """
                     INSERT INTO extraction_lab_runs (
-                        recorded_at, current_message, arms_json, request_json, result_json
-                    ) VALUES (?, ?, ?, ?, ?)
+                        recorded_at, current_message, arms_json, request_json, result_json,
+                        namespace
+                    ) VALUES (?, ?, ?, ?, ?, ?)
                     """,
                     (
                         _utc_now_iso(),
@@ -220,6 +228,7 @@ class TelemetryEventStoreMixin:
                         json.dumps(arm_summaries, default=_json_default),
                         json.dumps(request_payload, default=_json_default),
                         json.dumps(result_payload, default=_json_default),
+                        namespace,
                     ),
                 )
                 conn.commit()

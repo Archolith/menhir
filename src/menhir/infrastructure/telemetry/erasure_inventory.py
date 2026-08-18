@@ -95,12 +95,12 @@ CONTENT_COLUMNS: tuple[ContentColumn, ...] = (
     ContentColumn(
         table="mcp_events",
         column="payload_preview",
-        shape=ErasureShape.UNADDRESSABLE,
-        key_columns=(),
+        shape=ErasureShape.DIRECT_SUBJECT_UUID,
+        key_columns=("node_uuid",),
         note=(
-            "Carries a preview of memory text but has NO subject key column (no "
-            "node_uuid, no namespace). A UUID-keyed purge cannot reach it. This is "
-            "CF-167 / the CF-165 blocking schema defect; no key column is invented here."
+            "Carries a preview of memory text. Durable subject lineage (node_uuid) was "
+            "added by CF-165 Phase C, so a UUID-keyed purge can now reach it. Rows "
+            "written before that migration have NULL lineage and are not addressable."
         ),
     ),
     ContentColumn(
@@ -142,37 +142,49 @@ CONTENT_COLUMNS: tuple[ContentColumn, ...] = (
     ContentColumn(
         table="extraction_lab_runs",
         column="current_message",
-        shape=ErasureShape.UNADDRESSABLE,
-        key_columns=(),
+        shape=ErasureShape.NAMESPACE_KEYED,
+        key_columns=("namespace",),
         note=(
-            "Extraction-lab payload carrying raw message and extracted memory text. This table has NO namespace and NO uuid column, so no subject-keyed purge can reach it. Same schema defect class as mcp_events.payload_preview."
+            "Extraction-lab payload carrying raw message and extracted memory text. Durable "
+            "subject lineage (namespace) was added by CF-165 Phase C, so a namespace-keyed "
+            "purge can now reach it. Rows written before that migration have NULL lineage "
+            "and are not addressable."
         ),
     ),
     ContentColumn(
         table="extraction_lab_runs",
         column="arms_json",
-        shape=ErasureShape.UNADDRESSABLE,
-        key_columns=(),
+        shape=ErasureShape.NAMESPACE_KEYED,
+        key_columns=("namespace",),
         note=(
-            "Extraction-lab payload carrying raw message and extracted memory text. This table has NO namespace and NO uuid column, so no subject-keyed purge can reach it. Same schema defect class as mcp_events.payload_preview."
+            "Extraction-lab payload carrying raw message and extracted memory text. Durable "
+            "subject lineage (namespace) was added by CF-165 Phase C, so a namespace-keyed "
+            "purge can now reach it. Rows written before that migration have NULL lineage "
+            "and are not addressable."
         ),
     ),
     ContentColumn(
         table="extraction_lab_runs",
         column="request_json",
-        shape=ErasureShape.UNADDRESSABLE,
-        key_columns=(),
+        shape=ErasureShape.NAMESPACE_KEYED,
+        key_columns=("namespace",),
         note=(
-            "Extraction-lab payload carrying raw message and extracted memory text. This table has NO namespace and NO uuid column, so no subject-keyed purge can reach it. Same schema defect class as mcp_events.payload_preview."
+            "Extraction-lab payload carrying raw message and extracted memory text. Durable "
+            "subject lineage (namespace) was added by CF-165 Phase C, so a namespace-keyed "
+            "purge can now reach it. Rows written before that migration have NULL lineage "
+            "and are not addressable."
         ),
     ),
     ContentColumn(
         table="extraction_lab_runs",
         column="result_json",
-        shape=ErasureShape.UNADDRESSABLE,
-        key_columns=(),
+        shape=ErasureShape.NAMESPACE_KEYED,
+        key_columns=("namespace",),
         note=(
-            "Extraction-lab payload carrying raw message and extracted memory text. This table has NO namespace and NO uuid column, so no subject-keyed purge can reach it. Same schema defect class as mcp_events.payload_preview."
+            "Extraction-lab payload carrying raw message and extracted memory text. Durable "
+            "subject lineage (namespace) was added by CF-165 Phase C, so a namespace-keyed "
+            "purge can now reach it. Rows written before that migration have NULL lineage "
+            "and are not addressable."
         ),
     ),
     ContentColumn(
@@ -232,10 +244,13 @@ CONTENT_COLUMNS: tuple[ContentColumn, ...] = (
     ContentColumn(
         table="mcp_events",
         column="error",
-        shape=ErasureShape.UNADDRESSABLE,
-        key_columns=(),
+        shape=ErasureShape.DIRECT_SUBJECT_UUID,
+        key_columns=("node_uuid",),
         note=(
-            "Tool error text can embed request payload content, and mcp_events carries no subject key. Unaddressable for the same reason as payload_preview."
+            "Tool error text can embed request payload content. Durable subject lineage "
+            "(node_uuid) was added by CF-165 Phase C, so a UUID-keyed purge can now reach "
+            "it. Rows written before that migration have NULL lineage and are not "
+            "addressable."
         ),
     ),
     ContentColumn(
@@ -257,6 +272,8 @@ NON_CONTENT_COLUMNS: frozenset[tuple[str, str]] = frozenset(
         ("mcp_events", "completed_at"),
         ("mcp_events", "operation"),
         ("mcp_events", "kind"),
+        ("mcp_events", "namespace"),
+        ("mcp_events", "node_uuid"),
         # failure_events
         ("failure_events", "recorded_at"),
         ("failure_events", "operation"),
@@ -347,6 +364,7 @@ NON_CONTENT_COLUMNS: frozenset[tuple[str, str]] = frozenset(
         ("recall_lab_runs", "tied_ids_json"),
         # extraction_lab_runs
         ("extraction_lab_runs", "recorded_at"),
+        ("extraction_lab_runs", "namespace"),
     }
 )
 

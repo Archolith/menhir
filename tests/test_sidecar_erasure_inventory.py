@@ -119,17 +119,29 @@ class TestErasureInventory:
         finally:
             conn.close()
 
-    def test_mcp_events_payload_preview_is_unaddressable(self, tmp_path):
-        db_path = tmp_path / "t.db"
+    def test_every_content_column_is_reachable_by_some_key(self, tmp_path):
+        """No content column may sit in the registry with no way to erase it.
+
+        This started life as a guard pinning mcp_events.payload_preview to UNADDRESSABLE,
+        which was the honest reading when that table had no subject key at all. Phase C
+        gave it durable lineage, so pinning it there would now assert a defect that has
+        been fixed. The intent survives inverted: content must never regress to
+        unreachable, and anything still unreachable must be named here deliberately.
+        """
         _build_sidecar(tmp_path)
-        match = [
-            e
+        unreachable = sorted(
+            f"{e.table}.{e.column}"
             for e in CONTENT_COLUMNS
-            if e.table == "mcp_events" and e.column == "payload_preview"
-        ]
-        assert match, "mcp_events.payload_preview is not classified in CONTENT_COLUMNS"
-        assert match[0].shape is ErasureShape.UNADDRESSABLE, (
-            "Regression guard: mcp_events.payload_preview MUST stay UNADDRESSABLE; it "
-            "carries memory text with no subject key, so a UUID-keyed purge cannot "
-            "reach it (CF-167 / the CF-165 blocking schema defect)."
+            if e.shape is ErasureShape.UNADDRESSABLE
         )
+        assert unreachable == [], (
+            "Content columns with no subject key, so no erasure can reach them: "
+            f"{unreachable}. Either add durable lineage (see schema_migrations."
+            "ensure_lineage_columns) or record the gap in this list deliberately."
+        )
+
+        for entry in CONTENT_COLUMNS:
+            assert entry.key_columns, (
+                f"{entry.table}.{entry.column} is classified {entry.shape.value} but "
+                "declares no key columns, so a purge cannot address it."
+            )

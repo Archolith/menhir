@@ -18,24 +18,37 @@ from __future__ import annotations
 import sqlite3
 
 
-def ensure_merge_audit_namespace_columns(conn: sqlite3.Connection) -> None:
-    """Add ``survivor_namespace`` / ``absorbed_namespace`` to ``merge_audit`` (CF-165).
+def ensure_lineage_columns(conn: sqlite3.Connection) -> None:
+    """Add subject-lineage columns to every telemetry table that needs them (CF-165).
 
-    An explicit namespace erasure must be able to find the merge recovery rows belonging
-    to that namespace. Without durable lineage the namespace could only be recovered by
-    parsing ``snapshot_json`` or by assuming the survivor's graph node still exists --
-    neither survives the deletion this exists to support.
+    Content-bearing rows are only erasable when a subject key reaches them. Tables
+    carrying memory or user text therefore need durable lineage columns:
+    ``merge_audit`` gets ``survivor_namespace`` / ``absorbed_namespace`` so a namespace
+    erasure can find its merge recovery rows (the namespace could otherwise only be
+    recovered by parsing ``snapshot_json`` or assuming the survivor's graph node still
+    exists -- neither survives the deletion this exists to support), ``mcp_events`` gets
+    ``namespace`` / ``node_uuid``, and ``extraction_lab_runs`` gets ``namespace``.
 
     Nullable with no default: rows written before this migration genuinely have no
-    recorded namespace, and NULL is what the read and write paths expect for them.
+    recorded lineage, and NULL is what the read and write paths expect for them.
     Backfill is deliberately not attempted -- it is only sound where derivation is
     provable, which is a separate decision.
     """
-    existing = {row[1] for row in conn.execute("PRAGMA table_info(merge_audit)").fetchall()}
-    for column in ("survivor_namespace", "absorbed_namespace"):
-        if column not in existing:
-            # Literal names from the tuple above; never caller input.
-            conn.execute(f"ALTER TABLE merge_audit ADD COLUMN {column} TEXT")
+    additions: dict[str, tuple[str, ...]] = {
+        "merge_audit": ("survivor_namespace", "absorbed_namespace"),
+        "mcp_events": ("namespace", "node_uuid"),
+        "extraction_lab_runs": ("namespace",),
+    }
+    for table, columns in additions.items():
+        existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        if not existing:
+            # Table not created yet. Callers run this after the CREATE TABLE block, but
+            # skipping keeps a reordering from turning into an ALTER on a missing table.
+            continue
+        for column in columns:
+            if column not in existing:
+                # Literal names from the mapping above; never caller input.
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT")
 
 
-__all__ = ["ensure_merge_audit_namespace_columns"]
+__all__ = ["ensure_lineage_columns"]
