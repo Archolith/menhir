@@ -234,6 +234,37 @@ def host_pid_namespace_is_verifiable() -> bool:
     return os.environ.get(HOST_PID_NAMESPACE_ENV, "").strip().lower() in _TRUTHY
 
 
+#: Deployment assertion: every saga writer here is stopped, or runs a build whose
+#: ``GraphOperationsJournal.prepare()`` honours the reconciliation gate.
+SAGA_WRITERS_QUIESCED_ENV = "MENHIR_SAGA_WRITERS_QUIESCED"
+
+
+def saga_writers_are_quiesced() -> bool:
+    """Whether this deployment asserts it has no gate-unaware saga writers.
+
+    The global PREPARE pause is enforced INSIDE ``prepare()``, so it binds only writers whose code
+    knows to check the reconciliation lease. An older binary with the journal protocol but without
+    that check can still insert a PREPARED row while recovery holds the gate:
+
+        recovery acquires gate -> preflight runs -> OLD writer PREPAREs anyway
+        -> old writer begins mutating -> recovery misses the new row
+        -> recovery reports write-ready over an operation that is still in flight
+
+    That cannot be fixed from inside the new binary: the bypassing process is the one that does not
+    have the check. The honest options are to enforce below the writer (a guard in the shared
+    SQLite journal) or to declare mixed-version writers out of scope for live recovery. This is the
+    second, recorded as an operator assertion so the assumption is stated rather than silent.
+
+    **This is a promise, not a mechanism.** It records that an operator has confirmed no
+    gate-unaware writer can be running. Nothing here prevents one; it makes the precondition
+    explicit and fail-closed, which is what separates a known limitation from an unknown one.
+    Defaults to NOT asserted, and the preflight treats its absence as a BLOCKER rather than a
+    warning -- unlike the PID-namespace assertion, whose absence merely narrows recovery, this one
+    admits a writer racing recovery.
+    """
+    return os.environ.get(SAGA_WRITERS_QUIESCED_ENV, "").strip().lower() in _TRUTHY
+
+
 def classify_ownership(
     row: object,
     *,
@@ -343,6 +374,8 @@ __all__ = [
     "OWNER_UNKNOWN",
     "classify_ownership",
     "host_pid_namespace_is_verifiable",
+    "saga_writers_are_quiesced",
+    "SAGA_WRITERS_QUIESCED_ENV",
     "HOST_PID_NAMESPACE_ENV",
     "is_own_claim",
     "lease_expiry_iso",

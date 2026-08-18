@@ -77,6 +77,7 @@ class PreflightReport:
     warnings: list[str] = field(default_factory=list)
     hostname: str = ""
     pid_namespace_asserted: bool = False
+    writers_quiesced: bool = False
 
     @property
     def clean(self) -> bool:
@@ -96,6 +97,7 @@ class PreflightReport:
             "warnings": self.warnings,
             "hostname": self.hostname,
             "pid_namespace_asserted": self.pid_namespace_asserted,
+            "writers_quiesced": self.writers_quiesced,
         }
 
     def render(self) -> str:
@@ -106,6 +108,7 @@ class PreflightReport:
             f"  PREPARED backlog       : {self.scanned}",
             f"  oldest PREPARED age    : {self.oldest_prepared_age_seconds}",
             f"  PID namespace asserted : {self.pid_namespace_asserted}",
+            f"  writers quiesced       : {self.writers_quiesced}",
             f"  by kind                : {self.counts_by_kind or '{}'}",
             f"  by outcome             : {self.counts or '{}'}",
         ]
@@ -133,6 +136,7 @@ def preflight_from_run(run: Any) -> PreflightReport:
         examples=dict(getattr(run, "examples", {}) or {}),
         hostname=process_liveness.hostname(),
         pid_namespace_asserted=oo.host_pid_namespace_is_verifiable(),
+        writers_quiesced=oo.saga_writers_are_quiesced(),
     )
 
     # The observation's own verdict is the primary blocker: unknown kinds, unprovable ownership,
@@ -153,6 +157,18 @@ def preflight_from_run(run: Any) -> PreflightReport:
             "release it. Set it ONLY if this hostname identifies exactly one inspectable PID "
             "namespace -- not on containers, cloned images, or a journal volume shared by more "
             "than one node."
+        )
+
+    # A BLOCKER, unlike the PID-namespace warning above. That one narrows recovery; this one admits
+    # a writer racing it. Without the assertion there is no basis for believing the global PREPARE
+    # pause actually pauses every writer, and recovery's write-ready verdict is unsupported.
+    if not report.writers_quiesced:
+        report.blockers.append(
+            f"{oo.SAGA_WRITERS_QUIESCED_ENV} is not set. The PREPARE pause is enforced inside "
+            "prepare(), so it binds only writers running a gate-aware build: an older binary can "
+            "still insert a PREPARED row while recovery holds the gate, begin mutating, and be "
+            "missed by the pass that then reports write-ready. Set it only once every saga writer "
+            "in this deployment is stopped or upgraded."
         )
 
     return report
