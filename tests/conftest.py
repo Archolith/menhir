@@ -44,7 +44,19 @@ def pytest_configure(config: pytest.Config) -> None:
 
     from menhir.config import MemorySettings
 
-    real_prod_uri = MemorySettings.from_env().neo4j_uri  # capture BEFORE override
+    # The real prod URI. Normally read from the environment before this function overrides it --
+    # but under pytest-xdist this runs again in every WORKER, which inherits the parent's already
+    # overridden NEO4J_URI. Reading it fresh there yields the TEST uri, the guard below compares it
+    # against itself, and every worker aborts with "the test URI is the PRODUCTION graph". That
+    # false positive is why xdist could not be used on this suite at all.
+    #
+    # The snapshot the parent exports is the authority whenever it exists, and using it makes the
+    # guard STRONGER, not weaker: it is the genuine pre-override prod URI rather than whatever
+    # NEO4J_URI happens to say by the time a worker starts.
+    real_prod_uri = (
+        os.environ.get("MENHIR_PROD_NEO4J_URI_SNAPSHOT")
+        or MemorySettings.from_env().neo4j_uri
+    )
     test_uri = os.getenv("MENHIR_TEST_NEO4J_URI", "bolt://localhost:7688")
     test_user = os.getenv("MENHIR_TEST_NEO4J_USER", "neo4j")
     test_password = os.getenv("MENHIR_TEST_NEO4J_PASSWORD", "testpassword")
