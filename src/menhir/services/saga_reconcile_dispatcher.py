@@ -37,6 +37,7 @@ from typing import Any
 from menhir.infrastructure import operation_owner as oo
 from menhir.infrastructure.graph_operations import GraphOperationsJournal
 from menhir.services.saga_reconcile_gate import (
+    GateHeartbeat,
     ReconciliationGate,
     ReconciliationLeaseLost,
 )
@@ -318,6 +319,47 @@ class SagaReconcileDispatcher:
         oldest: str | None = None
         quarantined = 0
 
+        # Renewal runs independently of the row loop. Renewing between rows would inherit the very
+        # assumption this design discarded -- that a single mutation completes within some known
+        # wall-clock bound -- and a one-row backlog would never reach a second check at all.
+        heartbeat = GateHeartbeat(gate).start()
+        try:
+            self._replay_rows(run, gate, heartbeat)
+        finally:
+            heartbeat.stop()
+
+        run.counts = summarize_live_outcomes(run.rows)
+        run.oldest_prepared_at = run.oldest_prepared_at
+        run.oldest_prepared_age_seconds = self._age_seconds(run.oldest_prepared_at, moment)
+
+        # The LAST thing before a readiness verdict. Every per-row check happens before its own
+        # side effect, so without this the final row's mutation is never covered and a run could
+        # report write_ready after the PREPARE pause had already lapsed.
+        if not run.aborted:
+            try:
+                gate.verify_still_held()
+            except ReconciliationLeaseLost as exc:
+                run.aborted = True
+                run.abort_reason = f"reconciliation gate lost before the readiness verdict: {exc}"
+                logger.error("saga reconcile run %s ABORTED at final check: %s", run.run_id, exc)
+
+        self._assess_live_readiness(run)
+
+        logger.info(
+            "saga reconcile run %s (live): scanned=%d counts=%s aborted=%s write_ready=%s "
+            "reasons=%s",
+            run.run_id, run.scanned, run.counts, run.aborted, run.write_ready,
+            run.blocking_reasons,
+        )
+        return run
+
+    def _replay_rows(
+        self, run: ReconcileRun, gate: ReconciliationGate, heartbeat: GateHeartbeat
+    ) -> None:
+        """The row loop. Stops at the first systemic condition; row-local outcomes continue."""
+        oldest: str | None = None
+        quarantined = 0
+
         for row in self.journal.iter_by_state("PREPARED", batch_size=self.batch_size):
             run.scanned += 1
             op_id = str(row.get("op_id"))
@@ -329,6 +371,17 @@ class SagaReconcileDispatcher:
             ):
                 oldest = created_at
 
+            # The heartbeat thread is the authority on whether the gate is still ours; this
+            # durable re-read catches the case it cannot see -- an operator forcing a takeover
+            # between renewals. Both must hold before any side effect.
+            if heartbeat.lost:
+                run.aborted = True
+                run.abort_reason = "reconciliation gate renewal failed; the gate is no longer held"
+                logger.error(
+                    "saga reconcile run %s ABORTED before op %s: gate renewal failed",
+                    run.run_id, op_id,
+                )
+                break
             try:
                 gate.verify_still_held()
             except ReconciliationLeaseLost as exc:
@@ -355,18 +408,7 @@ class SagaReconcileDispatcher:
                     )
                     break
 
-        run.counts = summarize_live_outcomes(run.rows)
         run.oldest_prepared_at = oldest
-        run.oldest_prepared_age_seconds = self._age_seconds(oldest, moment)
-        self._assess_live_readiness(run)
-
-        logger.info(
-            "saga reconcile run %s (live): scanned=%d counts=%s aborted=%s write_ready=%s "
-            "reasons=%s",
-            run.run_id, run.scanned, run.counts, run.aborted, run.write_ready,
-            run.blocking_reasons,
-        )
-        return run
 
     def _replay_one(
         self, row: Mapping[str, Any], *, op_id: str, kind: str

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, Iterator
@@ -150,6 +151,67 @@ class ReconciliationGate:
         return dict(row) if row else None
 
 
+class GateHeartbeat:
+    """Keeps the reconciliation gate fresh for as long as recovery is running.
+
+    Checking the gate between rows is NOT sufficient on its own, and that gap was a real hole: a
+    single replay can begin with seconds left on the lease, block for longer than the whole TTL,
+    and finish after the gate lapsed and new writers were admitted. On a one-row backlog there is
+    no "next row" at which the expiry would ever be noticed.
+
+    That matters here more than in most lease code, because the premise this subsystem now works
+    from is precisely that a synchronous Neo4j call has NO proven wall-clock completion bound. A
+    renewal that only happens between rows inherits exactly the assumption Option 3 discarded.
+
+    So renewal runs on its own thread, independent of how long any single row takes. ``lost``
+    latches: once the gate is gone it is never silently reacquired, because another reconciler may
+    already hold it and be replaying the same backlog.
+    """
+
+    def __init__(self, gate: "ReconciliationGate", *, interval_s: float | None = None) -> None:
+        self._gate = gate
+        # Renew at a third of the TTL, so two consecutive failures still leave time to notice.
+        self._interval = float(interval_s or max(1.0, gate.lease_duration_s / 3.0))
+        self._stop = threading.Event()
+        self._lost = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    @property
+    def lost(self) -> bool:
+        return self._lost.is_set()
+
+    def start(self) -> "GateHeartbeat":
+        if self._thread is None:
+            self._thread = threading.Thread(
+                target=self._loop, name="saga-gate-heartbeat", daemon=True
+            )
+            self._thread.start()
+        return self
+
+    def stop(self) -> None:
+        self._stop.set()
+        thread, self._thread = self._thread, None
+        if thread is not None:
+            thread.join(timeout=5.0)
+
+    def _loop(self) -> None:
+        while not self._stop.wait(self._interval):
+            try:
+                renewed = self._gate.renew()
+            except Exception:  # noqa: BLE001 -- a renewal error is indistinguishable from loss here
+                logger.warning("Reconciliation gate renewal raised; treating as lost", exc_info=True)
+                renewed = False
+            if not renewed:
+                self._lost.set()
+                return
+
+    def __enter__(self) -> "GateHeartbeat":
+        return self.start()
+
+    def __exit__(self, *exc: object) -> None:
+        self.stop()
+
+
 @contextmanager
 def reconciliation_gate(
     *,
@@ -178,6 +240,7 @@ def reconciliation_gate(
 
 __all__ = [
     "DEFAULT_GATE_SECONDS",
+    "GateHeartbeat",
     "ReconciliationGate",
     "ReconciliationLeaseLost",
     "reconciliation_gate",
