@@ -38,6 +38,7 @@ Semantics:
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from dataclasses import dataclass
 
@@ -46,6 +47,8 @@ from menhir.infrastructure.telemetry.erasure_inventory import (
     CONTENT_COLUMNS,
     ErasureShape,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -76,6 +79,12 @@ class PurgeResult:
 
     rows_affected: dict[str, int]
     skipped_unaddressable: tuple[str, ...]
+    #: ``"table.column"`` entries this operation resolved NO subject for, so nothing was
+    #: matched. Distinct from ``skipped_unaddressable``: those columns can never be reached by
+    #: anyone, these simply were not addressed by THIS erasure. Reported because the silent
+    #: version of this skip is what let episode-keyed content survive a namespace erasure --
+    #: the clause built empty, the entry was passed over, and the outcome looked clean.
+    skipped_no_subjects: tuple[str, ...] = ()
 
 
 def _subject_set_for(key_column: str, subjects: ErasureSubjects) -> frozenset[str]:
@@ -147,6 +156,16 @@ def _is_not_null(conn: sqlite3.Connection, table: str, column: str) -> bool:
     return False
 
 
+def _has_content(conn: sqlite3.Connection, table: str, column: str) -> bool:
+    """Whether the column holds any populated content right now."""
+    row = conn.execute(
+        f"SELECT 1 FROM {table} WHERE {column} IS NOT NULL AND {column} != '' "
+        f"AND {column} != ? LIMIT 1",
+        (ERASED_MARKER,),
+    ).fetchone()
+    return row is not None
+
+
 def count_residual_content(
     conn: sqlite3.Connection, subjects: ErasureSubjects
 ) -> dict[str, int]:
@@ -185,7 +204,103 @@ def count_residual_content(
     return residual
 
 
-def count_unaddressable_content(conn: sqlite3.Connection) -> dict[str, int]:
+_WAIVER_TABLE = "erasure_residue_waiver"
+
+
+def _integer_pk(conn: sqlite3.Connection, table: str) -> str | None:
+    """Name of the table's INTEGER PRIMARY KEY, or None if it has no single integer key.
+
+    A waiver is anchored to this column, so a table without one cannot be waived at all --
+    there would be nothing to bound the waiver with, and an unbounded waiver is the thing this
+    design exists to prevent.
+    """
+    for row in conn.execute(f"PRAGMA table_info({table})"):
+        if int(row[5]) == 1 and str(row[2]).upper().startswith("INT"):
+            return str(row[1])
+    return None
+
+
+def waived_ceilings(conn: sqlite3.Connection) -> dict[str, int]:
+    """Accepted-residue ceilings per ``"table.column"``: rows at or below are not reported.
+
+    Empty when the waiver table does not exist, which is the correct reading -- no waiver has
+    ever been recorded, so nothing is excluded.
+    """
+    exists = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (_WAIVER_TABLE,)
+    ).fetchone()
+    if exists is None:
+        return {}
+    return {
+        f"{r[0]}.{r[1]}": int(r[2])
+        for r in conn.execute(
+            f"SELECT table_name, column_name, max_id FROM {_WAIVER_TABLE}"
+        )
+    }
+
+
+def record_residue_waiver(conn: sqlite3.Connection, *, note: str) -> dict[str, dict]:
+    """Freeze today's unaddressable rows as accepted residue. One-time operator action.
+
+    **Why a ceiling and not a rule.** The obvious implementation of "stop reporting the legacy
+    batch" is a predicate like "ignore rows whose key is NULL". That would also swallow every
+    row stranded from now on, which is precisely the CF-165 defect re-introduced with a
+    config-shaped lid on it. This instead records the CURRENT maximum id per column, and only
+    rows at or below it are excluded. ``mcp_events.id`` is ``INTEGER PRIMARY KEY AUTOINCREMENT``,
+    so SQLite never reuses an id even after deletes: a row written after this waiver is
+    guaranteed a strictly higher id and is therefore guaranteed to still be reported.
+
+    Accepting residue does not erase it. The rows keep their content; what changes is that the
+    erasure outcome stops counting a known, decided-upon backlog as an open question.
+    """
+    conn.execute(
+        f"""
+        CREATE TABLE IF NOT EXISTS {_WAIVER_TABLE} (
+            table_name  TEXT NOT NULL,
+            column_name TEXT NOT NULL,
+            max_id      INTEGER NOT NULL,
+            row_count   INTEGER NOT NULL,
+            accepted_at TEXT NOT NULL,
+            note        TEXT NOT NULL,
+            PRIMARY KEY (table_name, column_name)
+        )
+        """
+    )
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc).isoformat()
+    # Census with any existing waivers ignored, so re-running widens the ceiling to cover
+    # anything that has stranded since -- an explicit operator act, never an automatic one.
+    outstanding = count_unaddressable_content(conn, apply_waivers=False)
+    recorded: dict[str, dict] = {}
+    for key, count in outstanding.items():
+        table, column = key.split(".", 1)
+        pk = _integer_pk(conn, table)
+        if pk is None:
+            # Cannot bound it, so refuse rather than waive the whole column forever.
+            logger.warning(
+                "erasure residue waiver: %s has no integer primary key; leaving it reported",
+                key,
+            )
+            continue
+        row = conn.execute(f"SELECT MAX({pk}) FROM {table}").fetchone()
+        max_id = int(row[0]) if row and row[0] is not None else 0
+        conn.execute(
+            f"INSERT INTO {_WAIVER_TABLE} "
+            "(table_name, column_name, max_id, row_count, accepted_at, note) "
+            "VALUES (?,?,?,?,?,?) "
+            "ON CONFLICT(table_name, column_name) DO UPDATE SET "
+            "max_id=excluded.max_id, row_count=excluded.row_count, "
+            "accepted_at=excluded.accepted_at, note=excluded.note",
+            (table, column, max_id, count, now, note),
+        )
+        recorded[key] = {"max_id": max_id, "row_count": count, "accepted_at": now}
+    return recorded
+
+
+def count_unaddressable_content(
+    conn: sqlite3.Connection, *, apply_waivers: bool = True
+) -> dict[str, int]:
     """Count content-bearing rows NO subject key can ever reach, per ``"table.column"``.
 
     Required because ``PurgeResult.skipped_unaddressable`` does not answer this question. It
@@ -210,6 +325,7 @@ def count_unaddressable_content(conn: sqlite3.Connection) -> dict[str, int]:
     rewrites a key column, so this count cannot change across it.
     """
     out: dict[str, int] = {}
+    waivers = waived_ceilings(conn) if apply_waivers else {}
     for entry in CONTENT_COLUMNS:
         if not _table_exists(conn, entry.table):
             continue
@@ -217,6 +333,13 @@ def count_unaddressable_content(conn: sqlite3.Connection) -> dict[str, int]:
         populated = (
             f"{entry.column} IS NOT NULL AND {entry.column} != '' AND {entry.column} != ?"
         )
+        ceiling = waivers.get(f"{entry.table}.{entry.column}")
+        if ceiling is not None:
+            pk = _integer_pk(conn, entry.table)
+            if pk is not None:
+                # Bounded exclusion: only the rows that existed when the waiver was recorded.
+                # Anything written since has a higher id and is still counted.
+                populated = f"{populated} AND {pk} > {int(ceiling)}"
         if entry.shape is ErasureShape.UNADDRESSABLE:
             where = populated
         else:
@@ -258,6 +381,7 @@ def purge_content(
     """
     rows_affected: dict[str, int] = {}
     skipped: list[str] = []
+    no_subjects: list[str] = []
     for entry in CONTENT_COLUMNS:
         key = f"{entry.table}.{entry.column}"
         if entry.shape is ErasureShape.UNADDRESSABLE:
@@ -267,6 +391,9 @@ def purge_content(
             continue
         clause = _where_clause_for(entry.shape, entry.key_columns, subjects)
         if clause is None:
+            # Only worth reporting when the column actually holds something.
+            if _has_content(conn, entry.table, entry.column):
+                no_subjects.append(key)
             continue
         where, params = clause
         # Table and column names are registry-provided (never caller input), so they are
@@ -294,4 +421,5 @@ def purge_content(
     return PurgeResult(
         rows_affected=rows_affected,
         skipped_unaddressable=tuple(skipped),
+        skipped_no_subjects=tuple(no_subjects),
     )

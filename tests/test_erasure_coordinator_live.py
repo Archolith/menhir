@@ -286,3 +286,48 @@ def test_membership_capture_failure_leaves_the_real_partition_intact(
         live_repo.execute(
             "MATCH (n) WHERE n.test_tag = $g DETACH DELETE n", params={"g": group}
         )
+
+
+def test_namespace_erasure_reaches_episode_keyed_sidecar_content(coord, live_repo, sidecar):
+    """Episodic members own episode_uuid-keyed sidecar rows, on a real partition.
+
+    The existing namespace test seeds only ``memory_revisions``, i.e. the node_uuid path, so it
+    could not see this: a captured uuid went into ``node_uuids`` alone and every
+    ``episode_uuid``-keyed column was skipped while the outcome still looked clean.
+    """
+    group = f"test-erasure-ep-{uuidlib.uuid4()}"
+    episode = f"{group}-episode"
+    live_repo.execute(
+        "CREATE (n:Episodic {uuid:$u, group_id:$g, namespace:$g, test_tag:$g})",
+        params={"u": episode, "g": group},
+    )
+    try:
+        with sqlite3.connect(sidecar) as conn:
+            conn.execute(
+                "INSERT INTO failure_events (recorded_at, operation, episode_uuid, "
+                "failure_stage, classification, retryable, error, details_json) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                ("t", "add_episode", episode, "extract", "transient", 0,
+                 "boom", "verbatim user content"),
+            )
+            conn.execute(
+                "INSERT INTO lifecycle_events (recorded_at, phase, event, status, "
+                "episode_uuid, details_json) VALUES (?,?,?,?,?,?)",
+                ("t", "ingest", "started", "ok", episode, "more user content"),
+            )
+            conn.commit()
+
+        out = coord.erase_namespace(group)
+        assert out["reason"] in (ERASED, GRAPH_ALREADY_ABSENT)
+
+        with sqlite3.connect(sidecar) as conn:
+            assert conn.execute(
+                "SELECT details_json FROM failure_events WHERE episode_uuid=?", (episode,)
+            ).fetchone()[0] is None
+            assert conn.execute(
+                "SELECT details_json FROM lifecycle_events WHERE episode_uuid=?", (episode,)
+            ).fetchone()[0] is None
+    finally:
+        live_repo.execute(
+            "MATCH (n) WHERE n.test_tag = $g DETACH DELETE n", params={"g": group}
+        )

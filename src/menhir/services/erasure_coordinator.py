@@ -99,6 +99,37 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _subjects_for_uuids(
+    uuids: "frozenset[str] | set[str]", *, namespaces: "frozenset[str]" = frozenset()
+) -> ErasureSubjects:
+    """Build the purge subject set from captured graph uuids. ONE place, deliberately.
+
+    A captured uuid is not "a node uuid" -- it is a graph node identifier, and the sidecar
+    stores that same identifier under more than one column name. ``episode_uuid`` holds the
+    uuid of an ``:Episodic`` node, which is exactly what ``capture_namespace_uuids`` returns
+    for the Episodic half of a partition. Filling only ``node_uuids`` therefore left every
+    ``episode_uuid``-keyed column unreached: ``failure_events``, ``episode_task_events``,
+    ``lifecycle_events`` and ``llm_usage_events`` all carry content that can embed episode
+    text, and all of them were skipped -- by the purge, by the residual verification for the
+    same reason, and by the unaddressable census, which does not flag them because their key
+    IS populated. The erasure then reported a normal result.
+
+    Populating both buckets is not over-reach: uuids are globally unique, so a row whose
+    ``episode_uuid`` equals X is a row about node X. The two buckets are one identifier space
+    addressed through two column names.
+
+    ``session_ids`` is deliberately NOT filled. A session id is not a node uuid and no sidecar
+    table maps a session to a namespace (``recall_receipts`` has ``session_id`` and
+    ``client_id`` and no namespace column), so there is nothing to derive it from -- and
+    guessing would erase across namespace boundaries. That gap is reported rather than closed
+    here; see ``not_covered`` in the erasure outcome.
+    """
+    frozen = frozenset(uuids)
+    return ErasureSubjects(
+        node_uuids=frozen, episode_uuids=frozen, namespaces=frozenset(namespaces)
+    )
+
+
 @dataclass
 class ErasureCoordinator:
     """Runs explicit erasure of a memory or a whole namespace as a journaled saga."""
@@ -129,7 +160,9 @@ class ErasureCoordinator:
             return {"reason": NOTHING_TO_ERASE, "subjects": 0}
         return self._run(
             subjects=[("NODE_UUID", node_uuid)],
-            purge=ErasureSubjects(node_uuids=frozenset({node_uuid})),
+            # Both buckets: the target may itself be an :Episodic node, in which case its
+            # episode_uuid-keyed sidecar rows are its content too.
+            purge=_subjects_for_uuids({node_uuid}),
             request={"targets": [node_uuid], "namespace": None},
             # Single-node erasure fences via the participant lock, so no competing merge or
             # delete can hold this uuid while the erasure is unresolved.
@@ -174,9 +207,8 @@ class ErasureCoordinator:
         namespaces = {group_id} | ({namespace} if namespace else set())
         return self._run(
             subjects=subject_rows,
-            purge=ErasureSubjects(
-                node_uuids=frozenset(member_uuids),
-                namespaces=frozenset(n for n in namespaces if n),
+            purge=_subjects_for_uuids(
+                set(member_uuids), namespaces=frozenset(n for n in namespaces if n)
             ),
             request={
                 # Deliberately NOT the member uuids: request_json stays bounded, and the
@@ -366,6 +398,11 @@ class ErasureCoordinator:
             "unaddressable": sorted({*result.skipped_unaddressable, *stranded}),
             "unaddressable_rows": stranded,
             "unaddressable_known": stranded_known,
+            # Content-bearing columns this operation resolved no subject for. Today that is
+            # the session-keyed surface (`recall_receipts.reason`), which no namespace can
+            # derive: `recall_receipts` carries session_id and client_id and no namespace, so
+            # erasing by session would cross namespace boundaries. Reported, not guessed at.
+            "not_covered": list(result.skipped_no_subjects),
         }
 
     # ------------------------------------------------------------------ recovery
@@ -418,9 +455,9 @@ class ErasureCoordinator:
         namespaces = {
             str(r["subject_value"]) for r in pending if r["subject_type"] == "NAMESPACE"
         }
-        purge = ErasureSubjects(
-            node_uuids=frozenset(node_uuids), namespaces=frozenset(namespaces)
-        )
+        # Same mapping as the forward path. A replay that rebuilt subjects differently would
+        # resume an erasure that misses exactly what the original missed.
+        purge = _subjects_for_uuids(node_uuids, namespaces=frozenset(namespaces))
 
         # Finish the graph side too: a crash before the graph delete leaves nodes whose erasure
         # intent is already committed. Both graph calls are no-ops when the target is gone.

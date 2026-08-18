@@ -7,6 +7,7 @@ telemetry database or a live graph.
 from __future__ import annotations
 
 import sqlite3
+import uuid
 
 import pytest
 
@@ -593,3 +594,184 @@ def test_erased_marker_and_blank_rows_are_not_counted_as_stranded(tmp_path):
     _seed_mcp_event(db, node_uuid=None, preview="")
     with sqlite3.connect(db) as conn:
         assert count_unaddressable_content(conn) == {}
+
+
+# --------------------------------------------------------------------------- accepted residue
+#
+# The waiver exists so a decided-upon legacy batch stops reporting. Its whole safety argument is
+# that it is BOUNDED: waiving "rows whose key is NULL" as a rule would re-open CF-165 silently.
+
+
+def test_waiver_silences_the_accepted_batch(tmp_path):
+    from menhir.infrastructure.telemetry.erasure_purge import (
+        count_unaddressable_content,
+        record_residue_waiver,
+    )
+
+    db = tmp_path / "t.db"
+    _coordinator(tmp_path, FakeAdapter())
+    _seed_mcp_event(db, node_uuid=None)
+    _seed_mcp_event(db, node_uuid=None)
+
+    with sqlite3.connect(db) as conn:
+        assert count_unaddressable_content(conn)["mcp_events.payload_preview"] == 2
+        record_residue_waiver(conn, note="legacy batch, accepted")
+        conn.commit()
+        assert count_unaddressable_content(conn) == {}
+
+
+def test_waiver_does_not_cover_rows_stranded_afterwards(tmp_path):
+    """The counterexample the whole design exists for.
+
+    A blanket "ignore NULL lineage" rule would swallow this row and hand CF-165 straight back.
+    The ceiling is an id, and AUTOINCREMENT guarantees the new row sits above it.
+    """
+    from menhir.infrastructure.telemetry.erasure_purge import (
+        count_unaddressable_content,
+        record_residue_waiver,
+    )
+
+    db = tmp_path / "t.db"
+    _coordinator(tmp_path, FakeAdapter())
+    _seed_mcp_event(db, node_uuid=None, preview="legacy row")
+    with sqlite3.connect(db) as conn:
+        record_residue_waiver(conn, note="legacy batch, accepted")
+        conn.commit()
+        assert count_unaddressable_content(conn) == {}
+
+    # A NEW row strands after the waiver: same shape, same NULL key, later id.
+    _seed_mcp_event(db, node_uuid=None, preview="stranded after the waiver")
+    with sqlite3.connect(db) as conn:
+        assert count_unaddressable_content(conn)["mcp_events.payload_preview"] == 1
+
+
+def test_erasure_reports_erased_again_once_residue_is_accepted(tmp_path):
+    from menhir.infrastructure.telemetry.erasure_purge import record_residue_waiver
+
+    db = tmp_path / "t.db"
+    coord = _coordinator(tmp_path, FakeAdapter(present=True))
+    _seed_revision(db, "n-1")
+    _seed_mcp_event(db, node_uuid=None)
+    with sqlite3.connect(db) as conn:
+        record_residue_waiver(conn, note="legacy batch, accepted")
+        conn.commit()
+
+    assert coord.erase_memory("n-1")["reason"] == ERASED
+
+
+def test_a_new_stranding_reopens_the_incomplete_verdict(tmp_path):
+    """Accepting the legacy batch must not make the mechanism permanently blind."""
+    from menhir.infrastructure.telemetry.erasure_purge import record_residue_waiver
+    from menhir.services.erasure_coordinator import ERASED_INCOMPLETE
+
+    db = tmp_path / "t.db"
+    coord = _coordinator(tmp_path, FakeAdapter(present=True))
+    _seed_mcp_event(db, node_uuid=None, preview="legacy row")
+    with sqlite3.connect(db) as conn:
+        record_residue_waiver(conn, note="legacy batch, accepted")
+        conn.commit()
+
+    _seed_mcp_event(db, node_uuid=None, preview="new stranding")
+    _seed_revision(db, "n-1")
+    assert coord.erase_memory("n-1")["reason"] == ERASED_INCOMPLETE
+
+
+# ------------------------------------------------------- episode-keyed content (closure round 2)
+#
+# The reviewer's counterexample: a captured uuid went only into node_uuids, so every
+# episode_uuid-keyed column was skipped -- by the purge, by the residual check for the same
+# reason, and by the unaddressable census, which does not flag them because their key IS set.
+
+
+def _seed_failure_event(db, *, episode_uuid, details="user content in a diagnostic payload"):
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "INSERT INTO failure_events "
+            "(recorded_at, operation, episode_uuid, failure_stage, classification, "
+            "retryable, error, details_json) VALUES (?,?,?,?,?,?,?,?)",
+            ("t", "add_episode", episode_uuid, "extract", "transient", 0, "boom", details),
+        )
+        conn.commit()
+
+
+def _failure_details(db, episode_uuid):
+    with sqlite3.connect(db) as conn:
+        return [
+            r[0]
+            for r in conn.execute(
+                "SELECT details_json FROM failure_events WHERE episode_uuid = ?",
+                (episode_uuid,),
+            )
+        ]
+
+
+def test_namespace_erasure_reaches_episode_keyed_content(tmp_path):
+    """A namespace member that is an Episodic node owns episode_uuid-keyed rows too."""
+    db = tmp_path / "t.db"
+    episode = "ep-in-namespace"
+    adapter = FakeAdapter(members=[episode])
+    coord = _coordinator(tmp_path, adapter)
+    _seed_failure_event(db, episode_uuid=episode)
+
+    out = coord.erase_namespace("group-x", namespace="ns-x")
+
+    assert out["reason"] in (ERASED, GRAPH_ALREADY_ABSENT)
+    assert _failure_details(db, episode) == [None]
+
+
+def test_single_node_erasure_reaches_its_episode_keyed_content(tmp_path):
+    """Same defect one call over: erase_memory on an Episodic node."""
+    db = tmp_path / "t.db"
+    coord = _coordinator(tmp_path, FakeAdapter(present=True))
+    _seed_failure_event(db, episode_uuid="ep-1")
+
+    coord.erase_memory("ep-1")
+
+    assert _failure_details(db, "ep-1") == [None]
+
+
+def test_replayed_erasure_reaches_episode_keyed_content(tmp_path):
+    """The recovery path must rebuild the same subjects as the forward path.
+
+    A replay that mapped subjects differently would faithfully resume an erasure that misses
+    exactly what the original missed.
+    """
+    db = tmp_path / "t.db"
+    coord = _coordinator(tmp_path, FakeAdapter(present=True))
+    _seed_failure_event(db, episode_uuid="ep-crashed")
+
+    op_id = uuid.uuid4().hex
+    coord.journal.prepare(
+        operation_kind="EXPLICIT_ERASURE",
+        request_json='{"targets":["ep-crashed"],"namespace":null}',
+        target_uuid="ep-crashed",
+        op_id=op_id,
+    )
+    coord.subjects.record_subjects(op_id, [("NODE_UUID", "ep-crashed")])
+
+    coord.replay_prepared_row({"op_id": op_id, "operation_kind": "EXPLICIT_ERASURE"})
+
+    assert _failure_details(db, "ep-crashed") == [None]
+
+
+def test_session_keyed_content_is_reported_not_silently_skipped(tmp_path):
+    """What cannot be derived must at least be visible.
+
+    recall_receipts has session_id and client_id and no namespace, so a namespace erasure has
+    nothing to derive its sessions from. Guessing would cross namespace boundaries; staying
+    quiet is what let the episode-keyed class hide. So: report it.
+    """
+    db = tmp_path / "t.db"
+    coord = _coordinator(tmp_path, FakeAdapter(present=True))
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "INSERT INTO recall_receipts (token, operation, session_id, created_at, reason) "
+            "VALUES (?,?,?,?,?)",
+            ("tok", "recall", "sess-1", "t", "operator rating text"),
+        )
+        conn.commit()
+    _seed_revision(db, "n-1")
+
+    out = coord.erase_memory("n-1")
+
+    assert "recall_receipts.reason" in out["not_covered"]
