@@ -611,6 +611,28 @@ class MemoryGraphAdapter:
         )
         return int(rows[0].get("total", 0)) if rows else 0
 
+    def fetch_node_namespaces(self, uuids: list[str]) -> dict[str, str]:
+        """Map uuid -> namespace for nodes that still exist. Missing uuids are absent.
+
+        Used by the CF-165 lineage backfill. Absence is the load-bearing part: a uuid with no
+        row here has no provable namespace, and the backfill must leave it NULL rather than
+        guess one.
+        """
+        wanted = [str(u) for u in uuids if u]
+        if not wanted:
+            return {}
+        rows = self.neo4j.execute(
+            "MATCH (n) WHERE n.uuid IN $uuids "
+            "RETURN n.uuid AS uuid, "
+            "coalesce(n.namespace, n.group_id) AS namespace",
+            params={"uuids": wanted},
+        )
+        return {
+            str(r["uuid"]): str(r["namespace"])
+            for r in (rows or [])
+            if r.get("uuid") and r.get("namespace")
+        }
+
     def capture_namespace_uuids(
         self, group_id: str, *, namespace: str | None = None
     ) -> list[str]:

@@ -86,7 +86,17 @@ CONTENT_COLUMNS: tuple[ContentColumn, ...] = (
         table="merge_audit",
         column="snapshot_json",
         shape=ErasureShape.TWO_PARTY_UUID,
-        key_columns=("survivor_uuid", "absorbed_uuid"),
+        # Namespace lineage is a key here, not decoration. A namespace erasure reaches this
+        # table through captured member uuids -- but a historical merge whose participants are
+        # both long gone from the graph has no uuid in that captured set, so the row would
+        # survive the erasure of its own namespace. The lineage columns are the durable
+        # selector for exactly that case, which is why they were added.
+        key_columns=(
+            "survivor_uuid",
+            "absorbed_uuid",
+            "survivor_namespace",
+            "absorbed_namespace",
+        ),
         note=(
             "Absorbed-node snapshot used for unmerge; addressed by both the survivor "
             "and the absorbed memory UUIDs."

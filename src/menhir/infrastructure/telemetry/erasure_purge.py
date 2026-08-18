@@ -78,8 +78,14 @@ class PurgeResult:
 
 
 def _subject_set_for(key_column: str, subjects: ErasureSubjects) -> frozenset[str]:
-    """Resolve a key column name to the subject set that addresses it."""
-    if key_column == "namespace":
+    """Resolve a key column name to the subject set that addresses it.
+
+    Matched by suffix as well as exact name so per-party lineage columns
+    (``survivor_namespace``, ``absorbed_namespace``) resolve to namespaces rather than falling
+    through to the uuid default. Getting that wrong is silent: the clause would still build and
+    run, just matching namespace values against a set of uuids and finding nothing.
+    """
+    if key_column == "namespace" or key_column.endswith("_namespace"):
         return subjects.namespaces
     if key_column == "episode_uuid":
         return subjects.episode_uuids

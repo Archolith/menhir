@@ -187,6 +187,56 @@ def ingest_wiki(
     )
 
 
+@app.command("erasure-backfill")
+def erasure_backfill(
+    apply: bool = typer.Option(False, "--apply", help="Write changes (default is a dry run)"),
+    redact_unaddressable: bool = typer.Option(
+        False,
+        "--redact-unaddressable",
+        help="ALSO erase legacy content no subject key can ever reach. Irreversible.",
+    ),
+    json_mode: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Backfill CF-165 lineage on sidecar rows written before the migration.
+
+    Dry run by default. Fills merge_audit namespaces only where a surviving node PROVES them --
+    merge requires both participants to share a namespace, so a live survivor settles both sides;
+    a missing survivor proves nothing and the row is left NULL.
+
+    Rows in mcp_events / extraction_lab_runs that predate lineage carry memory text with no
+    subject, so nothing can derive one. They are reported, and --redact-unaddressable erases
+    them. That destroys historical telemetry and cannot be undone, which is why it is separate
+    and opt-in: the alternative is retaining content that no erasure request can ever reach.
+    """
+    import json
+    import sqlite3
+
+    configure_logging()
+    from menhir.config import MemorySettings
+    from menhir.core import build_memory_services
+    from menhir.infrastructure.graph_operations import GraphOperationsJournal
+    from menhir.services.erasure_backfill import run_backfill
+
+    settings = MemorySettings.from_env()
+    built = build_memory_services(settings)
+    db_path = GraphOperationsJournal().db_path
+    conn = sqlite3.connect(db_path)
+    try:
+        report = run_backfill(
+            conn,
+            built.graph_adapter,
+            dry_run=not apply,
+            redact_unaddressable=redact_unaddressable,
+        )
+    finally:
+        conn.close()
+
+    if json_mode:
+        typer.echo(json.dumps(report.as_dict(), indent=2, sort_keys=True))
+    else:
+        typer.echo(report.render())
+
+
 @app.command("saga-preflight")
 def saga_preflight(
     json_mode: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
