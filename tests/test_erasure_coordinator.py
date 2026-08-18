@@ -319,3 +319,47 @@ def test_erasure_kind_is_registered_so_recovery_never_blocks_boot(tmp_path):
 
     handlers = build_handlers(erasure=_coordinator(tmp_path, FakeAdapter()))
     assert "EXPLICIT_ERASURE" in handlers
+
+
+def test_in_flight_erasure_suppresses_the_archive_read(tmp_path):
+    """The window CF-165 named: content readable after the graph node is gone.
+
+    get_original_content is keyed on node_uuid alone with no graph-existence check, so it
+    answers for a deleted node. Between a committed erasure intent and a finished purge the
+    row still holds the text, so the veto -- not the purge -- is what closes that window.
+    """
+    from menhir.infrastructure.telemetry.recall_store import TelemetryRecallStoreMixin  # noqa: F401
+
+    coord = _coordinator(tmp_path, FakeAdapter(present=True))
+    db = tmp_path / "t.db"
+    _seed_revision(db, "n-live", "still-here")
+    store = McpTelemetryStore(db_path=db)
+
+    # Readable before any erasure exists.
+    assert store.get_original_content("n-live") == "still-here"
+
+    # Intent committed, purge deliberately NOT run: this is the in-flight window.
+    coord.subjects.record_subjects("op-x", [("NODE_UUID", "n-live")])
+
+    assert store.get_original_content("n-live") is None
+    # The row is genuinely still there -- suppression is doing the work, not deletion.
+    assert _revision_values(db, "n-live") == [("still-here", "still-here")]
+
+    # Once the purge completes the subject stops being suppressed, and the content is gone
+    # for real rather than merely hidden.
+    coord.subjects.mark_purged("op-x")
+    assert store.get_original_content("n-live") == "still-here"
+
+
+def test_completed_erasure_leaves_nothing_for_the_archive_read(tmp_path):
+    """End to end: after a real erasure the archive read returns nothing because the content
+    is gone, not because it is being hidden."""
+    coord = _coordinator(tmp_path, FakeAdapter(present=True))
+    db = tmp_path / "t.db"
+    _seed_revision(db, "n-erased", "secret")
+    store = McpTelemetryStore(db_path=db)
+
+    coord.erase_memory("n-erased")
+
+    assert store.get_original_content("n-erased") is None
+    assert _revision_values(db, "n-erased") == [(None, None)]
