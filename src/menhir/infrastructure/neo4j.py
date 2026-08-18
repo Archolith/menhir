@@ -196,18 +196,27 @@ class Neo4jRepository:
         Retries up to ``_TRANSIENT_RETRIES`` times on transient Neo4j errors
         (connection drops, leader switches) with exponential backoff.
 
-        ``timeout_s`` attaches a server-side transaction timeout (CF-211). Opt-in per call rather
-        than a blanket default: the saga mutations need a provable upper bound so an ownership claim
-        can be aged out safely, while unrelated long-running reads and maintenance scans must not
-        start failing because recovery wanted a bound.
+        ``timeout_s`` attaches a SERVER-side transaction timeout (CF-211). Opt-in per call rather
+        than a blanket default: saga mutations want their server work bounded, while unrelated
+        long-running reads and maintenance scans must not start failing because recovery wanted a
+        bound.
+
+        **It does not bound this call.** The server stops the transaction; the client then
+        materialises a lazy result over a socket with no comparable read deadline, so nothing here
+        establishes when ``execute`` returns. An earlier version of this docstring said saga
+        mutations "need a provable upper bound so an ownership claim can be aged out safely" --
+        that theorem was withdrawn, and ownership is no longer aged out on elapsed time at all.
+        Recovery requires positive evidence that the writer process is dead; see
+        ``operation_owner.classify_ownership``.
 
         It is passed through ``neo4j.Query(query, timeout=...)``, NOT as a keyword to
         ``session.run``. ``Session.run(query, parameters=None, **kwargs)`` treats keywords as CYPHER
         PARAMETERS, so a ``timeout=`` kwarg would be sent as a query parameter named ``timeout`` --
         silently bounding nothing, and colliding with any real parameter of that name.
 
-        The timeout bounds ONE attempt. The retry loop can spend it up to ``_TRANSIENT_RETRIES``
-        times; see :func:`mutation_window_seconds` for the window a lease must actually exceed.
+        The timeout bounds ONE server attempt. The retry loop can spend it up to
+        ``_TRANSIENT_RETRIES`` times; see :func:`mutation_window_seconds` for how that budget is
+        used to SIZE a lease -- sizing only, never as proof of when a writer stopped.
 
         ``should_continue`` is a zero-argument predicate consulted **before every attempt**. A saga
         writer passes its ownership heartbeat here so that, once its claim is lost, the retry loop
