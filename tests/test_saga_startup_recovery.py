@@ -204,11 +204,79 @@ def test_the_setting_is_normalised_before_it_is_compared(monkeypatch):
 
 
 @pytest.mark.unit
-def test_a_gate_held_elsewhere_skips_recovery_without_failing_startup(monkeypatch):
-    """Another instance is doing the work. Contending would be worse than skipping."""
+def test_a_peer_holding_the_gate_is_waited_out_not_treated_as_readiness(monkeypatch, tmp_path):
+    """The unsound shortcut this replaced.
+
+    Skipping recovery because a peer holds the gate looks harmless -- the peer is doing the work,
+    and our PREPAREs are blocked while it holds the lease. But if that peer finds an unresolvable
+    backlog, refuses its own startup and releases the gate in its ``finally``, THIS instance is
+    already alive and starts admitting writes against a dirty backlog. Nothing ever told it
+    recovery failed. So a held gate means wait, then reach a verdict of our own.
+    """
+    from menhir.services.saga_reconcile_gate import ReconciliationGate
+
+    acquires = {"n": 0}
+
+    def _acquire(self):
+        acquires["n"] += 1
+        return acquires["n"] > 2  # held by a peer for the first two attempts
+
+    monkeypatch.setattr(ReconciliationGate, "acquire", _acquire)
+    monkeypatch.setattr(ReconciliationGate, "release", lambda self: None)
+    monkeypatch.setattr(rt, "_SAGA_GATE_POLL_SECONDS", 0.01)
+
+    built = []
+
+    class _Dispatcher:
+        def observe(self):
+            return _Run()
+
+        def run(self, *, dry_run, gate):
+            built.append("recovered")
+            return _Run()
+
+    import menhir.services.saga_preflight as _pf
+
+    # _recover_saga_backlog imports build_default_dispatcher directly, so THAT is the symbol the
+    # patch has to reach; patching the runtime re-export would silently do nothing.
+    monkeypatch.setattr(_pf, "build_default_dispatcher", lambda a: _Dispatcher())
+    monkeypatch.setenv(oo.HOST_PID_NAMESPACE_ENV, "1")
+
+    result = rt._recover_saga_backlog(object())
+
+    assert acquires["n"] == 3, "must keep trying until the peer releases the gate"
+    assert built == ["recovered"], "recovery must run HERE once the gate is obtained"
+    assert result is not None
+
+
+@pytest.mark.unit
+def test_a_gate_never_released_refuses_startup_rather_than_admitting_writers(monkeypatch):
+    """Fail closed. Never establishing a verdict is not the same as passing."""
+    from menhir.services.saga_reconcile_gate import ReconciliationGate
+
+    monkeypatch.setattr(ReconciliationGate, "acquire", lambda self: False)
+    monkeypatch.setattr(ReconciliationGate, "release", lambda self: None)
+    monkeypatch.setattr(rt, "_SAGA_GATE_POLL_SECONDS", 0.01)
+    monkeypatch.setattr(rt, "SAGA_GATE_WAIT_SECONDS", 0.05)
+    import menhir.services.saga_preflight as _pf
+
+    monkeypatch.setattr(_pf, "build_default_dispatcher", lambda a: None)
+
+    with pytest.raises(rt.SagaRecoveryNotWriteReady, match="never established its own"):
+        rt._recover_saga_backlog(object())
+
+
+@pytest.mark.unit
+def test_a_verdict_of_none_refuses_startup(monkeypatch):
+    """Guard for a future path that returns without establishing readiness.
+
+    Unreachable today, and that is the point: if it ever becomes reachable, admitting writers on no
+    evidence at all is the one outcome that must not happen quietly.
+    """
     monkeypatch.setattr(rt, "_recover_saga_backlog", lambda a: None)
 
-    asyncio.run(rt._run_startup_saga_recovery(object()))  # must not raise
+    with pytest.raises(rt.SagaRecoveryNotWriteReady, match="no verdict"):
+        asyncio.run(rt._run_startup_saga_recovery(object()))
 
 
 @pytest.mark.unit

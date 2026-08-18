@@ -19,13 +19,14 @@ from __future__ import annotations
 
 import sqlite3
 import threading
+from time import monotonic, sleep
 
 import pytest
 
 from menhir.infrastructure import operation_owner as oo
 from menhir.infrastructure import process_liveness
 from menhir.infrastructure.graph_operations import GraphOperationsJournal
-from menhir.services.saga_reconcile_gate import ReconciliationLeaseLost
+from menhir.services.saga_reconcile_gate import GateHeartbeat, ReconciliationLeaseLost
 from menhir.services.saga_reconcile_dispatcher import (
     LEGACY_UNMERGE_DISPOSITION,
     SagaReconcileDispatcher,
@@ -78,16 +79,28 @@ class _Replayer:
 
 
 class _Gate:
-    """A gate that is held until told otherwise, and can lapse after N checks."""
+    """A gate that is held until told otherwise, and can lapse after N checks.
+
+    ``lease_duration_s`` is large so the renewal heartbeat never fires during a test; these tests
+    are about the row loop's own checks, and a background thread racing them would make them
+    flaky rather than more thorough. Gate-renewal behaviour is covered separately.
+    """
+
+    lease_duration_s = 3600.0
 
     def __init__(self, *, lose_after=None):
         self.lose_after = lose_after
         self.checks = 0
+        self.renewals = 0
 
     def verify_still_held(self):
         self.checks += 1
         if self.lose_after is not None and self.checks > self.lose_after:
             raise ReconciliationLeaseLost("gate taken by another reconciler")
+
+    def renew(self):
+        self.renewals += 1
+        return True
 
 
 @pytest.fixture()
@@ -140,17 +153,102 @@ def test_live_replay_without_a_gate_is_refused(journal):
 
 
 @pytest.mark.unit
-def test_the_gate_is_verified_before_every_row_not_once_per_pass(journal):
-    """A long backlog can outlive a lease. One check at the top would not notice."""
+def test_the_gate_is_verified_before_every_row_and_again_before_the_verdict(journal):
+    """The property that matters is coverage, not a count.
+
+    One check per row leaves the LAST row's mutation uncovered: every per-row check happens before
+    its own side effect, so without a final check a run can report write_ready after the PREPARE
+    pause has already lapsed. Hence rows + 1.
+    """
     for i in range(4):
         _insert(journal, f"op-{i}", created_at=f"2026-01-0{i + 1}T00:00:00+00:00")
     gate = _Gate()
 
-    SagaReconcileDispatcher(
+    run = SagaReconcileDispatcher(
         journal=journal, handlers=build_handlers(merge=_Replayer())
     ).run(dry_run=False, gate=gate)
 
-    assert gate.checks == 4, f"expected one check per row, got {gate.checks}"
+    assert gate.checks == 5, (
+        f"expected one check per row plus a final pre-verdict check, got {gate.checks}"
+    )
+    assert run.write_ready is True
+
+
+@pytest.mark.unit
+def test_losing_the_gate_after_the_last_row_still_blocks_the_readiness_verdict(journal):
+    """The uncovered case that made a per-row-only check insufficient.
+
+    A single replay can begin with seconds left on the lease and outlast the whole TTL. On a
+    one-row backlog there is no "next row" at which the expiry would ever be noticed, so without
+    the final check the run reports success after new writers were already admitted.
+    """
+    _insert(journal, "op-only")
+
+    # Held for the row's own check, gone by the time the verdict is taken.
+    run = SagaReconcileDispatcher(
+        journal=journal, handlers=build_handlers(merge=_Replayer())
+    ).run(dry_run=False, gate=_Gate(lose_after=1))
+
+    assert run.aborted is True
+    assert "before the readiness verdict" in (run.abort_reason or "")
+    assert run.write_ready is False
+
+
+@pytest.mark.unit
+def test_the_gate_heartbeat_latches_lost_when_renewal_fails():
+    """Renewal runs on its own thread, so gate loss is discoverable without reaching a next row.
+
+    Tested directly rather than by racing the dispatcher: driving it through a live pass would make
+    the result depend on whether the backlog finished before the first renewal tick, which is
+    exactly the kind of timing-dependent assertion that passes for the wrong reason.
+    """
+    class _LosesRenewal:
+        lease_duration_s = 3.0
+
+        def __init__(self):
+            self.renewals = 0
+
+        def renew(self):
+            self.renewals += 1
+            return False
+
+    gate = _LosesRenewal()
+    hb = GateHeartbeat(gate, interval_s=0.05).start()
+    try:
+        deadline = monotonic() + 5.0
+        while not hb.lost and monotonic() < deadline:
+            sleep(0.02)
+    finally:
+        hb.stop()
+
+    assert gate.renewals >= 1, "the heartbeat must actually attempt renewal"
+    assert hb.lost is True, "a failed renewal must latch as lost, never be retried into success"
+
+
+@pytest.mark.unit
+def test_the_gate_heartbeat_keeps_renewing_while_it_succeeds():
+    """The contrast case, so the test above pins failure handling and not merely that it runs."""
+    class _Holds:
+        lease_duration_s = 3.0
+
+        def __init__(self):
+            self.renewals = 0
+
+        def renew(self):
+            self.renewals += 1
+            return True
+
+    gate = _Holds()
+    hb = GateHeartbeat(gate, interval_s=0.05).start()
+    try:
+        deadline = monotonic() + 2.0
+        while gate.renewals < 3 and monotonic() < deadline:
+            sleep(0.02)
+    finally:
+        hb.stop()
+
+    assert gate.renewals >= 3
+    assert hb.lost is False
 
 
 # --------------------------------------------------------------------- claim before mutate

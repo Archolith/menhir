@@ -225,3 +225,65 @@ def test_an_attested_remote_owner_is_recoverable_without_the_pid_assertion(monke
 
     assert journal.attest_owner_death("op-remote", attested_by="ctharvey") is True
     assert journal.claim_abandoned_operation("op-remote") is True
+
+
+# ----------------------------------------------- an attestation does not outlive the owner it names
+
+
+@pytest.mark.unit
+def test_an_attestation_does_not_survive_ownership_transfer(journal):
+    """attest A -> claim B -> B's lease goes stale. B must NOT read as abandoned.
+
+    This is the Critical regression. The attestation was written about A. After the claim the row
+    belongs to B, and B may still be executing. If the old attestation survived, the moment B's
+    lease went stale a third reconciler would see "attested dead" and replay underneath B --
+    reinstating the false-death double-apply that positive death evidence exists to prevent.
+    """
+    _insert(journal, "op-1", token=_REMOTE, expires=_PAST)
+    assert journal.attest_owner_death("op-1", attested_by="ctharvey") is True
+    assert journal.claim_abandoned_operation("op-1") is True
+
+    row = journal.get("op-1")
+    assert row["owner_token"] == oo.process_owner_token()
+    assert row["owner_death_attested_by"] is None, "the attestation must not outlive its subject"
+    assert row["owner_death_attested_for_token"] is None
+
+    # Now age the new owner's claim, exactly as a slow replay would.
+    with sqlite3.connect(journal.db_path) as conn:
+        conn.execute(
+            "UPDATE graph_operations SET owner_lease_expires_at = ? WHERE op_id = ?",
+            (_PAST, "op-1"),
+        )
+        conn.commit()
+
+    stale = journal.get("op-1")
+    assert oo.classify_ownership(stale) != oo.ABANDONED, (
+        "a stale claim held by THIS process must not be abandoned on a predecessor's attestation"
+    )
+    assert journal.claim_abandoned_operation("op-1", owner_token="inst:other:9:zzz") is False
+
+
+@pytest.mark.unit
+def test_a_successful_heartbeat_retires_an_attestation(journal):
+    """attest A -> A renews -> A's lease later expires. The old attestation must be gone.
+
+    A renewal is the owner proving it is alive, which disproves the attestation outright. Left in
+    place it would lie dormant behind the fresh lease and reactivate the instant that lease expired,
+    turning a transient stall into a licence to replay.
+    """
+    _insert(journal, "op-1", token=_DEAD_LOCAL, expires=_PAST)
+    assert journal.attest_owner_death("op-1", attested_by="ctharvey") is True
+
+    assert journal.renew_owner_heartbeat("op-1", owner_token=_DEAD_LOCAL) is True
+    assert journal.get("op-1")["owner_death_attested_by"] is None
+
+    with sqlite3.connect(journal.db_path) as conn:
+        conn.execute(
+            "UPDATE graph_operations SET owner_lease_expires_at = ? WHERE op_id = ?",
+            (_PAST, "op-1"),
+        )
+        conn.commit()
+
+    # Only the ordinary PID evidence may apply now -- never the retired attestation.
+    monkey_free = journal.get("op-1")
+    assert str(monkey_free.get("owner_death_attested_by") or "") == ""

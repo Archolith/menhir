@@ -396,13 +396,51 @@ def test_an_expired_local_owner_whose_pid_is_alive_is_owner_unknown():
 
 @pytest.mark.unit
 def test_an_operator_attestation_outranks_the_clock():
-    """Independent evidence is the sanctioned path for an owner this process cannot inspect."""
+    """Independent evidence is the sanctioned path for an owner this process cannot inspect.
+
+    The attestation must NAME the owner it is about. This test previously omitted
+    ``owner_death_attested_for_token`` and still expected ABANDONED, which encoded the defect:
+    a bare attestation was treated as evidence about whoever happened to hold the row.
+    """
+    token = "inst:some-other-host:4242:nonce"
+    row = {
+        "owner_token": token,
+        "owner_lease_expires_at": "2020-01-01T00:00:00+00:00",
+        "owner_death_attested_by": "ctharvey",
+        "owner_death_attested_for_token": token,
+    }
+    assert oo.classify_ownership(row) == oo.ABANDONED
+
+
+@pytest.mark.unit
+def test_an_attestation_about_a_previous_owner_is_not_evidence_about_this_one():
+    """The regression that made this a Critical.
+
+    Ownership transferred, so the attestation now names a process that no longer holds the row.
+    Honouring it would declare the CURRENT owner dead on the strength of evidence about its
+    predecessor, and invite a third process to replay underneath a writer that may still be running.
+    """
+    row = {
+        "owner_token": "inst:host-b:2:new",
+        "owner_lease_expires_at": "2020-01-01T00:00:00+00:00",
+        "owner_death_attested_by": "ctharvey",
+        "owner_death_attested_for_token": "inst:host-a:1:old",
+    }
+    assert oo.classify_ownership(row) == oo.OWNER_UNKNOWN
+
+
+@pytest.mark.unit
+def test_an_attestation_with_no_named_subject_is_not_evidence():
+    """A row written by an older binary, before attestations named their subject.
+
+    Fails closed: unreadable provenance is not proof of death.
+    """
     row = {
         "owner_token": "inst:some-other-host:4242:nonce",
         "owner_lease_expires_at": "2020-01-01T00:00:00+00:00",
         "owner_death_attested_by": "ctharvey",
     }
-    assert oo.classify_ownership(row) == oo.ABANDONED
+    assert oo.classify_ownership(row) == oo.OWNER_UNKNOWN
 
 
 @pytest.mark.unit
