@@ -198,7 +198,8 @@ class GraphOperationsJournal:
                         owner_heartbeat_at    TEXT,
                         owner_lease_expires_at TEXT,
                         owner_death_attested_by TEXT,
-                        owner_death_attested_at TEXT
+                        owner_death_attested_at TEXT,
+                        owner_death_attested_for_token TEXT
                     )
                     """
                 )
@@ -219,6 +220,7 @@ class GraphOperationsJournal:
                     "owner_lease_expires_at",
                     "owner_death_attested_by",
                     "owner_death_attested_at",
+                    "owner_death_attested_for_token",
                 ):
                     if column not in operation_columns:
                         # Column names are literals from the tuple above, never caller input.
@@ -676,7 +678,12 @@ class GraphOperationsJournal:
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute(
                 "UPDATE graph_operations "
-                "SET owner_heartbeat_at = ?, owner_lease_expires_at = ? "
+                "SET owner_heartbeat_at = ?, owner_lease_expires_at = ?, "
+                # A renewal is the owner proving it is alive, which DISPROVES any attestation of its
+                # death. Leaving one in place would let it reactivate the moment this fresh lease
+                # later expired.
+                "    owner_death_attested_by = NULL, owner_death_attested_at = NULL, "
+                "    owner_death_attested_for_token = NULL "
                 "WHERE op_id = ? AND state = 'PREPARED' AND owner_token = ?",
                 (now, oo.lease_expiry_iso(seconds=seconds), op_id, token),
             )
@@ -739,7 +746,8 @@ class GraphOperationsJournal:
             # on expiry alone would route straight past the death-evidence requirement and
             # reintroduce exactly the unproven premise it exists to remove.
             row = conn.execute(
-                "SELECT owner_token, owner_lease_expires_at, owner_death_attested_by, state "
+                "SELECT owner_token, owner_lease_expires_at, owner_death_attested_by, state, "
+                "owner_death_attested_for_token "
                 "FROM graph_operations WHERE op_id = ?",
                 (op_id,),
             ).fetchone()
@@ -750,6 +758,7 @@ class GraphOperationsJournal:
                 "owner_token": row[0],
                 "owner_lease_expires_at": row[1],
                 "owner_death_attested_by": row[2],
+                "owner_death_attested_for_token": row[4],
             }
             if oo.classify_ownership(candidate) != oo.ABANDONED:
                 conn.commit()
@@ -758,7 +767,14 @@ class GraphOperationsJournal:
             cursor = conn.execute(
                 "UPDATE graph_operations "
                 "SET owner_token = ?, owner_heartbeat_at = ?, owner_lease_expires_at = ?, "
-                "    updated_at = ? "
+                "    updated_at = ?, "
+                # The attestation dies with the owner it named. Carrying it across a transfer would
+                # make it evidence about the CLAIMANT: once this new lease later went stale, the
+                # stale attestation would declare a possibly-live reconciler ABANDONED and invite a
+                # third process to replay underneath it -- the exact false-death path Option 3
+                # exists to remove.
+                "    owner_death_attested_by = NULL, owner_death_attested_at = NULL, "
+                "    owner_death_attested_for_token = NULL "
                 "WHERE op_id = ? "
                 "  AND state = 'PREPARED' "
                 "  AND owner_token IS NOT NULL "
@@ -801,7 +817,10 @@ class GraphOperationsJournal:
             conn.execute("BEGIN IMMEDIATE")
             cursor = conn.execute(
                 "UPDATE graph_operations "
-                "SET owner_death_attested_by = ?, owner_death_attested_at = ?, updated_at = ? "
+                "SET owner_death_attested_by = ?, owner_death_attested_at = ?, updated_at = ?, "
+                # Bind the attestation to the EXACT token it is about. An operator attests that one
+                # named process is dead, never that "whoever holds this row" is dead.
+                "    owner_death_attested_for_token = owner_token "
                 "WHERE op_id = ? "
                 "  AND state = 'PREPARED' "
                 "  AND owner_token IS NOT NULL "

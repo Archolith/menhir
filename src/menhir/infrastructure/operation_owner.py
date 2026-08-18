@@ -253,7 +253,7 @@ def classify_ownership(
     writer is dead before recovery may act:
 
     * fresh lease                                        -> LIVE_OWNER (a hard veto)
-    * expired, operator has attested the death           -> ABANDONED (recoverable)
+    * expired, operator attested THIS owner's death      -> ABANDONED (recoverable)
     * expired, verifiable SAME host, PID demonstrably gone -> ABANDONED (recoverable)
     * expired, remote host or PID still present          -> OWNER_UNKNOWN (fenced, needs a human)
     * expired, same host but PID namespace unverifiable  -> OWNER_UNKNOWN (see the env assertion)
@@ -286,7 +286,16 @@ def classify_ownership(
     # An operator attesting the death is that independent evidence, and it is the sanctioned path
     # for an owner this process can never inspect. It is accepted only on an already-stale claim,
     # so it can never override a live heartbeat.
-    if str(row.get("owner_death_attested_by") or "").strip():
+    #
+    # It must also be an attestation about THIS owner. An attestation names one process; after
+    # ownership transfers, that same row carries a different writer, and honouring the old
+    # attestation would declare the NEW owner dead on the strength of evidence about its
+    # predecessor. The write side clears the attestation on transfer and on renewal, so this
+    # equality check is the read-side half of the same rule -- and it is what keeps a row written
+    # by an older binary (attestation present, subject token absent) from being trusted.
+    attested_by = str(row.get("owner_death_attested_by") or "").strip()
+    attested_for = str(row.get("owner_death_attested_for_token") or "").strip()
+    if attested_by and attested_for == token:
         return ABANDONED
 
     parts = _owner_parts(token)
