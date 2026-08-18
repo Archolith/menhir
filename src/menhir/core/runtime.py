@@ -153,11 +153,29 @@ class SagaRecoveryNotWriteReady(RuntimeError):
     """
 
 
+#: How long a starting instance waits for a peer to finish recovery before giving up.
+#: Generous, because the alternative to waiting is refusing to boot: a peer draining a large
+#: backlog is normal, and a short timeout would turn ordinary simultaneous startup into an outage.
+SAGA_GATE_WAIT_SECONDS = 300.0
+
+#: Poll interval while waiting for the gate.
+_SAGA_GATE_POLL_SECONDS = 2.0
+
+
 def _recover_saga_backlog(adapter: object) -> object | None:
     """Acquire the reconciliation gate, preflight, and drain the abandoned backlog. Live (CF-20c).
 
-    Returns None when another instance already holds the gate. That is a normal outcome, not an
-    error: the other instance is doing the work, and contending for it would be worse than skipping.
+    **This process must establish readiness itself; a peer holding the gate is not a verdict.**
+    An earlier version returned None as soon as the gate was held elsewhere and let startup
+    continue, which is unsound: while the peer holds the gate this instance's PREPAREs are blocked,
+    but if the peer then finds an unresolvable backlog, refuses its own startup and releases the
+    gate in its ``finally``, THIS instance is already alive and begins admitting writes against a
+    dirty backlog. Nothing ever told it recovery had failed.
+
+    So a held gate means wait, not proceed: poll until the peer releases it, then run recovery here
+    and reach a verdict of our own. If the gate never comes free within
+    ``SAGA_GATE_WAIT_SECONDS``, that is itself a failure to establish readiness and startup is
+    refused -- fail closed, like every other ambiguity in this subsystem.
 
     **On failure this releases the gate and lets the caller refuse to boot.** The rule being
     honoured is "keep the writer gate closed", and an instance that does not finish starting admits
@@ -165,14 +183,31 @@ def _recover_saga_backlog(adapter: object) -> object | None:
     add nothing for this process while blocking healthy peers and the very operator tooling needed
     to fix the problem, and it would outlive the process by its entire TTL.
     """
+    from time import monotonic, sleep
+
     from menhir.services.saga_preflight import build_default_dispatcher, run_preflight
     from menhir.services.saga_reconcile_gate import ReconciliationGate
 
     dispatcher = build_default_dispatcher(adapter)
     gate = ReconciliationGate()
-    if not gate.acquire():
-        logger.info("Saga recovery: reconciliation gate held elsewhere; skipping recovery")
-        return None
+
+    deadline = monotonic() + SAGA_GATE_WAIT_SECONDS
+    waited = False
+    while not gate.acquire():
+        if monotonic() >= deadline:
+            raise SagaRecoveryNotWriteReady(
+                "another instance held the saga reconciliation gate for "
+                f"{SAGA_GATE_WAIT_SECONDS:.0f}s and this instance never established its own "
+                "recovery verdict; refusing to admit saga writers"
+            )
+        if not waited:
+            waited = True
+            logger.info(
+                "Saga recovery: reconciliation gate held elsewhere; waiting for the peer to "
+                "finish before establishing readiness here"
+            )
+        sleep(_SAGA_GATE_POLL_SECONDS)
+
     try:
         report = run_preflight(dispatcher)
         if not report.clean:
@@ -265,7 +300,13 @@ async def _run_startup_saga_recovery(adapter: object) -> None:
     """
     run = await asyncio.to_thread(_recover_saga_backlog, adapter)
     if run is None:
-        return
+        # No longer reachable: a held gate is waited out rather than skipped, so every live start
+        # produces a verdict of its own. Kept as a fail-closed guard -- a None here would mean some
+        # future path returned without establishing readiness, and continuing would admit writers
+        # on no evidence at all.
+        raise SagaRecoveryNotWriteReady(
+            "saga recovery returned no verdict; refusing to admit saga writers"
+        )
 
     logger.info(
         "Saga recovery (run %s): scanned=%s counts=%s by_kind=%s aborted=%s write_ready=%s",
