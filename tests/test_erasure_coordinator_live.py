@@ -227,3 +227,62 @@ def test_merge_snapshot_is_erased_from_either_side_on_a_real_sidecar(coord, side
             "SELECT snapshot_json FROM merge_audit WHERE absorbed_uuid = ?", (absorbed,)
         ).fetchone()[0]
     assert "absorbed node secret" not in (snapshot or "")
+
+
+def test_membership_capture_failure_leaves_the_real_partition_intact(
+    coord, live_repo, sidecar
+):
+    """The counterexample the fake cannot prove: a real partition SURVIVES a failed capture.
+
+    The old code turned any capture error into an empty member set and carried on, so this
+    scenario ended with the partition deleted, its uuid-keyed sidecar content never purged, and
+    ``erased`` returned -- and by then nothing could enumerate the members to finish the job.
+    The property is not "the error is logged", it is "the graph is still there afterwards".
+    """
+    from unittest.mock import patch
+
+    from menhir.services.erasure_coordinator import MEMBERSHIP_CAPTURE_FAILED
+
+    group = f"test-erasure-abstain-{uuidlib.uuid4()}"
+    members = [f"{group}-m{i}" for i in range(3)]
+    live_repo.execute(
+        "UNWIND $uuids AS u CREATE (n:Entity {uuid:u, group_id:$g, test_tag:$g})",
+        params={"uuids": members, "g": group},
+    )
+    try:
+        for m in members:
+            _seed_revision(sidecar, m, f"content of {m}")
+
+        with patch.object(
+            coord.graph_adapter,
+            "capture_namespace_uuids",
+            side_effect=ConnectionError("neo4j went away mid-erasure"),
+        ):
+            out = coord.erase_namespace(group)
+
+        assert out["reason"] == MEMBERSHIP_CAPTURE_FAILED
+        # Nothing destroyed: every member still in the real graph.
+        for m in members:
+            assert _exists(live_repo, m) is True
+        # Sidecar content untouched, so a later successful run can still erase it.
+        for m in members:
+            assert _revisions(sidecar, m) == [(f"content of {m}", f"content of {m}")]
+        # No durable intent, so no reconciler will try to resume a half-done erasure.
+        with sqlite3.connect(sidecar) as conn:
+            unresolved = conn.execute(
+                "SELECT COUNT(*) FROM graph_operations "
+                "WHERE operation_kind = 'EXPLICIT_ERASURE'"
+            ).fetchone()[0]
+        assert unresolved == 0
+
+        # And the retry the abstain promises is real: the same call succeeds once the graph
+        # answers again, which is what makes failing closed safe rather than merely strict.
+        retry = coord.erase_namespace(group)
+        assert retry["reason"] in (ERASED, GRAPH_ALREADY_ABSENT)
+        for m in members:
+            assert _exists(live_repo, m) is False
+            assert _revisions(sidecar, m) == [(None, None)]
+    finally:
+        live_repo.execute(
+            "MATCH (n) WHERE n.test_tag = $g DETACH DELETE n", params={"g": group}
+        )
