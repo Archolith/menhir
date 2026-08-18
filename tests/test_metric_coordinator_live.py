@@ -142,7 +142,7 @@ def test_crash_replay_against_real_graph_does_not_fork(live_coord, test_neo4j_re
     )[0]["c"] == 0
 
     monkeypatch.setattr(live_coord.graph_adapter, "record_metric", real_record)
-    out = live_coord.reconcile()
+    out = live_coord._replay_prepared()  # live sweep: reconcile() is observation-only since CF-20a
     assert out["replayed"] == 1 and out["drifted"] == 0
 
     rows = test_neo4j_repo.execute(

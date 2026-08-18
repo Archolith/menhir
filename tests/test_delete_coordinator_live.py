@@ -198,7 +198,7 @@ def test_crash_after_delete_commits_on_reconcile(coord, live_repo, nodes):
     assert not _exists(live_repo, nodes["target"]), "the delete landed"
     assert len(coord.journal.list_by_state("PREPARED")) == 1
 
-    out = coord.reconcile()
+    out = coord._replay_prepared()  # live sweep: reconcile() is observation-only since CF-20a
     assert out == {"committed": 1, "needs_review": 0}
     assert coord.journal.list_by_state("PREPARED") == []
 
@@ -216,6 +216,6 @@ def test_crash_before_delete_needs_review_and_is_not_retried(coord, live_repo, n
     monkeypatch.undo()
 
     assert _exists(live_repo, nodes["target"])
-    out = coord.reconcile()
+    out = coord._replay_prepared()  # live sweep: reconcile() is observation-only since CF-20a
     assert out == {"committed": 0, "needs_review": 1}
     assert _exists(live_repo, nodes["target"]), "reconcile must NOT delete it now"

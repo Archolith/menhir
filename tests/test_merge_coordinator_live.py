@@ -166,7 +166,7 @@ def test_crash_after_mutation_replays_as_committed(coord, live_repo, pair):
 
     # Reconcile: the survivor carries this op's marker, so replay is a no-op that commits.
     coord.journal.mark_committed = real_commit  # type: ignore[method-assign]
-    out = coord.reconcile()
+    out = coord._replay_prepared()  # live sweep: reconcile() is observation-only since CF-20a
     assert out == {"replayed": 1, "drifted": 0, "failed": 0}
     assert coord.journal.get(prepared[0]["op_id"])["state"] == "COMMITTED"
     assert coord.journal.list_by_state("PREPARED") == []
@@ -192,7 +192,7 @@ def test_drifted_pair_is_quarantined_not_committed(coord, live_repo, pair, monke
     live_repo.execute("MATCH (n:Entity {uuid:$u}) DETACH DELETE n", params={"u": pair["a"]})
 
     monkeypatch.undo()
-    out = coord.reconcile()
+    out = coord._replay_prepared()  # live sweep: reconcile() is observation-only since CF-20a
     assert out["drifted"] == 1 and out["replayed"] == 0
     assert coord.journal.get(op_id)["state"] == "NEEDS_REVIEW"
 
@@ -290,7 +290,7 @@ def test_replay_after_another_merge_touched_survivor_is_not_false_drift(coord, l
     assert fenced["reason"] == "PREPARE_FAILED"
 
     # Reconcile A: it succeeded, so it COMMITs (never a false NEEDS_REVIEW) and releases the fence.
-    out = coord.reconcile()
+    out = coord._replay_prepared()  # live sweep: reconcile() is observation-only since CF-20a
     assert out["drifted"] == 0, "op A succeeded; reconcile must commit it, not quarantine it"
     assert coord.journal.get(op_a)["state"] == "COMMITTED"
 
