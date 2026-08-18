@@ -184,33 +184,67 @@ class RuntimeProviderDataOpsMixin:
         # below cannot express "did not run", so an operator would see a namespace reported as
         # empty when in fact nothing was attempted. Raise instead -- the erasure touched nothing,
         # so retrying once the graph is reachable is safe.
-        from menhir.services.erasure_coordinator import MEMBERSHIP_CAPTURE_FAILED
+        from menhir.services.erasure_coordinator import (
+            ERASED,
+            GRAPH_ALREADY_ABSENT,
+            MEMBERSHIP_CAPTURE_FAILED,
+            RESIDUAL_CONTENT,
+        )
 
-        if outcome.get("reason") == MEMBERSHIP_CAPTURE_FAILED:
+        reason = outcome.get("reason")
+        if reason == MEMBERSHIP_CAPTURE_FAILED:
             raise RuntimeError(
                 f"erasure of namespace {namespace!r} abstained: its membership could not be "
                 f"enumerated, so nothing was deleted. Retry when the graph is reachable."
             )
-        # The return shape is deliberately unchanged. A documented response contract is not the
-        # place to smuggle new fields, and an existing test asserts this dict exactly. The erasure
-        # detail goes to the log instead -- including any content the registry could not address,
-        # which is content this erasure did NOT remove and an operator must not assume gone.
+        if reason == RESIDUAL_CONTENT:
+            # The purge did not cover what it claimed and the saga is quarantined for review.
+            # Returning a row count here would report a quarantined operation as a completed
+            # deletion, which is the failure mode this whole finding is about.
+            raise RuntimeError(
+                f"erasure of namespace {namespace!r} left residual content after the purge and "
+                f"has been quarantined for review (op_id={outcome.get('op_id')}); "
+                f"residual={outcome.get('residual')}"
+            )
+
         unaddressable = outcome.get("unaddressable") or []
-        if unaddressable:
+        not_covered = outcome.get("not_covered") or []
+        if unaddressable or not_covered:
             logger.warning(
-                "erasure %s for namespace %s left unaddressable content: %s",
+                "erasure %s for namespace %s did not remove everything: unaddressable=%s "
+                "not_covered=%s",
                 outcome.get("op_id"),
                 namespace,
                 sorted(unaddressable),
+                sorted(not_covered),
             )
         logger.info(
             "erasure %s for namespace %s: reason=%s purged=%s",
             outcome.get("op_id"),
             namespace,
-            outcome.get("reason"),
+            reason,
             outcome.get("purged"),
         )
-        return {"namespace": namespace, "deleted": int(outcome.get("graph_deleted") or 0)}
+        # The response now carries completeness. The previous shape was justified on the grounds
+        # that a documented contract is not the place to smuggle new fields -- true while the
+        # extra detail was merely diagnostic, and false now: whether the erasure actually removed
+        # everything is not a detail about the answer, it IS the answer. Flattening it meant the
+        # coordinator's "I could not cover this content class" was computed, logged, and then
+        # discarded one layer below the operator who needed it.
+        return {
+            "namespace": namespace,
+            "deleted": int(outcome.get("graph_deleted") or 0),
+            "reason": reason,
+            # False whenever a content class was left behind, whether because nothing can ever
+            # address it or because THIS operation could not derive its subjects.
+            "complete": bool(
+                reason in (ERASED, GRAPH_ALREADY_ABSENT)
+                and not unaddressable
+                and not not_covered
+            ),
+            "unaddressable": sorted(unaddressable),
+            "not_covered": sorted(not_covered),
+        }
 
     async def enqueue_pending_episode(self, episode_uuid: str) -> bool:
         return bool(

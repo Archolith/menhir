@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -192,7 +192,12 @@ async def test_delete_namespace_deletes_explicit_silo() -> None:
 
     adapter.delete_namespace.assert_called_once_with("alpha", namespace="alpha")
     adapter.count_namespace.assert_called_once_with("alpha", namespace="alpha")
-    assert result == {"namespace": "alpha", "deleted": 7}
+    # Completeness is part of the answer now, not a log line: an operator must be able to see
+    # that a content class was left behind without reading the server log (CF-165).
+    assert result["namespace"] == "alpha"
+    assert result["deleted"] == 7
+    assert result["complete"] is True
+    assert result["not_covered"] == []
 
 
 @pytest.mark.unit
@@ -214,7 +219,8 @@ async def test_delete_namespace_force_bypasses_max_nodes_gate() -> None:
     result = await backend.delete_namespace("alpha", max_nodes=200, force=True)
 
     adapter.delete_namespace.assert_called_once_with("alpha", namespace="alpha")
-    assert result == {"namespace": "alpha", "deleted": 500}
+    assert result["namespace"] == "alpha"
+    assert result["deleted"] == 500
 
 
 @pytest.mark.unit
@@ -282,3 +288,62 @@ async def test_contradiction_search_defaults_to_default_namespace(
     await svc._check_contradictions_batch([{"uuid": "n-1", "content": "legacy node"}])
 
     assert stub_graphiti_client.search_scored_calls[0]["group_ids"] == [""]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_delete_namespace_surfaces_an_incomplete_erasure():
+    """The coordinator's "I could not cover this" must reach the caller, not just the log.
+
+    Regression for the CF-165 closure residual: delete_namespace collapsed every outcome to
+    {namespace, deleted}, so erased_incomplete, not_covered and the residual-content quarantine
+    were all indistinguishable from a clean deletion at the API boundary.
+    """
+    from menhir.services.erasure_coordinator import ERASED_INCOMPLETE
+
+    backend, adapter = _backend_with_adapter(delete_count=3, node_count=3)
+    with patch.object(
+        backend, "_erasure",
+        return_value=SimpleNamespace(
+            erase_namespace=MagicMock(
+                return_value={
+                    "reason": ERASED_INCOMPLETE,
+                    "op_id": "op-1",
+                    "graph_deleted": 3,
+                    "purged": {},
+                    "unaddressable": ["mcp_events.payload_preview"],
+                    "not_covered": ["recall_receipts.reason"],
+                }
+            )
+        ),
+    ):
+        result = await backend.delete_namespace("alpha")
+
+    assert result["deleted"] == 3
+    assert result["complete"] is False
+    assert result["reason"] == ERASED_INCOMPLETE
+    assert result["not_covered"] == ["recall_receipts.reason"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_delete_namespace_refuses_to_report_a_quarantined_erasure():
+    """residual_content_after_purge means the purge did not do its job and the saga is held
+    for review. Reporting a row count for it would call a quarantined operation a success."""
+    from menhir.services.erasure_coordinator import RESIDUAL_CONTENT
+
+    backend, adapter = _backend_with_adapter(delete_count=3, node_count=3)
+    with patch.object(
+        backend, "_erasure",
+        return_value=SimpleNamespace(
+            erase_namespace=MagicMock(
+                return_value={
+                    "reason": RESIDUAL_CONTENT,
+                    "op_id": "op-2",
+                    "residual": {"memory_revisions.old_value": 4},
+                }
+            )
+        ),
+    ):
+        with pytest.raises(RuntimeError, match="quarantined"):
+            await backend.delete_namespace("alpha")
