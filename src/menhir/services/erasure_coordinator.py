@@ -91,6 +91,13 @@ class ErasureCoordinator:
     def __post_init__(self) -> None:
         self.journal._ensure_ready()
         self.subjects._ensure_ready()
+        # The purge is registry-driven over the TELEMETRY tables, which only McpTelemetryStore
+        # creates -- the journal's own schema pass does not. Without this, erasure raises
+        # "no such table" on a database where the journal exists but the telemetry schema has
+        # not been initialised yet.
+        from menhir.infrastructure.telemetry.store import McpTelemetryStore
+
+        McpTelemetryStore(db_path=self.journal.db_path)._ensure_ready()
 
     # ------------------------------------------------------------------ public entry points
     def erase_memory(self, node_uuid: str, *, dry_run: bool = False) -> dict[str, Any]:
@@ -152,7 +159,12 @@ class ErasureCoordinator:
             target_uuid=None,
             # A namespace erase is not a participant set, so it fences on its own key instead.
             target_key=f"erasure:namespace:{group_id}",
-            graph_present=bool(member_uuids),
+            # ALWAYS attempt the graph delete, never conditioned on whether membership capture
+            # succeeded. Capture failure is deliberately non-fatal, so deriving presence from it
+            # meant a failed capture silently skipped the graph deletion and still reported
+            # success -- leaving exactly the nodes the operator asked to erase. An empty or
+            # already-deleted partition just deletes 0 rows.
+            graph_present=True,
             delete_graph=lambda: int(
                 self.graph_adapter.delete_namespace(group_id, namespace=namespace)
             ),

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any
 
 from menhir.domain.namespace import DEFAULT_NAMESPACE, namespace_to_group_id
@@ -18,6 +19,8 @@ from .backend_shared import (
     _push_background_error,
     _to_jsonable,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class RuntimeProviderDataOpsMixin:
@@ -77,10 +80,42 @@ class RuntimeProviderDataOpsMixin:
             await self._off_loop(self.built.graph_adapter.promote_memory, node_uuid)
         )
 
+    def _erasure(self) -> Any:
+        """The erasure saga, built once per provider and cached.
+
+        Cached because constructing it re-runs the sidecar schema check; the coordinator itself
+        holds no per-request state.
+        """
+        existing = getattr(self, "_erasure_coordinator", None)
+        if existing is None:
+            from menhir.services.erasure_coordinator import ErasureCoordinator
+
+            existing = ErasureCoordinator(graph_adapter=self.built.graph_adapter)
+            self._erasure_coordinator = existing
+        return existing
+
     async def delete_memory(self, node_uuid: str) -> bool:
-        return bool(
-            await self._off_loop(self.built.graph_adapter.delete_memory, node_uuid)
-        )
+        """Erase a memory: the graph node AND every sidecar row addressable to it (CF-165).
+
+        This used to be a graph-only DETACH DELETE, which left the node's verbatim prior content
+        readable in the SQLite sidecar. It now runs the durable erasure saga instead.
+
+        Two behaviour changes worth knowing. It returns True when sidecar content was erased even
+        if the graph node was already absent -- an absorbed merge participant is removed from the
+        graph while its recovery snapshot survives, so that case is a real erasure, not a
+        "not found". And it is journaled, so a crash mid-erasure is resumed rather than leaving
+        content behind.
+
+        The return type stays ``bool`` deliberately: widening it would break this method's
+        Protocol, its HTTP client, and every MCP caller. The saga distinguishes
+        ``graph_already_absent`` from ``nothing_to_erase`` internally, but callers currently
+        cannot see which -- recorded as a known gap rather than smuggled through this signature.
+        """
+        from menhir.services.erasure_coordinator import NOTHING_TO_ERASE
+
+        outcome = await self._off_loop(self._erasure().erase_memory, node_uuid)
+        reason = (outcome or {}).get("reason")
+        return bool(reason and reason != NOTHING_TO_ERASE)
 
     async def delete_namespace(
         self,
@@ -125,10 +160,32 @@ class RuntimeProviderDataOpsMixin:
                 f"to inspect the count first without deleting anything"
             )
 
-        deleted = await self._off_loop(
-            self.built.graph_adapter.delete_namespace, group_id, namespace=namespace
+        # Erasure, not a bare graph delete: the namespace's members are captured before the
+        # partition is destroyed, then their sidecar content is purged too. The blast-radius gate
+        # above is unchanged and still runs first.
+        outcome = await self._off_loop(
+            self._erasure().erase_namespace, group_id, namespace=namespace
         )
-        return {"namespace": namespace, "deleted": int(deleted)}
+        # The return shape is deliberately unchanged. A documented response contract is not the
+        # place to smuggle new fields, and an existing test asserts this dict exactly. The erasure
+        # detail goes to the log instead -- including any content the registry could not address,
+        # which is content this erasure did NOT remove and an operator must not assume gone.
+        unaddressable = outcome.get("unaddressable") or []
+        if unaddressable:
+            logger.warning(
+                "erasure %s for namespace %s left unaddressable content: %s",
+                outcome.get("op_id"),
+                namespace,
+                sorted(unaddressable),
+            )
+        logger.info(
+            "erasure %s for namespace %s: reason=%s purged=%s",
+            outcome.get("op_id"),
+            namespace,
+            outcome.get("reason"),
+            outcome.get("purged"),
+        )
+        return {"namespace": namespace, "deleted": int(outcome.get("graph_deleted") or 0)}
 
     async def enqueue_pending_episode(self, episode_uuid: str) -> bool:
         return bool(

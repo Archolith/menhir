@@ -120,6 +120,18 @@ def _where_clause_for(
     return f"{key_column} IN ({placeholders})", list(values)
 
 
+def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
+    """Whether ``table`` exists. A registry entry for a missing table holds no content.
+
+    Skipping is correct rather than lenient: the registry is a static declaration, so it can
+    legitimately name a table a given database has not created yet.
+    """
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name = ? LIMIT 1", (table,)
+    ).fetchone()
+    return row is not None
+
+
 def _is_not_null(conn: sqlite3.Connection, table: str, column: str) -> bool:
     """Whether ``column`` is declared NOT NULL, so redaction must use '' rather than NULL."""
     for row in conn.execute(f"PRAGMA table_info({table})").fetchall():
@@ -144,6 +156,8 @@ def count_residual_content(
     residual: dict[str, int] = {}
     for entry in CONTENT_COLUMNS:
         if entry.shape is ErasureShape.UNADDRESSABLE:
+            continue
+        if not _table_exists(conn, entry.table):
             continue
         clause = _where_clause_for(entry.shape, entry.key_columns, subjects)
         if clause is None:
@@ -186,6 +200,8 @@ def purge_content(
         key = f"{entry.table}.{entry.column}"
         if entry.shape is ErasureShape.UNADDRESSABLE:
             skipped.append(key)
+            continue
+        if not _table_exists(conn, entry.table):
             continue
         clause = _where_clause_for(entry.shape, entry.key_columns, subjects)
         if clause is None:
