@@ -38,7 +38,7 @@ class TierFilteredFastMCP(FastMCP):
     mis-selecting from, tools they are not allowed to invoke.
 
     Note the SDK's ``FastMCP`` (``mcp.server.fastmcp``) has no tool-transform hook
-    like the ``fastmcp`` v2 package used by cth_mcp_framework's gateway, so we
+    like the ``fastmcp`` v2 package used by archolith_mcp_framework's gateway, so we
     override ``list_tools`` directly — that is the only seam available here.
     """
 

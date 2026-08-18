@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-08-18 - Import the MCP framework by its real name; upgrade cryptography
+
+- `menhir.mcp.server` imported `cth_mcp_framework`, the pre-migration package name. That name only
+  still resolved because `archolith-mcp-framework` ships a back-compat shim module; the declared
+  dependency has been `archolith-mcp-framework @ v0.2.0` for some time. The import now names the
+  package it actually depends on, so the shim is no longer load-bearing here.
+- Two stale prose references updated to match (`api/mcp_remote.py`, `tests/test_mcp_gateway.py`).
+  `test_backend_mcp_boundaries.py` deliberately still lists `cth_mcp_framework` among the roots
+  `menhir.core` may not import -- that is a forbidden-import guard, and keeping the old name makes
+  it stricter, not staler.
+- Upgraded `cryptography` 49.0.0 -> 50.0.0 (GHSA-g6cj-pr64-35w5, high). The advisory covers
+  PKCS#7 EnvelopedData decryption, which nothing in this dependency tree calls -- the package
+  arrives transitively under `joserfc`/`authlib`, and their `PKCS7` usage is CBC block padding,
+  an unrelated API of the same name. Upgraded on hygiene grounds, not reachable exposure.
+
 ## 2026-08-17 - Live saga recovery, behind a per-deployment preflight
 
 - Crashed saga operations now have a recovery path that actually runs. A PREPARED row left by a

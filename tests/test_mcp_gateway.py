@@ -1,6 +1,6 @@
 """Tests for MCP tool registration — replaces the old gateway dispatch tests.
 
-After migrating to cth-mcp-framework, the gateway.py with its hand-rolled
+After migrating to archolith-mcp-framework, the gateway.py with its hand-rolled
 dispatch is gone. These tests verify that all tools are properly registered
 on the MCP server and can be called directly.
 """

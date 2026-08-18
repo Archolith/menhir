@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 
 import anyio
 
-from cth_mcp_framework import create_gateway_server, run_server
+from archolith_mcp_framework import create_gateway_server, run_server
 
 from menhir.infrastructure.logging_config import configure_logging
 from menhir.mcp.lifecycle import (
