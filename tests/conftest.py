@@ -1656,3 +1656,29 @@ def pid_namespace_verifiable(monkeypatch):
     depend on it, and a test that forgets it fences instead of silently passing.
     """
     monkeypatch.setenv(_operation_owner.HOST_PID_NAMESPACE_ENV, "1")
+
+
+@pytest.fixture(autouse=True)
+def _clear_saga_admission_refusal():
+    """Reset the process-lifetime saga refusal latch around EVERY test.
+
+    ``runtime._saga_admission_refusal`` is deliberately a module global that is never cleared in
+    production: a refusal to admit saga writers is a fact about the process, and a shutdown must not
+    be able to erase it. Under pytest the whole suite is one process, so any test that triggers a
+    refusal permanently poisons every later test that reaches ``_initialize_services`` -- which is
+    exactly what happened: two startup-refusal tests latched it, and the M0 retrieval and sidecar
+    consistency tests then failed with "already refused saga write admission" instead of running.
+
+    ``monkeypatch.setattr(rt, "_saga_admission_refusal", None)`` inside a test is not a substitute.
+    It restores whatever the value was on entry, so once the latch is set it puts the poison back.
+
+    autouse and reset on BOTH sides: before, so a test never inherits a neighbour's refusal; after,
+    so a test that legitimately triggers one does not leak it forward.
+    """
+    from menhir.core import runtime as _runtime
+
+    _runtime._saga_admission_refusal = None
+    try:
+        yield
+    finally:
+        _runtime._saga_admission_refusal = None
