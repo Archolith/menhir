@@ -37,17 +37,26 @@ _TRANSIENT_BACKOFF_BASE = 0.5
 SAGA_MUTATION_TIMEOUT_S = 30.0
 
 #: Driver-level acquisition budget (neo4j WorkspaceConfig default, 6.2.0). Named here because the
-#: saga's ownership TTL must be computed against the WHOLE mutation window, and acquisition is part
-#: of that window: a call can wait this long before its transaction timeout even starts counting.
+#: saga's ownership TTL is sized against the WHOLE mutation window, and acquisition is part of that
+#: window: a call can wait this long before its transaction timeout even starts counting. Sizing
+#: only -- see mutation_window_seconds; none of this proves when a writer has stopped.
 _CONNECTION_ACQUISITION_TIMEOUT_S = 60.0
 
 
 def mutation_window_seconds(timeout_s: float, *, statements: int = 1) -> float:
-    """Worst-case wall time a bounded mutation can occupy, across every retry attempt (CF-211).
+    """Budgeted wall time a bounded mutation is EXPECTED to occupy, across every retry attempt.
 
-    The ownership TTL must exceed THIS, not one attempt. An operation whose lease expires while it
-    is still legitimately executing would be classified ABANDONED and replayed by a reconciler,
-    which is the double-apply the ownership model exists to prevent.
+    **Not a proven upper bound, and recovery must not treat it as one.** An earlier version of this
+    docstring said the ownership TTL had to exceed this figure so that expiry could be read as
+    ABANDONED. That reasoning was withdrawn: ``Query(timeout=...)`` bounds the SERVER transaction,
+    while the client materialises a lazy result over a socket with no comparable read deadline, so
+    no figure computed here establishes that a writer has stopped executing. Recovery now requires
+    positive evidence of writer death instead (see ``operation_owner.classify_ownership``), and this
+    number is not part of that argument.
+
+    What it is still good for: sizing the ownership TTL so a HEALTHY writer is not asked to renew
+    more often than necessary, and so a lease comfortably outlives ordinary work. Getting it wrong
+    costs renewal churn or delayed recovery -- it can no longer cost a double-apply.
 
     Budget per attempt: connection acquisition + the bounded transaction. Between attempts Menhir
     sleeps ``_TRANSIENT_BACKOFF_BASE * 2**n``. Deliberately pessimistic -- it assumes every attempt

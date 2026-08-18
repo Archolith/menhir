@@ -13,11 +13,18 @@ what makes recovery safe is that a writer which has LOST its claim stops initiat
 
     fresh heartbeat            -> a reconciler never replays the row
     heartbeat lost             -> the writer starts nothing new
-    bounded in-flight mutation -> the already-dispatched statement must finish within its bound
-    expiry after that bound    -> ABANDONED is now safe to replay
 
-An already-dispatched statement cannot be recalled, which is exactly why part 1 exists: recovery
-waits out an expiry chosen to exceed the maximum time such a statement could still be running.
+**The chain stops there, deliberately.** An earlier version of this note continued "bounded
+in-flight mutation -> expiry after that bound -> ABANDONED is now safe to replay". That step was
+withdrawn: a transaction timeout bounds the SERVER, while the client materialises a lazy result
+with no comparable deadline, so elapsed time never establishes that an already-dispatched statement
+has finished. Recovery therefore does NOT wait out an expiry chosen to exceed that time -- it
+requires positive evidence that the writer process is dead (see
+``operation_owner.classify_ownership``).
+
+What this heartbeat contributes is the negative half only: a writer that has lost its claim
+initiates nothing further. An already-dispatched statement still cannot be recalled, and nothing
+here pretends otherwise -- that residual risk is what the death-evidence rule exists to absorb.
 """
 
 from __future__ import annotations
