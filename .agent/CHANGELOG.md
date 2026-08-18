@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-08-17 - Restore live crash-recovery coverage broken by the CF-20a refactor
+
+- CF-20a made `reconcile()` observation-only. Seven call sites across four live coordinator test
+  files still asserted real replay, so all seven had been failing since that change -- unseen,
+  because online tests are deselected by default and every suite run reported green with
+  `190 deselected`.
+- The invariants those tests own are the ones live activation rests on: a PREPARED row replays
+  exactly once, drift quarantines without mutating, a missing precondition fails closed. The
+  refactor had removed the evidence for its own safety argument.
+- The seven sites now call `_replay_prepared()`, the live sweep kept under a private name for
+  exactly this reason. Assertions are unchanged; the return shape already matched.
+- Added live-graph coverage for the dispatcher, which had none: it was exercised only against stub
+  handlers offline, despite being the single live replay authority. Five online tests cover the
+  live-writer veto, real classification reaching already-applied and drift verdicts through the
+  dispatcher against a real graph, the legacy quarantine inside a real mixed backlog, and the
+  refusal of live replay so activation cannot happen silently.
+- Live replay THROUGH the dispatcher remains uncovered because no such path exists yet.
+  `_replay_prepared` still has no production caller.
+
 ## 2026-08-17 - Legacy unmerge rows quarantine instead of vanishing
 
 - `LEGACY_ENTITY_UNMERGE` rows were written by the legacy coordinator and claimed by no reconciler,
