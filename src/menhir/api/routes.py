@@ -598,6 +598,10 @@ async def delete_memory(request: Request, uuid: str) -> dict:
     _require_tier("operator")
     _try_record_destructive_op_rest("delete_memory")
     backend = _get_backend(request)
+    # Deliberately still delete_memory, not erase_memory. Both run the same erasure saga -- the
+    # only difference is that this one flattens the outcome to a bool. Switching the REST route
+    # to the richer call is an external API change with its own contract test, so it is a
+    # separate decision rather than a side effect of adding erase_memory.
     deleted = await backend.delete_memory(uuid)
     return {"uuid": uuid, "deleted": deleted}
 

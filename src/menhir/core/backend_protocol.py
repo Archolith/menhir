@@ -85,7 +85,21 @@ class MemoryBackend(Protocol):
         ...
 
     async def delete_memory(self, node_uuid: str) -> bool:
-        """Delete a memory node by UUID."""
+        """Erase a memory by UUID. True if anything was erased.
+
+        Kept boolean for compatibility; use :meth:`erase_memory` when the caller needs to know
+        WHICH outcome occurred.
+        """
+        ...
+
+    async def erase_memory(self, node_uuid: str) -> dict[str, Any]:
+        """Erase a memory and report the outcome (CF-165).
+
+        Distinguishes ``erased`` from ``graph_already_absent`` (the node was gone from the
+        graph but sidecar content was erased -- the state a merge leaves its absorbed
+        participant in) and from ``nothing_to_erase``. A bare bool collapses the middle case
+        into "not found", which is exactly wrong: something WAS erased.
+        """
         ...
 
     async def delete_namespace(

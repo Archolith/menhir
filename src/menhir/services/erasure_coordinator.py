@@ -282,8 +282,19 @@ class ErasureCoordinator:
             }
 
         self.journal.mark_committed(op_id)
+        # Three outcomes, not two. "The graph had nothing" and "nothing existed anywhere" are
+        # different answers: the first still erased stored content, the second erased nothing at
+        # all and must not report success, or delete_memory would claim an erasure that never
+        # happened for a uuid that exists nowhere.
+        purged_total = sum(result.rows_affected.values())
+        if graph_deleted:
+            reason = ERASED
+        elif purged_total:
+            reason = GRAPH_ALREADY_ABSENT
+        else:
+            reason = NOTHING_TO_ERASE
         return {
-            "reason": ERASED if graph_deleted else GRAPH_ALREADY_ABSENT,
+            "reason": reason,
             "op_id": op_id,
             "graph_deleted": graph_deleted,
             "purged": result.rows_affected,

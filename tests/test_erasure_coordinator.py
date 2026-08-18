@@ -443,3 +443,42 @@ def test_erased_merge_snapshot_reads_as_erased_not_corrupt(tmp_path):
     with pytest.raises(LegacySnapshotError) as corrupt:
         parse("{not json")
     assert not isinstance(corrupt.value, SnapshotErasedError)
+
+
+def test_backend_reports_which_erasure_outcome_occurred(tmp_path, monkeypatch):
+    """The distinction a bool cannot carry, end to end through the backend.
+
+    graph_already_absent means the node was gone but content WAS erased. Collapsing that into
+    "not found" tells the caller nothing happened, when in fact their content was destroyed.
+    """
+    import asyncio
+
+    from menhir.core.backend_runtime_data_ops import RuntimeProviderDataOpsMixin
+
+    class Provider(RuntimeProviderDataOpsMixin):
+        def __init__(self, coord):
+            self._erasure_coordinator = coord
+
+        async def _off_loop(self, fn, *args, **kwargs):
+            return fn(*args, **kwargs)
+
+    db = tmp_path / "t.db"
+    McpTelemetryStore(db_path=db)._ensure_ready()
+    coord = ErasureCoordinator(
+        graph_adapter=FakeAdapter(present=False),
+        journal=GraphOperationsJournal(db_path=db),
+        subjects=ErasureSubjectStore(db_path=db),
+    )
+    provider = Provider(coord)
+    _seed_revision(db, "n-absent", "residue")
+
+    outcome = asyncio.run(provider.erase_memory("n-absent"))
+    assert outcome["reason"] == GRAPH_ALREADY_ABSENT
+    assert outcome["purged"]["memory_revisions.old_value"] == 1
+
+    # delete_memory still answers True: something WAS erased, so "not found" would be a lie.
+    assert asyncio.run(provider.delete_memory("n-absent")) is True
+
+    # And a subject with nothing anywhere is the genuine negative.
+    assert asyncio.run(provider.delete_memory("n-never-existed")) is False
+    assert asyncio.run(provider.erase_memory("n-never-existed"))["reason"] == NOTHING_TO_ERASE

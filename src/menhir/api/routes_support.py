@@ -552,6 +552,7 @@ _BACKEND_METHODS = {
     "unflag_memory",
     "promote_memory",
     "delete_memory",
+    "erase_memory",
     "delete_namespace",
     "enqueue_pending_episode",
     "recall",
@@ -636,7 +637,7 @@ _BACKEND_METHODS = {
 # _BACKEND_METHODS without deciding its tier is caught by the test suite (implicit policy is
 # forbidden — memory-governance.md §4).
 _OP_TIER_OPERATOR = {
-    "delete_memory", "delete_namespace",
+    "delete_memory", "erase_memory", "delete_namespace",
     "resolve_conflict_group", "requeue_conflicts_for_llm_review", "scan_for_conflicts",
     "confirm_pending_conflicts", "record_conflict_resolution",
     "force_reset_failed_episode", "force_release_episode_lease",

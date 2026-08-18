@@ -113,9 +113,19 @@ class RuntimeProviderDataOpsMixin:
         """
         from menhir.services.erasure_coordinator import NOTHING_TO_ERASE
 
-        outcome = await self._off_loop(self._erasure().erase_memory, node_uuid)
-        reason = (outcome or {}).get("reason")
+        outcome = await self.erase_memory(node_uuid)
+        reason = outcome.get("reason")
         return bool(reason and reason != NOTHING_TO_ERASE)
+
+    async def erase_memory(self, node_uuid: str) -> dict[str, Any]:
+        """Erase a memory and report which outcome occurred (CF-165).
+
+        The richer sibling of delete_memory. ``graph_already_absent`` is the case a bool
+        cannot express: the node was gone from the graph, but sidecar content WAS erased --
+        which is what a merge leaves behind for its absorbed participant.
+        """
+        outcome = await self._off_loop(self._erasure().erase_memory, node_uuid)
+        return dict(outcome or {})
 
     async def delete_namespace(
         self,
