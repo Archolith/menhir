@@ -242,3 +242,80 @@ def test_two_party_merge_recovery_is_erased_for_either_side(tmp_path):
             "SELECT snapshot_json FROM merge_audit WHERE absorbed_uuid = ?", ("abs-1",)
         ).fetchone()[0]
     assert "secret" not in (snapshot or "")
+
+
+def test_crashed_erasure_is_resumed_from_the_inventory(tmp_path):
+    """The reason the inventory exists: resume without asking the graph anything.
+
+    Simulates a crash after PREPARE by journaling the intent and subjects, then leaving the row
+    PREPARED. Replay must purge the recorded subjects and commit, using only the inventory --
+    the namespace members are deliberately absent from request_json.
+    """
+    adapter = FakeAdapter(present=True, members=["m-1"])
+    coord = _coordinator(tmp_path, adapter)
+    db = tmp_path / "t.db"
+    _seed_revision(db, "m-1", "survived-the-crash")
+
+    op_id = "crashed-op"
+    with sqlite3.connect(db) as conn:
+        coord.journal.prepare(
+            operation_kind="EXPLICIT_ERASURE",
+            request_json='{"namespace":"ns-1","member_count":1,"targets":[]}',
+            target_key="erasure:namespace:ns-1",
+            op_id=op_id,
+            conn=conn,
+        )
+        coord.subjects.record_subjects(
+            op_id, [("NAMESPACE", "ns-1"), ("NODE_UUID", "m-1")], conn=conn
+        )
+        conn.commit()
+
+    outcome, diagnostics = coord.replay_prepared_row({"op_id": op_id})
+
+    assert outcome == "REPLAYED"
+    assert _revision_values(db, "m-1") == [(None, None)]
+    with sqlite3.connect(db) as conn:
+        state = conn.execute(
+            "SELECT state FROM graph_operations WHERE op_id = ?", (op_id,)
+        ).fetchone()[0]
+    assert state == "COMMITTED"
+    assert coord.subjects.count_unpurged(op_id) == 0
+
+
+def test_replay_of_an_already_purged_row_just_commits(tmp_path):
+    """Purge finished but the commit did not land: nothing to erase, only a state to settle."""
+    coord = _coordinator(tmp_path, FakeAdapter(present=True))
+    db = tmp_path / "t.db"
+    op_id = "done-but-uncommitted"
+    with sqlite3.connect(db) as conn:
+        coord.journal.prepare(
+            operation_kind="EXPLICIT_ERASURE",
+            request_json='{"targets":["n-9"]}',
+            target_uuid="n-9",
+            op_id=op_id,
+            conn=conn,
+        )
+        coord.subjects.record_subjects(op_id, [("NODE_UUID", "n-9")], conn=conn)
+        conn.commit()
+    coord.subjects.mark_purged(op_id)
+
+    outcome, _ = coord.replay_prepared_row({"op_id": op_id})
+
+    assert outcome == "SKIPPED"
+    with sqlite3.connect(db) as conn:
+        state = conn.execute(
+            "SELECT state FROM graph_operations WHERE op_id = ?", (op_id,)
+        ).fetchone()[0]
+    assert state == "COMMITTED"
+
+
+def test_erasure_kind_is_registered_so_recovery_never_blocks_boot(tmp_path):
+    """An unmapped kind reports UNKNOWN_KIND and blocks write-readiness.
+
+    With live recovery armed that means refusing to start, so the erasure handler must be
+    registered by the same default wiring startup uses.
+    """
+    from menhir.services.saga_reconcile_dispatcher import build_handlers
+
+    handlers = build_handlers(erasure=_coordinator(tmp_path, FakeAdapter()))
+    assert "EXPLICIT_ERASURE" in handlers

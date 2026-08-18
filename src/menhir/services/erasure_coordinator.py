@@ -44,7 +44,7 @@ import sqlite3
 import uuid as uuidlib
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Mapping
 
 from menhir.infrastructure.erasure_subjects import ErasureSubjectStore
 from menhir.infrastructure.graph_operations import GraphOperationsJournal
@@ -52,6 +52,14 @@ from menhir.infrastructure.telemetry.erasure_purge import (
     ErasureSubjects,
     count_residual_content,
     purge_content,
+)
+from menhir.services.saga_reconcile_outcomes import (
+    DRIFTED,
+    REPLAYED,
+    SKIP,
+    SKIPPED,
+    WOULD_NEEDS_REVIEW,
+    WOULD_REPLAY,
 )
 from menhir.services.saga_writer_heartbeat import owned_mutation
 
@@ -278,6 +286,84 @@ class ErasureCoordinator:
             # this erasure did not remove.
             "unaddressable": list(result.skipped_unaddressable),
         }
+
+    # ------------------------------------------------------------------ recovery
+    def classify_prepared_row(
+        self, row: "Mapping[str, Any]"
+    ) -> tuple[str, dict[str, Any]]:
+        """Decide what a PREPARED erasure row needs, without mutating anything."""
+        op_id = str(row.get("op_id") or "")
+        if not op_id:
+            return WOULD_NEEDS_REVIEW, {"observed_error": "erasure row has no op_id"}
+        try:
+            subjects = self.subjects.fetch_subjects(op_id, unpurged_only=True)
+        except Exception as exc:  # noqa: BLE001
+            return WOULD_NEEDS_REVIEW, {
+                "observed_error": f"subject inventory unreadable: {type(exc).__name__}: {exc}"
+            }
+        if not subjects:
+            # PREPARE writes the intent and the inventory in one transaction, so a PREPARED row
+            # with no unpurged subjects means the purge finished but the commit did not land.
+            # Nothing left to erase; the row just needs its terminal state.
+            return SKIP, {"reason": "no unpurged subjects"}
+        return WOULD_REPLAY, {"subjects": len(subjects)}
+
+    def replay_prepared_row(self, row: "Mapping[str, Any]") -> tuple[str, dict[str, Any]]:
+        """Resume ONE crashed erasure. Unlike a delete replay, this really does re-execute.
+
+        Re-running an erasure is safe in a way that re-running a delete is not: purging content
+        that is already redacted is a no-op, and the durable subject inventory says exactly what
+        to purge without asking a graph that may already be gone. That is what the inventory is
+        for -- resuming from it is the design, not a fallback.
+
+        **The caller must already hold the right to touch this row.** Ownership is deliberately
+        not re-checked here; the only sound place for that check is inside the claim transaction
+        the caller holds.
+        """
+        op_id = str(row.get("op_id") or "")
+        outcome, diagnostics = self.classify_prepared_row(row)
+        if outcome == SKIP:
+            self.journal.mark_committed(op_id)
+            return SKIPPED, dict(diagnostics)
+        if outcome == WOULD_NEEDS_REVIEW:
+            observed = str(diagnostics.get("observed_error"))
+            self.journal.mark_needs_review(op_id, observed_error=observed)
+            return DRIFTED, {"observed_error": observed}
+
+        pending = self.subjects.fetch_subjects(op_id, unpurged_only=True)
+        node_uuids = {
+            str(r["subject_value"]) for r in pending if r["subject_type"] == "NODE_UUID"
+        }
+        namespaces = {
+            str(r["subject_value"]) for r in pending if r["subject_type"] == "NAMESPACE"
+        }
+        purge = ErasureSubjects(
+            node_uuids=frozenset(node_uuids), namespaces=frozenset(namespaces)
+        )
+
+        # Finish the graph side too: a crash before the graph delete leaves nodes whose erasure
+        # intent is already committed. Both graph calls are no-ops when the target is gone.
+        for namespace in sorted(namespaces):
+            try:
+                self.graph_adapter.delete_namespace(namespace)
+            except Exception:  # noqa: BLE001
+                logger.warning("erasure replay: namespace delete failed for %s", namespace,
+                               exc_info=True)
+        for node_uuid in sorted(node_uuids):
+            try:
+                self.graph_adapter.delete_memory(node_uuid)
+            except Exception:  # noqa: BLE001
+                logger.warning("erasure replay: node delete failed for %s", node_uuid,
+                               exc_info=True)
+
+        result = self._erase_and_verify(
+            op_id=op_id, purge=purge, graph_present=False, delete_graph=lambda: 0
+        )
+        if result.get("reason") == RESIDUAL_CONTENT:
+            return DRIFTED, {
+                "observed_error": f"{RESIDUAL_CONTENT}: {sorted(result.get('residual') or {})}"
+            }
+        return REPLAYED, {"purged": result.get("purged", {})}
 
     # ------------------------------------------------------------------ helpers
     def _connect(self) -> sqlite3.Connection:
