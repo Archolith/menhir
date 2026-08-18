@@ -46,7 +46,7 @@ class _Run:
 @pytest.mark.unit
 def test_a_clean_empty_backlog_passes_preflight(monkeypatch):
     monkeypatch.setenv(oo.HOST_PID_NAMESPACE_ENV, "1")
-    monkeypatch.setenv(oo.SAGA_WRITERS_QUIESCED_ENV, "1")
+    monkeypatch.setenv(oo.SAGA_WRITERS_GATE_AWARE_ENV, "1")
 
     report = preflight_from_run(_Run())
 
@@ -59,7 +59,7 @@ def test_a_clean_empty_backlog_passes_preflight(monkeypatch):
 def test_an_unresolvable_backlog_blocks_activation(monkeypatch):
     """A blocker means activating would leave the deployment in the fenced state it was clearing."""
     monkeypatch.setenv(oo.HOST_PID_NAMESPACE_ENV, "1")
-    monkeypatch.setenv(oo.SAGA_WRITERS_QUIESCED_ENV, "1")
+    monkeypatch.setenv(oo.SAGA_WRITERS_GATE_AWARE_ENV, "1")
 
     report = preflight_from_run(
         _Run(write_ready=False, blocking_reasons=["3 PREPARED row(s) with unprovable ownership"])
@@ -78,7 +78,7 @@ def test_an_unasserted_pid_namespace_warns_but_does_not_block(monkeypatch):
     that would push deployments toward asserting something they have not verified.
     """
     monkeypatch.delenv(oo.HOST_PID_NAMESPACE_ENV, raising=False)
-    monkeypatch.setenv(oo.SAGA_WRITERS_QUIESCED_ENV, "1")
+    monkeypatch.setenv(oo.SAGA_WRITERS_GATE_AWARE_ENV, "1")
 
     report = preflight_from_run(_Run())
 
@@ -105,7 +105,7 @@ def test_preflight_uses_the_dispatcher_it_was_given(monkeypatch):
     """A preflight that inspected different wiring would answer about a system that is not the one
     about to run."""
     monkeypatch.setenv(oo.HOST_PID_NAMESPACE_ENV, "1")
-    monkeypatch.setenv(oo.SAGA_WRITERS_QUIESCED_ENV, "1")
+    monkeypatch.setenv(oo.SAGA_WRITERS_GATE_AWARE_ENV, "1")
     calls = []
 
     class _Dispatcher:
@@ -245,7 +245,7 @@ def test_a_peer_holding_the_gate_is_waited_out_not_treated_as_readiness(monkeypa
     # patch has to reach; patching the runtime re-export would silently do nothing.
     monkeypatch.setattr(_pf, "build_default_dispatcher", lambda a: _Dispatcher())
     monkeypatch.setenv(oo.HOST_PID_NAMESPACE_ENV, "1")
-    monkeypatch.setenv(oo.SAGA_WRITERS_QUIESCED_ENV, "1")
+    monkeypatch.setenv(oo.SAGA_WRITERS_GATE_AWARE_ENV, "1")
 
     result = rt._recover_saga_backlog(object())
 
@@ -485,13 +485,13 @@ def test_unquiesced_writers_block_activation(monkeypatch):
     mixed-version writers out of scope and refuses until an operator says none can be running.
     """
     monkeypatch.setenv(oo.HOST_PID_NAMESPACE_ENV, "1")
-    monkeypatch.delenv(oo.SAGA_WRITERS_QUIESCED_ENV, raising=False)
+    monkeypatch.delenv(oo.SAGA_WRITERS_GATE_AWARE_ENV, raising=False)
 
     report = preflight_from_run(_Run())
 
     assert report.clean is False
-    assert report.writers_quiesced is False
-    assert any(oo.SAGA_WRITERS_QUIESCED_ENV in b for b in report.blockers)
+    assert report.writers_gate_aware is False
+    assert any(oo.SAGA_WRITERS_GATE_AWARE_ENV in b for b in report.blockers)
 
 
 @pytest.mark.unit
@@ -504,14 +504,14 @@ def test_unquiesced_writers_are_a_blocker_not_a_warning(monkeypatch):
     the two would make one of them wrong.
     """
     monkeypatch.delenv(oo.HOST_PID_NAMESPACE_ENV, raising=False)
-    monkeypatch.delenv(oo.SAGA_WRITERS_QUIESCED_ENV, raising=False)
+    monkeypatch.delenv(oo.SAGA_WRITERS_GATE_AWARE_ENV, raising=False)
 
     report = preflight_from_run(_Run())
 
     assert len(report.warnings) == 1, "the PID namespace stays a warning"
     assert oo.HOST_PID_NAMESPACE_ENV in report.warnings[0]
     assert len(report.blockers) == 1, "the writer quiesce is a blocker"
-    assert oo.SAGA_WRITERS_QUIESCED_ENV in report.blockers[0]
+    assert oo.SAGA_WRITERS_GATE_AWARE_ENV in report.blockers[0]
     assert report.clean is False
 
 
@@ -522,7 +522,7 @@ def test_live_startup_refuses_when_writers_are_not_quiesced(monkeypatch):
     import menhir.services.saga_preflight as _pf
 
     monkeypatch.setenv(oo.HOST_PID_NAMESPACE_ENV, "1")
-    monkeypatch.delenv(oo.SAGA_WRITERS_QUIESCED_ENV, raising=False)
+    monkeypatch.delenv(oo.SAGA_WRITERS_GATE_AWARE_ENV, raising=False)
     monkeypatch.setattr(ReconciliationGate, "acquire", lambda self: True)
     monkeypatch.setattr(ReconciliationGate, "release", lambda self: None)
 
@@ -543,5 +543,5 @@ def test_live_startup_refuses_when_writers_are_not_quiesced(monkeypatch):
 @pytest.mark.parametrize("value", ["", "0", "false", "no", "soon", "partly"])
 def test_only_an_affirmative_quiesce_counts(monkeypatch, value):
     """A hedge is not an assertion."""
-    monkeypatch.setenv(oo.SAGA_WRITERS_QUIESCED_ENV, value)
-    assert oo.saga_writers_are_quiesced() is False
+    monkeypatch.setenv(oo.SAGA_WRITERS_GATE_AWARE_ENV, value)
+    assert oo.all_saga_writers_are_gate_aware() is False
