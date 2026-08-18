@@ -205,6 +205,35 @@ def _owner_parts(token: str) -> tuple[str, int] | None:
         return None
 
 
+#: Deployment assertion: hostname equality in an owner token really does identify the SAME PID
+#: namespace, so a local PID lookup answers about the recorded writer.
+HOST_PID_NAMESPACE_ENV = "MENHIR_HOST_PID_NAMESPACE_VERIFIABLE"
+
+_TRUTHY = frozenset({"1", "true", "yes", "on"})
+
+
+def host_pid_namespace_is_verifiable() -> bool:
+    """Whether this deployment asserts that a hostname uniquely identifies a PID namespace.
+
+    :func:`classify_ownership` uses a local PID lookup as death evidence when an owner token
+    records THIS hostname. That step is sound only if hostname equality actually implies the
+    recorded PID belongs to the namespace this process can inspect -- and hostname equality does
+    NOT establish that on its own. Containers sharing a kernel, cloned images, and two nodes
+    mounting the same journal volume can all present the same hostname while their PIDs are
+    unrelated. There ``pid_alive`` would answer about a different process entirely, and answering
+    "not running" about the wrong process is a fabricated death certificate -- the exact failure
+    mode the death-evidence rule was introduced to remove.
+
+    Menhir cannot verify the property from inside the process, so it is an OPERATOR ASSERTION made
+    per deployment and checked by the CF-20c preflight. It defaults to NOT asserted. Without it,
+    automatic PID-based recovery is disabled: an expired local row fences as OWNER_UNKNOWN and the
+    only route back is a named operator attestation. That costs automatic recovery in an
+    unconfigured deployment, which is the direction this subsystem consistently prefers over
+    inferring evidence it does not have.
+    """
+    return os.environ.get(HOST_PID_NAMESPACE_ENV, "").strip().lower() in _TRUTHY
+
+
 def classify_ownership(
     row: object,
     *,
@@ -223,11 +252,16 @@ def classify_ownership(
     So expiry now demotes a claim from "fresh" to "stale", and something independent must prove the
     writer is dead before recovery may act:
 
-    * fresh lease                                   -> LIVE_OWNER (a hard veto)
-    * expired, SAME host, PID demonstrably gone      -> ABANDONED (recoverable)
-    * expired, operator has attested the death       -> ABANDONED (recoverable)
-    * expired, remote host or PID still present      -> OWNER_UNKNOWN (fenced, needs a human)
-    * no token / no expiry / unreadable              -> OWNER_UNKNOWN
+    * fresh lease                                        -> LIVE_OWNER (a hard veto)
+    * expired, operator has attested the death           -> ABANDONED (recoverable)
+    * expired, verifiable SAME host, PID demonstrably gone -> ABANDONED (recoverable)
+    * expired, remote host or PID still present          -> OWNER_UNKNOWN (fenced, needs a human)
+    * expired, same host but PID namespace unverifiable  -> OWNER_UNKNOWN (see the env assertion)
+    * no token / no expiry / unreadable                  -> OWNER_UNKNOWN
+
+    Expiry is evaluated BEFORE attestation. A fresh lease outranks everything, an attestation
+    included: a live lease means the writer renewed it moments ago, so an attestation against it
+    is stale or mistaken, and honouring it would replay underneath a running writer.
 
     The asymmetry is the point: a false ABANDONED double-applies a graph mutation, while a false
     LIVE_OWNER or OWNER_UNKNOWN only delays recovery. Every ambiguity therefore resolves away from
@@ -240,24 +274,32 @@ def classify_ownership(
     if not isinstance(token, str) or not token.strip():
         return OWNER_UNKNOWN
 
-    # An operator attesting the writer is dead is independent evidence, and outranks the clock:
-    # it is the sanctioned path for a remote or unverifiable owner.
-    if str(row.get("owner_death_attested_by") or "").strip():
-        return ABANDONED
-
     expires_at = _parse_iso(row.get("owner_lease_expires_at"))
     if expires_at is None:
         return OWNER_UNKNOWN
     if expires_at > (now or _utc_now()):
         return LIVE_OWNER
 
-    # Expired. That is a staleness signal, not a death certificate.
+    # Expired. That is a staleness signal, not a death certificate. Something INDEPENDENT of the
+    # clock must establish that the recorded writer stopped.
+
+    # An operator attesting the death is that independent evidence, and it is the sanctioned path
+    # for an owner this process can never inspect. It is accepted only on an already-stale claim,
+    # so it can never override a live heartbeat.
+    if str(row.get("owner_death_attested_by") or "").strip():
+        return ABANDONED
+
     parts = _owner_parts(token)
     if parts is None:
         return OWNER_UNKNOWN
     owner_host, owner_pid = parts
     if owner_host != (local_hostname or process_liveness.hostname()):
         # A remote PID cannot be inspected from here, so death is unprovable by this process.
+        return OWNER_UNKNOWN
+    if not host_pid_namespace_is_verifiable():
+        # Same hostname, but this deployment has NOT asserted that a hostname identifies exactly
+        # one PID namespace. The local PID table may therefore describe an unrelated process, so
+        # what looks like a death certificate would be about the wrong process.
         return OWNER_UNKNOWN
     if process_liveness.pid_alive(owner_pid):
         # Either the original writer is still running, or its PID was recycled. Both read as
@@ -291,6 +333,8 @@ __all__ = [
     "LIVE_OWNER",
     "OWNER_UNKNOWN",
     "classify_ownership",
+    "host_pid_namespace_is_verifiable",
+    "HOST_PID_NAMESPACE_ENV",
     "is_own_claim",
     "lease_expiry_iso",
     "process_owner_token",

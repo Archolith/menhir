@@ -197,7 +197,8 @@ class GraphOperationsJournal:
                         owner_token           TEXT,
                         owner_heartbeat_at    TEXT,
                         owner_lease_expires_at TEXT,
-                        owner_death_attested_by TEXT
+                        owner_death_attested_by TEXT,
+                        owner_death_attested_at TEXT
                     )
                     """
                 )
@@ -217,6 +218,7 @@ class GraphOperationsJournal:
                     "owner_heartbeat_at",
                     "owner_lease_expires_at",
                     "owner_death_attested_by",
+                    "owner_death_attested_at",
                 ):
                     if column not in operation_columns:
                         # Column names are literals from the tuple above, never caller input.
@@ -710,6 +712,10 @@ class GraphOperationsJournal:
           UTC strings from ``_utc_now_iso`` sort lexicographically in timestamp order, which is what
           makes that valid.
 
+        Those conjuncts are NECESSARY but not SUFFICIENT. Expiry alone is a staleness signal, never
+        a death certificate, so the same :func:`classify_ownership` rule the observer applies is
+        re-evaluated inside this transaction and must return ABANDONED before the UPDATE runs.
+
         A row this process already owns is NOT claimable through here: it is not abandoned, and a
         reconciler that finds its own live claim should be verifying its own state machine rather
         than re-taking a lease it never lost.
@@ -772,17 +778,36 @@ class GraphOperationsJournal:
         deliberately a human act with a name attached -- the alternative is inferring death from a
         clock, which is the premise this design removed.
 
-        Refuses on a row that is not PREPARED: a terminal operation has no writer to attest about.
+        An attestation is a safety OVERRIDE for evidence automation cannot gather -- it is not a
+        faster clock, and each WHERE conjunct keeps it from becoming one:
+
+        * ``state = 'PREPARED'`` -- a terminal operation has no writer to attest about.
+        * ``owner_token IS NOT NULL`` -- an ownerless row names no writer, so there is nobody to
+          attest the death OF. Those rows stay OWNER_UNKNOWN and need direct repair.
+        * ``owner_lease_expires_at IS NOT NULL AND <= now`` -- the claim must ALREADY be stale.
+          Attesting against a live heartbeat would let a mistaken operator authorise a replay
+          underneath a writer that renewed its lease seconds ago. :func:`classify_ownership`
+          independently refuses to read an attestation on a fresh lease, so this is the durable
+          half of a check enforced on both the write and the read side.
+
+        Both the name and the instant are stored, because an override that cannot be audited after
+        the fact is indistinguishable from the clock-based inference this replaced.
         """
         if not str(attested_by or "").strip():
             raise GraphOperationError("attested_by is required: attestation must name a person")
         self._ensure_ready()
+        now = _utc_now_iso()
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("BEGIN IMMEDIATE")
             cursor = conn.execute(
-                "UPDATE graph_operations SET owner_death_attested_by = ?, updated_at = ? "
-                "WHERE op_id = ? AND state = 'PREPARED'",
-                (str(attested_by).strip(), _utc_now_iso(), op_id),
+                "UPDATE graph_operations "
+                "SET owner_death_attested_by = ?, owner_death_attested_at = ?, updated_at = ? "
+                "WHERE op_id = ? "
+                "  AND state = 'PREPARED' "
+                "  AND owner_token IS NOT NULL "
+                "  AND owner_lease_expires_at IS NOT NULL "
+                "  AND owner_lease_expires_at <= ?",
+                (str(attested_by).strip(), now, now, op_id, now),
             )
             conn.commit()
             return cursor.rowcount == 1
