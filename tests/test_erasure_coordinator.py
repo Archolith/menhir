@@ -60,18 +60,20 @@ _LEGACY_SEED_GUARDS = (
 def _coordinator(tmp_path, adapter: FakeAdapter) -> ErasureCoordinator:
     db = tmp_path / "t.db"
     McpTelemetryStore(db_path=db)._ensure_ready()
-    # This module deliberately manufactures historical residue with raw SQL after creating the
-    # current schema. Disable only the forward guards that would make those legacy states
-    # impossible; persistence-boundary tests separately prove current writes are minimized.
-    with sqlite3.connect(db) as conn:
-        for trigger in _LEGACY_SEED_GUARDS:
-            conn.execute(f"DROP TRIGGER IF EXISTS {trigger}")
-        conn.commit()
-    return ErasureCoordinator(
+    coord = ErasureCoordinator(
         graph_adapter=adapter,
         journal=GraphOperationsJournal(db_path=db),
         subjects=ErasureSubjectStore(db_path=db),
     )
+    # This module deliberately manufactures historical residue with raw SQL after creating the
+    # current schema. Coordinator construction re-runs telemetry readiness, so disable the
+    # forward guards only after it completes; otherwise __post_init__ recreates the triggers.
+    # Persistence-boundary tests separately prove current writes are minimized.
+    with sqlite3.connect(db) as conn:
+        for trigger in _LEGACY_SEED_GUARDS:
+            conn.execute(f"DROP TRIGGER IF EXISTS {trigger}")
+        conn.commit()
+    return coord
 
 
 def _seed_revision(db, node_uuid: str, content: str = "secret") -> None:
