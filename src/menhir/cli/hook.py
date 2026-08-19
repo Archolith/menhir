@@ -55,9 +55,10 @@ def run(
                 workspace=workspace or None,
             )
     except Exception as exc:
-        # Never crash in hook mode — let Claude Code proceed
+        # Never crash in hook mode -- let Claude Code proceed. But a failure must not be
+        # indistinguishable from an empty graph (CF-40), so it is reported in the payload too.
         print(f"menhir hook: unexpected {type(exc).__name__}, emitting empty response", file=sys.stderr)
-        print(wrap_hook_response(), flush=True)
+        print(wrap_hook_response(degraded=f"unexpected {type(exc).__name__}"), flush=True)
 
 
 def _parse_stdin() -> tuple[str, str]:
@@ -69,8 +70,8 @@ def _parse_stdin() -> tuple[str, str]:
             hook_input = json.load(sys.stdin)
             session_id = hook_input.get("session_id", session_id)
             prompt = hook_input.get("prompt", "")
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"menhir hook: stdin parse failed ({type(exc).__name__})", file=sys.stderr)
     return session_id, prompt
 
 
@@ -124,8 +125,8 @@ def _run_prompt_impl(
             telemetry_store.touch_client(client_id, client_name)
         if not recall_gated:
             temporal_line = format_temporal_line(last_accessed)
-    except Exception:
-        pass
+    except Exception as exc:
+        print(f"menhir hook: temporal telemetry failed ({type(exc).__name__})", file=sys.stderr)
 
     if recall_gated:
         print(wrap_hook_response(write_nudge), flush=True)
@@ -140,14 +141,14 @@ def _run_prompt_impl(
     todos: list[dict] = []
     try:
         todos = svc.graph_adapter.list_todos(status="open", limit=5)
-    except Exception:
-        pass
+    except Exception as exc:
+        print(f"menhir hook: todo recall failed ({type(exc).__name__})", file=sys.stderr)
 
     temporal_memories: list[dict] = []
     try:
         temporal_memories = svc.graph_adapter.list_temporal_in_window(window_days=30)
-    except Exception:
-        pass
+    except Exception as exc:
+        print(f"menhir hook: temporal recall failed ({type(exc).__name__})", file=sys.stderr)
 
     # Full path: context recall (if prompt is long enough and services available)
     context_text: str | None = None
@@ -196,8 +197,8 @@ def _run_postcompact_impl(*, max_tokens: int, workspace: str | None = None) -> N
             hook_input = json.load(sys.stdin)
             session_id = hook_input.get("session_id", session_id)
             compact_summary = hook_input.get("compact_summary", "")
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"menhir hook: stdin parse failed ({type(exc).__name__})", file=sys.stderr)
 
     _load_env()
 
@@ -217,8 +218,8 @@ def _run_postcompact_impl(*, max_tokens: int, workspace: str | None = None) -> N
         last_accessed = telemetry_store.get_session_last_accessed(session_id)
         telemetry_store.touch_session(session_id, None, None)
         temporal_line = format_temporal_line(last_accessed)
-    except Exception:
-        pass
+    except Exception as exc:
+        print(f"menhir hook: temporal telemetry failed ({type(exc).__name__})", file=sys.stderr)
 
     # Fast path: flagged memories + open TODOs + TEMPORAL reminders
     flagged = svc.graph_adapter.fetch_flagged_memories(limit=10, workspace=workspace)
@@ -226,14 +227,14 @@ def _run_postcompact_impl(*, max_tokens: int, workspace: str | None = None) -> N
     todos: list[dict] = []
     try:
         todos = svc.graph_adapter.list_todos(status="open", limit=5)
-    except Exception:
-        pass
+    except Exception as exc:
+        print(f"menhir hook: todo recall failed ({type(exc).__name__})", file=sys.stderr)
 
     temporal_memories: list[dict] = []
     try:
         temporal_memories = svc.graph_adapter.list_temporal_in_window(window_days=30)
-    except Exception:
-        pass
+    except Exception as exc:
+        print(f"menhir hook: temporal recall failed ({type(exc).__name__})", file=sys.stderr)
 
     # Context recall — always, no frequency gate
     context_text: str | None = None
