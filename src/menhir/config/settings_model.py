@@ -344,6 +344,23 @@ class MemorySettings:
     # unrestricted, preserving existing behavior.
     client_tools: dict[str, frozenset[str]] = field(default_factory=dict)
 
+    # MENHIR_KNOWN_CLIENTS -- comma-separated client names that are RECOGNIZED but carry no
+    # restriction. Exists because "known" and "restricted" are different facts, and CF-32's
+    # refusal needs the first without implying the second.
+    #
+    # Under static-key auth the caller supplies its own client name, so once ANY per-client
+    # restriction is configured an unrecognized name must be refused rather than treated as
+    # unrestricted -- otherwise a shared-key holder simply names itself something unconfigured
+    # and the restriction becomes opt-in by the party it restricts. But the only registries that
+    # existed were client_namespaces and client_tools, and adding a name to either RESTRICTS it.
+    # Registering an ordinary client like `claude-code` would have forced a namespace pin on it
+    # as a side effect of making it recognized.
+    #
+    # Empty (the default) is unchanged behavior, and this list is consulted only when some
+    # restriction is configured somewhere -- a deployment with no restrictions has nothing to
+    # evade and refuses nothing.
+    known_clients: frozenset[str] = frozenset()
+
     # HTTP process snapshot
     startup_scope: str = "full"
     cors_origins: tuple[str, ...] = ()
@@ -708,6 +725,11 @@ class MemorySettings:
             client_tokens_enabled=parse_bool_env(_getenv("MENHIR_CLIENT_TOKENS_ENABLED", default=str(cls.client_tokens_enabled))),
             client_namespaces=parse_client_namespaces(_getenv("MENHIR_CLIENT_NAMESPACES", default="")),
             client_tools=parse_client_tools(_getenv("MENHIR_CLIENT_TOOLS", default="")),
+            known_clients=frozenset(
+                part.strip().lower()
+                for part in (_getenv("MENHIR_KNOWN_CLIENTS", default="") or "").split(",")
+                if part.strip()
+            ),
             startup_scope=_getenv("MENHIR_STARTUP_SCOPE", default=cls.startup_scope).strip().lower(),
             cors_origins=parse_csv_env(_getenv("MENHIR_CORS_ORIGINS", default="")),
             instance_id=_getenv("MENHIR_INSTANCE_ID", default=cls.instance_id).strip(),

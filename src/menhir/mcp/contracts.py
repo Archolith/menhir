@@ -21,6 +21,7 @@ from menhir.mcp.service_access import (
     get_request_session,
     get_request_tier,
     request_uses_query_auth,
+    require_trusted_client_identity,
 )
 from menhir.mcp.telemetry import track_mcp_call
 
@@ -127,6 +128,34 @@ def _consume_query_add_memory_budget(now: float | None = None) -> tuple[int, flo
         return len(bucket), 0.0
 
 
+class ToolScope:
+    """How a tool relates to tenant data, declared rather than inferred (CF-33).
+
+    The namespace pin used to reach a tool only when `inspect.signature(self.endpoint)` happened
+    to contain `namespace`. That is not a policy applied to callers; it is a policy applied to
+    whichever endpoints happen to name a parameter. Adding a tool silently removed it from the
+    pin's reach with no error and no log line, which is why this cluster has been patched
+    per-site four times -- CF-16, CF-157, CF-64, CF-30 -- each correct, each leaving the next
+    hole intact, and CF-30's own remediation finding a fifth inside the surface it had just fixed.
+
+    Declaring the scope does not by itself close a hole. What it does is make an unconsidered
+    tool a STARTUP FAILURE instead of a silent gap, and reduce "41 tools that are global by
+    accident" to a list of roughly nine that a human can audit in a minute.
+    """
+
+    #: Takes a `namespace` argument; the pin is injected into it.
+    NAMESPACED = "namespaced"
+    #: Addressed by uuid. The pin cannot be injected as an argument, so tenancy must be checked
+    #: at load -- the two-lookup pattern CF-64 established: refuse only when the object exists
+    #: AND belongs to another silo, so genuinely-absent objects still report "not found".
+    OBJECT = "object"
+    #: Operational state that is genuinely not tenant-scoped (scheduler control, client admin).
+    #: Kept deliberately small and reviewable.
+    GLOBAL = "global"
+
+    ALL = frozenset({NAMESPACED, OBJECT, GLOBAL})
+
+
 _TIER_RANK: dict[str, int] = {"readonly": 0, "agent": 1, "operator": 2}
 
 
@@ -163,6 +192,59 @@ def _try_record_destructive_op_mcp(tool_name: str, tier: str) -> None:
         )
     except Exception:
         pass  # Telemetry failures must never disrupt the caller
+
+
+def assert_tool_scopes_declared(tool_classes: "list[type] | tuple[type, ...]") -> None:
+    """Refuse to start when any tool has not declared its tenancy scope (CF-33).
+
+    This is the load-bearing half of the ToolScope work. The enum alone documents; this is what
+    makes an omission impossible to ship. Every finding in this cluster is an instance of one
+    thing -- a tool was added and nobody decided how it relates to tenant data -- and that was
+    invisible precisely because the consequence was silence.
+
+    Also verifies the declaration matches the signature, because a wrong declaration is worse
+    than none: a tool marked NAMESPACED whose endpoint has no `namespace` parameter would read
+    as pinned in the audit list while the pin cannot actually reach it.
+
+    Raises at import/registration time rather than logging, so a mistake stops a deploy instead
+    of reaching production as a quiet gap.
+    """
+
+    undeclared: list[str] = []
+    invalid: list[str] = []
+    mismatched: list[str] = []
+
+    for tool_cls in tool_classes:
+        name = getattr(tool_cls, "name", tool_cls.__name__)
+        scope = getattr(tool_cls, "scope", None)
+        if scope is None:
+            undeclared.append(name)
+            continue
+        if scope not in ToolScope.ALL:
+            invalid.append(f"{name}={scope!r}")
+            continue
+        declares_namespace = "namespace" in inspect.signature(tool_cls.endpoint).parameters
+        if scope == ToolScope.NAMESPACED and not declares_namespace:
+            mismatched.append(f"{name}: declared NAMESPACED but the endpoint takes no `namespace`")
+        elif scope == ToolScope.GLOBAL and declares_namespace:
+            mismatched.append(f"{name}: declared GLOBAL but the endpoint takes a `namespace`")
+
+    problems: list[str] = []
+    if undeclared:
+        problems.append(
+            "tools with no `scope` declared: "
+            + ", ".join(sorted(undeclared))
+            + " -- set scope to one of "
+            + ", ".join(sorted(ToolScope.ALL))
+            + " (see ToolScope; NAMESPACED and OBJECT are tenant-scoped, GLOBAL is not)"
+        )
+    if invalid:
+        problems.append("tools with an unrecognized `scope`: " + ", ".join(sorted(invalid)))
+    if mismatched:
+        problems.append("tools whose `scope` contradicts their signature: " + "; ".join(sorted(mismatched)))
+
+    if problems:
+        raise RuntimeError("MCP tool scope declarations are incomplete. " + " | ".join(problems))
 
 
 class BaseJsonResource(ABC):
@@ -282,6 +364,14 @@ class BaseTool:
     response_kind = "text"
     required_tier: str = "agent"  # minimum tier required to invoke this tool
 
+    #: How this tool relates to tenant data. See :class:`ToolScope`.
+    #:
+    #: Deliberately declared with NO default that grants reach. `None` means "nobody has
+    #: decided", and `assert_tool_scopes_declared` refuses to start on it -- so the failure mode
+    #: for a newly added tool is a loud startup error rather than a tool silently outside the
+    #: pin's reach, which is how every finding in this cluster came to exist.
+    scope: str | None = None
+
     def get_backend(self) -> MemoryBackend:
         return build_memory_backend()
 
@@ -362,6 +452,12 @@ class BaseTool:
                             f"retry in about {int(retry_after)}s (limit {QUERY_AUTH_ADD_MEMORY_LIMIT} per "
                             f"{int(QUERY_AUTH_ADD_MEMORY_WINDOW_SECONDS)}s)"
                         )
+            # CF-32: identity BEFORE policy. Both gates below key on `client_name`, and under
+            # static-key auth the caller supplies that value itself -- so without this check a
+            # holder of the shared key selected its own pin and its own allowlist by naming
+            # itself something unconfigured, and an unknown name meant unrestricted.
+            require_trusted_client_identity()
+
             tier = get_request_tier()
             if tier and not _tier_allows(tier, self.required_tier):
                 raise PermissionError(

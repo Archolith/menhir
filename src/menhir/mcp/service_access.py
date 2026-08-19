@@ -206,6 +206,79 @@ def get_pinned_namespace(settings: MemorySettings | None = None) -> str:
     return (settings.client_namespaces or {}).get(client_name, "")
 
 
+#: Auth modes under which the caller SUPPLIES its own `client_name` rather than having it derived
+#: from a validated credential. Under these, the name is a claim, not an identity.
+#:
+#: `oauth` and `client_token` are excluded because there the name comes from the credential the
+#: server itself issued, so a caller cannot rename itself into a different policy.
+_SELF_DECLARED_IDENTITY_MODES = frozenset({"header", "query", "admin"})
+
+
+def require_trusted_client_identity(settings: MemorySettings | None = None) -> None:
+    """Refuse a self-named caller when per-client restrictions are configured (CF-32).
+
+    Under static-key auth the caller supplies `client_name` via header or MCP metadata, and both
+    `get_pinned_namespace` and `get_client_tool_allowlist` key on that value with an unknown name
+    meaning "unrestricted". So a holder of the shared static key chose which policy applied to it
+    by naming itself something not in the config -- the restriction was opt-in by the party it
+    restricts.
+
+    The refusal is deliberately ALL-OR-NOTHING on the deployment, not per-client: if any client
+    restriction is configured, every self-named caller must be a configured name. Refusing only
+    callers who name a *restricted* client would leave the evasion completely intact, since the
+    evasion is precisely to claim a name that is not restricted.
+
+    **Operational consequence, stated plainly because it will surprise someone:** configuring a
+    pin for one client means every other static-key client must now be registered in
+    `MENHIR_CLIENT_NAMESPACES` or `MENHIR_CLIENT_TOOLS`. An unregistered client that worked
+    yesterday will be refused. That is the chosen behaviour -- fail loud, so a misconfiguration is
+    visible the first time it happens rather than silently running unrestricted -- but it is a
+    breaking change for any deployment that mixes pinned and unpinned static-key clients.
+
+    Deployments with no client restrictions at all are untouched: there is no policy to evade, so
+    there is nothing to refuse.
+
+    A name counts as recognized if it appears in ANY of the three registries. `MENHIR_KNOWN_CLIENTS`
+    exists for exactly this check: "recognized" and "restricted" are different facts, and without a
+    third list, registering an ordinary client such as `claude-code` would have forced a namespace
+    pin on it purely as a side effect of making it nameable.
+    """
+
+    settings = settings or MemorySettings.from_env()
+    restrictions_configured = bool(settings.client_namespaces) or bool(settings.client_tools)
+    if not restrictions_configured:
+        return
+
+    if get_request_auth_mode() not in _SELF_DECLARED_IDENTITY_MODES:
+        return
+
+    session = get_request_session()
+    if session is None:
+        return
+
+    client_name = (getattr(session, "client_name", "") or "").strip().lower()
+    if not client_name:
+        raise PermissionError(
+            "This deployment configures per-client restrictions, so a caller must identify "
+            "itself. Set the client name (x-menhir-client-name, or MCP client_name metadata) "
+            "to a name listed in MENHIR_KNOWN_CLIENTS, MENHIR_CLIENT_NAMESPACES or "
+            "MENHIR_CLIENT_TOOLS."
+        )
+
+    known = (
+        set(settings.client_namespaces or {})
+        | set(settings.client_tools or {})
+        | set(settings.known_clients or frozenset())
+    )
+    if client_name not in known:
+        raise PermissionError(
+            f"Unknown client name {client_name!r}. This deployment configures per-client "
+            "restrictions, so an unrecognized name is refused rather than treated as "
+            "unrestricted. Add it to MENHIR_KNOWN_CLIENTS to recognize it without restricting "
+            "it, or to MENHIR_CLIENT_NAMESPACES / MENHIR_CLIENT_TOOLS to restrict it."
+        )
+
+
 def get_client_tool_allowlist(settings: MemorySettings | None = None) -> frozenset[str]:
     """Return the tool allowlist this client is restricted to, or empty if none.
 
