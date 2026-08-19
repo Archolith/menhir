@@ -1,3 +1,17 @@
+## 2026-08-19 — merge: CF-165 end-to-end closure
+
+- Merged `fix/cf165-e2e-closure` (35 commits): subject lineage enforced at the telemetry
+  persistence boundary, dual-keyed MCP events, multi-dimensional subject keys, replay made
+  fail-closed, TurnEvidence purged on the direct-namespace form, and recall-feedback prose
+  scrubbed from the sidecar.
+- **Telemetry payload redaction is now one implementation, and it is the stricter one.** That
+  branch and wave 3 had independently built a redactor for `mcp_events.payload_preview`. An
+  allowlisted key alone is no longer enough — the value must also be identifier-shaped, which
+  closes a hole where a caller could smuggle prose through a structurally-named key such as
+  `namespace`. Redaction happens inside `_preview_of` itself, so a future writer gets the safe
+  behaviour without opting in, and the two allowlists are unioned into one 57-key list.
+- Error strings are no longer persisted verbatim; the exception type is recorded instead.
+
 ## 2026-08-19 — fix: guard the remaining UUID-addressed mutation tools (ET-002)
 
 - `unflag_memory`, `promote_memory` and `close_memory` now take a namespace and check ownership
