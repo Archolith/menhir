@@ -50,6 +50,7 @@ from menhir.domain.work_artifact import (
     INITIAL_STATUS,
     REFERENCES_TODO_EDGE,
     SUPERSEDES_EDGE,
+    SUPERSESSION_PARAMS,
     TERMINAL_ANY,
     ArtifactMedium,
     ArtifactSourceSpec,
@@ -59,6 +60,9 @@ from menhir.domain.work_artifact import (
     QuestionStatus,
     can_transition,
     legal_next_statuses,
+    require_known_medium,
+    resolve_registration,
+    supersession_cypher,
     normalize_declarations,
     relation_is_legal,
     valid_statuses,
@@ -115,14 +119,9 @@ class WorkArtifactRepository:
         that genuinely is in that state, which makes the gap findable instead of
         invisible.
         """
-        if artifact_type not in ARTIFACT_TYPES:
-            raise ValueError(f"unknown artifact_type: {artifact_type!r}")
-
-        resolved_status = status or INITIAL_STATUS[artifact_type]
-        if resolved_status not in valid_statuses(artifact_type):
-            raise ValueError(
-                f"status {resolved_status!r} is not valid for {artifact_type!r}"
-            )
+        # CF-48: the domain decides registration legality, matching how `can_transition` is
+        # already delegated a few methods down. The repository gathers and writes; it does not rule.
+        resolved_status = resolve_registration(artifact_type, status)
 
         # A caller may supply the UUID the document already declares, so a
         # clean-clone registration reuses the author's identity instead of
@@ -190,8 +189,7 @@ class WorkArtifactRepository:
         """Attach one embodiment. Several may be attached over time (md, pdf)."""
         if source is None:
             return None
-        if source.medium not in ARTIFACT_MEDIA:
-            raise ValueError(f"unknown medium: {source.medium!r}")
+        require_known_medium(source.medium)  # CF-48
 
         props = source.as_properties()
         self.neo4j.execute(
@@ -1294,10 +1292,9 @@ class WorkArtifactRepository:
             f"""
             MATCH (new:WorkArtifact {{artifact_uuid: $new_uuid}})
             MATCH (old:WorkArtifact {{artifact_uuid: $old_uuid}})
-            WHERE new.artifact_type = old.artifact_type
-              AND new.artifact_uuid <> old.artifact_uuid
-              AND NOT old.status IN $terminal
-              AND old.namespace IN [new.namespace, $default_ns]
+            WHERE """
+            + supersession_cypher()
+            + f"""
             MERGE (new)-[:{SUPERSEDES_EDGE}]->(old)
             SET old.status = $superseded, old.status_changed_at = $now, old.updated_at = $now
             RETURN count(old) AS applied
@@ -1305,7 +1302,8 @@ class WorkArtifactRepository:
             {
                 "new_uuid": new_uuid,
                 "old_uuid": old_uuid,
-                "terminal": sorted(TERMINAL_ANY),
+                # CF-48: bound by the domain's own `supersession_cypher`, from `TERMINAL_ANY`.
+                **SUPERSESSION_PARAMS,
                 "superseded": ArtifactStatus.SUPERSEDED,
                 "default_ns": DEFAULT_ARTIFACT_NAMESPACE,
                 "now": now,

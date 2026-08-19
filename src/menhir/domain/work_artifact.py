@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import Any
 
 #: Bumped when artifact normalization rules change.
 ARTIFACT_SCHEMA_VERSION = 1
@@ -174,6 +175,61 @@ def can_transition(artifact_type: str, from_status: str, to_status: str) -> bool
     if to_status in TERMINAL_ANY:
         return from_status not in TERMINAL_ANY
     return to_status in _FORWARD[artifact_type].get(from_status, frozenset())
+
+
+def resolve_registration(artifact_type: str, status: str | None) -> str:
+    """Decide the status a new artifact of this type may be registered with (CF-48).
+
+    Moved here from the repository to match `can_transition`, which the same repository already
+    delegates to. The asymmetry was the finding: ordinary transitions asked the domain, while the
+    richer aggregate operations decided for themselves in infrastructure.
+
+    Raises ValueError with the same messages the repository raised, because they are the
+    registration contract's error surface and callers key on them.
+    """
+    if artifact_type not in ARTIFACT_TYPES:
+        raise ValueError(f"unknown artifact_type: {artifact_type!r}")
+    resolved = status or INITIAL_STATUS[artifact_type]
+    if resolved not in valid_statuses(artifact_type):
+        raise ValueError(f"status {resolved!r} is not valid for {artifact_type!r}")
+    return resolved
+
+
+def require_known_medium(medium: str) -> str:
+    """Reject an embodiment medium the domain does not define (CF-48)."""
+    if medium not in ARTIFACT_MEDIA:
+        raise ValueError(f"unknown medium: {medium!r}")
+    return medium
+
+
+#: Parameter names `supersession_cypher` binds. The repository must supply these.
+SUPERSESSION_PARAMS: dict[str, Any] = {
+    "terminal": sorted(TERMINAL_ANY),
+}
+
+
+def supersession_cypher(new: str = "new", old: str = "old") -> str:
+    """Emit the legality predicate for one artifact superseding another (CF-48).
+
+    Supersession is atomic by necessity -- the SUPERSEDES edge and the status move go together or
+    neither does, or the graph can hold an edge pointing at an artifact still marked APPROVED. So
+    the MUTATION belongs in one Cypher statement. That was never a reason for the RULE to live
+    there too, which is the distinction this finding turns on.
+
+    The rule, stated once: same type, not itself, the superseded artifact is not already in a
+    terminal state, and the namespaces are compatible. `TERMINAL_ANY` is the domain's own set, so
+    adding a terminal status now reaches this predicate instead of needing a second edit in
+    infrastructure that nobody would remember to make.
+
+    The fragment is a constant: `new` and `old` are Cypher variable names this codebase chooses,
+    never caller input.
+    """
+    return "\n              AND ".join([
+        f"{new}.artifact_type = {old}.artifact_type",
+        f"{new}.artifact_uuid <> {old}.artifact_uuid",
+        f"NOT {old}.status IN $terminal",
+        f"{old}.namespace IN [{new}.namespace, $default_ns]",
+    ])
 
 
 def legal_next_statuses(artifact_type: str, from_status: str) -> frozenset[str]:
