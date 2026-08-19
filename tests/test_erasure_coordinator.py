@@ -48,9 +48,25 @@ class FakeAdapter:
         return len(self.members)
 
 
+_LEGACY_SEED_GUARDS = (
+    "trg_cf165_mcp_missing_lineage",
+    "trg_cf165_merge_infer_lineage",
+    "trg_cf165_merge_drop_unowned",
+    "trg_cf165_recall_reason_insert",
+    "trg_cf165_recall_reason_update",
+)
+
+
 def _coordinator(tmp_path, adapter: FakeAdapter) -> ErasureCoordinator:
     db = tmp_path / "t.db"
     McpTelemetryStore(db_path=db)._ensure_ready()
+    # This module deliberately manufactures historical residue with raw SQL after creating the
+    # current schema. Disable only the forward guards that would make those legacy states
+    # impossible; persistence-boundary tests separately prove current writes are minimized.
+    with sqlite3.connect(db) as conn:
+        for trigger in _LEGACY_SEED_GUARDS:
+            conn.execute(f"DROP TRIGGER IF EXISTS {trigger}")
+        conn.commit()
     return ErasureCoordinator(
         graph_adapter=adapter,
         journal=GraphOperationsJournal(db_path=db),
