@@ -7,6 +7,7 @@ import contextlib
 import logging
 import os
 import socket
+import time
 import traceback
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -37,6 +38,20 @@ from menhir.services.scheduler_tasks import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+class _LeaseLostDuringJob(Exception):
+    """Raised when a job is abandoned because lease ownership stopped being provable.
+
+    Distinct from a job failure: nothing went wrong with the work, this process simply lost
+    the right to be doing it (CF-100).
+    """
+
+    def __init__(self, operation: str) -> None:
+        super().__init__(
+            f"maintenance job `{operation}` abandoned: scheduler lease ownership is no longer provable"
+        )
+        self.operation = operation
 
 
 @dataclass
@@ -127,12 +142,18 @@ class MaintenanceScheduler:
     lease_store: SchedulerLeaseStoreProtocol = field(default_factory=SchedulerLeaseStore)
     _task: asyncio.Task[None] | None = field(default=None, init=False, repr=False)
     _stop_event: asyncio.Event = field(default_factory=asyncio.Event, init=False, repr=False)
+    # Set ONLY by _mark_lease_lost. Deliberately separate from _stop_event: an orderly stop
+    # lets the running job finish, a lost lease must interrupt it (CF-100).
+    _lease_lost_event: asyncio.Event = field(default_factory=asyncio.Event, init=False, repr=False)
     _state_lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False, repr=False)
     _jobs: dict[str, _JobState] = field(default_factory=dict, init=False, repr=False)
     _owner_id: str = field(default_factory=lambda: f"{socket.gethostname()}:{os.getpid()}:{uuid4()}", init=False, repr=False)
     _owner_pid: int = field(default_factory=os.getpid, init=False, repr=False)
     _lease_acquired: bool = field(default=False, init=False, repr=False)
     _lease_lost: bool = field(default=False, init=False, repr=False)
+    # Monotonic deadline past which this process can no longer PROVE it holds the lease.
+    # 0.0 means "never established". See _lease_is_provable (CF-100).
+    _lease_valid_until: float = field(default=0.0, init=False, repr=False)
     _lease_blocked_reason: str | None = field(default=None, init=False, repr=False)
     _last_force_takeover_at: str | None = field(default=None, init=False, repr=False)
     _last_force_takeover_reason: str | None = field(default=None, init=False, repr=False)
@@ -183,6 +204,7 @@ class MaintenanceScheduler:
         async with self._state_lock:
             if self.is_running():
                 return True
+            acquire_started = time.monotonic()
             if force_takeover:
                 previous_owner = self.lease_store.force_acquire(
                     lease_name=self.lease_name,
@@ -221,6 +243,10 @@ class MaintenanceScheduler:
                 )
                 return False
             self._lease_blocked_reason = None
+            # The acquire is itself a proof of ownership; without stamping it here the first
+            # job of the run would be refused for want of a renewal that has not happened yet.
+            self._stamp_lease_deadline(acquire_started)
+            self._lease_lost_event.clear()
             self._stop_event.clear()
             self._task = asyncio.create_task(
                 self._run_loop(),
@@ -294,18 +320,56 @@ class MaintenanceScheduler:
         """
         return max(0.05, min(self.lease_heartbeat_s, self.lease_duration_s / 3.0))
 
+    def _stamp_lease_deadline(self, acquired_at: float) -> None:
+        """Record how long this process can prove it owns the lease.
+
+        `acquired_at` is sampled BEFORE the store call, never after: the store's own expiry
+        starts running during that call, so dating the window from the return value would
+        claim validity the store does not grant. Erring short can only stop work early.
+        """
+        self._lease_valid_until = acquired_at + self.lease_duration_s
+
     def _renew_lease(self) -> bool:
-        return self.lease_store.renew(
+        """Renew the lease and, on success, extend the provable-ownership deadline.
+
+        Every renewal in this class goes through here, so no path can refresh the lease
+        without refreshing the deadline that authorizes mutation.
+        """
+        started = time.monotonic()
+        renewed = self.lease_store.renew(
             lease_name=self.lease_name,
             owner_id=self._owner_id,
             owner_pid=self._owner_pid,
             lease_duration_s=self.lease_duration_s,
         )
+        if renewed:
+            self._stamp_lease_deadline(started)
+        return renewed
+
+    def _lease_is_provable(self) -> bool:
+        """True only while a successful renewal still covers the present moment (CF-100).
+
+        This is deliberately not "has something told me I lost the lease". A renewal that
+        returns False is one way to lose it; the others leave no signal at all:
+
+        - the event loop is blocked long enough that the heartbeat never runs (CF-99), so no
+          renewal is attempted and none can fail;
+        - the heartbeat task dies on an unexpected store error;
+        - the process is suspended.
+
+        In each case the lease expires under a live holder and another scheduler acquires it,
+        while every in-memory flag here still says "owner". Only the clock catches that.
+        """
+        if self._lease_lost:
+            return False
+        return time.monotonic() < self._lease_valid_until
 
     def _mark_lease_lost(self) -> None:
         self._lease_lost = True
         self._lease_acquired = False
+        self._lease_valid_until = 0.0
         self._lease_blocked_reason = "lease_lost"
+        self._lease_lost_event.set()
         # Wake the job loop so it stops before starting more work. A forced takeover
         # (bug FC-02) must not let the displaced owner keep mutating shared state.
         self._stop_event.set()
@@ -320,7 +384,23 @@ class MaintenanceScheduler:
         """
         interval = self._heartbeat_interval_s()
         while not self._stop_event.is_set() and not self._lease_lost:
-            if not self._renew_lease():
+            try:
+                renewed = self._renew_lease()
+            except Exception:
+                # A store error is not evidence that the lease was taken: it is evidence that
+                # ownership is unknown. Declaring loss here would let one locked SQLite write
+                # stop maintenance outright. Keep ticking and let the deadline decide -- if the
+                # errors persist past _lease_valid_until, _lease_is_provable goes false on its
+                # own and every job is refused. What must not happen is this task dying and
+                # leaving the job loop running with nothing renewing anything (CF-100).
+                logger.warning(
+                    "Maintenance scheduler lease renewal errored; ownership unproven until it "
+                    "succeeds owner_id=%s",
+                    self._owner_id,
+                    exc_info=True,
+                )
+                renewed = True
+            if not renewed:
                 logger.warning(
                     "Maintenance scheduler lease lost during heartbeat; stopping owner_id=%s",
                     self._owner_id,
@@ -335,6 +415,7 @@ class MaintenanceScheduler:
     async def _run_loop(self) -> None:
         logger.info("Maintenance scheduler started")
         self._lease_lost = False
+        self._lease_lost_event.clear()
         heartbeat_task = asyncio.create_task(
             self._heartbeat_loop(), name="menhir-maintenance-heartbeat"
         )
@@ -358,9 +439,13 @@ class MaintenanceScheduler:
     async def _run_due_jobs(self) -> None:
         now = datetime.now(timezone.utc)
         for name, job in self._jobs.items():
-            if self._lease_lost or self._stop_event.is_set():
-                # Lease lost or shutdown requested mid-batch: stop before the next job so a
-                # displaced owner does not keep running maintenance (FC-02 / AR-02).
+            if self._stop_event.is_set() or (
+                self._lease_supervision_active() and not self._lease_is_provable()
+            ):
+                # Lease unprovable or shutdown requested mid-batch: stop before the next job so
+                # a displaced owner does not keep running maintenance (FC-02 / AR-02 / CF-100).
+                # `_lease_is_provable` rather than `_lease_lost`, because the dangerous case is
+                # the one where nothing set that flag: the deadline passed unnoticed.
                 return
             if job.last_started_at is not None:
                 last_started = datetime.fromisoformat(job.last_started_at)
@@ -404,6 +489,90 @@ class MaintenanceScheduler:
     # Job wrapper — shared timing, telemetry, and state bookkeeping
     # ------------------------------------------------------------------
 
+    def _lease_supervision_active(self) -> bool:
+        """Whether lease ownership governs this job run at all.
+
+        A scheduler that has never established ownership is not a displaced owner: there is no
+        second owner it could be racing, so there is nothing for the deadline to protect. That
+        is the direct-invocation shape -- a job wrapper called without `start()`.
+
+        This is not a fail-open on unknown state, because no production path runs a job without
+        a prior successful acquire. Both callers were checked: `_run_due_jobs` is reachable only
+        from `_run_loop`, which `start()` creates only after `try_acquire`/`force_acquire`
+        succeeds; and `core.runtime._run_initial_structure_scan` -- the one caller of `_run_job`
+        outside this class -- is spawned inside an `elif` on `status_snapshot()["running"]`, so
+        it too runs only under a held lease and IS supervised.
+
+        `_lease_lost` is included because `_mark_lease_lost` zeroes the deadline: without it, a
+        scheduler that had just lost the lease would read as one that never held it.
+        """
+        return self._lease_lost or self._lease_valid_until > 0.0
+
+    async def _wait_for_lease_loss(self) -> None:
+        """Return as soon as this process can no longer prove it owns the lease.
+
+        Two ways in. `_lease_lost_event` is the fast path: a renewal that came back False, or
+        a force takeover, is a definite answer and wakes this immediately. The timeout is the
+        slow path, and it is the one that matters, because the dangerous losses are silent --
+        nothing fails, the deadline simply passes.
+        """
+        while True:
+            if not self._lease_is_provable():
+                return
+            remaining = self._lease_valid_until - time.monotonic()
+            try:
+                await asyncio.wait_for(
+                    self._lease_lost_event.wait(), timeout=max(0.01, remaining)
+                )
+            except asyncio.TimeoutError:
+                # The heartbeat may have pushed the deadline out while we waited; re-check
+                # rather than assuming the timeout means loss.
+                continue
+            return
+
+    async def _await_job_under_lease(
+        self, coro: Awaitable[dict[str, object]], operation: str
+    ) -> dict[str, object]:
+        """Run one job, abandoning it the moment lease ownership stops being provable.
+
+        Before this, the between-jobs check at the top of `_run_due_jobs` was the only guard,
+        so a lease lost during `await coro` stopped the NEXT job and let the current one run to
+        completion -- mutating the same graph a new owner had already started maintaining.
+
+        What this does and does not guarantee is worth being exact about. Cancellation is
+        cooperative: it is delivered at the job's next await point. A job blocked inside
+        `asyncio.to_thread` keeps that one worker-thread call running to completion, because
+        nothing can interrupt a thread from outside. So the guarantee is a bound, not an
+        eviction -- at most one already-dispatched call finishes, and no further step of the
+        job begins. It also depends on the job actually reaching an await point, which is
+        exactly what CF-99 restores by moving the scheduler's blocking graph calls off the
+        event loop. Under a synchronously blocked loop this guard cannot run at all.
+        """
+        if not self._lease_supervision_active():
+            return await coro
+        job_task = asyncio.ensure_future(coro)
+        guard = asyncio.ensure_future(self._wait_for_lease_loss())
+        try:
+            done, _pending = await asyncio.wait(
+                {job_task, guard}, return_when=asyncio.FIRST_COMPLETED
+            )
+            if job_task in done:
+                return job_task.result()
+            job_task.cancel()
+            with contextlib.suppress(BaseException):
+                await job_task
+            raise _LeaseLostDuringJob(operation)
+        except asyncio.CancelledError:
+            # This scheduler task is being torn down. Do not leave the job running detached.
+            job_task.cancel()
+            with contextlib.suppress(BaseException):
+                await job_task
+            raise
+        finally:
+            guard.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await guard
+
     async def _run_job(
         self,
         job: _JobState,
@@ -415,7 +584,7 @@ class MaintenanceScheduler:
         success = True
         result: dict[str, object]
         try:
-            result = await coro
+            result = await self._await_job_under_lease(coro, operation)
             record_mcp_event(
                 kind="background",
                 operation=operation,
@@ -423,6 +592,37 @@ class MaintenanceScheduler:
                 result=result,
                 duration_ms=int((asyncio.get_running_loop().time() - started) * 1000),
                 success=True,
+            )
+        except _LeaseLostDuringJob as exc:
+            # Not a job failure: the job was abandoned deliberately because a second owner may
+            # already be running it. Recorded as retryable so the new owner's own scheduling is
+            # the thing that retries, and kept off logger.exception -- there is no bug here to
+            # read a traceback for.
+            success = False
+            result = {"error": str(exc), "abandoned": "lease_lost"}
+            logger.warning(
+                "Maintenance scheduler abandoned job %s: lease ownership no longer provable "
+                "owner_id=%s",
+                operation,
+                self._owner_id,
+            )
+            record_failure_event(
+                operation=operation,
+                failure_stage="scheduler_lease_lost",
+                classification="lease_lost",
+                retryable=True,
+                queue_depth=self.ingest_service.get_queue_depth(),
+                error_type=type(exc).__name__,
+                error=str(exc),
+                traceback_text="",
+            )
+            record_mcp_event(
+                kind="background",
+                operation=operation,
+                payload=result,
+                duration_ms=int((asyncio.get_running_loop().time() - started) * 1000),
+                success=False,
+                error=str(exc),
             )
         except Exception as exc:
             success = False

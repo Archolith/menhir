@@ -401,6 +401,21 @@ class BaseTool:
             result = f"{result or ''}\n\n{warn_block}"
         return result or ""
 
+    def registered_description(self) -> str:
+        """The description handed to FastMCP at registration.
+
+        The curated class attribute leads, because it is the one line written to be read by a
+        model choosing a tool. The endpoint docstring follows when there is one, since it
+        carries the argument documentation the class attribute does not. Before this, neither
+        reached the client: `mcp.tool()` was called with no `description=`, and 36 of the 54
+        endpoints have no docstring for `@wraps` to copy.
+        """
+        curated = (self.description or "").strip()
+        detail = (self.endpoint.__doc__ or "").strip()
+        if detail and detail != curated:
+            return f"{curated}\n\n{detail}" if curated else detail
+        return curated
+
     def register(self, mcp: FastMCP) -> None:
         target = self.endpoint
 
@@ -410,7 +425,7 @@ class BaseTool:
 
         handler.__name__ = self.name
         handler.__qualname__ = self.name
-        mcp.tool()(handler)
+        mcp.tool(description=self.registered_description())(handler)
 
 
 class BaseTextTool(BaseTool):
