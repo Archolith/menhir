@@ -574,16 +574,9 @@ class CorrelationRepository:
             // Fail closed: if any no longer holds, this MATCH yields no row and the merge abstains
             // (see the empty-rows guard below). Structural role and existence cannot change mid-merge,
             // so they are not re-checked here.
-            WHERE coalesce(survivor.freshness, 'ACTIVE') IN ['ACTIVE']
-              AND coalesce(absorbed.freshness, 'ACTIVE') IN ['ACTIVE']
-              AND coalesce(survivor.scope, '') <> 'PROMOTED'
-              AND coalesce(absorbed.scope, '') <> 'PROMOTED'
-              AND coalesce(survivor.user_flagged, false) = false
-              AND coalesce(absorbed.user_flagged, false) = false
-              AND NOT coalesce(survivor.conflict_status, '') IN ['pending_llm_review', 'unresolved']
-              AND NOT coalesce(absorbed.conflict_status, '') IN ['pending_llm_review', 'unresolved']
-              AND coalesce(survivor.namespace, survivor.group_id, 'default')
-                  = coalesce(absorbed.namespace, absorbed.group_id, 'default')
+            WHERE """
+            + me.mutable_eligibility_cypher()
+            + """
               // Provenance was read in Phase 1 and derived in Python; if another writer changed ANY
               // of it in the window, the derived values are stale and writing them would silently
               // discard the concurrent writer's work. Guarding `source` alone is not enough: a
@@ -668,6 +661,11 @@ class CorrelationRepository:
                    coalesce(survivor.namespace, survivor.group_id, 'default') AS merge_namespace
             """,
             params={
+                # CF-47: the mutable predicates in the WHERE above are emitted by
+                # `domain.merge_eligibility`, and these are the values they bind. They come from
+                # the same constants the preflight decides on, so the two can no longer disagree
+                # by being edited apart.
+                **me.MUTABLE_PREDICATE_PARAMS,
                 "survivor_uuid": survivor_uuid,
                 "absorbed_uuid": absorbed_uuid,
                 "audit_entry": audit_entry,

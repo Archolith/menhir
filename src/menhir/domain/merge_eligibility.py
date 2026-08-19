@@ -41,10 +41,80 @@ PROMOTED_SCOPE = "PROMOTED_SCOPE"
 USER_FLAGGED = "USER_FLAGGED"
 PROTECTED_CONFLICT = "PROTECTED_CONFLICT"
 
-#: Freshness values that hard-veto a merge. Null/unstamped and ACTIVE are allowed (Option A).
+#: Freshness values that hard-veto a merge. Retained because the reason code and its telemetry
+#: are named for them, and because the veto message reports which value offended.
 _VETOED_FRESHNESS = frozenset({"COMPRESSED", "GONE"})
+#: Freshness values a merge may proceed under: ACTIVE, and unstamped (Option A treats a node with
+#: no freshness property as ACTIVE). Stated as an ALLOWLIST rather than as "not COMPRESSED and not
+#: GONE" so that a future `FreshnessState` value is refused by default instead of silently
+#: becoming mergeable -- merging DETACH-DELETEs the absorbed node, so the unknown case must fail
+#: closed. Today the two forms describe the same set: `FreshnessState` is exactly
+#: {ACTIVE, COMPRESSED, GONE}.
+_MERGEABLE_FRESHNESS = frozenset({"ACTIVE", ""})
 #: conflict_status values that mark a node as under active review (see domain.models.ConflictStatus).
 _PROTECTED_CONFLICT_STATES = frozenset({"pending_llm_review", "unresolved"})
+
+
+#: Parameter names the emitted mutation predicate binds. The repository must supply these.
+MUTABLE_PREDICATE_PARAMS: dict[str, Any] = {
+    "mergeable_freshness": sorted(_MERGEABLE_FRESHNESS),
+    "protected_conflict_states": sorted(_PROTECTED_CONFLICT_STATES),
+}
+
+
+def mutable_eligibility_cypher(survivor: str = "survivor", absorbed: str = "absorbed") -> str:
+    """Emit the mutation-time form of the MUTABLE predicates decided above (CF-47).
+
+    The mutation has to repeat these -- another writer can change freshness, scope, flag,
+    conflict state or namespace between the preflight and the write, and the guard must be inside
+    the statement that writes. What it must NOT do is restate them independently, which is what it
+    used to. Two hand-written copies of one rule disagreed in four places:
+
+    | predicate | Python | Cypher |
+    |---|---|---|
+    | freshness | `.upper()` then veto COMPRESSED/GONE | exact `IN ['ACTIVE']` |
+    | scope | `.upper() == 'PROMOTED'` | exact `<> 'PROMOTED'` |
+    | conflict | `.strip().lower()` then membership | exact membership |
+    | namespace | `normalize_namespace` | `coalesce(namespace, group_id, 'default')` |
+
+    Emitting the Cypher from the same constants is what makes them one rule rather than two that
+    happen to agree today. Editing `_MERGEABLE_FRESHNESS` or `_PROTECTED_CONFLICT_STATES` now
+    changes both sides at once, which is the only version of this that stays fixed.
+
+    **Where the two disagreed, the stricter side wins.** Merging DETACH-DELETEs the absorbed
+    node, so a predicate that cannot decide must refuse:
+
+    - scope and conflict: Python normalized and Cypher did not, so the Cypher admitted a
+      lowercase `promoted` and a `' Unresolved'`. Normalization moves into the Cypher, which
+      NARROWS it. A PROMOTED node is merge-immune by policy; case is not consent.
+    - freshness: Cypher was the stricter one, admitting only ACTIVE-or-null. It stays that way
+      here. Note the register's worked example -- `freshness = 'STALE'` passing preflight and
+      being dropped at mutation -- is not reachable: `FreshnessState` is exactly
+      {ACTIVE, COMPRESSED, GONE}, so there is no fourth value for the two rules to differ on.
+      The reachable divergence was always the normalization one, which is what this fixes.
+
+    `normalize_namespace` and the Cypher's namespace expression are left as they are and are
+    already equivalent in practice: the gather query at `correlation_queries.py:148` projects
+    `coalesce(n.namespace, n.group_id, 'default')` into the very field `normalize_namespace`
+    then strips. Namespace is the load-bearing tenancy boundary, so it is not restructured as a
+    side effect of this fix.
+
+    The returned fragment is a constant with no caller-controlled interpolation: `survivor` and
+    `absorbed` are Cypher variable names chosen by this codebase, never user input.
+    """
+    clauses = []
+    for var in (survivor, absorbed):
+        clauses.extend([
+            f"toUpper(trim(coalesce({var}.freshness, 'ACTIVE'))) IN $mergeable_freshness",
+            f"toUpper(trim(coalesce({var}.scope, ''))) <> 'PROMOTED'",
+            f"coalesce({var}.user_flagged, false) = false",
+            f"NOT toLower(trim(coalesce({var}.conflict_status, ''))) IN $protected_conflict_states",
+        ])
+    clauses.append(
+        f"coalesce({survivor}.namespace, {survivor}.group_id, 'default')"
+        f" = coalesce({absorbed}.namespace, {absorbed}.group_id, 'default')"
+    )
+    return "\n              AND ".join(clauses)
 
 
 def normalize_namespace(value: Any) -> str:
@@ -116,16 +186,25 @@ def evaluate(survivor: NodeSignals, absorbed: NodeSignals) -> MergeEligibility:
             absorbed_namespace=normalize_namespace(absorbed.namespace),
         )
 
-    # 5. COMPRESSED/GONE must be rehydrated first (null/ACTIVE allowed -- Option A).
+    # 5. Only ACTIVE or unstamped may merge (Option A). COMPRESSED/GONE must be rehydrated first.
+    #    An allowlist, not a veto list: the comment here used to say "null/ACTIVE allowed" while
+    #    the code allowed everything except two values, and the mutation allowed only ACTIVE --
+    #    which is how preflight came to say allowed while the write silently abstained (CF-47).
     bad_freshness = [
         (n.uuid, n.freshness) for n in (survivor, absorbed)
-        if str(n.freshness or "").upper() in _VETOED_FRESHNESS
+        if str(n.freshness or "").strip().upper() not in _MERGEABLE_FRESHNESS
     ]
     if bad_freshness:
         return _veto(NON_ACTIVE_FRESHNESS, offenders=bad_freshness)
 
     # 6. PROMOTED nodes are operator-curated and merge-immune.
-    promoted = [n.uuid for n in (survivor, absorbed) if str(n.scope or "").upper() == "PROMOTED"]
+    # `.strip()` alongside `.upper()`, and the same trim in the emitted Cypher: a PROMOTED node
+    # is operator-curated and merge-immune by policy, so neither case nor stray whitespace is
+    # consent to merge it (CF-47).
+    promoted = [
+        n.uuid for n in (survivor, absorbed)
+        if str(n.scope or "").strip().upper() == "PROMOTED"
+    ]
     if promoted:
         return _veto(PROMOTED_SCOPE, promoted=promoted)
 
