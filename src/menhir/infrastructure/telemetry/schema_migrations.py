@@ -19,26 +19,14 @@ import sqlite3
 
 
 def ensure_lineage_columns(conn: sqlite3.Connection) -> None:
-    """Add subject-lineage columns to every telemetry table that needs them (CF-165).
+    """Ensure current sidecar content has a sound erasure key where one is derivable (CF-165).
 
-    Content-bearing rows are only erasable when a subject key reaches them. Tables
-    carrying memory or user text therefore need durable lineage columns:
-    ``merge_audit`` gets ``survivor_namespace`` / ``absorbed_namespace`` so a namespace
-    erasure can find its merge recovery rows (the namespace could otherwise only be
-    recovered by parsing ``snapshot_json`` or assuming the survivor's graph node still
-    exists -- neither survives the deletion this exists to support), ``mcp_events`` gets
-    ``namespace`` / ``node_uuid``, and ``extraction_lab_runs`` gets ``namespace``.
+    ``recall_receipts.reason`` is scrubbed instead of assigned fake ownership: a usefulness
+    receipt can cover a global/workspace read, so there is no sound session->namespace mapping.
 
-    Nullable with no default: rows written before this migration genuinely have no
-    recorded lineage, and NULL is what the read and write paths expect for them.
-    Backfill is deliberately not attempted -- it is only sound where derivation is
-    provable, which is a separate decision.
-
-    ``recall_receipts.reason`` is intentionally scrubbed here. A usefulness receipt is
-    session-wide and can describe a global/workspace recall, so inventing namespace ownership
-    would be unsound. The structured score remains; the optional prose is not needed for the
-    metric and was the only content-bearing field that made namespace erasure depend on a
-    session->namespace mapping that does not exist.
+    Recall Lab is different. Its historical ``namespace=NULL`` means exactly "unscoped/default
+    recall"; that maps to Menhir's reserved ``default`` namespace. Backfill is therefore provable,
+    and a trigger keeps future direct-store callers from recreating NULL-keyed raw query/results.
     """
     additions: dict[str, tuple[str, ...]] = {
         "merge_audit": ("survivor_namespace", "absorbed_namespace"),
@@ -48,21 +36,37 @@ def ensure_lineage_columns(conn: sqlite3.Connection) -> None:
     for table, columns in additions.items():
         existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
         if not existing:
-            # Table not created yet. Callers run this after the CREATE TABLE block, but
-            # skipping keeps a reordering from turning into an ALTER on a missing table.
             continue
         for column in columns:
             if column not in existing:
-                # Literal names from the mapping above; never caller input.
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT")
 
     recall_columns = {
         row[1] for row in conn.execute("PRAGMA table_info(recall_receipts)").fetchall()
     }
     if "reason" in recall_columns:
-        # Idempotent privacy migration: old free-text rating notes have no sound namespace
-        # lineage. Keep the structured score/label and remove only the optional prose.
         conn.execute("UPDATE recall_receipts SET reason = NULL WHERE reason IS NOT NULL")
+
+    recall_lab_columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(recall_lab_runs)").fetchall()
+    }
+    if "namespace" in recall_lab_columns:
+        # In RecallLabRequest, None is the normal unscoped/default graph read -- unlike
+        # Extraction Lab's synthetic fixtures, this ownership is deterministic.
+        conn.execute(
+            "UPDATE recall_lab_runs SET namespace = 'default' "
+            "WHERE namespace IS NULL OR namespace = ''"
+        )
+        conn.execute(
+            """
+            CREATE TRIGGER IF NOT EXISTS trg_recall_lab_namespace_lineage
+            AFTER INSERT ON recall_lab_runs
+            WHEN NEW.namespace IS NULL OR NEW.namespace = ''
+            BEGIN
+                UPDATE recall_lab_runs SET namespace = 'default' WHERE id = NEW.id;
+            END
+            """
+        )
 
 
 __all__ = ["ensure_lineage_columns"]
