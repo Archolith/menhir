@@ -1,6 +1,8 @@
 # Titled-List Memory Shape (design note, NOT approved for build)
 
 Status: DESIGN NOTE. Raised 2026-07-27 by ctharvey: "maybe a special view or memory for just bare
+**Last verified:** 2026-08-18 — CONSISTENT with DESIGN NOTE. `titled_list` 3 hits and `_sanitize_combined_edge` 3 -- a design note raised by ctharvey 2026-07-27, not a work item claiming completion.
+
 item lists with title." Nothing here is approved for implementation.
 
 Related: task #11 (edgeless-roster collapse causes permanent content loss), task #10 (perceiver

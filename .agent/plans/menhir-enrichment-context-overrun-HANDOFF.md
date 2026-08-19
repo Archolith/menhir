@@ -1,5 +1,8 @@
 # HANDOFF: menhir enrichment silently loses ~9% of production memories
 
+**Last verified:** 2026-08-18 — FIX CONFIRMED LIVE, citation stale. The note cites `aa7c758`, which is NOT an ancestor of `main` (rebased, same pattern as CF-20). The fix itself IS on main: `_strip_embeddings` in `infrastructure/graphiti_model_patches.py:66`, wired through `graphiti_patches.py:22`, with the ~31KB `content_embedding` overrun documented in-place at :72. Recovery is recorded UNBLOCKED (dedupe request 2,123,893 -> 36,493 tokens). This is a handoff, not a plan -- consider moving it to `.agent/handoffs/`.
+
+
 > **STATUS 2026-07-27 (later session): ROOT CAUSE FOUND AND FIXED — commit `aa7c758`.**
 > All four verification queries in section 2 reproduced exactly. The leading hypothesis in
 > section 4 was **wrong in mechanism** and is retracted below. Live recovery is **blocked on
