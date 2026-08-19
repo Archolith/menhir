@@ -213,10 +213,11 @@ def test_merge_snapshot_is_erased_from_either_side_on_a_real_sidecar(coord, side
     with sqlite3.connect(sidecar) as conn:
         conn.execute(
             "INSERT INTO merge_audit "
-            "(recorded_at, survivor_uuid, absorbed_uuid, similarity, snapshot_json) "
-            "VALUES (?,?,?,?,?)",
+            "(recorded_at, survivor_uuid, absorbed_uuid, similarity, snapshot_json, "
+            "survivor_namespace, absorbed_namespace) "
+            "VALUES (?,?,?,?,?,?,?)",
             ("2026-08-18T00:00:00+00:00", survivor, absorbed, 0.91,
-             '{"content":"absorbed node secret"}'),
+             '{"content":"absorbed node secret"}', "test-erasure", "test-erasure"),
         )
         conn.commit()
 
