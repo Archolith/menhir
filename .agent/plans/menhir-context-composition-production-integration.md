@@ -1,6 +1,8 @@
 # Menhir Context-Composition Production Integration — Handoff Plan
 
 Status: STAGE 1 IMPLEMENTED AND SMOKE-TESTED (2026-07-16); Stages 2-4 not started. Written
+**Last verified:** 2026-08-18 — CONSISTENT with STAGE 1 IMPLEMENTED. `MemoryFacetSet` 12 hits, `abstained_no_eligible_candidates` 1.
+
 2026-07-16, immediately following the close of the Extraction Lab Phase 1-5 investigation. Stage 1
 was built the same day (`.agent/plans/menhir-context-composition-production-integration.md`'s own
 Stage 1 section below), committed in `c7d39b0`/`25c2140`/`488bfcc`, and run against real ingest

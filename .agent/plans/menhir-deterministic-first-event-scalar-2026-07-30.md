@@ -1,6 +1,8 @@
 # Deterministic-First Event Scalar Extraction
 
 Status: **reviewer-approved**
+**Last verified:** 2026-08-18 — ACCURATE. `reviewer-approved` is not `implemented`: `MENHIR_SCALAR_DETERMINISTIC_FIRST_ENABLED` and `MENHIR_SCALAR_DETERMINISTIC_CLASSES` are both 0 hits.
+
 
 Implementation status (2026-08-05): **Phase 1 + Phase 2A code-complete; bounded Phase 2 smoke
 completed and deterministic bypass rejected.** The pure v0.1 extractor, default-off

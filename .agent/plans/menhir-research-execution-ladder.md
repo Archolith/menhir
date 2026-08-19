@@ -1,5 +1,8 @@
 # Menhir Research → Production Execution Ladder
 
+**Last verified:** 2026-08-18 — IMPLEMENTED. `WardenChain` 6 hits, `WardenVerdict` 36.
+
+
 ## Status
 
 active — the ordered plan for taking research into code. Read-side rungs (R*) are benched

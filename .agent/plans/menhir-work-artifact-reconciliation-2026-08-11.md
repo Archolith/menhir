@@ -1,6 +1,8 @@
 # WorkArtifact Corpus Reconciliation
 
 Status: **PHASES 0-5 IMPLEMENTED; CLOSEOUT PARTIAL PENDING POST-DOC-MERGE RECONCILIATION; PHASE 6 REMAINS SEPARATELY OWNER-GATED.**
+**Last verified:** 2026-08-18 — CONSISTENT with PHASES 0-5 IMPLEMENTED. `ArtifactReconciliationCursor` 5 hits. The pending post-doc-merge reconcile was RUN 2026-08-18 (11 REGISTER_ARTIFACT applied, re-audit clean, 202 corpus = 202 sources).
+
 
 Date: 2026-08-11
 

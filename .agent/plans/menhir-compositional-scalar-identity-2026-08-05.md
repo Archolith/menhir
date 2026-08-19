@@ -1,6 +1,8 @@
 # Compositional Scalar Identity
 
 Status: **Phases 1-4 implemented; larger population evidence is next**
+**Last verified:** 2026-08-18 — CONSISTENT with Phases 1-4 implemented. `diagnostic_vs_llm` 2 hits, `TypedScalarProposal` 90.
+
 
 This is a corrective supplement to
 `menhir-deterministic-first-event-scalar-2026-07-30.md`. It replaces that plan's next-step idea of

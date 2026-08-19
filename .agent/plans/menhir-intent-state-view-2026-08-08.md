@@ -1,6 +1,8 @@
 # Intent State View
 
 Status: **planned; implementation not started**
+**Last verified:** 2026-08-18 — ACCURATE, unbuilt. `IntentStateKind` and `IntentLane` both 0 hits in `src/`.
+
 
 Replaces: recall-packet phrase matching for tentative plans in
 `typed-recall-packet-prototype.md`.

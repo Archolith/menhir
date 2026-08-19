@@ -1,6 +1,8 @@
 # menhir — Artifact semantic model
 
 Status: IMPLEMENTED (2026-08-03). Design approved 2026-08-02; shipped in five slices plus
+**Last verified:** 2026-08-18 — CONSISTENT with IMPLEMENTED. `ArtifactLocation` 8 hits. Gap: `CurrentPlanView` is 0 hits — that piece is not in `src/`.
+
 shape validation and the MCP surface, `37e4039..ea34c1d`. Sections below were reconciled
 with the shipped code — where design and implementation diverged, the implementation is
 described and the reason for the divergence is stated inline.
