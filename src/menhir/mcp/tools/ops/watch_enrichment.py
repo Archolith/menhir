@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from menhir.mcp.formatters import _collect_episode_status, _format_episode_watch, _require_episode_uuid
 from menhir.mcp.tools.base import BaseTextTool
+from menhir.mcp.contracts import ToolScope
 
 
 async def watch_enrichment(
@@ -31,6 +32,7 @@ async def watch_enrichment(
 
 class WatchEnrichmentTool(BaseTextTool):
     name = "watch_enrichment"
+    scope = ToolScope.OBJECT
     required_tier = "readonly"
     description = "Follow one enrichment live and return observed deltas."
 

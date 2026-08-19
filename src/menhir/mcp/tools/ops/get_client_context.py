@@ -7,10 +7,12 @@ from datetime import datetime, timezone
 from menhir.mcp.service_access import get_request_session
 from menhir.mcp.telemetry import telemetry_store
 from menhir.mcp.tools.base import BaseTextTool
+from menhir.mcp.contracts import ToolScope
 
 
 class GetClientContextTool(BaseTextTool):
     name = "get_client_context"
+    scope = ToolScope.GLOBAL
     required_tier = "readonly"
     description = (
         "Return caller identity (client_id, client_name) and last_accessed timestamp. "

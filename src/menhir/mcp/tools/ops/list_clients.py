@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from menhir.mcp.tools.base import BaseTextTool
+from menhir.mcp.contracts import ToolScope
 
 
 async def list_clients() -> str:
@@ -15,6 +16,7 @@ async def list_clients() -> str:
 
 class ListClientsTool(BaseTextTool):
     name = "list_clients"
+    scope = ToolScope.GLOBAL
     required_tier = "operator"
     description = "list registered (non-revoked) per-client tokens (no token material)."
 

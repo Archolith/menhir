@@ -9,6 +9,7 @@ from menhir.mcp.formatters import (
     _resolve_conflict_status_filter,
 )
 from menhir.mcp.tools.base import BaseJsonTool
+from menhir.mcp.contracts import ToolScope
 
 
 async def list_conflicts(status: str = "unresolved", limit: int = 25) -> str:
@@ -27,6 +28,7 @@ async def list_conflicts(status: str = "unresolved", limit: int = 25) -> str:
 
 class ListConflictsTool(BaseJsonTool):
     name = "list_conflicts"
+    scope = ToolScope.OBJECT
     required_tier = "readonly"
     description = "List conflict groups detected by contradiction checks."
 

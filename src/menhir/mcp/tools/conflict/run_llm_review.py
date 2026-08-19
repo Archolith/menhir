@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from menhir.mcp.tools.base import BaseJsonTool
+from menhir.mcp.contracts import ToolScope
 
 
 async def run_llm_conflict_review(limit: int = 20) -> str:
@@ -24,6 +25,7 @@ async def run_llm_conflict_review(limit: int = 20) -> str:
 
 class RunLLMReviewTool(BaseJsonTool):
     name = "run_llm_conflict_review"
+    scope = ToolScope.OBJECT
     required_tier = "operator"
     description = "Run LLM contradiction confirmation on pending conflicts."
 

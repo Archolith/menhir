@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from menhir.mcp.tools.base import BaseTextTool
+from menhir.mcp.contracts import ToolScope
 
 
 async def close_memory(uuid: str, namespace: str = "") -> str:
@@ -23,6 +24,7 @@ async def close_memory(uuid: str, namespace: str = "") -> str:
 
 class CloseMemoryTool(BaseTextTool):
     name = "close_memory"
+    scope = ToolScope.NAMESPACED
     required_tier = "operator"
     description = "Mark a TEMPORAL memory as completed."
 

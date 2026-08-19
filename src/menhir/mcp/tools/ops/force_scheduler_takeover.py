@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from menhir.mcp.tools.base import BaseTextTool
+from menhir.mcp.contracts import ToolScope
 
 
 async def force_scheduler_takeover(reason: str = "manual-troubleshooting") -> str:
@@ -20,6 +21,7 @@ async def force_scheduler_takeover(reason: str = "manual-troubleshooting") -> st
 
 class ForceSchedulerTakeoverTool(BaseTextTool):
     name = "force_scheduler_takeover"
+    scope = ToolScope.GLOBAL
     required_tier = "operator"
     description = "Force this MCP process to take scheduler lease ownership."
 

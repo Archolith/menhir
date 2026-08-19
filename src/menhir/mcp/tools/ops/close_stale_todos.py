@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from menhir.mcp.tools.base import BaseTextTool
+from menhir.mcp.contracts import ToolScope
 
 
 async def close_stale_todos(
@@ -25,6 +26,7 @@ async def close_stale_todos(
 
 class CloseStaleTodosTool(BaseTextTool):
     name = "close_stale_todos"
+    scope = ToolScope.NAMESPACED
     description = "Close stale TODO items that have been open for too long."
 
     async def endpoint(

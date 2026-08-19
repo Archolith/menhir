@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 from menhir.mcp.formatters import _coerce_iso, _resolve_queue_state_filter, _stale_reason_for_row
 from menhir.mcp.tools.base import BaseTextTool
+from menhir.mcp.contracts import ToolScope
 
 
 async def list_enrichment_queue(state: str = "active", limit: int = 25) -> str:
@@ -24,6 +25,7 @@ async def list_enrichment_queue(state: str = "active", limit: int = 25) -> str:
 
 class ListEnrichmentQueueTool(BaseTextTool):
     name = "list_enrichment_queue"
+    scope = ToolScope.OBJECT
     required_tier = "readonly"
     description = "List episodic enrichment queue rows with stale-state hints."
 

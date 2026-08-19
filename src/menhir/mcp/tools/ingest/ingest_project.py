@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from menhir.mcp.service_access import get_mcp_session
 from menhir.mcp.tools.base import BaseTextTool
+from menhir.mcp.contracts import ToolScope
 from menhir.services.project_ingest import (
     ProjectEpisodeStatus,
     ProjectIngestOutcome,
@@ -36,6 +37,7 @@ async def ingest_project(
 
 class IngestProjectTool(BaseTextTool):
     name = "ingest_project"
+    scope = ToolScope.OBJECT
     description = "Scan a project directory and ingest its structure into the memory graph."
 
     def timeout_for(self, path: str = "", name: str | None = None, force: bool = False) -> int:

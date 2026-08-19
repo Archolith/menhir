@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from menhir.mcp.formatters import _coerce_iso
 from menhir.mcp.tools.base import BaseTextTool
+from menhir.mcp.contracts import ToolScope
 
 
 async def repair_stale_enrichment(dry_run: bool = True, limit: int = 100) -> str:
@@ -22,6 +23,7 @@ async def repair_stale_enrichment(dry_run: bool = True, limit: int = 100) -> str
 
 class RepairStaleEnrichmentTool(BaseTextTool):
     name = "repair_stale_enrichment"
+    scope = ToolScope.GLOBAL
     required_tier = "operator"
     description = "Inspect and optionally repair stale ENRICHING episodes."
 

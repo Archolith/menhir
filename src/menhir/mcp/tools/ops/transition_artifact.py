@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from menhir.mcp.tools.base import BaseTextTool
+from menhir.mcp.contracts import ToolScope
 
 
 async def transition_artifact(
@@ -30,6 +31,7 @@ async def transition_artifact(
 
 class TransitionArtifactTool(BaseTextTool):
     name = "transition_artifact"
+    scope = ToolScope.NAMESPACED
     description = "Move a work artifact to a new lifecycle status, if the transition is legal."
 
     async def endpoint(

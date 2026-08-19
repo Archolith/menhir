@@ -7,6 +7,7 @@ import os
 
 from menhir.mcp.service_access import get_mcp_session
 from menhir.mcp.tools.base import BaseTextTool
+from menhir.mcp.contracts import ToolScope
 
 
 async def ingest_document(
@@ -40,6 +41,7 @@ async def ingest_document(
 
 class IngestDocumentTool(BaseTextTool):
     name = "ingest_document"
+    scope = ToolScope.OBJECT
     description = "Ingest a doc/markdown/text file into the memory graph as a document entity + semantic episode."
 
     def timeout_for(

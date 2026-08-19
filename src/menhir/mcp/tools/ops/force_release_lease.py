@@ -5,6 +5,7 @@ from __future__ import annotations
 from menhir.mcp.formatters import _require_episode_uuid
 from menhir.mcp.telemetry import record_lifecycle_event
 from menhir.mcp.tools.base import BaseTextTool
+from menhir.mcp.contracts import ToolScope
 
 
 async def force_release_enrichment_lease(episode_uuid: str, requeue: bool = True) -> str:
@@ -15,6 +16,7 @@ async def force_release_enrichment_lease(episode_uuid: str, requeue: bool = True
 
 class ForceReleaseEnrichmentLeaseTool(BaseTextTool):
     name = "force_release_enrichment_lease"
+    scope = ToolScope.OBJECT
     required_tier = "operator"
     description = "Force-release one ENRICHING episode lease."
 

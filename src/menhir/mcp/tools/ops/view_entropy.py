@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from menhir.mcp.tools.base import BaseJsonTool
+from menhir.mcp.contracts import ToolScope
 
 
 async def view_entropy(
@@ -34,6 +35,7 @@ async def view_entropy(
 
 class ViewEntropyTool(BaseJsonTool):
     name = "view_entropy"
+    scope = ToolScope.NAMESPACED
     required_tier = "readonly"
     description = "D0 view-reachability probe: rank + footprint of each current View's self-recall."
 

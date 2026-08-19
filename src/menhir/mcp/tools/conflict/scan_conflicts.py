@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from menhir.mcp.tools.base import BaseJsonTool
+from menhir.mcp.contracts import ToolScope
 
 
 async def scan_for_conflicts(limit: int = 150, cursor: str = "") -> str:
@@ -28,6 +29,7 @@ async def scan_for_conflicts(limit: int = 150, cursor: str = "") -> str:
 
 class ScanConflictsTool(BaseJsonTool):
     name = "scan_for_conflicts"
+    scope = ToolScope.OBJECT
     required_tier = "operator"
     description = "Scan persistent entity nodes for similarity-based conflicts."
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from menhir.mcp.tools.base import BaseJsonTool
+from menhir.mcp.contracts import ToolScope
 
 
 async def delete_namespace(
@@ -37,6 +38,7 @@ async def delete_namespace(
 
 class DeleteNamespaceTool(BaseJsonTool):
     name = "delete_namespace"
+    scope = ToolScope.NAMESPACED
     required_tier = "operator"
     description = "Tear down a throwaway/eval namespace silo, gated by node count."
 

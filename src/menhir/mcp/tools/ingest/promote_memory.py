@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from menhir.mcp.tools.base import BaseTextTool
+from menhir.mcp.contracts import ToolScope
 
 
 async def promote_memory(node_uuid: str, namespace: str = "") -> str:
@@ -30,6 +31,7 @@ async def promote_memory(node_uuid: str, namespace: str = "") -> str:
 
 class PromoteMemoryTool(BaseTextTool):
     name = "promote_memory"
+    scope = ToolScope.NAMESPACED
     required_tier = "operator"
     description = "Promote a PERSISTENT memory to PROMOTED (operator-curated, verified ground truth)."
 

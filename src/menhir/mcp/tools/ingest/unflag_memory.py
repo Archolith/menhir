@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from menhir.mcp.tools.base import BaseTextTool
+from menhir.mcp.contracts import ToolScope
 
 
 async def unflag_memory(node_uuid: str, namespace: str = "") -> str:
@@ -22,6 +23,7 @@ async def unflag_memory(node_uuid: str, namespace: str = "") -> str:
 
 class UnflagMemoryTool(BaseTextTool):
     name = "unflag_memory"
+    scope = ToolScope.NAMESPACED
     description = "Remove the permanent-retention flag from a memory node."
 
     async def endpoint(self, node_uuid: str, namespace: str = "") -> str:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from menhir.mcp.tools.base import BaseTextTool
+from menhir.mcp.contracts import ToolScope
 
 
 async def flag_memory(
@@ -26,6 +27,7 @@ async def flag_memory(
 
 class FlagMemoryTool(BaseTextTool):
     name = "flag_memory"
+    scope = ToolScope.NAMESPACED
     description = "Flag a memory node for permanent retention."
 
     async def endpoint(

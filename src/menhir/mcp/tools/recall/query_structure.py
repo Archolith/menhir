@@ -6,6 +6,7 @@ import json
 import os
 
 from menhir.mcp.tools.base import BaseTextTool
+from menhir.mcp.contracts import ToolScope
 
 # Read-time existence check on a project's root_path — the structural-graph analogue of
 # stale_labeling.py's file-anchor advisory. The structural graph reflects the last
@@ -89,6 +90,7 @@ async def query_structure(
 
 class QueryStructureTool(BaseTextTool):
     name = "query_structure"
+    scope = ToolScope.NAMESPACED
     required_tier = "readonly"
     description = (
         "Query the structural code graph for project layout, files, imports, tests, endpoints, "

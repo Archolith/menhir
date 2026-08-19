@@ -5,6 +5,7 @@ from __future__ import annotations
 from menhir.mcp.formatters import _queue_summary
 from menhir.mcp.service_access import get_mcp_session
 from menhir.mcp.tools.base import BaseTextTool
+from menhir.mcp.contracts import ToolScope
 
 
 async def add_memory(
@@ -42,6 +43,7 @@ async def add_memory(
 
 class AddMemoryTool(BaseTextTool):
     name = "add_memory"
+    scope = ToolScope.NAMESPACED
     description = "Queue a memory for enrichment."
 
     async def endpoint(

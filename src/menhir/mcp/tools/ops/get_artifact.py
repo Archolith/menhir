@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from menhir.mcp.tools.base import BaseTextTool
+from menhir.mcp.contracts import ToolScope
 
 
 async def get_artifact(artifact_uuid: str, namespace: str = "") -> str:
@@ -20,6 +21,7 @@ async def get_artifact(artifact_uuid: str, namespace: str = "") -> str:
 
 class GetArtifactTool(BaseTextTool):
     name = "get_artifact"
+    scope = ToolScope.NAMESPACED
     required_tier = "readonly"
     description = "Read one work artifact (plan, review, investigation, report, handoff) in full."
 

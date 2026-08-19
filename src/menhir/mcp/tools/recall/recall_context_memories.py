@@ -7,6 +7,7 @@ from menhir.domain.structural_memory import is_structural_memory_row
 from menhir.mcp.formatters import _compact_memory_item, _normalize_reader_id
 from menhir.mcp.lifecycle import _has_recent_flagged_bootstrap_read
 from menhir.mcp.tools.base import BaseJsonTool
+from menhir.mcp.contracts import ToolScope
 
 
 async def recall_context_memories(
@@ -49,6 +50,7 @@ async def recall_context_memories(
 
 class RecallContextMemoriesTool(BaseJsonTool):
     name = "recall_context_memories"
+    scope = ToolScope.NAMESPACED
     required_tier = "readonly"
     description = "Read non-flagged startup context memories."
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from menhir.mcp.tools.base import BaseTextTool
+from menhir.mcp.contracts import ToolScope
 
 
 async def get_memory_stats(since_hours: int = 24) -> str:
@@ -28,6 +29,7 @@ _SCHEDULER_PREFIX = "scheduler_"
 
 class GetMemoryStatsTool(BaseTextTool):
     name = "get_memory_stats"
+    scope = ToolScope.OBJECT
     required_tier = "readonly"
     description = "Return operational health summary."
 

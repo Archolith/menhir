@@ -7,6 +7,7 @@ from menhir.domain.structural_memory import is_structural_memory_row
 from menhir.mcp.formatters import _compact_memory_item, _normalize_reader_id
 from menhir.mcp.lifecycle import _remember_flagged_bootstrap_read
 from menhir.mcp.tools.base import BaseJsonTool
+from menhir.mcp.contracts import ToolScope
 
 
 async def read_flagged_memories(
@@ -34,6 +35,7 @@ async def read_flagged_memories(
 
 class ReadFlaggedMemoriesTool(BaseJsonTool):
     name = "read_flagged_memories"
+    scope = ToolScope.NAMESPACED
     required_tier = "readonly"
     description = "Read flagged memories for startup bootstrap."
 

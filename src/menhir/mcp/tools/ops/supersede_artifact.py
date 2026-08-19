@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from menhir.mcp.tools.base import BaseTextTool
+from menhir.mcp.contracts import ToolScope
 
 
 async def supersede_artifact(new_uuid: str, old_uuid: str) -> str:
@@ -26,6 +27,7 @@ async def supersede_artifact(new_uuid: str, old_uuid: str) -> str:
 
 class SupersedeArtifactTool(BaseTextTool):
     name = "supersede_artifact"
+    scope = ToolScope.OBJECT
     description = "Record that one artifact supersedes another, moving status and edge together."
 
     async def endpoint(self, new_uuid: str, old_uuid: str) -> str:

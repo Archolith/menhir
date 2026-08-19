@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from menhir.mcp.tools.base import BaseTextTool
+from menhir.mcp.contracts import ToolScope
 
 
 async def get_artifact_relationships(artifact_uuid: str) -> str:
@@ -23,6 +24,7 @@ async def get_artifact_relationships(artifact_uuid: str) -> str:
 
 class ArtifactRelationshipsTool(BaseTextTool):
     name = "get_artifact_relationships"
+    scope = ToolScope.OBJECT
     required_tier = "readonly"
     description = "Show an artifact's declared relationships, subjects, and referenced todos."
 

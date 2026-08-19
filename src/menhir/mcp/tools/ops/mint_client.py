@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from menhir.mcp.tools.base import BaseTextTool
+from menhir.mcp.contracts import ToolScope
 
 
 async def mint_client(client_name: str, tier: str = "readonly") -> str:
@@ -15,6 +16,7 @@ async def mint_client(client_name: str, tier: str = "readonly") -> str:
 
 class MintClientTool(BaseTextTool):
     name = "mint_client"
+    scope = ToolScope.GLOBAL
     required_tier = "operator"
     description = "mint a new per-client token; returns the raw token ONCE."
 

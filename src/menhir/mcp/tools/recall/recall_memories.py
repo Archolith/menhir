@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from menhir.mcp.formatters import _compact_scored_item
 from menhir.mcp.service_access import get_request_session
 from menhir.mcp.tools.base import BaseJsonTool
+from menhir.mcp.contracts import ToolScope
 
 
 def _resolve_compact(explicit: bool | None) -> bool:
@@ -57,6 +58,7 @@ async def recall_memories(
 
 class RecallMemoriesTool(BaseJsonTool):
     name = "recall_memories"
+    scope = ToolScope.NAMESPACED
     required_tier = "readonly"
     description = "Search memories by semantic similarity."
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from menhir.mcp.tools.base import BaseTextTool
+from menhir.mcp.contracts import ToolScope
 
 
 async def relocate_artifact_source(
@@ -50,6 +51,7 @@ async def relocate_artifact_source(
 
 class RelocateArtifactSourceTool(BaseTextTool):
     name = "relocate_artifact_source"
+    scope = ToolScope.OBJECT
     description = (
         "Move one work-artifact source's locator, preserving identity and every relationship."
     )

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from menhir.mcp.tools.base import BaseTextTool
+from menhir.mcp.contracts import ToolScope
 
 
 async def add_candidate(
@@ -60,6 +61,7 @@ async def add_candidate(
 
 class AddCandidateTool(BaseTextTool):
     name = "add_candidate"
+    scope = ToolScope.OBJECT
     description = "Stage a low-trust memory/friction candidate for human review (not recalled until approved)."
 
     async def endpoint(

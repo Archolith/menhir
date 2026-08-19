@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from menhir.mcp.tools.base import BaseTextTool
+from menhir.mcp.contracts import ToolScope
 
 
 async def close_todo(uuid: str) -> str:
@@ -19,6 +20,7 @@ async def close_todo(uuid: str) -> str:
 
 class CloseTodoTool(BaseTextTool):
     name = "close_todo"
+    scope = ToolScope.OBJECT
     description = "Mark a TODO item as closed."
 
     async def endpoint(self, uuid: str) -> str:

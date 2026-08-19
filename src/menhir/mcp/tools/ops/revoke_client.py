@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from menhir.mcp.tools.base import BaseTextTool
+from menhir.mcp.contracts import ToolScope
 
 
 async def revoke_client(client_id: str) -> str:
@@ -15,6 +16,7 @@ async def revoke_client(client_id: str) -> str:
 
 class RevokeClientTool(BaseTextTool):
     name = "revoke_client"
+    scope = ToolScope.GLOBAL
     required_tier = "operator"
     description = "revoke a client token by client_id."
 

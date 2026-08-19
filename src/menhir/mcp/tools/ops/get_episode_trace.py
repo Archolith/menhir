@@ -5,6 +5,7 @@ from __future__ import annotations
 from menhir.domain.utils import decode_json_value
 from menhir.mcp.formatters import _coerce_iso, _require_episode_uuid
 from menhir.mcp.tools.base import BaseJsonTool
+from menhir.mcp.contracts import ToolScope
 
 
 async def get_episode_trace(episode_uuid: str, limit: int = 20) -> str:
@@ -15,6 +16,7 @@ async def get_episode_trace(episode_uuid: str, limit: int = 20) -> str:
 
 class GetEpisodeTraceTool(BaseJsonTool):
     name = "get_episode_trace"
+    scope = ToolScope.OBJECT
     required_tier = "readonly"
     description = "Return a compact debug trace for one episode."
 

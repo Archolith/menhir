@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from menhir.mcp.tools.base import BaseTextTool
+from menhir.mcp.contracts import ToolScope
 
 
 async def link_artifacts(source_uuid: str, target_uuid: str, relation: str) -> str:
@@ -25,6 +26,7 @@ async def link_artifacts(source_uuid: str, target_uuid: str, relation: str) -> s
 
 class LinkArtifactsTool(BaseTextTool):
     name = "link_artifacts"
+    scope = ToolScope.OBJECT
     description = "Declare that one artifact reviews, implements, or informs another."
 
     _REASONS = {

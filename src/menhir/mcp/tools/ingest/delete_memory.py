@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from menhir.mcp.tools.base import BaseTextTool
+from menhir.mcp.contracts import ToolScope
 
 
 async def delete_memory(node_uuid: str, namespace: str = "") -> str:
@@ -21,6 +22,7 @@ async def delete_memory(node_uuid: str, namespace: str = "") -> str:
 
 class DeleteMemoryTool(BaseTextTool):
     name = "delete_memory"
+    scope = ToolScope.NAMESPACED
     required_tier = "operator"
     description = "Delete a specific memory node and all its relationships."
 

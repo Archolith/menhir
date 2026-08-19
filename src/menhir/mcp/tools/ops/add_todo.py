@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from menhir.mcp.tools.base import BaseTextTool
+from menhir.mcp.contracts import ToolScope
 
 
 async def add_todo(
@@ -45,6 +46,7 @@ async def add_todo(
 
 class AddTodoTool(BaseTextTool):
     name = "add_todo"
+    scope = ToolScope.NAMESPACED
     description = "Create a persistent TODO item that survives across sessions."
 
     async def endpoint(

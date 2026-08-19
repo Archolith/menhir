@@ -9,6 +9,7 @@ from menhir.mcp.formatters import (
     _require_episode_uuid,
 )
 from menhir.mcp.tools.base import BaseTextTool
+from menhir.mcp.contracts import ToolScope
 
 
 async def get_enrichment_status(
@@ -39,6 +40,7 @@ async def get_enrichment_status(
 
 class GetEnrichmentStatusTool(BaseTextTool):
     name = "get_enrichment_status"
+    scope = ToolScope.OBJECT
     required_tier = "readonly"
     description = "Inspect one episode's enrichment status."
 

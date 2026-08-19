@@ -7,6 +7,7 @@ from typing import Literal
 from menhir.mcp.feedback import SCORE_SCALE, is_valid_score, score_value
 from menhir.mcp.service_access import get_request_session
 from menhir.mcp.tools.base import BaseJsonTool
+from menhir.mcp.contracts import ToolScope
 
 RecallScore = Literal["useful", "partial", "noise", "unused"]
 
@@ -59,6 +60,7 @@ rate_recall.__doc__ = _RATE_RECALL_DOC
 
 class RateRecallTool(BaseJsonTool):
     name = "rate_recall"
+    scope = ToolScope.OBJECT
     required_tier = "agent"
     description = "Report how useful a prior recall result was (operational signal only)."
 

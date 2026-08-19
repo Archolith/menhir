@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from menhir.core.backend_impl import RuntimeProvider
 from menhir.infrastructure.scheduler_trace import emit_scheduler_task_event
 from menhir.mcp.tools.base import BaseJsonTool
+from menhir.mcp.contracts import ToolScope
 
 
 async def recover_orphans(max_age_hours: float = 4.0, dry_run: bool = False) -> str:
@@ -29,6 +30,7 @@ async def recover_orphans(max_age_hours: float = 4.0, dry_run: bool = False) -> 
 
 class RecoverOrphansTool(BaseJsonTool):
     name = "recover_orphans"
+    scope = ToolScope.GLOBAL
     required_tier = "operator"
     description = "Recover orphaned SESSION nodes from crashed sessions."
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from menhir.mcp.tools.base import BaseJsonTool
+from menhir.mcp.contracts import ToolScope
 
 #: default cap on returned episode content (chars); keeps the receipt compact.
 _DEFAULT_CONTENT_CHARS = 500
@@ -30,6 +31,7 @@ async def get_provenance(node_uuid: str, content_chars: int = _DEFAULT_CONTENT_C
 
 class GetProvenanceTool(BaseJsonTool):
     name = "get_provenance"
+    scope = ToolScope.OBJECT
     required_tier = "readonly"
     description = (
         "Show a memory/View node's receipts: the source episodes it was built from, plus evidence "

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from menhir.mcp.tools.base import BaseTextTool
+from menhir.mcp.contracts import ToolScope
 
 
 async def list_artifacts(
@@ -28,6 +29,7 @@ async def list_artifacts(
 
 class ListArtifactsTool(BaseTextTool):
     name = "list_artifacts"
+    scope = ToolScope.NAMESPACED
     required_tier = "readonly"
     description = "List work artifacts filtered by type, status, or namespace."
 

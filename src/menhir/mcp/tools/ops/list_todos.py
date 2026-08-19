@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from menhir.mcp.tools.base import BaseTextTool
+from menhir.mcp.contracts import ToolScope
 
 
 async def list_todos(status: str = "open", limit: int = 25, namespace: str = "") -> str:
@@ -22,6 +23,7 @@ async def list_todos(status: str = "open", limit: int = 25, namespace: str = "")
 
 class ListTodosTool(BaseTextTool):
     name = "list_todos"
+    scope = ToolScope.NAMESPACED
     required_tier = "readonly"
     description = "List persistent TODO items filtered by status."
 

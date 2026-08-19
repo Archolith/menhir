@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from menhir.domain.recall import InvalidQueryPresetError, format_query_preset_values
 from menhir.mcp.service_access import get_request_session
 from menhir.mcp.tools.base import BaseTextTool
+from menhir.mcp.contracts import ToolScope
 
 
 def _build_temporal_header() -> str | None:
@@ -69,6 +70,7 @@ async def build_context(
 
 class BuildContextTool(BaseTextTool):
     name = "build_context"
+    scope = ToolScope.NAMESPACED
     required_tier = "readonly"
     description = "Build a token-budget-limited context string."
 

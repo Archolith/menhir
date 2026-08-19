@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from menhir.mcp.tools.base import BaseTextTool
+from menhir.mcp.contracts import ToolScope
 
 
 async def list_artifact_questions(
@@ -29,6 +30,7 @@ async def list_artifact_questions(
 
 class ArtifactQuestionsTool(BaseTextTool):
     name = "list_artifact_questions"
+    scope = ToolScope.NAMESPACED
     required_tier = "readonly"
     description = "List open, answered, or deferred design questions on work artifacts."
 

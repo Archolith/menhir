@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from menhir.mcp.tools.base import BaseJsonTool
+from menhir.mcp.contracts import ToolScope
 
 
 async def requeue_conflicts_for_llm_review(
@@ -30,6 +31,7 @@ async def requeue_conflicts_for_llm_review(
 
 class RequeueForReviewTool(BaseJsonTool):
     name = "requeue_conflicts_for_llm_review"
+    scope = ToolScope.OBJECT
     required_tier = "operator"
     description = "Re-queue conflict groups for LLM contradiction confirmation."
 

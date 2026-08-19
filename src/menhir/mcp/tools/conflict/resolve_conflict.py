@@ -7,6 +7,7 @@ from itertools import combinations
 
 from menhir.mcp.formatters import _coerce_conflict_members, _count_unresolved_members
 from menhir.mcp.tools.base import BaseJsonTool
+from menhir.mcp.contracts import ToolScope
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,7 @@ async def resolve_conflict(
 
 class ResolveConflictTool(BaseJsonTool):
     name = "resolve_conflict"
+    scope = ToolScope.OBJECT
     required_tier = "operator"
     description = "Resolve one conflict group using keep/replace/discard actions."
 

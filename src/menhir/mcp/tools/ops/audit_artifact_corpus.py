@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from menhir.mcp.tools.base import BaseTextTool
+from menhir.mcp.contracts import ToolScope
 
 
 async def audit_artifact_corpus(
@@ -40,6 +41,7 @@ async def audit_artifact_corpus(
 
 class AuditArtifactCorpusTool(BaseTextTool):
     name = "audit_artifact_corpus"
+    scope = ToolScope.OBJECT
     description = (
         "Read-only parity report between a repository's work-artifact corpus and the graph."
     )

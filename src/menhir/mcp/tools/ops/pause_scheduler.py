@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from menhir.mcp.tools.base import BaseTextTool
+from menhir.mcp.contracts import ToolScope
 
 
 async def pause_scheduler() -> str:
@@ -21,6 +22,7 @@ async def pause_scheduler() -> str:
 
 class PauseSchedulerTool(BaseTextTool):
     name = "pause_scheduler"
+    scope = ToolScope.GLOBAL
     required_tier = "operator"
     description = "Stop the maintenance scheduler loop (enrichment retries, stale recovery, conflict jobs)."
 

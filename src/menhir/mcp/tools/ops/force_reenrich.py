@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from menhir.mcp.formatters import _collect_episode_status, _format_episode_status, _require_episode_uuid
 from menhir.mcp.tools.base import BaseTextTool
+from menhir.mcp.contracts import ToolScope
 
 
 async def force_reenrich(
@@ -38,6 +39,7 @@ async def force_reenrich(
 
 class ForceReenrichTool(BaseTextTool):
     name = "force_reenrich"
+    scope = ToolScope.OBJECT
     required_tier = "operator"
     description = "Force a failed episode back into enrichment."
 
