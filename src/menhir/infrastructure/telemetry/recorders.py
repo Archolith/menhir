@@ -18,7 +18,7 @@ from .store import McpTelemetryStore, telemetry_store
 logger = logging.getLogger(__name__)
 
 
-_NON_EPISODE_USAGE_KEY = "__non_episode__"
+_NON_EPISODE_SUBJECT_KEY = "__non_episode__"
 
 
 def record_llm_usage_event(
@@ -49,7 +49,7 @@ def record_llm_usage_event(
             call_id=event.call_id,
             recorded_at=_utc_now_iso(),
             run_id=os.getenv("MENHIR_BENCH_ACTIVE_RUN_ID") or None,
-            episode_uuid=episode_uuid or _NON_EPISODE_USAGE_KEY,
+            episode_uuid=episode_uuid or _NON_EPISODE_SUBJECT_KEY,
             operation=event.operation,
             kind=event.kind,
             model=event.model,
@@ -62,8 +62,6 @@ def record_llm_usage_event(
             cached_input_tokens=event.cached_input_tokens,
             reasoning_output_tokens=event.reasoning_output_tokens,
             provider_usage_json=provider_usage_json,
-            # Exception prose can contain prompts/provider bodies. The call classification remains in
-            # status/operation/model; the content is not useful enough to justify a durable copy.
             error="[redacted]" if event.error else None,
         )
     except Exception as exc:  # pragma: no cover - telemetry must never break the caller
@@ -142,8 +140,6 @@ def record_mcp_event(
             completed_at=timestamp,
             duration_ms=max(0, duration_ms),
             success=success,
-            # Arbitrary error strings can embed a request body; the structured failure store is
-            # the place for addressable detailed diagnostics.
             error="[redacted]" if error else None,
             input_size=input_size,
             result_size=result_size,
@@ -171,8 +167,14 @@ def record_failure_event(
     details: Any = None,
     store: McpTelemetryStore = telemetry_store,
 ) -> bool:
-    """Persist a structured failure record for enrichment and scheduler diagnostics."""
+    """Persist a structured failure record for enrichment and scheduler diagnostics.
 
+    Episode failures retain their addressable diagnostics. A non-episode failure has no memory
+    subject to erase, so it gets an explicit operational sentinel and a minimized payload rather
+    than a NULL key plus arbitrary exception prose.
+    """
+
+    scoped = bool(str(episode_uuid or "").strip())
     details_payload = details
     if traceback_text:
         base_details = (
@@ -185,6 +187,8 @@ def record_failure_event(
         base_details["traceback"] = traceback_text
         base_details["traceback_preview"] = traceback_text[:500]
         details_payload = base_details
+    if details_payload is not None and not scoped:
+        details_payload = _redact_telemetry_value(details_payload)
     details_json = None
     if details_payload is not None:
         details_json = json.dumps(details_payload, default=_json_default, sort_keys=True)
@@ -192,7 +196,7 @@ def record_failure_event(
         return store.record_failure(
             recorded_at=_utc_now_iso(),
             operation=operation,
-            episode_uuid=episode_uuid,
+            episode_uuid=episode_uuid if scoped else _NON_EPISODE_SUBJECT_KEY,
             failure_stage=failure_stage,
             classification=classification,
             retryable=retryable,
@@ -200,7 +204,7 @@ def record_failure_event(
             queue_depth=queue_depth,
             worker_id=worker_id,
             error_type=error_type,
-            error=error,
+            error=error if scoped else "[redacted]",
             details_json=details_json,
         )
     except Exception as exc:  # pragma: no cover - telemetry must never break the caller
@@ -262,16 +266,19 @@ def record_lifecycle_event(
     details: Any = None,
     store: McpTelemetryStore = telemetry_store,
 ) -> None:
+    """Persist a lifecycle event with addressable or explicitly operational lineage."""
+    scoped = bool(str(episode_uuid or "").strip())
+    details_payload = details if scoped else _redact_telemetry_value(details)
     details_json = None
-    if details is not None:
-        details_json = json.dumps(details, default=_json_default, sort_keys=True)
+    if details_payload is not None:
+        details_json = json.dumps(details_payload, default=_json_default, sort_keys=True)
     try:
         store.record_lifecycle_event(
             recorded_at=_utc_now_iso(),
             component=component,
             event=event,
             state=state,
-            episode_uuid=episode_uuid,
+            episode_uuid=episode_uuid if scoped else _NON_EPISODE_SUBJECT_KEY,
             details_json=details_json,
         )
     except Exception as exc:  # pragma: no cover - telemetry must never break the caller
@@ -319,13 +326,7 @@ def record_merge(
     absorbed_namespace: str | None = None,
     store: McpTelemetryStore = telemetry_store,
 ) -> None:
-    """Module-level convenience wrapper around ``telemetry_store.record_merge``.
-
-    Durable merge audit: survives deletion of the survivor node, unlike the
-    ``survivor.merge_audit`` graph property. The legacy merge caller already embeds the absorbed
-    node's namespace in ``snapshot_json``; derive both parties from it when explicit lineage is
-    absent because merge eligibility requires namespace equality before this writer is reached.
-    """
+    """Persist the durable merge audit with namespace lineage when derivable."""
 
     try:
         inferred_namespace: str | None = None
@@ -385,17 +386,7 @@ def record_destructive_op(
     session_id: str,
     user_id: str,
 ) -> None:
-    """Record a destructive operation (operator-tier action) for audit purposes.
-
-    Args:
-        surface: Where the action originated ("mcp" or "rest")
-        name: Operation name (tool name or endpoint)
-        tier: Auth tier of the caller
-        session_id: Session ID of the caller
-        user_id: User ID of the caller
-
-    Non-blocking, best-effort recording — failures are logged at debug level.
-    """
+    """Record a destructive operation (operator-tier action) for audit purposes."""
     try:
         record_mcp_event(
             kind="background",
