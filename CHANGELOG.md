@@ -1,4 +1,4 @@
-## 2026-08-19 — fix: HIGH remediation wave 1 (14 confirmed findings)
+## 2026-08-19 — fix: HIGH remediation wave 1 (15 confirmed findings)
 
 - **Extraction and LLM output parsing.** `_extract_first_json_payload` now strips a code fence
   wherever it appears and returns the first payload `raw_decode` accepts, instead of taking

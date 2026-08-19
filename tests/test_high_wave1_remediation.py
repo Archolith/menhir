@@ -1,5 +1,5 @@
-"""Counterexample tests for the HIGH remediation wave 1 (CF-11, 12, 66, 103, 144, 156, 170,
-183, 184, 185, 186, 188, 197, 204).
+"""Counterexample tests for the 15 findings remediated in HIGH remediation wave 1:
+CF-11, 12, 66, 103, 144, 156, 170, 172, 183, 184, 185, 186, 188, 197, 204.
 
 Each test reproduces the failing scenario the finding recorded, not the shape of the fix.
 """
