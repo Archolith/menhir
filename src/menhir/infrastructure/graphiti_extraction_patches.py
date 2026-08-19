@@ -13,6 +13,7 @@ from time import perf_counter
 from typing import Any, Callable
 
 from menhir.infrastructure.graphiti_helpers import (
+    SYNTHETIC_FACT_PREFIX,
     _build_graphiti_failure_details,
     _describe_openai_client_base_url,
     _extract_first_json_payload,
@@ -27,6 +28,25 @@ _combined_extraction_cache: ContextVar[tuple[str, list[Any]] | None] = ContextVa
     default=None,
 )
 _original_graphiti_extract_edges: Any | None = None
+_original_graphiti_extract_nodes: Any | None = None
+#: The MODULE holding the replacement extractor's real dependency, imported at patch time so the
+#: patch's own ImportError guard covers it. Deliberately the module and not the function: the
+#: attribute is read per call so a later rebind -- another patch, or a test seam -- is still seen.
+#: Freezing the function here would trade one silent-failure mode for another.
+_graphiti_combined_extraction_module: Any | None = None
+
+
+def _resolve_combined_extractor() -> Any:
+    """Return the combined extractor, resolved from the module bound at patch time.
+
+    Falls back to a direct import for callers that reach this function without having applied the
+    patch (the extraction tests do exactly that). Availability is still PROVEN at patch time, which
+    is the point of CF-12: the patch no longer reports success while its real dependency is absent.
+    """
+    module = _graphiti_combined_extraction_module
+    if module is None:
+        from graphiti_core.utils.maintenance import combined_extraction as module
+    return module.extract_nodes_and_edges
 
 
 # ---------------------------------------------------------------------------
@@ -585,22 +605,25 @@ def _sanitize_combined_payload(
     synthesized = 0
     self_bound = 0
     self_echo_edges = 0
+    surviving_edges: list[dict[str, Any]] = []
     for edge in edges:
         edge_is_self_echo = False
         for endpoint_key in ("source_entity_name", "target_entity_name"):
             endpoint_name = edge[endpoint_key]
             norm_key = _normalize_endpoint_name(endpoint_name)
-            if norm_key in known:
-                continue
             if is_assistant_turn and (
                 norm_key in _SELF_THIRD_PERSON or norm_key in _SELF_FIRST_PERSON
             ):
-                # Deliberately NOT bound (see `_is_self_endpoint`): this is the assistant restating
-                # a fact the human already gave first-hand. Record it so an episode emptied ENTIRELY
-                # by this policy is reported as an intentional no-op rather than a retryable
-                # collapse -- otherwise a pure-echo turn burns its whole retry budget on an
-                # outcome that is correct and can never change.
+                # This is the assistant restating a fact the human already gave first-hand. The
+                # decision is made on ROLE + LABEL alone and is tested BEFORE `known` membership,
+                # because enforcement used to rely on leaving the endpoint unbound so graphiti
+                # would drop the edge -- and Menhir's own `_RELATION_COMPLETENESS_INSTRUCTIONS`
+                # tells the model to include `user` in extracted_entities, which puts the endpoint
+                # in `known` and silently disabled the whole policy. Break: a doomed edge must not
+                # go on to mint a synthesized endpoint entity for its other side.
                 edge_is_self_echo = True
+                break
+            if norm_key in known:
                 continue
             if _is_self_endpoint(norm_key, episode_text):
                 # Rewrite to the canonical self display and materialize it ONCE per payload, so
@@ -635,6 +658,20 @@ def _sanitize_combined_payload(
             # bound above instead of refused.
         if edge_is_self_echo:
             self_echo_edges += 1
+            continue
+        surviving_edges.append(edge)
+
+    # Echo edges are dropped EXPLICITLY rather than by leaving an endpoint unbound. The old
+    # implicit enforcement only worked when the model omitted `user` from extracted_entities;
+    # when it lists `user` -- which the extraction prompt asks it to do -- the endpoint resolves
+    # and the echo edge survived, duplicating the user's own first-hand fact under the assistant's
+    # paraphrase while the receipt reported zero suppressed.
+    # The titled-list fallback below keeps its ORIGINAL trigger: it asks whether the extractor
+    # produced any edge at all, which is the question it was written to ask. Testing the post-drop
+    # list instead would newly fire list synthesis on echo-only assistant turns -- a separate
+    # decision that this fix deliberately does not make.
+    extractor_produced_edges = bool(edges)
+    edges = surviving_edges
 
     # Titled list: the turn states membership through SYNTAX rather than a verb, so the extractor
     # returns names with no relation between them. Every node is then orphan-pruned for want of an
@@ -643,7 +680,7 @@ def _sanitize_combined_payload(
     # Only when the extractor found NO usable edges: if it did state relations, they are the truth
     # of the turn and a synthetic membership edge must not compete with them.
     list_edges_added = 0
-    if not edges:
+    if not extractor_produced_edges:
         parsed = parse_titled_list(episode_text)
         if parsed is not None:
             container, items = parsed
@@ -666,7 +703,10 @@ def _sanitize_combined_payload(
                         "relation_type": _MEMBERSHIP_RELATION,
                         "source_entity_name": item,
                         "target_entity_name": container,
-                        "fact": f"{item} is listed under {container}",
+                        # Menhir built this fact, not the model. It carries the synthetic marker so
+                        # the storage boundary classifies it honestly instead of stamping
+                        # fact_source="original" on a sentence the model never asserted.
+                        "fact": f"{SYNTHETIC_FACT_PREFIX}{item} is listed under {container}",
                         "episode_indices": [0],
                     })
                     if synthetic is None:      # unreachable today; fail closed rather than emit junk
@@ -894,7 +934,11 @@ async def _run_graphiti_combined_extraction(
     excluded_entity_types: Any,
     custom_extraction_instructions: str | None,
 ) -> tuple[list[Any], list[Any], dict[str, list[int]]]:
-    from graphiti_core.utils.maintenance.combined_extraction import extract_nodes_and_edges
+    # Resolved at patch time (see `_patch_graphiti_combined_extraction`) so the patch's own
+    # ImportError guard covers this dependency. Importing it here instead put the replacement
+    # function's real dependency outside the guard: the patch reported success and every
+    # subsequent add_episode raised.
+    extract_nodes_and_edges = _resolve_combined_extractor()
 
     receipt = _extraction_receipt.get()
     if receipt is not None:
@@ -1054,19 +1098,45 @@ def _patch_graphiti_combined_extraction() -> None:
     """
 
     global _original_graphiti_extract_edges
+    global _original_graphiti_extract_nodes
+    global _graphiti_combined_extraction_module
 
+    graphiti_module = None
     try:
         import graphiti_core.graphiti as graphiti_module
 
         if getattr(graphiti_module, "_menhir_combined_extraction_patched", False):
             return
+        # Prove the replacement's own dependency FIRST, inside this guard. It used to be imported
+        # lazily inside `_run_graphiti_combined_extraction`, where this except clause could not
+        # reach it: the patch logged success and every add_episode then raised.
+        from graphiti_core.utils.maintenance import combined_extraction as _combined_module
+
+        _combined_module.extract_nodes_and_edges  # noqa: B018 - presence check, guarded above
+
+        _original_graphiti_extract_nodes = graphiti_module.extract_nodes
         _original_graphiti_extract_edges = graphiti_module.extract_edges
+        _graphiti_combined_extraction_module = _combined_module
         graphiti_module.extract_nodes = _extract_nodes_combined_for_add_episode
         graphiti_module.extract_edges = _extract_edges_from_combined_cache
         graphiti_module._menhir_combined_extraction_patched = True
         logger.debug("Graphiti single-episode combined extraction patch applied")
     except (ImportError, AttributeError) as exc:
-        logger.warning("Failed to patch Graphiti combined extraction: %s", exc)
+        # Restore whatever was rebound before the failure, so a partial patch cannot leave
+        # Graphiti pointing at a replacement whose dependency is missing. Without originals to
+        # restore to, the old code left the process with no fallback at all.
+        if graphiti_module is not None:
+            if _original_graphiti_extract_nodes is not None:
+                graphiti_module.extract_nodes = _original_graphiti_extract_nodes
+            if _original_graphiti_extract_edges is not None:
+                graphiti_module.extract_edges = _original_graphiti_extract_edges
+        _original_graphiti_extract_nodes = None
+        _original_graphiti_extract_edges = None
+        _graphiti_combined_extraction_module = None
+        logger.warning(
+            "Failed to patch Graphiti combined extraction; left Graphiti on its own extractors: %s",
+            exc,
+        )
 
 
 def _patch_graphiti_combined_extraction_models() -> None:
@@ -1108,8 +1178,21 @@ def _patch_graphiti_combined_extraction_models() -> None:
         _CombinedFact = _ene_module.CombinedFact
 
         class PatchedCombinedExtraction(BaseModel):
-            extracted_entities: list[_CombinedEntity] = Field(default_factory=list)  # type: ignore[valid-type]
-            edges: list[_CombinedFact] = Field(default_factory=list)  # type: ignore[valid-type]
+            # Field declarations are copied VERBATIM from upstream CombinedExtraction: both
+            # required, both described. `model_json_schema()` is what the structured-output path
+            # sends as `response_format.json_schema`, so relaxing these to `default_factory=list`
+            # told the model both arrays were optional and stripped their descriptions -- weakening
+            # the constraint on exactly the local models this patch family exists to compensate for
+            # -- and turned a `{}` or typo'd-key response from a loud upstream ValidationError into
+            # a silent, successful zero-extraction. The tolerance belongs in the `mode="before"`
+            # validator below, which runs ahead of required-field checking and can supply the
+            # defaults without changing the schema handed to the model.
+            extracted_entities: list[_CombinedEntity] = Field(  # type: ignore[valid-type]
+                ..., description="List of extracted entities"
+            )
+            edges: list[_CombinedFact] = Field(  # type: ignore[valid-type]
+                ..., description="List of extracted relationship facts"
+            )
 
             @model_validator(mode="before")
             @classmethod
