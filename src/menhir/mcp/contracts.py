@@ -209,7 +209,10 @@ class BaseJsonResource(ABC):
         )
 
     async def execute(self, *args: Any, **kwargs: Any) -> str:
+        telemetry_effective_payload: dict[str, Any] | None = None
+
         async def _run() -> str:
+            nonlocal telemetry_effective_payload
             # Query-string auth is a legacy compatibility exception for the tool
             # surface. QUERY_AUTH_ALLOWED_TOOLS is built from ALL_TOOLS only, so
             # resources have no established query-auth compatibility contract;
@@ -228,6 +231,7 @@ class BaseJsonResource(ABC):
             # those values against resource names or URI templates would silently deny
             # all resources for restricted clients. A resource ACL, if introduced, must
             # be a distinct policy/config surface with explicit resource semantics.
+            telemetry_effective_payload = self.call_payload(*args, **kwargs)
             payload = await self.build_payload(*args, **kwargs)
             return render_json(payload)
 
@@ -237,6 +241,7 @@ class BaseJsonResource(ABC):
             payload=self.call_payload(*args, **kwargs),
             runner=_run,
             error_mapper=self.error_mapper,
+            effective_payload=lambda: telemetry_effective_payload,
         )
 
     def call_payload(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
@@ -338,8 +343,10 @@ class BaseTool:
         error_mapper = None
         if type(self).error_mapper is not BaseTool.error_mapper:
             error_mapper = self.error_mapper
+        telemetry_effective_payload: dict[str, Any] | None = None
 
         async def _runner() -> str:
+            nonlocal telemetry_effective_payload
             if request_uses_query_auth() and self.name not in QUERY_AUTH_ALLOWED_TOOLS:
                 raise PermissionError(
                     f"query-string auth cannot invoke `{self.name}`; use Authorization header for write/admin tools"
@@ -375,6 +382,7 @@ class BaseTool:
             if self.required_tier == "operator":
                 _try_record_destructive_op_mcp(self.name, tier)
             call_kwargs = self._apply_pinned_namespace(kwargs)
+            telemetry_effective_payload = self.call_payload(*args, **call_kwargs)
             return await self.endpoint(*args, **call_kwargs)
 
         result = await track_mcp_call(
@@ -384,6 +392,7 @@ class BaseTool:
             runner=_runner,
             timeout=self.timeout_for(*args, **kwargs),
             error_mapper=error_mapper,
+            effective_payload=lambda: telemetry_effective_payload,
         )
         from menhir.core.backend_impl import drain_client_warnings
         warnings = drain_client_warnings()
