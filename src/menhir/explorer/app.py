@@ -617,14 +617,47 @@ def _extraction_lab_store(request: Request) -> object:
     return getattr(request.app.state, "extraction_lab_store", None) or telemetry_store
 
 
+def _require_explorer_readonly() -> None:
+    """Router-level floor for every explorer route.
+
+    The explorer mounts into the SAME FastAPI app as the API and sits behind the same bearer
+    middleware, so a caller needed a valid token -- but tier was never consulted, so any
+    authenticated token reached all 36 routes regardless of its rank. Reuses the API's own
+    `_require_tier` so the two surfaces cannot drift apart in how they rank tiers or shape the
+    403.
+    """
+    from menhir.api.routes_support import _require_tier
+
+    _require_tier("readonly")
+
+
+def _require_explorer_agent() -> None:
+    """Floor for explorer routes that MUTATE or spend real resources.
+
+    Applied in the route body rather than as a second router dependency, because it applies to
+    six routes rather than to the router. Read the individual routes for why each one is here.
+    """
+    from menhir.api.routes_support import _require_tier
+
+    _require_tier("agent")
+
+
 def create_explorer_router() -> Any:
     """Create an APIRouter with all explorer routes for mounting onto an app.
 
     Routes assume app.state.repo and app.state.candidate_service are available.
     """
-    from fastapi import APIRouter
+    from fastapi import APIRouter, Depends
 
-    router = APIRouter()
+    # Tier enforcement is applied to the ROUTER, not written into each route body.
+    # api/routes.py carries 23 explicit `_require_tier(...)` calls across its own endpoints;
+    # this router carried 36 routes and zero. Enforcing per-route here would fix the 36 that
+    # exist and silently exempt the 37th, which is the failure mode this codebase keeps
+    # reproducing. A router-level dependency cannot be forgotten by a new route.
+    #
+    # readonly is the FLOOR. The mutating routes below re-assert a higher tier in their own
+    # bodies; the dependency does not weaken those.
+    router = APIRouter(dependencies=[Depends(_require_explorer_readonly)])
 
     @router.get("/explorer", response_class=HTMLResponse)
     async def explorer_home(request: Request) -> HTMLResponse:
@@ -678,6 +711,9 @@ def create_explorer_router() -> Any:
 
     @router.post("/explorer/api/recall-lab/run", response_class=JSONResponse)
     async def recall_lab_api(request: Request, body: RecallLabRequest) -> JSONResponse:
+        # Above the router-level readonly floor: runs a real recall against the graph and writes
+        # a recall_lab_runs row, spending LLM/embedder budget on demand. Not a read.
+        _require_explorer_agent()
         recall_service = _runtime_recall_service(request)
         if recall_service is None:
             raise HTTPException(
@@ -730,6 +766,9 @@ def create_explorer_router() -> Any:
 
     @router.post("/explorer/api/extraction-lab/run", response_class=JSONResponse)
     async def extraction_lab_api(request: Request, body: ExtractionLabRequest) -> JSONResponse:
+        # Above the router-level readonly floor: a real extraction -- LLM calls plus an
+        # extraction_lab_runs row. A readonly token must not be able to spend extraction budget.
+        _require_explorer_agent()
         payload = await run_extraction_lab(body)
         result_payload = payload.model_dump(mode="json")
         store = _extraction_lab_store(request)
@@ -833,6 +872,9 @@ def create_explorer_router() -> Any:
 
     @router.post("/explorer/candidates/{uuid}/approve", response_class=JSONResponse)
     async def approve_candidate(request: Request, uuid: str) -> JSONResponse:
+        # Above the router-level readonly floor: mutates graph state by promoting a candidate
+        # into the memory graph.
+        _require_explorer_agent()
         result = await request.app.state.candidate_service.approve(uuid)
         if result["status"] == "not_found":
             raise HTTPException(status_code=404, detail="Candidate not found")
@@ -840,6 +882,9 @@ def create_explorer_router() -> Any:
 
     @router.post("/explorer/candidates/{uuid}/reject", response_class=JSONResponse)
     async def reject_candidate(request: Request, uuid: str) -> JSONResponse:
+        # Above the router-level readonly floor: mutates graph state by rejecting a candidate,
+        # which is durable and not reversible from this UI.
+        _require_explorer_agent()
         result = await request.app.state.candidate_service.reject(uuid)
         if result["status"] == "not_found":
             raise HTTPException(status_code=404, detail="Candidate not found")
@@ -890,6 +935,12 @@ def create_explorer_router() -> Any:
 
         ``state=hide`` sets reveal=0 (redact); ``state=reveal`` sets reveal=1 (show, honored
         only on a loopback bind by ``_reveal``). Returns the effective state.
+
+        DELIBERATELY left at the router's readonly floor despite being a POST. It mutates a
+        per-browser cookie, not server state, and the direction that matters -- reveal -- is
+        independently gated: ``_reveal`` honours the cookie only on a loopback bind, so setting
+        it from a proxied request grants nothing. Escalating this to agent would restrict
+        turning redaction ON, which is the safe direction.
         """
         if state not in ("hide", "reveal"):
             raise HTTPException(status_code=400, detail="state must be 'hide' or 'reveal'")
@@ -1091,6 +1142,9 @@ def create_explorer_router() -> Any:
         body: QueryFilteredPacketRequest,
     ) -> JSONResponse:
         """Select with production recall, then type and budget the selected evidence."""
+        # Above the router-level readonly floor. Runs PRODUCTION recall and budgets evidence --
+        # the same resource-spending class as the recall/extraction lab endpoints above.
+        _require_explorer_agent()
         reader = _bench_task_reader(request)
         task = reader.get_task_detail(run_id, namespace, reveal=_reveal(request))
         if task is None:
@@ -1222,5 +1276,14 @@ def create_app(
     return app
 
 
-# Standalone app instance for compatibility (tests only)
-app = create_app()
+# NO module-level `app = create_app()` here, deliberately.
+#
+# It used to exist, commented "for compatibility (tests only)", and no test used it: every test
+# either calls the `create_app` FACTORY or patches `menhir.explorer.app.<attr>`, which goes
+# through sys.modules and never touches an instance. What it did do was build a complete FastAPI
+# application on EVERY import -- and the import chain runs on every production start, via
+# api/server_support.py -> explorer/__init__.py -> this module -- so the `explorer_enabled` gate
+# 176 lines later could not prevent it. Settings were also read during import, meaning a config
+# error in a disabled subsystem could abort startup.
+#
+# Construct through `create_app()` or `create_explorer_router()`; both are gated by the caller.
