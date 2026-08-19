@@ -37,7 +37,9 @@ _RATE_RECALL_DOC = """Report how useful a prior recall/context result was.
               you already had the answer in context).
         recall_id: The recall_id token from the recall response. If omitted, the
             most recent unrated recall in this session is rated.
-        reason: Optional short note on why (e.g. "answered the question directly").
+        reason: Optional compatibility note. It is accepted but deliberately NOT persisted;
+            usefulness telemetry stores only the structured score so a session-wide receipt
+            does not become an unerasable free-text sidecar copy.
 
     Returns:
         Confirmation of the rated recall, or an error if no matching recall exists.
@@ -85,8 +87,6 @@ class RateRecallTool(BaseJsonTool):
         session_id = session.session_id if session and session.session_id else ""
         client_id = session.client_id if session and session.client_id else ""
 
-        clean_reason = (reason or "").strip()[:500] or None
-
         from menhir.mcp.telemetry import telemetry_store
 
         rated = telemetry_store.record_recall_feedback(
@@ -95,7 +95,9 @@ class RateRecallTool(BaseJsonTool):
             token=recall_id or None,
             session_id=session_id,
             client_id=client_id,
-            reason=clean_reason,
+            # CF-165 closure: a receipt can cover a global/workspace recall and there is no
+            # sound session->namespace mapping. Persist the structured score, not arbitrary prose.
+            reason=None,
         )
         if rated is None:
             hint = (
