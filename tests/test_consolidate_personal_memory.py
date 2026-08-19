@@ -759,12 +759,17 @@ def test_make_sync_chat_honors_model_override(monkeypatch) -> None:
 
     from menhir.infrastructure import sync_llm
     from menhir.infrastructure.observability import reset_llm_usage_callback, set_llm_usage_callback
-    from menhir.infrastructure.providers import ProviderConfig
+    from menhir.infrastructure.providers import ProviderConfig, ProviderKind
 
     class _Cfg:
         api_key = "k"
         chat_model = "global-model"
-        base_url = ""
+        # A CONCRETE local endpoint, not "". CF-188: an empty base_url is the local sentinel, and
+        # handing it to the OpenAI SDK resolves to api.openai.com, so make_sync_chat now refuses
+        # it rather than egressing memory text. Deliberately NOT the default :8081 base, which
+        # would route this stub through the real llama scheduler.
+        base_url = "http://127.0.0.1:9099/v1"
+        kind = ProviderKind.LOCAL
 
     used: dict = {}
 
