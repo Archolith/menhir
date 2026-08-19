@@ -1294,6 +1294,7 @@ class StubMemoryGraphAdapter:
         *,
         status: str | None = "unresolved",
         limit: int = 25,
+        namespace: str | None = None,
     ) -> list[dict[str, object]]:
         results = []
         for group in self.conflict_groups.values():

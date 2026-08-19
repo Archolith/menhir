@@ -12,31 +12,50 @@ from menhir.mcp.tools.base import BaseJsonTool
 from menhir.mcp.contracts import ToolScope
 
 
-async def list_conflicts(status: str = "unresolved", limit: int = 25) -> str:
+async def list_conflicts(
+    status: str = "unresolved", limit: int = 25, namespace: str = ""
+) -> str:
     """List conflict groups detected by contradiction checks.
 
     Args:
         status: Filter by status ("unresolved", "resolved", "auto-resolved", "all").
         limit: Max groups to return (default: 25, max: 200).
+        namespace: Optional silo to scope this operation to. Empty = every silo
+            (existing behavior). A pinned client has this forced to its own silo.
 
     Returns:
         Grouped conflict summary with member details and a suggested resolve command.
     """
 
-    return await ListConflictsTool().execute(status=status, limit=limit)
+    return await ListConflictsTool().execute(
+        status=status, limit=limit, namespace=namespace
+    )
 
 
 class ListConflictsTool(BaseJsonTool):
     name = "list_conflicts"
-    scope = ToolScope.OBJECT
+    # NAMESPACED, not OBJECT: this reads member `content` at READONLY tier, and before the
+    # namespace argument existed it did so across every silo with no tenancy predicate at
+    # all -- the same shape as CF-216. A conflict group is not an object address, so OBJECT
+    # was never the right declaration for it.
+    scope = ToolScope.NAMESPACED
     required_tier = "readonly"
     description = "List conflict groups detected by contradiction checks."
 
-    async def endpoint(self, status: str = "unresolved", limit: int = 25) -> str:
+    async def endpoint(
+        self, status: str = "unresolved", limit: int = 25, namespace: str = ""
+    ) -> str:
         try:
             backend = self.get_backend()
             _, status_filter = _resolve_conflict_status_filter(status)
-            rows = await backend.list_conflict_groups(status=status_filter, limit=limit)
+        # `namespace` is forwarded only when set. An unpinned caller therefore produces a
+        # byte-identical backend call to the one made before this parameter existed --
+        # not merely an equivalent query. That is the stronger property, and it is what
+        # keeps every pre-existing backend stub and protocol implementation valid.
+            scope = {"namespace": namespace} if namespace else {}
+            rows = await backend.list_conflict_groups(
+                status=status_filter, limit=limit, **scope
+            )
             groups: list[dict[str, object]] = []
             for row in rows:
                 group_id = str(row.get("group_id") or "")

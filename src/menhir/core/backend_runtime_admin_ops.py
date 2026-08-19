@@ -13,13 +13,15 @@ class RuntimeProviderAdminOpsMixin:
     """Conflict, scheduler, telemetry, and mutation operations for the in-process backend adapter."""
 
     async def list_conflict_groups(
-        self, *, status: str | None = None, limit: int = 25
+        self, *, status: str | None = None, limit: int = 25,
+        namespace: str | None = None,
     ) -> list[dict[str, Any]]:
         return _to_jsonable(
             await self._off_loop(
                 self.built.graph_adapter.list_conflict_groups,
                 status=status,
                 limit=limit,
+                namespace=namespace,
             )
         )
 
@@ -46,31 +48,35 @@ class RuntimeProviderAdminOpsMixin:
         )
 
     async def requeue_conflicts_for_llm_review(
-        self, *, from_status: str = "pending", limit: int = 50
+        self, *, from_status: str = "pending", limit: int = 50,
+        namespace: str | None = None,
     ) -> int:
         return int(
             await self._off_loop(
                 self.built.graph_adapter.requeue_conflicts_for_llm_review,
                 from_status=from_status,
                 limit=limit,
+                namespace=namespace,
             )
         )
 
     async def scan_for_conflicts(
-        self, *, limit: int = 150, cursor: str | None = None
+        self, *, limit: int = 150, cursor: str | None = None,
+        namespace: str | None = None,
     ) -> dict[str, Any]:
         return _to_jsonable(
             await self.built.lifecycle_service.scan_for_conflicts(
-                limit=limit, cursor=cursor
+                limit=limit, cursor=cursor, namespace=namespace
             )
         )
 
     async def confirm_pending_conflicts(
-        self, *, limit: int = 10, verbose: bool = False
+        self, *, limit: int = 10, verbose: bool = False,
+        namespace: str | None = None,
     ) -> dict[str, Any]:
         return _to_jsonable(
             await self.built.lifecycle_service.confirm_pending_conflicts(
-                limit=limit, verbose=verbose
+                limit=limit, verbose=verbose, namespace=namespace
             )
         )
 

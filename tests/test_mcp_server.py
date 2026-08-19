@@ -259,7 +259,10 @@ class StubGraphAdapter:
         row["processing_lease_expires_at"] = None
         return True
 
-    def list_conflict_groups(self, *, status: str | None = "unresolved", limit: int = 25):
+    def list_conflict_groups(
+        self, *, status: str | None = "unresolved", limit: int = 25,
+        namespace: str | None = None,
+    ):
         rows = self.conflict_groups
         if status is not None:
             filtered: list[dict[str, object]] = []

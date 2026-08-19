@@ -293,9 +293,10 @@ class MemoryBackend(Protocol):
     # ------------------------------------------------------------------
 
     async def list_conflict_groups(
-        self, *, status: str | None = None, limit: int = 25
+        self, *, status: str | None = None, limit: int = 25,
+        namespace: str | None = None,
     ) -> list[dict[str, Any]]:
-        """List conflict groups, optionally filtered by status."""
+        """List conflict groups, optionally filtered by status and namespace."""
         ...
 
     async def resolve_conflict_group(
@@ -312,19 +313,22 @@ class MemoryBackend(Protocol):
         ...
 
     async def requeue_conflicts_for_llm_review(
-        self, *, from_status: str = "pending", limit: int = 50
+        self, *, from_status: str = "pending", limit: int = 50,
+        namespace: str | None = None,
     ) -> int:
         """Requeue conflict groups for LLM review. Returns count requeued."""
         ...
 
     async def scan_for_conflicts(
-        self, *, limit: int = 150, cursor: str | None = None
+        self, *, limit: int = 150, cursor: str | None = None,
+        namespace: str | None = None,
     ) -> dict[str, Any]:
         """Scan for new conflicts. Returns scan result dict."""
         ...
 
     async def confirm_pending_conflicts(
-        self, *, limit: int = 10, verbose: bool = False
+        self, *, limit: int = 10, verbose: bool = False,
+        namespace: str | None = None,
     ) -> dict[str, Any]:
         """Run LLM review on pending conflicts. Returns review result dict."""
         ...

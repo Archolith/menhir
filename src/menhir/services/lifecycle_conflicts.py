@@ -54,6 +54,7 @@ from menhir.services.lifecycle_models import (
 class LifecycleConflictMixin:
     async def scan_for_conflicts(
         self, *, limit: int = 150, cursor: str | None = None,
+        namespace: str | None = None,
     ) -> dict[str, Any]:
         """Run a similarity scan across persistent entity nodes to detect conflicts.
 
@@ -70,9 +71,14 @@ class LifecycleConflictMixin:
             limit: Max nodes to scan per batch.
             cursor: Resume token — pass ``next_cursor`` from the previous result
                 to continue where the last scan left off.
+            namespace: Optional silo to restrict the candidate set to. Opt-in --
+                ``None``/empty scans every silo, which is the existing behavior. Pairing
+                was already namespace-scoped per candidate (see the ``group_ids`` argument
+                below), so this bounds WHICH nodes are scanned, not which may be paired.
 
         Returns dict with scanned, new_conflicts, next_cursor, done.
         """
+        ns = str(namespace).strip() if namespace is not None else ""
         query = (
             Cypher()
             .match("(n:Entity)")
@@ -82,6 +88,7 @@ class LifecycleConflictMixin:
                 "n.conflict_group_id IS NULL",
             )
             .where_if(cursor is not None, "n.uuid > $cursor")
+            .where_if(bool(ns), "coalesce(n.namespace, 'default') = $namespace")
             .return_raw("n.uuid AS uuid, n.name AS name, coalesce(n.summary, n.content, '') AS content, coalesce(n.namespace, 'default') AS namespace")
             .order_by("n.uuid")
             .limit()
@@ -90,6 +97,8 @@ class LifecycleConflictMixin:
         params: dict[str, Any] = {"limit": max(1, min(limit, 2000))}
         if cursor is not None:
             params["cursor"] = cursor
+        if ns:
+            params["namespace"] = ns
         rows = await asyncio.to_thread(self.graph_adapter.neo4j.execute, query, params=params)
         candidates = [dict(r) for r in rows]
         new_conflicts = await self._check_contradictions_batch(candidates)
@@ -102,7 +111,8 @@ class LifecycleConflictMixin:
         }
 
     async def confirm_pending_conflicts(
-        self, *, limit: int = 20, verbose: bool = False, status: str = "pending_llm_review"
+        self, *, limit: int = 20, verbose: bool = False, status: str = "pending_llm_review",
+        namespace: str | None = None,
     ) -> dict:
         """Run LLM confirmation on similarity-flagged conflicts.
 
@@ -125,10 +135,16 @@ class LifecycleConflictMixin:
         if self.llm is None:
             return {"confirmed": 0, "cleared": 0, "skipped_no_llm": 1, "errors": 0}
 
+        # The namespace filter is applied at group SELECTION, which is what bounds every
+        # mutation below: `resolve_conflict_group` acts by conflict_group_id on the whole
+        # group, so the only way to keep this loop inside one silo is to never hand it a
+        # group from another. Groups are namespace-homogeneous by construction (see
+        # `list_conflict_groups`), so a selected group's members are the caller's own.
         groups = await asyncio.to_thread(
             self.graph_adapter.list_conflict_groups,
             status=status,
             limit=limit,
+            namespace=namespace,
         )
         confirmed = cleared = errors = 0
         details: list[dict] = []

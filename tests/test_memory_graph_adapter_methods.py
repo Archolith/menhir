@@ -723,7 +723,13 @@ def test_list_conflict_groups_applies_safe_limit_and_status_filter() -> None:
 
     assert len(rows) == 1
     assert rows[0]["group_id"] == "g-1"
-    assert neo4j.calls[0]["params"] == {"status": "unresolved", "limit": 200}
+    assert neo4j.calls[0]["params"] == {
+        "status": "unresolved",
+        "limit": 200,
+        # The query now carries a `$namespace` predicate, so the parameter is bound on
+        # every call; None is the "do not filter" value that preserves prior behavior.
+        "namespace": None,
+    }
     assert "MATCH (n:Entity)" in neo4j.calls[0]["query"]
     assert "collect({" in neo4j.calls[0]["query"]
 

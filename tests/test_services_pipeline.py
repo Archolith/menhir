@@ -2989,7 +2989,9 @@ def test_lifecycle_service_auto_resolve_stale_conflicts_resolves_old_groups() ->
     fresh_created = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
 
     class _FakeAdapter:
-        def list_conflict_groups(self, *, status: str | None, limit: int) -> list[dict]:
+        def list_conflict_groups(
+            self, *, status: str | None, limit: int, namespace: str | None = None
+        ) -> list[dict]:
             return [
                 {"group_id": "stale-group", "created_at": stale_created},
                 {"group_id": "fresh-group", "created_at": fresh_created},

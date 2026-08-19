@@ -934,10 +934,11 @@ class MemoryGraphAdapter:
         return self._consolidation.set_conflict_group_status(group_id, status)
 
     def requeue_conflicts_for_llm_review(
-        self, *, from_status: str = "unresolved", limit: int = 200
+        self, *, from_status: str = "unresolved", limit: int = 200,
+        namespace: str | None = None,
     ) -> int:
         return self._consolidation.requeue_conflicts_for_llm_review(
-            from_status=from_status, limit=limit
+            from_status=from_status, limit=limit, namespace=namespace
         )
 
     # -------------------------------------------------------------------------
@@ -1076,8 +1077,11 @@ class MemoryGraphAdapter:
         *,
         status: str | None = "unresolved",
         limit: int = 25,
+        namespace: str | None = None,
     ) -> list[dict[str, Any]]:
-        return self._consolidation.list_conflict_groups(status=status, limit=limit)
+        return self._consolidation.list_conflict_groups(
+            status=status, limit=limit, namespace=namespace
+        )
 
     def list_conflict_pairs(
         self,

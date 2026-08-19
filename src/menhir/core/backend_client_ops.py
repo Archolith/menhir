@@ -271,10 +271,12 @@ class BackendClientOpsMixin:
         )
 
     async def list_conflict_groups(
-        self, *, status: str | None = None, limit: int = 25
+        self, *, status: str | None = None, limit: int = 25,
+        namespace: str | None = None,
     ) -> list[dict[str, Any]]:
         return await self._request(
-            "list_conflict_groups", {"status": status, "limit": limit}
+            "list_conflict_groups",
+            {"status": status, "limit": limit, "namespace": namespace},
         )
 
     async def resolve_conflict_group(
@@ -300,27 +302,32 @@ class BackendClientOpsMixin:
         )
 
     async def requeue_conflicts_for_llm_review(
-        self, *, from_status: str = "pending", limit: int = 50
+        self, *, from_status: str = "pending", limit: int = 50,
+        namespace: str | None = None,
     ) -> int:
         return int(
             await self._request(
                 "requeue_conflicts_for_llm_review",
-                {"from_status": from_status, "limit": limit},
+                {"from_status": from_status, "limit": limit, "namespace": namespace},
             )
         )
 
     async def scan_for_conflicts(
-        self, *, limit: int = 150, cursor: str | None = None
+        self, *, limit: int = 150, cursor: str | None = None,
+        namespace: str | None = None,
     ) -> dict[str, Any]:
         return await self._request(
-            "scan_for_conflicts", {"limit": limit, "cursor": cursor}
+            "scan_for_conflicts",
+            {"limit": limit, "cursor": cursor, "namespace": namespace},
         )
 
     async def confirm_pending_conflicts(
-        self, *, limit: int = 10, verbose: bool = False
+        self, *, limit: int = 10, verbose: bool = False,
+        namespace: str | None = None,
     ) -> dict[str, Any]:
         return await self._request(
-            "confirm_pending_conflicts", {"limit": limit, "verbose": verbose}
+            "confirm_pending_conflicts",
+            {"limit": limit, "verbose": verbose, "namespace": namespace},
         )
 
     async def fetch_episode_processing(

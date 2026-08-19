@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 from typing import Any, Callable
 
@@ -10,6 +11,7 @@ from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from menhir.domain.recall import InvalidQueryPresetError
+from menhir.mcp.service_access import get_pinned_namespace
 
 from .routes_support import (
     ClientSummary,
@@ -206,6 +208,55 @@ async def phase3_reset_impl(
     )
 
 
+def _pin_backend_invoke_namespace(
+    operation: str,
+    method: Any,
+    call_kwargs: dict[str, Any],
+    logger: logging.Logger,
+) -> dict[str, Any]:
+    """Force a pinned client's namespace onto this dispatch.
+
+    `/api/internal/backend/{operation}` is menhir's own RPC channel, but it is mounted under
+    `/api/` and gated only by the operation's tier -- so it is reachable directly by any client
+    holding a token of that tier, not just by menhir's own backend client. It passed the request
+    body to the backend method verbatim, which meant a client pinned to one silo reached every
+    silo by naming one (or naming none) in the body.
+
+    That is CF-30's finding recurring in the surface CF-30 did not cover. The named REST routes
+    were fixed by routing them through `_resolve_namespace`; this generic dispatch was not, and
+    it re-exposes the SAME operations those routes wrap -- `recall`, `fetch_recent_memories`,
+    `list_conflict_groups` and the rest -- with the pin skipped. Per-site enforcement fixed what
+    existed and exempted what came next, which is the recurring shape of this whole cluster.
+
+    Behaviour matches `BaseTool._apply_pinned_namespace` and `_resolve_namespace` exactly: the
+    pin wins, a mismatch is logged rather than rejected, and an unpinned client is untouched.
+    The three surfaces must not disagree about what a pinned client's request means.
+
+    Injection is possible only where the target method declares `namespace`. Operations that do
+    not are unchanged here -- they are object-addressed or global, and their tenancy is CF-33
+    step 4's ownership-at-load work, not something this boundary can decide.
+    """
+    pinned = get_pinned_namespace()
+    if not pinned:
+        return call_kwargs
+    try:
+        accepts_namespace = "namespace" in inspect.signature(method).parameters
+    except (TypeError, ValueError):  # builtins / C-level callables
+        accepts_namespace = False
+    if not accepts_namespace:
+        return call_kwargs
+    requested = str(call_kwargs.get("namespace") or "").strip()
+    if requested and requested != pinned:
+        logger.warning(
+            "namespace pin: backend_invoke client requested namespace=%r for `%s`; forcing %r",
+            requested,
+            operation,
+            pinned,
+        )
+    call_kwargs["namespace"] = pinned
+    return call_kwargs
+
+
 async def backend_invoke_impl(
     request: Request,
     operation: str,
@@ -229,8 +280,9 @@ async def backend_invoke_impl(
     caller_session = resolve_caller_session(request)
     backend = get_backend(request)
     method = getattr(backend, operation)
+    call_kwargs = _pin_backend_invoke_namespace(operation, method, dict(body or {}), logger)
     try:
-        result = await method(**(body or {}))
+        result = await method(**call_kwargs)
     except InvalidQueryPresetError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception:
