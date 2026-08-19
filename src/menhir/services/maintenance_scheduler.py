@@ -29,6 +29,7 @@ from menhir.services.scheduler_tasks import (
     recover_stale_leases,
     refresh_structure_graphs,
     review_unresolved_conflicts,
+    prune_telemetry_revisions,
     retry_failed_enrichments,
     consolidate_personal_memory,
     sync_experience_counters,
@@ -112,6 +113,11 @@ class MaintenanceScheduler:
     lifecycle_consolidation_enabled: bool = True
     lifecycle_decay_interval_s: float = 86400.0  # daily
     lifecycle_decay_enabled: bool = True
+    # Retention for the telemetry sidecar's memory_revisions table. The pruner and the
+    # MENHIR_REVISION_RETENTION_DAYS setting both existed; nothing connected them, so the
+    # documented window was never enforced. 0 disables the job entirely.
+    revision_retention_days: int = 14
+    revision_prune_interval_s: float = 86400.0  # daily
     recovery_limit: int = 100
     failed_retry_limit: int = 50
     tick_interval_s: float = 1.0
@@ -156,6 +162,10 @@ class MaintenanceScheduler:
             self._jobs["consolidate_lifecycle"] = _JobState(interval_s=self.lifecycle_consolidation_interval_s)
         if self.lifecycle_service is not None and self.lifecycle_decay_enabled:
             self._jobs["decay_lifecycle"] = _JobState(interval_s=self.lifecycle_decay_interval_s)
+        if self.revision_retention_days > 0:
+            self._jobs["prune_telemetry_revisions"] = _JobState(
+                interval_s=self.revision_prune_interval_s
+            )
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -385,6 +395,10 @@ class MaintenanceScheduler:
             elif name == "decay_lifecycle":
                 if self.lifecycle_service is not None:
                     await self._run_job(job, "scheduler_decay_lifecycle", self._make_decay_lifecycle())
+            elif name == "prune_telemetry_revisions":
+                await self._run_job(
+                    job, "scheduler_prune_telemetry_revisions", self._make_prune_telemetry_revisions()
+                )
 
     # ------------------------------------------------------------------
     # Job wrapper — shared timing, telemetry, and state bookkeeping
@@ -443,6 +457,9 @@ class MaintenanceScheduler:
     # ------------------------------------------------------------------
     # Task coroutine factories
     # ------------------------------------------------------------------
+
+    def _make_prune_telemetry_revisions(self) -> Awaitable[dict[str, object]]:
+        return prune_telemetry_revisions(retention_days=self.revision_retention_days)
 
     def _make_recover_stale_leases(self) -> Awaitable[dict[str, object]]:
         return recover_stale_leases(self.ingest_service, recovery_limit=self.recovery_limit)

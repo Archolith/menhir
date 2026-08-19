@@ -108,8 +108,14 @@ def capture_changes(
         "-M",  # detect renames with default similarity threshold
         "--date=iso-strict",
         "--format=%x01%H%x1f%cI",
-        "--",
     ]
+    if since_commit is None:
+        # Bare "HEAD" is a REVISION, not a commit: it selects every ancestor of HEAD. The
+        # docstring has always said this path "logs HEAD only", so bound it explicitly.
+        # -1 rather than HEAD~1..HEAD because the latter fails on a root commit.
+        # This must precede the "--" separator: after it, git reads -1 as a PATHSPEC.
+        git_args.append("-1")
+    git_args.append("--")
     if paths:
         git_args.extend(paths)
 

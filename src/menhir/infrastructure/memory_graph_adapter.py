@@ -594,6 +594,11 @@ class MemoryGraphAdapter:
     def count_namespace(self, group_id: str, *, namespace: str | None = None) -> int:
         """Count nodes in the given graphiti group partition, without deleting anything.
 
+        :TurnEvidence is included here for the same reason it is included in the delete and in
+        the pre-erasure capture: these three predicates must name the same set. A dry_run that
+        under-reported the blast radius, a capture that missed a subject, and a delete that left
+        the node behind were all the same omission.
+
         Used by the delete_namespace safety gate to report the blast radius before an
         irreversible DETACH DELETE.
 
@@ -605,7 +610,7 @@ class MemoryGraphAdapter:
         namespace_clause = (
             " OR (n:Episodic AND n.namespace = $namespace)"
             " OR ((n:TypedAssertion OR n:TypedAssertionHead OR "
-            "n:ScalarConsolidationWatermark) AND n.namespace = $namespace)"
+            "n:ScalarConsolidationWatermark OR n:TurnEvidence) AND n.namespace = $namespace)"
             " OR (n:TypedEventAssertion AND n.namespace = $namespace)"
             " OR (n:TypedEventAssertionHead AND EXISTS {"
             " MATCH (n)-[:HAS_VERSION]->(ev:TypedEventAssertion) WHERE ev.namespace = $namespace})"
@@ -653,7 +658,7 @@ class MemoryGraphAdapter:
         namespace_clause = (
             " OR (n:Episodic AND n.namespace = $namespace)"
             " OR ((n:TypedAssertion OR n:TypedAssertionHead OR "
-            "n:ScalarConsolidationWatermark) AND n.namespace = $namespace)"
+            "n:ScalarConsolidationWatermark OR n:TurnEvidence) AND n.namespace = $namespace)"
             " OR (n:TypedEventAssertion AND n.namespace = $namespace)"
             " OR (n:TypedEventAssertionHead AND EXISTS {"
             " MATCH (n)-[:HAS_VERSION]->(ev:TypedEventAssertion) WHERE ev.namespace = $namespace})"

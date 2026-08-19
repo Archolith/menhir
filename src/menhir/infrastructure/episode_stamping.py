@@ -7,6 +7,7 @@ from typing import Any
 
 from menhir.domain.namespace import stamped_namespace
 from menhir.infrastructure.cypher import Cypher
+from menhir.infrastructure.schema import EDGE_LABELS
 
 
 @dataclass
@@ -15,6 +16,11 @@ class PolicyStampResult:
 
     nodes_touched: int
     edges_touched: int
+
+
+# Exactly the five relationship types that carry uuid indexes (schema.EDGE_LABELS).
+# An untyped pattern can use none of them, so type the edge match explicitly.
+_EDGE_TYPE_PATTERN = "|".join(EDGE_LABELS)
 
 
 class EpisodeStampingRepository:
@@ -135,7 +141,7 @@ class EpisodeStampingRepository:
         if unique_edge_uuids:
             edge_query = (
                 Cypher()
-                .match("()-[r]-()")
+                .match(f"()-[r:{_EDGE_TYPE_PATTERN}]->()")
                 .where("r.uuid IN $uuids")
                 .set(
                     (

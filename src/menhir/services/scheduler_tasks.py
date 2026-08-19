@@ -816,3 +816,29 @@ def _write_project_index(
         )
     except Exception:
         logger.debug("Failed to write project index for hooks", exc_info=True)
+
+
+async def prune_telemetry_revisions(*, retention_days: int) -> dict[str, object]:
+    """Delete `memory_revisions` rows past the retention window.
+
+    This job exists because the control it drives did not. `prune_old_revisions` was written,
+    fully unit-tested, and never called from production: `grep` found its definition and six
+    test references, and nothing else. The setting that is supposed to configure it,
+    `MENHIR_REVISION_RETENTION_DAYS`, was parsed into `revision_retention_days` and then read
+    nowhere. Meanwhile the operator runbook stated, as fact, that the window was enforced and
+    configurable. Three independent failures of one control, and a document asserting it worked.
+
+    Threaded off the event loop: the store does synchronous SQLite with a commit, and the
+    sidecar is shared by seven writers.
+    """
+    from menhir.infrastructure.telemetry import telemetry_store
+
+    days = max(1, int(retention_days))
+    deleted = await asyncio.to_thread(
+        telemetry_store.prune_old_revisions, retention_days=days
+    )
+    if deleted:
+        logger.info(
+            "Pruned %d memory_revisions row(s) older than %d day(s)", deleted, days
+        )
+    return {"retention_days": days, "rows_deleted": int(deleted)}

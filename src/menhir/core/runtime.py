@@ -415,6 +415,7 @@ async def _start_scheduler(built: object) -> MaintenanceScheduler:
         ingest_service=built.ingest_service,
         graph_adapter=built.graph_adapter,
         lifecycle_service=getattr(built, "lifecycle_service", None),
+        revision_retention_days=getattr(settings, "revision_retention_days", 14),
         structure_watcher_interval_s=getattr(settings, "structure_watcher_interval_s", 1800.0),
         structure_watcher_enabled=getattr(settings, "structure_watcher_enabled", True),
         experience_counter_enabled=getattr(settings, "experience_counter_enabled", True),

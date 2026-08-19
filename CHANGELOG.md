@@ -1,3 +1,37 @@
+## 2026-08-19 — fix: HIGH remediation wave 3 (retention, at-rest privacy, unbounded scans)
+
+- **Every telemetry time window was silently too wide.** Rows are written with Python's isoformat
+  and compared as TEXT against SQLite's `datetime('now')`, whose separator and precision differ, so
+  a stored value sorted above a same-instant cutoff. A row genuinely 25 hours old read as inside a
+  24-hour window. Fixed on the read side, so old and new rows are both correct with no migration.
+- **Raw MCP tool arguments are no longer persisted verbatim.** The first 500 characters of every
+  memory submitted through `add_memory` were written in plaintext to the sidecar, keyed to nothing.
+  Redaction now happens at the single write boundary, under an allowlist, so a tool added later is
+  private by default rather than leaked by default. Call shape (which arguments, which limits and
+  flags) still survives for debugging.
+- **`:TurnEvidence` is deleted inside the namespace cascade.** It holds raw user prompts, and two
+  of the three deletion paths left it behind; the third purged it as an unjournaled step after the
+  erasure saga had committed, so a crash in that window left prompts with nothing able to resume
+  them. The blast-radius count and the pre-erasure subject capture were updated in the same change,
+  because those three predicates must name the same set.
+- **The documented revision-retention control now exists.** The setting was read nowhere, the
+  pruner had no production caller, and its signature duplicated the setting's default instead of
+  reading it — while the operator runbook stated the window was enforced and configurable. All
+  three are closed. Retention for the other high-volume tables remains post-MVP, as that runbook
+  already discloses honestly.
+- **Post-ingest edge stamping no longer scans every relationship twice.** The match was untyped, so
+  none of the five uuid relationship indexes could back it, and undirected, so it produced two rows
+  per relationship. Now typed from `EDGE_LABELS` and directed.
+- **Indexes added** for the Hook Center `structure_*` predicates (reached on every recall) and the
+  `:Episodic` content prefix scan behind dirty-namespace detection.
+- **`capture_changes` logs one commit on its default path**, as its docstring always claimed. Bare
+  `HEAD` is a revision, not a commit — measured at 1,715 lines of output where 3 were intended, on
+  a 64-commit repository, growing without bound as the repo ages.
+- **The `code_ref` resolver is anchored and defined once.** `ENDS WITH 'utils.py'` also matched
+  `my_utils.py`, and with `LIMIT 1` a todo got a `:REFERENCES_FILE` edge to an arbitrarily chosen
+  wrong file — surfaced to users as `linked_file_path` beside a correct `locations[]` in the same
+  payload.
+
 ## 2026-08-19 — fix: HIGH remediation wave 2 (tenancy semantics)
 
 - **Settled the tenancy contract instead of re-litigating it.** The audit filed CF-199 as three

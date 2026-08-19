@@ -338,15 +338,22 @@ class TelemetryLifecycleStoreMixin:
                 exc_info=True,
             )
 
-    def prune_old_revisions(self, *, retention_days: int = 14) -> int:
-        """Delete memory_revisions rows older than retention_days. Returns rows deleted."""
+    def prune_old_revisions(self, *, retention_days: int) -> int:
+        """Delete memory_revisions rows older than retention_days. Returns rows deleted.
+
+        `retention_days` is deliberately REQUIRED. It used to default to 14, duplicating the
+        `revision_retention_days` setting rather than reading it, so any wiring that forgot to
+        thread the value would have silently ignored MENHIR_REVISION_RETENTION_DAYS while
+        appearing to honour it. There is one source of truth for the window and the caller
+        must supply it.
+        """
 
         self._ensure_ready()
         with self._connect() as conn:
             cursor = conn.execute(
                 """
                 DELETE FROM memory_revisions
-                WHERE recorded_at < datetime('now', '-' || ? || ' days')
+                WHERE substr(replace(recorded_at, 'T', ' '), 1, 19) < datetime('now', '-' || ? || ' days')
                 """,
                 (max(1, retention_days),),
             )
@@ -367,7 +374,7 @@ class TelemetryLifecycleStoreMixin:
                        AVG(duration_ms) AS avg_ms,
                        SUM(CASE WHEN llm_used = 1 THEN 1 ELSE 0 END) AS llm_count
                 FROM lifecycle_actions
-                WHERE recorded_at >= datetime('now', '-' || ? || ' hours')
+                WHERE substr(replace(recorded_at, 'T', ' '), 1, 19) >= datetime('now', '-' || ? || ' hours')
                 GROUP BY action
                 """,
                 (since_hours,),
@@ -375,7 +382,7 @@ class TelemetryLifecycleStoreMixin:
             revision_count = conn.execute(
                 """
                 SELECT COUNT(*) AS cnt FROM memory_revisions
-                WHERE recorded_at >= datetime('now', '-' || ? || ' hours')
+                WHERE substr(replace(recorded_at, 'T', ' '), 1, 19) >= datetime('now', '-' || ? || ' hours')
                 """,
                 (since_hours,),
             ).fetchone()
@@ -420,7 +427,7 @@ class TelemetryLifecycleStoreMixin:
                         ','
                     ) AS latencies_csv
                 FROM mcp_events
-                WHERE started_at >= datetime('now', '-' || ? || ' hours')
+                WHERE substr(replace(started_at, 'T', ' '), 1, 19) >= datetime('now', '-' || ? || ' hours')
                   AND (? IS NULL OR operation = ?)
                 GROUP BY operation
                 ORDER BY total_calls DESC
@@ -477,7 +484,7 @@ class TelemetryLifecycleStoreMixin:
         params: list[Any] = list(kinds)
         window_clause = ""
         if since_hours is not None:
-            window_clause = "AND started_at >= datetime('now', '-' || ? || ' hours')"
+            window_clause = "AND substr(replace(started_at, 'T', ' '), 1, 19) >= datetime('now', '-' || ? || ' hours')"
             params.append(since_hours)
 
         with self._connect() as conn:

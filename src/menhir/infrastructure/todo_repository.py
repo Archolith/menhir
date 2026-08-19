@@ -15,7 +15,11 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from menhir.domain.todo_location import DEFAULT_TODO_NAMESPACE, parse_code_ref
+from menhir.domain.todo_location import (
+    DEFAULT_TODO_NAMESPACE,
+    code_ref_file_predicate,
+    parse_code_ref,
+)
 
 _VALID_PRIORITIES = frozenset({"low", "normal", "high"})
 _VALID_STATUSES = frozenset({"open", "closed"})
@@ -162,15 +166,12 @@ class TodoRepository:
         itself is retained either way.
         """
         rows = self.neo4j.execute(
-            """
-            MATCH (t:Todo {uuid: $uuid})-[:HAS_LOCATION]->(l:TodoLocation)
+            f"""
+            MATCH (t:Todo {{uuid: $uuid}})-[:HAS_LOCATION]->(l:TodoLocation)
             WHERE l.resolution_status = 'resolved' AND l.path IS NOT NULL
             MATCH (f:Entity)
             WHERE f.structure_role IN ['file', 'entrypoint', 'config', 'test']
-              AND (
-                    f.structure_path = l.path
-                    OR (NOT l.path CONTAINS '/' AND f.structure_path ENDS WITH ('/' + l.path))
-                  )
+              AND {code_ref_file_predicate('f', 'l.path')}
               AND (l.project IS NULL OR f.structure_project = l.project)
             MERGE (l)-[:REFERENCES_FILE]->(f)
             RETURN count(*) AS linked
@@ -276,11 +277,11 @@ class TodoRepository:
         if code_ref:
             file_path = code_ref.split(":")[0] if ":" in code_ref else code_ref
             rows = self.neo4j.execute(
-                """
-                MATCH (todo:Todo {uuid: $uuid})
+                f"""
+                MATCH (todo:Todo {{uuid: $uuid}})
                 OPTIONAL MATCH (f:Entity)
                 WHERE f.structure_role IN ['file', 'entrypoint', 'config', 'test']
-                  AND f.structure_path ENDS WITH $file_path
+                  AND {code_ref_file_predicate('f', '$file_path')}
                   AND ($structure_project IS NULL OR f.structure_project = $structure_project)
                 WITH todo, f WHERE f IS NOT NULL
                 CREATE (todo)-[:REFERENCES_FILE]->(f)
