@@ -1,3 +1,26 @@
+## 2026-08-19 — fix: HIGH remediation wave 2 (tenancy semantics)
+
+- **Settled the tenancy contract instead of re-litigating it.** The audit filed CF-199 as three
+  mutually contradictory positions on whether `:Entity` is tenant-scoped. `domain/namespace.py`
+  already answers it: namespace maps 1:1 onto graphiti's `group_id`, which is the load-bearing
+  isolation boundary; the `namespace` property is defense-in-depth; `"default"` maps to group id
+  `""`; and an unspecified namespace does not filter, because isolation is opt-in. Two of the three
+  "positions" are that documented contract. The decision is recorded in
+  `.agent/plans/menhir-cf199-tenancy-decision.md`.
+- **Closed the one real leak in that group.** `query_blast_radius` applied its namespace to one of
+  four sub-queries; the memory-preview fetch two lines above had no tenancy predicate at all and
+  returned up to 10 previews from every namespace through a `readonly`-tier MCP tool.
+- **Stopped comparing a group id against a namespace name.** The scalar-history read coalesced
+  `group_id` to the NAME `'default'`, which cannot match the `""` group id the write path produces.
+- **Let the namespace pin reach the two UUID-addressed mutating tools.** `delete_memory`
+  (destructive, operator tier) and `flag_memory` (agent tier) declared no `namespace` parameter, and
+  the pin is applied by signature introspection, so no pin could ever apply to them. Both now check
+  ownership before mutating — while still allowing erasure of residual content for a node already
+  absent from the graph, which is a supported path rather than an error.
+- **Stamped `group_id` on raw-capture entities.** Of eight `:Entity` write sites, seven set the
+  tenancy property and one did not, so the captures created to make a terminally-failed episode's
+  text reachable by recall were invisible to exactly the scoped recall they exist for.
+
 ## 2026-08-19 — fix: HIGH remediation wave 1 (15 confirmed findings)
 
 - **Extraction and LLM output parsing.** `_extract_first_json_payload` now strips a code fence
