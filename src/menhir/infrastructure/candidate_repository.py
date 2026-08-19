@@ -18,6 +18,8 @@ lifecycle auto-promote shortcut, which skips the contradiction check we require 
 from __future__ import annotations
 
 from datetime import datetime, timezone
+
+from menhir.domain.namespace import namespace_to_group_id, stamped_namespace
 from typing import Any
 from uuid import uuid4
 
@@ -62,6 +64,7 @@ class CandidateRepository:
         last_seen: str | None = None,
         notes: list[str] | None = None,
         source_confidence: float = 0.5,
+        namespace: str | None = None,
     ) -> dict[str, Any]:
         """Create or refresh a CANDIDATE :Entity node (idempotent on source+cluster_id).
 
@@ -78,6 +81,20 @@ class CandidateRepository:
             first_seen/last_seen: ISO timestamps; default to now.
             notes:             Evidence note strings (capped/truncated for storage).
             source_confidence: Prior confidence; candidates stay low-trust until approved.
+            namespace:         Silo for the candidate. Opt-in: omitted keeps the historical
+                               unscoped behavior exactly, including the '' group_id.
+
+        The namespace joins the MERGE KEY, not just the properties, and that is the point.
+        The key was (source, cluster_id) alone, so two silos emitting the same cluster id from
+        the same source landed on ONE node -- and `ON MATCH SET` then let each rewrite the
+        other's `candidate_evidence_strength`, `candidate_distinct_sessions` and
+        `candidate_notes`. Those are the fields a promotion decision reads, so the collision
+        was not merely untidy: one silo's activity could push another silo's candidate up the
+        evidence ladder toward approval.
+
+        It is added to the key only when supplied, so existing nodes (which carry no
+        `namespace` property) still match their own key and are not duplicated. There is no
+        migration here and none is needed.
 
         Returns:
             Dict with uuid, scope, cluster_id, evidence_strength, distinct_sessions,
@@ -88,15 +105,22 @@ class CandidateRepository:
         node_name = (label or content)[:120]
         capped_notes = _cap_notes(notes)
 
+        ns = str(namespace).strip() if namespace is not None else ""
+        merge_key = "{source: $source, candidate_cluster_id: $cluster_id}"
+        if ns:
+            merge_key = (
+                "{source: $source, candidate_cluster_id: $cluster_id, namespace: $namespace}"
+            )
         rows = self.neo4j.execute(
-            """
-            MERGE (n:Entity {source: $source, candidate_cluster_id: $cluster_id})
+            f"""
+            MERGE (n:Entity {merge_key})
             ON CREATE SET
                 n.uuid = $uuid,
                 n.name = $name,
                 n.summary = '',
                 n.content = $content,
-                n.group_id = '',
+                n.group_id = $group_id,
+                n.namespace = $stamped_namespace,
                 n.type = $type,
                 n.scope = 'CANDIDATE',
                 n.candidate_kind = $kind,
@@ -132,6 +156,12 @@ class CandidateRepository:
             {
                 "source": source,
                 "cluster_id": cluster_id,
+                "namespace": ns,
+                # `namespace_to_group_id` maps both unspecified and 'default' onto graphiti's
+                # default partition (''), which is exactly the hardcoded value this replaces --
+                # so an unscoped write lands where it always did.
+                "group_id": namespace_to_group_id(ns or None),
+                "stamped_namespace": stamped_namespace(ns or None),
                 "uuid": node_uuid,
                 "name": node_name,
                 "content": content,

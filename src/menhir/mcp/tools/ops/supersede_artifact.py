@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from menhir.mcp.ownership import foreign_object_refusal
 from menhir.mcp.tools.base import BaseTextTool
 from menhir.mcp.contracts import ToolScope
 
 
-async def supersede_artifact(new_uuid: str, old_uuid: str) -> str:
+async def supersede_artifact(new_uuid: str, old_uuid: str, namespace: str = "") -> str:
     """Record that one artifact replaces another, atomically.
 
     Writes the SUPERSEDES edge and moves the old artifact to SUPERSEDED in a
@@ -22,16 +23,46 @@ async def supersede_artifact(new_uuid: str, old_uuid: str) -> str:
     Returns:
         Confirmation, or the reason it was refused.
     """
-    return await SupersedeArtifactTool().execute(new_uuid=new_uuid, old_uuid=old_uuid)
+    return await SupersedeArtifactTool().execute(
+        new_uuid=new_uuid, old_uuid=old_uuid, namespace=namespace
+    )
 
 
 class SupersedeArtifactTool(BaseTextTool):
     name = "supersede_artifact"
-    scope = ToolScope.OBJECT
+    # NAMESPACED once the ownership guard exists (CF-33 step 4): an artifact uuid is
+    # not proof of ownership, so each one the caller names is checked against the pin.
+    scope = ToolScope.NAMESPACED
     description = "Record that one artifact supersedes another, moving status and edge together."
 
-    async def endpoint(self, new_uuid: str, old_uuid: str) -> str:
+    async def endpoint(
+        self, new_uuid: str, old_uuid: str, namespace: str = ""
+    ) -> str:
         backend = self.get_backend()
+        # CF-33 step 4: ownership-at-load, on BOTH uuids. The existing check that the two
+        # artifacts share a namespace is RELATIVE -- it stops a cross-silo link but is
+        # equally satisfied by two artifacts that both live in someone else's silo. This is
+        # the absolute check: each named artifact must be the caller's own.
+        refusal = await foreign_object_refusal(
+            uuid=new_uuid,
+            namespace=namespace,
+            # Resolved lazily so an UNPINNED call touches nothing it did not touch
+            # before: `backend.get_artifact` is not looked up unless a namespace is set.
+            lookup=lambda uuid, **kw: backend.get_artifact(uuid, **kw),
+            label="artifact",
+        )
+        if refusal:
+            return refusal
+        refusal = await foreign_object_refusal(
+            uuid=old_uuid,
+            namespace=namespace,
+            # Resolved lazily so an UNPINNED call touches nothing it did not touch
+            # before: `backend.get_artifact` is not looked up unless a namespace is set.
+            lookup=lambda uuid, **kw: backend.get_artifact(uuid, **kw),
+            label="artifact",
+        )
+        if refusal:
+            return refusal
         result = await backend.supersede_artifact(new_uuid, old_uuid)
 
         if result.get("applied"):

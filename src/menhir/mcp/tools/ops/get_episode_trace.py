@@ -4,25 +4,49 @@ from __future__ import annotations
 
 from menhir.domain.utils import decode_json_value
 from menhir.mcp.formatters import _coerce_iso, _require_episode_uuid
+from menhir.mcp.ownership import foreign_object_refusal
 from menhir.mcp.tools.base import BaseJsonTool
 from menhir.mcp.contracts import ToolScope
 
 
-async def get_episode_trace(episode_uuid: str, limit: int = 20) -> str:
+async def get_episode_trace(
+    episode_uuid: str, limit: int = 20, namespace: str = ""
+) -> str:
     """Return a compact debug trace for one episode using queue state plus telemetry sidecar rows."""
 
-    return await GetEpisodeTraceTool().execute(episode_uuid=episode_uuid, limit=limit)
+    return await GetEpisodeTraceTool().execute(
+        episode_uuid=episode_uuid, limit=limit, namespace=namespace
+    )
 
 
 class GetEpisodeTraceTool(BaseJsonTool):
     name = "get_episode_trace"
-    scope = ToolScope.OBJECT
+    # NAMESPACED once the ownership guard exists: the pin can now reach this tool,
+    # and the uuid it addresses is checked against that pin at load (CF-33 step 4).
+    scope = ToolScope.NAMESPACED
     required_tier = "readonly"
     description = "Return a compact debug trace for one episode."
 
-    async def endpoint(self, episode_uuid: str, limit: int = 20) -> str:
+    async def endpoint(
+        self, episode_uuid: str, limit: int = 20, namespace: str = ""
+    ) -> str:
         backend = self.get_backend()
         normalized_uuid = _require_episode_uuid(episode_uuid)
+        # CF-33 step 4: ownership-at-load. An episode uuid is not proof of ownership -- a
+        # pinned client that learned one through any global read could previously inspect,
+        # re-enrich or release the lease on another silo's episode. Two lookups, per CF-64:
+        # only an episode that demonstrably belongs elsewhere is refused, so absent-episode
+        # paths keep reporting "not found" rather than "refused".
+        refusal = await foreign_object_refusal(
+            uuid=normalized_uuid,
+            namespace=namespace,
+            # Resolved lazily so an UNPINNED call touches nothing it did not touch before:
+            # `backend.fetch_memory_by_uuid` is not even looked up unless a namespace is set.
+            lookup=lambda uuid, **kw: backend.fetch_memory_by_uuid(uuid, **kw),
+            label="episode",
+        )
+        if refusal:
+            return refusal
         row = await backend.fetch_episode_processing(normalized_uuid)
         task_events = await backend.fetch_episode_task_events(
             episode_uuid=normalized_uuid,

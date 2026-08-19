@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from menhir.mcp.ownership import foreign_object_refusal
 from menhir.mcp.tools.base import BaseJsonTool
 from menhir.mcp.contracts import ToolScope
 
@@ -10,7 +11,9 @@ _DEFAULT_CONTENT_CHARS = 500
 _MAX_CONTENT_CHARS = 5000
 
 
-async def get_provenance(node_uuid: str, content_chars: int = _DEFAULT_CONTENT_CHARS) -> str:
+async def get_provenance(
+    node_uuid: str, content_chars: int = _DEFAULT_CONTENT_CHARS, namespace: str = ""
+) -> str:
     """Show the receipts for a memory or View node: the source episodes it was built from,
     plus its first-class evidence anchors, so you can verify a summary/claim against its sources.
 
@@ -26,20 +29,41 @@ async def get_provenance(node_uuid: str, content_chars: int = _DEFAULT_CONTENT_C
         SUPPORTED_BY evidence, and ANCHORED_TO structural paths.
     """
 
-    return await GetProvenanceTool().execute(node_uuid=node_uuid, content_chars=content_chars)
+    return await GetProvenanceTool().execute(
+        node_uuid=node_uuid, content_chars=content_chars, namespace=namespace
+    )
 
 
 class GetProvenanceTool(BaseJsonTool):
     name = "get_provenance"
-    scope = ToolScope.OBJECT
+    # NAMESPACED once the ownership guard exists (CF-33 step 4): a uuid is not proof of
+    # ownership, so the object the caller names is checked against the pin at load.
+    scope = ToolScope.NAMESPACED
     required_tier = "readonly"
     description = (
         "Show a memory/View node's receipts: the source episodes it was built from, plus evidence "
         "anchors, so you can verify a summary or claim against its sources."
     )
 
-    async def endpoint(self, node_uuid: str, content_chars: int = _DEFAULT_CONTENT_CHARS) -> str:
+    async def endpoint(
+        self, node_uuid: str, content_chars: int = _DEFAULT_CONTENT_CHARS,
+        namespace: str = "",
+    ) -> str:
         backend = self.get_backend()
+        # CF-33 step 4: ownership-at-load. This returns a node's source episodes and its
+        # evidence anchors -- provenance IS content, so an unowned uuid must not resolve.
+        refusal = await foreign_object_refusal(
+            uuid=node_uuid,
+            namespace=namespace,
+            # Resolved lazily so an UNPINNED call touches nothing it did not touch before.
+            lookup=lambda uuid, **kw: backend.fetch_memory_by_uuid(uuid, **kw),
+            label="node",
+        )
+        if refusal:
+            return self.render_json(
+                {"ok": False, "tool": self.operation, "node_uuid": node_uuid,
+                 "error": {"message": refusal}}
+            )
         row = await backend.fetch_node_receipts(node_uuid)
         if row is None:
             return self.render_json(

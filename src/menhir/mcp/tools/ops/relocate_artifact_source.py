@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from menhir.mcp.ownership import foreign_object_refusal
 from menhir.mcp.tools.base import BaseTextTool
 from menhir.mcp.contracts import ToolScope
 
@@ -10,6 +11,7 @@ async def relocate_artifact_source(
     artifact_uuid: str,
     old_path: str,
     new_path: str,
+    namespace: str = "",
     repository: str = "",
     expected_old_integrity: str = "",
     observed_integrity: str = "",
@@ -43,6 +45,7 @@ async def relocate_artifact_source(
         artifact_uuid=artifact_uuid,
         old_path=old_path,
         new_path=new_path,
+        namespace=namespace,
         repository=repository,
         expected_old_integrity=expected_old_integrity,
         observed_integrity=observed_integrity,
@@ -51,7 +54,9 @@ async def relocate_artifact_source(
 
 class RelocateArtifactSourceTool(BaseTextTool):
     name = "relocate_artifact_source"
-    scope = ToolScope.OBJECT
+    # NAMESPACED once the ownership guard exists (CF-33 step 4): an artifact uuid is
+    # not proof of ownership, so each one the caller names is checked against the pin.
+    scope = ToolScope.NAMESPACED
     description = (
         "Move one work-artifact source's locator, preserving identity and every relationship."
     )
@@ -61,11 +66,24 @@ class RelocateArtifactSourceTool(BaseTextTool):
         artifact_uuid: str,
         old_path: str,
         new_path: str,
+        namespace: str = "",
         repository: str = "",
         expected_old_integrity: str = "",
         observed_integrity: str = "",
     ) -> str:
         backend = self.get_backend()
+        # CF-33 step 4: ownership-at-load. `repository` is a locator identity, not a tenancy
+        # boundary -- relocating a source is a write against the artifact that owns it.
+        refusal = await foreign_object_refusal(
+            uuid=artifact_uuid,
+            namespace=namespace,
+            # Resolved lazily so an UNPINNED call touches nothing it did not touch
+            # before: `backend.get_artifact` is not looked up unless a namespace is set.
+            lookup=lambda uuid, **kw: backend.get_artifact(uuid, **kw),
+            label="artifact",
+        )
+        if refusal:
+            return refusal
         result = await backend.relocate_artifact_source(
             artifact_uuid=artifact_uuid,
             old_path=old_path,

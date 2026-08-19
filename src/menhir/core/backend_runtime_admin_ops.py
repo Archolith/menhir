@@ -567,6 +567,7 @@ class RuntimeProviderAdminOpsMixin:
         last_seen: str | None = None,
         notes: list[str] | None = None,
         source_confidence: float = 0.5,
+        namespace: str | None = None,
     ) -> dict[str, Any]:
         return _to_jsonable(
             await self._off_loop(
@@ -584,6 +585,7 @@ class RuntimeProviderAdminOpsMixin:
                 last_seen=last_seen,
                 notes=notes,
                 source_confidence=source_confidence,
+                namespace=namespace,
             )
         )
 

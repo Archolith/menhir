@@ -60,7 +60,15 @@ rate_recall.__doc__ = _RATE_RECALL_DOC
 
 class RateRecallTool(BaseJsonTool):
     name = "rate_recall"
-    scope = ToolScope.OBJECT
+    # GLOBAL, not OBJECT. `recall_id` is a telemetry receipt token, not a graph object -- this
+    # writes a usefulness score to the sidecar and touches no tenant memory, so there is no
+    # object to check ownership of and no namespace to inject.
+    #
+    # Its actual boundary is the receipt lookup, which was `WHERE token = ?` with no caller
+    # check while the no-token branch of the same method scoped by session/client. That is
+    # fixed at the store (`recall_store.record_recall_feedback`), where the scoping already
+    # lived, rather than by giving this tool a namespace it has no use for.
+    scope = ToolScope.GLOBAL
     required_tier = "agent"
     description = "Report how useful a prior recall result was (operational signal only)."
 

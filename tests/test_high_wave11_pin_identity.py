@@ -100,6 +100,10 @@ def test_cf33_the_global_list_is_small_and_reviewable() -> None:
         "list_clients",
         "mint_client",
         "pause_scheduler",
+        # Added 2026-08-19 (CF-33 step 4). `recall_id` is a telemetry receipt token, not a
+        # graph object: this writes a usefulness score to the sidecar and touches no tenant
+        # memory. Its real boundary was the receipt lookup, fixed in `recall_store`.
+        "rate_recall",
         "recover_orphans",
         "repair_stale_enrichment",
         "resume_scheduler",

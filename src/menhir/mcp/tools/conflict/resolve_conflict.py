@@ -21,6 +21,7 @@ async def resolve_conflict(
     remove_uuid: str | None = None,
     dry_run: bool = False,
     allow_promoted_removal: bool = False,
+    namespace: str = "",
 ) -> str:
     """Resolve one conflict group using keep/replace/discard actions.
 
@@ -43,12 +44,14 @@ async def resolve_conflict(
         remove_uuid=remove_uuid,
         dry_run=dry_run,
         allow_promoted_removal=allow_promoted_removal,
+        namespace=namespace,
     )
 
 
 class ResolveConflictTool(BaseJsonTool):
     name = "resolve_conflict"
-    scope = ToolScope.OBJECT
+    # NAMESPACED once the group lookup is scoped (CF-33 step 4).
+    scope = ToolScope.NAMESPACED
     required_tier = "operator"
     description = "Resolve one conflict group using keep/replace/discard actions."
 
@@ -60,6 +63,7 @@ class ResolveConflictTool(BaseJsonTool):
         remove_uuid: str | None = None,
         dry_run: bool = False,
         allow_promoted_removal: bool = False,
+        namespace: str = "",
     ) -> str:
         try:
             backend = self.get_backend()
@@ -83,7 +87,16 @@ class ResolveConflictTool(BaseJsonTool):
             keep = (keep_uuid or "").strip() or None
             remove = (remove_uuid or "").strip() or None
 
-            rows = await backend.list_conflict_groups(status=None, limit=_CONFLICT_LOOKUP_LIMIT)
+            # CF-33 step 4: ownership-at-load, and it needs no separate guard. The group is
+            # found through the same `list_conflict_groups` read the namespace filter now
+            # bounds, so a group outside the caller's silo simply is not in `rows` and lands on
+            # the existing not-found path below. Scoping the GROUP scopes its members too:
+            # groups are namespace-homogeneous by construction (see `list_conflict_groups`),
+            # which is what makes this one predicate sufficient for keep_uuid/remove_uuid.
+            scope = {"namespace": namespace} if namespace else {}
+            rows = await backend.list_conflict_groups(
+                status=None, limit=_CONFLICT_LOOKUP_LIMIT, **scope
+            )
             group_row = next((row for row in rows if str(row.get("group_id") or "") == normalized_group), None)
             if group_row is None:
                 return f"Conflict group not found: {normalized_group}"

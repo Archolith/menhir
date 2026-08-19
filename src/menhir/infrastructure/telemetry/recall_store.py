@@ -63,10 +63,34 @@ class TelemetryRecallStoreMixin:
         with self._connect() as conn:
             conn.row_factory = sqlite3.Row
             if token:
-                target = conn.execute(
-                    "SELECT id, token, operation FROM recall_receipts WHERE token = ?",
-                    (token,),
-                ).fetchone()
+                # The token path is scoped the same way the no-token path below already is.
+                # It was `WHERE token = ?` alone, so any agent-tier caller holding or guessing
+                # a receipt token could overwrite the rating on another client's recall -- and
+                # read back that recall's `operation` in the response. The scoping mechanism
+                # existed on the sibling branch of this same method and simply was not applied
+                # here.
+                #
+                # Scoped by session OR client, not session alone: rating a recall from a later
+                # session of the same client is legitimate and was always possible. When the
+                # caller presents neither identity there is nothing to enforce, and the lookup
+                # stays as it was rather than failing closed on the local/CLI path.
+                if session_id or client_id:
+                    target = conn.execute(
+                        """
+                        SELECT id, token, operation FROM recall_receipts
+                        WHERE token = ?
+                          AND (
+                                (? <> '' AND session_id = ?)
+                             OR (? <> '' AND client_id = ?)
+                              )
+                        """,
+                        (token, session_id, session_id, client_id, client_id),
+                    ).fetchone()
+                else:
+                    target = conn.execute(
+                        "SELECT id, token, operation FROM recall_receipts WHERE token = ?",
+                        (token,),
+                    ).fetchone()
             else:
                 target = conn.execute(
                     """

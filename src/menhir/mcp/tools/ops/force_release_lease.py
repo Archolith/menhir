@@ -4,25 +4,49 @@ from __future__ import annotations
 
 from menhir.mcp.formatters import _require_episode_uuid
 from menhir.mcp.telemetry import record_lifecycle_event
+from menhir.mcp.ownership import foreign_object_refusal
 from menhir.mcp.tools.base import BaseTextTool
 from menhir.mcp.contracts import ToolScope
 
 
-async def force_release_enrichment_lease(episode_uuid: str, requeue: bool = True) -> str:
+async def force_release_enrichment_lease(
+    episode_uuid: str, requeue: bool = True, namespace: str = ""
+) -> str:
     """Force-release one ENRICHING episode lease, failing exhausted rows instead of requeueing them."""
 
-    return await ForceReleaseEnrichmentLeaseTool().execute(episode_uuid=episode_uuid, requeue=requeue)
+    return await ForceReleaseEnrichmentLeaseTool().execute(
+        episode_uuid=episode_uuid, requeue=requeue, namespace=namespace
+    )
 
 
 class ForceReleaseEnrichmentLeaseTool(BaseTextTool):
     name = "force_release_enrichment_lease"
-    scope = ToolScope.OBJECT
+    # NAMESPACED once the ownership guard exists: the pin can now reach this tool,
+    # and the uuid it addresses is checked against that pin at load (CF-33 step 4).
+    scope = ToolScope.NAMESPACED
     required_tier = "operator"
     description = "Force-release one ENRICHING episode lease."
 
-    async def endpoint(self, episode_uuid: str, requeue: bool = True) -> str:
+    async def endpoint(
+        self, episode_uuid: str, requeue: bool = True, namespace: str = ""
+    ) -> str:
         backend = self.get_backend()
         normalized_uuid = _require_episode_uuid(episode_uuid)
+        # CF-33 step 4: ownership-at-load. An episode uuid is not proof of ownership -- a
+        # pinned client that learned one through any global read could previously inspect,
+        # re-enrich or release the lease on another silo's episode. Two lookups, per CF-64:
+        # only an episode that demonstrably belongs elsewhere is refused, so absent-episode
+        # paths keep reporting "not found" rather than "refused".
+        refusal = await foreign_object_refusal(
+            uuid=normalized_uuid,
+            namespace=namespace,
+            # Resolved lazily so an UNPINNED call touches nothing it did not touch before:
+            # `backend.fetch_memory_by_uuid` is not even looked up unless a namespace is set.
+            lookup=lambda uuid, **kw: backend.fetch_memory_by_uuid(uuid, **kw),
+            label="episode",
+        )
+        if refusal:
+            return refusal
 
         released = await backend.force_release_episode_lease(
             normalized_uuid,

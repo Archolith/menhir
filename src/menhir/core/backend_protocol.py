@@ -684,6 +684,7 @@ class MemoryBackend(Protocol):
         last_seen: str | None = None,
         notes: list[str] | None = None,
         source_confidence: float = 0.5,
+        namespace: str | None = None,
     ) -> dict[str, Any]:
         """Create/refresh a CANDIDATE :Entity node (review tier). Bypasses enrichment queue.
 

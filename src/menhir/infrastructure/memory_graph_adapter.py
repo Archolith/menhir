@@ -1691,6 +1691,7 @@ class MemoryGraphAdapter:
         last_seen: str | None = None,
         notes: list[str] | None = None,
         source_confidence: float = 0.5,
+        namespace: str | None = None,
     ) -> dict[str, Any]:
         return self._candidates.create_candidate(
             content=content,
@@ -1706,6 +1707,7 @@ class MemoryGraphAdapter:
             last_seen=last_seen,
             notes=notes,
             source_confidence=source_confidence,
+            namespace=namespace,
         )
 
     def list_candidates(self, *, source: str | None = None, limit: int = 100) -> list[dict[str, Any]]:

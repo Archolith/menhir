@@ -20,6 +20,7 @@ async def add_candidate(
     last_seen: str | None = None,
     notes: list[str] | None = None,
     source_confidence: float = 0.5,
+    namespace: str = "",
 ) -> str:
     """Stage a low-trust memory/friction candidate for human review (not recalled until approved).
 
@@ -56,12 +57,13 @@ async def add_candidate(
         last_seen=last_seen,
         notes=notes,
         source_confidence=source_confidence,
+        namespace=namespace,
     )
 
 
 class AddCandidateTool(BaseTextTool):
     name = "add_candidate"
-    scope = ToolScope.OBJECT
+    scope = ToolScope.NAMESPACED
     description = "Stage a low-trust memory/friction candidate for human review (not recalled until approved)."
 
     async def endpoint(
@@ -79,6 +81,7 @@ class AddCandidateTool(BaseTextTool):
         last_seen: str | None = None,
         notes: list[str] | None = None,
         source_confidence: float = 0.5,
+        namespace: str = "",
     ) -> str:
         """Stage a low-trust memory/friction candidate for human review (not recalled until approved).
 
@@ -102,6 +105,11 @@ class AddCandidateTool(BaseTextTool):
         """
         backend = self.get_backend()
 
+        # CF-33 step 4 resolved this as a MISDECLARATION, not a missing guard: `cluster_id`
+        # is an emitter-side grouping label on a NEW write, not the address of an existing
+        # object, so OBJECT never described this tool. It stages tenant memory -- an approved
+        # candidate becomes recalled memory -- and did so with a hardcoded default group_id.
+        scope = {"namespace": namespace} if namespace else {}
         result = await backend.create_candidate(
             content=content,
             source=source,
@@ -116,6 +124,7 @@ class AddCandidateTool(BaseTextTool):
             last_seen=last_seen,
             notes=notes,
             source_confidence=source_confidence,
+            **scope,
         )
 
         return (
