@@ -1,6 +1,8 @@
 # Namespace Contract and Contamination Cleanup
 
 Status: **planned; implementation not started**
+**Last verified:** 2026-08-18 — ACCURATE, not started. `MENHIR_CLIENT_NAMESPACES` (5 hits) is the PRE-EXISTING config this plan would constrain, not its deliverable; Phase 1's single validation chokepoint is absent (no `validate_namespace`/`_validate_namespace` in `src/`).
+
 
 RCA: `.agent/reviews/rca-namespace-contamination-experimental-scalars-2026-08-09.md`
 

@@ -1,6 +1,8 @@
 # Conflict Suggestion Remediation
 
 Status: **planned; implementation not started**
+**Last verified:** 2026-08-18 — INCONCLUSIVE — checked, not settled. `_record_suppression` (6), `keep_both` (20) and `blast_radius` (14) all resolve, but they may be pre-existing conflict vocabulary rather than this plan's deliverables. Distinguishing them needs the phase-by-phase read, not a grep.
+
 
 RCA: `.agent/reviews/rca-conflict-suggestion-destructive-default-2026-08-09.md`
 
