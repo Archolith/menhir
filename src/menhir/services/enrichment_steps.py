@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import traceback
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -812,7 +813,17 @@ async def _repair_synthetic_edge_facts(
         if not uuid:
             continue
         repaired_fact = repaired[j] if j < len(repaired) else None
-        if repaired_fact:
+        # CF-78: between the model returning a string and that string becoming a stored edge fact
+        # there used to be exactly one check -- `if repaired_fact:`. The input to that model is
+        # untrusted episode content, and the output is persisted into a graph recall renders
+        # verbatim into an operator's agent context (CF-39). Truthiness is not validation.
+        #
+        # `fact_source` is what decides how hard to look. That field was written at five sites and
+        # read at none, which made it a provenance marker that recorded a distinction nothing
+        # honoured; branching on it here is the first consumer. An `original` fact came from the
+        # extractor and keeps its existing treatment. An `llm_repaired` one is model prose about
+        # attacker-influenced text and is held to the stricter bar.
+        if repaired_fact and _is_admissible_repaired_fact(repaired_fact):
             updates.append({"uuid": uuid, "fact": repaired_fact, "fact_source": "llm_repaired"})
         else:
             updates.append({
@@ -837,6 +848,46 @@ async def _repair_synthetic_edge_facts(
 # ---------------------------------------------------------------------------
 # Structural anchoring (best-effort, non-fatal)
 # ---------------------------------------------------------------------------
+
+#: An edge fact is a short declarative sentence about two entities. These are the bounds a real
+#: one stays inside; anything outside them is not a fact this pipeline produced.
+_MAX_REPAIRED_FACT_CHARS = 500
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+
+
+def _is_admissible_repaired_fact(candidate: object) -> bool:
+    """Whether a model-repaired edge fact may be persisted (CF-78).
+
+    Deliberately a SHAPE check, not a semantic one. The register's ideal -- verify the fact is
+    supported by the source span -- is a grounding test, and CF-17 is the standing record of how
+    badly a naive grounding test goes: token overlap admitted every single-word contradiction of
+    its source, and the substring replacement admitted quotation, attribution and conditionals as
+    assertions. Shipping a second one of those here, to guard a lower-severity path, would be
+    repeating a mistake this codebase has already made twice and written down.
+
+    So: bound what can be said, and leave what it means to the pipeline that already judges it.
+
+    - a length bound, because an edge fact is a sentence and anything at 500+ characters is a
+      payload wearing a sentence's clothes;
+    - no control characters or line breaks, which are what let stored text stop being one field
+      and start looking like structure when it is rendered into a later prompt or an agent's
+      context (CF-39 is that delivery site, and it is confirmed);
+    - non-empty after stripping, which the old truthiness check nearly covered and did not, since
+      a whitespace-only string is truthy.
+
+    What this does NOT do is check that the fact is true, or that the model was not steered into
+    writing it. A short, clean, well-formed lie passes. That is the honest boundary of a shape
+    check and the reason `fact_source` still marks these as `llm_repaired`.
+    """
+    if not isinstance(candidate, str):
+        return False
+    text = candidate.strip()
+    if not text or len(text) > _MAX_REPAIRED_FACT_CHARS:
+        return False
+    if "\n" in candidate or "\r" in candidate:
+        return False
+    return not _CONTROL_CHARS_RE.search(candidate)
+
 
 def _anchor_to_structural_entities(
     ctx: EnrichmentContext,
