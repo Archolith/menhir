@@ -64,7 +64,8 @@ def test_record_merge_with_namespaces_round_trips(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
-def test_record_merge_without_namespaces_stores_null(tmp_path: Path) -> None:
+def test_record_merge_without_derivable_namespace_drops_unowned_snapshot(tmp_path: Path) -> None:
+    """A current low-level writer must not persist recovery content with no erasure owner."""
     db_path = tmp_path / "no-namespace.db"
     store = McpTelemetryStore(db_path=db_path)
     store.record_merge(
@@ -75,17 +76,8 @@ def test_record_merge_without_namespaces_stores_null(tmp_path: Path) -> None:
     )
 
     with sqlite3.connect(db_path) as conn:
-        conn.row_factory = sqlite3.Row
-        row = conn.execute(
-            """
-            SELECT survivor_namespace, absorbed_namespace
-            FROM merge_audit
-            ORDER BY id ASC
-            """
-        ).fetchone()
-    assert row is not None
-    assert row["survivor_namespace"] is None
-    assert row["absorbed_namespace"] is None
+        count = conn.execute("SELECT COUNT(*) FROM merge_audit").fetchone()[0]
+    assert count == 0
 
 
 @pytest.mark.unit
