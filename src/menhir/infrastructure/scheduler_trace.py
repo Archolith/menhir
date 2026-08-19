@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from functools import partial
 from typing import Any
 
 import httpx
@@ -28,37 +29,49 @@ async def register_scheduler_task_source() -> None:
     global _registered
     async with _register_lock:
         if _registered:
-            record_lifecycle_event(
-                component="scheduler_trace",
-                event="register_task_source",
-                state="skipped",
-                details={"reason": "already_registered", "source": "memory"},
+            await asyncio.to_thread(
+                partial(
+                    record_lifecycle_event,
+                    component="scheduler_trace",
+                    event="register_task_source",
+                    state="skipped",
+                    details={"reason": "already_registered", "source": "memory"},
+                )
             )
             return
         scheduler_url = scheduler_url_from_env().rstrip("/")
-        record_lifecycle_event(
-            component="scheduler_trace",
-            event="register_task_source",
-            state="started",
-            details={"source": "memory", "scheduler_url": scheduler_url},
+        await asyncio.to_thread(
+            partial(
+                record_lifecycle_event,
+                component="scheduler_trace",
+                event="register_task_source",
+                state="started",
+                details={"source": "memory", "scheduler_url": scheduler_url},
+            )
         )
         try:
             async with httpx.AsyncClient(timeout=2.0) as client:
                 response = await client.post(f"{scheduler_url}/task-sources/register", json=_MEMORY_SOURCE_PAYLOAD)
                 response.raise_for_status()
             _registered = True
-            record_lifecycle_event(
-                component="scheduler_trace",
-                event="register_task_source",
-                state="completed",
-                details={"source": "memory", "scheduler_url": scheduler_url},
+            await asyncio.to_thread(
+                partial(
+                    record_lifecycle_event,
+                    component="scheduler_trace",
+                    event="register_task_source",
+                    state="completed",
+                    details={"source": "memory", "scheduler_url": scheduler_url},
+                )
             )
         except (httpx.HTTPError, OSError) as exc:
-            record_lifecycle_event(
-                component="scheduler_trace",
-                event="register_task_source",
-                state="failed",
-                details={"source": "memory", "scheduler_url": scheduler_url, "error": str(exc)},
+            await asyncio.to_thread(
+                partial(
+                    record_lifecycle_event,
+                    component="scheduler_trace",
+                    event="register_task_source",
+                    state="failed",
+                    details={"source": "memory", "scheduler_url": scheduler_url, "error": str(exc)},
+                )
             )
             logger.warning("scheduler task source registration failed: %s", exc)
 
@@ -85,25 +98,12 @@ async def emit_scheduler_task_event(
     }
     if child is not None:
         payload["child"] = child
-    record_lifecycle_event(
-        component="scheduler_trace",
-        event="emit_task_event",
-        state="started",
-        episode_uuid=parent_job_id,
-        details={
-            "scheduler_url": scheduler_url,
-            "parent_state": parent_state,
-            "has_child": child is not None,
-        },
-    )
-    try:
-        async with httpx.AsyncClient(timeout=2.0) as client:
-            response = await client.post(f"{scheduler_url}/task-events", json=payload)
-            response.raise_for_status()
-        record_lifecycle_event(
+    await asyncio.to_thread(
+        partial(
+            record_lifecycle_event,
             component="scheduler_trace",
             event="emit_task_event",
-            state="completed",
+            state="started",
             episode_uuid=parent_job_id,
             details={
                 "scheduler_url": scheduler_url,
@@ -111,18 +111,40 @@ async def emit_scheduler_task_event(
                 "has_child": child is not None,
             },
         )
+    )
+    try:
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            response = await client.post(f"{scheduler_url}/task-events", json=payload)
+            response.raise_for_status()
+        await asyncio.to_thread(
+            partial(
+                record_lifecycle_event,
+                component="scheduler_trace",
+                event="emit_task_event",
+                state="completed",
+                episode_uuid=parent_job_id,
+                details={
+                    "scheduler_url": scheduler_url,
+                    "parent_state": parent_state,
+                    "has_child": child is not None,
+                },
+            )
+        )
     except (httpx.HTTPError, OSError) as exc:
-        record_lifecycle_event(
-            component="scheduler_trace",
-            event="emit_task_event",
-            state="failed",
-            episode_uuid=parent_job_id,
-            details={
-                "scheduler_url": scheduler_url,
-                "parent_state": parent_state,
-                "has_child": child is not None,
-                "error": str(exc),
-            },
+        await asyncio.to_thread(
+            partial(
+                record_lifecycle_event,
+                component="scheduler_trace",
+                event="emit_task_event",
+                state="failed",
+                episode_uuid=parent_job_id,
+                details={
+                    "scheduler_url": scheduler_url,
+                    "parent_state": parent_state,
+                    "has_child": child is not None,
+                    "error": str(exc),
+                },
+            )
         )
         logger.warning("scheduler task event failed parent_job_id=%s: %s", parent_job_id, exc)
 

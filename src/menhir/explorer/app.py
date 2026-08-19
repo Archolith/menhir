@@ -631,6 +631,7 @@ def create_explorer_router() -> Any:
         repo_obj = request.app.state.repo
         rev = _reveal(request)
         episodes = _recent_episodes(repo_obj)
+        pending = await asyncio.to_thread(PendingActionStore().fetch_pending, limit=50)
         return TEMPLATES.TemplateResponse(
             request,
             "index.html",
@@ -644,7 +645,7 @@ def create_explorer_router() -> Any:
                 "flagged": redact_rows(_flagged_nodes(repo_obj), reveal=rev),
                 "candidates": redact_rows(_candidates(repo_obj), reveal=rev),
                 "entities": redact_rows(_search_entities(repo_obj, ""), reveal=rev),
-                "pending_actions": redact_rows(PendingActionStore().fetch_pending(limit=50), reveal=rev),
+                "pending_actions": redact_rows(pending, reveal=rev),
                 "mcp_events": redact_rows(telemetry_store.fetch_recent(limit=50), reveal=rev),
                 "initial_episode_uuid": episodes[0]["uuid"] if episodes else "",
                 "privacy_redact": not rev,
@@ -799,10 +800,11 @@ def create_explorer_router() -> Any:
 
     @router.get("/explorer/partials/pending_actions", response_class=HTMLResponse)
     async def pending_actions_partial(request: Request) -> HTMLResponse:
+        pending = await asyncio.to_thread(PendingActionStore().fetch_pending, limit=50)
         return TEMPLATES.TemplateResponse(
             request,
             "_pending_actions.html",
-            {"pending_actions": redact_rows(PendingActionStore().fetch_pending(limit=50), reveal=_reveal(request))},
+            {"pending_actions": redact_rows(pending, reveal=_reveal(request))},
         )
 
     @router.get("/explorer/partials/mcp_events", response_class=HTMLResponse)

@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import logging
 from dataclasses import dataclass, field
+from functools import partial
 from datetime import datetime, timezone
 from time import monotonic, perf_counter
 from typing import Any
@@ -382,16 +383,19 @@ class GraphitiClient:
                         status_missing_started_at = now
                         watchdog_reason = "scheduler_status_unavailable"
                         watchdog_started = True
-                        record_lifecycle_event(
-                            component="graphiti_client",
-                            event="add_episode_request_watchdog",
-                            state="started",
-                            episode_uuid=episode_uuid,
-                            details={
-                                "task": task,
-                                "child_task_id": child_task_id,
-                                "reason": watchdog_reason,
-                            },
+                        await asyncio.to_thread(
+                            partial(
+                                record_lifecycle_event,
+                                component="graphiti_client",
+                                event="add_episode_request_watchdog",
+                                state="started",
+                                episode_uuid=episode_uuid,
+                                details={
+                                    "task": task,
+                                    "child_task_id": child_task_id,
+                                    "reason": watchdog_reason,
+                                },
+                            )
                         )
                         continue
                     stalled_for_s = now - status_missing_started_at
@@ -405,17 +409,20 @@ class GraphitiClient:
                         "graphiti add_episode stalled while scheduler status was unavailable "
                         f"for {int(stalled_for_s)}s"
                     )
-                    record_lifecycle_event(
-                        component="graphiti_client",
-                        event="add_episode_request_watchdog",
-                        state="failed",
-                        episode_uuid=episode_uuid,
-                        details={
-                            "task": task,
-                            "child_task_id": child_task_id,
-                            "stalled_for_s": int(stalled_for_s),
-                            "reason": watchdog_reason,
-                        },
+                    await asyncio.to_thread(
+                        partial(
+                            record_lifecycle_event,
+                            component="graphiti_client",
+                            event="add_episode_request_watchdog",
+                            state="failed",
+                            episode_uuid=episode_uuid,
+                            details={
+                                "task": task,
+                                "child_task_id": child_task_id,
+                                "stalled_for_s": int(stalled_for_s),
+                                "reason": watchdog_reason,
+                            },
+                        )
                     )
                     raise TimeoutError(message)
 
@@ -436,16 +443,19 @@ class GraphitiClient:
                     idle_started_at = now
                     watchdog_reason = "scheduler_idle"
                     watchdog_started = True
-                    record_lifecycle_event(
-                        component="graphiti_client",
-                        event="add_episode_request_watchdog",
-                        state="started",
-                        episode_uuid=episode_uuid,
-                        details={
-                            "task": task,
-                            "child_task_id": child_task_id,
-                            "reason": watchdog_reason,
-                        },
+                    await asyncio.to_thread(
+                        partial(
+                            record_lifecycle_event,
+                            component="graphiti_client",
+                            event="add_episode_request_watchdog",
+                            state="started",
+                            episode_uuid=episode_uuid,
+                            details={
+                                "task": task,
+                                "child_task_id": child_task_id,
+                                "reason": watchdog_reason,
+                            },
+                        )
                     )
                     continue
                 stalled_for_s = now - idle_started_at
@@ -459,31 +469,37 @@ class GraphitiClient:
                     "graphiti add_episode stalled after scheduler request went idle "
                     f"for {int(stalled_for_s)}s"
                 )
-                record_lifecycle_event(
-                    component="graphiti_client",
-                    event="add_episode_request_watchdog",
-                    state="failed",
-                    episode_uuid=episode_uuid,
-                    details={
-                        "task": task,
-                        "child_task_id": child_task_id,
-                        "stalled_for_s": int(stalled_for_s),
-                        "reason": watchdog_reason,
-                    },
+                await asyncio.to_thread(
+                    partial(
+                        record_lifecycle_event,
+                        component="graphiti_client",
+                        event="add_episode_request_watchdog",
+                        state="failed",
+                        episode_uuid=episode_uuid,
+                        details={
+                            "task": task,
+                            "child_task_id": child_task_id,
+                            "stalled_for_s": int(stalled_for_s),
+                            "reason": watchdog_reason,
+                        },
+                    )
                 )
                 raise TimeoutError(message)
         finally:
             if watchdog_started:
-                record_lifecycle_event(
-                    component="graphiti_client",
-                    event="add_episode_request_watchdog",
-                    state="completed",
-                    episode_uuid=episode_uuid,
-                    details={
-                        "task": task,
-                        "child_task_id": child_task_id,
-                        "reason": watchdog_reason,
-                    },
+                await asyncio.to_thread(
+                    partial(
+                        record_lifecycle_event,
+                        component="graphiti_client",
+                        event="add_episode_request_watchdog",
+                        state="completed",
+                        episode_uuid=episode_uuid,
+                        details={
+                            "task": task,
+                            "child_task_id": child_task_id,
+                            "reason": watchdog_reason,
+                        },
+                    )
                 )
 
     def _maybe_update_client_base_url(self, *, llm_base_url: str) -> None:
@@ -567,11 +583,14 @@ class GraphitiClient:
         """Wake scheduler-managed OpenAI-compatible endpoints used by Graphiti."""
 
         logger.debug("Graphiti wake sequence start task=%s", task)
-        record_lifecycle_event(
-            component="graphiti_client",
-            event="wake_sequence",
-            state="started",
-            details={"task": task},
+        await asyncio.to_thread(
+            partial(
+                record_lifecycle_event,
+                component="graphiti_client",
+                event="wake_sequence",
+                state="started",
+                details={"task": task},
+            )
         )
         llm_fallback = self.scheduler_fallback_base_url
         try:
@@ -583,11 +602,14 @@ class GraphitiClient:
                         task,
                         llm_fallback,
                     )
-                    record_lifecycle_event(
-                        component="graphiti_client",
-                        event="wake_llm_endpoint",
-                        state="started",
-                        details={"task": task, "fallback": llm_fallback},
+                    await asyncio.to_thread(
+                        partial(
+                            record_lifecycle_event,
+                            component="graphiti_client",
+                            event="wake_llm_endpoint",
+                            state="started",
+                            details={"task": task, "fallback": llm_fallback},
+                        )
                     )
                     acquired_url = await acquire_llama_url_async(fallback=llm_fallback, task=task)
                     self._maybe_update_client_base_url(llm_base_url=acquired_url)
@@ -597,19 +619,25 @@ class GraphitiClient:
                         acquired_url,
                         int((perf_counter() - started) * 1000),
                     )
-                    record_lifecycle_event(
-                        component="graphiti_client",
-                        event="wake_llm_endpoint",
-                        state="completed",
-                        details={"task": task, "acquired": acquired_url},
+                    await asyncio.to_thread(
+                        partial(
+                            record_lifecycle_event,
+                            component="graphiti_client",
+                            event="wake_llm_endpoint",
+                            state="completed",
+                            details={"task": task, "acquired": acquired_url},
+                        )
                     )
                 except (httpx.HTTPError, OSError, asyncio.TimeoutError, RuntimeError) as exc:
                     logger.warning("scheduler acquire failed for graphiti llm; continuing with fallback endpoint: %s", exc)
-                    record_lifecycle_event(
-                        component="graphiti_client",
-                        event="wake_llm_endpoint",
-                        state="failed",
-                        details={"task": task, "error": str(exc)},
+                    await asyncio.to_thread(
+                        partial(
+                            record_lifecycle_event,
+                            component="graphiti_client",
+                            event="wake_llm_endpoint",
+                            state="failed",
+                            details={"task": task, "error": str(exc)},
+                        )
                     )
 
             embed_fallback = self.scheduler_fallback_embed_base_url
@@ -622,11 +650,14 @@ class GraphitiClient:
                         embed_task,
                         embed_fallback,
                     )
-                    record_lifecycle_event(
-                        component="graphiti_client",
-                        event="wake_embed_endpoint",
-                        state="started",
-                        details={"task": embed_task, "fallback": embed_fallback},
+                    await asyncio.to_thread(
+                        partial(
+                            record_lifecycle_event,
+                            component="graphiti_client",
+                            event="wake_embed_endpoint",
+                            state="started",
+                            details={"task": embed_task, "fallback": embed_fallback},
+                        )
                     )
                     acquired_embed_url = await acquire_llama_url_async(
                         fallback=embed_fallback,
@@ -639,22 +670,28 @@ class GraphitiClient:
                         acquired_embed_url,
                         int((perf_counter() - started) * 1000),
                     )
-                    record_lifecycle_event(
-                        component="graphiti_client",
-                        event="wake_embed_endpoint",
-                        state="completed",
-                        details={"task": embed_task, "acquired": acquired_embed_url},
+                    await asyncio.to_thread(
+                        partial(
+                            record_lifecycle_event,
+                            component="graphiti_client",
+                            event="wake_embed_endpoint",
+                            state="completed",
+                            details={"task": embed_task, "acquired": acquired_embed_url},
+                        )
                     )
                 except (httpx.HTTPError, OSError, asyncio.TimeoutError, RuntimeError) as exc:
                     logger.warning(
                         "scheduler acquire failed for graphiti embedder; continuing with fallback endpoint: %s",
                         exc,
                     )
-                    record_lifecycle_event(
-                        component="graphiti_client",
-                        event="wake_embed_endpoint",
-                        state="failed",
-                        details={"task": embed_task, "error": str(exc)},
+                    await asyncio.to_thread(
+                        partial(
+                            record_lifecycle_event,
+                            component="graphiti_client",
+                            event="wake_embed_endpoint",
+                            state="failed",
+                            details={"task": embed_task, "error": str(exc)},
+                        )
                     )
 
             reranker_fallback = self.scheduler_fallback_reranker_base_url
@@ -667,11 +704,14 @@ class GraphitiClient:
                         reranker_task,
                         reranker_fallback,
                     )
-                    record_lifecycle_event(
-                        component="graphiti_client",
-                        event="wake_reranker_endpoint",
-                        state="started",
-                        details={"task": reranker_task, "fallback": reranker_fallback},
+                    await asyncio.to_thread(
+                        partial(
+                            record_lifecycle_event,
+                            component="graphiti_client",
+                            event="wake_reranker_endpoint",
+                            state="started",
+                            details={"task": reranker_task, "fallback": reranker_fallback},
+                        )
                     )
                     acquired_reranker_url = await acquire_llama_url_async(
                         fallback=reranker_fallback,
@@ -684,30 +724,39 @@ class GraphitiClient:
                         acquired_reranker_url,
                         int((perf_counter() - started) * 1000),
                     )
-                    record_lifecycle_event(
-                        component="graphiti_client",
-                        event="wake_reranker_endpoint",
-                        state="completed",
-                        details={"task": reranker_task, "acquired": acquired_reranker_url},
+                    await asyncio.to_thread(
+                        partial(
+                            record_lifecycle_event,
+                            component="graphiti_client",
+                            event="wake_reranker_endpoint",
+                            state="completed",
+                            details={"task": reranker_task, "acquired": acquired_reranker_url},
+                        )
                     )
                 except (httpx.HTTPError, OSError, asyncio.TimeoutError, RuntimeError) as exc:
                     logger.warning(
                         "scheduler acquire failed for graphiti reranker; continuing with fallback endpoint: %s",
                         exc,
                     )
-                    record_lifecycle_event(
-                        component="graphiti_client",
-                        event="wake_reranker_endpoint",
-                        state="failed",
-                        details={"task": reranker_task, "error": str(exc)},
+                    await asyncio.to_thread(
+                        partial(
+                            record_lifecycle_event,
+                            component="graphiti_client",
+                            event="wake_reranker_endpoint",
+                            state="failed",
+                            details={"task": reranker_task, "error": str(exc)},
+                        )
                     )
         finally:
             logger.debug("Graphiti wake sequence complete task=%s", task)
-            record_lifecycle_event(
-                component="graphiti_client",
-                event="wake_sequence",
-                state="completed",
-                details={"task": task},
+            await asyncio.to_thread(
+                partial(
+                    record_lifecycle_event,
+                    component="graphiti_client",
+                    event="wake_sequence",
+                    state="completed",
+                    details={"task": task},
+                )
             )
 
     async def _count_existing_indices(self) -> int:
@@ -792,12 +841,15 @@ class GraphitiClient:
             )
         wake_started = perf_counter()
         logger.debug("Graphiti add_episode wake begin name=%s source=%s", name, source_description)
-        record_lifecycle_event(
-            component="graphiti_client",
-            event="add_episode_wake",
-            state="started",
-            episode_uuid=episode_uuid,
-            details={"name": name, "source": source_description, "task": task, "child_task_id": child_task_id},
+        await asyncio.to_thread(
+            partial(
+                record_lifecycle_event,
+                component="graphiti_client",
+                event="add_episode_wake",
+                state="started",
+                episode_uuid=episode_uuid,
+                details={"name": name, "source": source_description, "task": task, "child_task_id": child_task_id},
+            )
         )
         await self._ensure_graphiti_endpoints_alive(task=task)
         logger.debug(
@@ -808,19 +860,22 @@ class GraphitiClient:
             self.embed_base_url,
             self.reranker_base_url,
         )
-        record_lifecycle_event(
-            component="graphiti_client",
-            event="add_episode_wake",
-            state="completed",
-            episode_uuid=episode_uuid,
-            details={
-                "name": name,
-                "llm": self.llm_base_url,
-                "embed": self.embed_base_url,
-                "reranker": self.reranker_base_url,
-                "task": task,
-                "child_task_id": child_task_id,
-            },
+        await asyncio.to_thread(
+            partial(
+                record_lifecycle_event,
+                component="graphiti_client",
+                event="add_episode_wake",
+                state="completed",
+                episode_uuid=episode_uuid,
+                details={
+                    "name": name,
+                    "llm": self.llm_base_url,
+                    "embed": self.embed_base_url,
+                    "reranker": self.reranker_base_url,
+                    "task": task,
+                    "child_task_id": child_task_id,
+                },
+            )
         )
         if episode_uuid and uses_scheduler_trace:
             await emit_scheduler_task_event(
@@ -844,12 +899,15 @@ class GraphitiClient:
 
         request_started = perf_counter()
         logger.debug("Graphiti add_episode request begin name=%s", name)
-        record_lifecycle_event(
-            component="graphiti_client",
-            event="add_episode_request",
-            state="started",
-            episode_uuid=episode_uuid,
-            details={"name": name, "task": task, "child_task_id": child_task_id},
+        await asyncio.to_thread(
+            partial(
+                record_lifecycle_event,
+                component="graphiti_client",
+                event="add_episode_request",
+                state="started",
+                episode_uuid=episode_uuid,
+                details={"name": name, "task": task, "child_task_id": child_task_id},
+            )
         )
         # graphiti_core.Graphiti.add_episode() does not currently accept a caller-supplied
         # external episode ID. We use episode_uuid for tracing/scheduler correlation here,
@@ -873,17 +931,20 @@ class GraphitiClient:
             name,
             int((perf_counter() - request_started) * 1000),
         )
-        record_lifecycle_event(
-            component="graphiti_client",
-            event="add_episode_request",
-            state="completed",
-            episode_uuid=episode_uuid,
-            details={
-                "name": name,
-                "duration_ms": int((perf_counter() - request_started) * 1000),
-                "task": task,
-                "child_task_id": child_task_id,
-            },
+        await asyncio.to_thread(
+            partial(
+                record_lifecycle_event,
+                component="graphiti_client",
+                event="add_episode_request",
+                state="completed",
+                episode_uuid=episode_uuid,
+                details={
+                    "name": name,
+                    "duration_ms": int((perf_counter() - request_started) * 1000),
+                    "task": task,
+                    "child_task_id": child_task_id,
+                },
+            )
         )
         if episode_uuid and uses_scheduler_trace:
             await emit_scheduler_task_event(
