@@ -63,7 +63,22 @@ def _size_of(value: Any) -> int:
 
 
 def _preview_of(value: Any, limit: int = 500) -> str:
-    rendered = json.dumps(value, default=_json_default, sort_keys=True)
+    """Render a payload for `mcp_events.payload_preview`, with free text masked.
+
+    This is the single write boundary for that column -- both `record_mcp_event` and the
+    MCP tracker reach the store through here -- so redacting at this point covers every
+    sink. It used to `json.dumps` the caller's kwargs verbatim, which meant the first 500
+    characters of every memory submitted through `add_memory(text=...)` were persisted in
+    plaintext to the sidecar.
+
+    `_size_of` deliberately still measures the UNREDACTED payload: a size is structural
+    and is the reason this preview is useful for debugging in the first place.
+    """
+    from menhir.privacy import redact_payload_for_storage
+
+    rendered = json.dumps(
+        redact_payload_for_storage(value), default=_json_default, sort_keys=True
+    )
     if len(rendered) <= limit:
         return rendered
     return rendered[: limit - 3] + "..."

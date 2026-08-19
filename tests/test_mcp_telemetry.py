@@ -94,7 +94,11 @@ def test_track_mcp_call_records_success():
         assert row["duration_ms"] >= 0
         assert row["input_size"] is not None
         assert row["result_size"] is not None
-        assert '"text": "hello"' in row["payload_preview"]
+        # CF-167: the KEY is structural and survives; the VALUE is user memory text and
+        # must not reach the plaintext sidecar. This assertion previously required the
+        # opposite, pinning the leak as correct behaviour.
+        assert '"text"' in row["payload_preview"]
+        assert "hello" not in row["payload_preview"]
     finally:
         _cleanup_db_path(db_path)
 
