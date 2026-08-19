@@ -7,13 +7,8 @@ import sqlite3
 import time
 from typing import Any, Awaitable, Callable, TypeVar, cast
 
-from menhir.infrastructure.telemetry.store import (
-    McpTelemetryStore,
-    _safe_preview_of,
-    _size_of,
-    _utc_now_iso,
-    telemetry_store,
-)
+from menhir.infrastructure.telemetry.helpers import _safe_preview_of, _size_of, _utc_now_iso
+from menhir.infrastructure.telemetry.store import McpTelemetryStore, telemetry_store
 
 T = TypeVar("T")
 logger = logging.getLogger(__name__)
