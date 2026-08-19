@@ -678,25 +678,45 @@ class TodoRepository:
             {"query": query.lower(), "words": words, "limit": safe_limit},
         )
 
-    def close_stale_todos(self, *, older_than_days: int = 60, dry_run: bool = True) -> dict[str, Any]:
-        """Close todos older than N days.
+    def close_stale_todos(
+        self, *, older_than_days: int = 60, dry_run: bool = True, namespace: str | None = None
+    ) -> dict[str, Any]:
+        """Close todos older than N days, optionally restricted to one namespace.
 
         Returns a dict with ``closed_count`` and ``preview`` (uuids that would
         be or were closed).  With ``dry_run=True`` (default), no todos are
         actually closed.
+
+        Scoping deliberately differs from this file's READ idiom. ``list_todos`` and
+        ``get_todo`` use the requested-plus-default rule
+        (``[_safe_namespace(namespace), DEFAULT_NAMESPACE]``), which is a convenience: seeing
+        the shared bucket alongside your own costs nothing. This is a BULK MUTATION, so it
+        matches the requested namespace EXACTLY. A client scoped to one silo -- or pinned to
+        it server-side -- must not close todos in the shared default bucket as a side effect
+        of tidying its own.
+
+        With no namespace supplied the behaviour is unchanged and unscoped, per the opt-in
+        isolation contract in ``domain/namespace.py``.
         """
         now = datetime.now(timezone.utc).isoformat()
         safe_days = max(1, min(older_than_days, 365))
 
+        scoped = bool((namespace or "").strip())
+        ns_filter = "AND n.namespace = $namespace" if scoped else ""
+        params: dict[str, Any] = {"days": safe_days}
+        if scoped:
+            params["namespace"] = _safe_namespace(namespace)
+
         # Find stale todos
         rows = self.neo4j.execute(
-            """
-            MATCH (n:Todo {status: 'open'})
+            f"""
+            MATCH (n:Todo {{status: 'open'}})
             WHERE duration.between(datetime(n.created_at), datetime()).days >= $days
+              {ns_filter}
             RETURN n.uuid AS uuid, n.content AS content, n.created_at AS created_at
             ORDER BY n.created_at ASC
             """,
-            {"days": safe_days},
+            params,
         )
 
         stale_uuids = [str(r.get("uuid")) for r in rows]
