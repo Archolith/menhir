@@ -116,10 +116,27 @@ def _normalize_interval_frequency(stated_span: str) -> tuple[int | float, str] |
     if len(matches) != 1:
         return None
     match = matches[0]
-    count = _frequency_number(match.group("count"), default=1.0)
+    count_text = match.group("count")
     interval = _frequency_number(match.group("interval"), default=1.0)
     if interval <= 0:
         return None
+    if count_text is None:
+        # The count group requires its number to sit IMMEDIATELY before "every", so an
+        # intervening noun defeats it -- "I read 2 books every week" captures no count, and
+        # the fabricated 1 below then OVERWRITES the model's own extracted 2 at
+        # `parse_scalar_row` (there is no fallback and no drop; the wrong number is persisted).
+        #
+        # Abstain when the source carries a number ahead of "every" that we could not
+        # attribute: returning None leaves the model's value intact, which is strictly better
+        # than asserting a guess. A phrase with no number at all ("every week", "every other
+        # week", "every three days") is genuinely count-1 and still normalizes as before.
+        if re.search(
+            rf"\b{_FREQUENCY_NUMBER_PATTERN}\b",
+            stated_span[: match.start()],
+            re.IGNORECASE,
+        ):
+            return None
+    count = _frequency_number(count_text, default=1.0)
     rate = count / interval
     value: int | float = int(rate) if rate.is_integer() else rate
     return value, match.group("period").lower()
