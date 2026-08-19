@@ -356,13 +356,14 @@ class ErasureCoordinator:
         """Delete the graph partition and its raw TurnEvidence inside the durable saga.
 
         ``MemoryGraphAdapter.delete_namespace`` handles the group_id/scalar/event graph but
-        TurnEvidence is keyed by its logical namespace. Running both here means a crash after one
-        delete leaves this erasure PREPARED and replayable instead of leaving raw prompts outside the
-        journal. Production adapters expose ``purge_turn_evidence``; lightweight test/fake adapters
-        may omit it, in which case their graph model has no TurnEvidence plane to erase.
+        TurnEvidence is keyed by its logical namespace. For every non-default silo the Graphiti
+        group id is the namespace itself, so a direct coordinator call that omits the redundant
+        ``namespace=`` argument must still purge that same TurnEvidence partition. Running both
+        deletes here means a crash after either one leaves this erasure PREPARED and replayable
+        instead of leaving raw prompts outside the journal.
         """
         deleted = int(self.graph_adapter.delete_namespace(group_id, namespace=namespace) or 0)
-        logical_namespace = str(namespace or "").strip()
+        logical_namespace = str(namespace or group_id).strip()
         purge_turn_evidence = getattr(self.graph_adapter, "purge_turn_evidence", None)
         if logical_namespace and callable(purge_turn_evidence):
             deleted += int(purge_turn_evidence(logical_namespace) or 0)
