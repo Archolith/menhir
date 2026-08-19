@@ -106,7 +106,7 @@ class TelemetryRecallStoreMixin:
         params: list[Any] = []
         window_clause = ""
         if since_hours is not None:
-            window_clause = "WHERE created_at >= datetime('now', '-' || ? || ' hours')"
+            window_clause = "WHERE substr(replace(created_at, 'T', ' '), 1, 19) >= datetime('now', '-' || ? || ' hours')"
             params.append(since_hours)
         with self._connect() as conn:
             conn.row_factory = sqlite3.Row
@@ -147,7 +147,7 @@ class TelemetryRecallStoreMixin:
                 """
                 SELECT coalesce(classification, 'unknown') AS cls, COUNT(*) AS cnt
                 FROM failure_events
-                WHERE recorded_at >= datetime('now', '-' || ? || ' hours')
+                WHERE substr(replace(recorded_at, 'T', ' '), 1, 19) >= datetime('now', '-' || ? || ' hours')
                 GROUP BY cls
                 ORDER BY cnt DESC
                 """,
@@ -157,7 +157,7 @@ class TelemetryRecallStoreMixin:
                 """
                 SELECT operation, COUNT(*) AS cnt
                 FROM failure_events
-                WHERE recorded_at >= datetime('now', '-' || ? || ' hours')
+                WHERE substr(replace(recorded_at, 'T', ' '), 1, 19) >= datetime('now', '-' || ? || ' hours')
                 GROUP BY operation
                 ORDER BY cnt DESC
                 LIMIT 5
@@ -372,7 +372,7 @@ class TelemetryRecallStoreMixin:
                         ','
                     ) AS success_latencies_csv
                 FROM mcp_events
-                WHERE started_at >= datetime('now', '-' || ? || ' hours')
+                WHERE substr(replace(started_at, 'T', ' '), 1, 19) >= datetime('now', '-' || ? || ' hours')
                   AND operation = 'episode_enrichment'
                 """,
                 (since_hours,),
@@ -402,7 +402,7 @@ class TelemetryRecallStoreMixin:
                 """
                 SELECT event, COUNT(*) AS cnt, MAX(recorded_at) AS latest
                 FROM lifecycle_events
-                WHERE recorded_at >= datetime('now', '-' || ? || ' hours')
+                WHERE substr(replace(recorded_at, 'T', ' '), 1, 19) >= datetime('now', '-' || ? || ' hours')
                 GROUP BY event
                 ORDER BY cnt DESC
                 """,
@@ -468,7 +468,7 @@ class TelemetryRecallStoreMixin:
                     """
                     SELECT 1 FROM conflict_resolutions
                     WHERE uuid_a = ? AND uuid_b = ?
-                      AND resolved_at > datetime('now', ?)
+                      AND substr(replace(resolved_at, 'T', ' '), 1, 19) > datetime('now', ?)
                     """,
                     (pair[0], pair[1], f"-{cooldown_days} days"),
                 ).fetchone()
