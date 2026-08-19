@@ -391,7 +391,9 @@ def collect_runtime_capabilities(
             f"base_url={llama_base_url}, chat={graphiti_llm.chat_model}, "
             f"embed={graphiti_embed.embed_model})."
         )
-    embedder_ready = True
+    # NOTE: embedder_ready must never be optimistically True. A value meaning
+    # "checked and healthy" must only be produced by a path that actually
+    # performed a check; the old optimistic default reported ready with no check.
     if embed_base_url != llama_base_url:
         if graphiti_embed.kind is ProviderKind.OPENAI:
             embedder_ready = check_openai_provider_configuration(
@@ -408,7 +410,19 @@ def collect_runtime_capabilities(
             )
     elif graphiti_embed.embed_model:
         embedder_ready = graphiti_llm_ready
-    if not embedder_ready:
+    else:
+        # No embed model is configured (`local_llm_embed_model` defaults to ""), so there is
+        # nothing to check and nothing to connect to. Report NOT ready -- that is the honest
+        # answer and it is what `reads_ready` should consume, since semantic reads cannot work
+        # without an embedder.
+        #
+        # Deliberately NOT a `failures` entry. An unconfigured embedder is a deployment choice,
+        # not a broken check, and `failures` gates startup: appending here would refuse to start
+        # for configurations that run today. The defect in CF-138 was a flag that meant "checked
+        # and healthy" being produced by a path that checked nothing -- not the absence of a
+        # configured embedder.
+        embedder_ready = False
+    if not embedder_ready and graphiti_embed.embed_model:
         failures.append(
             "Graphiti embed connectivity/model check failed "
             f"(provider={graphiti_embed.kind.value}, embed_base_url={embed_base_url}, "

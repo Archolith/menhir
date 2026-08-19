@@ -1,3 +1,25 @@
+## 2026-08-19 - fix: HIGH remediation wave 5 (explorer authorization, domain correctness)
+
+- **Every explorer route now carries a tier floor.** The explorer's 36 routes mount into the same
+  FastAPI app that enforces tier 23 times on its own routes, and enforced it zero times on these.
+  Enforcement is a router-level dependency rather than 36 route bodies, so a route added later
+  inherits it. Five mutating routes re-assert `agent` above that floor.
+- **The explorer is no longer built on import.** A complete FastAPI application was constructed
+  every time the package was imported - which happens on every production start - so the
+  `explorer_enabled` gate could not prevent it, and a config error in a disabled subsystem could
+  abort startup.
+- **`timeline()` orders by date, not by byte.** The parser deliberately accepts slash dates; the
+  sort compared raw strings, where `-` precedes `/`, so every slash date sorted after every dash
+  date regardless of its calendar position.
+- **A stated frequency count is no longer overwritten with 1.** "I read 2 books every week"
+  captured no count because a noun sat between the number and "every", and the fabricated 1
+  replaced the model's own extracted value. It now abstains and keeps the model's value.
+- **Preflight no longer reports `embedder_ready=True` having checked nothing.** An unconfigured
+  embedder reports not-ready, honestly, without gating startup for the deployments that run that
+  way today.
+- **A committed write is no longer reported as a failure** because a cosmetic read after it failed.
+- **`transition_artifact` is namespace-scoped**, in both the legality read and the mutation.
+
 ## 2026-08-19 — merge: CF-165 end-to-end closure
 
 - Merged `fix/cf165-e2e-closure` (35 commits): subject lineage enforced at the telemetry

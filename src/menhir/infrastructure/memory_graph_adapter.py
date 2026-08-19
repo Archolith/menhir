@@ -1438,8 +1438,12 @@ class MemoryGraphAdapter:
     def supersede_artifact(self, new_uuid: str, old_uuid: str) -> dict[str, Any]:
         return self._work_artifacts.supersede_artifact(new_uuid, old_uuid)
 
-    def transition_artifact_status(self, artifact_uuid: str, to_status: str) -> dict[str, Any]:
-        return self._work_artifacts.transition_status(artifact_uuid, to_status)
+    def transition_artifact_status(
+        self, artifact_uuid: str, to_status: str, *, namespace: str | None = None
+    ) -> dict[str, Any]:
+        return self._work_artifacts.transition_status(
+            artifact_uuid, to_status, namespace=namespace
+        )
 
     def fetch_artifact_corpus_audit(
         self,

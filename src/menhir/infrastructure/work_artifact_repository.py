@@ -1149,7 +1149,9 @@ class WorkArtifactRepository:
         )
         return int(rows[0].get("linked", 0)) if rows else 0
 
-    def transition_status(self, artifact_uuid: str, to_status: str) -> dict[str, Any]:
+    def transition_status(
+        self, artifact_uuid: str, to_status: str, *, namespace: str | None = None
+    ) -> dict[str, Any]:
         """Move an artifact to a new status, if the transition is legal.
 
         Legality is decided in the domain against the artifact's *current*
@@ -1158,12 +1160,22 @@ class WorkArtifactRepository:
         than raising -- an illegal transition is a caller mistake to surface,
         not a crash.
         """
+        # Scoped EXACTLY, not requested-plus-default. The read idiom elsewhere in this file
+        # widens to the default namespace as a convenience; this is a lifecycle MUTATION, so a
+        # caller scoped to one silo must not move an artifact in the shared bucket.
+        scoped = bool((namespace or "").strip())
+        ns_filter = "AND a.namespace = $namespace" if scoped else ""
+        params: dict[str, Any] = {"uuid": artifact_uuid}
+        if scoped:
+            params["namespace"] = _safe_namespace(namespace)
+
         rows = self.neo4j.execute(
-            """
-            MATCH (a:WorkArtifact {artifact_uuid: $uuid})
+            f"""
+            MATCH (a:WorkArtifact {{artifact_uuid: $uuid}})
+            WHERE true {ns_filter}
             RETURN a.artifact_type AS artifact_type, a.status AS status
             """,
-            {"uuid": artifact_uuid},
+            params,
         )
         if not rows:
             return {"applied": False, "reason": "artifact_not_found"}
@@ -1185,12 +1197,21 @@ class WorkArtifactRepository:
             }
 
         now = datetime.now(timezone.utc).isoformat()
+        # The predicate is REPEATED inside the mutation, not just in the legality read above.
+        # Scoping only the preflight leaves the read-to-write window unguarded; the merge path
+        # in correlation_queries closes the same race the same way.
+        write_params: dict[str, Any] = {
+            "uuid": artifact_uuid, "to_status": to_status, "now": now
+        }
+        if scoped:
+            write_params["namespace"] = _safe_namespace(namespace)
         self.neo4j.execute(
-            """
-            MATCH (a:WorkArtifact {artifact_uuid: $uuid})
+            f"""
+            MATCH (a:WorkArtifact {{artifact_uuid: $uuid}})
+            WHERE true {ns_filter}
             SET a.status = $to_status, a.status_changed_at = $now, a.updated_at = $now
             """,
-            {"uuid": artifact_uuid, "to_status": to_status, "now": now},
+            write_params,
         )
         return {"applied": True, "from_status": from_status, "to_status": to_status}
 

@@ -206,9 +206,21 @@ def distinct_count(events: Iterable[Event]) -> int:
 def timeline(events: Iterable[Event]) -> list[dict[str, Any]]:
     """LIST — the free monoid: identity [], combine merge-sort ∪, dedup by (when, identity|what).
     Lossless; any unanticipated query is a read-time δ over this. Sorted ascending by `when`."""
+    def _sort_key(x: Event) -> tuple[bool, datetime, str, str]:
+        # Sort by the PARSED date. `_parse` deliberately tolerates slash dates, but this
+        # function used to sort on the RAW string, where "-" (0x2D) precedes "/" (0x2F) -- so
+        # every slash date sorted after every dash date regardless of its actual calendar
+        # position, and the docstring's "Sorted ascending by `when`" was false for exactly the
+        # format `_parse` exists to accept.
+        #
+        # Unparseable values sort LAST and keep the previous key as their tiebreak (raw `when`,
+        # then `what`), so their relative order is unchanged and remains deterministic.
+        parsed = _parse(x.when)
+        return (parsed is None, parsed or _MIN, str(x.when), str(x.what or ""))
+
     seen: set[tuple[str, str]] = set()
     out: list[dict[str, Any]] = []
-    for e in sorted(events, key=lambda x: (str(x.when), str(x.what or ""))):
+    for e in sorted(events, key=_sort_key):
         ident = (str(e.when), str(e.identity if e.identity is not None else (e.what or "")))
         if ident in seen:
             continue
