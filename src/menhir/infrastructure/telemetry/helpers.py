@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -84,14 +85,21 @@ _SAFE_TELEMETRY_STRING_KEYS = frozenset(
     }
 )
 
+# Structural values are observed BEFORE the protected MCP runner has necessarily validated them.
+# Retaining a string merely because its key is named ``namespace`` would let a denied caller smuggle
+# arbitrary prose into telemetry. Keep only compact identifier/date/URL-ish tokens; everything else
+# is treated as content and redacted.
+_STRUCTURAL_VALUE_RE = re.compile(r"^[A-Za-z0-9_.:/@+\-]{1,200}$")
+
 
 def _redact_telemetry_value(value: Any, *, key: str | None = None) -> Any:
     """Return a payload shape safe to persist in telemetry previews.
 
     Telemetry needs operation shape and sizing, not a second durable copy of arbitrary
     user/memory prose. String values are therefore retained only for a narrow structural
-    allowlist; every other non-empty string is replaced with a marker. Containers are
-    traversed so nested request bodies cannot bypass the rule.
+    allowlist AND only when they have a compact identifier-like shape; every other non-empty
+    string is replaced with a marker. Containers are traversed so nested request bodies cannot
+    bypass the rule.
     """
     if isinstance(value, dict):
         return {
@@ -105,7 +113,7 @@ def _redact_telemetry_value(value: Any, *, key: str | None = None) -> Any:
     if isinstance(value, str):
         if not value:
             return value
-        if key in _SAFE_TELEMETRY_STRING_KEYS:
+        if key in _SAFE_TELEMETRY_STRING_KEYS and _STRUCTURAL_VALUE_RE.fullmatch(value):
             return value
         return "[redacted]"
     if isinstance(value, (int, float, bool)) or value is None:
