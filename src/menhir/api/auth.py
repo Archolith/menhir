@@ -370,8 +370,27 @@ class BearerAuthMiddleware:
         #
         # Remote clients remain enforced exactly like /api/* (graph reads AND candidate
         # approve/reject writes), so LAN exposure still requires a credential.
-        direct_loopback = self._client_is_loopback(scope) and not self._has_proxy_forwarding_header(headers)
-        if is_explorer and (self._loopback_admin_ok or direct_loopback):
+        # CF-8: the forwarding exclusion is now unconditional, which is what the comment above
+        # always claimed and the code did not do.
+        #
+        # It read `(self._loopback_admin_ok or direct_loopback)`. `_loopback_admin_ok` is
+        # `loopback_bound` -- a static SERVER-configuration boolean, permanently True on a
+        # loopback-bound server -- so the `or` short-circuited and `direct_loopback`, the only
+        # term excluding proxy-forwarded requests, was never evaluated. A same-host reverse proxy
+        # connects from 127.0.0.1, so it satisfies every remaining condition.
+        #
+        # Note what is NOT changed: on a loopback bind the BIND is still the boundary, and the
+        # peer is not separately required to be loopback. That is deliberate and documented --
+        # the explorer is a browser UI and a browser cannot attach a bearer token, so gating it
+        # on the peer would make it unreachable rather than hardened. Three existing tests
+        # encode that intent, and a first attempt at this fix that copied the admin-mint path's
+        # stricter three-way `and` broke all three. The mint path is stricter because it issues
+        # credentials; this one has a different contract, and the defect was only ever the
+        # unevaluated forwarding term.
+        explorer_loopback_ok = (
+            self._loopback_admin_ok or self._client_is_loopback(scope)
+        ) and not self._has_proxy_forwarding_header(headers)
+        if is_explorer and explorer_loopback_ok:
             await self.app(scope, receive, send)
             return
 
