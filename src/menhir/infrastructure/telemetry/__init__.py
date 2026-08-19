@@ -17,7 +17,12 @@ from .recorders import (
     record_memory_revision,
     record_merge,
 )
-from .store import McpTelemetryStore, default_telemetry_db_path, telemetry_store
+from .store import (
+    McpTelemetryStore,
+    connect_telemetry_db,
+    default_telemetry_db_path,
+    telemetry_store,
+)
 
 
 def enable_llm_usage_telemetry() -> None:
@@ -29,6 +34,7 @@ def enable_llm_usage_telemetry() -> None:
 
 __all__ = [
     "McpTelemetryStore",
+    "connect_telemetry_db",
     "default_telemetry_db_path",
     "telemetry_store",
     "current_traceback_text",

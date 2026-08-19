@@ -39,7 +39,7 @@ from pathlib import Path
 from typing import Any
 
 from menhir.infrastructure import operation_owner as oo
-from menhir.infrastructure.telemetry import default_telemetry_db_path
+from menhir.infrastructure.telemetry import connect_telemetry_db, default_telemetry_db_path
 
 logger = logging.getLogger(__name__)
 
@@ -183,7 +183,7 @@ class GraphOperationsJournal:
             if self._initialized:
                 return
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
-            with sqlite3.connect(self.db_path) as conn:
+            with connect_telemetry_db(self.db_path) as conn:
                 conn.execute(
                     """
                     CREATE TABLE IF NOT EXISTS graph_operations (
@@ -361,7 +361,7 @@ class GraphOperationsJournal:
         # pre-dispatch headroom check while the real claim was close to lapsing.
         claim_seconds = oo.lease_seconds_for_kind(operation_kind)
         owns = conn is None
-        connection = sqlite3.connect(self.db_path) if owns else conn
+        connection = connect_telemetry_db(self.db_path) if owns else conn
         try:
             # BEGIN IMMEDIATE takes the write lock BEFORE the gate check, so the check and the
             # insert are one atomic step against the recovery lease (CF-20c). Python's sqlite3
@@ -577,7 +577,7 @@ class GraphOperationsJournal:
         """Increment attempt_count and record the last error, without changing state."""
         self._ensure_ready()
         now = _utc_now_iso()
-        with sqlite3.connect(self.db_path) as conn:
+        with connect_telemetry_db(self.db_path) as conn:
             cur = conn.execute(
                 """
                 UPDATE graph_operations
@@ -603,7 +603,7 @@ class GraphOperationsJournal:
         # never in the SET list here -- a transition only moves state and audit stamps.
         self._ensure_ready()
         now = _utc_now_iso()
-        with sqlite3.connect(self.db_path) as conn:
+        with connect_telemetry_db(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
                 "SELECT state FROM graph_operations WHERE op_id = ?", (op_id,)
@@ -658,7 +658,7 @@ class GraphOperationsJournal:
     # ------------------------------------------------------------------ reads
     def get(self, op_id: str) -> dict[str, Any] | None:
         self._ensure_ready()
-        with sqlite3.connect(self.db_path) as conn:
+        with connect_telemetry_db(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
                 "SELECT * FROM graph_operations WHERE op_id = ?", (op_id,)
@@ -683,7 +683,7 @@ class GraphOperationsJournal:
         self._ensure_ready()
         now = _utc_now_iso()
         token = owner_token or oo.process_owner_token()
-        with sqlite3.connect(self.db_path) as conn:
+        with connect_telemetry_db(self.db_path) as conn:
             cursor = conn.execute(
                 "UPDATE graph_operations "
                 "SET owner_heartbeat_at = ?, owner_lease_expires_at = ?, "
@@ -738,7 +738,7 @@ class GraphOperationsJournal:
         self._ensure_ready()
         token = owner_token or oo.process_owner_token()
         now = _utc_now_iso()
-        with sqlite3.connect(self.db_path) as conn:
+        with connect_telemetry_db(self.db_path) as conn:
             conn.execute("BEGIN IMMEDIATE")
             # Derive the new expiry from the ROW's own kind, inside the same transaction that reads
             # it. A claimant that stamped the single-statement default onto a two-statement
@@ -821,7 +821,7 @@ class GraphOperationsJournal:
             raise GraphOperationError("attested_by is required: attestation must name a person")
         self._ensure_ready()
         now = _utc_now_iso()
-        with sqlite3.connect(self.db_path) as conn:
+        with connect_telemetry_db(self.db_path) as conn:
             conn.execute("BEGIN IMMEDIATE")
             cursor = conn.execute(
                 "UPDATE graph_operations "
@@ -867,7 +867,7 @@ class GraphOperationsJournal:
         cursor_created_at: str | None = None
         cursor_op_id: str | None = None
         while True:
-            with sqlite3.connect(self.db_path) as conn:
+            with connect_telemetry_db(self.db_path) as conn:
                 conn.row_factory = sqlite3.Row
                 if cursor_created_at is None:
                     rows = conn.execute(
@@ -895,7 +895,7 @@ class GraphOperationsJournal:
         if state not in OPERATION_STATES:
             raise GraphOperationError(f"unknown state {state!r}")
         self._ensure_ready()
-        with sqlite3.connect(self.db_path) as conn:
+        with connect_telemetry_db(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 "SELECT * FROM graph_operations WHERE state = ? ORDER BY created_at ASC LIMIT ?",
@@ -905,7 +905,7 @@ class GraphOperationsJournal:
 
     def list_by_batch(self, batch_id: str) -> list[dict[str, Any]]:
         self._ensure_ready()
-        with sqlite3.connect(self.db_path) as conn:
+        with connect_telemetry_db(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 "SELECT * FROM graph_operations WHERE batch_id = ? ORDER BY created_at ASC",
@@ -943,7 +943,7 @@ class GraphOperationsJournal:
         # rows beyond it (every call restarts at offset 0), so a beyond-ceiling receiptless op would be
         # invisible forever and a beyond-ceiling orphan would be marked unresolved on every run.
         while True:
-            with sqlite3.connect(self.db_path) as conn:
+            with connect_telemetry_db(self.db_path) as conn:
                 conn.row_factory = sqlite3.Row
                 rows = conn.execute(
                     "SELECT op_id, request_json, reverses_op_id FROM graph_operations "

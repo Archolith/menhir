@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -12,6 +14,22 @@ from menhir.infrastructure.paths import telemetry_db_path
 def default_telemetry_db_path() -> Path:
     """Return the default SQLite path for MCP telemetry."""
     return telemetry_db_path()
+
+
+_SQLITE_BUSY_TIMEOUT_S = float(os.getenv("MENHIR_TELEMETRY_BUSY_TIMEOUT_S", "5"))
+
+
+def connect_telemetry_db(db_path: Path) -> sqlite3.Connection:
+    """Single connect seam for every store sharing the telemetry DB file.
+
+    Applies ``MENHIR_TELEMETRY_BUSY_TIMEOUT_S`` to all of them.
+    """
+    conn = sqlite3.connect(db_path, timeout=_SQLITE_BUSY_TIMEOUT_S)
+    try:
+        conn.execute(f"PRAGMA busy_timeout = {int(_SQLITE_BUSY_TIMEOUT_S * 1000)}")
+    except sqlite3.Error:  # pragma: no cover - a pragma failure must never break a connect
+        pass
+    return conn
 
 
 def _utc_now_iso() -> str:

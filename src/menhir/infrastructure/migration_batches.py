@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from menhir.infrastructure.telemetry import default_telemetry_db_path
+from menhir.infrastructure.telemetry import connect_telemetry_db, default_telemetry_db_path
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +52,7 @@ class MigrationBatchStore:
             if self._initialized:
                 return
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
-            with sqlite3.connect(self.db_path) as conn:
+            with connect_telemetry_db(self.db_path) as conn:
                 conn.execute(
                     """
                     CREATE TABLE IF NOT EXISTS migration_batches (
@@ -90,7 +90,7 @@ class MigrationBatchStore:
         self._ensure_ready()
         batch_id = batch_id or uuidlib.uuid4().hex
         now = _utc_now_iso()
-        with sqlite3.connect(self.db_path) as conn:
+        with connect_telemetry_db(self.db_path) as conn:
             conn.execute(
                 """
                 INSERT INTO migration_batches (
@@ -138,7 +138,7 @@ class MigrationBatchStore:
     ) -> None:
         self._ensure_ready()
         now = _utc_now_iso()
-        with sqlite3.connect(self.db_path) as conn:
+        with connect_telemetry_db(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
                 "SELECT state FROM migration_batches WHERE batch_id = ?", (batch_id,)
@@ -165,7 +165,7 @@ class MigrationBatchStore:
 
     def get(self, batch_id: str) -> dict[str, Any] | None:
         self._ensure_ready()
-        with sqlite3.connect(self.db_path) as conn:
+        with connect_telemetry_db(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
                 "SELECT * FROM migration_batches WHERE batch_id = ?", (batch_id,)
@@ -174,7 +174,7 @@ class MigrationBatchStore:
 
     def list_batches(self, *, state: str | None = None) -> list[dict[str, Any]]:
         self._ensure_ready()
-        with sqlite3.connect(self.db_path) as conn:
+        with connect_telemetry_db(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             if state is not None:
                 if state not in BATCH_STATES:
