@@ -233,15 +233,22 @@ def test_extract_stated_total_null_is_no_cross_check():
 
 
 @pytest.mark.unit
-def test_extract_stated_total_measure_is_interpolated_into_prompt():
+def test_extract_stated_total_measure_reaches_the_model_as_data_not_as_system_prompt():
+    # CF-69: `measure` is model-derived and therefore attacker-influenced, so it must reach the
+    # model in the USER message. This test previously asserted the opposite -- that it appeared
+    # in the system prompt -- which is the placement the finding is about. What it should pin is
+    # unchanged: the value reaches the model and no template placeholder leaks.
     class _Capture(FakeLLM):
         def __call__(self, system, user):
             self.last_system = system
+            self.last_user = user
             return super().__call__(system, user)
 
     llm = _Capture([{"total": 42}])
     extract_stated_total(EPISODES, "playlists", llm)
-    assert "playlists" in llm.last_system and "{measure}" not in llm.last_system
+    assert "playlists" in llm.last_user
+    assert "playlists" not in llm.last_system
+    assert "{measure}" not in llm.last_system and "{measure}" not in llm.last_user
 
 
 def _bike225_events():
@@ -514,11 +521,15 @@ def test_verify_candidate_prompt_shape_law3_vs_non_law3():
     # while non-Law-3 prompts are byte-identical to the original.
     from menhir.services.perception import verify_candidate
 
-    # Capture the prompts sent to the judge (judge is called with (prompt, ""))
+    # CF-69: the data block is now the USER message and the system prompt is a constant, so this
+    # captures the second argument. Before, the whole formatted block -- measure key and item
+    # quotes, both authored from episode text -- was passed as the system argument.
     captured_prompts = []
+    captured_systems = []
 
-    def capture_judge(prompt, _):
-        captured_prompts.append(prompt)
+    def capture_judge(system, user):
+        captured_systems.append(system)
+        captured_prompts.append(user)
         return '{"correct": true}'
 
     anchor = Event(when="2026-01-01", kind="assertion", value=4.0, episode_uuid="a0")
@@ -538,6 +549,9 @@ def test_verify_candidate_prompt_shape_law3_vs_non_law3():
     assert "(d)" not in non_law3_prompt
     # Verify original prompt structure is preserved
     assert "(a)" in non_law3_prompt and "(b)" in non_law3_prompt and "(c)" in non_law3_prompt
+    # The system prompt is a constant: it carries none of the model-derived payload.
+    assert all("lenses" not in system for system in captured_systems)
+    assert all("macro lens" not in system for system in captured_systems)
 
 
 @pytest.mark.unit
