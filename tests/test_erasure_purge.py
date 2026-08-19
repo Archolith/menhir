@@ -27,11 +27,27 @@ from menhir.infrastructure.telemetry.store import McpTelemetryStore
 pytestmark = [pytest.mark.unit]
 
 
+_LEGACY_SEED_GUARDS = (
+    "trg_cf165_mcp_missing_lineage",
+    "trg_cf165_merge_infer_lineage",
+    "trg_cf165_merge_drop_unowned",
+)
+
+
 def _sidecar(tmp_path) -> tuple[McpTelemetryStore, sqlite3.Connection]:
-    """Create a real sidecar under tmp_path and return (store, connection)."""
+    """Create a real sidecar under tmp_path and return (store, connection).
+
+    This module intentionally inserts historical/pre-lineage rows with raw SQL. Disable the
+    current forward guards in this isolated fixture so those rows remain representable; the
+    persistence-boundary tests separately prove new application writes cannot recreate them.
+    """
     store = McpTelemetryStore(db_path=tmp_path / "t.db")
     store._ensure_ready()
-    return store, sqlite3.connect(store.db_path)
+    conn = sqlite3.connect(store.db_path)
+    for trigger in _LEGACY_SEED_GUARDS:
+        conn.execute(f"DROP TRIGGER IF EXISTS {trigger}")
+    conn.commit()
+    return store, conn
 
 
 def _insert_memory_revision(conn, recorded_at, node_uuid, old_value, new_value):
