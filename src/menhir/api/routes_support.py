@@ -13,7 +13,11 @@ from menhir.core.backend_protocol import MemoryBackend
 from menhir.core.runtime import RuntimeContext
 from menhir.domain.session import MemorySession, new_session
 from menhir.infrastructure.telemetry import record_destructive_op
-from menhir.mcp.service_access import get_request_session, get_request_tier
+from menhir.mcp.service_access import (
+    get_pinned_namespace,
+    get_request_session,
+    get_request_tier,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -134,11 +138,36 @@ def _caller_header(request: Request, suffix: str) -> str:
 
 
 def _resolve_namespace(request: Request, body_namespace: str | None) -> str | None:
-    """Namespace precedence: explicit request body, then x-menhir-namespace header, else None.
+    """Namespace precedence: server-side pin, then request body, then x-menhir-namespace header.
 
     None preserves the legacy global behavior (no isolation); an explicit value scopes
     the operation to that silo. The deprecated x-yawn-namespace spelling is still accepted.
+
+    THE PIN WINS, and it is checked first. `MENHIR_CLIENT_NAMESPACES` binds a client to a
+    namespace server-side, and `BaseTool._apply_pinned_namespace` documents the guarantee as
+    absolute: a pinned client "cannot escape it, whether by passing another namespace or by
+    omitting the argument entirely". That was true only of MCP tools. REST never consulted the
+    pin at all, so a credential restricted to one namespace through MCP reached every namespace
+    through HTTP by putting one in the request body -- the same client, the same server-side
+    policy, one transport enforcing it.
+
+    Nothing new is needed to fix that: the auth middleware already binds the request session
+    (carrying `client_name`) on this path, so `get_pinned_namespace()` resolves here exactly as
+    it does under MCP. It was simply never called.
+
+    A mismatch is logged rather than rejected, matching the tool path's behaviour precisely --
+    the two surfaces must not disagree about what a pinned client's request means.
     """
+    pinned = get_pinned_namespace()
+    if pinned:
+        requested = (body_namespace or _caller_header(request, "namespace") or "").strip()
+        if requested and requested != pinned:
+            logger.warning(
+                "namespace pin: REST client requested namespace=%r; forcing %r",
+                requested,
+                pinned,
+            )
+        return pinned
     if body_namespace:
         return body_namespace
     return _caller_header(request, "namespace") or None

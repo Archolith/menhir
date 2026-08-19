@@ -235,7 +235,11 @@ async def bootstrap_context(
 
     backend = _get_backend(request)
     normalized_reader = _normalize_reader_id(body.reader_id)
-    effective_workspace = body.workspace or body.namespace
+    # Resolved, not read raw off the body: this route reads memory content and must honour the
+    # server-side namespace pin like every other REST read. It previously used body.namespace
+    # directly and so was exempt from it.
+    resolved_namespace = _resolve_namespace(request, body.namespace)
+    effective_workspace = body.workspace or resolved_namespace
     selection_key, _allowed = bootstrap_selection(effective_workspace)
     version = await backend.fetch_flagged_memory_bootstrap_version(
         workspace=effective_workspace
@@ -254,7 +258,7 @@ async def bootstrap_context(
             body.query.strip(),
             limit=body.limit,
             include_session=True,
-            namespace=body.namespace,
+            namespace=resolved_namespace,
         )
         relevant = [
             _compact_scored_item(SimpleNamespace(**row))
@@ -263,7 +267,7 @@ async def bootstrap_context(
 
     recent_rows = await backend.fetch_recent_memories(
         limit=body.recent_limit * 3,
-        namespace=body.namespace,
+        namespace=resolved_namespace,
     )
     recent = [
         row
