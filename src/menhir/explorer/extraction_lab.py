@@ -10,6 +10,7 @@ under test (prompt_variant, model, or context_episode_count). See
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import datetime, timezone
@@ -469,8 +470,11 @@ async def _run_extraction_arm(
         # silently no-ops and the harness tried to reach a Neo4j that was never
         # configured, exactly the kind of harness/production divergence the fidelity
         # contract exists to catch.
-        settings = MemorySettings.from_env()
-        graphiti_client = GraphitiClient.from_settings(settings)
+        # CF-107: `from_settings` resolves the LLM and embedding endpoints over HTTP through
+        # `acquire_llama_url_sync` -- two blocking network calls per arm, up to 16 arms per
+        # request, all on the shared event loop.
+        settings = await asyncio.to_thread(MemorySettings.from_env)
+        graphiti_client = await asyncio.to_thread(GraphitiClient.from_settings, settings)
         clients = graphiti_client.client.clients
 
         # Apply model/temperature overrides. Safe to mutate directly (unlike the prompt

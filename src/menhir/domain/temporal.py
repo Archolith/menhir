@@ -52,17 +52,26 @@ def parse_iso8601(value: Any) -> datetime | None:
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
-def _parse(ts: str | None) -> datetime | None:
-    # NOTE: a 4th copy of the tolerant-parse idea, kept deliberately separate for now. It does NOT
-    # strip the zone-id suffix, so it shares the defect parse_iso8601 exists to fix. Switching it
-    # would change what the bitemporal filters below (is_valid_at / was_known_at / matches_query)
-    # consider parseable, i.e. real recall-behaviour change -- so it is a decision, not a cleanup.
-    if ts is None:
-        return None
-    try:
-        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
-    except ValueError:
-        return None
+#: CF-55: the bitemporal filters below now use the canonical parser, as its own docstring says
+#: everything reading a Neo4j timestamp must.
+#:
+#: There WAS a 4th copy here that did not strip the zone-id suffix, kept separate on the
+#: reasoning that switching it "would change what the bitemporal filters consider parseable,
+#: i.e. real recall-behaviour change -- so it is a decision, not a cleanup." That was right about
+#: the risk and silent about the current behaviour already being wrong: `toString()` is exactly
+#: the format recall projects these fields in, the old parser returned None for it, and an
+#: unparseable bound is SKIPPED rather than raised (`if va is not None and va > pivot`). So every
+#: bound silently stopped constraining and every filter returned True. Fail-open by construction,
+#: on the one format production actually produces.
+#:
+#: Results on any enabled path will change: inputs that were passing incorrectly will start being
+#: excluded. That is the fix, not a regression.
+#:
+#: A second defect goes with it. The old parser returned NAIVE datetimes for unsuffixed input,
+#: while a pivot parsed from an offset-bearing string is aware -- comparing the two raises
+#: TypeError. `parse_iso8601` treats a naive result as UTC, so every comparison below is now
+#: between two aware values.
+_parse = parse_iso8601
 
 
 @dataclass(frozen=True)
