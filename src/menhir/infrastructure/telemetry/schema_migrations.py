@@ -33,6 +33,12 @@ def ensure_lineage_columns(conn: sqlite3.Connection) -> None:
     recorded lineage, and NULL is what the read and write paths expect for them.
     Backfill is deliberately not attempted -- it is only sound where derivation is
     provable, which is a separate decision.
+
+    ``recall_receipts.reason`` is intentionally scrubbed here. A usefulness receipt is
+    session-wide and can describe a global/workspace recall, so inventing namespace ownership
+    would be unsound. The structured score remains; the optional prose is not needed for the
+    metric and was the only content-bearing field that made namespace erasure depend on a
+    session->namespace mapping that does not exist.
     """
     additions: dict[str, tuple[str, ...]] = {
         "merge_audit": ("survivor_namespace", "absorbed_namespace"),
@@ -49,6 +55,14 @@ def ensure_lineage_columns(conn: sqlite3.Connection) -> None:
             if column not in existing:
                 # Literal names from the mapping above; never caller input.
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT")
+
+    recall_columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(recall_receipts)").fetchall()
+    }
+    if "reason" in recall_columns:
+        # Idempotent privacy migration: old free-text rating notes have no sound namespace
+        # lineage. Keep the structured score/label and remove only the optional prose.
+        conn.execute("UPDATE recall_receipts SET reason = NULL WHERE reason IS NOT NULL")
 
 
 __all__ = ["ensure_lineage_columns"]
