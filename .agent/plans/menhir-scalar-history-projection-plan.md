@@ -6,6 +6,7 @@ Add a replayable, slot-keyed scalar-history View that preserves delta evidence a
 
 **Date:** 2026-07-29
 **Status:** READY FOR IMPLEMENTATION
+**Last verified:** 2026-08-18 — ACCURATE, unbuilt. `ScalarHistoryRepository` 0 hits; `MENHIR_PERSONAL_MEMORY_SCALAR_HISTORY_ENABLED` appears in settings only.
 **Owners:** Menhir scalar pipeline and archolith-bench
 **Related plan:** `.agent/plans/menhir-scalar-state-view-implementation-plan.md`
 

@@ -1,6 +1,7 @@
 # Menhir CF-17 — Admission Gate Contradiction Remediation Plan
 
 **Status:** CONFIRMED · **Severity:** High (downgraded from Critical — see §1)
+**Last verified:** 2026-08-18 — ACCURATE, remediation pending. `_has_negation` and `_has_polarity_mismatch` are 0 hits in `src/`; CONFIRMED refers to the finding, not a fix.
 **Reporter's claim reviewed:** `.agent/reviews/REGISTER-SNAPSHOT.md:133-176`
 **Verifier agent:** deepseek/deepseek-v4-flash · **Date:** 2026-08-12
 
