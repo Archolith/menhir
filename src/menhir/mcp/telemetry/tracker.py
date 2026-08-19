@@ -97,22 +97,34 @@ async def track_mcp_call(
     store: McpTelemetryStore = telemetry_store,
     timeout: int = DEFAULT_MCP_TIMEOUT,
     error_mapper: Callable[[str], T] | None = None,
+    effective_payload: Callable[[], Any | None] | None = None,
 ) -> T:
     """Measure and persist one MCP call around an async runner.
 
     Returns an error string instead of raising so Claude always gets a response.
     Applies an async timeout (default 120s) to prevent indefinite hangs.
 
-    The telemetry preview is privacy-minimized before persistence, and every new MCP-event row
-    receives non-NULL namespace lineage. This is load-bearing for explicit erasure: historical
-    rows written before lineage existed remain distinguishable from current writes.
+    ``payload`` is used only for sizing and a privacy-minimized preview. Tool callers may provide
+    ``effective_payload`` to publish the structural arguments only after authorization, allowlist
+    checks, and namespace pinning have completed. If a protected runner is denied before that
+    point, telemetry falls back to the server-side pinned/default namespace and does not treat raw
+    caller UUID/namespace arguments as ownership.
     """
 
     started_at = _utc_now_iso()
     started = time.perf_counter()
     input_size = _size_of(payload) if payload is not None else None
     payload_preview = _safe_preview_of(payload) if payload is not None else None
-    namespace, node_uuid = _lineage_from_payload(payload)
+
+    def _resolved_lineage() -> tuple[str, str | None]:
+        lineage_payload = payload
+        if effective_payload is not None:
+            try:
+                lineage_payload = effective_payload()
+            except Exception:  # pragma: no cover - telemetry lineage is best-effort
+                logger.warning("Failed to resolve effective MCP telemetry lineage", exc_info=True)
+                lineage_payload = None
+        return _lineage_from_payload(lineage_payload)
 
     try:
         result = await asyncio.wait_for(runner(), timeout=timeout)
@@ -125,6 +137,7 @@ async def track_mcp_call(
             "event loop so the call cannot return sooner. Check server health."
         )
         logger.error("%s (duration=%dms)", error_msg, duration_ms)
+        namespace, node_uuid = _resolved_lineage()
         try:
             store.record(
                 kind=kind,
@@ -150,6 +163,7 @@ async def track_mcp_call(
         duration_ms = int((time.perf_counter() - started) * 1000)
         error_msg = _diagnose_failure(operation, exc)
         logger.error("MCP %s/%s failed after %dms: %s", kind, operation, duration_ms, error_msg)
+        namespace, node_uuid = _resolved_lineage()
         try:
             store.record(
                 kind=kind,
@@ -175,6 +189,7 @@ async def track_mcp_call(
     duration_ms = int((time.perf_counter() - started) * 1000)
     result_size = _size_of(result) if result is not None else None
     logger.info("MCP %s/%s completed in %dms", kind, operation, duration_ms)
+    namespace, node_uuid = _resolved_lineage()
     try:
         store.record(
             kind=kind,
