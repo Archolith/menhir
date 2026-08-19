@@ -10,9 +10,10 @@ LLM-free, fail-closed (precision-first — when in doubt, deny).
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from typing import Any
+
+from menhir.domain.truth.assertion_spans import claim_is_grounded, normalize_claim_text
 
 
 @dataclass(frozen=True)
@@ -32,44 +33,25 @@ class AdmissionVerdict:
     """The UUID of the cited turn evidence, if any."""
 
 
-def _normalize_text(text: str | None) -> str:
-    """Lowercase and collapse whitespace for comparison."""
-    if not text:
-        return ""
-    return " ".join(str(text).lower().split())
+#: One normalization authority, shared with span extraction so the two can never compare
+#: differently-shaped strings.
+_normalize_text = normalize_claim_text
 
 
 def _text_grounded(claimed: str, source_span: str) -> bool:
-    """True if claimed text is meaningfully present in source span.
+    """True if the source span ASSERTS the claimed text (CF-17).
 
-    Conservative substring/token-overlap check:
-    - Normalize both to lowercase, collapsed whitespace.
-    - Require a contiguous substring of claimed text, or
-    - A high fraction (>= 50%) of significant tokens from claimed appear in source.
+    Delegates to ``assertion_spans.claim_is_grounded``: equality against the whole evidence text,
+    or equality against one extracted single-assertion span. See that module for the safety
+    argument and for what is deliberately denied.
 
-    This is deliberately conservative: a loose semantic match (e.g. "bought a bike" in
-    "I purchased a bicycle") may not ground here — precision-first, fall back to agent_inference
-    if the match is uncertain.
+    This function previously granted on a contiguous substring OR on >= 50% of retained claimed
+    tokens appearing anywhere in the source, and its docstring called that "conservative" and
+    "precision-first". It was neither, which is a large part of why the defect survived review:
+    every single-word contradiction of a multi-token claim grounded at the apex tier, and so did
+    quotation, attribution and conditionals. Both branches are gone.
     """
-    norm_claimed = _normalize_text(claimed)
-    norm_source = _normalize_text(source_span)
-
-    if not norm_claimed or not norm_source:
-        return False
-
-    # Exact substring match (most reliable).
-    if norm_claimed in norm_source:
-        return True
-
-    # Token overlap: split into non-empty words, require >= 50% of claimed tokens in source.
-    claimed_tokens = [t for t in re.split(r"\W+", norm_claimed) if t and len(t) > 2]
-    if not claimed_tokens:
-        # Claimed is all short/empty tokens (e.g. "a b c") — require exact substring.
-        return norm_claimed in norm_source
-
-    source_tokens = set(t for t in re.split(r"\W+", norm_source) if t and len(t) > 2)
-    overlap = sum(1 for t in claimed_tokens if t in source_tokens)
-    return overlap >= len(claimed_tokens) * 0.5
+    return claim_is_grounded(claimed, source_span)
 
 
 def evaluate_user_tier_claim(

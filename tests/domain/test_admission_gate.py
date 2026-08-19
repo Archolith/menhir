@@ -157,8 +157,17 @@ class TestAdmissionGate:
         assert verdict.reason == "grounded"
         assert verdict.turn_evidence_uuid == "turn123"
 
-    def test_grant_substring_match(self):
-        """Substring present grants the claim."""
+    def test_substring_no_longer_grants(self):
+        """CF-17: a substring of the prompt no longer grants apex tier.
+
+        This test previously asserted the opposite, and it was one of the two places the defect
+        was written down as intended behaviour. Containment cannot tell an assertion from a
+        mention -- the same branch that grounded "I bought a bicycle" here also grounded
+        "the deploy failed" against "Alice claimed the deploy failed."
+
+        The claim is denied because it is not the whole turn and not a whole sentence of it. A
+        memory that IS a whole sentence still grounds; see tests/domain/test_assertion_spans.py.
+        """
         verdict = evaluate_user_tier_claim(
             requested_source="user",
             turn_evidence={
@@ -173,11 +182,11 @@ class TestAdmissionGate:
             session_id="sess1",
             namespace="ns1",
         )
-        assert verdict.granted is True
-        assert verdict.effective_source == "user"
+        assert verdict.granted is False
+        assert verdict.effective_source == "agent_inference"
 
-    def test_grant_token_overlap(self):
-        """Sufficient token overlap (>=50%) grants the claim."""
+    def test_token_overlap_no_longer_grants(self):
+        """CF-17: token overlap no longer grants. This test formerly asserted that it did."""
         verdict = evaluate_user_tier_claim(
             requested_source="user",
             turn_evidence={
@@ -192,11 +201,16 @@ class TestAdmissionGate:
             session_id="sess1",
             namespace="ns1",
         )
-        # "purchased", "bicycle" match from claimed_text; "a" is short so excluded
-        # Significant tokens in claimed: ["bought", "bicycle"] (2 tokens)
-        # Matched: ["bicycle"] (1 token, 50%)
-        # This should grant because 50% of significant tokens overlap
-        assert verdict.granted is True
+        # CF-17: this is the branch that admitted every contradiction. The arithmetic recorded
+        # below is correct and is exactly the problem -- for a claim of N retained tokens with one
+        # substituted, overlap = N-1 >= 0.5N for all N >= 2, so "the deploy failed" grounded
+        # against "the deploy succeeded" by the same rule that grounds this paraphrase.
+        #
+        # Denying paraphrase is the deliberate cost. No offline deterministic test can tell
+        # "purchased" from "bought" without also admitting "succeeded" for "failed", so a
+        # paraphrased memory is stored at agent_inference (0.5), which describes it accurately.
+        assert verdict.granted is False
+        assert verdict.effective_source == "agent_inference"
 
     def test_manual_source_same_logic(self):
         """'manual' source uses same gating logic as 'user'."""
