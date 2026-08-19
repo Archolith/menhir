@@ -1829,7 +1829,18 @@ async def test_maintenance_scheduler_runs_phase_one_jobs(monkeypatch: pytest.Mon
             lease_store=SchedulerLeaseStore(db_path=run_dir / "scheduler-lock.db"),
         )
         await scheduler.start()
-        await asyncio.sleep(0.05)
+        # Wait for the pass to reach observe_queue_health rather than sleeping a fixed 0.05s.
+        # The old fixed sleep worked only because the scheduler blocked the event loop: with
+        # every graph call synchronous, one _run_due_jobs pass ran to completion without ever
+        # yielding, so the sleep could not resume mid-pass and the snapshot always saw a whole
+        # pass. CF-99 moved those calls onto worker threads, which restores real await points
+        # -- so the loop now yields mid-pass and a 0.05s snapshot lands inside job two. The
+        # assertions below are unchanged; only the "wait long enough" mechanism is.
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            if scheduler.status_snapshot()["jobs"]["observe_queue_health"]["runs"] >= 1:
+                break
+            await asyncio.sleep(0.01)
         snapshot = scheduler.status_snapshot()
         await scheduler.stop()
     finally:

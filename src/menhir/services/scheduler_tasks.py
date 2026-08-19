@@ -113,7 +113,9 @@ async def observe_queue_health(
     is correct -- a 400 is not retryable -- but nothing surfaced the growing pile). The counts
     below are cheap; the warning is the point.
     """
-    overview = graph_adapter.fetch_memory_overview()
+    # CF-99: the maintenance loop must never block. A blocked loop cannot renew the
+    # scheduler lease, which lets a second owner start mutating the same graph.
+    overview = await asyncio.to_thread(graph_adapter.fetch_memory_overview)
     result: dict[str, object] = {
         "queue_depth": ingest_service.get_queue_depth(),
         "failed_enrichments": ingest_service.get_failed_enrichment_count(),
@@ -123,7 +125,9 @@ async def observe_queue_health(
     }
 
     try:
-        signatures = graph_adapter.fetch_failed_error_signatures(limit=25)
+        signatures = await asyncio.to_thread(
+            graph_adapter.fetch_failed_error_signatures, limit=25
+        )
     except Exception as exc:  # noqa: BLE001 - health reporting must never break the loop
         logger.warning("queue health: could not group failed-episode errors: %s", exc)
         return result
@@ -235,7 +239,8 @@ async def retry_process_candidate(
     processing_attempts = int(row.get("processing_attempts") or 0)
 
     if episode_uuid and anchor_name:
-        existing_completion = graph_adapter.find_completed_episode_artifact(
+        existing_completion = await asyncio.to_thread(
+            graph_adapter.find_completed_episode_artifact,
             anchor_uuid=episode_uuid,
             anchor_name=anchor_name,
         )
@@ -246,7 +251,8 @@ async def retry_process_candidate(
             stamp_kwargs: dict[str, object] = {}
             if row.get("bootstrap_scope") is not None:
                 stamp_kwargs["bootstrap_scope"] = row.get("bootstrap_scope")
-            stamped = graph_adapter.stamp_ingest_metadata(
+            stamped = await asyncio.to_thread(
+                graph_adapter.stamp_ingest_metadata,
                 node_uuids=[resolved_episode_uuid] + entity_uuids,
                 edge_uuids=edge_uuids,
                 session_id=str(row.get("session_id") or ""),
@@ -263,7 +269,8 @@ async def retry_process_candidate(
                     episode_uuid=episode_uuid,
                     bootstrap_scope=row.get("bootstrap_scope"),
                 )
-            if graph_adapter.mark_episode_ready(
+            if await asyncio.to_thread(
+                graph_adapter.mark_episode_ready,
                 episode_uuid,
                 required_state="FAILED",
                 resolved_episode_uuid=resolved_episode_uuid,
@@ -347,7 +354,9 @@ async def retry_failed_enrichments(
 ) -> dict[str, object]:
     now = datetime.now(timezone.utc)
     counts: dict[str, int] = dict(reconciled=0, requeued=0, terminal=0, waiting=0, exhausted=0)
-    candidates = graph_adapter.fetch_failed_episode_retry_candidates(limit=failed_retry_limit)
+    candidates = await asyncio.to_thread(
+        graph_adapter.fetch_failed_episode_retry_candidates, limit=failed_retry_limit
+    )
     max_attempts = ingest_service.get_max_enrichment_attempts()
     for row in candidates:
         action = await retry_process_candidate(graph_adapter, ingest_service, row, max_attempts, now)
