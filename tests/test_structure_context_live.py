@@ -1,0 +1,239 @@
+"""CF-73: `query_context` made five sequential Neo4j round trips; `query_overview` made five.
+
+**STATUS: NOT YET RUN. The rewrite has NOT been done.** These assertions were derived by
+reading the current implementation, not by observing it -- the test Neo4j (:7688) went down
+before the first run and Docker would not bring it back, so nothing here is verified. Treat the
+expected values as a careful reading that still owes a confirming run: a failure on first
+execution is as likely to be this fixture or my reading as it is to be the code.
+
+They exist to make the rewrite provable rather than plausible, and the order matters. Run them
+against the ORIGINAL five-call implementation FIRST and correct whatever they got wrong about
+today's behaviour. Only once they pass unchanged against the original do they become a
+characterisation, and only then is it safe to collapse the five queries into one and require the
+same test to pass untouched. Rewriting first and writing the test afterwards proves nothing --
+it pins whatever the new code happens to do.
+
+Why a live test and not stubs: the risk in this rewrite is entirely in Cypher semantics --
+`OPTIONAL MATCH` cardinality, `collect` on an empty branch, ordering, and null handling. A stub
+that returns canned rows per `neo4j.execute` call cannot exercise any of it, and would be
+rewritten to match the new call shape anyway, proving only that the test was updated. There were
+also no tests for either method at all, so nothing is being replaced.
+
+The four empty-branch cases below are the whole point. A file with no symbols, no importers and
+no tests is the state where a five-query implementation naturally returns `[]` and a single
+`OPTIONAL MATCH` query naturally returns `[null]`, and that difference is the defect this
+rewrite would otherwise ship.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from menhir.infrastructure.structure_queries import StructureGraphWriter
+
+PROJECT = "cf73-fixture"
+
+
+@pytest.fixture
+def writer(test_neo4j_repo) -> StructureGraphWriter:
+    """A small structure graph, shaped like what the scanner writes.
+
+    `lonely.py` is deliberately barren -- no symbols, no imports either way, no tests -- because
+    that is the case a combined query gets wrong.
+    """
+    test_neo4j_repo.execute(
+        """
+        CREATE (proj:Entity {structure_project: $p, structure_role: 'project',
+                             structure_path: '', content: 'fixture project', stack: 'python'})
+
+        CREATE (app:Entity {structure_project: $p, structure_role: 'file',
+                            structure_path: 'src/app.py', content: 'the app',
+                            symbols_truncated: false})
+        CREATE (util:Entity {structure_project: $p, structure_role: 'file',
+                             structure_path: 'src/util.py', content: 'helpers',
+                             symbols_truncated: false})
+        CREATE (cli:Entity {structure_project: $p, structure_role: 'file',
+                            structure_path: 'src/cli.py', content: 'entry point',
+                            symbols_truncated: false})
+        CREATE (lonely:Entity {structure_project: $p, structure_role: 'file',
+                               structure_path: 'src/lonely.py', content: 'nothing links here'})
+        CREATE (trunc:Entity {structure_project: $p, structure_role: 'file',
+                              structure_path: 'src/big.py', content: 'huge',
+                              symbols_truncated: true})
+        CREATE (test:Entity {structure_project: $p, structure_role: 'file',
+                             structure_path: 'tests/test_app.py', content: 'tests'})
+
+        CREATE (s2:Entity {structure_project: $p, structure_role: 'symbol', name: 'beta',
+                           symbol_kind: 'function', symbol_signature: 'beta(x)',
+                           content: 'second by line', symbol_line: 20,
+                           symbol_parent: 'App', symbol_decorator: 'staticmethod'})
+        CREATE (s1:Entity {structure_project: $p, structure_role: 'symbol', name: 'alpha',
+                           symbol_kind: 'class', symbol_signature: 'alpha()',
+                           content: 'first by line', symbol_line: 5,
+                           symbol_parent: '', symbol_decorator: ''})
+        CREATE (nonsym:Entity {structure_project: $p, structure_role: 'note', name: 'not-a-symbol',
+                               symbol_line: 1})
+
+        CREATE (app)-[:DEFINES]->(s1)
+        CREATE (app)-[:DEFINES]->(s2)
+        CREATE (app)-[:DEFINES]->(nonsym)
+        CREATE (app)-[:IMPORTS]->(util)
+        CREATE (cli)-[:IMPORTS]->(app)
+        CREATE (test)-[:TESTS]->(app)
+        """,
+        params={"p": PROJECT},
+    )
+    return StructureGraphWriter(test_neo4j_repo)
+
+
+# ---------------------------------------------------------------------------
+# query_context
+# ---------------------------------------------------------------------------
+
+@pytest.mark.online
+def test_context_returns_every_branch_for_a_well_connected_file(writer) -> None:
+    result = writer.query_context(PROJECT, "src/app.py")
+
+    assert result == {
+        "path": "src/app.py",
+        "summary": "the app",
+        "truncated": False,
+        "symbols": [
+            {"name": "alpha", "kind": "class", "sig": "alpha()", "doc": "first by line",
+             "line": 5, "parent": "", "decorator": ""},
+            {"name": "beta", "kind": "function", "sig": "beta(x)", "doc": "second by line",
+             "line": 20, "parent": "App", "decorator": "staticmethod"},
+        ],
+        "imports": ["src/util.py"],
+        "imported_by": ["src/cli.py"],
+        "tested_by": ["tests/test_app.py"],
+    }
+
+
+@pytest.mark.online
+def test_context_empty_branches_are_empty_lists_not_lists_of_none(writer) -> None:
+    """The case that breaks a naive combined query. Five separate queries return no rows and the
+    comprehension yields `[]`; one query with `OPTIONAL MATCH` yields a row whose collected
+    branches contain a null unless they are filtered. `[None]` would then reach the MCP caller
+    as a symbol with an empty name or an import path of "None"."""
+    result = writer.query_context(PROJECT, "src/lonely.py")
+
+    assert result["symbols"] == []
+    assert result["imports"] == []
+    assert result["imported_by"] == []
+    assert result["tested_by"] == []
+    assert result["summary"] == "nothing links here"
+
+
+@pytest.mark.online
+def test_context_reports_a_missing_file_as_an_error_not_an_empty_context(writer) -> None:
+    """`lonely.py` and a file that does not exist must stay distinguishable. A combined query
+    anchored on a required MATCH returns zero rows for the latter, which is what preserves this
+    -- but only if the error branch is kept."""
+    result = writer.query_context(PROJECT, "src/does-not-exist.py")
+
+    assert result == {"error": "File not found in structure graph: src/does-not-exist.py"}
+    assert "symbols" not in result
+
+
+@pytest.mark.online
+def test_context_symbols_are_ordered_by_line_not_insertion(writer) -> None:
+    """`beta` is CREATEd before `alpha` and has the higher line number, so an implementation that
+    lost `ORDER BY sym.symbol_line` would still return both and pass a set-based assertion."""
+    result = writer.query_context(PROJECT, "src/app.py")
+
+    assert [s["line"] for s in result["symbols"]] == [5, 20]
+    assert [s["name"] for s in result["symbols"]] == ["alpha", "beta"]
+
+
+@pytest.mark.online
+def test_context_excludes_defined_nodes_that_are_not_symbols(writer) -> None:
+    """The DEFINES edge is not sufficient: the original filters on
+    `sym.structure_role = 'symbol'`. `nonsym` is DEFINES-linked and would appear without it."""
+    result = writer.query_context(PROJECT, "src/app.py")
+
+    assert "not-a-symbol" not in [s["name"] for s in result["symbols"]]
+    assert len(result["symbols"]) == 2
+
+
+@pytest.mark.online
+def test_context_truncated_flag_survives(writer) -> None:
+    assert writer.query_context(PROJECT, "src/big.py")["truncated"] is True
+    assert writer.query_context(PROJECT, "src/app.py")["truncated"] is False
+
+
+@pytest.mark.online
+def test_context_missing_truncated_property_coalesces_to_false(writer) -> None:
+    """`lonely.py` carries no `symbols_truncated` property at all -- legacy nodes predate it."""
+    assert writer.query_context(PROJECT, "src/lonely.py")["truncated"] is False
+
+
+@pytest.mark.online
+def test_context_does_not_cross_project_boundaries(test_neo4j_repo, writer) -> None:
+    """Both queries key on `structure_project`, and a combined query has to keep that on every
+    branch -- not only on the anchor -- or another project's importer leaks in."""
+    test_neo4j_repo.execute(
+        """
+        CREATE (other:Entity {structure_project: 'other-project', structure_role: 'file',
+                              structure_path: 'other/thing.py', content: 'elsewhere'})
+        WITH other
+        MATCH (app:Entity {structure_project: $p, structure_path: 'src/app.py'})
+        CREATE (other)-[:IMPORTS]->(app)
+        CREATE (other)-[:TESTS]->(app)
+        """,
+        params={"p": PROJECT},
+    )
+    result = writer.query_context(PROJECT, "src/app.py")
+
+    # The ORIGINAL does not filter importers/testers by project -- `MATCH (importer:Entity)`
+    # is unqualified -- so a cross-project importer should be returned today. Read from the
+    # source, NOT observed (see the module docstring). Asserted this way deliberately: if the
+    # first run disagrees, that is the interesting result, because it means either the reading
+    # or the fixture is wrong and the rewrite would have inherited the mistake.
+    assert result["imported_by"] == ["other/thing.py", "src/cli.py"]
+    assert result["tested_by"] == ["other/thing.py", "tests/test_app.py"]
+
+
+@pytest.mark.online
+def test_context_requires_a_path(writer) -> None:
+    with pytest.raises(ValueError, match="path is required"):
+        writer.query_context(PROJECT, "")
+
+
+# ---------------------------------------------------------------------------
+# query_overview
+# ---------------------------------------------------------------------------
+
+@pytest.mark.online
+def test_overview_returns_counts_description_and_stack(writer) -> None:
+    result = writer.query_overview(PROJECT)
+
+    assert result["project"] == PROJECT
+    assert result["description"] == "fixture project"
+    assert result["stack"] == "python"
+    assert result["entities"] == {"project": 1, "file": 6, "symbol": 2, "note": 1}
+    assert result["edges"] == {"DEFINES": 3, "IMPORTS": 2, "TESTS": 1}
+
+
+@pytest.mark.online
+def test_overview_of_an_unknown_project_is_empty_rather_than_an_error(writer) -> None:
+    """The three reads are independent, so an absent project yields empty aggregates and empty
+    strings rather than raising. A combined query anchored on a required MATCH of the project
+    node would turn this into no rows at all, which is the trap here."""
+    result = writer.query_overview("no-such-project")
+
+    assert result["description"] == ""
+    assert result["stack"] == ""
+    assert result["entities"] == {}
+    assert result["edges"] == {}
+
+
+@pytest.mark.online
+def test_overview_still_carries_coverage_and_contained_repos(writer) -> None:
+    """These are two further round trips beyond the three the finding counts -- `query_overview`
+    makes five, not three. Pinned so a rewrite of the three does not drop them."""
+    result = writer.query_overview(PROJECT)
+
+    assert "coverage" in result
+    assert result["coverage"]["known"] is False  # no files_indexed on the fixture project node
+    assert result["contains_repos"] == []
