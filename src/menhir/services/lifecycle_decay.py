@@ -51,6 +51,12 @@ from menhir.services.lifecycle_models import (
     _DEFAULT_GONE_SHARPNESS,
 )
 
+#: After this many consecutive compression failures the sweep stops calling the LLM. Each call
+#: costs up to 242 s of backoff before returning None, and consecutive failures are almost
+#: certainly one shared outage rather than N independent ones.
+_MAX_CONSECUTIVE_LLM_FAILURES = 3
+
+
 class LifecycleDecayMixin:
     @staticmethod
     def should_compress(node: dict[str, Any]) -> bool:
@@ -263,6 +269,7 @@ class LifecycleDecayMixin:
             max_edge_count=_DEFAULT_COMPRESS_EDGE_COUNT,
         )
 
+        consecutive_llm_failures = 0
         for candidate in active_candidates:
             uuid = str(candidate.get("uuid") or "")
             query = str(candidate.get("content") or candidate.get("summary") or candidate.get("name") or "")
@@ -294,10 +301,15 @@ class LifecycleDecayMixin:
                 if self.llm is None:
                     await asyncio.to_thread(self.pending_actions.upsert, uuid, "compress", failure_reason="no_llm")
                     continue
+                if consecutive_llm_failures >= _MAX_CONSECUTIVE_LLM_FAILURES:
+                    await asyncio.to_thread(self.pending_actions.upsert, uuid, "compress", failure_reason="llm_breaker_open")
+                    continue
                 summary = await self.llm.compress_content(raw)
                 if not summary or not summary.strip():
+                    consecutive_llm_failures += 1
                     await asyncio.to_thread(self.pending_actions.upsert, uuid, "compress", failure_reason="llm_failed")
                     continue
+                consecutive_llm_failures = 0
                 if await asyncio.to_thread(self.graph_adapter.compress_node, uuid, summary):
                     await asyncio.to_thread(self.pending_actions.complete, uuid)
                     compressed += 1

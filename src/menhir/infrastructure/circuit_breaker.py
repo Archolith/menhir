@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass, field
+from functools import partial
 from enum import StrEnum
 from time import monotonic
 from typing import Any, Awaitable, Callable, TypeVar
@@ -158,6 +159,14 @@ class CircuitBreaker:
                     previous = self._state
                     self._state = CircuitState.HALF_OPEN
                     self._probe_in_flight = True
+                    # DELIBERATELY SYNCHRONOUS, unlike every other telemetry write in this file.
+                    # This one sits inside the lock, between setting `_probe_in_flight = True` and
+                    # the caller reaching `await fn()` -- the only stretch not covered by the
+                    # `except BaseException` probe-abandon handler below. An await here is a
+                    # cancellation point that leaves the breaker HALF_OPEN with a probe flagged
+                    # in flight that will never run, wedging it permanently: the exact defect
+                    # `test_cancelled_probe_does_not_wedge_breaker` exists to prevent. A breaker
+                    # state transition is rare, so the loop stall CF-170 targets is not paid here.
                     record_lifecycle_event(
                         component="circuit_breaker",
                         event=f"{previous.value}->{self._state.value}",
@@ -197,22 +206,28 @@ class CircuitBreaker:
                         self._state = CircuitState.OPEN
                         self._opened_at = monotonic()
                         self._probe_in_flight = False
-                        record_lifecycle_event(
-                            component="circuit_breaker",
-                            event=f"{previous.value}->{self._state.value}",
-                            state="transition",
-                            details={"breaker": self.name, "failures": self._failures},
+                        await asyncio.to_thread(
+                            partial(
+                                record_lifecycle_event,
+                                component="circuit_breaker",
+                                event=f"{previous.value}->{self._state.value}",
+                                state="transition",
+                                details={"breaker": self.name, "failures": self._failures},
+                            )
                         )
                     elif self._state == CircuitState.CLOSED and self._failures >= self.failure_threshold:
                         # CLOSED -> OPEN
                         previous = self._state
                         self._state = CircuitState.OPEN
                         self._opened_at = monotonic()
-                        record_lifecycle_event(
-                            component="circuit_breaker",
-                            event=f"{previous.value}->{self._state.value}",
-                            state="transition",
-                            details={"breaker": self.name, "failures": self._failures},
+                        await asyncio.to_thread(
+                            partial(
+                                record_lifecycle_event,
+                                component="circuit_breaker",
+                                event=f"{previous.value}->{self._state.value}",
+                                state="transition",
+                                details={"breaker": self.name, "failures": self._failures},
+                            )
                         )
                 else:
                     # Non-trip failure — log but don't change breaker state
@@ -224,11 +239,14 @@ class CircuitBreaker:
                         self._failures = 0
                         self._opened_at = None
                         self._probe_in_flight = False
-                        record_lifecycle_event(
-                            component="circuit_breaker",
-                            event=f"{previous.value}->{self._state.value}",
-                            state="transition",
-                            details={"breaker": self.name, "reason": "non_trip_error_probe_closed"},
+                        await asyncio.to_thread(
+                            partial(
+                                record_lifecycle_event,
+                                component="circuit_breaker",
+                                event=f"{previous.value}->{self._state.value}",
+                                state="transition",
+                                details={"breaker": self.name, "reason": "non_trip_error_probe_closed"},
+                            )
                         )
                     logger.info(
                         "Circuit breaker %s: non-trip failure %s (state unchanged)",
@@ -257,11 +275,14 @@ class CircuitBreaker:
                 self._failures = 0
                 self._opened_at = None
                 self._probe_in_flight = False
-                record_lifecycle_event(
-                    component="circuit_breaker",
-                    event=f"{previous.value}->{self._state.value}",
-                    state="transition",
-                    details={"breaker": self.name},
+                await asyncio.to_thread(
+                    partial(
+                        record_lifecycle_event,
+                        component="circuit_breaker",
+                        event=f"{previous.value}->{self._state.value}",
+                        state="transition",
+                        details={"breaker": self.name},
+                    )
                 )
             elif self._state == CircuitState.CLOSED:
                 # Reset consecutive failure counter on success

@@ -28,7 +28,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from menhir.infrastructure.telemetry import default_telemetry_db_path
+from menhir.infrastructure.telemetry import connect_telemetry_db, default_telemetry_db_path
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +52,7 @@ class PendingActionStore:
             if self._initialized:
                 return
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
-            with sqlite3.connect(self.db_path) as conn:
+            with connect_telemetry_db(self.db_path) as conn:
                 conn.execute(
                     """
                     CREATE TABLE IF NOT EXISTS pending_actions (
@@ -88,7 +88,7 @@ class PendingActionStore:
         """Insert or update a pending action. Increments attempts on conflict."""
         self._ensure_ready()
         now = _utc_now_iso()
-        with sqlite3.connect(self.db_path) as conn:
+        with connect_telemetry_db(self.db_path) as conn:
             conn.execute(
                 """
                 INSERT INTO pending_actions
@@ -109,7 +109,7 @@ class PendingActionStore:
     def complete(self, node_uuid: str) -> bool:
         """Remove a pending action after successful processing."""
         self._ensure_ready()
-        with sqlite3.connect(self.db_path) as conn:
+        with connect_telemetry_db(self.db_path) as conn:
             cursor = conn.execute(
                 "DELETE FROM pending_actions WHERE node_uuid = ?",
                 (node_uuid,),
@@ -147,7 +147,7 @@ class PendingActionStore:
             """
             params = (max_attempts, limit)
 
-        with sqlite3.connect(self.db_path) as conn:
+        with connect_telemetry_db(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(query, params).fetchall()
             return [dict(row) for row in rows]
@@ -155,7 +155,7 @@ class PendingActionStore:
     def count(self, action: str | None = None) -> int:
         """Count pending actions, optionally filtered by action type."""
         self._ensure_ready()
-        with sqlite3.connect(self.db_path) as conn:
+        with connect_telemetry_db(self.db_path) as conn:
             if action is not None:
                 row = conn.execute(
                     "SELECT COUNT(*) FROM pending_actions WHERE action = ?",

@@ -17,6 +17,10 @@ from menhir.infrastructure.neo4j import SAGA_MUTATION_TIMEOUT_S, Neo4jRepository
 
 logger = logging.getLogger(__name__)
 
+# Bounded per run so the decay sweep can't stall indefinitely; the stable
+# ORDER BY means successive runs make forward progress.
+_DECAY_CANDIDATE_LIMIT = 500
+
 
 def _content_overlap_ratio(left: str | None, right: str | None) -> float:
     """Compute simple Jaccard overlap ratio over lowercase token sets."""
@@ -112,6 +116,7 @@ class ConsolidationRepository:
         min_days_since_accessed: float,
         max_edge_count: int,
         max_sharpness: float | None = None,
+        limit: int = _DECAY_CANDIDATE_LIMIT,
     ) -> list[dict[str, object]]:
         """Fetch PERSISTENT decay candidates using current cached graph signals.
 
@@ -146,11 +151,13 @@ class ConsolidationRepository:
        CASE WHEN n.target_date IS NOT NULL AND date(n.target_date) < date() THEN true ELSE false END AS target_date_passed,
        n.created_at AS created_at""")
             .order_by("coalesce(n.created_at, n.last_accessed) ASC, n.uuid")
+            .limit()
             .build())
         params: dict[str, object] = {
             "freshness": freshness,
             "min_days_since_accessed": min_days_since_accessed,
             "max_edge_count": max_edge_count,
+            "limit": limit,
         }
         if max_sharpness is not None:
             params["max_sharpness"] = max_sharpness

@@ -15,7 +15,7 @@ from pathlib import Path
 
 from menhir.infrastructure import operation_owner
 from menhir.infrastructure import process_liveness
-from menhir.infrastructure.telemetry import default_telemetry_db_path
+from menhir.infrastructure.telemetry import connect_telemetry_db, default_telemetry_db_path
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ class SchedulerLeaseStore:
             if self._initialized:
                 return
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
-            with sqlite3.connect(self.db_path) as conn:
+            with connect_telemetry_db(self.db_path) as conn:
                 conn.execute(
                     """
                     CREATE TABLE IF NOT EXISTS scheduler_leases (
@@ -75,7 +75,7 @@ class SchedulerLeaseStore:
         expires_at = now + max(1.0, lease_duration_s)
         heartbeat_at = _utc_now_iso()
         hostname = self._hostname()
-        with sqlite3.connect(self.db_path) as conn:
+        with connect_telemetry_db(self.db_path) as conn:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
                 """
@@ -160,7 +160,7 @@ class SchedulerLeaseStore:
         now = self._now_epoch()
         heartbeat_at = _utc_now_iso()
         expires_at = now + max(1.0, lease_duration_s)
-        with sqlite3.connect(self.db_path) as conn:
+        with connect_telemetry_db(self.db_path) as conn:
             updated = conn.execute(
                 """
                 UPDATE scheduler_leases
@@ -178,7 +178,7 @@ class SchedulerLeaseStore:
 
     def release(self, *, lease_name: str, owner_id: str) -> None:
         self._ensure_ready()
-        with sqlite3.connect(self.db_path) as conn:
+        with connect_telemetry_db(self.db_path) as conn:
             conn.execute(
                 """
                 DELETE FROM scheduler_leases
@@ -191,7 +191,7 @@ class SchedulerLeaseStore:
 
     def fetch(self, *, lease_name: str) -> dict[str, object] | None:
         self._ensure_ready()
-        with sqlite3.connect(self.db_path) as conn:
+        with connect_telemetry_db(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
                 """
@@ -222,7 +222,7 @@ class SchedulerLeaseStore:
         expires_at = now + max(1.0, lease_duration_s)
         heartbeat_at = _utc_now_iso()
         hostname = self._hostname()
-        with sqlite3.connect(self.db_path) as conn:
+        with connect_telemetry_db(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             conn.execute("BEGIN IMMEDIATE")
             previous_row = conn.execute(

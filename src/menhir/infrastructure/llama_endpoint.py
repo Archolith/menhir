@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from functools import partial
 from pathlib import Path
 from threading import Lock
 from urllib.error import HTTPError, URLError
@@ -388,32 +389,44 @@ async def acquire_llama_url_async(
         "scheduler_url": scheduler_url,
         "timeout_s": timeout_s,
     }
-    record_lifecycle_event(
-        component="llama_endpoint",
-        event="acquire_async",
-        state="started",
-        details=details,
-    )
-    try:
-        record_lifecycle_event(
+    await asyncio.to_thread(
+        partial(
+            record_lifecycle_event,
             component="llama_endpoint",
-            event="ensure_scheduler_running",
+            event="acquire_async",
             state="started",
             details=details,
         )
-        await asyncio.to_thread(ensure_scheduler_running)
-        record_lifecycle_event(
-            component="llama_endpoint",
-            event="ensure_scheduler_running",
-            state="completed",
-            details=details,
-        )
-        async with httpx.AsyncClient(timeout=timeout_s) as client:
-            record_lifecycle_event(
+    )
+    try:
+        await asyncio.to_thread(
+            partial(
+                record_lifecycle_event,
                 component="llama_endpoint",
-                event="scheduler_acquire_request",
+                event="ensure_scheduler_running",
                 state="started",
                 details=details,
+            )
+        )
+        await asyncio.to_thread(ensure_scheduler_running)
+        await asyncio.to_thread(
+            partial(
+                record_lifecycle_event,
+                component="llama_endpoint",
+                event="ensure_scheduler_running",
+                state="completed",
+                details=details,
+            )
+        )
+        async with httpx.AsyncClient(timeout=timeout_s) as client:
+            await asyncio.to_thread(
+                partial(
+                    record_lifecycle_event,
+                    component="llama_endpoint",
+                    event="scheduler_acquire_request",
+                    state="started",
+                    details=details,
+                )
             )
             response = await client.post(
                 f"{scheduler_url}/acquire",
@@ -421,25 +434,34 @@ async def acquire_llama_url_async(
             )
             response.raise_for_status()
             acquired_url = str(response.json()["url"])
-            record_lifecycle_event(
-                component="llama_endpoint",
-                event="scheduler_acquire_request",
-                state="completed",
-                details={**details, "acquired_url": acquired_url},
+            await asyncio.to_thread(
+                partial(
+                    record_lifecycle_event,
+                    component="llama_endpoint",
+                    event="scheduler_acquire_request",
+                    state="completed",
+                    details={**details, "acquired_url": acquired_url},
+                )
             )
-            record_lifecycle_event(
-                component="llama_endpoint",
-                event="acquire_async",
-                state="completed",
-                details={**details, "acquired_url": acquired_url},
+            await asyncio.to_thread(
+                partial(
+                    record_lifecycle_event,
+                    component="llama_endpoint",
+                    event="acquire_async",
+                    state="completed",
+                    details={**details, "acquired_url": acquired_url},
+                )
             )
             return acquired_url
     except (httpx.HTTPError, OSError, ValueError, asyncio.TimeoutError) as exc:
-        record_lifecycle_event(
-            component="llama_endpoint",
-            event="acquire_async",
-            state="failed",
-            details={**details, "error": f"{type(exc).__name__}: {exc}"},
+        await asyncio.to_thread(
+            partial(
+                record_lifecycle_event,
+                component="llama_endpoint",
+                event="acquire_async",
+                state="failed",
+                details={**details, "error": f"{type(exc).__name__}: {exc}"},
+            )
         )
         return fallback
 

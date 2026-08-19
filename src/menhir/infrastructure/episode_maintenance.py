@@ -11,6 +11,10 @@ from menhir.infrastructure.cypher import (
     build_reset_or_fail_query,
 )
 
+#: Rows per terminal-failure sweep. Each row becomes a full-content read plus one MERGE on
+#: ``:Entity`` by ``raw_capture_for``, so this bounds both the fetch and the write loop above it.
+_EXHAUSTED_EPISODE_FETCH_LIMIT = 200
+
 
 class EpisodeMaintenanceRepository:
     """Scheduled reset, recovery, and cleanup operations."""
@@ -387,8 +391,14 @@ class EpisodeMaintenanceRepository:
             )
         return False
 
-    def fetch_exhausted_pending_episodes(self, *, max_attempts: int) -> list[dict[str, Any]]:
+    def fetch_exhausted_pending_episodes(
+        self, *, max_attempts: int, limit: int = _EXHAUSTED_EPISODE_FETCH_LIMIT
+    ) -> list[dict[str, Any]]:
         """Fetch episodes that will be marked as exhausted.
+
+        Bounded: the caller creates one raw-capture entity per row, so an unbounded fetch of
+        full episode content feeds an unbounded per-row MERGE. Ordered by ``queued_at`` so
+        successive sweeps drain the backlog oldest-first instead of re-reading the same page.
 
         Returns:
             List of dicts with uuid, content, session_id, user_id, source, namespace.
@@ -405,7 +415,11 @@ class EpisodeMaintenanceRepository:
                 "n.session_id AS session_id, n.user_id AS user_id, "
                 "n.source AS source, n.namespace AS namespace"
             )
+            .order_by("coalesce(n.queued_at, n.created_at) ASC, n.uuid")
+            .limit()
             .build()
         )
-        rows = self.neo4j.execute(query, params={"max_attempts": max(1, max_attempts)})
+        rows = self.neo4j.execute(
+            query, params={"max_attempts": max(1, max_attempts), "limit": limit}
+        )
         return list(rows) if rows else []

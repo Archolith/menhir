@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import logging
 import math
-import os
 import sqlite3
 import threading
 from dataclasses import dataclass, field
@@ -24,6 +23,7 @@ from menhir.infrastructure.telemetry.helpers import (
     _size_of,
     _span_days,
     _utc_now_iso,
+    connect_telemetry_db,
     default_telemetry_db_path,
 )
 from menhir.infrastructure.telemetry.lifecycle_store import TelemetryLifecycleStoreMixin
@@ -32,14 +32,6 @@ from menhir.infrastructure.telemetry.llm_usage_store import (
     initialize_llm_usage_schema,
 )
 from menhir.infrastructure.telemetry.recall_store import TelemetryRecallStoreMixin
-
-
-
-#: bounded busy-wait (seconds) for the telemetry SQLite DB. With it, a locked/contended DB raises
-#: sqlite3.OperationalError within this window instead of blocking the caller — and, on the async MCP
-#: path, the whole event loop — indefinitely. The MCP tracker maps that raised error into a clear
-#: "store busy/locked" message for the caller. Override via MENHIR_TELEMETRY_BUSY_TIMEOUT_S.
-_SQLITE_BUSY_TIMEOUT_S = float(os.getenv("MENHIR_TELEMETRY_BUSY_TIMEOUT_S", "5"))
 
 
 @dataclass
@@ -60,19 +52,20 @@ class McpTelemetryStore(
     def _connect(self) -> sqlite3.Connection:
         """Open the telemetry DB with a BOUNDED busy-wait so a locked/contended DB fails FAST.
 
-        Without this, a bare ``sqlite3.connect`` blocks indefinitely while another connection (e.g.
-        a duplicate ``menhir serve`` process) holds the lock — and because the MCP tool path calls
-        this synchronously, it freezes the event loop and the request never returns. With a bounded
-        ``timeout`` + matching ``PRAGMA busy_timeout``, a contended DB instead raises
-        ``sqlite3.OperationalError: database is locked`` within ``_SQLITE_BUSY_TIMEOUT_S``; the MCP
-        tracker turns that into an actionable "store busy/locked" message. Per-connection settings
-        only — this never alters the on-disk database."""
-        conn = sqlite3.connect(self.db_path, timeout=_SQLITE_BUSY_TIMEOUT_S)
-        try:
-            conn.execute(f"PRAGMA busy_timeout = {int(_SQLITE_BUSY_TIMEOUT_S * 1000)}")
-        except sqlite3.Error:  # pragma: no cover - a pragma failure must never break a connect
-            pass
-        return conn
+        A contended DB raises ``sqlite3.OperationalError: database is locked`` within the configured
+        window instead of stalling the caller — and, because the MCP tool path calls this
+        synchronously, the event loop with it. The MCP tracker turns that error into an actionable
+        "store busy/locked" message.
+
+        The window is NOT what this seam buys: a bare ``sqlite3.connect`` already blocks about 5 s,
+        not indefinitely, because Python installs a busy handler from its own ``timeout=5.0``
+        default. What it buys is that ``MENHIR_TELEMETRY_BUSY_TIMEOUT_S`` reaches the connection at
+        all. That is why the implementation now lives in
+        :func:`~menhir.infrastructure.telemetry.helpers.connect_telemetry_db` and every store
+        sharing this database file calls it — an operator raising the timeout previously moved the
+        ceiling for this store alone while six siblings kept failing at 5 s against the same
+        file."""
+        return connect_telemetry_db(self.db_path)
 
     def _ensure_ready(self) -> None:
         if self._initialized:

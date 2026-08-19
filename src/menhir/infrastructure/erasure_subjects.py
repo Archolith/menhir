@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from menhir.infrastructure.telemetry import default_telemetry_db_path
+from menhir.infrastructure.telemetry import connect_telemetry_db, default_telemetry_db_path
 
 # Closed enum of subject kinds a read-suppression check can ask about. Kept as a plain
 # frozenset so callers pass validated strings.
@@ -105,7 +105,7 @@ class ErasureSubjectStore:
             if self._initialized:
                 return
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
-            with sqlite3.connect(self.db_path) as conn:
+            with connect_telemetry_db(self.db_path) as conn:
                 conn.execute(
                     """
                     CREATE TABLE IF NOT EXISTS erasure_subjects (
@@ -165,7 +165,7 @@ class ErasureSubjectStore:
         if not rows:
             return 0
         owns = conn is None
-        connection = sqlite3.connect(self.db_path) if owns else conn
+        connection = connect_telemetry_db(self.db_path) if owns else conn
         try:
             cursor = connection.executemany(
                 "INSERT OR IGNORE INTO erasure_subjects "
@@ -194,7 +194,7 @@ class ErasureSubjectStore:
         self._ensure_ready()
         now = _utc_now_iso()
         owns = conn is None
-        connection = sqlite3.connect(self.db_path) if owns else conn
+        connection = connect_telemetry_db(self.db_path) if owns else conn
         try:
             sql = "UPDATE erasure_subjects SET purged_at = ? WHERE op_id = ? AND purged_at IS NULL"
             params: list[Any] = [now, op_id]
@@ -235,7 +235,7 @@ class ErasureSubjectStore:
         if unpurged_only:
             sql += " AND purged_at IS NULL"
         sql += " ORDER BY id ASC"
-        with sqlite3.connect(self.db_path) as conn:
+        with connect_telemetry_db(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(sql, params).fetchall()
             return [dict(r) for r in rows]
@@ -249,7 +249,7 @@ class ErasureSubjectStore:
         if subject_type not in SUBJECT_TYPES:
             raise ErasureSubjectError(f"unknown subject_type {subject_type!r}")
         self._ensure_ready()
-        with sqlite3.connect(self.db_path) as conn:
+        with connect_telemetry_db(self.db_path) as conn:
             row = conn.execute(
                 "SELECT 1 FROM erasure_subjects "
                 "WHERE subject_type = ? AND subject_value = ? AND purged_at IS NULL LIMIT 1",
@@ -260,7 +260,7 @@ class ErasureSubjectStore:
     def count_unpurged(self, op_id: str) -> int:
         """Count the op's rows still awaiting purge."""
         self._ensure_ready()
-        with sqlite3.connect(self.db_path) as conn:
+        with connect_telemetry_db(self.db_path) as conn:
             row = conn.execute(
                 "SELECT COUNT(*) FROM erasure_subjects WHERE op_id = ? AND purged_at IS NULL",
                 (op_id,),

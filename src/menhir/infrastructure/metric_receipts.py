@@ -28,7 +28,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from menhir.infrastructure.telemetry import default_telemetry_db_path
+from menhir.infrastructure.telemetry import connect_telemetry_db, default_telemetry_db_path
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +58,7 @@ class MetricReceiptStore:
             if self._initialized:
                 return
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
-            with sqlite3.connect(self.db_path) as conn:
+            with connect_telemetry_db(self.db_path) as conn:
                 conn.execute(
                     """
                     CREATE TABLE IF NOT EXISTS metric_receipts (
@@ -123,7 +123,7 @@ class MetricReceiptStore:
         self._ensure_ready()
         now = _utc_now_iso()
         owns = conn is None
-        connection = sqlite3.connect(self.db_path) if owns else conn
+        connection = connect_telemetry_db(self.db_path) if owns else conn
         try:
             connection.execute(
                 """
@@ -153,7 +153,7 @@ class MetricReceiptStore:
 
     def get(self, op_id: str) -> dict[str, Any] | None:
         self._ensure_ready()
-        with sqlite3.connect(self.db_path) as conn:
+        with connect_telemetry_db(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
                 "SELECT * FROM metric_receipts WHERE op_id = ?", (op_id,)
@@ -174,7 +174,7 @@ class MetricReceiptStore:
         written in the same microsecond still order by write order.
         """
         self._ensure_ready()
-        with sqlite3.connect(self.db_path) as conn:
+        with connect_telemetry_db(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             if committed_only:
                 row = conn.execute(
@@ -198,7 +198,7 @@ class MetricReceiptStore:
         rowid tiebreak keeps the chain deterministic when created_at ties.
         """
         self._ensure_ready()
-        with sqlite3.connect(self.db_path) as conn:
+        with connect_telemetry_db(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 "SELECT * FROM metric_receipts WHERE view_key = ? "

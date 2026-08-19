@@ -376,6 +376,14 @@ class _CachingEmbeddingsEndpoint:
         except (AttributeError, TypeError, IndexError):
             logger.debug("Embedding cache: failed to extract/cache upstream vectors", exc_info=True)
 
+        if len(cached_vectors) != len(texts):
+            logger.warning(
+                "Embedding cache: upstream returned %d of %d requested vectors; "
+                "returning the upstream response unmodified rather than synthesising gaps",
+                len(cached_vectors), len(texts),
+            )
+            return upstream_result
+
         # If we had no cache hits, just return upstream directly (preserves exact contract)
         if not any(i in cached_vectors for i in range(len(texts)) if i not in miss_indices):
             return upstream_result

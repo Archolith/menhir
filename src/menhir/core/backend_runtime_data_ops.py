@@ -557,15 +557,24 @@ class RuntimeProviderDataOpsMixin:
     ) -> dict[str, int]:
         import asyncio as _asyncio
 
+        from menhir.core.ingest_guard import ensure_ingest_path_allowed
+
         scan_obj = _project_scan_from_dict(scan)
         # If 'symbols' key is absent, the sender is an older MCP process that
         # predates symbol extraction.  Write the structural data now (fast), then
         # fire off a background task to rescan and fill in symbol nodes.
         if "symbols" not in scan:
-            root = scan_obj.root_path
+            # SEC-02: the rescan reads the caller-supplied root off disk, so it is subject to the
+            # same containment policy as ingest_document. The guard was applied to that sibling
+            # and skipped here, which let an agent-tier caller have ProjectScanner walk any
+            # directory on the host and persist its structure (signatures include default
+            # argument values). The tier is captured HERE, on the request, because it lives in a
+            # ContextVar that a detached task is not guaranteed to inherit.
+            tier = get_request_tier()
+            root = str(ensure_ingest_path_allowed(scan_obj.root_path, tier=tier))
             name = scan_obj.name
             _asyncio.create_task(
-                self._background_symbol_rescan(root, name, session_id, user_id),
+                self._background_symbol_rescan(root, name, session_id, user_id, tier=tier),
                 name=f"menhir-symbol-rescan-{name}",
             )
         return _to_jsonable(
@@ -578,15 +587,24 @@ class RuntimeProviderDataOpsMixin:
         )
 
     async def _background_symbol_rescan(
-        self, root: str, name: str, session_id: str, user_id: str
+        self, root: str, name: str, session_id: str, user_id: str, *, tier: str | None
     ) -> None:
         import asyncio as _asyncio
         import logging as _logging
         import os as _os
+        from menhir.core.ingest_guard import IngestPathNotAllowedError, ensure_ingest_path_allowed
         from menhir.infrastructure.project_scanner import ProjectScanner as _PS
 
         _log = _logging.getLogger(__name__)
         if not root or not _os.path.isdir(root):
+            return
+        # Re-checked here rather than trusted from the scheduling site: this coroutine is a
+        # detached task and the tier it must be judged against is the one passed in, never a
+        # ContextVar read from whatever context happens to be current when it runs.
+        try:
+            root = str(ensure_ingest_path_allowed(root, tier=tier))
+        except IngestPathNotAllowedError as exc:
+            _log.warning("Background symbol rescan refused: project=%s error=%s", name, exc)
             return
         try:
             fresh_scan = await _asyncio.to_thread(_PS().scan, root, name)

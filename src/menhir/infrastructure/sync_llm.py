@@ -10,15 +10,16 @@ defaults > 0 because perception's k-sample self-consistency needs sampling diver
 from __future__ import annotations
 
 import logging
-from typing import Callable
+from typing import Any, Callable
 
 from menhir.config import MemorySettings
+from menhir.infrastructure.llama_endpoint import acquire_llama_url_sync, should_use_scheduler
 from menhir.infrastructure.observability import (
     complete_llm_usage_call,
     fail_llm_usage_call,
     start_llm_usage_call,
 )
-from menhir.infrastructure.providers import ProviderConfig
+from menhir.infrastructure.providers import ProviderConfig, ProviderKind
 
 logger = logging.getLogger(__name__)
 
@@ -44,8 +45,33 @@ def make_sync_chat(
         logger.warning("sync chat seam unavailable: openai client not importable")
         return None
 
-    client = OpenAI(api_key=cfg.api_key, base_url=cfg.base_url or None)
     model = model or cfg.chat_model
+    client_holder: dict[str, Any] = {}
+
+    def _resolve_client() -> Any:
+        client = client_holder.get("client")
+        if client is not None:
+            return client
+        base_url = cfg.base_url
+        # Gated on the DECLARED provider, not on the base_url alone. `should_use_scheduler`
+        # returns True for an empty string, which is the local sentinel -- but an empty base_url
+        # on a Gemini or Anthropic config is not a request to go find a llama-server, and an
+        # empty one on a local config must never be handed to the OpenAI SDK, which resolves it
+        # to https://api.openai.com/v1/ and ships namespace-scoped memory text off the host
+        # before the 401 comes back.
+        if cfg.kind is ProviderKind.LOCAL:
+            if should_use_scheduler(base_url):
+                base_url = acquire_llama_url_sync(
+                    fallback=base_url, task="memory: sync chat", timeout_s=120.0,
+                )
+            if not base_url:
+                raise RuntimeError(
+                    "sync chat seam will not fall back to the public OpenAI endpoint: the "
+                    "configured chat provider is local and no local endpoint could be resolved"
+                )
+        client = OpenAI(api_key=cfg.api_key, base_url=base_url or None)
+        client_holder["client"] = client
+        return client
 
     def _complete(system: str, user: str) -> str:
         handle = start_llm_usage_call(
@@ -55,6 +81,7 @@ def make_sync_chat(
             operation="sync_chat",
         )
         try:
+            client = _resolve_client()
             resp = client.chat.completions.create(
                 model=model,
                 messages=[

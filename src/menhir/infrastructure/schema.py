@@ -111,6 +111,10 @@ def _node_index_queries() -> list[str]:
             "CREATE INDEX episodic_processing_lease_expires_idx IF NOT EXISTS FOR (n:Episodic) ON (n.processing_lease_expires_at)",
             "CREATE INDEX episodic_queued_at_idx IF NOT EXISTS FOR (n:Episodic) ON (n.queued_at)",
             "CREATE INDEX episodic_resolved_episode_uuid_idx IF NOT EXISTS FOR (n:Episodic) ON (n.resolved_episode_uuid)",
+            # Raw captures are MERGEd by this property once per exhausted episode during the
+            # terminal-failure sweep. Without the index that MERGE is a full :Entity label scan
+            # per episode.
+            "CREATE INDEX entity_raw_capture_for_idx IF NOT EXISTS FOR (n:Entity) ON (n.raw_capture_for)",
         ]
     )
     # :Todo and its owned :TodoLocation value objects. Before these, :Todo had no

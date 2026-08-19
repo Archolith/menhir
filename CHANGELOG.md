@@ -1,3 +1,39 @@
+## 2026-08-19 — fix: HIGH remediation wave 1 (14 confirmed findings)
+
+- **Extraction and LLM output parsing.** `_extract_first_json_payload` now strips a code fence
+  wherever it appears and returns the first payload `raw_decode` accepts, instead of taking
+  first-`{` to last-`}` greedily and only handling fences at position 0 — ordinary model chattiness
+  was turning recoverable JSON into a parse failure. Entity names resolve once with an explicit
+  `name > entity_name > entity` precedence, so two payloads differing only in key order no longer
+  produce different graph identities. `description` and `summary` promoted into an edge's `fact`
+  now carry the synthetic marker rather than being stored as model-asserted.
+- **Combined-extraction patches.** The patched response model declares both output fields exactly
+  as upstream does — required and described — so a `{}` or typo'd-key response fails validation
+  instead of validating as a successful zero-extraction. The assistant self-echo policy is decided
+  on role and label before the `known` membership test and drops echo edges explicitly, closing a
+  bypass Menhir's own extraction prompt was inducing. The combined-extraction patch proves its
+  dependency at patch time and restores Graphiti's originals when it cannot complete.
+- **Event loop.** 38 synchronous SQLite telemetry writes inside `async def` bodies moved off the
+  loop (~30 per ingest, measured mean 12.4 ms each), along with the two explorer routes reading
+  `pending_actions` synchronously. The one write inside the circuit breaker's lock is deliberately
+  left synchronous — an await there is a cancellation point that wedges the breaker.
+- **SQLite contention.** `MENHIR_TELEMETRY_BUSY_TIMEOUT_S` now reaches all seven stores sharing the
+  telemetry database file, not one of them. (The audit register listed five; `erasure_subjects` and
+  the scheduler lease store are the sixth and seventh.)
+- **Decay sweep.** Decay candidates are bounded per run and the sweep stops calling the LLM after
+  three consecutive compression failures, instead of paying up to 242 s of backoff per candidate
+  over an unbounded candidate set.
+- **Data preservation.** Raw-capture creation for retry-exhausted episodes was shadowed by a second
+  definition of the same method and never ran, so terminal failures lost their text to recall. The
+  duplicate is gone, and the unbounded fetch and missing `raw_capture_for` index that restoring it
+  switches back on are fixed in the same change.
+- **Embedding cache.** A short upstream response no longer becomes a zero-length embedding vector;
+  the cache returns the upstream result unmodified rather than synthesising gaps.
+- **Security and privacy.** The ingest path guard now covers `write_project_structure` and its
+  background rescan, which reached the same scanner unguarded with a caller-supplied root. The
+  synchronous chat seam resolves through the scheduler and refuses to construct a client that would
+  send personal-memory content to `api.openai.com` on the empty-base-url sentinel.
+
 ## 2026-08-11 — feat: add an idempotent post-install and agent onboarding path
 
 - Added `menhir setup` to create a missing `.env`, wire repository-managed Git hooks, audit setup
