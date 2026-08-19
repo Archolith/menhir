@@ -9,6 +9,12 @@ was.
 
 Two things make this test different, and both matter:
 
+**Scope: this is a WRITER-and-SAGA E2E, not a network-surface one.** It calls
+`create_pending_episode` and `erase_memory` directly. The REST route delegates into this same
+coordinator and `test_two_tenant_e2e.py` proves the transport->backend wiring, so the full
+composition is covered between the two files -- but no single test in this file drives HTTP, and
+the names here say so.
+
 **1. The copies are written by production code, not by the test.** `MENHIR_MCP_TELEMETRY_DB`
 redirects the real module-level `telemetry_store` singleton at a temp file, so
 `record_memory_revision` / `record_lifecycle_action` -- the same functions
@@ -204,12 +210,19 @@ def _ingest(adapter, store, *, sentinel: str, namespace: str) -> str:
 # ---------------------------------------------------------------------------
 
 @pytest.mark.online
-def test_public_ingest_then_public_erase_leaves_zero_content_anywhere(product_stack) -> None:
-    """The whole finding, end to end, with nothing seeded by hand.
+def test_real_writer_ingest_then_saga_erase_leaves_zero_content_anywhere(product_stack) -> None:
+    """The whole finding, end to end through the WRITER and SAGA layers, nothing seeded by hand.
 
-    `delete_memory` is the exact call `DELETE /api/memory/{uuid}` makes
-    (`RuntimeProvider.delete_memory` -> `erase_memory` -> `ErasureCoordinator`), so this is the
-    public erase surface rather than a coordinator the test constructed for itself.
+    **Scope, named precisely because the earlier name overstated it.** This does not go over
+    HTTP. It calls `adapter.create_pending_episode` and `coordinator.erase_memory` directly --
+    the layers underneath the transports, not the transports themselves. `DELETE
+    /api/memory/{uuid}` reaches this same coordinator (`RuntimeProvider.delete_memory` ->
+    `erase_memory` -> `ErasureCoordinator`) and `test_two_tenant_e2e.py` covers the
+    transport->backend wiring, so the composition is proven; it is simply not proven *by this
+    test*, and the name should not imply otherwise.
+
+    What IS proven here and nowhere else: the copies are made by production recorders rather
+    than by the test, and the post-erase assertion sweeps the entire live schema.
     """
     adapter, coordinator, db, repo, store = product_stack
     sentinel = f"SENTINEL-{uuidlib.uuid4().hex}-PRIVATE-PROSE"
