@@ -152,6 +152,7 @@ class BearerAuthMiddleware:
         self._operator_key = operator_key or api_key  # backwards compat: api_key -> operator
         self._agent_key = agent_key
         self._readonly_key = readonly_key
+        self._reject_duplicate_tier_keys()
         self._oauth_config = oauth_config or OAuthConfig()
         self._oauth_verifier = oauth_verifier or (
             OAuthTokenVerifier(self._oauth_config) if self._oauth_config.enabled else None
@@ -173,6 +174,43 @@ class BearerAuthMiddleware:
                 self._operator_key or self._agent_key or self._readonly_key
             ),
         )
+
+    def _reject_duplicate_tier_keys(self) -> None:
+        """Refuse to start when two configured tier keys are the same value (CF-31).
+
+        `_resolve_tier` returns on the first match and tries operator first, so a shared value
+        silently resolves every caller holding it to the HIGHEST tier it appears in: set
+        MENHIR_READONLY_KEY to the operator key and every readonly client is an operator.
+        Nothing anywhere validated distinctness, and there is no runtime symptom -- the
+        privilege is simply granted.
+
+        Checked here rather than in settings because this is where the three values are finally
+        resolved, including the `api_key -> operator` backwards-compatibility fallback above.
+        A check on the settings fields alone would miss a legacy `api_key` colliding with a
+        separately configured agent or readonly key.
+
+        Empty keys are not configured keys, so they are excluded rather than compared -- the
+        ordinary single-key deployment leaves two of the three blank.
+        """
+        configured = {
+            "operator": self._operator_key,
+            "agent": self._agent_key,
+            "readonly": self._readonly_key,
+        }
+        names_by_value: dict[str, list[str]] = {}
+        for tier_name, key in configured.items():
+            if key:
+                names_by_value.setdefault(key, []).append(tier_name)
+        collisions = sorted(
+            tuple(names) for names in names_by_value.values() if len(names) > 1
+        )
+        if collisions:
+            joined = "; ".join(" == ".join(names) for names in collisions)
+            raise ValueError(
+                "Menhir tier keys must be distinct: "
+                f"{joined}. A shared value resolves to the highest matching tier, so the "
+                "lower tier grants the higher one's authority."
+            )
 
     @staticmethod
     def _token_matches(token: str, key: str) -> bool:
