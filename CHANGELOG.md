@@ -1,3 +1,14 @@
+## 2026-08-19 — fix: guard the remaining UUID-addressed mutation tools (ET-002)
+
+- `unflag_memory`, `promote_memory` and `close_memory` now take a namespace and check ownership
+  before mutating, closing the gap left when `delete_memory` and `flag_memory` were guarded.
+  A UUID is an identifier, not proof of tenancy: a pinned caller that learns a foreign uuid
+  through any global read reached these directly, because the namespace pin cannot be injected
+  into an endpoint whose signature does not declare it.
+- `unflag_memory` is the one that matters most — it runs at the default agent tier, so no
+  operator credential is needed to strip another tenant's retention protection and return their
+  data to ordinary lifecycle decay.
+
 ## 2026-08-19 — fix: the namespace pin reaches REST, and two unscoped tenant reads closed
 
 - **The namespace pin now applies on the HTTP transport.** `MENHIR_CLIENT_NAMESPACES` binds a

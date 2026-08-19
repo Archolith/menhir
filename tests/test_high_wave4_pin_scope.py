@@ -221,3 +221,86 @@ def test_cf217_tool_declares_namespace_so_the_pin_can_reach_it() -> None:
         if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == "endpoint"
     )
     assert "namespace" in [a.arg for a in endpoint.args.args + endpoint.args.kwonlyargs]
+
+
+# ---------------------------------------------------------------------------
+# ET-002 -- a UUID is an identifier, not proof of tenancy
+# ---------------------------------------------------------------------------
+
+_UUID_MUTATORS = {
+    "DeleteMemoryTool": ("delete_memory.py", "node_uuid"),
+    "FlagMemoryTool": ("flag_memory.py", "node_uuid"),
+    "UnflagMemoryTool": ("unflag_memory.py", "node_uuid"),
+    "PromoteMemoryTool": ("promote_memory.py", "node_uuid"),
+    "CloseMemoryTool": ("close_memory.py", "uuid"),
+}
+
+
+@pytest.mark.parametrize("cls_name", sorted(_UUID_MUTATORS))
+def test_et002_every_uuid_mutator_declares_namespace_and_guards(cls_name: str) -> None:
+    """The pinned-client regression ET-002 asks for, as a structural invariant.
+
+    `unflag_memory` is the sharpest of these: it runs at the DEFAULT agent tier and removes
+    another tenant's retention protection, returning their data to ordinary lifecycle decay.
+    No operator tier is needed for that chain.
+    """
+    fname, _param = _UUID_MUTATORS[cls_name]
+    tree = ast.parse((_SRC / "mcp/tools/ingest" / fname).read_text(encoding="utf-8"))
+    cls = next(n for n in ast.walk(tree) if isinstance(n, ast.ClassDef) and n.name == cls_name)
+    endpoint = next(
+        n
+        for n in cls.body
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == "endpoint"
+    )
+
+    params = [a.arg for a in endpoint.args.args + endpoint.args.kwonlyargs]
+    assert "namespace" in params, f"{cls_name}: pin cannot reach an endpoint that omits it"
+
+    guarded = any(
+        isinstance(c, ast.Call) and getattr(c.func, "attr", None) == "fetch_memory_by_uuid"
+        for c in ast.walk(endpoint)
+    )
+    assert guarded, f"{cls_name}: no ownership check before mutating"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "module_name,cls_name,kwargs",
+    [
+        ("unflag_memory", "UnflagMemoryTool", {"node_uuid": "u1"}),
+        ("promote_memory", "PromoteMemoryTool", {"node_uuid": "u1"}),
+        ("close_memory", "CloseMemoryTool", {"uuid": "u1"}),
+    ],
+)
+async def test_et002_pinned_caller_refused_on_a_foreign_node(
+    module_name: str, cls_name: str, kwargs: dict[str, Any]
+) -> None:
+    import importlib
+
+    module = importlib.import_module(f"menhir.mcp.tools.ingest.{module_name}")
+    tool = getattr(module, cls_name)()
+
+    mutated: list[str] = []
+
+    class _Backend:
+        async def fetch_memory_by_uuid(self, node_uuid, *, namespace=None):
+            # The node exists, but it belongs to tenant-b.
+            return None if namespace not in (None, "tenant-b") else {"uuid": node_uuid}
+
+        async def unflag_memory(self, node_uuid):
+            mutated.append(node_uuid)
+            return True
+
+        async def promote_memory(self, node_uuid):
+            mutated.append(node_uuid)
+            return True
+
+        async def complete_temporal(self, uuid):
+            mutated.append(uuid)
+            return True
+
+    tool.get_backend = lambda: _Backend()  # type: ignore[method-assign]
+    result = await tool.endpoint(namespace="tenant-a", **kwargs)
+
+    assert "Refused" in result
+    assert mutated == []
