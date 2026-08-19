@@ -373,28 +373,35 @@ class RuntimeProviderDataOpsMixin:
         )
 
     async def fetch_flagged_memories(
-        self, limit: int = 50, workspace: str | None = None
+        self,
+        limit: int = 50,
+        workspace: str | None = None,
+        *,
+        namespace: str | None = None,
     ) -> list[dict[str, Any]]:
         kwargs: dict[str, Any] = {"limit": limit}
         if workspace is not None:
             kwargs["workspace"] = workspace
+        if namespace is not None:
+            kwargs["namespace"] = namespace
         return _to_jsonable(
             await self._off_loop(self.built.graph_adapter.fetch_flagged_memories, **kwargs)
         )
 
     async def fetch_flagged_memory_bootstrap_version(
-        self, workspace: str | None = None
+        self,
+        workspace: str | None = None,
+        *,
+        namespace: str | None = None,
     ) -> str:
-        if workspace is None:
-            return str(
-                await self._off_loop(
-                    self.built.graph_adapter.fetch_flagged_memory_bootstrap_version
-                )
-            )
+        kwargs: dict[str, Any] = {}
+        if workspace is not None:
+            kwargs["workspace"] = workspace
+        if namespace is not None:
+            kwargs["namespace"] = namespace
         return str(
             await self._off_loop(
-                self.built.graph_adapter.fetch_flagged_memory_bootstrap_version,
-                workspace=workspace,
+                self.built.graph_adapter.fetch_flagged_memory_bootstrap_version, **kwargs
             )
         )
 

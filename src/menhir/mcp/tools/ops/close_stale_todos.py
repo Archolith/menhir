@@ -5,28 +5,45 @@ from __future__ import annotations
 from menhir.mcp.tools.base import BaseTextTool
 
 
-async def close_stale_todos(older_than_days: int = 60, dry_run: bool = True) -> str:
+async def close_stale_todos(
+    older_than_days: int = 60, dry_run: bool = True, namespace: str = ""
+) -> str:
     """Close stale TODO items that have been open for too long.
 
     Args:
         older_than_days: Close todos open for more than this many days (default: 60, max: 365).
-        dry_run: Preview only — don't actually close any todos (default: true).
+        dry_run: Preview only -- don't actually close any todos (default: true).
+        namespace: Restrict to a single silo. A pinned client has this forced.
 
     Returns:
         Summary of closed or previewed stale todos.
     """
-    return await CloseStaleTodosTool().execute(older_than_days=older_than_days, dry_run=dry_run)
+    return await CloseStaleTodosTool().execute(
+        older_than_days=older_than_days, dry_run=dry_run, namespace=namespace
+    )
 
 
 class CloseStaleTodosTool(BaseTextTool):
     name = "close_stale_todos"
     description = "Close stale TODO items that have been open for too long."
 
-    async def endpoint(self, older_than_days: int = 60, dry_run: bool = True) -> str:
+    async def endpoint(
+        self, older_than_days: int = 60, dry_run: bool = True, namespace: str = ""
+    ) -> str:
+        """Close stale TODO items that have been open for too long.
+
+        Args:
+            older_than_days: Close todos open for more than this many days (default 60, max 365).
+            dry_run: Preview only -- don't actually close any todos (default true).
+            namespace: Restrict to a single silo. A pinned client has this forced -- and the
+                parameter existing is what makes that possible, since the pin is injected only
+                into endpoints whose signature declares it.
+        """
         backend = self.get_backend()
         result = await backend.close_stale_todos(
             older_than_days=max(1, min(older_than_days, 365)),
             dry_run=dry_run,
+            namespace=namespace.strip() or None,
         )
 
         lines: list[str] = []

@@ -185,13 +185,20 @@ class MemoryBackend(Protocol):
         ...
 
     async def fetch_flagged_memories(
-        self, limit: int = 50, workspace: str | None = None
+        self,
+        limit: int = 50,
+        workspace: str | None = None,
+        *,
+        namespace: str | None = None,
     ) -> list[dict[str, Any]]:
         """Fetch permanently flagged memory nodes."""
         ...
 
     async def fetch_flagged_memory_bootstrap_version(
-        self, workspace: str | None = None
+        self,
+        workspace: str | None = None,
+        *,
+        namespace: str | None = None,
     ) -> str:
         """Get the current version hash of flagged memories."""
         ...
@@ -615,7 +622,9 @@ class MemoryBackend(Protocol):
         """Hard-delete a todo node regardless of status."""
         ...
 
-    async def close_stale_todos(self, *, older_than_days: int = 60, dry_run: bool = True) -> dict[str, Any]:
+    async def close_stale_todos(
+        self, *, older_than_days: int = 60, dry_run: bool = True, namespace: str | None = None
+    ) -> dict[str, Any]:
         """Close todos older than N days. Returns summary with closed/preview counts."""
         ...
 

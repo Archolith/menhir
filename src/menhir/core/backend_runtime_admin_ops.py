@@ -485,12 +485,15 @@ class RuntimeProviderAdminOpsMixin:
     async def delete_todo(self, uuid: str) -> bool:
         return bool(await self._off_loop(self.built.graph_adapter.delete_todo, uuid))
 
-    async def close_stale_todos(self, *, older_than_days: int = 60, dry_run: bool = True) -> dict[str, Any]:
+    async def close_stale_todos(
+        self, *, older_than_days: int = 60, dry_run: bool = True, namespace: str | None = None
+    ) -> dict[str, Any]:
         return _to_jsonable(
             await self._off_loop(
                 self.built.graph_adapter.close_stale_todos,
                 older_than_days=older_than_days,
                 dry_run=dry_run,
+                namespace=namespace,
             )
         )
 

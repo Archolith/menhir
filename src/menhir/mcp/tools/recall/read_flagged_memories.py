@@ -10,7 +10,7 @@ from menhir.mcp.tools.base import BaseJsonTool
 
 
 async def read_flagged_memories(
-    reader_id: str = "default", limit: int = 10, workspace: str = ""
+    reader_id: str = "default", limit: int = 10, workspace: str = "", namespace: str = ""
 ) -> str:
     """Read flagged memories for startup bootstrap.
 
@@ -20,13 +20,15 @@ async def read_flagged_memories(
         reader_id: Stable bot/client identifier used for bootstrap gating.
         limit: Max flagged memories to return (default: 10, max: 50).
         workspace: Registered workspace key. Empty selects general pins only.
+        namespace: Restrict the read to a single namespace. A pinned client has
+            it forced.
 
     Returns:
         Flagged memory list and bootstrap state for the reader.
     """
 
     return await ReadFlaggedMemoriesTool().execute(
-        reader_id=reader_id, limit=limit, workspace=workspace
+        reader_id=reader_id, limit=limit, workspace=workspace, namespace=namespace
     )
 
 
@@ -36,21 +38,30 @@ class ReadFlaggedMemoriesTool(BaseJsonTool):
     description = "Read flagged memories for startup bootstrap."
 
     async def endpoint(
-        self, reader_id: str = "default", limit: int = 10, workspace: str = ""
+        self,
+        reader_id: str = "default",
+        limit: int = 10,
+        workspace: str = "",
+        namespace: str = "",
     ) -> str:
         """Read flagged memories for startup bootstrap.
 
         Bots should call this first before requesting broader context.
+
+        Args:
+            namespace: Restrict the read to a single namespace. A pinned client
+                has it forced.
         """
         backend = self.get_backend()
         normalized_reader_id = _normalize_reader_id(reader_id)
         selection_key, _ = bootstrap_selection(workspace)
+        ns = namespace.strip() or None
         rows = await backend.fetch_flagged_memories(
-            limit=limit, workspace=workspace or None
+            limit=limit, workspace=workspace or None, namespace=ns
         )
         rows = [row for row in rows if not is_structural_memory_row(row)]
         flagged_version = await backend.fetch_flagged_memory_bootstrap_version(
-            workspace=workspace or None
+            workspace=workspace or None, namespace=ns
         )
         _remember_flagged_bootstrap_read(
             normalized_reader_id, flagged_version, workspace=workspace or None

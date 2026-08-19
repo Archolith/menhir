@@ -843,17 +843,26 @@ class MemoryGraphAdapter:
         return self._memory_queries.fetch_recent_memories(limit, namespace=namespace)
 
     def fetch_flagged_memories(
-        self, limit: int = 10, workspace: str | None = None
+        self,
+        limit: int = 10,
+        workspace: str | None = None,
+        *,
+        namespace: str | None = None,
     ) -> list[dict[str, Any]]:
         """Return explicitly flagged memory nodes for bootstrap context reads."""
-        return self._memory_queries.fetch_flagged_memories(limit, workspace=workspace)
+        return self._memory_queries.fetch_flagged_memories(
+            limit, workspace=workspace, namespace=namespace
+        )
 
     def fetch_flagged_memory_bootstrap_version(
-        self, workspace: str | None = None
+        self,
+        workspace: str | None = None,
+        *,
+        namespace: str | None = None,
     ) -> str:
         """Return a deterministic version fingerprint for the flagged-memory set."""
         return self._memory_queries.fetch_flagged_memory_bootstrap_version(
-            workspace=workspace
+            workspace=workspace, namespace=namespace
         )
 
     def unflag_structural_nodes(self) -> int:
@@ -1604,8 +1613,12 @@ class MemoryGraphAdapter:
     def delete_todo(self, uuid: str) -> bool:
         return self._todos.delete_todo(uuid)
 
-    def close_stale_todos(self, *, older_than_days: int = 60, dry_run: bool = True) -> dict[str, Any]:
-        return self._todos.close_stale_todos(older_than_days=older_than_days, dry_run=dry_run)
+    def close_stale_todos(
+        self, *, older_than_days: int = 60, dry_run: bool = True, namespace: str | None = None
+    ) -> dict[str, Any]:
+        return self._todos.close_stale_todos(
+            older_than_days=older_than_days, dry_run=dry_run, namespace=namespace
+        )
 
     def list_todos_matching_query(
         self, query: str, *, limit: int = 3

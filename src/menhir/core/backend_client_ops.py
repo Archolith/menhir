@@ -175,18 +175,27 @@ class BackendClientOpsMixin:
         )
 
     async def fetch_flagged_memories(
-        self, limit: int = 50, workspace: str | None = None
+        self,
+        limit: int = 50,
+        workspace: str | None = None,
+        *,
+        namespace: str | None = None,
     ) -> list[dict[str, Any]]:
         return await self._request(
-            "fetch_flagged_memories", {"limit": limit, "workspace": workspace}
+            "fetch_flagged_memories",
+            {"limit": limit, "workspace": workspace, "namespace": namespace},
         )
 
     async def fetch_flagged_memory_bootstrap_version(
-        self, workspace: str | None = None
+        self,
+        workspace: str | None = None,
+        *,
+        namespace: str | None = None,
     ) -> str:
         return str(
             await self._request(
-                "fetch_flagged_memory_bootstrap_version", {"workspace": workspace}
+                "fetch_flagged_memory_bootstrap_version",
+                {"workspace": workspace, "namespace": namespace},
             )
         )
 
@@ -614,10 +623,12 @@ class BackendClientOpsMixin:
     async def delete_todo(self, uuid: str) -> bool:
         return bool(await self._request("delete_todo", {"uuid": uuid}))
 
-    async def close_stale_todos(self, *, older_than_days: int = 60, dry_run: bool = True) -> dict[str, Any]:
+    async def close_stale_todos(
+        self, *, older_than_days: int = 60, dry_run: bool = True, namespace: str | None = None
+    ) -> dict[str, Any]:
         return await self._request(
             "close_stale_todos",
-            {"older_than_days": older_than_days, "dry_run": dry_run},
+            {"older_than_days": older_than_days, "dry_run": dry_run, "namespace": namespace},
         )
 
     async def create_temporal(

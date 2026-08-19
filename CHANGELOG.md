@@ -1,3 +1,23 @@
+## 2026-08-19 — fix: the namespace pin reaches REST, and two unscoped tenant reads closed
+
+- **The namespace pin now applies on the HTTP transport.** `MENHIR_CLIENT_NAMESPACES` binds a
+  client to a namespace server-side and the guarantee is documented as absolute, but only MCP
+  tools enforced it — REST never consulted it, so a credential restricted to one namespace
+  reached every namespace by putting one in the request body. Nothing new was needed: the auth
+  middleware already binds the session that carries the client name on that path.
+- **`read_flagged_memories` no longer returns every tenant's flagged content.** Its query had no
+  tenancy predicate at all, it runs at the lowest tier, and agents are told to call it at the
+  start of every session. The bootstrap version fingerprint is scoped with it, so the receipt
+  gate answers the same question the read does.
+- **`close_stale_todos` no longer reads and closes every tenant's todos.** At the default agent
+  tier it matched all open todos, returned their content, and closed them. Scoping matches the
+  requested namespace exactly rather than the read path's requested-plus-default rule: a bulk
+  mutation must not touch the shared bucket as a side effect.
+
+Both unscoped reads were found by tracing the tools that CF-33 records as unreachable by the pin
+down to their queries. That finding documents the coverage gap; it does not record that some of
+those tools read tenant content with no predicate at all, which is the sharper problem.
+
 ## 2026-08-19 — fix: HIGH remediation wave 3 (retention, at-rest privacy, unbounded scans)
 
 - **Every telemetry time window was silently too wide.** Rows are written with Python's isoformat
