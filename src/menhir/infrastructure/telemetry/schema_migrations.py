@@ -127,6 +127,13 @@ def _ensure_forward_lineage_guards(conn: sqlite3.Connection) -> None:
                 SET episode_uuid = '{_NON_EPISODE_SUBJECT_KEY}',
                     details_json = CASE
                         WHEN NEW.details_json IS NULL OR NEW.details_json = '' THEN NEW.details_json
+                        WHEN json_valid(NEW.details_json)
+                         AND NOT EXISTS (
+                                SELECT 1
+                                FROM json_tree(NEW.details_json)
+                                WHERE type = 'text' AND atom IS NOT NULL AND atom != ''
+                            )
+                            THEN NEW.details_json
                         ELSE '{{}}'
                     END
                 WHERE id = NEW.id;
