@@ -614,34 +614,68 @@ class StructureGraphWriter:
 
     def query_overview(self, project: str) -> dict[str, Any]:
         """Return a project summary with entity/edge counts by type."""
-        entity_rows = self.neo4j.execute(
+        # CF-73: the three independent reads become one. Each is a separate `CALL { ... }` so
+        # the two aggregations cannot multiply each other's rows, and none imports a variable,
+        # so there is no anchor whose absence would collapse the result.
+        #
+        # That last point is the trap worth naming: anchoring this on the project node would
+        # turn an unknown project from "empty aggregates" into NO ROWS, and the method would
+        # start raising or returning nothing where it used to return zeros. The description
+        # branch is therefore OPTIONAL MATCH, and it is the only branch that touches the project
+        # node at all. Pinned by `test_overview_of_an_unknown_project_is_empty_rather_than_an_error`.
+        #
+        # `get_project_coverage` and `query_contained_repos` stay as their own round trips.
+        # Inlining their Cypher would take this to one call, but `get_project_coverage` has a
+        # second caller (:1096) and both are public methods -- a copy here would be a second
+        # definition of the same query, free to diverge silently from the canonical one. Five
+        # round trips become three; the last two are a maintainability boundary, not an
+        # oversight.
+        rows = self.neo4j.execute(
             """
-            MATCH (n:Entity {structure_project: $p})
-            RETURN n.structure_role AS role, count(n) AS cnt
+            CALL {
+                MATCH (n:Entity {structure_project: $p})
+                WITH n.structure_role AS role, count(n) AS cnt
+                RETURN collect({role: role, cnt: cnt}) AS raw_entities
+            }
+            CALL {
+                MATCH (a:Entity {structure_project: $p})-[r]->(b:Entity)
+                WITH type(r) AS rel, count(r) AS cnt
+                RETURN collect({rel: rel, cnt: cnt}) AS raw_edges
+            }
+            CALL {
+                OPTIONAL MATCH (n:Entity {structure_project: $p, structure_role: 'project'})
+                RETURN n.content AS description, n.stack AS stack
+                LIMIT 1
+            }
+            RETURN raw_entities, raw_edges, description, stack
             """,
             {"p": project},
         )
-        edge_rows = self.neo4j.execute(
+        row = rows[0] if rows else {}
+
+        def _tally(items: list[dict[str, Any]] | None, key: str) -> dict[str, int]:
+            """Read the GROUPED rows back into a dict.
+
+            The grouping happens server-side, inside each subquery, and that is load-bearing
+            rather than stylistic: collecting one map per node and counting them here would
+            ship a map for every entity in the project -- thousands, on a real codebase -- to
+            replace a handful of aggregated rows. That would be a bandwidth regression
+            introduced by a latency fix, which is worse than the finding.
             """
-            MATCH (a:Entity {structure_project: $p})-[r]->(b:Entity)
-            RETURN type(r) AS rel, count(r) AS cnt
-            """,
-            {"p": project},
-        )
-        # Project description + stack
-        proj_rows = self.neo4j.execute(
-            """
-            MATCH (n:Entity {structure_project: $p, structure_role: 'project'})
-            RETURN n.content AS description, n.stack AS stack
-            """,
-            {"p": project},
-        )
+            counts: dict[str, int] = {}
+            for item in items or []:
+                name = item.get(key)
+                if name is None:
+                    continue
+                counts[str(name)] = counts.get(str(name), 0) + int(item.get("cnt") or 0)
+            return counts
+
         return {
             "project": project,
-            "description": proj_rows[0].get("description", "") if proj_rows else "",
-            "stack": proj_rows[0].get("stack", "") if proj_rows else "",
-            "entities": {str(r["role"]): int(r["cnt"]) for r in entity_rows},
-            "edges": {str(r["rel"]): int(r["cnt"]) for r in edge_rows},
+            "description": row.get("description") or "",
+            "stack": row.get("stack") or "",
+            "entities": _tally(row.get("raw_entities"), "role"),
+            "edges": _tally(row.get("raw_edges"), "rel"),
             "coverage": self.get_project_coverage(project),
             "contains_repos": self.query_contained_repos(project),
         }
@@ -1399,73 +1433,90 @@ class StructureGraphWriter:
         if not path:
             raise ValueError("path is required for context query")
 
-        file_rows = self.neo4j.execute(
+        # CF-73: one round trip, not five. The five statements this replaces all anchored on
+        # the same `(f:Entity {structure_project, structure_path})` pattern and were independent
+        # of one another, so they compose as OPTIONAL MATCH branches over one anchor.
+        #
+        # Each branch is collected in its OWN `CALL { ... }` subquery, which is the part that
+        # matters. Chaining OPTIONAL MATCHes in a single scope multiplies rows -- two symbols
+        # times two importers is four rows -- and the counts then come out wrong in a way that
+        # only shows on a file that has several of both. A per-branch subquery aggregates before
+        # the next branch runs, so each returns exactly one list.
+        #
+        # `[x IN collect(...) WHERE x IS NOT NULL]` is not defensive noise: OPTIONAL MATCH on a
+        # file with no symbols yields one row of nulls, so an unfiltered collect returns `[null]`
+        # rather than `[]`, and a null path would reach the MCP caller as the string "None".
+        #
+        # The importer and tester branches are deliberately NOT filtered by `structure_project`,
+        # because the originals were not either -- `MATCH (importer:Entity)` qualified only the
+        # anchor. That is a cross-project leak (filed CF-224) but fixing it here would change
+        # what this returns under cover of a performance change. Pinned by
+        # `test_context_does_not_cross_project_boundaries`.
+        rows = self.neo4j.execute(
             """
             MATCH (f:Entity {structure_project: $p, structure_path: $path})
-            RETURN f.content AS summary, coalesce(f.symbols_truncated, false) AS truncated
+            CALL {
+                WITH f
+                OPTIONAL MATCH (f)-[:DEFINES]->(sym:Entity)
+                WHERE sym.structure_role = 'symbol'
+                WITH sym ORDER BY sym.symbol_line
+                RETURN collect(CASE WHEN sym IS NULL THEN null ELSE {
+                    name: sym.name, kind: sym.symbol_kind, sig: sym.symbol_signature,
+                    doc: sym.content, line: sym.symbol_line, parent: sym.symbol_parent,
+                    decorator: sym.symbol_decorator
+                } END) AS raw_symbols
+            }
+            CALL {
+                WITH f
+                OPTIONAL MATCH (f)-[:IMPORTS]->(imp:Entity)
+                WITH imp ORDER BY imp.structure_path
+                RETURN collect(imp.structure_path) AS raw_imports
+            }
+            CALL {
+                WITH f
+                OPTIONAL MATCH (importer:Entity)-[:IMPORTS]->(f)
+                WITH importer ORDER BY importer.structure_path
+                RETURN collect(importer.structure_path) AS raw_imported_by
+            }
+            CALL {
+                WITH f
+                OPTIONAL MATCH (t:Entity)-[:TESTS]->(f)
+                WITH t ORDER BY t.structure_path
+                RETURN collect(t.structure_path) AS raw_tested_by
+            }
+            RETURN f.content AS summary,
+                   coalesce(f.symbols_truncated, false) AS truncated,
+                   [x IN raw_symbols WHERE x IS NOT NULL] AS symbols,
+                   [x IN raw_imports WHERE x IS NOT NULL] AS imports,
+                   [x IN raw_imported_by WHERE x IS NOT NULL] AS imported_by,
+                   [x IN raw_tested_by WHERE x IS NOT NULL] AS tested_by
             """,
             {"p": project, "path": path},
         )
-        if not file_rows:
+        if not rows:
             return {"error": f"File not found in structure graph: {path}"}
 
-        summary = str(file_rows[0].get("summary", ""))
-        truncated = bool(file_rows[0].get("truncated", False))
-
-        sym_rows = self.neo4j.execute(
-            """
-            MATCH (f:Entity {structure_project: $p, structure_path: $path})-[:DEFINES]->(sym:Entity)
-            WHERE sym.structure_role = 'symbol'
-            RETURN sym.name AS name, sym.symbol_kind AS kind,
-                   sym.symbol_signature AS sig, sym.content AS doc,
-                   sym.symbol_line AS line, sym.symbol_parent AS parent,
-                   sym.symbol_decorator AS decorator
-            ORDER BY sym.symbol_line
-            """,
-            {"p": project, "path": path},
-        )
-        import_out_rows = self.neo4j.execute(
-            """
-            MATCH (f:Entity {structure_project: $p, structure_path: $path})-[:IMPORTS]->(imp:Entity)
-            RETURN imp.structure_path AS path ORDER BY imp.structure_path
-            """,
-            {"p": project, "path": path},
-        )
-        import_in_rows = self.neo4j.execute(
-            """
-            MATCH (importer:Entity)-[:IMPORTS]->(f:Entity {structure_project: $p, structure_path: $path})
-            RETURN importer.structure_path AS path ORDER BY importer.structure_path
-            """,
-            {"p": project, "path": path},
-        )
-        test_rows = self.neo4j.execute(
-            """
-            MATCH (t:Entity)-[:TESTS]->(f:Entity {structure_project: $p, structure_path: $path})
-            RETURN t.structure_path AS path ORDER BY t.structure_path
-            """,
-            {"p": project, "path": path},
-        )
-
+        row = rows[0]
         symbols = [
             {
-                "name": str(r.get("name", "")),
-                "kind": str(r.get("kind", "")),
-                "sig": str(r.get("sig", "")),
-                "doc": str(r.get("doc", "")),
+                "name": str(r.get("name") or ""),
+                "kind": str(r.get("kind") or ""),
+                "sig": str(r.get("sig") or ""),
+                "doc": str(r.get("doc") or ""),
                 "line": int(r["line"]) if r.get("line") is not None else 0,
-                "parent": str(r.get("parent", "")),
-                "decorator": str(r.get("decorator", "")),
+                "parent": str(r.get("parent") or ""),
+                "decorator": str(r.get("decorator") or ""),
             }
-            for r in sym_rows
+            for r in (row.get("symbols") or [])
         ]
         return {
             "path": path,
-            "summary": summary,
-            "truncated": truncated,
+            "summary": str(row.get("summary", "")),
+            "truncated": bool(row.get("truncated", False)),
             "symbols": symbols,
-            "imports": [str(r["path"]) for r in import_out_rows],
-            "imported_by": [str(r["path"]) for r in import_in_rows],
-            "tested_by": [str(r["path"]) for r in test_rows],
+            "imports": [str(x) for x in (row.get("imports") or [])],
+            "imported_by": [str(x) for x in (row.get("imported_by") or [])],
+            "tested_by": [str(x) for x in (row.get("tested_by") or [])],
         }
 
     # ------------------------------------------------------------------

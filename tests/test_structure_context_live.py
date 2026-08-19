@@ -230,3 +230,89 @@ def test_overview_still_carries_coverage_and_contained_repos(writer) -> None:
     assert "coverage" in result
     assert result["coverage"]["known"] is False  # no files_indexed on the fixture project node
     assert result["contains_repos"] == []
+
+
+# ---------------------------------------------------------------------------
+# The rewrite's own properties: round trips, and where the aggregation happens
+# ---------------------------------------------------------------------------
+
+@pytest.mark.online
+def test_context_makes_exactly_one_round_trip(test_neo4j_repo, writer) -> None:
+    """The finding itself. Five sequential `neo4j.execute` calls became one, and this counts
+    them rather than trusting the shape of the source -- a helper reintroduced later would
+    restore the round trips while every equivalence test above still passed."""
+    calls: list[str] = []
+    original = test_neo4j_repo.execute
+    test_neo4j_repo.execute = lambda q, params=None, **kw: (  # type: ignore[method-assign]
+        calls.append(q), original(q, params, **kw)
+    )[1]
+    try:
+        writer.query_context(PROJECT, "src/app.py")
+    finally:
+        test_neo4j_repo.execute = original  # type: ignore[method-assign]
+
+    assert len(calls) == 1, f"query_context made {len(calls)} round trips"
+
+
+@pytest.mark.online
+def test_overview_makes_three_round_trips_and_that_is_deliberate(test_neo4j_repo, writer) -> None:
+    """Three, not one. The three independent reads are combined; `get_project_coverage` and
+    `query_contained_repos` stay separate because `get_project_coverage` has another caller and
+    both are public methods -- inlining their Cypher here would create a second definition free
+    to diverge from the canonical one. Asserted so the boundary is a recorded decision rather
+    than something a later reader assumes was missed."""
+    calls: list[str] = []
+    original = test_neo4j_repo.execute
+    test_neo4j_repo.execute = lambda q, params=None, **kw: (  # type: ignore[method-assign]
+        calls.append(q), original(q, params, **kw)
+    )[1]
+    try:
+        writer.query_overview(PROJECT)
+    finally:
+        test_neo4j_repo.execute = original  # type: ignore[method-assign]
+
+    assert len(calls) == 3, f"query_overview made {len(calls)} round trips"
+
+
+@pytest.mark.online
+def test_overview_counts_are_aggregated_server_side(test_neo4j_repo) -> None:
+    """The regression this rewrite nearly shipped.
+
+    The original used `count(n)`, so the server returned one row per ROLE. A combined query that
+    collects one map per NODE and counts them in Python returns identical numbers -- every
+    equivalence test above passes -- while shipping a map for every entity in the project.
+    On a real codebase that is thousands of maps replacing a handful of rows: a bandwidth
+    regression introduced by a latency fix.
+
+    Correctness of the counts cannot detect it, so this asserts the shape ON THE WIRE instead.
+    """
+    test_neo4j_repo.execute(
+        """
+        CREATE (:Entity {structure_project: 'agg-fixture', structure_role: 'project'})
+        """
+    )
+    test_neo4j_repo.execute(
+        """
+        UNWIND range(1, 200) AS i
+        CREATE (:Entity {structure_project: 'agg-fixture', structure_role: 'file',
+                         structure_path: 'f' + toString(i) + '.py'})
+        """
+    )
+
+    writer = StructureGraphWriter(test_neo4j_repo)
+    result = writer.query_overview("agg-fixture")
+    assert result["entities"] == {"file": 200, "project": 1}
+
+    rows = test_neo4j_repo.execute(
+        """
+        CALL {
+            MATCH (n:Entity {structure_project: $p})
+            WITH n.structure_role AS role, count(n) AS cnt
+            RETURN collect({role: role, cnt: cnt}) AS e
+        }
+        RETURN e
+        """,
+        params={"p": "agg-fixture"},
+    )
+    # Two roles across 201 nodes. If the aggregation moved to Python this would be 201.
+    assert len(rows[0]["e"]) == 2
