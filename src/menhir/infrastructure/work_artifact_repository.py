@@ -77,6 +77,18 @@ def _safe_namespace(namespace: str | None) -> str:
     return (namespace or "").strip() or DEFAULT_ARTIFACT_NAMESPACE
 
 
+def _safe_namespace_filter(namespace: str | None) -> str | None:
+    """The READ counterpart of `_safe_namespace`.
+
+    `_safe_namespace` is for WRITES, where an unspecified namespace must still land somewhere,
+    so it substitutes the default. A read must not do that: substituting the default would turn
+    "caller did not ask to be scoped" into "show only the default silo", silently hiding data
+    from every existing unscoped caller. Isolation is opt-in, so absent means no filter.
+    """
+    value = (namespace or "").strip()
+    return value or None
+
+
 class WorkArtifactRepository:
     """Direct Neo4j CRUD for :WorkArtifact nodes and their owned subordinates."""
 
@@ -250,13 +262,19 @@ class WorkArtifactRepository:
     # ------------------------------------------------------------------
 
     def list_artifact_source_snapshots(
-        self, *, repository: str | None = None
+        self, *, repository: str | None = None, namespace: str | None = None
     ) -> list[ArtifactSourceSnapshot]:
-        """Every embodiment as the graph holds it, for the read-only audit."""
+        """Every embodiment as the graph holds it, for the read-only audit.
+
+        ``namespace`` is opt-in: ``None``/empty does not filter. A repository is NOT a tenancy
+        boundary -- `a.namespace` is -- so two silos holding artifacts for the same repository
+        were previously visible to each other through this read.
+        """
         rows = self.neo4j.execute(
             """
             MATCH (a:WorkArtifact)-[:EMBODIED_IN]->(s:ArtifactSource)
-            WHERE $repository IS NULL OR s.locator_repository = $repository
+            WHERE ($repository IS NULL OR s.locator_repository = $repository)
+              AND ($namespace IS NULL OR a.namespace = $namespace)
             RETURN a.artifact_uuid       AS artifact_uuid,
                    a.artifact_type       AS artifact_type,
                    a.title               AS title,
@@ -273,7 +291,7 @@ class WorkArtifactRepository:
                    s.schema_version      AS schema_version
             ORDER BY s.locator_path, a.artifact_uuid
             """,
-            {"repository": repository},
+            {"repository": repository, "namespace": _safe_namespace_filter(namespace)},
         )
         return [
             ArtifactSourceSnapshot(
@@ -298,7 +316,8 @@ class WorkArtifactRepository:
         ]
 
     def list_unscoped_artifact_source_snapshots(
-        self, *, paths: Sequence[str], artifact_uuids: Sequence[str]
+        self, *, paths: Sequence[str], artifact_uuids: Sequence[str],
+        namespace: str | None = None,
     ) -> list[ArtifactSourceSnapshot]:
         """Relevant legacy sources whose repository locator was never recorded."""
         if not paths and not artifact_uuids:
@@ -308,6 +327,7 @@ class WorkArtifactRepository:
             MATCH (a:WorkArtifact)-[:EMBODIED_IN]->(s:ArtifactSource)
             WHERE coalesce(trim(s.locator_repository), '') = ''
               AND (s.locator_path IN $paths OR a.artifact_uuid IN $artifact_uuids)
+              AND ($namespace IS NULL OR a.namespace = $namespace)
             RETURN a.artifact_uuid       AS artifact_uuid,
                    a.artifact_type       AS artifact_type,
                    a.title               AS title,
@@ -327,6 +347,7 @@ class WorkArtifactRepository:
             {
                 "paths": sorted(set(paths)),
                 "artifact_uuids": sorted(set(artifact_uuids)),
+                "namespace": _safe_namespace_filter(namespace),
             },
         )
         return [
@@ -364,15 +385,21 @@ class WorkArtifactRepository:
         return rows[0].get("commit") if rows else None
 
     def list_work_artifact_identities(
-        self, *, artifact_uuids: Sequence[str]
+        self, *, artifact_uuids: Sequence[str], namespace: str | None = None
     ) -> list[WorkArtifactIdentitySnapshot]:
-        """Identity state for declared UUIDs, including artifacts with no source."""
+        """Identity state for declared UUIDs, including artifacts with no source.
+
+        The UUIDs come from files in the caller's own worktree, but a UUID is not proof of
+        ownership -- a declared UUID that resolves to another silo's artifact would otherwise
+        return that artifact's title and status.
+        """
         if not artifact_uuids:
             return []
         rows = self.neo4j.execute(
             """
             UNWIND $artifact_uuids AS artifact_uuid
             MATCH (a:WorkArtifact {artifact_uuid: artifact_uuid})
+            WHERE $namespace IS NULL OR a.namespace = $namespace
             OPTIONAL MATCH (a)-[:EMBODIED_IN]->(s:ArtifactSource)
             RETURN a.artifact_uuid AS artifact_uuid,
                    a.artifact_type AS artifact_type,
@@ -381,7 +408,10 @@ class WorkArtifactRepository:
                    count(s) AS source_count
             ORDER BY a.artifact_uuid
             """,
-            {"artifact_uuids": sorted(set(artifact_uuids))},
+            {
+                "artifact_uuids": sorted(set(artifact_uuids)),
+                "namespace": _safe_namespace_filter(namespace),
+            },
         )
         return [
             WorkArtifactIdentitySnapshot(

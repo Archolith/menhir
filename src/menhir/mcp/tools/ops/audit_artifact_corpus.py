@@ -10,6 +10,7 @@ async def audit_artifact_corpus(
     repo_path: str,
     repository: str,
     from_commit: str = "",
+    namespace: str = "",
 ) -> str:
     """Report whether a repository's work-artifact corpus matches the graph.
 
@@ -29,31 +30,42 @@ async def audit_artifact_corpus(
                     worktree directory name is not repository identity.
         from_commit: Optional override for the persisted reconciliation cursor.
                      It changes only the Git evidence interval.
+        namespace: Optional silo to scope this operation to. Empty = every silo
+                   (existing behavior). Distinct from `repository`: a repository is a
+                   locator identity, not a tenancy boundary.
 
     Returns:
         A parity summary, the plan digest, and any conflicts or lane/lifecycle
         contradictions found.
     """
     return await AuditArtifactCorpusTool().execute(
-        repo_path=repo_path, repository=repository, from_commit=from_commit
+        repo_path=repo_path, repository=repository, from_commit=from_commit,
+        namespace=namespace,
     )
 
 
 class AuditArtifactCorpusTool(BaseTextTool):
     name = "audit_artifact_corpus"
-    scope = ToolScope.OBJECT
+    # NAMESPACED, not OBJECT: `repository` reads like an object address but is a locator
+    # identity, and `WorkArtifact.namespace` is the tenancy boundary. Two silos holding
+    # artifacts for the same repository saw each other's titles, statuses and paths -- and
+    # each other's artifacts reported as conflicts in their own corpus.
+    scope = ToolScope.NAMESPACED
     description = (
         "Read-only parity report between a repository's work-artifact corpus and the graph."
     )
 
     async def endpoint(
-        self, repo_path: str, repository: str, from_commit: str = ""
+        self, repo_path: str, repository: str, from_commit: str = "",
+        namespace: str = "",
     ) -> str:
         backend = self.get_backend()
         result = await backend.fetch_artifact_corpus_audit(
             repo_path=repo_path,
             repository=repository,
             from_commit=from_commit or None,
+            # Forwarded only when set: byte-identical call when unpinned.
+            **({"namespace": namespace} if namespace else {}),
         )
 
         counts = result.get("counts") or {}

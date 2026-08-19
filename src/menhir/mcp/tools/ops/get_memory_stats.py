@@ -29,7 +29,17 @@ _SCHEDULER_PREFIX = "scheduler_"
 
 class GetMemoryStatsTool(BaseTextTool):
     name = "get_memory_stats"
-    scope = ToolScope.OBJECT
+    # GLOBAL, not OBJECT: this is the operational health dashboard -- operation latencies,
+    # failure counts, enrichment rate, queue depth, circuit-breaker state. None of it is tenant
+    # memory and none of it is addressed by an object, so OBJECT was a misdeclaration rather
+    # than a missing namespace argument.
+    #
+    # Residue, stated rather than glossed: the Graph section reports AGGREGATE counts
+    # (entity_count, episode_count, flagged_count) summed across every silo, so a pinned client
+    # learns roughly how much data exists outside its own. That is a cardinality signal, not
+    # content, and it is the same shape as the other GLOBAL tools' operational readouts.
+    # Narrowing it means per-namespace counts, which is a feature decision, not this fix.
+    scope = ToolScope.GLOBAL
     required_tier = "readonly"
     description = "Return operational health summary."
 

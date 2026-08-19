@@ -163,12 +163,18 @@ class ArtifactReconciliationService:
         from_commit: str | None = None,
         git: GitEvidence | None = None,
         extra_renames: Sequence[GitRename] = (),
+        namespace: str | None = None,
     ) -> ReconciliationReport:
         """Compare the tree against the graph. Zero writes, by construction.
 
         Graph locators are repository-scoped identities. Inferring that identity
         from a worktree directory name can make an existing repository appear
         empty, so every graph-backed caller must supply it explicitly.
+
+        ``namespace`` is a separate axis and is opt-in. A repository is not a tenancy
+        boundary; `WorkArtifact.namespace` is. All three graph reads below carry the filter --
+        omitting it from any one of them would leave the audit reporting another silo's
+        artifacts as conflicts or contradictions in the caller's own corpus.
         """
         root = Path(repo_root).resolve()
         name = self._require_repository(repository)
@@ -180,16 +186,21 @@ class ArtifactReconciliationService:
             else collect_git_evidence(root, from_commit=evidence_from_commit)
         )
         entries = scan_corpus(root, repository=name, git=evidence)
-        snapshots = self._repo.list_artifact_source_snapshots(repository=name)
+        snapshots = self._repo.list_artifact_source_snapshots(
+            repository=name, namespace=namespace
+        )
         declared_uuids = sorted(
             {entry.declared_uuid for entry in entries if entry.declared_uuid}
         )
         unscoped_snapshots = self._repo.list_unscoped_artifact_source_snapshots(
             paths=sorted({entry.path for entry in entries}),
             artifact_uuids=declared_uuids,
+            namespace=namespace,
         )
         identities = (
-            self._repo.list_work_artifact_identities(artifact_uuids=declared_uuids)
+            self._repo.list_work_artifact_identities(
+                artifact_uuids=declared_uuids, namespace=namespace
+            )
             if declared_uuids
             else []
         )

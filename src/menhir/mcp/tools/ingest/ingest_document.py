@@ -14,6 +14,7 @@ async def ingest_document(
     path: str,
     project: str | None = None,
     document_type: str = "generic",
+    namespace: str = "",
 ) -> str:
     """Ingest a document or markdown file into the memory graph.
 
@@ -30,18 +31,27 @@ async def ingest_document(
             call to co-locate the document with its project's structural graph.
         document_type: Type of document (generic, wiki_article, reference_article).
             Used for filtering documents in recall/queries.
+        namespace: Optional silo for the QUEUED EPISODE -- the recallable memory this
+            produces. Empty = default/global behavior. Note this is unrelated to `project`,
+            which labels the shared structure graph and is not a tenancy boundary.
 
     Returns:
         Summary of the entity written and episode queue status.
     """
     return await IngestDocumentTool().execute(
-        path=path, project=project, document_type=document_type
+        path=path, project=project, document_type=document_type, namespace=namespace
     )
 
 
 class IngestDocumentTool(BaseTextTool):
     name = "ingest_document"
-    scope = ToolScope.OBJECT
+    # NAMESPACED, not OBJECT: the structure node this writes is deliberately shared (the
+    # structure graph is an index of a codebase keyed by project, and `query_structure`
+    # documents that namespace scopes only its Todo section). The EPISODE it queues is not --
+    # that becomes recallable tenant memory through the same `queue_episode` call `add_memory`
+    # makes. Omitting the argument sent it to the default group regardless of the caller's pin,
+    # which is CF-220's escape in a third tool.
+    scope = ToolScope.NAMESPACED
     description = "Ingest a doc/markdown/text file into the memory graph as a document entity + semantic episode."
 
     def timeout_for(
@@ -50,7 +60,8 @@ class IngestDocumentTool(BaseTextTool):
         return 30
 
     async def endpoint(
-        self, path: str, project: str | None = None, document_type: str = "generic"
+        self, path: str, project: str | None = None, document_type: str = "generic",
+        namespace: str = "",
     ) -> str:
         if not os.path.isfile(path):
             return f"Error: not a file: {path}"
@@ -82,6 +93,8 @@ class IngestDocumentTool(BaseTextTool):
                         user_id=session.user_id,
                         session_id=session.session_id,
                         source="document-ingest",
+                        # Forwarded only when set: byte-identical call when unpinned.
+                        **({"namespace": namespace} if namespace else {}),
                     ),
                     timeout=10,
                 )

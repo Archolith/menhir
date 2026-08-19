@@ -219,6 +219,7 @@ class StubGraphAdapter:
         *,
         processing_states: list[str] | None = None,
         limit: int = 25,
+        namespace: str | None = None,
     ):
         states = {state.upper() for state in (processing_states or [])}
         rows = []

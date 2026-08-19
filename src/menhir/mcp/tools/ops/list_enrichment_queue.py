@@ -9,7 +9,9 @@ from menhir.mcp.tools.base import BaseTextTool
 from menhir.mcp.contracts import ToolScope
 
 
-async def list_enrichment_queue(state: str = "active", limit: int = 25) -> str:
+async def list_enrichment_queue(
+    state: str = "active", limit: int = 25, namespace: str = ""
+) -> str:
     """List episodic enrichment queue rows with stale-state hints.
 
     Args:
@@ -20,21 +22,30 @@ async def list_enrichment_queue(state: str = "active", limit: int = 25) -> str:
         Queue summary and row-level diagnostics.
     """
 
-    return await ListEnrichmentQueueTool().execute(state=state, limit=limit)
+    return await ListEnrichmentQueueTool().execute(
+        state=state, limit=limit, namespace=namespace
+    )
 
 
 class ListEnrichmentQueueTool(BaseTextTool):
     name = "list_enrichment_queue"
-    scope = ToolScope.OBJECT
+    # NAMESPACED: the rows carry session_id, source and enrichment error text -- tenant-
+    # identifying operational metadata, reaching every silo at readonly tier with no predicate.
+    # Milder than a content read, which is why it is filed below `list_conflicts`, not beside it.
+    scope = ToolScope.NAMESPACED
     required_tier = "readonly"
     description = "List episodic enrichment queue rows with stale-state hints."
 
-    async def endpoint(self, state: str = "active", limit: int = 25) -> str:
+    async def endpoint(
+        self, state: str = "active", limit: int = 25, namespace: str = ""
+    ) -> str:
         backend = self.get_backend()
         state_label, state_filter = _resolve_queue_state_filter(state)
+        scope = {"namespace": namespace} if namespace else {}
         rows = await backend.list_episode_processing(
             states=state_filter,
             limit=limit,
+            **scope,
         )
         now_utc = datetime.now(timezone.utc)
 

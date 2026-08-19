@@ -162,13 +162,23 @@ class EpisodeMaintenanceRepository:
         *,
         processing_states: list[str] | None = None,
         limit: int = 25,
+        namespace: str | None = None,
     ) -> list[dict[str, Any]]:
+        """List episode processing rows, newest work first.
+
+        ``namespace`` is opt-in per the namespace contract: ``None``/empty does not filter,
+        preserving today's behavior. The rows carry `session_id`, `source` and the enrichment
+        error text, which is tenant-identifying operational metadata rather than memory content
+        -- milder than a content read, but it was reaching every silo at readonly tier.
+        """
         safe_limit = max(1, min(limit, 200))
         states = [str(state).strip().upper() for state in (processing_states or []) if str(state).strip()]
+        ns = str(namespace).strip() if namespace is not None else ""
         query = (
             Cypher()
             .match("(n:Episodic)")
             .where_if(bool(states), "n.processing_state IN $states")
+            .where_if(bool(ns), "coalesce(n.namespace, 'default') = $namespace")
             .return_fields(
                 EPISODE_PROCESSING_FIELDS,
                 "n.resolved_episode_uuid AS resolved_episode_uuid",
@@ -180,7 +190,10 @@ class EpisodeMaintenanceRepository:
             .limit()
             .build()
         )
-        return self.neo4j.execute(query, params={"states": states, "limit": safe_limit})
+        params: dict[str, Any] = {"states": states, "limit": safe_limit}
+        if ns:
+            params["namespace"] = ns
+        return self.neo4j.execute(query, params=params)
 
     def fetch_stale_enriching_episodes(
         self,

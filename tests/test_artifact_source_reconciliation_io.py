@@ -425,6 +425,9 @@ def test_unscoped_source_read_is_bounded_to_paths_and_declared_uuids() -> None:
     assert neo.calls[0]["params"] == {
         "paths": [".agent/plans/a.md"],
         "artifact_uuids": ["a-1"],
+        # The query now carries a `$namespace` predicate, so the parameter is bound on every
+        # call; None is the "do not filter" value that preserves the unscoped read.
+        "namespace": None,
     }
     assert "coalesce(trim(s.locator_repository), '') = ''" in neo.calls[0]["query"]
 
@@ -634,11 +637,15 @@ class _RecordingRepo:
         self.cursor = kwargs["observed_commit"]
         return {"advanced": True, "current_commit": self.cursor}
 
-    def list_artifact_source_snapshots(self, *, repository: str | None = None):
+    def list_artifact_source_snapshots(
+        self, *, repository: str | None = None, namespace: str | None = None
+    ):
         self.calls.append(("list", {"repository": repository}))
         return list(self.snapshots)
 
-    def list_unscoped_artifact_source_snapshots(self, *, paths, artifact_uuids):
+    def list_unscoped_artifact_source_snapshots(
+        self, *, paths, artifact_uuids, namespace=None
+    ):
         self.calls.append(
             (
                 "unscoped",
@@ -650,7 +657,7 @@ class _RecordingRepo:
         )
         return list(self.unscoped)
 
-    def list_work_artifact_identities(self, *, artifact_uuids):
+    def list_work_artifact_identities(self, *, artifact_uuids, namespace=None):
         self.calls.append(("identities", {"artifact_uuids": artifact_uuids}))
         return list(self.identities)
 
@@ -1183,7 +1190,7 @@ def test_validation_reports_a_duplicate_uuid_across_two_documents(
 @pytest.mark.unit
 def test_validation_needs_no_graph_connection(tmp_path: Path) -> None:
     class _Exploding:
-        def list_artifact_source_snapshots(self, *, repository=None):
+        def list_artifact_source_snapshots(self, *, repository=None, namespace=None):
             raise AssertionError("validation must not read the graph")
 
     _write(tmp_path, ".agent/plans/a.md", "# A\n")

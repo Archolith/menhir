@@ -399,3 +399,145 @@ def test_internal_backend_dispatch_cannot_inject_where_there_is_no_parameter(pin
     assert routes_handlers._pin_backend_invoke_namespace(
         "scheduler_pause", scheduler_pause, {}, logging.getLogger(__name__)
     ) == {}
+
+
+# ---------------------------------------------------------------------------
+# The startup check gap that let this row exist at all
+# ---------------------------------------------------------------------------
+
+@pytest.mark.unit
+def test_object_without_an_object_key_is_now_a_startup_failure() -> None:
+    """The gap that produced this whole row. `assert_tool_scopes_declared` caught
+    NAMESPACED-without-`namespace` and GLOBAL-with-`namespace` but not this -- so the one
+    declaration that meant "nobody examined this tool" was the one that stayed silent, and nine
+    tools sat in the OBJECT bucket addressing nothing. CF-216, CF-217 and the four conflict
+    tools all came out of that row.
+    """
+    from menhir.mcp.contracts import BaseTextTool, assert_tool_scopes_declared
+
+    class _ObjectInNameOnly(BaseTextTool):
+        name = "object_in_name_only"
+        scope = ToolScope.OBJECT
+        description = "declares OBJECT, addresses nothing"
+
+        async def endpoint(self, limit: int = 25) -> str:
+            return ""
+
+    with pytest.raises(RuntimeError, match="no object identifier"):
+        assert_tool_scopes_declared([_ObjectInNameOnly])
+
+
+@pytest.mark.unit
+def test_a_genuine_object_tool_still_passes() -> None:
+    """The check must not become a blanket refusal of the OBJECT declaration -- fourteen tools
+    legitimately hold it, and breaking them would push someone toward declaring GLOBAL to
+    silence the build, which is the one way this mechanism fails."""
+    from menhir.mcp.contracts import BaseTextTool, assert_tool_scopes_declared
+
+    class _RealObjectTool(BaseTextTool):
+        name = "real_object_tool"
+        scope = ToolScope.OBJECT
+        description = "addressed by uuid"
+
+        async def endpoint(self, node_uuid: str) -> str:
+            return ""
+
+    assert_tool_scopes_declared([_RealObjectTool])
+
+
+@pytest.mark.unit
+def test_the_object_bucket_is_now_entirely_object_addressed() -> None:
+    """The census in prose form. Every remaining OBJECT tool names something; none is a
+    tenant-scoped tool hiding behind the declaration. This is what makes CF-33 step 4
+    (ownership-at-load) a bounded, enumerable job rather than an open question."""
+    from menhir.mcp.tools import ALL_TOOLS
+    from menhir.mcp.contracts import _declares_object_key
+
+    keyless = sorted(
+        t.name
+        for t in ALL_TOOLS
+        if getattr(t, "scope", None) == ToolScope.OBJECT
+        and not _declares_object_key(inspect.signature(t.endpoint).parameters)
+    )
+    assert keyless == []
+
+
+# ---------------------------------------------------------------------------
+# Live: the rest of step 3's queries, against a real Neo4j
+# ---------------------------------------------------------------------------
+
+@pytest.mark.online
+def test_live_episode_processing_rows_are_scoped(test_neo4j_repo) -> None:
+    """`list_enrichment_queue` at readonly tier. The rows carry session_id, source and the
+    enrichment error text -- tenant-identifying operational metadata, which is why this is filed
+    below `list_conflicts` rather than beside it, but it was reaching every silo all the same."""
+    from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
+
+    for ns in ("tenant_a", "tenant_b"):
+        test_neo4j_repo.execute(
+            """
+            CREATE (n:Episodic {uuid: $uuid, namespace: $ns, processing_state: 'PENDING',
+                                session_id: $sid, source: 'test', created_at: datetime()})
+            """,
+            params={"uuid": f"ep-{ns}", "ns": ns, "sid": f"session-of-{ns}"},
+        )
+    adapter = MemoryGraphAdapter(neo4j=test_neo4j_repo)
+
+    scoped = adapter.list_episode_processing(processing_states=["PENDING"], namespace="tenant_a")
+    assert [r["uuid"] for r in scoped] == ["ep-tenant_a"]
+
+    # Opt-in: no namespace still sees both.
+    unscoped = adapter.list_episode_processing(processing_states=["PENDING"])
+    assert len(unscoped) == 2
+
+
+@pytest.mark.online
+def test_live_artifact_snapshots_are_scoped(test_neo4j_repo) -> None:
+    """A repository is a locator identity, not a tenancy boundary. Two silos holding artifacts
+    for the same repository saw each other's titles, statuses and paths -- and each other's
+    artifacts reported as conflicts in their own corpus audit."""
+    from menhir.infrastructure.work_artifact_repository import WorkArtifactRepository
+
+    for ns in ("tenant_a", "tenant_b"):
+        test_neo4j_repo.execute(
+            """
+            CREATE (a:WorkArtifact {artifact_uuid: $uuid, namespace: $ns,
+                                    artifact_type: 'plan', title: $title, status: 'ACTIVE'})
+            CREATE (s:ArtifactSource {source_uuid: $suuid, medium: 'markdown',
+                                      locator_repository: 'shared-repo',
+                                      locator_path: $path})
+            CREATE (a)-[:EMBODIED_IN]->(s)
+            """,
+            params={
+                "uuid": f"art-{ns}", "suuid": f"src-{ns}", "ns": ns,
+                "title": f"{ns} private plan", "path": f".agent/plans/{ns}.md",
+            },
+        )
+    repo = WorkArtifactRepository(test_neo4j_repo)
+
+    scoped = repo.list_artifact_source_snapshots(repository="shared-repo", namespace="tenant_a")
+    assert [s.artifact_uuid for s in scoped] == ["art-tenant_a"]
+
+    assert len(repo.list_artifact_source_snapshots(repository="shared-repo")) == 2
+
+
+@pytest.mark.online
+def test_live_a_declared_uuid_is_not_proof_of_ownership(test_neo4j_repo) -> None:
+    """`list_work_artifact_identities` takes UUIDs read out of files in the caller's own
+    worktree. Nothing stops a file from declaring another silo's UUID, and without the filter
+    that returned the foreign artifact's title and status."""
+    from menhir.infrastructure.work_artifact_repository import WorkArtifactRepository
+
+    test_neo4j_repo.execute(
+        """
+        CREATE (a:WorkArtifact {artifact_uuid: 'art-foreign', namespace: 'tenant_b',
+                                artifact_type: 'plan', title: 'tenant_b secret title',
+                                status: 'ACTIVE'})
+        """
+    )
+    repo = WorkArtifactRepository(test_neo4j_repo)
+
+    assert repo.list_work_artifact_identities(
+        artifact_uuids=["art-foreign"], namespace="tenant_a"
+    ) == []
+    assert len(repo.list_work_artifact_identities(artifact_uuids=["art-foreign"])) == 1

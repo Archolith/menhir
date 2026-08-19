@@ -911,6 +911,7 @@ class StubMemoryGraphAdapter:
         *,
         processing_states: list[str] | None = None,
         limit: int = 25,
+        namespace: str | None = None,
     ) -> list[dict[str, object]]:
         states = {str(state).strip().upper() for state in (processing_states or []) if str(state).strip()}
         rows = []

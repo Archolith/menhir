@@ -9,6 +9,7 @@ import threading
 import time
 from abc import ABC, abstractmethod
 from collections import deque
+from collections.abc import Mapping
 from functools import wraps
 from typing import TYPE_CHECKING, Any, Awaitable
 
@@ -194,6 +195,25 @@ def _try_record_destructive_op_mcp(tool_name: str, tier: str) -> None:
         pass  # Telemetry failures must never disrupt the caller
 
 
+def _declares_object_key(params: "Mapping[str, inspect.Parameter]") -> bool:
+    """Whether an endpoint is actually addressed by an object identifier.
+
+    OBJECT means "the pin cannot be injected as an argument because the caller names a specific
+    object". A tool declaring OBJECT while naming no object is not making that claim -- it is
+    the third row of CF-33's census, where genuinely-global tools and tenant-scoped tools that
+    simply never got a `namespace` argument look identical from outside. Nine tools sat there,
+    and CF-216, CF-217 and the four conflict tools all came out of it.
+
+    The original check caught NAMESPACED-without-`namespace` and GLOBAL-with-`namespace` but not
+    this, so the one declaration that meant "unexamined" was the one that stayed silent.
+    """
+    return any(
+        "uuid" in name or name == "id" or name.endswith("_id")
+        for name in params
+        if name != "self"
+    )
+
+
 def assert_tool_scopes_declared(tool_classes: "list[type] | tuple[type, ...]") -> None:
     """Refuse to start when any tool has not declared its tenancy scope (CF-33).
 
@@ -223,11 +243,18 @@ def assert_tool_scopes_declared(tool_classes: "list[type] | tuple[type, ...]") -
         if scope not in ToolScope.ALL:
             invalid.append(f"{name}={scope!r}")
             continue
-        declares_namespace = "namespace" in inspect.signature(tool_cls.endpoint).parameters
+        params = inspect.signature(tool_cls.endpoint).parameters
+        declares_namespace = "namespace" in params
         if scope == ToolScope.NAMESPACED and not declares_namespace:
             mismatched.append(f"{name}: declared NAMESPACED but the endpoint takes no `namespace`")
         elif scope == ToolScope.GLOBAL and declares_namespace:
             mismatched.append(f"{name}: declared GLOBAL but the endpoint takes a `namespace`")
+        elif scope == ToolScope.OBJECT and not _declares_object_key(params):
+            mismatched.append(
+                f"{name}: declared OBJECT but the endpoint takes no object identifier "
+                "-- OBJECT means addressed by uuid, so a tool with neither a `namespace` nor "
+                "an id is either tenant-scoped and missing its argument, or genuinely GLOBAL"
+            )
 
     problems: list[str] = []
     if undeclared:

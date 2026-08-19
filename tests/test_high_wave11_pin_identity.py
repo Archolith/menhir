@@ -90,6 +90,13 @@ def test_cf33_the_global_list_is_small_and_reviewable() -> None:
     assert global_tools == [
         "force_scheduler_takeover",
         "get_client_context",
+        # Added 2026-08-19 (CF-33 step 3) as a deliberate reclassification, not to silence the
+        # startup check: `get_memory_stats` is the operational health readout -- latencies,
+        # failure counts, queue depth, breaker state -- and had been declared OBJECT while
+        # addressing no object. Its residue is recorded at the declaration: the Graph section
+        # reports aggregate node counts across every silo, a cardinality signal rather than
+        # content.
+        "get_memory_stats",
         "list_clients",
         "mint_client",
         "pause_scheduler",

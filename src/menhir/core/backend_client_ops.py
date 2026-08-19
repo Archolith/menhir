@@ -338,10 +338,12 @@ class BackendClientOpsMixin:
         )
 
     async def list_episode_processing(
-        self, *, states: list[str] | None = None, limit: int = 25
+        self, *, states: list[str] | None = None, limit: int = 25,
+        namespace: str | None = None,
     ) -> list[dict[str, Any]]:
         return await self._request(
-            "list_episode_processing", {"states": states, "limit": limit}
+            "list_episode_processing",
+            {"states": states, "limit": limit, "namespace": namespace},
         )
 
     async def get_queue_depth(self) -> int:
@@ -593,6 +595,7 @@ class BackendClientOpsMixin:
         repository: str,
         from_commit: str | None = None,
         conflict_limit: int = 25,
+        namespace: str | None = None,
     ) -> dict[str, Any]:
         return await self._request(
             "fetch_artifact_corpus_audit",
@@ -601,6 +604,7 @@ class BackendClientOpsMixin:
                 "repository": repository,
                 "from_commit": from_commit,
                 "conflict_limit": conflict_limit,
+                "namespace": namespace,
             },
         )
 

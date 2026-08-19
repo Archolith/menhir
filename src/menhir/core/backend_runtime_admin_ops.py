@@ -90,13 +90,15 @@ class RuntimeProviderAdminOpsMixin:
         )
 
     async def list_episode_processing(
-        self, *, states: list[str] | None = None, limit: int = 25
+        self, *, states: list[str] | None = None, limit: int = 25,
+        namespace: str | None = None,
     ) -> list[dict[str, Any]]:
         return _to_jsonable(
             await self._off_loop(
                 self.built.graph_adapter.list_episode_processing,
                 processing_states=states,
                 limit=limit,
+                namespace=namespace,
             )
         )
 
@@ -453,6 +455,7 @@ class RuntimeProviderAdminOpsMixin:
         repository: str,
         from_commit: str | None = None,
         conflict_limit: int = 25,
+        namespace: str | None = None,
     ) -> dict[str, Any]:
         return _to_jsonable(
             await self._off_loop(

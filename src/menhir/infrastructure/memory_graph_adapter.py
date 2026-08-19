@@ -975,9 +975,10 @@ class MemoryGraphAdapter:
         *,
         processing_states: list[str] | None = None,
         limit: int = 25,
+        namespace: str | None = None,
     ) -> list[dict[str, Any]]:
         return self._episodes.list_episode_processing(
-            processing_states=processing_states, limit=limit
+            processing_states=processing_states, limit=limit, namespace=namespace
         )
 
     def fetch_stale_enriching_episodes(
@@ -1456,6 +1457,7 @@ class MemoryGraphAdapter:
         repository: str,
         from_commit: str | None = None,
         conflict_limit: int = 25,
+        namespace: str | None = None,
     ) -> dict[str, Any]:
         """Read-only corpus parity summary, with a bounded conflict list.
 
@@ -1469,7 +1471,8 @@ class MemoryGraphAdapter:
 
         service = ArtifactReconciliationService(self._work_artifacts)
         report = service.audit(
-            repo_path, repository=repository, from_commit=from_commit
+            repo_path, repository=repository, from_commit=from_commit,
+            namespace=namespace,
         )
         limit = max(1, min(int(conflict_limit), 100))
         conflicts = report.conflicts

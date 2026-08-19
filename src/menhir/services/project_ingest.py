@@ -134,8 +134,16 @@ async def execute_project_ingest(
     session_id: str,
     user_id: str,
     queue_timeout_s: float = 10.0,
+    namespace: str | None = None,
 ) -> ProjectIngestOutcome:
-    """Run project scan/write and best-effort semantic queueing outside transport code."""
+    """Run project scan/write and best-effort semantic queueing outside transport code.
+
+    ``namespace`` scopes only the QUEUED EPISODE. The structure graph this also writes is
+    deliberately shared -- it indexes a codebase by project, and `query_structure` documents
+    that namespace scopes only its Todo section. The episode is different in kind: it becomes
+    recallable tenant memory through the same `queue_episode` call `add_memory` makes, so
+    omitting the argument sent a pinned caller's project narrative to the default group.
+    """
 
     project_name = name or os.path.basename(os.path.normpath(path))
     if not os.path.isdir(path):
@@ -158,12 +166,16 @@ async def execute_project_ingest(
     episode = ProjectEpisodeOutcome(ProjectEpisodeStatus.NO_NARRATIVE)
     if narrative:
         try:
+            # Forwarded only when set, so an unpinned caller produces a byte-identical
+            # `queue_episode` call to the one made before this parameter existed.
+            scope = {"namespace": namespace} if namespace else {}
             queued = await asyncio.wait_for(
                 backend.queue_episode(
                     narrative,
                     user_id=user_id,
                     session_id=session_id,
                     source="project-scan",
+                    **scope,
                 ),
                 timeout=queue_timeout_s,
             )

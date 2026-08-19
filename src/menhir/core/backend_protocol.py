@@ -350,9 +350,10 @@ class MemoryBackend(Protocol):
         ...
 
     async def list_episode_processing(
-        self, *, states: list[str] | None = None, limit: int = 25
+        self, *, states: list[str] | None = None, limit: int = 25,
+        namespace: str | None = None,
     ) -> list[dict[str, Any]]:
-        """List episodes in processing queue, optionally filtered by state."""
+        """List episodes in processing queue, optionally filtered by state and namespace."""
         ...
 
     async def get_queue_depth(self) -> int:
@@ -600,6 +601,7 @@ class MemoryBackend(Protocol):
         repository: str,
         from_commit: str | None = None,
         conflict_limit: int = 25,
+        namespace: str | None = None,
     ) -> dict[str, Any]:
         """Read-only graph/filesystem parity summary for one artifact corpus."""
         ...
