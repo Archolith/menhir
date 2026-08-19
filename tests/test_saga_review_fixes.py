@@ -318,9 +318,12 @@ class TestClientReadDeadlineIsMeasured:
     than by changing this code. Preflight therefore measures it instead of assuming it.
     """
 
-    def test_absent_deadline_is_reported_as_a_warning(self):
+    def test_absent_deadline_is_reported_as_a_warning(self, monkeypatch):
         from menhir.services.saga_preflight import preflight_from_run
 
+        # This test isolates the read-deadline verdict. Gate-awareness is an independent
+        # deployment precondition and must not depend on whichever environment runs pytest.
+        monkeypatch.setenv(oo.SAGA_WRITERS_GATE_AWARE_ENV, "1")
         run = SimpleNamespace(
             run_id="r", scanned=0, counts={}, counts_by_kind={},
             oldest_prepared_age_seconds=None, examples={}, write_ready=True,
