@@ -7,7 +7,8 @@ import sqlite3
 import time
 from typing import Any, Awaitable, Callable, TypeVar, cast
 
-from menhir.infrastructure.telemetry.store import McpTelemetryStore, _preview_of, _size_of, _utc_now_iso, telemetry_store
+from menhir.infrastructure.telemetry.helpers import _safe_preview_of, _size_of, _utc_now_iso
+from menhir.infrastructure.telemetry.store import McpTelemetryStore, telemetry_store
 
 T = TypeVar("T")
 logger = logging.getLogger(__name__)
@@ -40,6 +41,53 @@ def _diagnose_failure(operation: str, exc: Exception) -> str:
     return f"{type(exc).__name__}: {text}"
 
 
+def _telemetry_error(exc: Exception) -> str:
+    """Return an error label safe to persist without copying arbitrary exception prose.
+
+    Caller-facing diagnostics still use :func:`_diagnose_failure`; the sidecar only needs
+    enough information to aggregate failure classes. Arbitrary exception text can contain the
+    request body and must not become another durable copy of user content.
+    """
+    text = str(exc).lower()
+    if isinstance(exc, sqlite3.OperationalError) and ("locked" in text or "busy" in text):
+        return "SQLiteOperationalError: telemetry store busy/locked"
+    if type(exc).__name__ in _GRAPH_UNREACHABLE_ERRORS or "neo4j" in text:
+        return f"{type(exc).__name__}: graph store unavailable"
+    return type(exc).__name__
+
+
+def _lineage_from_payload(payload: Any) -> tuple[str, str | None]:
+    """Resolve durable telemetry lineage from effective request context and structural args.
+
+    Namespace pinning is server policy, so it wins over a caller-supplied namespace. When no
+    tenant namespace exists, stamp the explicit default namespace instead of NULL: a current
+    telemetry row must never look like pre-lineage historical residue merely because the call
+    was global/default-scoped.
+    """
+    from menhir.domain.namespace import DEFAULT_NAMESPACE
+
+    requested_namespace = ""
+    node_uuid: str | None = None
+    if isinstance(payload, dict):
+        requested_namespace = str(payload.get("namespace") or "").strip()
+        for key in ("node_uuid", "memory_uuid", "uuid"):
+            value = str(payload.get(key) or "").strip()
+            if value:
+                node_uuid = value
+                break
+
+    pinned_namespace = ""
+    try:
+        from menhir.mcp.service_access import get_pinned_namespace
+
+        pinned_namespace = str(get_pinned_namespace() or "").strip()
+    except Exception:  # pragma: no cover - telemetry lineage is best-effort
+        pinned_namespace = ""
+
+    namespace = pinned_namespace or requested_namespace or DEFAULT_NAMESPACE
+    return namespace, node_uuid
+
+
 async def track_mcp_call(
     *,
     kind: str,
@@ -49,17 +97,34 @@ async def track_mcp_call(
     store: McpTelemetryStore = telemetry_store,
     timeout: int = DEFAULT_MCP_TIMEOUT,
     error_mapper: Callable[[str], T] | None = None,
+    effective_payload: Callable[[], Any | None] | None = None,
 ) -> T:
     """Measure and persist one MCP call around an async runner.
 
     Returns an error string instead of raising so Claude always gets a response.
     Applies an async timeout (default 120s) to prevent indefinite hangs.
+
+    ``payload`` is used only for sizing and a privacy-minimized preview. Tool callers may provide
+    ``effective_payload`` to publish the structural arguments only after authorization, allowlist
+    checks, and namespace pinning have completed. If a protected runner is denied before that
+    point, telemetry falls back to the server-side pinned/default namespace and does not treat raw
+    caller UUID/namespace arguments as ownership.
     """
 
     started_at = _utc_now_iso()
     started = time.perf_counter()
     input_size = _size_of(payload) if payload is not None else None
-    payload_preview = _preview_of(payload) if payload is not None else None
+    payload_preview = _safe_preview_of(payload) if payload is not None else None
+
+    def _resolved_lineage() -> tuple[str, str | None]:
+        lineage_payload = payload
+        if effective_payload is not None:
+            try:
+                lineage_payload = effective_payload()
+            except Exception:  # pragma: no cover - telemetry lineage is best-effort
+                logger.warning("Failed to resolve effective MCP telemetry lineage", exc_info=True)
+                lineage_payload = None
+        return _lineage_from_payload(lineage_payload)
 
     try:
         result = await asyncio.wait_for(runner(), timeout=timeout)
@@ -72,6 +137,7 @@ async def track_mcp_call(
             "event loop so the call cannot return sooner. Check server health."
         )
         logger.error("%s (duration=%dms)", error_msg, duration_ms)
+        namespace, node_uuid = _resolved_lineage()
         try:
             store.record(
                 kind=kind,
@@ -80,10 +146,12 @@ async def track_mcp_call(
                 completed_at=completed_at,
                 duration_ms=duration_ms,
                 success=False,
-                error=error_msg,
+                error=f"TimeoutError: exceeded {timeout}s",
                 input_size=input_size,
                 result_size=None,
                 payload_preview=payload_preview,
+                namespace=namespace,
+                node_uuid=node_uuid,
             )
         except sqlite3.Error:
             logger.exception("Failed to record timeout telemetry")
@@ -95,6 +163,7 @@ async def track_mcp_call(
         duration_ms = int((time.perf_counter() - started) * 1000)
         error_msg = _diagnose_failure(operation, exc)
         logger.error("MCP %s/%s failed after %dms: %s", kind, operation, duration_ms, error_msg)
+        namespace, node_uuid = _resolved_lineage()
         try:
             store.record(
                 kind=kind,
@@ -103,10 +172,12 @@ async def track_mcp_call(
                 completed_at=completed_at,
                 duration_ms=duration_ms,
                 success=False,
-                error=error_msg,
+                error=_telemetry_error(exc),
                 input_size=input_size,
                 result_size=None,
                 payload_preview=payload_preview,
+                namespace=namespace,
+                node_uuid=node_uuid,
             )
         except sqlite3.Error:
             logger.exception("Failed to record error telemetry")
@@ -118,6 +189,7 @@ async def track_mcp_call(
     duration_ms = int((time.perf_counter() - started) * 1000)
     result_size = _size_of(result) if result is not None else None
     logger.info("MCP %s/%s completed in %dms", kind, operation, duration_ms)
+    namespace, node_uuid = _resolved_lineage()
     try:
         store.record(
             kind=kind,
@@ -130,6 +202,8 @@ async def track_mcp_call(
             input_size=input_size,
             result_size=result_size,
             payload_preview=payload_preview,
+            namespace=namespace,
+            node_uuid=node_uuid,
         )
     except sqlite3.Error:
         logger.exception("Failed to record success telemetry")

@@ -26,7 +26,9 @@ class ErasureShape(str, Enum):
     """How content in a column is addressed for erasure.
 
     - DIRECT_SUBJECT_UUID: content keyed by a single subject UUID (e.g. a memory node).
-    - TWO_PARTY_UUID: content keyed by two UUIDs (e.g. survivor and absorbed node).
+    - TWO_PARTY_UUID: content keyed by multiple party identifiers; any matching key erases it.
+    - ANY_SUBJECT: content may be keyed by different subject dimensions (for example either
+      node_uuid or namespace); any resolved matching key erases it.
     - NAMESPACE_KEYED: content keyed by a namespace rather than a single UUID.
     - DERIVABLE_SUBJECT: subject can be derived from surrounding row data.
     - UNADDRESSABLE: carries content but has no subject key, so a UUID-keyed purge
@@ -35,6 +37,7 @@ class ErasureShape(str, Enum):
 
     DIRECT_SUBJECT_UUID = "DIRECT_SUBJECT_UUID"
     TWO_PARTY_UUID = "TWO_PARTY_UUID"
+    ANY_SUBJECT = "ANY_SUBJECT"
     NAMESPACE_KEYED = "NAMESPACE_KEYED"
     DERIVABLE_SUBJECT = "DERIVABLE_SUBJECT"
     UNADDRESSABLE = "UNADDRESSABLE"
@@ -98,19 +101,19 @@ CONTENT_COLUMNS: tuple[ContentColumn, ...] = (
             "absorbed_namespace",
         ),
         note=(
-            "Absorbed-node snapshot used for unmerge; addressed by both the survivor "
-            "and the absorbed memory UUIDs."
+            "Absorbed-node snapshot used for unmerge; addressed by both participant UUIDs "
+            "and durable namespace lineage."
         ),
     ),
     ContentColumn(
         table="mcp_events",
         column="payload_preview",
-        shape=ErasureShape.DIRECT_SUBJECT_UUID,
-        key_columns=("node_uuid",),
+        shape=ErasureShape.ANY_SUBJECT,
+        key_columns=("node_uuid", "namespace"),
         note=(
-            "Carries a preview of memory text. Durable subject lineage (node_uuid) was "
-            "added by CF-165 Phase C, so a UUID-keyed purge can now reach it. Rows "
-            "written before that migration have NULL lineage and are not addressable."
+            "Legacy rows can contain memory text; current writers privacy-minimize the preview. "
+            "Rows are addressable by a specific node UUID when one exists or by the effective "
+            "namespace for namespace erasure. Pre-lineage NULL/NULL rows remain explicit residue."
         ),
     ),
     ContentColumn(
@@ -254,13 +257,11 @@ CONTENT_COLUMNS: tuple[ContentColumn, ...] = (
     ContentColumn(
         table="mcp_events",
         column="error",
-        shape=ErasureShape.DIRECT_SUBJECT_UUID,
-        key_columns=("node_uuid",),
+        shape=ErasureShape.ANY_SUBJECT,
+        key_columns=("node_uuid", "namespace"),
         note=(
-            "Tool error text can embed request payload content. Durable subject lineage "
-            "(node_uuid) was added by CF-165 Phase C, so a UUID-keyed purge can now reach "
-            "it. Rows written before that migration have NULL lineage and are not "
-            "addressable."
+            "Legacy tool errors can embed request payload content; current writers persist only a "
+            "redacted/classification label. Rows are addressable by node UUID or effective namespace."
         ),
     ),
     ContentColumn(
@@ -269,7 +270,9 @@ CONTENT_COLUMNS: tuple[ContentColumn, ...] = (
         shape=ErasureShape.DERIVABLE_SUBJECT,
         key_columns=("session_id",),
         note=(
-            "Operator-authored rating text; only session-scoped, with no node key."
+            "Legacy/operator-authored rating text. Current writers no longer persist this field "
+            "and schema migration scrubs existing values, but any populated value is still "
+            "content and must be reported when an erasure cannot derive its session ownership."
         ),
     ),
 )
@@ -357,7 +360,8 @@ NON_CONTENT_COLUMNS: frozenset[tuple[str, str]] = frozenset(
         ("session_registry", "client_name"),
         ("session_registry", "first_accessed"),
         ("session_registry", "last_accessed"),
-        # recall_receipts
+        # recall_receipts -- free-text reasons are scrubbed by the schema migration and no
+        # longer persisted by rate_recall; remaining fields are operational metrics only.
         ("recall_receipts", "token"),
         ("recall_receipts", "operation"),
         ("recall_receipts", "client_id"),

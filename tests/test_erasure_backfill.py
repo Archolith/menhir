@@ -34,10 +34,25 @@ class FakeGraph:
         return {u: self.namespaces[u] for u in uuids if u in self.namespaces}
 
 
+_LEGACY_SEED_GUARDS = (
+    "trg_cf165_mcp_missing_lineage",
+    "trg_cf165_extraction_missing_lineage",
+    "trg_cf165_merge_infer_lineage",
+    "trg_cf165_merge_drop_unowned",
+)
+
+
 @pytest.fixture
 def db(tmp_path):
     path = tmp_path / "t.db"
     McpTelemetryStore(db_path=path)._ensure_ready()
+    # These tests deliberately manufacture rows that pre-date the forward-lineage guards while
+    # using today's schema. Disable only those guards so the fixture represents historical residue
+    # rather than a new application write, which the production database correctly minimizes.
+    with sqlite3.connect(path) as conn:
+        for trigger in _LEGACY_SEED_GUARDS:
+            conn.execute(f"DROP TRIGGER IF EXISTS {trigger}")
+        conn.commit()
     return path
 
 

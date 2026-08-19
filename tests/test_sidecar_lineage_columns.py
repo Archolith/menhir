@@ -102,7 +102,8 @@ def test_record_round_trips_namespace_and_node_uuid(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
-def test_record_without_new_kwargs_stores_null(tmp_path: Path) -> None:
+def test_record_without_new_kwargs_gets_safe_default_lineage(tmp_path: Path) -> None:
+    """The persistence boundary must not create a new NULL-lineage MCP event."""
     db_path = tmp_path / "no-lineage.db"
     store = McpTelemetryStore(db_path=db_path)
     store.record(
@@ -120,7 +121,7 @@ def test_record_without_new_kwargs_stores_null(tmp_path: Path) -> None:
 
     row = _mcp_event_row(db_path)
     assert row is not None
-    assert row["namespace"] is None
+    assert row["namespace"] == "default"
     assert row["node_uuid"] is None
 
 
@@ -141,7 +142,10 @@ def test_record_extraction_lab_run_round_trips_namespace(tmp_path: Path) -> None
 
 
 @pytest.mark.unit
-def test_record_extraction_lab_run_without_namespace_stores_null(tmp_path: Path) -> None:
+def test_record_extraction_lab_run_without_namespace_stores_explicit_unscoped_lineage(
+    tmp_path: Path,
+) -> None:
+    """A current raw-message row must never be NULL-lineage CF-165 residue."""
     db_path = tmp_path / "lab-no-namespace.db"
     store = McpTelemetryStore(db_path=db_path)
     run_id = store.record_extraction_lab_run(
@@ -152,7 +156,7 @@ def test_record_extraction_lab_run_without_namespace_stores_null(tmp_path: Path)
 
     row = _extraction_lab_run_row(db_path)
     assert row is not None
-    assert row["namespace"] is None
+    assert row["namespace"] == "__extraction_lab_unscoped__"
 
 
 @pytest.mark.unit

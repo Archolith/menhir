@@ -27,9 +27,9 @@ Semantics:
   ``absorbed_uuid``, ...) -> node_uuids.
 - Single-key shapes (``DIRECT_SUBJECT_UUID``, ``NAMESPACE_KEYED``,
   ``DERIVABLE_SUBJECT``) match rows where that key column IS IN its subject set.
-- ``TWO_PARTY_UUID`` matches rows where ANY key column matches (OR across key columns,
-  never AND): matching only one side would leave recovery material for the erased
-  subject, which is load-bearing, not a detail.
+- ``TWO_PARTY_UUID`` and ``ANY_SUBJECT`` match rows where ANY resolved key column matches
+  (OR across key columns, never AND). The former models multi-party recovery records; the
+  latter models content that may legitimately be addressed through different subject dimensions.
 - Purge NULLs the content column; it never deletes rows, because rows carry non-content
   operational columns other findings depend on (erase the content, keep the shape).
 - An entry whose key columns resolve to no subjects at all is skipped instead of
@@ -121,9 +121,9 @@ def _where_clause_for(
             resolved.append((key_column, values))
     if not resolved:
         return None
-    if shape is ErasureShape.TWO_PARTY_UUID:
-        # Match on ANY key column (OR, never AND). One-sided matching would leave
-        # recovery material for the erased subject.
+    if shape in {ErasureShape.TWO_PARTY_UUID, ErasureShape.ANY_SUBJECT}:
+        # Match on ANY resolved key column (OR, never AND). One-sided matching would leave
+        # recovery material or telemetry content for an erased subject.
         clauses: list[str] = []
         params: list[str] = []
         for key_column, values in resolved:

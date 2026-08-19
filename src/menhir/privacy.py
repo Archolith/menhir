@@ -114,101 +114,16 @@ def redact_rows(
 
 # --- at-rest redaction for persisted telemetry payloads --------------------
 #
-# Everything above this line is DISPLAY-time redaction, as the module docstring says:
-# it hides content on the way to a human viewer and never changes what is stored.
-# What follows is different in kind and is the only part of this module that does.
+# This module is DISPLAY-time redaction, as the docstring above says. The at-rest control for
+# `mcp_events.payload_preview` deliberately does NOT live here: it is
+# `infrastructure/telemetry/helpers._redact_telemetry_value`, applied inside `_preview_of` so
+# every writer of that column gets it without opting in.
 #
-# MCP tool arguments were persisted verbatim into `mcp_events.payload_preview` -- the
-# first 500 characters of every memory a user submitted, in plaintext, in the sidecar
-# database. That is the absence of an at-rest control rather than a broken one, so the
-# fix belongs at the write boundary.
-#
-# The policy is an ALLOWLIST and it is deliberately inverted relative to REDACTED_FIELDS
-# above. Display-time redaction can name the content fields because the surfaces are
-# known and finite. A tool argument is neither: 92 distinct parameter names across 54
-# tools today, and the next tool added is not going to update a denylist. So a string
-# survives only if its key is named here as structural; anything else is masked. A new
-# content-bearing parameter is then private by default instead of leaked by default.
-
-#: Argument names whose STRING values are structural and safe to persist. Derived by
-#: enumerating every `endpoint()` signature under `mcp/tools/`; identifiers, enums,
-#: namespaces and selectors, never free text or filesystem paths.
-TELEMETRY_SAFE_ARG_NAMES: frozenset[str] = frozenset(
-    {
-        "action",
-        "artifact_type",
-        "artifact_uuid",
-        "bootstrap_scope",
-        "candidate_type",
-        "client_id",
-        "client_name",
-        "cluster_id",
-        "cursor",
-        "document_type",
-        "episode_uuid",
-        "evidence_strength",
-        "expected_old_integrity",
-        "from_commit",
-        "from_status",
-        "group_id",
-        "keep_uuid",
-        "kind",
-        "namespace",
-        "new_uuid",
-        "node_uuid",
-        "observed_integrity",
-        "old_uuid",
-        "operation",
-        "preset",
-        "priority",
-        "project",
-        "query_type",
-        "reader_id",
-        "recall_id",
-        "relation",
-        "remove_uuid",
-        "repository",
-        "session_id",
-        "source",
-        "source_uuid",
-        "state",
-        "status",
-        "structure_project",
-        "target_uuid",
-        "tier",
-        "to_status",
-        "turn_evidence_uuid",
-        "type",
-        "user_id",
-        "uuid",
-        "workspace",
-    }
-)
-
-
-def redact_payload_for_storage(value: object, *, key: str | None = None) -> object:
-    """Mask free text in a telemetry payload before it is written to the sidecar.
-
-    Non-string scalars (int, float, bool, None) are structural by type and pass through,
-    so a preview still shows the SHAPE of a call -- which argument names were supplied,
-    which limits and flags were set -- without its content. Strings survive only under a
-    key in :data:`TELEMETRY_SAFE_ARG_NAMES`. Containers are walked, and a string inside a
-    list inherits the list's key, so ``notes=["..."]`` is masked as a whole.
-
-    Note the asymmetry with :func:`redact_text`: that one passes empty strings through
-    because there is nothing to hide at display time. Here an empty string is masked like
-    any other unlisted string, because the value of this function is that its output does
-    not depend on the content it was given.
-    """
-    if isinstance(value, dict):
-        return {k: redact_payload_for_storage(v, key=str(k)) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [redact_payload_for_storage(v, key=key) for v in value]
-    if isinstance(value, str):
-        if key is not None and key in TELEMETRY_SAFE_ARG_NAMES:
-            return value
-        return MASK
-    return value
+# A duplicate of it briefly lived here (CF-167). It was removed on merging the CF-165 E2E closure
+# work, which had arrived at the same control independently and with a property this one lacked:
+# an allowlisted KEY is not enough, the VALUE must also be identifier-shaped. Without that, a
+# caller passing `namespace="<prose>"` had the prose retained because the key was on the list.
+# Two implementations of one rule is how they drift; the stricter one won.
 
 
 # --- log-line redaction ----------------------------------------------------

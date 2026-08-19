@@ -13,6 +13,7 @@ from menhir.infrastructure.telemetry.helpers import _json_default, _span_days, _
 
 logger = logging.getLogger(__name__)
 
+
 class TelemetryEventStoreMixin:
     def record(
         self,
@@ -198,6 +199,11 @@ class TelemetryEventStoreMixin:
 
         Mirrors record_recall_lab_run's shape; arms_json carries a per-arm summary of
         gold scores + error state instead of retrieval-hit counts.
+
+        ``source_namespace`` is the production fixture's real Graphiti group id. Use it as
+        durable erasure lineage when the caller does not explicitly supply ``namespace``.
+        Synthetic fixtures have no tenant owner, so they are stamped with an explicit lab scope
+        rather than NULL; NULL is reserved for genuine pre-lineage historical residue.
         """
 
         self._ensure_ready()
@@ -212,6 +218,11 @@ class TelemetryEventStoreMixin:
             }
             for arm in result_payload.get("arms") or []
         ]
+        effective_namespace = (
+            str(namespace or "").strip()
+            or str(request_payload.get("source_namespace") or "").strip()
+            or "__extraction_lab_unscoped__"
+        )
         try:
             with self._connect() as conn:
                 cursor = conn.execute(
@@ -228,7 +239,7 @@ class TelemetryEventStoreMixin:
                         json.dumps(arm_summaries, default=_json_default),
                         json.dumps(request_payload, default=_json_default),
                         json.dumps(result_payload, default=_json_default),
-                        namespace,
+                        effective_namespace,
                     ),
                 )
                 conn.commit()
