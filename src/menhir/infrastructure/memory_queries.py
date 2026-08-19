@@ -12,6 +12,7 @@ import logging
 from typing import Any
 
 from menhir.domain.bootstrap_scope import bootstrap_selection, normalize_bootstrap_scope
+from menhir.domain.namespace import namespace_to_group_ids
 from menhir.domain.structural_memory import non_structural_memory_cypher
 from menhir.infrastructure.cypher import (
     Cypher,
@@ -90,7 +91,11 @@ class MemoryQueryRepository:
         return self.neo4j.execute(query, params=params)
 
     def fetch_flagged_memories(
-        self, limit: int = 10, workspace: str | None = None
+        self,
+        limit: int = 10,
+        workspace: str | None = None,
+        *,
+        namespace: str | None = None,
     ) -> list[dict[str, Any]]:
         """Return explicitly flagged memory nodes for bootstrap context reads.
 
@@ -100,26 +105,32 @@ class MemoryQueryRepository:
 
         safe_limit = max(1, min(limit, 50))
         _selection_key, allowed_scopes = bootstrap_selection(workspace)
+        where = ["(n:Entity OR n:Episodic)",
+                 "coalesce(n.user_flagged, false) = true",
+                 "n.bootstrap_scope IN $allowed_scopes",
+                 non_structural_memory_cypher("n")]
+        params: dict[str, Any] = {
+            "limit": safe_limit,
+            "allowed_scopes": allowed_scopes,
+        }
+        group_ids = namespace_to_group_ids(namespace)
+        if group_ids is not None:
+            where.append("n.group_id IN $group_ids")
+            params["group_ids"] = group_ids
         query = (Cypher()
             .match("(n)")
-            .where("(n:Entity OR n:Episodic)",
-                   "coalesce(n.user_flagged, false) = true",
-                   "n.bootstrap_scope IN $allowed_scopes",
-                   non_structural_memory_cypher("n"))
+            .where(*where)
             .return_fields(MEMORY_RETURN_FIELDS)
             .order_by("coalesce(n.last_accessed, n.created_at) DESC, n.uuid")
             .limit()
             .build())
-        return self.neo4j.execute(
-            query,
-            params={
-                "limit": safe_limit,
-                "allowed_scopes": allowed_scopes,
-            },
-        )
+        return self.neo4j.execute(query, params=params)
 
     def fetch_flagged_memory_bootstrap_version(
-        self, workspace: str | None = None
+        self,
+        workspace: str | None = None,
+        *,
+        namespace: str | None = None,
     ) -> str:
         """Return a deterministic version fingerprint for the flagged-memory set.
 
@@ -128,17 +139,23 @@ class MemoryQueryRepository:
         """
 
         selection_key, allowed_scopes = bootstrap_selection(workspace)
+        where = ["(n:Entity OR n:Episodic)",
+                 "coalesce(n.user_flagged, false) = true",
+                 "n.bootstrap_scope IN $allowed_scopes",
+                 non_structural_memory_cypher("n")]
+        params: dict[str, Any] = {"allowed_scopes": allowed_scopes}
+        group_ids = namespace_to_group_ids(namespace)
+        if group_ids is not None:
+            where.append("n.group_id IN $group_ids")
+            params["group_ids"] = group_ids
         rows = self.neo4j.execute(
             f"""
             MATCH (n)
-            WHERE (n:Entity OR n:Episodic)
-              AND coalesce(n.user_flagged, false) = true
-              AND n.bootstrap_scope IN $allowed_scopes
-              AND {non_structural_memory_cypher("n")}
+            WHERE {" AND ".join(where)}
             WITH n ORDER BY n.uuid
             RETURN collect(n.uuid) AS uuids
             """,
-            params={"allowed_scopes": allowed_scopes},
+            params=params,
         )
         uuids = [str(uuid) for uuid in (rows[0].get("uuids", []) if rows else []) if uuid]
         digest = hashlib.sha256("|".join(uuids).encode("utf-8")).hexdigest()[:16]
