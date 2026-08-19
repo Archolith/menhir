@@ -60,6 +60,14 @@ from menhir.services.ingest_models import (
     _parse_occurred_at,
 )
 
+class LlmBudgetExceeded(RuntimeError):
+    """An episode tried to make more LLM calls than its per-job budget permits (CF-79).
+
+    Raised from the usage callback at the moment a call is reserved, so the call never
+    dispatches. Distinct from a provider error: nothing failed, the work was refused.
+    """
+
+
 class IngestWorkerMixin:
     async def _enrichment_worker_loop(self) -> None:
         queue = self._queue()
@@ -200,30 +208,14 @@ class IngestWorkerMixin:
                 )
                 return
 
-            # PART 4: Per-job LLM budget enforcement (backpressure, not failure)
-            job_llm_count = self._job_llm_call_counts.get(episode_uuid, 0)
-            if job_llm_count > self._budget_settings_max_per_job:
-                logger.warning(
-                    "Per-job LLM budget exceeded for episode %s: %d calls (limit=%d) — "
-                    "requeueing with backpressure",
-                    episode_uuid,
-                    job_llm_count,
-                    self._budget_settings_max_per_job,
-                )
-                await asyncio.to_thread(
-                    self.graph_adapter.mark_episode_pending,
-                    episode_uuid,
-                    retry_after_s=60.0,  # Same backpressure shape as session budget
-                    worker_id=self._worker_id,
-                )
-                record_lifecycle_event(
-                    component="ingest_worker",
-                    event="per_job_llm_budget_requeue",
-                    state="completed",
-                    episode_uuid=episode_uuid,
-                    details={"retry_after_s": 60.0, "job_llm_calls": job_llm_count},
-                )
-                return
+            # PART 4: the per-job LLM budget is enforced at the RESERVATION point, in
+            # `_record_episode_llm_usage`, not here (CF-79). A pre-attempt check on
+            # `_job_llm_call_counts` could never fire: the `finally` below pops the counter at the
+            # end of every attempt, so a fresh attempt always reads 0. It could only have stopped
+            # an attempt that was already over budget when it began, which is not a state this
+            # code can produce. The amplification the finding proves is WITHIN one attempt --
+            # entity count multiplies judge calls, and episode content drives entity count -- so
+            # only an in-flight bound stops it.
 
             await run_graphiti_extraction(ctx, finalize_under_gate=True)
         except CircuitOpenError as exc:
@@ -267,14 +259,30 @@ class IngestWorkerMixin:
         """Increment live LLM task counters for one processing episode."""
 
         if event.phase == "started":
+            # CF-79: this is a RESERVATION, not a meter. The counter is incremented before the
+            # call is allowed to proceed, and breaching the budget raises rather than logging.
+            #
+            # It read `budget` and `limit` and behaved as telemetry: it warned and the call went
+            # ahead, as did every call after it. That matters because the quantity is influenced
+            # by an untrusted party -- one attempt costs roughly
+            # `1 + N_entities searches + (surviving pairs x 3)` judge calls, and episode content
+            # decides N_entities. A control that counts an attacker-shaped quantity and does
+            # nothing is not a control.
+            #
+            # Raising lands in `_process_episode`'s `except Exception` and goes through
+            # `handle_enrichment_failure`, the same path any mid-episode LLM error already takes.
             count = self._job_llm_call_counts.get(episode_uuid, 0) + 1
             self._job_llm_call_counts[episode_uuid] = count
             if count > self._budget_settings_max_per_job:
                 logger.warning(
-                    "Per-job LLM budget exceeded for episode %s: %d calls (limit=%d)",
+                    "Per-job LLM budget exceeded for episode %s: %d calls (limit=%d) -- refusing",
                     episode_uuid,
                     count,
                     self._budget_settings_max_per_job,
+                )
+                raise LlmBudgetExceeded(
+                    f"episode {episode_uuid} exceeded its per-job LLM budget "
+                    f"({count} calls, limit {self._budget_settings_max_per_job})"
                 )
 
         scheduler_task = build_episode_scheduler_task(
