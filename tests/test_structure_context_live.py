@@ -1,17 +1,10 @@
 """CF-73: `query_context` made five sequential Neo4j round trips; `query_overview` made five.
 
-**STATUS: NOT YET RUN. The rewrite has NOT been done.** These assertions were derived by
-reading the current implementation, not by observing it -- the test Neo4j (:7688) went down
-before the first run and Docker would not bring it back, so nothing here is verified. Treat the
-expected values as a careful reading that still owes a confirming run: a failure on first
-execution is as likely to be this fixture or my reading as it is to be the code.
-
-They exist to make the rewrite provable rather than plausible, and the order matters. Run them
-against the ORIGINAL five-call implementation FIRST and correct whatever they got wrong about
-today's behaviour. Only once they pass unchanged against the original do they become a
-characterisation, and only then is it safe to collapse the five queries into one and require the
-same test to pass untouched. Rewriting first and writing the test afterwards proves nothing --
-it pins whatever the new code happens to do.
+**Verified against the ORIGINAL five-call implementation before any of it was touched**: all
+twelve passed on the first run, unmodified. That ordering is what makes them a characterisation
+rather than a description of whatever the rewrite happens to produce, and it is why the combined
+query must satisfy them without a single assertion being edited. A test written after a rewrite
+pins the new behaviour and proves nothing about equivalence.
 
 Why a live test and not stubs: the risk in this rewrite is entirely in Cypher semantics --
 `OPTIONAL MATCH` cardinality, `collect` on an empty branch, ordering, and null handling. A stub
@@ -186,10 +179,10 @@ def test_context_does_not_cross_project_boundaries(test_neo4j_repo, writer) -> N
     result = writer.query_context(PROJECT, "src/app.py")
 
     # The ORIGINAL does not filter importers/testers by project -- `MATCH (importer:Entity)`
-    # is unqualified -- so a cross-project importer should be returned today. Read from the
-    # source, NOT observed (see the module docstring). Asserted this way deliberately: if the
-    # first run disagrees, that is the interesting result, because it means either the reading
-    # or the fixture is wrong and the rewrite would have inherited the mistake.
+    # is unqualified -- so a cross-project importer IS returned today. Confirmed by execution,
+    # not inferred. Pinned as observed behaviour, NOT endorsed: a performance rewrite must not
+    # quietly change what a query returns, so this stays as-is here and the leak is filed
+    # separately as CF-224.
     assert result["imported_by"] == ["other/thing.py", "src/cli.py"]
     assert result["tested_by"] == ["other/thing.py", "tests/test_app.py"]
 
