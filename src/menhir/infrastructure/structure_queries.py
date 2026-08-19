@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from menhir.domain.namespace import namespace_to_group_ids
 from menhir.domain.todo_location import DEFAULT_TODO_NAMESPACE as _DEFAULT_TODO_NAMESPACE
 from menhir.domain.truth.kinds import SOURCE_CONFIDENCE_AGENT
 from menhir.domain.utils import source_confidence_for, symbol_structure_path
@@ -989,7 +990,9 @@ class StructureGraphWriter:
         ]
 
         # Related memories: semantic memories anchored to impacted files
-        related_memories = self.query_linked_memories(project, all_impacted, limit=10)
+        related_memories = self.query_linked_memories(
+            project, all_impacted, limit=10, namespace=namespace
+        )
 
         # Open TODOs at any impacted location. Matched on the todo's own
         # normalized :TodoLocation (exact project + path) rather than the
@@ -1202,17 +1205,35 @@ class StructureGraphWriter:
         project: str,
         file_paths: list[str],
         limit: int = 10,
+        *,
+        namespace: str | None = None,
     ) -> list[dict[str, str]]:
-        """Find semantic memories anchored to the given structural file paths."""
+        """Find semantic memories anchored to the given structural file paths.
+
+        The result is restricted to the given namespace when one is supplied, and
+        unfiltered when it is None.
+        """
         if not file_paths:
             return []
+        # Isolation is opt-in (domain/namespace.py): an unspecified namespace must not filter,
+        # so the predicate is omitted entirely rather than passed as a null-guarded no-op.
+        # Predicated on group_id, the load-bearing isolation boundary -- `namespace` on a node
+        # is only the defense-in-depth stamp. NULL group_id therefore does NOT match a scoped
+        # read: this is a leak fix, so an unstamped node fails closed rather than open.
+        group_ids = namespace_to_group_ids(namespace)
+        params: dict[str, Any] = {"p": project, "paths": file_paths, "limit": limit}
+        tenancy_filter = ""
+        if group_ids is not None:
+            tenancy_filter = "AND sem.group_id IN $group_ids"
+            params["group_ids"] = group_ids
         rows = self.neo4j.execute(
-            """
+            f"""
             UNWIND $paths AS fp
-            MATCH (struct:Entity {structure_project: $p, structure_path: fp})
+            MATCH (struct:Entity {{structure_project: $p, structure_path: fp}})
                   <-[r:ANCHORED_TO]-(sem:Entity)
             WHERE sem.structure_role IS NULL
               AND coalesce(sem.freshness, 'ACTIVE') <> 'GONE'
+              {tenancy_filter}
             WITH sem, struct, r
             ORDER BY sem.last_accessed DESC
             RETURN sem.uuid AS uuid,
@@ -1224,7 +1245,7 @@ class StructureGraphWriter:
             ORDER BY last_accessed DESC
             LIMIT $limit
             """,
-            {"p": project, "paths": file_paths, "limit": limit},
+            params,
         )
         return [
             {
