@@ -264,6 +264,17 @@ CONTENT_COLUMNS: tuple[ContentColumn, ...] = (
             "redacted/classification label. Rows are addressable by node UUID or effective namespace."
         ),
     ),
+    ContentColumn(
+        table="recall_receipts",
+        column="reason",
+        shape=ErasureShape.DERIVABLE_SUBJECT,
+        key_columns=("session_id",),
+        note=(
+            "Legacy/operator-authored rating text. Current writers no longer persist this field "
+            "and schema migration scrubs existing values, but any populated value is still "
+            "content and must be reported when an erasure cannot derive its session ownership."
+        ),
+    ),
 )
 
 
@@ -350,14 +361,13 @@ NON_CONTENT_COLUMNS: frozenset[tuple[str, str]] = frozenset(
         ("session_registry", "first_accessed"),
         ("session_registry", "last_accessed"),
         # recall_receipts -- free-text reasons are scrubbed by the schema migration and no
-        # longer persisted by rate_recall; the remaining columns are operational metrics only.
+        # longer persisted by rate_recall; remaining fields are operational metrics only.
         ("recall_receipts", "token"),
         ("recall_receipts", "operation"),
         ("recall_receipts", "client_id"),
         ("recall_receipts", "session_id"),
         ("recall_receipts", "created_at"),
         ("recall_receipts", "score_label"),
-        ("recall_receipts", "reason"),
         ("recall_receipts", "rated_at"),
         # recall_lab_runs
         ("recall_lab_runs", "recorded_at"),
