@@ -440,7 +440,7 @@ class LLMAdapter:
         # _strip_thinking_tags may collapse newlines into spaces, so we split
         # on the numbered pattern rather than relying on line breaks.
         results: list[str | None] = [None] * len(edges)
-        for match in re.finditer(r"(\d+)[.:\-)\s]+(.+?)(?=\s*\d+[.:\-)\s]|$)", raw.strip()):
+        for match in re.finditer(r"(\d+)[.:\-)\s]+(.+?)(?=\s*\d+[.:\-)]|$)", raw.strip()):
             idx = int(match.group(1)) - 1
             fact = match.group(2).strip()
             if 0 <= idx < len(edges) and fact:
