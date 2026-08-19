@@ -748,7 +748,15 @@ class MemoryQueryRepository:
         event assertion outside it. A shared head (still HAS_VERSION to a surviving assertion in
         another namespace) is PRESERVED; its deleted CURRENT is repaired by a later idempotent
         write, and event recall reads durable assertions, so a shared head may temporarily carry no
-        CURRENT without data loss. Scalar repair receipts and return shape are unchanged."""
+        CURRENT without data loss. Scalar repair receipts and return shape are unchanged.
+
+        :TurnEvidence is deleted HERE, inside this query, rather than by a follow-up call. It holds
+        raw user prompts plus ``cwd`` and ``transcript_path``, and it used to be omitted from this
+        clause entirely -- so two of the three deletion paths left it behind. The one path that did
+        purge it did so as a separate, unjournaled step AFTER this saga had already committed, which
+        meant a crash in that window left raw prompts behind with no unresolved erasure row capable
+        of resuming them. Folding the label into this MATCH makes its removal atomic with the rest
+        of the partition, which is the only way that durability argument holds."""
         rows = self.neo4j.execute(
             """
             OPTIONAL MATCH (a:TypedAssertion {namespace: $namespace})
@@ -775,6 +783,7 @@ class MemoryQueryRepository:
                OR (n:TypedAssertion AND n.namespace = $namespace)
                OR (n:TypedAssertionHead AND n.namespace = $namespace)
                OR (n:ScalarConsolidationWatermark AND n.namespace = $namespace)
+               OR (n:TurnEvidence AND n.namespace = $namespace)
                OR (n:EventConsolidationWatermark AND n.group_id = $namespace)
                OR (n:TypedEventAssertion AND n.namespace = $namespace)
                OR (n:TypedEventAssertionHead
