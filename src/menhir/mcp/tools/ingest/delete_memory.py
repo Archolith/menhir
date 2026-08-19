@@ -5,17 +5,18 @@ from __future__ import annotations
 from menhir.mcp.tools.base import BaseTextTool
 
 
-async def delete_memory(node_uuid: str) -> str:
+async def delete_memory(node_uuid: str, namespace: str = "") -> str:
     """Delete a specific memory node and all its relationships.
 
     Args:
         node_uuid: The UUID of the memory node to delete. Get this from recall_memories results.
+        namespace: Restrict the operation to a single silo. A pinned client has this forced.
 
     Returns:
         Confirmation or failure message.
     """
 
-    return await DeleteMemoryTool().execute(node_uuid=node_uuid)
+    return await DeleteMemoryTool().execute(node_uuid=node_uuid, namespace=namespace)
 
 
 class DeleteMemoryTool(BaseTextTool):
@@ -23,16 +24,35 @@ class DeleteMemoryTool(BaseTextTool):
     required_tier = "operator"
     description = "Delete a specific memory node and all its relationships."
 
-    async def endpoint(self, node_uuid: str) -> str:
+    async def endpoint(self, node_uuid: str, namespace: str = "") -> str:
         """Delete a specific memory node and all its relationships.
 
         Args:
             node_uuid: The UUID of the memory node to delete. Get this from recall_memories results.
+            namespace: Restrict the operation to a single silo. A pinned client has this forced.
 
         Returns:
             Confirmation or failure message.
         """
         backend = self.get_backend()
+        # Ownership guard. Without the `namespace` parameter above, the pin cannot reach
+        # this tool at all: _apply_pinned_namespace injects only into endpoints whose
+        # signature names it, so a pinned client could erase any uuid it had learned.
+        #
+        # Two lookups, not one, and the second is the point. Refusing whenever the node is
+        # not found IN this namespace would also refuse when it is not in the graph AT ALL
+        # -- and that is a supported erasure path, not an error: `graph_already_absent` is
+        # how a merge leaves the node it absorbed, whose stored content must still be
+        # erasable. So absent-from-graph proceeds, and only a node that demonstrably
+        # belongs to another silo is refused.
+        ns = namespace.strip() or None
+        if ns is not None and await backend.fetch_memory_by_uuid(
+            node_uuid, namespace=ns
+        ) is None:
+            if await backend.fetch_memory_by_uuid(node_uuid) is not None:
+                return (
+                    f"Refused: memory {node_uuid} exists but is outside namespace {ns}."
+                )
         outcome = await backend.erase_memory(node_uuid)
         reason = outcome.get("reason")
         purged = sum((outcome.get("purged") or {}).values())

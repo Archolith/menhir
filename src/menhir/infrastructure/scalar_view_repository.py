@@ -454,7 +454,10 @@ class ScalarViewRepositoryMixin:
             """
             MATCH (n:Entity {view_kind:'scalar_history'})
             WHERE coalesce(n.view_current, true)
-              AND coalesce(n.group_id, 'default') = $namespace
+              // group_id is the tenancy property, and the empty string is the DEFAULT
+              // silo's group id -- so it must not be coalesced to the NAME 'default'.
+              // Matches the convention of the sibling list_scalar_history_views above.
+              AND n.group_id = $namespace
             RETURN n.uuid AS uuid, n.view_subject AS subject,
                    n.view_subject_uuid AS subject_uuid,
                    n.ss_attribute AS attribute, n.ss_scope AS scope,
@@ -464,7 +467,7 @@ class ScalarViewRepositoryMixin:
                      n.ss_kind, n.ss_unit, n.uuid
             LIMIT $limit
             """,
-            {"namespace": namespace, "limit": max(1, min(int(limit), 500))},
+            {"namespace": (namespace or ""), "limit": max(1, min(int(limit), 500))},
         )
         return [dict(r) for r in rows]
 

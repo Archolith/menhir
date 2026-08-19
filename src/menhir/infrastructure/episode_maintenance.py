@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from menhir.domain.namespace import namespace_to_group_id
 from menhir.infrastructure.cypher import (
     Cypher,
     EPISODE_PROCESSING_FIELDS,
@@ -317,6 +318,14 @@ class EpisodeMaintenanceRepository:
                     "n.type = 'ENTITY'",
                     "n.scope = 'SESSION'",
                     "n.raw_capture = true",
+                    # BOTH tenancy properties. `namespace` alone is the defense-in-depth
+                    # stamp; `group_id` is the load-bearing isolation boundary, and it is
+                    # what every namespace-scoped READ predicates on (see
+                    # domain/namespace.py and memory_queries.search_content_embeddings).
+                    # This was the ONE :Entity writer of eight that omitted it, so raw
+                    # captures were invisible to exactly the scoped recall they exist to
+                    # be found by.
+                    "n.group_id = $group_id",
                     "n.namespace = $namespace",
                     "n.session_id = $session_id",
                     "n.user_id = $user_id",
@@ -337,6 +346,7 @@ class EpisodeMaintenanceRepository:
                     "name": name,
                     "content": content,
                     "namespace": namespace,
+                    "group_id": namespace_to_group_id(namespace),
                     "session_id": session_id,
                     "user_id": user_id,
                     "source": source,
