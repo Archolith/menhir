@@ -416,6 +416,15 @@ async def _start_scheduler(built: object) -> MaintenanceScheduler:
         graph_adapter=built.graph_adapter,
         lifecycle_service=getattr(built, "lifecycle_service", None),
         revision_retention_days=getattr(settings, "revision_retention_days", 14),
+        # CF-171: thread the windows through. The finding this fixes is a sibling of CF-166 --
+        # a retention control that existed and was never called -- so leaving these parsed but
+        # unread would reproduce the exact defect.
+        telemetry_observability_retention_days=getattr(
+            settings, "telemetry_observability_retention_days", 30
+        ),
+        telemetry_diagnostic_retention_days=getattr(
+            settings, "telemetry_diagnostic_retention_days", 90
+        ),
         structure_watcher_interval_s=getattr(settings, "structure_watcher_interval_s", 1800.0),
         structure_watcher_enabled=getattr(settings, "structure_watcher_enabled", True),
         experience_counter_enabled=getattr(settings, "experience_counter_enabled", True),

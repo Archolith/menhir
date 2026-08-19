@@ -101,6 +101,14 @@ class MemorySettings:
     # M6 sidecar expansion
     record_detailed_revisions: bool = True
     revision_retention_days: int = 14
+    # CF-171: retention for the telemetry sidecar, tiered by role. The high-volume observability
+    # tables (lifecycle_events at ~30 rows/ingest, mcp_events, episode_task_events,
+    # lifecycle_actions) answer "what happened just now"; the diagnostic tables are what someone
+    # reads investigating a defect weeks later, so a single short window would delete the history
+    # needed to correlate a recurring failure. 0 disables pruning for that tier entirely.
+    # `merge_audit` is never time-pruned -- see TelemetryLifecycleStoreMixin._RETENTION_TIERS.
+    telemetry_observability_retention_days: int = 30
+    telemetry_diagnostic_retention_days: int = 90
 
     # M6 LLM budget caps
     max_llm_calls_per_session_window: int = 50
@@ -723,6 +731,12 @@ class MemorySettings:
             readonly_key=_getenv("MENHIR_READONLY_KEY", default=cls.readonly_key),
             allow_insecure_remote_no_auth=parse_bool_env(_getenv("MENHIR_ALLOW_INSECURE_REMOTE_NO_AUTH", default=str(cls.allow_insecure_remote_no_auth))),
             client_tokens_enabled=parse_bool_env(_getenv("MENHIR_CLIENT_TOKENS_ENABLED", default=str(cls.client_tokens_enabled))),
+            telemetry_observability_retention_days=int(
+                _getenv("MENHIR_TELEMETRY_OBSERVABILITY_RETENTION_DAYS", default="30") or 30
+            ),
+            telemetry_diagnostic_retention_days=int(
+                _getenv("MENHIR_TELEMETRY_DIAGNOSTIC_RETENTION_DAYS", default="90") or 90
+            ),
             client_namespaces=parse_client_namespaces(_getenv("MENHIR_CLIENT_NAMESPACES", default="")),
             client_tools=parse_client_tools(_getenv("MENHIR_CLIENT_TOOLS", default="")),
             known_clients=frozenset(

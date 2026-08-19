@@ -344,6 +344,82 @@ class TelemetryLifecycleStoreMixin:
                 exc_info=True,
             )
 
+    #: Retention tiers for the sidecar (CF-171). Table -> (timestamp column, tier).
+    #:
+    #: Tiered by ROLE rather than uniformly, because these tables answer different questions.
+    #: The high-volume group is per-operation observability: `lifecycle_events` alone writes
+    #: ~30 rows per ingest, which is what produces the measured ~664 bytes/row growth. The
+    #: diagnostic group is what someone reads when investigating a defect weeks later, and a
+    #: 30-day window there would delete the history needed to correlate a recurring failure.
+    #:
+    #: `merge_audit` is DELIBERATELY ABSENT and must stay absent. It is not observability: its
+    #: `snapshot_json` holds the absorbed node's content and is the ONLY surviving copy once a
+    #: merge DETACH-DELETEs that node. Two recovery paths read it -- `legacy_unmerge_coordinator`
+    #: to restore an absorbed node, and `merge_recoverability` to report whether a merge can be
+    #: undone at all. The row outliving the node is the design, not an oversight. Time-pruning it
+    #: would silently convert "recoverable" into "permanently lost", which is data destruction
+    #: wearing the costume of disk hygiene. Erasure already suppresses these rows by subject,
+    #: which is the correct deletion axis for them.
+    _RETENTION_TIERS: dict[str, tuple[str, str]] = {
+        # High-volume observability.
+        "lifecycle_events": ("recorded_at", "observability"),
+        "mcp_events": ("started_at", "observability"),
+        "episode_task_events": ("recorded_at", "observability"),
+        "lifecycle_actions": ("recorded_at", "observability"),
+        # Diagnostic / investigative.
+        "failure_events": ("recorded_at", "diagnostic"),
+        "recall_receipts": ("created_at", "diagnostic"),
+        "conflict_resolutions": ("resolved_at", "diagnostic"),
+        "recall_lab_runs": ("recorded_at", "diagnostic"),
+        "extraction_lab_runs": ("recorded_at", "diagnostic"),
+    }
+
+    def prune_telemetry_tables(
+        self, *, observability_days: int, diagnostic_days: int
+    ) -> dict[str, int]:
+        """Delete rows past the retention window for each sidecar table (CF-171).
+
+        Returns a per-table deleted count, omitting tables that do not exist in this database --
+        four of the nine are created lazily or live in a separate store file, and a pruner that
+        raised on a missing table would abort the whole sweep and leave the high-volume tables
+        unpruned. A missing table is not an error; it is a table with nothing to prune.
+
+        The comparison uses the `substr(replace(col, 'T', ' '), 1, 19)` idiom rather than a plain
+        `<`. That is not decoration: CF-6 in this codebase was a timestamp-separator mismatch
+        where ISO-8601 values with a 'T' compared wrong against `datetime('now', ...)`, silently
+        widening every window. A pruner that got this wrong would silently delete nothing -- or,
+        far worse, silently delete the wrong side of the boundary.
+        """
+
+        self._ensure_ready()
+        deleted: dict[str, int] = {}
+        windows = {
+            "observability": max(1, int(observability_days)),
+            "diagnostic": max(1, int(diagnostic_days)),
+        }
+        with self._connect() as conn:
+            existing = {
+                row[0]
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+            for table, (column, tier) in self._RETENTION_TIERS.items():
+                if table not in existing:
+                    continue
+                cursor = conn.execute(
+                    f"""
+                    DELETE FROM {table}
+                    WHERE substr(replace({column}, 'T', ' '), 1, 19)
+                          < datetime('now', '-' || ? || ' days')
+                    """,
+                    (windows[tier],),
+                )
+                if cursor.rowcount > 0:
+                    deleted[table] = cursor.rowcount
+            conn.commit()
+        return deleted
+
     def prune_old_revisions(self, *, retention_days: int) -> int:
         """Delete memory_revisions rows older than retention_days. Returns rows deleted.
 

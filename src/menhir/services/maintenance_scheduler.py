@@ -23,6 +23,7 @@ from menhir.services.scheduler_protocols import (
     SchedulerLifecycleService,
 )
 from menhir.services.scheduler_tasks import (
+    prune_telemetry_tables,
     auto_resolve_conflicts,
     compute_failed_retry_delay_s,
     confirm_conflicts,
@@ -132,6 +133,9 @@ class MaintenanceScheduler:
     # MENHIR_REVISION_RETENTION_DAYS setting both existed; nothing connected them, so the
     # documented window was never enforced. 0 disables the job entirely.
     revision_retention_days: int = 14
+    # CF-171: sidecar retention, tiered by role. See scheduler_tasks.prune_telemetry_tables.
+    telemetry_observability_retention_days: int = 30
+    telemetry_diagnostic_retention_days: int = 90
     revision_prune_interval_s: float = 86400.0  # daily
     recovery_limit: int = 100
     failed_retry_limit: int = 50
@@ -185,6 +189,15 @@ class MaintenanceScheduler:
             self._jobs["decay_lifecycle"] = _JobState(interval_s=self.lifecycle_decay_interval_s)
         if self.revision_retention_days > 0:
             self._jobs["prune_telemetry_revisions"] = _JobState(
+                interval_s=self.revision_prune_interval_s
+            )
+        # CF-171: registered when EITHER tier is enabled, since the two windows are independent
+        # and an operator may disable one without disabling the other.
+        if (
+            self.telemetry_observability_retention_days > 0
+            or self.telemetry_diagnostic_retention_days > 0
+        ):
+            self._jobs["prune_telemetry_tables"] = _JobState(
                 interval_s=self.revision_prune_interval_s
             )
 
@@ -480,6 +493,10 @@ class MaintenanceScheduler:
             elif name == "decay_lifecycle":
                 if self.lifecycle_service is not None:
                     await self._run_job(job, "scheduler_decay_lifecycle", self._make_decay_lifecycle())
+            elif name == "prune_telemetry_tables":
+                await self._run_job(
+                    job, "scheduler_prune_telemetry_tables", self._make_prune_telemetry_tables()
+                )
             elif name == "prune_telemetry_revisions":
                 await self._run_job(
                     job, "scheduler_prune_telemetry_revisions", self._make_prune_telemetry_revisions()
@@ -657,6 +674,12 @@ class MaintenanceScheduler:
     # ------------------------------------------------------------------
     # Task coroutine factories
     # ------------------------------------------------------------------
+
+    def _make_prune_telemetry_tables(self) -> Awaitable[dict[str, object]]:
+        return prune_telemetry_tables(
+            observability_days=self.telemetry_observability_retention_days,
+            diagnostic_days=self.telemetry_diagnostic_retention_days,
+        )
 
     def _make_prune_telemetry_revisions(self) -> Awaitable[dict[str, object]]:
         return prune_telemetry_revisions(retention_days=self.revision_retention_days)

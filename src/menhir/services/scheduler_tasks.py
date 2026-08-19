@@ -827,6 +827,41 @@ def _write_project_index(
         logger.debug("Failed to write project index for hooks", exc_info=True)
 
 
+async def prune_telemetry_tables(
+    *, observability_days: int, diagnostic_days: int
+) -> dict[str, object]:
+    """Delete sidecar telemetry rows past their retention window (CF-171).
+
+    Nothing deleted from any of the nine high-volume tables. The one pruner that existed targeted
+    `memory_revisions` -- by write volume the LEAST affected table -- and was itself never wired
+    until CF-166. Measured growth is ~664 bytes/row against ~30 rows per ingest, and this is the
+    file six writers contend on, so the size is not merely disk: a larger file means longer WAL
+    checkpoints and deeper B-trees, which lengthens exactly the CF-170 writes that block the loop.
+
+    A tier set to 0 is skipped entirely, so an operator can disable one window without disabling
+    the other. Threaded off the event loop for the same reason as its sibling.
+    """
+    from menhir.infrastructure.telemetry import telemetry_store
+
+    if observability_days <= 0 and diagnostic_days <= 0:
+        return {"pruned": {}, "skipped": "both tiers disabled"}
+
+    deleted = await asyncio.to_thread(
+        telemetry_store.prune_telemetry_tables,
+        observability_days=observability_days if observability_days > 0 else 10**6,
+        diagnostic_days=diagnostic_days if diagnostic_days > 0 else 10**6,
+    )
+    total = sum(deleted.values())
+    if total:
+        logger.info(
+            "Pruned %d telemetry row(s) across %d table(s): %s",
+            total,
+            len(deleted),
+            ", ".join(f"{t}={n}" for t, n in sorted(deleted.items())),
+        )
+    return {"pruned": deleted, "total": total}
+
+
 async def prune_telemetry_revisions(*, retention_days: int) -> dict[str, object]:
     """Delete `memory_revisions` rows past the retention window.
 
