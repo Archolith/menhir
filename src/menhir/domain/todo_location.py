@@ -265,3 +265,22 @@ def parse_code_ref(
         locations.append(loc)
 
     return locations
+
+
+def code_ref_file_predicate(file_alias: str, path_expr: str) -> str:
+    """Return the anchored Cypher predicate matching a structural file to a code_ref path.
+
+    Single source of truth for the ``code_ref`` -> structural file resolver, so the
+    write path and every reader cannot drift apart. The anchor is what keeps a
+    basename match on a real path boundary: the bare ``ENDS WITH`` form this replaces
+    matched any path suffix, so a ref of ``utils.py`` also matched ``my_utils.py`` and
+    ``test_utils.py``. Shared verbatim, like ``_INELIGIBLE_ROLE_PREDICATE`` in
+    ``correlation_queries.py``, precisely so the two sites cannot drift apart.
+    """
+    return (
+        "(\n"
+        f"    {file_alias}.structure_path = {path_expr}\n"
+        f"    OR (NOT {path_expr} CONTAINS '/' AND "
+        f"{file_alias}.structure_path ENDS WITH ('/' + {path_expr}))\n"
+        ")"
+    )

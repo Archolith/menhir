@@ -18,7 +18,11 @@ import sys
 from dotenv import load_dotenv
 
 from menhir.config.settings_model import MemorySettings
-from menhir.domain.todo_location import LOCATION_SCHEMA_VERSION, parse_code_ref
+from menhir.domain.todo_location import (
+    LOCATION_SCHEMA_VERSION,
+    code_ref_file_predicate,
+    parse_code_ref,
+)
 from menhir.infrastructure.neo4j import Neo4jRepository
 
 
@@ -115,15 +119,12 @@ def main(argv: list[str] | None = None) -> int:
 
     # Audit trail: raw declaration -> normalized location -> resolved entity.
     linked = n.execute(
-        """
+        f"""
         MATCH (l:TodoLocation)
         WHERE l.resolution_status = 'resolved' AND l.path IS NOT NULL
         MATCH (f:Entity)
         WHERE f.structure_role IN ['file', 'entrypoint', 'config', 'test']
-          AND (
-                f.structure_path = l.path
-                OR (NOT l.path CONTAINS '/' AND f.structure_path ENDS WITH ('/' + l.path))
-              )
+          AND {code_ref_file_predicate('f', 'l.path')}
           AND (l.project IS NULL OR f.structure_project = l.project)
         MERGE (l)-[:REFERENCES_FILE]->(f)
         RETURN count(*) AS c

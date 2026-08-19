@@ -28,7 +28,7 @@ except ModuleNotFoundError:  # pragma: no cover - import guard
     _Neo4jConstraintError = ()  # type: ignore[assignment]
 
 from menhir.domain.artifact_shape import ShapeReport, ShapeStatus, validate_shape
-from menhir.domain.todo_location import parse_code_ref
+from menhir.domain.todo_location import code_ref_file_predicate, parse_code_ref
 from menhir.domain.artifact_reconciliation import (
     ARTIFACT_SOURCE_SCHEMA_VERSION,
     ArtifactSourceSnapshot,
@@ -1135,15 +1135,12 @@ class WorkArtifactRepository:
     def _link_location_files(self, artifact_uuid: str) -> int:
         """Resolve each location to a structural file entity where one exists."""
         rows = self.neo4j.execute(
-            """
-            MATCH (a:WorkArtifact {artifact_uuid: $uuid})-[:HAS_LOCATION]->(l:ArtifactLocation)
+            f"""
+            MATCH (a:WorkArtifact {{artifact_uuid: $uuid}})-[:HAS_LOCATION]->(l:ArtifactLocation)
             WHERE l.resolution_status = 'resolved' AND l.path IS NOT NULL
             MATCH (f:Entity)
             WHERE f.structure_role IN ['file', 'entrypoint', 'config', 'test']
-              AND (
-                    f.structure_path = l.path
-                    OR (NOT l.path CONTAINS '/' AND f.structure_path ENDS WITH ('/' + l.path))
-                  )
+              AND {code_ref_file_predicate('f', 'l.path')}
               AND (l.project IS NULL OR f.structure_project = l.project)
             MERGE (l)-[:RESOLVES_TO]->(f)
             RETURN count(*) AS linked
