@@ -111,10 +111,19 @@ def _node_index_queries() -> list[str]:
             "CREATE INDEX episodic_processing_lease_expires_idx IF NOT EXISTS FOR (n:Episodic) ON (n.processing_lease_expires_at)",
             "CREATE INDEX episodic_queued_at_idx IF NOT EXISTS FOR (n:Episodic) ON (n.queued_at)",
             "CREATE INDEX episodic_resolved_episode_uuid_idx IF NOT EXISTS FOR (n:Episodic) ON (n.resolved_episode_uuid)",
+            # Dirty-namespace detection scans :Episodic with a content STARTS WITH predicate on
+            # every consolidation request and scheduler cycle; a plain index backs prefix search.
+            "CREATE INDEX episodic_content_idx IF NOT EXISTS FOR (n:Episodic) ON (n.content)",
             # Raw captures are MERGEd by this property once per exhausted episode during the
             # terminal-failure sweep. Without the index that MERGE is a full :Entity label scan
             # per episode.
             "CREATE INDEX entity_raw_capture_for_idx IF NOT EXISTS FOR (n:Entity) ON (n.raw_capture_for)",
+            # Hook Center stale-anchor labelling runs on EVERY recall and file edit, filtering
+            # :Entity by role/path/project. Without these each is a full :Entity label scan.
+            # The composite matches project AND path together and is the one structural lookups use.
+            "CREATE INDEX entity_structure_role_idx IF NOT EXISTS FOR (n:Entity) ON (n.structure_role)",
+            "CREATE INDEX entity_structure_path_idx IF NOT EXISTS FOR (n:Entity) ON (n.structure_path)",
+            "CREATE INDEX entity_structure_project_path_idx IF NOT EXISTS FOR (n:Entity) ON (n.structure_project, n.structure_path)",
         ]
     )
     # :Todo and its owned :TodoLocation value objects. Before these, :Todo had no
