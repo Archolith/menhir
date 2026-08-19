@@ -13,6 +13,12 @@ from menhir.infrastructure.telemetry.helpers import _json_default, _span_days, _
 
 logger = logging.getLogger(__name__)
 
+#: Ceiling for an archived field value in `memory_revisions`. This is the ONLY surviving copy of
+#: a node body once decay compresses it, so the old 2,000-character cap silently discarded the
+#: tail of anything longer on the success path (CF-101). Sized to hold a whole memory body
+#: rather than a preview; the truncation marker remains for the pathological case.
+_MAX_REVISION_VALUE_LEN = 100_000
+
 
 class MergeAuditUnavailable(RuntimeError):
     """The merge-audit read failed, so its result is unknown rather than empty (CF-205).
@@ -304,7 +310,7 @@ class TelemetryLifecycleStoreMixin:
             raise ValueError(
                 f"Invalid changed_by {changed_by!r}; expected one of {self._VALID_CHANGED_BY}"
             )
-        max_val_len = 2000
+        max_val_len = _MAX_REVISION_VALUE_LEN
         if old_value and len(old_value) > max_val_len:
             old_value = old_value[:max_val_len] + "...[truncated]"
         if new_value and len(new_value) > max_val_len:

@@ -310,6 +310,18 @@ class LifecycleDecayMixin:
                     await asyncio.to_thread(self.pending_actions.upsert, uuid, "compress", failure_reason="llm_failed")
                     continue
                 consecutive_llm_failures = 0
+                # CF-101: archive BEFORE the mutation, not after. `compress_node` replaces the
+                # node body; a crash between the two statements used to leave the content
+                # destroyed with no copy anywhere. The cost of this order is an archive row for
+                # a compression that then failed, which is a harmless extra row. The cost of the
+                # old order was irreversible content loss on an unattended scheduled sweep.
+                record_memory_revision(
+                    node_uuid=uuid,
+                    field="content",
+                    old_value=raw,
+                    new_value=summary,
+                    changed_by="decay",
+                )
                 if await asyncio.to_thread(self.graph_adapter.compress_node, uuid, summary):
                     await asyncio.to_thread(self.pending_actions.complete, uuid)
                     compressed += 1
@@ -320,13 +332,6 @@ class LifecycleDecayMixin:
                         before_freshness=FreshnessState.ACTIVE,
                         after_freshness=FreshnessState.COMPRESSED,
                         llm_used=True,
-                    )
-                    record_memory_revision(
-                        node_uuid=uuid,
-                        field="content",
-                        old_value=raw,
-                        new_value=summary,
-                        changed_by="decay",
                     )
 
         delete_candidates = await asyncio.to_thread(
