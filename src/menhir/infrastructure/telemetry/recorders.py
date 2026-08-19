@@ -6,10 +6,19 @@ import os
 import traceback
 from typing import Any
 
-from .helpers import _json_default, _safe_preview_of, _size_of, _utc_now_iso
+from .helpers import (
+    _json_default,
+    _redact_telemetry_value,
+    _safe_preview_of,
+    _size_of,
+    _utc_now_iso,
+)
 from .store import McpTelemetryStore, telemetry_store
 
 logger = logging.getLogger(__name__)
+
+
+_NON_EPISODE_USAGE_KEY = "__non_episode__"
 
 
 def record_llm_usage_event(
@@ -18,7 +27,13 @@ def record_llm_usage_event(
     episode_uuid: str | None = None,
     store: McpTelemetryStore = telemetry_store,
 ) -> bool:
-    """Persist one terminal provider invocation without affecting the caller."""
+    """Persist one terminal provider invocation without affecting the caller.
+
+    Provider ``usage`` objects are not trusted to contain counters only: compatible providers may
+    attach arbitrary strings. Persist a recursively minimized copy, and give process-wide/non-episode
+    calls an explicit sentinel key instead of NULL so current operational rows can never masquerade as
+    pre-lineage unaddressable content during a CF-165 completeness census.
+    """
 
     if event.phase not in {"completed", "failed"} or not event.call_id:
         return False
@@ -26,7 +41,7 @@ def record_llm_usage_event(
         provider_usage_json = None
         if event.provider_usage is not None:
             provider_usage_json = json.dumps(
-                event.provider_usage,
+                _redact_telemetry_value(event.provider_usage),
                 default=_json_default,
                 sort_keys=True,
             )
@@ -34,7 +49,7 @@ def record_llm_usage_event(
             call_id=event.call_id,
             recorded_at=_utc_now_iso(),
             run_id=os.getenv("MENHIR_BENCH_ACTIVE_RUN_ID") or None,
-            episode_uuid=episode_uuid,
+            episode_uuid=episode_uuid or _NON_EPISODE_USAGE_KEY,
             operation=event.operation,
             kind=event.kind,
             model=event.model,
@@ -47,7 +62,9 @@ def record_llm_usage_event(
             cached_input_tokens=event.cached_input_tokens,
             reasoning_output_tokens=event.reasoning_output_tokens,
             provider_usage_json=provider_usage_json,
-            error=event.error,
+            # Exception prose can contain prompts/provider bodies. The call classification remains in
+            # status/operation/model; the content is not useful enough to justify a durable copy.
+            error="[redacted]" if event.error else None,
         )
     except Exception as exc:  # pragma: no cover - telemetry must never break the caller
         _log_telemetry_persist_failure(f"record_llm_usage_event:{event.call_id}", exc)
@@ -298,20 +315,36 @@ def record_merge(
     absorbed_uuid: str,
     similarity: float | None,
     snapshot_json: str,
+    survivor_namespace: str | None = None,
+    absorbed_namespace: str | None = None,
     store: McpTelemetryStore = telemetry_store,
 ) -> None:
     """Module-level convenience wrapper around ``telemetry_store.record_merge``.
 
     Durable merge audit: survives deletion of the survivor node, unlike the
-    ``survivor.merge_audit`` graph property.
+    ``survivor.merge_audit`` graph property. The legacy merge caller already embeds the absorbed
+    node's namespace in ``snapshot_json``; derive both parties from it when explicit lineage is
+    absent because merge eligibility requires namespace equality before this writer is reached.
     """
 
     try:
+        inferred_namespace: str | None = None
+        try:
+            payload = json.loads(snapshot_json)
+            properties = payload.get("properties") if isinstance(payload, dict) else None
+            if isinstance(properties, dict):
+                inferred_namespace = str(properties.get("namespace") or "").strip() or None
+        except (TypeError, ValueError, json.JSONDecodeError):
+            inferred_namespace = None
+        survivor_ns = str(survivor_namespace or "").strip() or inferred_namespace
+        absorbed_ns = str(absorbed_namespace or "").strip() or inferred_namespace
         store.record_merge(
             survivor_uuid=survivor_uuid,
             absorbed_uuid=absorbed_uuid,
             similarity=similarity,
             snapshot_json=snapshot_json,
+            survivor_namespace=survivor_ns,
+            absorbed_namespace=absorbed_ns,
         )
     except Exception as exc:  # pragma: no cover - telemetry must never break the caller
         _log_telemetry_persist_failure(
