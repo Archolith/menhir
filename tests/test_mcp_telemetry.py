@@ -94,7 +94,8 @@ def test_track_mcp_call_records_success():
         assert row["duration_ms"] >= 0
         assert row["input_size"] is not None
         assert row["result_size"] is not None
-        assert '"text": "hello"' in row["payload_preview"]
+        assert '"text": "[redacted]"' in row["payload_preview"]
+        assert "hello" not in row["payload_preview"]
     finally:
         _cleanup_db_path(db_path)
 
@@ -125,7 +126,8 @@ def test_track_mcp_call_records_failure_and_returns_error_string():
         assert row["operation"] == "memory://search/{term}"
         assert row["kind"] == "resource_template"
         assert row["success"] == 0
-        assert "boom" in row["error"]
+        assert row["error"] == "RuntimeError"
+        assert "boom" not in row["error"]
         assert row["duration_ms"] >= 0
     finally:
         _cleanup_db_path(db_path)
