@@ -36,10 +36,37 @@ def expected_graphiti_embedding_dimension(settings: MemorySettings) -> int | Non
     return infer_embedding_dimension_for_model(provider.embed_model)
 
 
+#: Process-lifetime memo for the startup sweep (CF-173).
+#:
+#: `embedding_dimension_health` runs six unbounded scans, two of them over EVERY relationship in
+#: the graph with no label to narrow them, and startup calls it twice: once from the `serve`
+#: guard in `cli/__init__.py` and once from `core/runtime_preflight`. Two full sweeps, moments
+#: apart, over a graph nothing has had a chance to change in between. This makes the second one
+#: free.
+#:
+#: Deliberately keyed on the connection target and the expected dimension rather than being a
+#: bare flag: a different database or a changed embedder is a different question, and answering
+#: it from a memo would be worse than the cost it saves. Not invalidated by time, because its
+#: only purpose is the startup pair -- a long-running process that wants a fresh answer should
+#: call `reset_embedding_dimension_cache()`, which the health surface can do if it ever needs to.
+#:
+#: Opt-IN, not opt-out. Only the two startup callers pass `use_cache=True`. A memo that every
+#: caller got by default would change behaviour for paths this finding says nothing about, and an
+#: un-invalidated memo answering a question someone asked live is a worse defect than the double
+#: sweep it saves.
+_HEALTH_CACHE: dict[tuple[str, str, int | None], dict[str, Any]] = {}
+
+
+def reset_embedding_dimension_cache() -> None:
+    """Drop the memoized startup sweep. For tests, and for any caller that needs a live answer."""
+    _HEALTH_CACHE.clear()
+
+
 def embedding_dimension_health(
     neo4j: Neo4jRepository,
     *,
     expected_dim: int | None = None,
+    use_cache: bool = False,
 ) -> dict[str, Any]:
     """Report embedding-dimension health for the graph's semantic vectors.
 
@@ -48,7 +75,14 @@ def embedding_dimension_health(
     against) but the raw per-dimension distributions and the model-agnostic
     ``mixed`` flag are still computed — so a mixed-dimension graph is caught even
     for an unknown embedding model.
+
+    With ``use_cache=True`` the result is memoized per (uri, database, expected_dim) for the
+    process lifetime. Only the two startup callers opt in; see ``_HEALTH_CACHE`` (CF-173).
     """
+    cache_key = (str(getattr(neo4j, "uri", "")), str(getattr(neo4j, "database", "")), expected_dim)
+    if use_cache and cache_key in _HEALTH_CACHE:
+        return dict(_HEALTH_CACHE[cache_key])
+
     entity_rows = neo4j.execute(
         """
         MATCH (n:Entity)
@@ -120,7 +154,7 @@ def embedding_dimension_health(
         or len(_distinct(edge_dims)) > 1
     )
 
-    return {
+    result = {
         "expected_dim": expected_dim,
         "ok": (
             wrong_entity_count == 0 and wrong_community_count == 0 and wrong_edge_count == 0
@@ -138,6 +172,9 @@ def embedding_dimension_health(
         "community_dims": community_dims,
         "edge_dims": edge_dims,
     }
+    if use_cache:
+        _HEALTH_CACHE[cache_key] = dict(result)
+    return result
 
 
 @dataclass(frozen=True)
@@ -165,17 +202,30 @@ class EmbeddingCompatibility:
 
 
 def evaluate_embedding_compatibility(
-    neo4j: Neo4jRepository, settings: MemorySettings
+    neo4j: Neo4jRepository, settings: MemorySettings, *, use_cache: bool = False
 ) -> EmbeddingCompatibility:
-    """Single source of truth for embedding/graph dimension compatibility.
+    """Classify embedding/graph dimension compatibility for the ``serve`` startup guard.
 
-    Used by both the ``serve`` startup guard (hard block) and the runtime health
-    surface, so the classification cannot drift between them.
+    This used to claim to be the "single source of truth ... used by both the serve startup guard
+    and the runtime health surface, so the classification cannot drift between them". It is not:
+    `core/runtime_preflight` calls `embedding_dimension_health` directly, with its own
+    `expected_dim is not None` gate and its own reading of the result. The two paths already
+    differ, and the comment describing them as one was the seventeenth instance in this codebase
+    of a comment asserting an invariant the code does not implement (CF-173).
+
+    They now at least share the underlying sweep through `_HEALTH_CACHE`, so they see the same
+    numbers even though they classify them separately.
+
+    Note on why the ``serve`` guard is NOT gated on ``expected_dim is not None`` to match
+    preflight, which is what CF-173 proposes: ``blocking`` is
+    ``mixed or (expected_dim is not None and wrong > 0)``, and ``mixed`` is the model-agnostic
+    corruption signal that exists precisely for the case where the dimension cannot be inferred.
+    Gating the guard would delete the check in the only situation it was written for.
     """
     provider = ProviderConfig.for_graphiti_embedder(settings)
     model_name = provider.embed_model or ""
     expected_dim = expected_graphiti_embedding_dimension(settings)
-    health = embedding_dimension_health(neo4j, expected_dim=expected_dim)
+    health = embedding_dimension_health(neo4j, expected_dim=expected_dim, use_cache=use_cache)
 
     stored = {int(d): int(c) for d, c in health["entity_dims"].items() if int(d) > 0}
     mixed = bool(health["mixed"])

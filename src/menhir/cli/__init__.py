@@ -497,7 +497,9 @@ def serve(
             password=settings.neo4j_password,
         )
         try:
-            _compat = evaluate_embedding_compatibility(_repo, settings)
+            # CF-173: memoize the six-scan sweep so `core/runtime_preflight` -- which runs
+            # moments later against the same graph -- does not pay for it a second time.
+            _compat = evaluate_embedding_compatibility(_repo, settings, use_cache=True)
         finally:
             _repo.close()
     except SystemExit:
