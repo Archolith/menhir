@@ -489,6 +489,13 @@ class MemoryGraphAdapter:
 
         PART 2: Creates raw-capture entities for exhausted episodes with content before
         marking them as failed, so terminal breakage preserves the episode text for recall.
+
+        This body was dead until 2026-08-19: a second, bare-delegation definition of the same
+        method later in the class shadowed it, so an exhausted episode was marked FAILED with
+        no raw capture and its text never reached recall (recall searches ``:Entity``; the
+        surviving ``:Episodic`` node is not one). Restoring it also switches its cost back on,
+        which is why ``fetch_exhausted_pending_episodes`` is now bounded by a LIMIT and
+        ``raw_capture_for`` is indexed -- the per-episode MERGE below is a label scan without it.
         """
         import logging
 
@@ -930,9 +937,6 @@ class MemoryGraphAdapter:
         return self._episodes.reset_orphaned_enriching_episodes(
             max_attempts=max_attempts
         )
-
-    def fail_exhausted_pending_episodes(self, *, max_attempts: int) -> int:
-        return self._episodes.fail_exhausted_pending_episodes(max_attempts=max_attempts)
 
     def force_reset_failed_episode(self, episode_uuid: str) -> bool:
         return self._episodes.force_reset_failed_episode(episode_uuid)
