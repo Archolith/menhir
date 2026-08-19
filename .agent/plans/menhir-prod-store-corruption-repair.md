@@ -1,6 +1,8 @@
 # Plan: menhir prod Neo4j store corruption - diagnosis and validated repair
 
 Status: DIAGNOSIS COMPLETE / REPAIR VALIDATED ON COPY / NOT YET APPLIED TO PROD
+**Last verified:** 2026-08-18 — NOT VERIFIABLE OFFLINE — treat as LIVE. Status says the repair is validated on a copy but NOT YET APPLIED TO PROD, and nothing in this workspace can confirm prod Neo4j state (bolt://192.168.86.33:7687). The only mentions of `property record id:964518 / owner NODE:-1` are inside this plan. Someone must check prod directly before this is closed.
+
 Date: 2026-07-25
 Prod: bolt://192.168.86.33:7687 - Neo4j 5.26.26 Community
 Evidence source: `C:\Users\thron\IdeaProjects\backups\prod-neo4j-data-20260725-CORRUPT.tar.gz` (raw data dir, 15:08 2026-07-25)
