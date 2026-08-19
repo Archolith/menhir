@@ -288,7 +288,7 @@ def extract_once(episodes: list[Episode], llm_complete: LlmComplete) -> list[Per
     for ev in raw:
         if not isinstance(ev, dict):
             continue
-        subject = str(ev.get("subject") or "user").strip().lower()
+        subject = sanitize_subject_name(str(ev.get("subject") or "")) or "user"
         # CF-4/CF-5/CF-69: constrain the model-authored key here, at its origin, so the prompt
         # sites and the durable View property all inherit it. A label that is not a measure key
         # yields "" and the existing guard below drops the event.
@@ -405,6 +405,52 @@ _MEASURE_ALIASES: dict[str, str] = {
     "movies_to_watch": "watchlist_item_count",
     "pending_media_count": "watchlist_item_count",
 }
+
+
+#: A subject is a NAME, not an identifier -- "my wife", "Alice's laptop", "the 2019 Corolla" are
+#: all legitimate and none survives the `measure` rule. So this constrains SHAPE-OF-A-NAME rather
+#: than shape-of-a-key: names are single-line, free of control characters, and short.
+_SUBJECT_MAX_CHARS = 120
+
+
+def sanitize_subject_name(raw: str) -> str:
+    """Constrain a model-authored subject to something that can still be a name (CF-219).
+
+    `subject` is read from the same parsed model output as `measure`, one line apart, and reaches
+    the same durable destinations -- `ViewRepository.retrieval_text`, whose output is embedded as
+    the View's retrieval surface, and the View's own `subject` property. CF-5's mechanism is
+    therefore closed for one of the two strings composing that surface and was open for the other.
+
+    **Deliberately NOT the `measure` rule.** Applying an identifier shape would drop real subjects
+    or silently relabel another entity's data as "user", and both are worse than the gap. What is
+    removed here is only what stops a value being a name:
+
+    * control characters, INCLUDING NUL -- a NUL reaching a durable store is a data-integrity
+      problem in its own right, independent of any prompt concern, and it survived before this;
+    * newlines, which are what let a subject stop being a name and start being a new line of
+      structure in whatever renders it;
+    * unbounded length -- a 5000-character "name" is not a name, and it was being embedded and
+      stored at full size.
+
+    **What this does not claim.** Downstream containment already holds for markdown structure:
+    an injected `### System` in a subject lands INSIDE the hook's context fence and is inert as
+    markup (verified). This is not a second fence; it is the origin constraint that keeps
+    obviously-not-a-name values out of durable storage in the first place, so containment is not
+    the only thing standing between a hostile subject and the recall surface.
+
+    Returns "" only for input that is empty after cleaning; the caller's existing `or "user"`
+    default then applies, exactly as before.
+    """
+    # `isprintable()` is False for every control character INCLUDING newline and NUL, so one test
+    # covers both concerns. Control characters become a SPACE rather than being deleted: deleting
+    # them runs the surrounding words together ("wife\\n### System" -> "wife### system"), which
+    # corrupts the very embedding surface this value exists to feed. `split()/join()` then
+    # collapses the runs.
+    cleaned = "".join(ch if (ch.isprintable() or ch == " ") else " " for ch in (raw or ""))
+    cleaned = " ".join(cleaned.split())
+    if len(cleaned) > _SUBJECT_MAX_CHARS:
+        cleaned = cleaned[:_SUBJECT_MAX_CHARS].rstrip()
+    return cleaned.lower()
 
 
 #: A measure key is a snake_case identifier. `SYSTEM_PROMPT` already asks the extractor for
