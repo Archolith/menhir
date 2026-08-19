@@ -380,6 +380,41 @@ def _render_consent(
     )
 
 
+def _render_consent_retry(
+    fields: dict[str, str],
+    client: OAuthClient,
+    *,
+    error: str,
+) -> str:
+    """Render a failed approve attempt WITHOUT issuing a new consent token (CF-10).
+
+    The consent token is single-use and its jti is burned before the admin secret is checked,
+    so one guess should cost one authorization GET. Re-rendering the form here handed back a
+    freshly signed token instead, which is what turned a single GET into an unbounded guess
+    loop. This page carries no token and no secret field: continuing requires a fresh GET.
+
+    The link target is safe to build from `fields`: they were verified against our own
+    signature at step 1 before this page can be reached.
+    """
+    retry_params = {k: fields.get(k, "") for k in _SIGNED_FIELDS if fields.get(k)}
+    retry_params["response_type"] = "code"
+    retry_url = "/oauth/authorize?" + urlencode(retry_params)
+    return (
+        "<!doctype html><html><head><meta charset=\"utf-8\">"
+        "<title>Authorize connection</title></head><body>"
+        "<h1>Authorize connection</h1>"
+        "<p style=\"color:#b00\">{error}</p>"
+        "<p><strong>{client_name}</strong> (<code>{client_id}</code>) was not authorized.</p>"
+        "<p><a href=\"{retry_url}\">Restart the authorization</a> to try again.</p>"
+        "</body></html>"
+    ).format(
+        error=html.escape(error),
+        client_name=html.escape(client.client_name or client.client_id),
+        client_id=html.escape(client.client_id),
+        retry_url=html.escape(retry_url, quote=True),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Consent session cookie (Phase 8) + shared code issuance
 # ---------------------------------------------------------------------------
@@ -605,8 +640,8 @@ async def authorize_post(request: Request):
         return _bad_request("Consent request is invalid or has expired; restart the authorization.")
 
     # 1b. Single-use (AS-004): burn the consent token's jti now, before evaluating the
-    # secret. A replayed token (the brute-force amplifier) is rejected; each admin-secret
-    # attempt therefore requires a fresh consent page (a fresh GET).
+    # secret. A replayed token is rejected, and the failure pages below issue no replacement
+    # token (CF-10), so each admin-secret attempt costs one fresh authorization GET.
     jti = _consent_jti(consent_token)
     if jti is None or not _consume_consent_jti(jti, settings):
         return _bad_request("Consent request has already been used; restart the authorization.")
@@ -636,11 +671,10 @@ async def authorize_post(request: Request):
     # secret is ever evaluated, so an attacker cannot rapidly guess the admin secret.
     if not _approve_limiter.allow(client_ip(request, settings)):
         return HTMLResponse(
-            content=_render_consent(
+            content=_render_consent_retry(
                 submitted,
                 client,
                 error="Too many attempts; please wait and try again.",
-                settings=settings,
             ),
             status_code=429,
             headers=_CONSENT_HEADERS,
@@ -655,8 +689,8 @@ async def authorize_post(request: Request):
         )
     if not hmac.compare_digest(admin_secret.encode("utf-8"), operator_key.encode("utf-8")):
         return HTMLResponse(
-            content=_render_consent(
-                submitted, client, error="Invalid admin secret.", settings=settings
+            content=_render_consent_retry(
+                submitted, client, error="Invalid admin secret."
             ),
             status_code=401,
             headers=_CONSENT_HEADERS,
