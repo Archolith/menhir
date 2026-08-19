@@ -568,11 +568,15 @@ class BackendClientOpsMixin:
         )
 
     async def transition_artifact_status(
-        self, artifact_uuid: str, to_status: str
+        self, artifact_uuid: str, to_status: str, *, namespace: str | None = None
     ) -> dict[str, Any]:
         return await self._request(
             "transition_artifact_status",
-            {"artifact_uuid": artifact_uuid, "to_status": to_status},
+            {
+                "artifact_uuid": artifact_uuid,
+                "to_status": to_status,
+                "namespace": namespace,
+            },
         )
 
     async def fetch_artifact_corpus_audit(

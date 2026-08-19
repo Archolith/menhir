@@ -5,7 +5,9 @@ from __future__ import annotations
 from menhir.mcp.tools.base import BaseTextTool
 
 
-async def transition_artifact(artifact_uuid: str, to_status: str) -> str:
+async def transition_artifact(
+    artifact_uuid: str, to_status: str, namespace: str = ""
+) -> str:
     """Move a work artifact to a new lifecycle status.
 
     Transitions are checked against the artifact's stored type and current
@@ -16,12 +18,13 @@ async def transition_artifact(artifact_uuid: str, to_status: str) -> str:
         artifact_uuid: The artifact to move.
         to_status: Target status, e.g. REVIEWED, APPROVED, IMPLEMENTING,
                    IMPLEMENTED, COMPLETE, READY_FOR_REVIEW, SUPERSEDED, DEFERRED.
+        namespace: Restrict to a single silo. A pinned client has this forced.
 
     Returns:
         Confirmation with the previous status, or the reason it was refused.
     """
     return await TransitionArtifactTool().execute(
-        artifact_uuid=artifact_uuid, to_status=to_status
+        artifact_uuid=artifact_uuid, to_status=to_status, namespace=namespace
     )
 
 
@@ -29,9 +32,22 @@ class TransitionArtifactTool(BaseTextTool):
     name = "transition_artifact"
     description = "Move a work artifact to a new lifecycle status, if the transition is legal."
 
-    async def endpoint(self, artifact_uuid: str, to_status: str) -> str:
+    async def endpoint(
+        self, artifact_uuid: str, to_status: str, namespace: str = ""
+    ) -> str:
+        """Move a work artifact to a new lifecycle status.
+
+        Args:
+            artifact_uuid: The artifact to move.
+            to_status: Target lifecycle status.
+            namespace: Restrict to a single silo. A pinned client has this forced --
+                and the parameter existing is what makes that possible, since the pin
+                is injected only into endpoints whose signature declares it.
+        """
         backend = self.get_backend()
-        result = await backend.transition_artifact_status(artifact_uuid, to_status)
+        result = await backend.transition_artifact_status(
+            artifact_uuid, to_status, namespace=namespace.strip() or None
+        )
 
         if result.get("applied"):
             return (

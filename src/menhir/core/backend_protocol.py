@@ -584,7 +584,7 @@ class MemoryBackend(Protocol):
         ...
 
     async def transition_artifact_status(
-        self, artifact_uuid: str, to_status: str
+        self, artifact_uuid: str, to_status: str, *, namespace: str | None = None
     ) -> dict[str, Any]:
         """Move an artifact to a new status if the transition is legal for its type."""
         ...

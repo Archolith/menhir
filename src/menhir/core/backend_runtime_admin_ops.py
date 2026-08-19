@@ -429,11 +429,14 @@ class RuntimeProviderAdminOpsMixin:
         )
 
     async def transition_artifact_status(
-        self, artifact_uuid: str, to_status: str
+        self, artifact_uuid: str, to_status: str, *, namespace: str | None = None
     ) -> dict[str, Any]:
         return _to_jsonable(
             await self._off_loop(
-                self.built.graph_adapter.transition_artifact_status, artifact_uuid, to_status
+                self.built.graph_adapter.transition_artifact_status,
+                artifact_uuid,
+                to_status,
+                namespace=namespace,
             )
         )
 
