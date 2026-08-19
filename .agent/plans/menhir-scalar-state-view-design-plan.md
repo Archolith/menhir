@@ -3,7 +3,15 @@
 **Project:** menhir (production memory system; design only - NO prod code in this plan)
 **Date:** 2026-07-18
 **Author:** Claude Code (design brief by Charles Harvey)
-**Status:** DRAFT (Rev 2) - design for review. No implementation until approved.
+**Status:** APPROVED AND IMPLEMENTED (noted 2026-08-18). The gate below was passed: the design
+was approved and built under the sibling plan `menhir-scalar-state-view-implementation-plan.md`
+(Rev 3, Pieces A + B + C COMPLETE). Verified in source 2026-08-18 -- `domain/scalar_state_fold.py`,
+`domain/scalar_view_authority.py`, `domain/scalar_view_suppression.py`,
+`infrastructure/scalar_view_repository.py`, `services/scalar_state_service.py`; `ScalarStateView`
+appears in 43 places and code comments cite "Piece C" directly. This header still read
+"design for review, no implementation until approved" until 2026-08-18, which contradicted its
+own implementation plan. Original gate, kept for the record:
+*DRAFT (Rev 2) - design for review. No implementation until approved.*
 **Rev 2 (2026-07-18):** incorporates code-grounded review. Anchored the ingestion seam on the
 existing perception boundary (`services/perception.py` / `perceive_and_fold`); replaced the
 "exactly rebuildable by re-perception" claim with a durable persisted typed-assertion event log
