@@ -1,6 +1,8 @@
 # Unbounded Graph Writes
 
 Status: **planned; implementation not started**
+**Last verified:** 2026-08-18 — ACCURATE, not started. Inverse test: no graph-write bound exists. `sync_edge_counts`/`compose_episode_body`/`edge_count` are the UNBOUNDED code the plan indicts, not its output; the only `MAX_EDGES` in `src/` is `domain/scalar_dependency_evidence.py:19`, an unrelated evidence-payload cap.
+
 
 Two independent writes that scale with data and have no bound. Neither is a mystery — both are
 documented in the codebase as known limits — so this is a design note, not an RCA. What was missing

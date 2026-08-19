@@ -1,5 +1,8 @@
 # Menhir Post-Install and Agent Defaults
 
+**Last verified:** 2026-08-18 — NOT MERGED — work exists on an unmerged branch. `agent/menhir-post-install-agent-defaults` @ `0328629` (2026-08-11) is NOT an ancestor of `main`; `post_install` is 0 hits in `main`, while `install_hooks`/`def install` (4/2) are the pre-existing CLI installer. Plan carries no Status line. Decide: merge the branch or close it.
+
+
 ## Why
 
 - Installation currently ends after `pip install`, while environment creation, repository hook wiring,

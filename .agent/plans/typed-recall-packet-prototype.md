@@ -1,6 +1,8 @@
 # Typed Recall Packet Prototype
 
 Status: **structured scalar/event packet retained; recall-side tentative-intent inference removed**
+**Last verified:** 2026-08-18 — CONSISTENT with status. The scalar/event packet is retained (`event_history` 71 hits, `scalar_history` 142); `intent_state` is 0, which is expected since it depends on `menhir-intent-state-view-2026-08-08` (verified unbuilt the same day).
+
 
 > **Boundary decision (2026-08-08): tentative typing is ingest-owned.** `_TENTATIVE_MODALITY` and
 > all recall-side phrase classification have been removed. Tentative/plan authority will be

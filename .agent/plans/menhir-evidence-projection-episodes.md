@@ -1,6 +1,8 @@
 # Evidence-Projection Episodes: entities from the user's own words
 
 Status: PLAN, approved in direction 2026-07-27 by ctharvey ("i think second"). Not built.
+**Last verified:** 2026-08-18 — PARTIAL. `TurnEvidenceRequest` (4) and `UserPromptSubmit` (5) are present; `PostToolUse` is 0, so the tool-side projection leg is absent. Status is "PLAN, approved in direction", which does not claim completion.
+
 Supersedes the context-injection design sketched earlier in the same session (see "Designs that
 died" below -- three were tried, and the reasons they failed are the load-bearing part of this doc).
 
