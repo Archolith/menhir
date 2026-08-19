@@ -102,8 +102,8 @@ def test_record_round_trips_namespace_and_node_uuid(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
-def test_record_without_new_kwargs_stores_null(tmp_path: Path) -> None:
-    """The low-level store remains backward compatible; production writers own lineage."""
+def test_record_without_new_kwargs_gets_safe_default_lineage(tmp_path: Path) -> None:
+    """The persistence boundary must not create a new NULL-lineage MCP event."""
     db_path = tmp_path / "no-lineage.db"
     store = McpTelemetryStore(db_path=db_path)
     store.record(
@@ -121,7 +121,7 @@ def test_record_without_new_kwargs_stores_null(tmp_path: Path) -> None:
 
     row = _mcp_event_row(db_path)
     assert row is not None
-    assert row["namespace"] is None
+    assert row["namespace"] == "default"
     assert row["node_uuid"] is None
 
 
