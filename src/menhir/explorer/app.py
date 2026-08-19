@@ -663,21 +663,23 @@ def create_explorer_router() -> Any:
     async def explorer_home(request: Request) -> HTMLResponse:
         repo_obj = request.app.state.repo
         rev = _reveal(request)
-        episodes = _recent_episodes(repo_obj)
+        # CF-107: the explorer shares its event loop with the API and MCP surfaces, so a page that
+        # runs its queries inline parks all three. This handler alone makes nine round trips.
+        episodes = await asyncio.to_thread(_recent_episodes, repo_obj)
         pending = await asyncio.to_thread(PendingActionStore().fetch_pending, limit=50)
         return TEMPLATES.TemplateResponse(
             request,
             "index.html",
             {
-                "queued_episodes": redact_rows(_queued_episodes(repo_obj), reveal=rev),
-                "successful_episodes": redact_rows(_successful_episodes(repo_obj), reveal=rev),
-                "failed_episodes": redact_rows(_failed_episodes(repo_obj), reveal=rev),
-                "recovered_episodes": redact_rows(_recovered_episodes(repo_obj), reveal=rev),
+                "queued_episodes": redact_rows(await asyncio.to_thread(_queued_episodes, repo_obj), reveal=rev),
+                "successful_episodes": redact_rows(await asyncio.to_thread(_successful_episodes, repo_obj), reveal=rev),
+                "failed_episodes": redact_rows(await asyncio.to_thread(_failed_episodes, repo_obj), reveal=rev),
+                "recovered_episodes": redact_rows(await asyncio.to_thread(_recovered_episodes, repo_obj), reveal=rev),
                 "episodes": redact_rows(episodes, reveal=rev),
-                "sessions": redact_rows(_recent_sessions(repo_obj), reveal=rev),
-                "flagged": redact_rows(_flagged_nodes(repo_obj), reveal=rev),
-                "candidates": redact_rows(_candidates(repo_obj), reveal=rev),
-                "entities": redact_rows(_search_entities(repo_obj, ""), reveal=rev),
+                "sessions": redact_rows(await asyncio.to_thread(_recent_sessions, repo_obj), reveal=rev),
+                "flagged": redact_rows(await asyncio.to_thread(_flagged_nodes, repo_obj), reveal=rev),
+                "candidates": redact_rows(await asyncio.to_thread(_candidates, repo_obj), reveal=rev),
+                "entities": redact_rows(await asyncio.to_thread(_search_entities, repo_obj, ""), reveal=rev),
                 "pending_actions": redact_rows(pending, reveal=rev),
                 "mcp_events": redact_rows(telemetry_store.fetch_recent(limit=50), reveal=rev),
                 "initial_episode_uuid": episodes[0]["uuid"] if episodes else "",
@@ -810,7 +812,7 @@ def create_explorer_router() -> Any:
         return TEMPLATES.TemplateResponse(
             request,
             "_queue.html",
-            {"queued_episodes": redact_rows(_queued_episodes(request.app.state.repo), reveal=_reveal(request))},
+            {"queued_episodes": redact_rows(await asyncio.to_thread(_queued_episodes, request.app.state.repo), reveal=_reveal(request))},
         )
 
     @router.get("/explorer/partials/failed", response_class=HTMLResponse)
@@ -818,7 +820,7 @@ def create_explorer_router() -> Any:
         return TEMPLATES.TemplateResponse(
             request,
             "_failed.html",
-            {"failed_episodes": redact_rows(_failed_episodes(request.app.state.repo), reveal=_reveal(request))},
+            {"failed_episodes": redact_rows(await asyncio.to_thread(_failed_episodes, request.app.state.repo), reveal=_reveal(request))},
         )
 
     @router.get("/explorer/partials/successful", response_class=HTMLResponse)
@@ -826,7 +828,7 @@ def create_explorer_router() -> Any:
         return TEMPLATES.TemplateResponse(
             request,
             "_successful.html",
-            {"successful_episodes": redact_rows(_successful_episodes(request.app.state.repo), reveal=_reveal(request))},
+            {"successful_episodes": redact_rows(await asyncio.to_thread(_successful_episodes, request.app.state.repo), reveal=_reveal(request))},
         )
 
     @router.get("/explorer/partials/recovered", response_class=HTMLResponse)
@@ -834,7 +836,7 @@ def create_explorer_router() -> Any:
         return TEMPLATES.TemplateResponse(
             request,
             "_recovered.html",
-            {"recovered_episodes": redact_rows(_recovered_episodes(request.app.state.repo), reveal=_reveal(request))},
+            {"recovered_episodes": redact_rows(await asyncio.to_thread(_recovered_episodes, request.app.state.repo), reveal=_reveal(request))},
         )
 
     @router.get("/explorer/partials/pending_actions", response_class=HTMLResponse)
@@ -856,19 +858,19 @@ def create_explorer_router() -> Any:
 
     @router.get("/explorer/partials/episodes", response_class=HTMLResponse)
     async def episodes_partial(request: Request) -> HTMLResponse:
-        return TEMPLATES.TemplateResponse(request, "_episodes.html", {"episodes": redact_rows(_recent_episodes(request.app.state.repo), reveal=_reveal(request))})
+        return TEMPLATES.TemplateResponse(request, "_episodes.html", {"episodes": redact_rows(await asyncio.to_thread(_recent_episodes, request.app.state.repo), reveal=_reveal(request))})
 
     @router.get("/explorer/partials/sessions", response_class=HTMLResponse)
     async def sessions_partial(request: Request) -> HTMLResponse:
-        return TEMPLATES.TemplateResponse(request, "_sessions.html", {"sessions": redact_rows(_recent_sessions(request.app.state.repo), reveal=_reveal(request))})
+        return TEMPLATES.TemplateResponse(request, "_sessions.html", {"sessions": redact_rows(await asyncio.to_thread(_recent_sessions, request.app.state.repo), reveal=_reveal(request))})
 
     @router.get("/explorer/partials/flagged", response_class=HTMLResponse)
     async def flagged_partial(request: Request) -> HTMLResponse:
-        return TEMPLATES.TemplateResponse(request, "_flagged.html", {"flagged": redact_rows(_flagged_nodes(request.app.state.repo), reveal=_reveal(request))})
+        return TEMPLATES.TemplateResponse(request, "_flagged.html", {"flagged": redact_rows(await asyncio.to_thread(_flagged_nodes, request.app.state.repo), reveal=_reveal(request))})
 
     @router.get("/explorer/partials/candidates", response_class=HTMLResponse)
     async def candidates_partial(request: Request) -> HTMLResponse:
-        return TEMPLATES.TemplateResponse(request, "_candidates.html", {"candidates": redact_rows(_candidates(request.app.state.repo), reveal=_reveal(request))})
+        return TEMPLATES.TemplateResponse(request, "_candidates.html", {"candidates": redact_rows(await asyncio.to_thread(_candidates, request.app.state.repo), reveal=_reveal(request))})
 
     @router.post("/explorer/candidates/{uuid}/approve", response_class=JSONResponse)
     async def approve_candidate(request: Request, uuid: str) -> JSONResponse:
@@ -895,12 +897,12 @@ def create_explorer_router() -> Any:
         return TEMPLATES.TemplateResponse(
             request,
             "_entities.html",
-            {"entities": redact_rows(_search_entities(request.app.state.repo, query), reveal=_reveal(request)), "query": query},
+            {"entities": redact_rows(await asyncio.to_thread(_search_entities, request.app.state.repo, query), reveal=_reveal(request)), "query": query},
         )
 
     @router.get("/explorer/partials/node/{uuid}", response_class=HTMLResponse)
     async def node_detail_partial(request: Request, uuid: str) -> HTMLResponse:
-        detail = _node_detail(request.app.state.repo, uuid)
+        detail = await asyncio.to_thread(_node_detail, request.app.state.repo, uuid)
         if detail is None:
             raise HTTPException(status_code=404, detail="Node not found")
         detail = _redact_detail(detail, reveal=_reveal(request))
@@ -908,7 +910,7 @@ def create_explorer_router() -> Any:
 
     @router.get("/explorer/partials/session/{session_id}", response_class=HTMLResponse)
     async def session_detail_partial(request: Request, session_id: str) -> HTMLResponse:
-        detail = _session_detail(request.app.state.repo, session_id)
+        detail = await asyncio.to_thread(_session_detail, request.app.state.repo, session_id)
         if detail is None:
             raise HTTPException(status_code=404, detail="Session not found")
         detail = _redact_session(detail, reveal=_reveal(request))
@@ -916,17 +918,17 @@ def create_explorer_router() -> Any:
 
     @router.get("/explorer/api/graph/{uuid}", response_class=JSONResponse)
     async def graph_api(request: Request, uuid: str, depth: int = Query(default=1, ge=1, le=2)) -> JSONResponse:
-        if _node_detail(request.app.state.repo, uuid) is None:
+        if await asyncio.to_thread(_node_detail, request.app.state.repo, uuid) is None:
             raise HTTPException(status_code=404, detail="Node not found")
-        elements = _graph_elements(request.app.state.repo, uuid, depth)
+        elements = await asyncio.to_thread(_graph_elements, request.app.state.repo, uuid, depth)
         return JSONResponse({"elements": _redact_graph_elements(elements, reveal=_reveal(request))})
 
     @router.get("/explorer/api/session/{session_id}", response_class=JSONResponse)
     async def session_graph_api(request: Request, session_id: str) -> JSONResponse:
-        detail = _session_detail(request.app.state.repo, session_id)
+        detail = await asyncio.to_thread(_session_detail, request.app.state.repo, session_id)
         if detail is None:
             raise HTTPException(status_code=404, detail="Session not found")
-        elements = _session_graph_elements(request.app.state.repo, session_id)
+        elements = await asyncio.to_thread(_session_graph_elements, request.app.state.repo, session_id)
         return JSONResponse({"elements": _redact_graph_elements(elements, reveal=_reveal(request))})
 
     @router.post("/explorer/privacy/{state}", response_class=JSONResponse)
