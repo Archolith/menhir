@@ -664,7 +664,8 @@ class CorrelationRepository:
             WITH survivor, absorbed, edges_bridged, size(episodes) AS episodes_rebound
             // Remove the absorbed node
             DETACH DELETE absorbed
-            RETURN edges_bridged, episodes_rebound, 1 AS deleted
+            RETURN edges_bridged, episodes_rebound, 1 AS deleted,
+                   coalesce(survivor.namespace, survivor.group_id, 'default') AS merge_namespace
             """,
             params={
                 "survivor_uuid": survivor_uuid,
@@ -723,14 +724,17 @@ class CorrelationRepository:
         # Best-effort: telemetry must never break the merge.
         from menhir.infrastructure.telemetry import record_merge
 
+        row = rows[0]
+        merge_namespace = str(row.get("merge_namespace") or "default")
         record_merge(
             survivor_uuid=survivor_uuid,
             absorbed_uuid=absorbed_uuid,
             similarity=similarity,
             snapshot_json=audit_entry,
+            survivor_namespace=merge_namespace,
+            absorbed_namespace=merge_namespace,
         )
 
-        row = rows[0]
         return {
             "merged": 1,
             "edges_bridged": int(row.get("edges_bridged", 0) or 0),
