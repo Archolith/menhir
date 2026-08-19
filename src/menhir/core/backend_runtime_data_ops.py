@@ -14,6 +14,7 @@ from menhir.infrastructure.text_io import read_text_utf8
 from menhir.services.project_ingest import build_project_narrative
 
 from .request_context import get_request_tier
+from .tenancy import pinned_namespace, require_own_object
 from .backend_shared import (
     _project_scan_from_dict,
     _push_background_error,
@@ -55,9 +56,33 @@ class RuntimeProviderDataOpsMixin:
         )
         return _to_jsonable(result)
 
+    async def _require_own_memory(self, node_uuid: str) -> None:
+        """Refuse a pinned caller that named another silo's memory node.
+
+        THE reason this lives at the backend boundary rather than in each caller: these methods
+        are reached from at least four places -- MCP tools, named REST routes
+        (`DELETE /api/memory/{uuid}`, `/flag`, `/unflag`), the generic dispatch at
+        `/api/internal/backend/{operation}`, and the CLI. Guarding them per-caller has been
+        tried four times in this cluster and each fix exempted the surface added next.
+
+        The pin is read from the request context, not taken as a parameter. A parameter is
+        something a caller can forget to pass, and a caller that forgets is exactly the caller
+        this defends against.
+
+        `fetch_memory_by_uuid` is the lookup because it matches `:Entity` OR `:Episodic` and
+        already accepts a namespace -- the same call `delete_memory`'s MCP guard uses, so the
+        two surfaces cannot disagree about what ownership means.
+        """
+        await require_own_object(
+            uuid=node_uuid,
+            lookup=lambda uuid, **kw: self.fetch_memory_by_uuid(uuid, **kw),
+            label="memory",
+        )
+
     async def flag_memory(
         self, node_uuid: str, bootstrap_scope: str | None = None
     ) -> bool:
+        await self._require_own_memory(node_uuid)
         if bootstrap_scope is None:
             return bool(
                 await self._off_loop(self.built.graph_adapter.flag_memory, node_uuid)
@@ -71,11 +96,13 @@ class RuntimeProviderDataOpsMixin:
         )
 
     async def unflag_memory(self, node_uuid: str) -> bool:
+        await self._require_own_memory(node_uuid)
         return bool(
             await self._off_loop(self.built.graph_adapter.unflag_memory, node_uuid)
         )
 
     async def promote_memory(self, node_uuid: str) -> bool:
+        await self._require_own_memory(node_uuid)
         return bool(
             await self._off_loop(self.built.graph_adapter.promote_memory, node_uuid)
         )
@@ -113,6 +140,8 @@ class RuntimeProviderDataOpsMixin:
         """
         from menhir.services.erasure_coordinator import DELETION_SUCCEEDED_REASONS
 
+        # No guard here: this delegates to erase_memory, which carries it. A second call would
+        # double the lookups and, worse, invite the two to drift apart.
         outcome = await self.erase_memory(node_uuid)
         # Allowlist, not "anything except nothing_to_erase". That predicate answered True for
         # every reason it did not know about, so a failed PREPARE and a quarantined
@@ -127,6 +156,7 @@ class RuntimeProviderDataOpsMixin:
         cannot express: the node was gone from the graph, but sidecar content WAS erased --
         which is what a merge leaves behind for its absorbed participant.
         """
+        await self._require_own_memory(node_uuid)
         outcome = await self._off_loop(self._erasure().erase_memory, node_uuid)
         return dict(outcome or {})
 
@@ -148,6 +178,21 @@ class RuntimeProviderDataOpsMixin:
         """
         if not namespace or not namespace.strip() or namespace == DEFAULT_NAMESPACE:
             raise ValueError(f"refusing to delete the default/shared namespace: {namespace!r}")
+
+        # A pinned caller may only tear down its OWN silo. This is the one operation where the
+        # namespace is the target rather than a filter, so the pin cannot be "applied" to it in
+        # the usual sense -- injecting the pin would silently retarget the deletion at the
+        # caller's own namespace, destroying real data on what the caller believes is a
+        # different request. Refused, loudly, instead.
+        #
+        # At the backend boundary because `DELETE /api/namespace/{namespace}` takes the target
+        # from the URL path and never consulted the pin at all.
+        pin = pinned_namespace()
+        if pin and namespace.strip() != pin:
+            raise PermissionError(
+                f"Refused: this client is pinned to namespace {pin!r} and cannot delete "
+                f"namespace {namespace.strip()!r}."
+            )
         group_id = namespace_to_group_id(namespace)
         if group_id == "":
             raise ValueError("refusing to delete the default graphiti group")

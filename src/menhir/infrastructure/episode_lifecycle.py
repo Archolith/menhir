@@ -195,12 +195,31 @@ class EpisodeLifecycleRepository:
 
         IDEMPOTENT on the turn: `MERGE` keys on `evidence_projection_of`, so N memories citing one
         turn yield ONE projection, not N.
+
+        THE PROJECTION INHERITS THE TURN'S NAMESPACE, and `namespace` is a FILTER on which turns
+        this caller may reach -- two separate things that were previously one.
+
+        It used to stamp the CALLER's namespace on a turn matched globally. That is a content
+        EXFILTRATION, not merely a mis-scoped link: it copies another tenant's verbatim user text
+        into a node in the caller's own silo, where their recall then enriches and surfaces it.
+        Worse than the admission link it accompanies, because it moves content across the
+        boundary rather than drawing an edge across it.
+
+        Stamping from `t.namespace` is what makes the fix correct rather than merely restrictive.
+        A projection is a COPY OF THE TURN, so its home is wherever the turn lives; deriving it
+        from the caller meant an unpinned caller projecting a turn in namespace X produced a
+        projection in the default silo -- the content separated from its own tenant, a latent
+        mis-filing that predates the tenancy work and that a caller-derived value could never fix.
+
+        `namespace=None` does not filter, so an unpinned deployment reaches every turn exactly as
+        before and each projection now lands in the right silo.
         """
         rows = self.neo4j.execute(
             """
             MATCH (t:TurnEvidence {turn_id: $turn_evidence_uuid})
             WHERE t.role = 'user' AND t.declarant = 'user'
               AND t.text IS NOT NULL AND trim(t.text) <> ''
+              AND ($namespace IS NULL OR coalesce(t.namespace, 'default') = $namespace)
             MERGE (p:Episodic {evidence_projection_of: t.turn_id})
             ON CREATE SET
                 p.uuid = $projection_uuid,
@@ -216,7 +235,7 @@ class EpisodeLifecycleRepository:
                 p.bootstrap_scope = null,
                 p.session_id = $session_id,
                 p.user_id = $user_id,
-                p.namespace = $namespace,
+                p.namespace = coalesce(t.namespace, 'default'),
                 p.created_at = datetime(),
                 p.last_accessed = datetime(),
                 p.sharpness = 0.0,
@@ -252,7 +271,10 @@ class EpisodeLifecycleRepository:
                 "name": name,
                 "session_id": session_id,
                 "user_id": user_id,
-                "namespace": namespace,
+                # A FILTER on which turns this caller may reach -- NOT the value stamped on the
+                # projection, which is inherited from the turn itself. None means "do not
+                # filter" and keeps an unpinned caller's reach exactly as it was.
+                "namespace": (str(namespace).strip() or None) if namespace else None,
                 # From the SSOT, never a literal. `source_confidence_for`'s own docstring records
                 # that hardcoding this value here was drift (SSOT-09), and the tier ladder is the
                 # kind of thing that gets tuned -- a literal would keep passing tests while silently
@@ -267,7 +289,9 @@ class EpisodeLifecycleRepository:
             return None  # already projected on an earlier memory citing the same turn
         return str(row["uuid"])
 
-    def link_episode_admission(self, *, episode_uuid: str, turn_evidence_uuid: str) -> bool:
+    def link_episode_admission(
+        self, *, episode_uuid: str, turn_evidence_uuid: str, namespace: str | None = None
+    ) -> bool:
         """Record WHICH `:TurnEvidence` an apex-tier memory was admitted on:
         `(:Episodic)-[:ADMITTED_ON]->(:TurnEvidence)`.
 
@@ -284,17 +308,28 @@ class EpisodeLifecycleRepository:
         MATCH-only on both sides: never MERGE a node, so a bad uuid draws nothing rather than creating a
         stub that would later read as evidence that does not exist. Idempotent on the relationship, so a
         replayed ingest does not fan out duplicates. Returns True when the edge exists after the call.
+
+        ``namespace`` scopes BOTH endpoints and is opt-in (``None`` does not filter). Both ids come
+        from the caller, and matching them globally meant a caller could join ANY episode to ANY
+        turn -- including two nodes neither of which was its own, drawing a permanent provenance
+        edge inside another tenant's graph. The predicate is on both MATCHes rather than one,
+        because scoping only the episode would still let a caller's own memory be joined to
+        someone else's captured turn, which is the direction that leaks.
         """
+        ns = str(namespace).strip() if namespace is not None else ""
         rows = self.neo4j.execute(
             """
             MATCH (e:Episodic {uuid: $episode_uuid})
+            WHERE $namespace IS NULL OR coalesce(e.namespace, 'default') = $namespace
             MATCH (t:TurnEvidence {turn_id: $turn_evidence_uuid})
+            WHERE $namespace IS NULL OR coalesce(t.namespace, 'default') = $namespace
             MERGE (e)-[:ADMITTED_ON]->(t)
             RETURN count(*) AS linked
             """,
             params={
                 "episode_uuid": episode_uuid,
                 "turn_evidence_uuid": turn_evidence_uuid,
+                "namespace": ns or None,
             },
         )
         return bool(rows and int(rows[0].get("linked") or 0) > 0)

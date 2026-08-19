@@ -36,7 +36,13 @@ class TestLinkEpisodeAdmissionCypher:
             episode_uuid="ep-1", turn_evidence_uuid="turn-1"
         ) is True
         params = repo.neo4j.execute.call_args.kwargs["params"]
-        assert params == {"episode_uuid": "ep-1", "turn_evidence_uuid": "turn-1"}
+        # The query now binds a `$namespace` parameter on both MATCHes; None is the
+        # "do not filter" value that preserves the unscoped link.
+        assert params == {
+            "episode_uuid": "ep-1",
+            "turn_evidence_uuid": "turn-1",
+            "namespace": None,
+        }
 
     def test_never_creates_a_node(self):
         """MERGE the relationship, MATCH the endpoints. A MERGE on either node would let a stale uuid

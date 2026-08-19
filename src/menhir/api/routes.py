@@ -210,9 +210,22 @@ async def bootstrap_flagged(
     backend = _get_backend(request)
     normalized_reader = _normalize_reader_id(reader_id)
     selection_key, _allowed = bootstrap_selection(workspace)
-    rows = await backend.fetch_flagged_memories(limit=limit, workspace=workspace)
+    # Resolved server-side, like every other REST read of memory content. This route took no
+    # namespace at all, so a pinned client's bootstrap pins were drawn from every silo --
+    # and `workspace` is not a substitute: it selects a bootstrap SCOPE, not a tenant.
+    #
+    # The version hash takes the same namespace as the rows. If it did not, two clients pinned
+    # to different silos would receive different pins under the SAME version string, and the
+    # receipt in `_remember_flagged_bootstrap_read` would report a client as freshly
+    # bootstrapped on content it never saw.
+    resolved_namespace = _resolve_namespace(request, None)
+    rows = await backend.fetch_flagged_memories(
+        limit=limit, workspace=workspace, namespace=resolved_namespace
+    )
     rows = [row for row in rows if not is_structural_memory_row(row)]
-    version = await backend.fetch_flagged_memory_bootstrap_version(workspace=workspace)
+    version = await backend.fetch_flagged_memory_bootstrap_version(
+        workspace=workspace, namespace=resolved_namespace
+    )
     _remember_flagged_bootstrap_read(normalized_reader, version, workspace=workspace)
     return {
         "reader_id": normalized_reader,
@@ -426,9 +439,15 @@ async def link_episode_admission(
     if adapter is None or not hasattr(adapter, "link_episode_admission"):
         raise HTTPException(status_code=503, detail="episode admission unavailable")
 
+    # Resolved once and used for BOTH the link and the projection below. They must be the same
+    # value: linking in one namespace while projecting from another is precisely the split that
+    # let a caller reach a foreign turn's text.
+    resolved_namespace = _resolve_namespace(request, None)
+
     linked = bool(await asyncio.to_thread(
         adapter.link_episode_admission,
         episode_uuid=episode_uuid, turn_evidence_uuid=turn_evidence_uuid,
+        namespace=resolved_namespace,
     ))
 
     # Only project once the join actually landed. Projecting after a failed link would enrich a turn
@@ -443,7 +462,7 @@ async def link_episode_admission(
             name=f"evidence-projection-{turn_evidence_uuid}",
             session_id=getattr(session, "session_id", "") or "",
             user_id=getattr(session, "user_id", "") or "",
-            namespace=_resolve_namespace(request, None),
+            namespace=resolved_namespace,
         )
     return EpisodeAdmissionResponse(linked=linked, projection_uuid=projection_uuid)
 

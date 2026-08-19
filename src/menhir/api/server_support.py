@@ -156,6 +156,37 @@ def register_exception_handlers(app: FastAPI) -> None:
             extra={"errors": exc.errors()},
         )
 
+    @app.exception_handler(PermissionError)
+    async def _permission_error_handler(request: Request, exc: PermissionError) -> JSONResponse:
+        """Map a tenancy or tier refusal to 403 instead of letting it read as a crash.
+
+        The backend boundary raises `PermissionError` for an ownership violation (see
+        `core.tenancy`). Without this handler the generic `Exception` handler below catches it
+        and returns 500 "An unexpected server error occurred" -- which is wrong twice: the
+        caller cannot tell a deliberate refusal from a server fault, and an operator watching
+        error rates sees a spike of fake internal errors when tenancy is working correctly.
+
+        The refusal message is returned as the detail on purpose. It names the namespace the
+        object actually belongs to only in the sense of "not yours" -- it never discloses the
+        owning namespace -- and it tells a legitimate caller that got the wrong uuid what
+        happened.
+        """
+        request_id = request_id_for_request(request)
+        logger.warning(
+            "Tenancy refusal: %s %s request_id=%s -- %s",
+            request.method,
+            request.url.path,
+            request_id,
+            exc,
+        )
+        return error_response(
+            status_code=403,
+            error="Forbidden",
+            detail=str(exc) or "Forbidden",
+            code="forbidden",
+            request_id=request_id,
+        )
+
     @app.exception_handler(Exception)
     async def _unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
         request_id = request_id_for_request(request)

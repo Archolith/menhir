@@ -326,11 +326,12 @@ class MemoryGraphAdapter:
         )
 
     def link_episode_admission(
-        self, *, episode_uuid: str, turn_evidence_uuid: str
+        self, *, episode_uuid: str, turn_evidence_uuid: str, namespace: str | None = None
     ) -> bool:
         return self._episodes.link_episode_admission(
             episode_uuid=episode_uuid,
             turn_evidence_uuid=turn_evidence_uuid,
+            namespace=namespace,
         )
 
     def create_evidence_projection(

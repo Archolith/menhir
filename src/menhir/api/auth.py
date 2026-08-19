@@ -18,6 +18,7 @@ from menhir.mcp.service_access import (
     bind_request_auth_mode,
     bind_request_session,
     bind_request_tier,
+    require_trusted_client_identity,
     reset_request_auth_mode,
     reset_request_session,
     reset_request_tier,
@@ -421,6 +422,40 @@ class BearerAuthMiddleware:
             return
 
         if self._auth_mode is AuthMode.NONE:
+            # CF-34: a loopback BIND is not proof the CALLER is local.
+            #
+            # This mode grants unauthenticated access on the reasoning that startup guarantees a
+            # loopback bind, so only a local process can connect. A same-host reverse proxy
+            # defeats that: it IS a local process, it connects from 127.0.0.1, and it forwards
+            # requests from anywhere. Every protected surface is then reachable with no
+            # credential at all -- the widest bypass in this cluster, because there is no
+            # credential to get wrong.
+            #
+            # CF-8 fixed the explorer half of exactly this assumption and its commit recorded
+            # that the no-auth half was left open. This is that half. A forwarding header is
+            # positive evidence the request was relayed, so the peer address proves nothing
+            # about the origin and the mode's own precondition does not hold.
+            #
+            # Refused rather than downgraded to another mode: there is no credential to fall
+            # back to, and silently serving a proxied caller is the defect. The message names
+            # the fix, because an operator who genuinely wants remote access needs to configure
+            # auth, not remove the header.
+            if self._has_proxy_forwarding_header(headers):
+                await self._send_auth_error(
+                    scope,
+                    send,
+                    status_code=401,
+                    detail=(
+                        "This server runs with authentication disabled, which is only safe for "
+                        "directly-connected local callers. This request carries a proxy "
+                        "forwarding header, so it was relayed and its origin cannot be "
+                        "established. Configure an API key or per-client tokens to serve "
+                        "proxied or remote clients."
+                    ),
+                    code="proxied_request_without_auth",
+                )
+                return
+
             # Loopback no-auth: no tokens, but still capture self-declared per-client
             # identity for provenance/telemetry. Safe because startup guarantees a
             # loopback bind (bind-safety guard). Labels are cooperative, not an
@@ -460,6 +495,24 @@ class BearerAuthMiddleware:
             session_token = bind_request_session(user_id, session_id, client_id=client_id, client_name=client_name)
             tier_token = bind_request_tier(tier)
             try:
+                # CF-32 at the TRANSPORT boundary, not per-tool. Under static-key auth the
+                # caller supplies `client_name`, and both the namespace pin and the tool
+                # allowlist key on it with an unknown name meaning "unrestricted" -- so the
+                # party being restricted chose whether the restriction applied.
+                #
+                # `BaseTool.execute` already refuses this, and that check STAYS as
+                # defense-in-depth. But it only covers MCP tools: MCP resources and every REST
+                # route reached this point with the name already bound and never validated. The
+                # boundary belongs here, above dispatch, because every surface passes through
+                # it and none of them can opt out.
+                try:
+                    require_trusted_client_identity()
+                except PermissionError as exc:
+                    await self._send_auth_error(
+                        scope, send, status_code=403, detail=str(exc),
+                        code="unknown_client",
+                    )
+                    return
                 await self.app(scope, receive, send)
             finally:
                 reset_request_session(session_token)

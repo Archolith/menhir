@@ -55,8 +55,11 @@ def test_links_and_projects(client, graph_adapter):
     data = resp.json()
     assert data["linked"] is True
     assert data["projection_uuid"] == "proj-1"
+    # The route now resolves the namespace ONCE and passes it to both the link and the
+    # projection, so a pinned caller cannot join or read across silos. None is the unpinned
+    # value and preserves the previous behaviour.
     assert graph_adapter.link_episode_admission.call_args.kwargs == {
-        "episode_uuid": "ep-1", "turn_evidence_uuid": "turn-1"}
+        "episode_uuid": "ep-1", "turn_evidence_uuid": "turn-1", "namespace": None}
 
 
 def test_no_projection_when_the_link_did_not_land(client, graph_adapter):

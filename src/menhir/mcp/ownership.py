@@ -28,6 +28,8 @@ from __future__ import annotations
 
 from typing import Any, Awaitable, Callable, Protocol
 
+from menhir.core.tenancy import foreign_object_refusal as core_foreign_object_refusal
+
 
 class ScopedLookup(Protocol):
     """A lookup that can be restricted to one silo.
@@ -52,19 +54,17 @@ async def foreign_object_refusal(
     ``None`` means proceed -- either the caller is unpinned and unscoped (isolation is opt-in),
     the object is theirs, or it does not exist anywhere.
 
+    The tool-facing name for `core.tenancy.foreign_object_refusal`, which is the single
+    implementation. It moved to `core` when the same guard was needed at the backend boundary,
+    because `core` cannot import from `mcp` and a second copy of "does this object belong to
+    this caller" is exactly the divergence this cluster keeps producing.
+
     Args:
         uuid: The object identifier the caller named.
         namespace: The caller's silo. Empty means no scoping was requested.
         lookup: ``await lookup(uuid, namespace=...)`` -> object or None.
         label: What to call the object in the refusal, e.g. "episode", "artifact".
     """
-    ns = (namespace or "").strip()
-    if not ns:
-        return None
-    if await lookup(uuid, namespace=ns) is not None:
-        return None
-    if await lookup(uuid) is None:
-        # Absent everywhere. Not an ownership violation, and several tools have supported
-        # absent-object paths that must keep working (see the module docstring).
-        return None
-    return f"Refused: {label} {uuid} exists but is outside namespace {ns}."
+    return await core_foreign_object_refusal(
+        uuid=uuid, namespace=namespace, lookup=lookup, label=label
+    )

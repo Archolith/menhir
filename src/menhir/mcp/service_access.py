@@ -14,6 +14,7 @@ from menhir.config import MemorySettings
 from menhir.core.backend_config import resolve_backend_auth_key
 from menhir.core.backend_impl import BackendClient, RuntimeProvider
 from menhir.core.backend_protocol import MemoryBackend
+from menhir.core.tenancy import pinned_namespace as core_pinned_namespace
 from menhir.core.request_context import (
     bind_request_auth_mode,
     bind_request_session as _bind_request_session_context,
@@ -194,16 +195,14 @@ def get_pinned_namespace(settings: MemorySettings | None = None) -> str:
     own writes -- a game-chat bot driven by a small model will not reliably pass the
     right namespace argument. When a client is pinned, contracts.py FORCES the
     namespace on every tool call, so the caller's argument cannot override it.
+
+    Delegates to `core.tenancy.pinned_namespace`, which is the single authority. The backend
+    boundary needs this same resolution and `core` cannot import from `mcp`, so the logic moved
+    down rather than being copied -- two answers to "which silo is this caller in" would agree
+    until someone edited one of them.
     """
 
-    session = get_request_session()
-    if session is None:
-        return ""
-    client_name = (getattr(session, "client_name", "") or "").strip().lower()
-    if not client_name:
-        return ""
-    settings = settings or MemorySettings.from_env()
-    return (settings.client_namespaces or {}).get(client_name, "")
+    return core_pinned_namespace(settings)
 
 
 def client_restrictions_configured(settings: MemorySettings | None = None) -> bool:

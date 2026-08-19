@@ -11,6 +11,7 @@ from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from menhir.domain.recall import InvalidQueryPresetError
+from menhir.core.tenancy import require_namespace_target, resolve_namespace_filter
 from menhir.mcp.service_access import get_pinned_namespace
 
 from .routes_support import (
@@ -53,7 +54,10 @@ async def phase3_run_impl(
             detail="no sync chat provider configured for personal-memory consolidation",
         )
     embed = make_view_embedder(settings)
-    ns = body.namespace
+    # A consolidation pass MUTATES the namespace it runs over, so the namespace is the target
+    # of the action, not a filter on it -- forcing the pin here would silently re-aim the run at
+    # the caller's own silo and consolidate data it did not ask to touch. Refused instead.
+    ns = require_namespace_target(body.namespace, action="run consolidation over")
     selected = ns in await asyncio.to_thread(adapter.list_dirty_namespaces, limit=500)
     result = await consolidate_personal_memory(
         adapter,
@@ -141,6 +145,10 @@ async def phase3_status_impl(
     require_phase3_adapter: Callable[[Request], tuple[Any, Any]],
 ) -> Phase3StatusResponse:
     _, adapter = require_phase3_adapter(request)
+    # A read, so the pin forces rather than refuses -- the caller gets a correct answer about
+    # its own silo instead of an error. Without this, `?namespace=` was taken verbatim and a
+    # pinned client could count another tenant's turn evidence.
+    namespace = resolve_namespace_filter(namespace) or namespace
     dirty = namespace in await asyncio.to_thread(adapter.list_dirty_namespaces, limit=500)
     turn_evidence = await asyncio.to_thread(adapter.count_turn_evidence, namespace)
     return Phase3StatusResponse(namespace=namespace, dirty=dirty, turn_evidence=int(turn_evidence))
@@ -154,6 +162,9 @@ async def phase3_views_impl(
     require_phase3_adapter: Callable[[Request], tuple[Any, Any]],
 ) -> Phase3ViewsResponse:
     _, adapter = require_phase3_adapter(request)
+    # A read of View CONTENT -- counter values and their history -- so the pin forces. This was
+    # the widest of the four: `?namespace=` named any silo and returned its Views verbatim.
+    namespace = resolve_namespace_filter(namespace) or namespace
     counters = await asyncio.to_thread(adapter.list_counters, namespace=namespace, limit=limit)
     views: list[dict[str, Any]] = []
     receipts: list[dict[str, Any]] = []
