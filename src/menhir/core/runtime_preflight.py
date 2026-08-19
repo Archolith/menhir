@@ -314,6 +314,9 @@ def collect_runtime_capabilities(
                 health = embedding_dimension_health(
                     neo4j=repo,
                     expected_dim=expected_dim,
+                    # CF-173: the `serve` guard ran this identical six-scan sweep moments ago
+                    # against the same graph. Share its result rather than paying for it twice.
+                    use_cache=True,
                 )
             except Exception as exc:
                 logger.warning("Embedding dimension compatibility check failed: %s", exc)
