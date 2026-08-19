@@ -185,7 +185,12 @@ async def phase3_reset_impl(
     require_phase3_adapter: Callable[[Request], tuple[Any, Any]],
     get_backend: Callable[[Request], Any],
 ) -> Phase3ResetResponse:
-    require_tier("agent")
+    # CF-9: operator, not agent. This calls `backend.delete_namespace` -- the same operation the
+    # MCP `delete_namespace` tool exposes at `required_tier = "operator"`, and a strictly wider
+    # blast radius than `DELETE /memory/{uuid}`, which is already operator-only for a single
+    # node. The transport was the only thing deciding how much authority destroying an entire
+    # tenant required.
+    require_tier("operator")
     try_record_destructive_op_rest("phase3_reset")
     _, adapter = require_phase3_adapter(request)
     backend = get_backend(request)
