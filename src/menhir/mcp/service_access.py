@@ -206,6 +206,31 @@ def get_pinned_namespace(settings: MemorySettings | None = None) -> str:
     return (settings.client_namespaces or {}).get(client_name, "")
 
 
+def client_restrictions_configured(settings: MemorySettings | None = None) -> bool:
+    """Whether this deployment configures any per-client policy at all.
+
+    The switch for both CF-32's identity refusal and CF-83's mint refusal. A deployment with no
+    restrictions has no policy to evade, so neither check applies and behaviour is unchanged.
+    """
+    settings = settings or MemorySettings.from_env()
+    return bool(settings.client_namespaces) or bool(settings.client_tools)
+
+
+def declared_client_names(settings: MemorySettings | None = None) -> frozenset[str]:
+    """Every client name this deployment recognizes, from all three registries.
+
+    One authority, consulted by the identity refusal (CF-32) and the mint refusal (CF-83). Two
+    copies of "what counts as a declared name" would be the CF-47 failure mode: they would agree
+    until someone edited one of them.
+    """
+    settings = settings or MemorySettings.from_env()
+    return frozenset(
+        set(settings.client_namespaces or {})
+        | set(settings.client_tools or {})
+        | set(settings.known_clients or frozenset())
+    )
+
+
 #: Auth modes under which the caller SUPPLIES its own `client_name` rather than having it derived
 #: from a validated credential. Under these, the name is a claim, not an identity.
 #:
@@ -245,8 +270,7 @@ def require_trusted_client_identity(settings: MemorySettings | None = None) -> N
     """
 
     settings = settings or MemorySettings.from_env()
-    restrictions_configured = bool(settings.client_namespaces) or bool(settings.client_tools)
-    if not restrictions_configured:
+    if not client_restrictions_configured(settings):
         return
 
     if get_request_auth_mode() not in _SELF_DECLARED_IDENTITY_MODES:
@@ -265,12 +289,7 @@ def require_trusted_client_identity(settings: MemorySettings | None = None) -> N
             "MENHIR_CLIENT_TOOLS."
         )
 
-    known = (
-        set(settings.client_namespaces or {})
-        | set(settings.client_tools or {})
-        | set(settings.known_clients or frozenset())
-    )
-    if client_name not in known:
+    if client_name not in declared_client_names(settings):
         raise PermissionError(
             f"Unknown client name {client_name!r}. This deployment configures per-client "
             "restrictions, so an unrecognized name is refused rather than treated as "

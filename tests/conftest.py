@@ -98,6 +98,25 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
             item.add_marker(skip_online)
 
 
+@pytest.fixture(autouse=True)
+def _isolate_client_restrictions(monkeypatch):
+    """No test may inherit the developer's per-client policy from `.env` (CF-32 / CF-83).
+
+    Both of those refusals key on server config -- an unrecognized client name is refused, and an
+    undeclared name cannot be minted -- and `MemorySettings.from_env()` reads the real `.env`
+    through dotenv. So on a machine that configures MENHIR_CLIENT_NAMESPACES, tests that merely
+    bind `client_name="web"` or mint `"alpha"` began failing with an identity error, in three
+    files that have nothing to do with identity. The failure looked unrelated to what they test,
+    which is the expensive kind.
+
+    Cleared here rather than per-file because it is one class of failure, not three incidents. A
+    test that WANTS a restricted deployment sets these itself; `monkeypatch.setenv` inside the
+    test overrides this fixture, since both write the same environment.
+    """
+    for var in ("MENHIR_CLIENT_NAMESPACES", "MENHIR_CLIENT_TOOLS", "MENHIR_KNOWN_CLIENTS"):
+        monkeypatch.setenv(var, "")
+
+
 @pytest.fixture(autouse=True, scope="session")
 def force_all_tests_onto_test_neo4j():
     """SAFETY (2026-07-13): no test may ever connect to the PRODUCTION graph.

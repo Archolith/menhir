@@ -18,20 +18,6 @@ from menhir.mcp.service_access import (
 from menhir.mcp.tools import ALL_TOOLS
 
 
-@pytest.fixture(autouse=True)
-def _no_client_restrictions(monkeypatch):
-    """Isolate these tests from per-client identity config (CF-32).
-
-    This file exercises query-auth policy, not client identity. When CF-32's identity refusal
-    landed, every test here failed on a developer machine whose `.env` configures
-    MENHIR_CLIENT_NAMESPACES -- because an unrecognized client name is now refused, and these
-    tests bind `client_name="web"`. The tests were silently depending on ambient environment,
-    which is why the failure looked unrelated to what they test.
-    """
-    for var in ("MENHIR_CLIENT_NAMESPACES", "MENHIR_CLIENT_TOOLS", "MENHIR_KNOWN_CLIENTS"):
-        monkeypatch.setenv(var, "")
-
-
 def test_query_auth_allowlist_equals_readonly_tools_plus_add_memory():
     """Verify the allowlist is exactly {readonly tools} ∪ {add_memory}."""
     expected = {"add_memory"}

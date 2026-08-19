@@ -231,3 +231,99 @@ def test_cf32_identity_is_checked_before_the_policies_that_key_on_it() -> None:
 
     source = inspect.getsource(contracts.BaseTool.execute)
     assert source.index("require_trusted_client_identity") < source.index("get_client_tool_allowlist")
+
+
+class _FakeTokenStore:
+    """Minimal stand-in for the per-client token store."""
+
+    def mint(self, client_name: str, tier: str):
+        record = type(
+            "_Rec", (), {"client_id": "cid", "client_name": client_name, "tier": tier}
+        )()
+        return "raw-token", record
+
+
+# ---------------------------------------------------------------------------
+# CF-83 -- a boundary you can mint your way out of is not a boundary
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_cf83_minting_an_undeclared_client_is_refused(monkeypatch) -> None:
+    """A namespace pin is server config keyed on client_name, so minting a name that is not
+    configured yields a credential no pin covers -- and a pinned operator mints its way out of
+    its own data boundary.
+
+    Note this is NOT settled by the decision that a pinned client may invoke a GLOBAL tool. That
+    decision says the pin bounds data and tier bounds actions; minting is a global action whose
+    EFFECT is a new principal with a different data boundary.
+    """
+    import json as _json
+
+    from menhir.mcp.tools.ops import mint_client as mod
+
+    monkeypatch.setattr(
+        "menhir.api.client_token_store.get_client_token_store", lambda: _FakeTokenStore()
+    )
+    monkeypatch.setattr(
+        "menhir.mcp.service_access.client_restrictions_configured", lambda *a, **k: True
+    )
+    monkeypatch.setattr(
+        "menhir.mcp.service_access.declared_client_names",
+        lambda *a, **k: frozenset({"tiny-agent"}),
+    )
+
+    result = _json.loads(await mod.MintClientTool().endpoint(client_name="helper"))
+    assert "refusing to mint undeclared client" in result["error"]
+    assert "token" not in result
+
+
+@pytest.mark.asyncio
+async def test_cf83_minting_a_declared_client_still_works(monkeypatch) -> None:
+    import json as _json
+
+    from menhir.mcp.tools.ops import mint_client as mod
+
+    monkeypatch.setattr(
+        "menhir.api.client_token_store.get_client_token_store", lambda: _FakeTokenStore()
+    )
+    monkeypatch.setattr(
+        "menhir.mcp.service_access.client_restrictions_configured", lambda *a, **k: True
+    )
+    monkeypatch.setattr(
+        "menhir.mcp.service_access.declared_client_names",
+        lambda *a, **k: frozenset({"tiny-agent"}),
+    )
+
+    result = _json.loads(await mod.MintClientTool().endpoint(client_name="tiny-agent"))
+    assert result["token"] == "raw-token"
+
+
+@pytest.mark.asyncio
+async def test_cf83_an_unrestricted_deployment_mints_freely(monkeypatch) -> None:
+    """No configured restriction means there is no pin to escape, so minting is unchanged."""
+    import json as _json
+
+    from menhir.mcp.tools.ops import mint_client as mod
+
+    monkeypatch.setattr(
+        "menhir.api.client_token_store.get_client_token_store", lambda: _FakeTokenStore()
+    )
+    monkeypatch.setattr(
+        "menhir.mcp.service_access.client_restrictions_configured", lambda *a, **k: False
+    )
+
+    result = _json.loads(await mod.MintClientTool().endpoint(client_name="brand-new"))
+    assert result["token"] == "raw-token"
+
+
+def test_cf83_declared_names_have_one_authority() -> None:
+    """The identity refusal and the mint refusal must consult the same set. Two copies of "what
+    counts as a declared name" would agree until someone edited one of them -- the CF-47 shape."""
+    import inspect
+
+    from menhir.mcp import service_access
+    from menhir.mcp.tools.ops import mint_client as mod
+
+    assert "declared_client_names" in inspect.getsource(service_access.require_trusted_client_identity)
+    assert "declared_client_names" in inspect.getsource(mod.MintClientTool.endpoint)
