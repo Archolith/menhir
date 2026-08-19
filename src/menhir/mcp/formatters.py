@@ -538,23 +538,33 @@ async def _standing_unrecallable_count(backend: object) -> int:
 
 
 async def _queue_summary(backend: object) -> str:
-    if hasattr(backend, "get_queue_depth"):
-        queue_depth = int(await backend.get_queue_depth())
-        active_rows = await backend.list_episode_processing(states=[ProcessingState.ENRICHING], limit=200)
-        snapshot = await backend.scheduler_status_snapshot()
-    else:
-        queue_depth = int(backend.ingest_service.get_queue_depth())
-        active_rows = backend.graph_adapter.list_episode_processing(
-            processing_states=[ProcessingState.ENRICHING],
-            limit=200,
+    # NOTE: this helper runs AFTER a durable mutation, so it must never raise --
+    # its failure is cosmetic and the write is already committed. A suppressed
+    # read must surface as unknown, never as a fabricated measurement.
+    try:
+        if hasattr(backend, "get_queue_depth"):
+            queue_depth = int(await backend.get_queue_depth())
+            active_rows = await backend.list_episode_processing(states=[ProcessingState.ENRICHING], limit=200)
+            snapshot = await backend.scheduler_status_snapshot()
+        else:
+            queue_depth = int(backend.ingest_service.get_queue_depth())
+            active_rows = backend.graph_adapter.list_episode_processing(
+                processing_states=[ProcessingState.ENRICHING],
+                limit=200,
+            )
+            scheduler = getattr(backend, "scheduler", None)
+            snapshot = None
+            if scheduler is not None and hasattr(scheduler, "status_snapshot"):
+                try:
+                    snapshot = scheduler.status_snapshot()
+                except (AttributeError, TypeError, RuntimeError):
+                    snapshot = None
+    except Exception:  # noqa: BLE001 - post-write cosmetic read; the write is committed
+        logger.debug("could not read queue status after durable mutation", exc_info=True)
+        return (
+            "queue_status: UNAVAILABLE (queue status could not be read after the "
+            "write; the write itself is committed)"
         )
-        scheduler = getattr(backend, "scheduler", None)
-        snapshot = None
-        if scheduler is not None and hasattr(scheduler, "status_snapshot"):
-            try:
-                snapshot = scheduler.status_snapshot()
-            except (AttributeError, TypeError, RuntimeError):
-                snapshot = None
     active_enriching = len(active_rows)
     scheduler_state = "running" if snapshot and snapshot.get("running") else "stopped" if snapshot is not None else "unknown"
     summary = (
