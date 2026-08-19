@@ -82,6 +82,25 @@ def set_default_llm_usage_callback(callback: LLMUsageCallback | None) -> None:
     _default_llm_usage_callback = callback
 
 
+class LlmUsageControlSignal(Exception):
+    """Raised BY a usage callback to REFUSE the call it is being notified about.
+
+    The emitter below swallows exceptions from usage callbacks, and that is correct for what it
+    was written for: an instrumentation fault must never take down the caller it is observing.
+    But a budget REFUSAL is not an instrumentation fault -- it is a control decision whose entire
+    purpose is to affect the caller, and the blanket `except Exception` swallowed it identically.
+
+    That made CF-79's per-job reservation ineffective in production: `_record_episode_llm_usage`
+    raised, this module logged it at DEBUG, and the call proceeded -- which is precisely the
+    "counts and warns, never stops a call" behaviour CF-79 was filed about, one layer further
+    down than anyone looked.
+
+    Opting in explicitly, rather than narrowing the `except` to a specific type, keeps the
+    original principle intact: anything a callback raises by ACCIDENT is still swallowed, and
+    only a signal deliberately declaring itself control flow propagates.
+    """
+
+
 def _emit_llm_usage_event(
     kind: str,
     *,
@@ -121,6 +140,10 @@ def _emit_llm_usage_event(
                 error=error,
             )
         )
+    except LlmUsageControlSignal:
+        # A deliberate refusal, not a fault. It MUST reach the caller -- swallowing it is what
+        # left CF-79's reservation unable to stop anything.
+        raise
     except Exception:  # pragma: no cover - instrumentation must not affect callers
         logger.debug(
             "LLM usage callback failed for kind=%s phase=%s endpoint=%s",

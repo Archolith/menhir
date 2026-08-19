@@ -28,6 +28,7 @@ if TYPE_CHECKING:
 from menhir.services.scheduler_protocols import LifecycleServiceProtocol
 from menhir.infrastructure.observability import (
     LLMUsageEvent,
+    LlmUsageControlSignal,
     reset_llm_usage_callback,
     set_llm_usage_callback,
 )
@@ -60,7 +61,7 @@ from menhir.services.ingest_models import (
     _parse_occurred_at,
 )
 
-class LlmBudgetExceeded(RuntimeError):
+class LlmBudgetExceeded(LlmUsageControlSignal, RuntimeError):
     """An episode tried to make more LLM calls than its per-job budget permits (CF-79).
 
     Raised from the usage callback at the moment a call is reserved, so the call never
