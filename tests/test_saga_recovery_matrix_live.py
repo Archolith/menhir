@@ -48,6 +48,31 @@ Two things follow, and both are worth carrying:
   inverse is `if True:` there (every abstention benign) plus `if False:` on the classification
   check.
 
+**What the inverse tests establish for CF-21, stated exactly.** Removing GUARD 4 alone
+(`_classify_replay`'s `observed_fp != expected_before`) does NOT fail
+`test_unmerge_crash_then_drift_is_quarantined_without_restoring`, because the after-state
+verification in `_apply_owned` (`expected_after and after_fp != expected_after`) catches the same
+drift one step later. So unmerge has the same two-layer protection merge does.
+
+The difference matters and is worth being precise about: with GUARD 4 removed the restore is
+ATTEMPTED and then quarantined, rather than refused before touching anything. In the drift case
+this file constructs -- the survivor deleted -- the attempted restore matches nothing, so no
+overwrite occurs and the test still passes. **A drift case where GUARD 4 is the only thing
+standing between a replay and a real overwrite was not constructed here.** That is the remaining
+gap in CF-21's live proof, recorded rather than glossed: what is proven is the observable
+behaviour (drift quarantines, undrifted replays complete), not that GUARD 4 is individually
+load-bearing.
+
+**Recovery semantics are NOT uniform across the saga family**, which this matrix makes concrete:
+
+* merge and unmerge REPLAY to completion when the graph is unchanged;
+* ENTITY_DELETE deliberately does NOT auto-resume -- a crashed delete whose target still exists
+  is quarantined with the survivor named ("deleting them now could destroy nodes the crash
+  spared"), because a wrong delete replay is unrecoverable while a delayed one is merely stuck.
+
+A test written on the assumption that "resumes correctly" means the same thing for every kind
+will assert the wrong thing for delete; this file originally did.
+
 Run with:  pytest --run-online -m online tests/test_saga_recovery_matrix_live.py
 """
 
@@ -60,7 +85,7 @@ import pytest
 
 from menhir.infrastructure import operation_owner as _operation_owner
 from menhir.infrastructure import process_liveness
-from menhir.infrastructure.correlation_queries import CorrelationRepository
+from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
 from menhir.infrastructure.graph_operations import GraphOperationsJournal
 from menhir.services.merge_coordinator import MergeCoordinator
 from menhir.services.saga_reconcile_dispatcher import (
@@ -106,7 +131,15 @@ def journal(tmp_path):
 
 @pytest.fixture
 def graph(test_neo4j_repo):
-    return CorrelationRepository(test_neo4j_repo)
+    """The FULL adapter, matching production.
+
+    `build_default_dispatcher(adapter)` hands ONE adapter to all five coordinators, so a test
+    using a narrower one (e.g. `CorrelationRepository`, which the merge-only live tests use) is
+    not exercising the wiring startup actually builds -- and indeed fails outright for delete
+    (`newly_unreferenced_evidence`) and metric write (`fetch_metric_state`), whose interfaces it
+    does not implement.
+    """
+    return MemoryGraphAdapter(neo4j=test_neo4j_repo)
 
 
 @pytest.fixture
@@ -512,27 +545,229 @@ def test_startup_wires_the_real_dispatcher_rather_than_a_coordinator(monkeypatch
 # 5. CF-21: the unmerge precondition, live
 # ---------------------------------------------------------------------------
 
+
+# ---------------------------------------------------------------------------
+# 6. ENTITY_UNMERGE: CF-21 GUARD 4, driven against a real drifted graph
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def merged_pair(coordinators, journal, test_neo4j_repo, pair):
+    """A COMMITTED merge, so there is something real to unmerge."""
+    result = coordinators["merge"].merge(
+        survivor_uuid=pair["s"], absorbed_uuid=pair["a"], similarity=0.97
+    )
+    assert result.get("merged"), f"setup merge did not land: {result}"
+    merge_op_id = str(result["op_id"])
+    assert _state_of(journal, merge_op_id) == "COMMITTED"
+    assert not _exists(test_neo4j_repo, pair["a"]), "setup merge left the absorbed node"
+    return merge_op_id
+
+
+def _crash_unmerge(coordinators, journal, monkeypatch, merge_op_id):
+    """PREPARE an unmerge, die inside the owned mutation, then bury the writer."""
+    cls = type(coordinators["unmerge"])
+    original = cls._apply_owned
+
+    def _die(*_a, **_kw):
+        raise RuntimeError("simulated process death mid-unmerge")
+
+    monkeypatch.setattr(cls, "_apply_owned", _die, raising=True)
+    with pytest.raises(RuntimeError):
+        coordinators["unmerge"].unmerge(merge_op_id)
+    _bury_the_writer(journal)
+    monkeypatch.setattr(cls, "_apply_owned", original, raising=True)
+
+    prepared = [
+        r for r in _rows(journal, "PREPARED")
+        if str(r.get("operation_kind")) == "ENTITY_UNMERGE"
+    ]
+    assert len(prepared) == 1, f"the unmerge crash left no recoverable row: {prepared}"
+    return str(prepared[0]["op_id"])
+
+
 @pytest.mark.online
-def test_unmerge_replay_reads_its_precondition_against_a_real_graph(
-    coordinators, journal, test_neo4j_repo, pair
+def test_unmerge_crash_then_drift_is_quarantined_without_restoring(
+    coordinators, dispatcher, journal, test_neo4j_repo, pair, merged_pair, monkeypatch
 ) -> None:
-    """CF-21 was `expected_before_sha256` written and never read. `test_unmerge_precondition`
-    covers the guard with stub doubles; this pins that the field is both WRITTEN at prepare and
-    READ at replay in the real coordinator, so a refactor cannot drop the read while the stub
-    test keeps passing against its own fake."""
-    import inspect
+    """CF-21 as a LIVE property rather than a source inspection.
 
-    unmerge_src = inspect.getsource(type(coordinators["unmerge"]))
-    assert "expected_before_sha256" in unmerge_src
+    The first version of this file asserted, via `inspect.getsource`, that `_classify_replay`
+    mentions `expected_before_sha256`. That pins the code SHAPE and nothing about behaviour --
+    a guard could read the field and ignore it and the assertion would still pass.
 
-    # The guard is GUARD 4 in `_classify_replay`, which every replay path routes through --
-    # located by reading the source rather than assumed, because an assertion aimed at the wrong
-    # method passes or fails for reasons unrelated to the invariant.
-    classify_src = inspect.getsource(type(coordinators["unmerge"])._classify_replay)
-    assert "expected_before_sha256" in classify_src, (
-        "the unmerge replay classification no longer reads its own precondition hash -- CF-21 "
-        "exactly"
+    This performs a real merge, crashes a real unmerge after PREPARE, drifts a fact the
+    precondition genuinely covers, and requires the dispatcher to quarantine. That is the
+    finding: replaying a restore into a drifted graph overwrites exactly the survivor state the
+    snapshot exists to protect.
+    """
+    unmerge_op = _crash_unmerge(coordinators, journal, monkeypatch, merged_pair)
+
+    # GUARD 4 reuses `merge_state_fingerprint`, whose three facts include `survivor_present`, so
+    # removing the survivor is drift the precondition actually covers -- not an arbitrary edit.
+    test_neo4j_repo.execute(
+        "MATCH (s:Entity {uuid:$s}) DETACH DELETE s", params={"s": pair["s"]}
     )
-    assert "cannot verify precondition" in classify_src, (
-        "a row with no recorded precondition no longer fails closed"
+
+    dispatcher.replay(gate=_HeldGate())
+
+    assert _state_of(journal, unmerge_op) == "NEEDS_REVIEW", (
+        "a drifted unmerge was restored instead of quarantined -- CF-21 exactly"
     )
+    assert not _exists(test_neo4j_repo, pair["a"]), (
+        "a quarantined unmerge restored the absorbed node anyway"
+    )
+
+
+@pytest.mark.online
+def test_an_undrifted_unmerge_still_replays_to_completion(
+    coordinators, dispatcher, journal, test_neo4j_repo, pair, merged_pair, monkeypatch
+) -> None:
+    """The other half, without which the quarantine test would be satisfied by a guard that
+    refuses everything. An unmerge crashed into an UNCHANGED graph must actually restore."""
+    unmerge_op = _crash_unmerge(coordinators, journal, monkeypatch, merged_pair)
+
+    dispatcher.replay(gate=_HeldGate())
+
+    assert _state_of(journal, unmerge_op) == "COMMITTED", (
+        "an unmerge into an unchanged graph failed to replay"
+    )
+    assert _exists(test_neo4j_repo, pair["a"]), "the replayed unmerge did not restore the node"
+
+
+# ---------------------------------------------------------------------------
+# 7. ENTITY_DELETE: crash-resume against a real node
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def delete_coordinator(graph, journal):
+    from menhir.services.delete_coordinator import DeleteCoordinator
+
+    return DeleteCoordinator(graph_adapter=graph, journal=journal)
+
+
+@pytest.mark.online
+def test_delete_crash_after_prepare_resumes_and_releases_its_lock(
+    delete_coordinator, journal, test_neo4j_repo, pair, monkeypatch
+) -> None:
+    """ENTITY_DELETE was wired into the dispatcher but its crash-resume behaviour was never
+    driven against a real graph -- and it turns out NOT to be the merge shape at all.
+
+    Merge replays to completion; delete refuses to. See the comment at the assertions for why
+    that asymmetry is correct rather than an oversight."""
+    from menhir.services.delete_coordinator import DeleteCoordinator
+
+    cls = DeleteCoordinator
+    original = cls._mutate_and_verify
+
+    def _die(*_a, **_kw):
+        raise RuntimeError("simulated process death mid-delete")
+
+    monkeypatch.setattr(cls, "_mutate_and_verify", _die, raising=True)
+    with pytest.raises(RuntimeError):
+        delete_coordinator.delete_entity(pair["p"])
+    _bury_the_writer(journal)
+    monkeypatch.setattr(cls, "_mutate_and_verify", original, raising=True)
+
+    prepared = [
+        r for r in _rows(journal, "PREPARED")
+        if str(r.get("operation_kind")) == "ENTITY_DELETE"
+    ]
+    assert len(prepared) == 1, f"the delete crash left no recoverable row: {prepared}"
+    op_id = str(prepared[0]["op_id"])
+    assert _exists(test_neo4j_repo, pair["p"]), "the crash deleted before it was interrupted"
+    assert _locks_for(journal, op_id), "PREPARE took no participant lock"
+
+    run = SagaReconcileDispatcher(
+        journal=journal, handlers=build_handlers(delete=delete_coordinator)
+    ).replay(gate=_HeldGate())
+
+    # DELETE DOES NOT AUTO-RESUME, and that is deliberate -- the opposite of merge.
+    #
+    # This test originally asserted COMMITTED, on the assumption that "resumes correctly" means
+    # the same thing for every saga. It does not. A crashed delete whose target still EXISTS is
+    # quarantined with the survivors named: "NOT retried automatically -- deleting them now could
+    # destroy nodes the crash spared." Re-driving a destructive operation on the strength of a
+    # journal row is exactly the asymmetry this subsystem refuses, because a wrong replay of a
+    # delete is unrecoverable while a delayed one is merely stuck.
+    #
+    # So the recovery guarantee for ENTITY_DELETE is "surface it, never guess", and the property
+    # worth pinning is that the node SURVIVES and a human is told.
+    outcomes = run.as_dict().get("outcomes") or []
+    assert _state_of(journal, op_id) == "NEEDS_REVIEW", outcomes
+    assert _exists(test_neo4j_repo, pair["p"]), (
+        "a crashed delete was auto-retried and destroyed a node the crash had spared"
+    )
+    assert any(pair["p"] in str(o.get("observed_error", "")) for o in outcomes), (
+        f"the quarantine did not name the surviving target: {outcomes}"
+    )
+    assert _locks_for(journal, op_id), (
+        "a quarantined delete released its fence, so ordinary traffic can now mutate a node "
+        "whose intended fate is still undetermined"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 8. METRIC_WRITE: crash-resume reaches the intended value exactly once
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def metric_coordinator(graph, journal):
+    from menhir.infrastructure.metric_receipts import MetricReceiptStore
+    from menhir.services.metric_write_coordinator import MetricWriteCoordinator
+
+    return MetricWriteCoordinator(
+        graph_adapter=graph,
+        journal=journal,
+        receipts=MetricReceiptStore(db_path=journal.db_path),
+    )
+
+
+@pytest.mark.online
+def test_metric_write_crash_resumes_to_the_intended_value_exactly_once(
+    metric_coordinator, journal, monkeypatch
+) -> None:
+    """The one saga whose correctness is a VALUE rather than a node's presence.
+
+    Exactly-once therefore has to be asserted on the number: a double-applied fold shows up as a
+    doubled count and a lost replay as a missing one, and neither is visible in "the node is
+    gone" style assertions the other cases can use.
+    """
+    from menhir.services.metric_write_coordinator import MetricWriteCoordinator
+
+    subject = f"saga-matrix-{uuidlib.uuid4().hex[:8]}"
+    cls = MetricWriteCoordinator
+    original = cls._apply_owned
+
+    def _die(*_a, **_kw):
+        raise RuntimeError("simulated process death mid-metric-write")
+
+    monkeypatch.setattr(cls, "_apply_owned", _die, raising=True)
+    with pytest.raises(RuntimeError):
+        metric_coordinator.record_telemetry_absolute(
+            subject=subject,
+            counter="failures",
+            source_table="failure_events",
+            grouping={"kind": "test"},
+            cutoff_id=10,
+            absolute_count=7.0,
+            row_ids=[1, 2, 3],
+        )
+    _bury_the_writer(journal)
+    monkeypatch.setattr(cls, "_apply_owned", original, raising=True)
+
+    prepared = [
+        r for r in _rows(journal, "PREPARED")
+        if str(r.get("operation_kind")) == "METRIC_WRITE"
+    ]
+    assert len(prepared) == 1, f"the metric crash left no recoverable row: {prepared}"
+    op_id = str(prepared[0]["op_id"])
+
+    dispatcher = SagaReconcileDispatcher(
+        journal=journal, handlers=build_handlers(metric_write=metric_coordinator)
+    )
+    dispatcher.replay(gate=_HeldGate())
+    assert _state_of(journal, op_id) == "COMMITTED", "the metric write did not replay"
+
+    second = dispatcher.replay(gate=_HeldGate())
+    assert second.as_dict().get("scanned", 0) == 0, "a committed metric write was replayed again"
+    assert _rows(journal, "PREPARED") == []
