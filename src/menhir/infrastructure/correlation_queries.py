@@ -123,10 +123,21 @@ class CorrelationRepository:
     # Entity merge (near-duplicate absorption)
     # ------------------------------------------------------------------
 
-    #: Path-shaped-name predicate, shared verbatim with check_ineligible_node_veto so the
-    #: eligibility gate and the standalone veto cannot drift apart.
+    #: The ONE merge-ineligibility predicate. Interpolated by BOTH the eligibility gate and the
+    #: standalone veto, on the same `n` binding, so the two cannot state different rules.
+    #:
+    #: The previous comment claimed the two "cannot drift apart" while only the path-shaped
+    #: regex was actually shared -- the veto hand-wrote its own copy of the rest and had already
+    #: lost `is_view` (CF-149). Neither copy ever carried `is_quantstate`, so a legacy counter
+    #: register was merge-eligible at the mutation boundary (CF-159).
+    #:
+    #: The derived-node clause is the same triple the typed-scalar binding queries use in
+    #: `episode_lifecycle` (`is_view` / `is_quantstate` / `view_kind`), inverted: a node is
+    #: INELIGIBLE if any of them says it is derived. Counters written today carry `is_view` too,
+    #: so `is_quantstate` covers pre-View registers specifically.
     _INELIGIBLE_ROLE_PREDICATE = (
         r"(n.structure_role IS NOT NULL) OR coalesce(n.is_view, false) OR "
+        r"coalesce(n.is_quantstate, false) OR (n.view_kind IS NOT NULL) OR "
         r"(n.name =~ '(?i).*([\\/]|\\.(py|md|txt|json|ya?ml|ps1|sh|java|ts|tsx|js|sql|env|toml|"
         r"cfg|ini|gradle|html|css|png|jpg|svg))(\b|$).*')"
     )
@@ -846,20 +857,17 @@ class CorrelationRepository:
     ) -> bool:
         r"""Ineligible-node veto: structural or path-shaped nodes must never merge.
 
-        A node is merge-ineligible if:
-        1. structure_role IS NOT NULL (own identity path, structural upsert), OR
-        2. name is path-shaped: contains `/` or `\` or ends with a file extension
-           (py, md, txt, json, yml, yaml, ps1, sh, java, ts, tsx, js, sql, env, toml,
-           cfg, ini, gradle, html, css, png, jpg, svg).
+        The rule lives in `_INELIGIBLE_ROLE_PREDICATE` and is interpolated here rather than
+        restated, because restating it is exactly how this drifted: structural nodes, derived
+        nodes (`is_view` / `is_quantstate` / `view_kind`), and path-shaped names.
 
         Returns True if EITHER node is ineligible (veto applies), False otherwise.
         """
         rows = self._neo4j.execute(
-            r"""
+            f"""
             MATCH (n:Entity) WHERE n.uuid IN [$a, $b]
-            WITH n, (n.structure_role IS NOT NULL) AS structural,
-                 (n.name =~ '(?i).*([\\/]|\\.(py|md|txt|json|ya?ml|ps1|sh|java|ts|tsx|js|sql|env|toml|cfg|ini|gradle|html|css|png|jpg|svg))(\b|$).*') AS pathshaped
-            RETURN count(CASE WHEN structural OR pathshaped THEN 1 END) > 0 AS ineligible
+            WITH n, ({self._INELIGIBLE_ROLE_PREDICATE}) AS ineligible_node
+            RETURN count(CASE WHEN ineligible_node THEN 1 END) > 0 AS ineligible
             """,
             params={"a": survivor_uuid, "b": absorbed_uuid},
         )

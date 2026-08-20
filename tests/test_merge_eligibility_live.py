@@ -116,3 +116,45 @@ def test_missing_node_abstains(live_repo, make_pair):
     result = repo.merge_entity(s, "does-not-exist-uuid", similarity=0.99)
     assert result["merged"] == 0
     assert result.get("reason") == me.NODE_MISSING
+
+
+# --------------------------------------------------------------------------- CF-149 / CF-159
+# One predicate, two call sites. The eligibility gate and the standalone veto had drifted: the
+# veto hand-wrote its own copy and had lost `is_view`, and NEITHER copy carried `is_quantstate`,
+# so a pre-View counter register was merge-eligible at the mutation boundary.
+
+
+@pytest.mark.online
+@pytest.mark.parametrize(
+    "derived_props",
+    [
+        pytest.param({"is_quantstate": True}, id="legacy-counter-register"),
+        pytest.param({"is_view": True}, id="derived-view"),
+        pytest.param({"view_kind": "counter"}, id="kinded-view"),
+    ],
+)
+def test_derived_nodes_are_ineligible_at_both_call_sites(live_repo, make_pair, derived_props):
+    s, a = make_pair(
+        survivor_props={"freshness": "ACTIVE", "scope": "PERSISTENT"},
+        absorbed_props={"freshness": "ACTIVE", "scope": "PERSISTENT", **derived_props},
+    )
+    repo = CorrelationRepository(live_repo)
+
+    # the standalone veto (classification path)
+    assert repo.check_ineligible_node_veto(s, a) is True
+    # the mutation-boundary gate -- the one that actually guards DETACH DELETE
+    assert repo.evaluate_merge_eligibility(s, a).allowed is False
+
+
+@pytest.mark.online
+def test_ordinary_pair_is_still_eligible_at_both_call_sites(live_repo, make_pair):
+    """Positive control for the test above. Without it, a predicate that vetoed EVERYTHING would
+    satisfy every assertion there while breaking merge entirely."""
+    s, a = make_pair(
+        survivor_props={"freshness": "ACTIVE", "scope": "PERSISTENT"},
+        absorbed_props={"freshness": "ACTIVE", "scope": "PERSISTENT"},
+    )
+    repo = CorrelationRepository(live_repo)
+
+    assert repo.check_ineligible_node_veto(s, a) is False
+    assert repo.evaluate_merge_eligibility(s, a).allowed is True
