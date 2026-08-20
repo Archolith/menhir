@@ -789,6 +789,42 @@ def test_create_todo_writes_namespace_into_the_node() -> None:
 
 
 @pytest.mark.unit
+def test_reminder_is_stamped_with_its_todos_namespace() -> None:
+    neo4j = _StubNeo4j()
+    repo = TodoRepository(neo4j)
+
+    repo.create_todo(content="x", due_date="2027-02-16", namespace="tenantA")
+
+    # call 0 is the :Todo CREATE, call 1 is the reminder CREATE
+    params = neo4j.calls[1]["params"]
+    assert params["r_namespace"] == "tenantA"
+    assert params["r_group_id"] == "tenantA"
+
+    query = neo4j.calls[1]["query"]
+    assert "namespace:     $r_namespace" in query
+    assert "group_id:      ''" not in query
+
+
+@pytest.mark.unit
+def test_reminder_defaults_to_the_default_namespace() -> None:
+    neo4j = _StubNeo4j()
+    repo = TodoRepository(neo4j)
+
+    repo.create_todo(content="x", due_date="2027-02-16")
+
+    # call 0 is the :Todo CREATE, call 1 is the reminder CREATE
+    params = neo4j.calls[1]["params"]
+    assert params["r_namespace"] == "default"
+    assert params["r_group_id"] == ""
+
+    # Assert the QUERY consumes them. Checking only the params dict is vacuous: the values are
+    # computed whether or not the Cypher binds them, so unstamping the node leaves this green.
+    query = neo4j.calls[1]["query"]
+    assert "namespace:     $r_namespace" in query
+    assert "group_id:      $r_group_id" in query
+
+
+@pytest.mark.unit
 def test_list_todos_without_namespace_does_not_filter() -> None:
     neo4j = _StubNeo4j()
     repo = TodoRepository(neo4j)

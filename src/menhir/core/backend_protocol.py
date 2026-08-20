@@ -659,9 +659,12 @@ class MemoryBackend(Protocol):
         ...
 
     async def list_temporal_in_window(
-        self, *, window_days: int = 30
+        self, *, window_days: int = 30, namespace: str | None = None
     ) -> list[dict[str, Any]]:
-        """Return open TEMPORAL nodes whose target_date is within ±window_days of today."""
+        """Return open TEMPORAL nodes whose target_date is within ±window_days of today.
+
+        ``namespace`` is opt-in and scopes the read to one silo.
+        """
         ...
 
     async def complete_temporal(self, uuid: str) -> bool:

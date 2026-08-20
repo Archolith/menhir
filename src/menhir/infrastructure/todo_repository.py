@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
+from menhir.domain.namespace import namespace_to_group_id, stamped_namespace
 from menhir.domain.todo_location import (
     DEFAULT_TODO_NAMESPACE,
     code_ref_file_predicate,
@@ -247,12 +248,13 @@ class TodoRepository:
                     name:          $r_name,
                     summary:       '',
                     content:       $content,
-                    group_id:      '',
+                    group_id:      $r_group_id,
                     type:          'TEMPORAL',
                     target_date:   $due_date,
                     status:        'open',
                     source:        $source,
                     scope:         'PERSISTENT',
+                    namespace:     $r_namespace,
                     created_at:    $now,
                     last_accessed: $now,
                     freshness:     'ACTIVE',
@@ -269,6 +271,8 @@ class TodoRepository:
                     "due_date": due_date,
                     "source": source,
                     "now": now,
+                    "r_group_id": namespace_to_group_id(safe_namespace),
+                    "r_namespace": stamped_namespace(safe_namespace),
                 },
             )
 

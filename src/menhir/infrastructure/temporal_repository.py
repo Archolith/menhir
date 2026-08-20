@@ -186,18 +186,31 @@ class TemporalRepository:
     # Read
     # ------------------------------------------------------------------
 
-    def list_in_window(self, *, window_days: int = 30) -> list[dict[str, Any]]:
-        """Return open TEMPORAL nodes whose target_date is within ±window_days of today."""
+    def list_in_window(
+        self, *, window_days: int = 30, namespace: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Return open TEMPORAL nodes whose target_date is within ±window_days of today.
+
+        ``namespace`` is opt-in, matching the sibling ``TodoRepository.list_todos``: omitting it
+        lists every silo. Reminders written before they were stamped carry no namespace property,
+        so a missing one reads as ``default`` rather than being stranded -- the same coalesce
+        idiom the memory queries use.
+        """
         safe_window = max(1, min(window_days, 365))
+        scope = (
+            ""
+            if namespace is None
+            else "              AND coalesce(n.namespace, 'default') = $namespace\n"
+        )
         return self.neo4j.execute(
-            """
+            f"""
             MATCH (n:Entity)
             WHERE n.type = 'TEMPORAL'
               AND n.status = 'open'
               AND n.target_date IS NOT NULL
-              AND date(n.target_date) >= date() - duration({days: $window})
-              AND date(n.target_date) <= date() + duration({days: $window})
-            RETURN
+              AND date(n.target_date) >= date() - duration({{days: $window}})
+              AND date(n.target_date) <= date() + duration({{days: $window}})
+{scope}            RETURN
                 n.uuid        AS uuid,
                 n.name        AS name,
                 n.content     AS content,
@@ -205,5 +218,5 @@ class TemporalRepository:
                 n.status      AS status
             ORDER BY n.target_date ASC
             """,
-            {"window": safe_window},
+            {"window": safe_window, "namespace": namespace},
         )

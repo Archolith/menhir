@@ -673,10 +673,11 @@ class BackendClientOpsMixin:
         )
 
     async def list_temporal_in_window(
-        self, *, window_days: int = 30
+        self, *, window_days: int = 30, namespace: str | None = None
     ) -> list[dict[str, Any]]:
         return await self._request(
-            "list_temporal_in_window", {"window_days": window_days}
+            "list_temporal_in_window",
+            {"window_days": window_days, "namespace": namespace},
         )
 
     async def complete_temporal(self, uuid: str) -> bool:

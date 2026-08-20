@@ -140,13 +140,15 @@ def _run_prompt_impl(
 
     todos: list[dict] = []
     try:
-        todos = svc.graph_adapter.list_todos(status="open", limit=5)
+        todos = svc.graph_adapter.list_todos(status="open", limit=5, namespace=workspace)
     except Exception as exc:
         print(f"menhir hook: todo recall failed ({type(exc).__name__})", file=sys.stderr)
 
     temporal_memories: list[dict] = []
     try:
-        temporal_memories = svc.graph_adapter.list_temporal_in_window(window_days=30)
+        temporal_memories = svc.graph_adapter.list_temporal_in_window(
+            window_days=30, namespace=workspace
+        )
     except Exception as exc:
         print(f"menhir hook: temporal recall failed ({type(exc).__name__})", file=sys.stderr)
 
@@ -226,13 +228,15 @@ def _run_postcompact_impl(*, max_tokens: int, workspace: str | None = None) -> N
 
     todos: list[dict] = []
     try:
-        todos = svc.graph_adapter.list_todos(status="open", limit=5)
+        todos = svc.graph_adapter.list_todos(status="open", limit=5, namespace=workspace)
     except Exception as exc:
         print(f"menhir hook: todo recall failed ({type(exc).__name__})", file=sys.stderr)
 
     temporal_memories: list[dict] = []
     try:
-        temporal_memories = svc.graph_adapter.list_temporal_in_window(window_days=30)
+        temporal_memories = svc.graph_adapter.list_temporal_in_window(
+            window_days=30, namespace=workspace
+        )
     except Exception as exc:
         print(f"menhir hook: temporal recall failed ({type(exc).__name__})", file=sys.stderr)
 

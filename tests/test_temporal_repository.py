@@ -123,3 +123,45 @@ def test_add_memory_tool_temporal_branch_normalizes_blank_namespace_to_none() ->
         namespace=None,
         turn_evidence_uuid=None,
     )
+
+
+# ---------------------------------------------------------------------------
+# list_in_window tenancy predicate (CF-106)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_list_in_window_unscoped_has_no_namespace_predicate() -> None:
+    neo4j = _EchoNeo4j()
+    repo = TemporalRepository(neo4j)
+
+    repo.list_in_window(window_days=30)
+
+    query = neo4j.calls[0]["query"]
+    params = neo4j.calls[0]["params"]
+    assert "coalesce(n.namespace" not in query
+    assert params["namespace"] is None
+
+
+@pytest.mark.unit
+def test_list_in_window_scoped_injects_namespace_predicate() -> None:
+    neo4j = _EchoNeo4j()
+    repo = TemporalRepository(neo4j)
+
+    repo.list_in_window(window_days=30, namespace="tenantA")
+
+    query = neo4j.calls[0]["query"]
+    params = neo4j.calls[0]["params"]
+    assert "coalesce(n.namespace, 'default') = $namespace" in query
+    assert params["namespace"] == "tenantA"
+
+
+@pytest.mark.unit
+def test_list_in_window_scoped_query_is_still_valid_shape() -> None:
+    neo4j = _EchoNeo4j()
+    repo = TemporalRepository(neo4j)
+
+    repo.list_in_window(window_days=30, namespace="tenantA")
+
+    query = neo4j.calls[0]["query"]
+    assert query.index("coalesce(n.namespace") < query.index("RETURN")
