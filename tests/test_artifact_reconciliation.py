@@ -831,6 +831,26 @@ def test_an_undeclared_subdirectory_is_outside_the_corpus() -> None:
 
 
 @pytest.mark.unit
+def test_archived_wrapups_stay_in_the_corpus() -> None:
+    """CF-15: the gateway's own archive destination was the one archive dir with no route.
+
+    A wrapup was tracked in `.agent/for-review` and then left the corpus silently the moment it
+    was archived -- `route_for_path` returned None, so `build_entry` returned None and the
+    document was neither tracked nor reported as unclassified.
+    """
+    route = route_for_path(".agent/archive/wrapups/WRAPUP-2026-08-20-x.md")
+    assert route is not None
+    assert route.lane == CorpusLane.ARCHIVE
+    # Same type as the active lane it came from: archiving does not change what a document is.
+    assert route.artifact_type == route_for_path(".agent/for-review/WRAPUP-x.md").artifact_type
+
+    # CONTROL: the sibling archive routes still resolve, so a change that broke the route
+    # table generally would fail here rather than silently passing the assertion above.
+    assert route_for_path(".agent/archive/handoffs/x.md").lane == CorpusLane.ARCHIVE
+    assert route_for_path(".agent/archive/reviews/x.md").lane == CorpusLane.ARCHIVE
+
+
+@pytest.mark.unit
 def test_index_documents_are_excluded() -> None:
     assert is_index_document(".agent/plans/README.md")
     assert not is_index_document(".agent/plans/readme-driven-plan.md")

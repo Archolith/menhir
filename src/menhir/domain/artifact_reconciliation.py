@@ -208,6 +208,16 @@ CORPUS_ROUTES: tuple[CorpusRoute, ...] = (
         CorpusLane.ARCHIVE,
         preserve_existing_type=True,
     ),
+    #: Archived wrapups. `.agent/for-review` (the active lane) routes to
+    #: IMPLEMENTATION_REPORT, and archiving does not change what the document is.
+    #: Without this route the gateway's own archive destination falls out of the
+    #: corpus entirely -- `route_for_path` returns no match and `build_entry` None.
+    CorpusRoute(
+        ".agent/archive/wrapups",
+        ArtifactType.IMPLEMENTATION_REPORT,
+        CorpusLane.ARCHIVE,
+        preserve_existing_type=True,
+    ),
     CorpusRoute(
         ".agent/reference",
         None,
