@@ -59,23 +59,23 @@ class MemorySettings:
     neo4j_uri: str = "bolt://localhost:7687"
     neo4j_database: str = "neo4j"
     neo4j_user: str = "neo4j"
-    neo4j_password: str = ""
+    neo4j_password: str = field(default="", repr=False)
 
     # Local LLM (llama.cpp / OpenAI-compatible)
     local_llm_base_url: str = "http://127.0.0.1:8081/v1"
-    local_llm_api_key: str = "not-needed"
+    local_llm_api_key: str = field(default="not-needed", repr=False)
     local_llm_chat_model: str = "qwen3.5-35b-a3b"
     local_llm_embed_model: str = ""
     local_llm_embed_base_url: str = ""
 
     # OpenAI
-    openai_api_key: str = ""
+    openai_api_key: str = field(default="", repr=False)
     openai_chat_model: str = "gpt-4o-mini"
     openai_embed_model: str = "text-embedding-3-small"
 
     # Gemini
     gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
-    gemini_api_key: str = ""
+    gemini_api_key: str = field(default="", repr=False)
     gemini_chat_model: str = "gemini-2.5-flash"
 
     # Provider selection — applies to chat backend and all Graphiti components
@@ -324,10 +324,10 @@ class MemorySettings:
     # HTTP server
     api_host: str = "127.0.0.1"
     api_port: int = 8100
-    api_key: str = ""
-    operator_key: str = ""  # MENHIR_OPERATOR_KEY — Claude, Codex, human operator
-    agent_key: str = ""     # MENHIR_AGENT_KEY — Qwen, Gemini, Reasonix
-    readonly_key: str = ""  # MENHIR_READONLY_KEY — dashboards, read integrations
+    api_key: str = field(default="", repr=False)
+    operator_key: str = field(default="", repr=False)  # MENHIR_OPERATOR_KEY — Claude, Codex, human operator
+    agent_key: str = field(default="", repr=False)     # MENHIR_AGENT_KEY — Qwen, Gemini, Reasonix
+    readonly_key: str = field(default="", repr=False)  # MENHIR_READONLY_KEY — dashboards, read integrations
     allow_insecure_remote_no_auth: bool = False  # MENHIR_ALLOW_INSECURE_REMOTE_NO_AUTH
     client_tokens_enabled: bool = False  # MENHIR_CLIENT_TOKENS_ENABLED — enforced per-client token tier
 
@@ -408,7 +408,7 @@ class MemorySettings:
     oauth_as_dir: str = ""
     oauth_as_code_ttl_s: float = 120.0
     oauth_as_access_ttl_s: int = 3600
-    oauth_as_consent_secret: str = ""
+    oauth_as_consent_secret: str = field(default="", repr=False)
     oauth_as_consent_ttl_s: float = 300.0
     oauth_as_session_ttl_s: float = 600.0
     oauth_as_register_rate: int = 20
@@ -428,8 +428,8 @@ class MemorySettings:
 
     # Langfuse
     langfuse_host: str = ""
-    langfuse_public_key: str = ""
-    langfuse_secret_key: str = ""
+    langfuse_public_key: str = field(default="", repr=False)
+    langfuse_secret_key: str = field(default="", repr=False)
 
     def __post_init__(self) -> None:
         """Validate bounds on critical numeric settings."""
