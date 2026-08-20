@@ -9,6 +9,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
 from menhir.config import MemorySettings
+from menhir.infrastructure.observability import LlmUsageControlSignal
 from menhir.infrastructure.providers import (
     ChatBackend,
     ProviderConfig,
@@ -210,6 +211,13 @@ class LLMAdapter:
                 result = _strip_thinking_tags(raw).strip()
                 return result if result else None
             except asyncio.CancelledError:
+                raise
+            except LlmUsageControlSignal:
+                # CF-235. A budget refusal is a DECISION, not a provider fault: retrying it is
+                # the one response guaranteed to be wrong, and returning None reports "the model
+                # was unavailable" to a judge that then routes the merge to conflict. Same shape
+                # as CF-227 and CF-231 -- the third place in this codebase where a control signal
+                # met a handler written for faults.
                 raise
             except TimeoutError as exc:
                 logger.warning("LLM %s timed out; not retrying: %s", operation, exc)

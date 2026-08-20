@@ -19,7 +19,7 @@ from menhir.domain.utils import source_confidence_for
 from menhir.infrastructure import consolidation_audit as _audit
 from menhir.infrastructure.episode_repository import is_recoverable_context_window_error
 from menhir.infrastructure.telemetry import record_failure_event
-from menhir.services.enrichment_failures import classify_enrichment_failure
+from menhir.services.enrichment_failures import classify_enrichment_failure, is_budget_refusal
 from menhir.services.enrichment_steps import propagate_user_flag
 from menhir.services.event_consolidation import (
     EventConsolidationConfig,
@@ -133,12 +133,15 @@ async def observe_queue_health(
         return result
 
     buckets: dict[str, int] = {}
+    budget_parked = 0
     worst: tuple[int, str, str] | None = None  # (count, error, oldest_at)
     for row in signatures:
         error = str(row.get("error") or "")
         count = int(row.get("count") or 0)
         classification = classify_enrichment_failure(error)
         buckets[classification] = buckets.get(classification, 0) + count
+        if is_budget_refusal(error):
+            budget_parked += count
         if classification in _NEVER_RETRIED_CLASSIFICATIONS:
             if worst is None or count > worst[0]:
                 worst = (count, error, str(row.get("oldest_at") or "unknown"))
@@ -146,6 +149,11 @@ async def observe_queue_health(
     stuck = sum(buckets.get(name, 0) for name in _NEVER_RETRIED_CLASSIFICATIONS)
     result["failed_by_classification"] = dict(sorted(buckets.items()))
     result["awaiting_manual_review"] = stuck
+    # Broken out of the parked pile because the two need OPPOSITE operator actions: a parse-error
+    # pile is a model or prompt problem, a budget pile means the cap is too low for real episodes
+    # and is fixed by raising it and requeueing. Folded together they read as one backlog with no
+    # indicated action -- which is how the 196-episode pile above stayed unactioned.
+    result["parked_on_budget"] = budget_parked
 
     if stuck > 0 and worst is not None:
         top_count, top_error, oldest_at = worst
