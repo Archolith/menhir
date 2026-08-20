@@ -283,7 +283,23 @@ class IngestWorkerMixin:
             # `handle_enrichment_failure`, the same path any mid-episode LLM error already takes.
             count = self._job_llm_call_counts.get(episode_uuid, 0) + 1
             self._job_llm_call_counts[episode_uuid] = count
-            if count > self._budget_settings_max_per_job:
+            if count > self._budget_settings_max_per_job and event.report_only:
+                # CF-234 measurement mode. The call is counted -- so the overrun is visible and
+                # the counter stays truthful for every later call in this job -- but it is not
+                # refused. Enforcing here would need a handler that does not exist yet: an
+                # unhandled `LlmBudgetExceeded` reaches `_process_episode`'s generic
+                # `except Exception` and marks the episode FAILED, which is a worse outcome than
+                # the over-spend it prevents.
+                logger.warning(
+                    "Per-job LLM budget WOULD refuse call %d for episode %s (limit=%d, "
+                    "report-only): %s %s",
+                    count,
+                    episode_uuid,
+                    self._budget_settings_max_per_job,
+                    event.kind,
+                    event.operation or "",
+                )
+            elif count > self._budget_settings_max_per_job:
                 logger.warning(
                     "Per-job LLM budget exceeded for episode %s: %d calls (limit=%d) -- refusing",
                     episode_uuid,
@@ -304,17 +320,30 @@ class IngestWorkerMixin:
             # it. Refusing on absence would break those call sites for no safety gain, since a
             # caller with no session has no window to exhaust.
             if budget_key is not None and not self.reserve_session_llm_call(budget_key):
-                logger.warning(
-                    "Session LLM budget exhausted for key %s while episode %s was running "
-                    "-- refusing the call",
-                    budget_key,
-                    episode_uuid,
-                )
-                raise LlmBudgetExceeded(
-                    f"session {budget_key} exhausted its LLM call budget "
-                    f"(limit {self._budget_settings_max_calls} calls per "
-                    f"{self._budget_settings_window_s}s)"
-                )
+                if event.report_only:
+                    # Reserved (the window is debited, so the measurement is honest) but not
+                    # refused, for the same reason as the per-job branch above.
+                    logger.warning(
+                        "Session LLM budget WOULD refuse a call for key %s while episode %s was "
+                        "running (report-only)",
+                        budget_key,
+                        episode_uuid,
+                    )
+                    # Deliberately NOT `return`: the raise below skips the usage write, but a
+                    # measured call must still be recorded or the measurement loses the very
+                    # calls it exists to count.
+                else:
+                    logger.warning(
+                        "Session LLM budget exhausted for key %s while episode %s was running "
+                        "-- refusing the call",
+                        budget_key,
+                        episode_uuid,
+                    )
+                    raise LlmBudgetExceeded(
+                        f"session {budget_key} exhausted its LLM call budget "
+                        f"(limit {self._budget_settings_max_calls} calls per "
+                        f"{self._budget_settings_window_s}s)"
+                    )
 
         scheduler_task = build_episode_scheduler_task(
             episode_uuid=episode_uuid,

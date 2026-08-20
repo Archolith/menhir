@@ -212,15 +212,38 @@ class OpenAIStyleChatBackend:
             settings=self.settings,
             request_timeout_s=self.dependencies.request_timeout_s,
         )
-        response = await client.chat.completions.create(
+        # CF-234: this backend announced nothing, so every `LLMAdapter` call it served was
+        # invisible to both LLM budgets -- including the judge fan-out (3 calls per proposal per
+        # extracted node) that CF-79 was filed to bound. `build_chat_backend` routes both LOCAL
+        # and OPENAI here and `chat_provider` defaults to "local", so that was the default
+        # configuration.
+        #
+        # `report_only=True` is deliberate and temporary: it makes the calls VISIBLE without
+        # making the budget bind. Enforcing needs a landing zone first -- a refusal currently has
+        # no handler and falls into `_process_episode`'s generic `except Exception`, which marks
+        # the episode FAILED. Flip this to enforcing only together with that handler and a cap
+        # calibrated on what this measurement reports.
+        handle = start_llm_usage_call(
+            kind="chat",
             model=self.provider.chat_model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            max_tokens=max_tokens,
-            temperature=temperature,
+            endpoint="chat.completions.create",
+            operation=operation,
+            report_only=True,
         )
+        try:
+            response = await client.chat.completions.create(
+                model=self.provider.chat_model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
+        except BaseException as exc:
+            fail_llm_usage_call(handle, exc)
+            raise
+        complete_llm_usage_call(handle, result=response)
         return response.choices[0].message.content or ""
 
 
@@ -262,6 +285,11 @@ class GeminiChatBackend:
             model=self.provider.chat_model,
             endpoint="models.generateContent",
             operation=operation,
+            # Same surface as the OpenAI-style backend above, so the same mode. Leaving this one
+            # enforcing would keep exactly the split CF-234 is about -- and its enforcement is
+            # phantom anyway: CF-235 has `_chat_text` catch the refusal, retry it, and return
+            # None, so no refusal on this path has ever reached an actor.
+            report_only=True,
         )
         try:
             response = await _gemini_generate_content(

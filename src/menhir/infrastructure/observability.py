@@ -41,6 +41,10 @@ class LLMUsageEvent:
     reasoning_output_tokens: int | None = None
     provider_usage: dict[str, Any] | None = None
     error: str | None = None
+    #: This call is being MEASURED, not governed: a budget callback must count it and let it
+    #: proceed rather than refusing it (CF-234). Set by the announcement site, never inferred, so
+    #: a surface that does not opt in keeps whatever enforcement it has today.
+    report_only: bool = False
 
 
 @dataclass(frozen=True)
@@ -53,6 +57,7 @@ class LLMCallHandle:
     endpoint: str | None
     operation: str | None
     started_at: float
+    report_only: bool = False
 
 
 LLMUsageCallback = Callable[[LLMUsageEvent], None]
@@ -117,6 +122,7 @@ def _emit_llm_usage_event(
     reasoning_output_tokens: int | None = None,
     provider_usage: dict[str, Any] | None = None,
     error: str | None = None,
+    report_only: bool = False,
 ) -> None:
     callback = _llm_usage_callback.get() or _default_llm_usage_callback
     if callback is None:
@@ -138,6 +144,7 @@ def _emit_llm_usage_event(
                 reasoning_output_tokens=reasoning_output_tokens,
                 provider_usage=provider_usage,
                 error=error,
+                report_only=report_only,
             )
         )
     except LlmUsageControlSignal:
@@ -242,7 +249,13 @@ def start_llm_usage_call(
     model: str | None,
     endpoint: str | None,
     operation: str | None = None,
+    report_only: bool = False,
 ) -> LLMCallHandle:
+    """Announce a call. ``report_only`` asks a budget callback to count it, not refuse it.
+
+    Carried on the handle so the completed/failed phases report it identically -- a call that was
+    measured at reservation must not appear governed at completion.
+    """
     handle = LLMCallHandle(
         call_id=uuid4().hex,
         kind=kind,
@@ -250,6 +263,7 @@ def start_llm_usage_call(
         endpoint=endpoint,
         operation=operation,
         started_at=perf_counter(),
+        report_only=report_only,
     )
     _emit_llm_usage_event(
         kind,
@@ -258,6 +272,7 @@ def start_llm_usage_call(
         endpoint=endpoint,
         operation=operation,
         call_id=handle.call_id,
+        report_only=report_only,
     )
     return handle
 
@@ -279,6 +294,7 @@ def complete_llm_usage_call(
             call_id=handle.call_id,
             duration_ms=int((perf_counter() - handle.started_at) * 1000),
             **normalized,
+            report_only=handle.report_only,
         )
     except LlmUsageControlSignal:
         # CF-227 taught the EMITTER to let a refusal through; this handler is the emitter's own
@@ -295,6 +311,7 @@ def complete_llm_usage_call(
             operation=handle.operation,
             call_id=handle.call_id,
             duration_ms=int((perf_counter() - handle.started_at) * 1000),
+            report_only=handle.report_only,
         )
 
 
@@ -308,6 +325,7 @@ def fail_llm_usage_call(handle: LLMCallHandle, error: BaseException) -> None:
         call_id=handle.call_id,
         duration_ms=int((perf_counter() - handle.started_at) * 1000),
         error=str(error),
+        report_only=handle.report_only,
     )
 
 

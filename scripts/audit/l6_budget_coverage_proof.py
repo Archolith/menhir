@@ -96,8 +96,15 @@ def _client_factory(counter: dict[str, int]):
     return factory
 
 
-async def part_a() -> tuple[int, int]:
-    """Does the per-job budget bind the judge path? Counts real dispatches."""
+async def part_a() -> tuple[int, int, int]:
+    """Does the per-job budget SEE, and then bind, the judge path? Counts real dispatches.
+
+    Announcements are counted separately from refusals because after the CF-234 fix the two
+    diverge, and the original version of this script could not tell the difference: a backend
+    that announces nothing and a backend announcing in report-only mode both execute 9 calls and
+    raise 0 refusals. Visibility is the property the fix changes; binding is deliberately still
+    off until the refusal has a handler.
+    """
     counter = {"executed": 0}
     provider = ProviderConfig(
         kind=ProviderKind.OPENAI,
@@ -122,9 +129,14 @@ async def part_a() -> tuple[int, int]:
     )
 
     worker = _Worker(max_per_job=PER_JOB_BUDGET)
-    token = set_llm_usage_callback(
-        lambda event: worker._record_episode_llm_usage("ep-proof", event, budget_key=None)
-    )
+    announced = {"n": 0}
+
+    def _callback(event: Any) -> None:
+        if event.phase == "started":
+            announced["n"] += 1
+        worker._record_episode_llm_usage("ep-proof", event, budget_key=None)
+
+    token = set_llm_usage_callback(_callback)
     refused = 0
     try:
         for _ in range(JUDGE_CALLS):
@@ -137,7 +149,7 @@ async def part_a() -> tuple[int, int]:
                 break
     finally:
         reset_llm_usage_callback(token)
-    return counter["executed"], refused
+    return counter["executed"], refused, announced["n"]
 
 
 class _AnnouncingBackend:
@@ -193,12 +205,23 @@ async def part_b() -> tuple[int, int, Any]:
 async def main() -> int:
     print(f"per-job budget = {PER_JOB_BUDGET} calls; the judge loop asks for {JUDGE_CALLS}\n")
 
-    executed_a, refused_a = await part_a()
+    executed_a, refused_a, announced_a = await part_a()
     print("PART A -- real OpenAIStyleChatBackend (the production default for local/openai)")
+    print(f"  calls announced to the budget : {announced_a}")
     print(f"  model calls actually executed : {executed_a}")
     print(f"  budget refusals raised        : {refused_a}")
-    print(f"  verdict: {'BUDGET BINDS' if executed_a <= PER_JOB_BUDGET else 'BUDGET DOES NOT BIND'}"
-          f" -- {executed_a} calls ran against a limit of {PER_JOB_BUDGET}\n")
+    if announced_a == 0:
+        print(f"  verdict: BUDGET IS BLIND -- {executed_a} calls ran unseen against a "
+              f"limit of {PER_JOB_BUDGET}")
+    elif executed_a <= PER_JOB_BUDGET:
+        print(f"  verdict: BUDGET BINDS -- {executed_a} calls ran against a limit "
+              f"of {PER_JOB_BUDGET}")
+    else:
+        print(f"  verdict: VISIBLE, REPORT-ONLY -- all {announced_a} calls are announced and "
+              f"the overrun is measurable ({announced_a - PER_JOB_BUDGET} over a limit of "
+              f"{PER_JOB_BUDGET}), but nothing is refused yet. Intended until a refusal "
+              f"has a handler.")
+    print()
 
     executed_b, announced_b, escaped_b = await part_b()
     print("PART B -- a backend that announces (Gemini today; every backend once A is fixed)")
