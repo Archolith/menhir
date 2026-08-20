@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable
 
-from menhir.config import MemorySettings
+from menhir.config import MemorySettings, redact_uri_credentials
 from menhir.infrastructure.llama_endpoint import acquire_llama_url_sync, should_use_scheduler
 from menhir.infrastructure.observability import (
     complete_llm_usage_call,
@@ -94,18 +94,46 @@ def make_view_embedder(settings: MemorySettings) -> ViewEmbedder | None:
     return embed
 
 
+def _normalize_embed_stamp_base(base_url: str) -> str:
+    """Normalize a base URL for stamping: strip whitespace, any userinfo, and a trailing slash.
+
+    Userinfo (``http://user:pass@host``) is stripped defensively -- base_url comes from operator
+    settings and COULD carry it -- and the stamp is persisted on every embedded row, so it must
+    never hold a credential. This delegates to the same `redact_uri_credentials` used by the
+    CF-35 disclosure boundaries rather than repeating the parse here: one implementation, so an
+    IPv6 literal or a malformed port cannot be handled two different ways.
+    """
+    return redact_uri_credentials(base_url.strip()).rstrip("/")
+
+
 def view_embedder_version(settings: MemorySettings) -> str | None:
-    """The stable identity of the configured embed model, stamped as `embed_version` on write-time
+    """The stable identity of the configured embed provider, stamped as `embed_version` on write-time
     observation embeddings so it agrees with `backfill_assertion_embeddings` (which re-embeds rows whose
-    stamped version differs). Returns the embed model name, or None when no OpenAI-compatible embed
-    provider is configured (so write-time embedding is simply skipped and the backfill fills later).
+    stamped version differs). Returns ``<normalized base_url>|<embed_model>`` — the resolved endpoint and
+    the model name — or None when no OpenAI-compatible embed provider is configured (so write-time
+    embedding is simply skipped and the backfill fills later).
+
+    The endpoint is part of the stamp because the local llama-server serves a GGUF file under an
+    operator-chosen alias: swapping the weights while keeping the alias changes the embedding space with
+    no change to the model string. Including the resolved base_url means the same model served from a
+    different endpoint is a different embedding space. base_url is normalized (whitespace, trailing
+    slash, and any userinfo stripped) so two spellings of the same endpoint produce the SAME stamp.
+
+    What this still does NOT catch: a weight swap behind the SAME alias AND the SAME URL remains
+    invisible — this is not a fingerprint of the weights, only of where they are served from.
+
+    Migration cost: this stamp format differs from the previous (model-name-only) one, so every
+    existing stamped row now mismatches and the next `backfill_assertion_embeddings` run re-embeds the
+    whole observation corpus once. That is correct-but-costly; it is a one-time migration.
+
     Never raises: a partial/misconfigured settings degrades to None, never a consolidation crash."""
     try:
         provider = ProviderConfig.for_graphiti_embedder(settings)
+        if not provider.supports_graphiti_openai_contract() or not provider.embed_model:
+            return None
+        base_url = _normalize_embed_stamp_base(provider.base_url)
+        return f"{base_url}|{provider.embed_model}"
     except Exception:
         logger.warning("embed-version resolution failed; write-time observation embedding disabled",
                        exc_info=True)
         return None
-    if not provider.supports_graphiti_openai_contract() or not provider.embed_model:
-        return None
-    return str(provider.embed_model)
