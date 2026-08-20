@@ -295,6 +295,39 @@ def test_evidence_stats_shape_with_triage():
     assert stats["triage_version_counts"]["claude-hook-v1"] == 3
 
 
+@pytest.mark.unit
+def test_derive_turn_key_is_namespace_scoped():
+    kwargs = dict(source_kind="claude_code_hook", session_id="s1", text="hello", cwd="/p",
+                  prompt_id="pid-A")
+    k_a = derive_turn_key(namespace="tenantA", **kwargs)
+    k_b = derive_turn_key(namespace="tenantB", **kwargs)
+    assert k_a != k_b
+    # idempotency preserved: the same namespace twice hashes identically.
+    assert k_a == derive_turn_key(namespace="tenantA", **kwargs)
+
+
+@pytest.mark.unit
+def test_supplied_turn_key_is_bound_to_caller_namespace():
+    fake = FakeNeo4j(routes=[("MERGE (t:TurnEvidence", [{"turn_id": "tid", "created": True,
+                                                          "recorded_at": "x"}])])
+    repo = TurnEvidenceRepository(fake)
+    repo.record_turn_evidence(text="hello", namespace="tenantA", turn_key="attacker-supplied")
+    key_a = fake.executed[-1][1]["turn_key"]
+    repo.record_turn_evidence(text="hello", namespace="tenantB", turn_key="attacker-supplied")
+    key_b = fake.executed[-1][1]["turn_key"]
+    assert key_a != key_b
+    assert key_a != "attacker-supplied" and key_b != "attacker-supplied"
+
+
+@pytest.mark.unit
+def test_same_turn_in_two_namespaces_does_not_share_identity():
+    # A global UNIQUE constraint on turn_key means equal keys are one node.
+    kwargs = dict(source_kind="k", session_id="s", text="I have 20 coins", cwd="/p")
+    a = derive_turn_key(namespace="tenantA", **kwargs)
+    b = derive_turn_key(namespace="tenantB", **kwargs)
+    assert a != b
+
+
 # ----------------------------------------------------------------------------- Phase 3 preference
 
 

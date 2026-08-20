@@ -39,7 +39,7 @@ def _normalize_occurred_at(value: str | None) -> str | None:
 
 def derive_turn_key(
     *, source_kind: str, session_id: str | None, text: str, cwd: str | None = None,
-    prompt_id: str | None = None,
+    prompt_id: str | None = None, namespace: str | None = None,
 ) -> str:
     """Deterministic idempotency key: the same turn hashes identically, so a double-fired hook merges
     onto one node instead of duplicating evidence.
@@ -50,12 +50,29 @@ def derive_turn_key(
     ("I have 20 coins" said twice) stay DISTINCT evidence sources -- keying on the text alone collapses
     them into one, which breaks the per-observation / reinforcement model. When no `prompt_id` is
     available (older Claude Code < 2.1.196, or a producer that supplies none), the key falls back to the
-    prompt TEXT (prior behavior), accepting that identical text collapses to a single source."""
+    prompt TEXT (prior behavior), accepting that identical text collapses to a single source.
+
+    The key is per-namespace because `turn_key` carries a GLOBAL uniqueness constraint, so two
+    namespaces presenting the same turn must produce different keys or they collapse onto one node."""
     h = hashlib.sha256()
     identity = (prompt_id or "").strip() or (text or "")
-    for part in (source_kind or "", session_id or "", cwd or "", identity):
+    for part in (source_kind or "", session_id or "", cwd or "", identity, namespace or ""):
         h.update(part.encode("utf-8", "replace"))
         h.update(b"\x00")
+    return h.hexdigest()
+
+
+def _namespace_scoped_key(base_key: str, namespace: str | None) -> str:
+    """Bind a caller-supplied `turn_key` to the caller's namespace.
+
+    `turn_key` arrives from the request body, so an unscoped one lets a caller in one
+    namespace address a node in another. Derived keys already fold the namespace in;
+    this covers the supplied path with the same guarantee.
+    """
+    h = hashlib.sha256()
+    h.update((namespace or "").encode("utf-8", "replace"))
+    h.update(b"\x00")
+    h.update((base_key or "").encode("utf-8", "replace"))
     return h.hexdigest()
 
 
@@ -115,9 +132,13 @@ class TurnEvidenceRepository:
             raise ValueError(f"role must be one of {EVIDENCE_ROLES}, got {role!r}")
         declarant = declarant or role
         normalized_occurred_at = _normalize_occurred_at(occurred_at)
-        key = turn_key or derive_turn_key(
-            source_kind=source_kind, session_id=session_id, text=text, cwd=cwd,
-            prompt_id=prompt_id,
+        key = (
+            _namespace_scoped_key(turn_key, namespace)
+            if turn_key
+            else derive_turn_key(
+                source_kind=source_kind, session_id=session_id, text=text, cwd=cwd,
+                prompt_id=prompt_id, namespace=namespace,
+            )
         )
         rows = self._neo4j.execute(
             """
