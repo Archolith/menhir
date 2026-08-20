@@ -280,6 +280,11 @@ def complete_llm_usage_call(
             duration_ms=int((perf_counter() - handle.started_at) * 1000),
             **normalized,
         )
+    except LlmUsageControlSignal:
+        # CF-227 taught the EMITTER to let a refusal through; this handler is the emitter's own
+        # caller, and a blanket `except Exception` here re-swallows exactly what that fix released.
+        # Re-emitting instead would also call the budget callback a second time for one LLM call.
+        raise
     except Exception:  # pragma: no cover - instrumentation must not affect callers
         logger.debug("Could not normalize LLM usage for call_id=%s", handle.call_id, exc_info=True)
         _emit_llm_usage_event(
