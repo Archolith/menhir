@@ -29,6 +29,7 @@ from typing import Any, Callable
 from menhir.domain.event_history import TypedEventAssertion
 from menhir.domain.temporal import parse_iso8601
 from menhir.domain.typed_assertion import build_source_key
+from menhir.services.event_history_recall import _has_whole_token
 from menhir.services.typed_scalar_rules import (
     _ground_span,
     _opt_str,
@@ -91,11 +92,12 @@ _POSSESSION_RE = re.compile(
     re.IGNORECASE,
 )
 
-#: Negation that vetoes a completed acquisition even when a completion verb is present ("I did not
-#: buy...", "never purchased"). A negating auxiliary/adverb immediately preceding a registry verb
-#: asserts the event did NOT happen, so it is rejected deterministically BEFORE the completion-marker
-#: exception can admit it. Includes base-form verbs too, so "I did not buy" is caught explicitly
-#: rather than relying only on the completed-acquisition evidence gate.
+#: Negation that vetoes a completed acquisition when a registry verb is present ("I did not buy...",
+#: "never purchased"). A negating auxiliary/adverb immediately preceding a registry verb asserts the
+#: event did NOT happen, so it is rejected deterministically BEFORE the completion-marker exception can
+#: admit it. This veto covers only registry verbs; a negated NON-registry verb falls to the bare-negator
+#: refusal on the possessive-new evidence limb instead. Includes base-form verbs too, so "I did not buy"
+#: is caught explicitly rather than relying only on the completed-acquisition evidence gate.
 _NEGATION_VERBS = (
     "purchased", "bought", "got", "acquired",
     "buy", "purchase", "get", "acquire",
@@ -106,6 +108,12 @@ _NEGATION_RE = re.compile(
     r"(?:" + "|".join(re.escape(v) for v in _NEGATION_VERBS) + r")\b",
     re.IGNORECASE,
 )
+
+#: A bare negator (not/never/no or a "n't" contraction) anywhere in a possessive-new quote refutes
+#: current possession, so that limb is refused even when no registry verb is present to trip the
+#: existing _NEGATION_RE veto. Deliberately generic and conservative: it gates only the
+#: possessive-new evidence limb, never the registry-verb veto.
+_BARE_NEGATION_RE = re.compile(r"\b(?:not|never|no)\b|n't", re.IGNORECASE)
 
 #: A conservative generic possessive-new construction ("my new notebook", "his new pen") that states
 #: current possession of something newly acquired, admissible as completed-acquisition evidence even
@@ -149,11 +157,13 @@ def _canon_object_key(raw: str) -> str:
 
 def _object_grounded(stated_span: str, object_key: str) -> bool:
     """Fail-closed object grounding: the canonical object phrase must occur in the exact stated_span
-    under case/whitespace normalization. Prevents admitting object="pen" over a quote that says the
-    user acquired a completely different thing ("I bought a pen"). A blank object is never grounded."""
+    as a whole word under case/whitespace normalization. Prevents admitting object="pen" over a quote
+    that says the user acquired a completely different thing ("I bought a pencil"). A blank object is
+    never grounded. Reuses the recall side's word-boundary matcher so the write and read sides cannot
+    drift apart."""
     span = _WHITESPACE_RE.sub(" ", (stated_span or "").strip().lower()).strip()
     obj = object_key  # already trimmed/lowercased/whitespace-collapsed/determiner-stripped
-    return bool(obj and span) and obj in span
+    return bool(obj and span) and _has_whole_token(span, obj)
 
 
 def canonicalize_predicate(token: str) -> str | None:
@@ -177,8 +187,14 @@ def _has_completed_acquisition_evidence(text: str) -> bool:
     acquisition verb (purchased/bought/got/acquired) OR a conservative possessive-new construction
     ("my new notebook"). This is the admission gate that keeps a hallucinated row over arbitrary prose
     (no completed-acquisition evidence at all) from being admitted. Intent/negation are vetoed BEFORE
-    this gate by the caller."""
-    return _expresses_completed_acquisition(text) or bool(_POSSESSIVE_NEW_RE.search(text or ""))
+    this gate by the caller. The possessive-new limb refuses a bare negator (not/never/no or "n't"):
+    a quote stating the user does NOT have the thing is not a completed acquisition, even when it
+    carries no registry verb to trip the caller's _NEGATION_RE veto."""
+    if _expresses_completed_acquisition(text):
+        return True
+    if _POSSESSIVE_NEW_RE.search(text or ""):
+        return not _BARE_NEGATION_RE.search(text or "")
+    return False
 
 
 #: (system, user) -> completion text. Injected so this boundary is decoupled from any specific LLM,

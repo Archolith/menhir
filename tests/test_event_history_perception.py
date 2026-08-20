@@ -200,6 +200,56 @@ def test_object_not_grounded_rejects_unrelated_object():
 
 
 @pytest.mark.unit
+def test_object_grounding_word_boundary_rejects_pen_over_pencil():
+    """CF-123: substring-only grounding admitted object='pen' over 'I bought a pencil'; word-boundary
+    grounding must reject it as not the same object."""
+    episode = [_Ep(uuid="ep-0", content="I bought a pencil.")]
+    drops: list[str] = []
+    assert extract_events_once(
+        episode, _llm([{"episode": 0, "events": [_event(object="pen", stated_span="bought a pencil")]}]), on_drop=drops.append
+    ) == []
+    assert drops == ["object_not_grounded"]
+
+
+@pytest.mark.unit
+def test_object_grounding_word_boundary_accepts_full_object():
+    """CF-123 positive control: the same quote with the true object is still admitted, so word-boundary
+    grounding did not reject everything."""
+    episode = [_Ep(uuid="ep-0", content="I bought a pencil.")]
+    out = extract_events_once(
+        episode, _llm([{"episode": 0, "events": [_event(object="pencil", stated_span="bought a pencil")]}])
+    )
+    assert len(out) == 1
+    assert out[0].object_key == "pencil"
+
+
+@pytest.mark.unit
+def test_bare_negation_rejects_possessive_new_with_non_registry_verb():
+    """CF-124: a negated NON-registry verb (never received) plus possessive-new is NOT admitted as a
+    completed acquisition — the bare negator refuses the possessive-new limb."""
+    episode = [_Ep(uuid="ep-0", content="I never received my new notebook.")]
+    drops: list[str] = []
+    assert extract_events_once(
+        episode,
+        _llm([{"episode": 0, "events": [_event(object="my new notebook", object_display="my new notebook", stated_span="never received my new notebook")]}]),
+        on_drop=drops.append,
+    ) == []
+    assert drops == ["no_completed_acquisition_evidence"]
+
+
+@pytest.mark.unit
+def test_possessive_new_without_negation_is_admitted():
+    """CF-124 positive control: possessive-new WITHOUT a negator is still admitted, so the limb works."""
+    episode = [_Ep(uuid="ep-0", content="I received my new notebook.")]
+    out = extract_events_once(
+        episode,
+        _llm([{"episode": 0, "events": [_event(object="my new notebook", object_display="my new notebook", stated_span="received my new notebook")]}]),
+    )
+    assert len(out) == 1
+    assert out[0].object_key == "notebook"
+
+
+@pytest.mark.unit
 def test_object_grounding_strips_leading_determiners():
     """Object with a differing article still grounds when the noun phrase occurs in the quote."""
     episode = [_Ep(uuid="ep-0", content="I bought the camera yesterday.")]
