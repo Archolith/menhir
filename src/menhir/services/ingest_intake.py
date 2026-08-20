@@ -178,6 +178,17 @@ class IngestIntakeMixin:
                     self.graph_adapter.link_episode_admission(
                         episode_uuid=episode_uuid,
                         turn_evidence_uuid=admitted_on_uuid,
+                        # Scoped, and it was NOT before. `link_episode_admission` filters its two
+                        # MATCHes only when a namespace is supplied -- None deliberately means
+                        # "do not filter" -- so omitting it here let a non-user source draw
+                        # `episode in A -[:ADMITTED_ON]-> TurnEvidence in B`, from a caller-supplied
+                        # id taken at face value. CF-225 scoped the QUERY; this is the call site
+                        # that was still passing None into it.
+                        #
+                        # `stamped_namespace` matches the projection call below, which already
+                        # passed it: one normalisation, so the edge and the projection cannot
+                        # disagree about which silo this write belongs to.
+                        namespace=stamped_namespace(namespace),
                     )
                 except Exception:
                     logger.debug(

@@ -28,6 +28,7 @@ Run with:  pytest --run-online -m online tests/test_admitted_on_inprocess_live.p
 
 from __future__ import annotations
 
+import asyncio
 import uuid as uuidlib
 
 import pytest
@@ -64,56 +65,86 @@ def _admitted_on_edges(repo, episode_uuid: str) -> list[str]:
     return [str(r["turn_id"]) for r in rows]
 
 
+@pytest.fixture
+def ingest(graph):
+    """The REAL IngestService, so tests drive `queue_episode_for_enrichment` itself.
+
+    The first version of this file called `create_pending_episode` and `link_episode_admission`
+    separately -- testing the two helpers with IDEAL arguments rather than the caller production
+    executes. That hid a live defect: the production call site passed no `namespace`, and
+    `link_episode_admission` treats None as "do not filter", so an episode in namespace A could
+    draw ADMITTED_ON to a TurnEvidence in B. The helper was correct; its caller was not, and a
+    test of the helper could never see it.
+
+    Same lesson as CF-79: testing the right function with the right arguments is not enough when
+    the argument production supplies IS the defect.
+    """
+    from unittest.mock import MagicMock
+
+    from menhir.services.ingest_service import IngestService
+
+    svc = IngestService(graphiti_client=MagicMock(), graph_adapter=graph, llm=MagicMock())
+    # Enrichment off: this file is about the durable write and its provenance edge, and a real
+    # graphiti round trip would need an LLM.
+    svc.configure(enrichment_enabled=False)
+    return svc
+
+
+def _queue(ingest, *, text: str, namespace: str, session_id: str, turn_id: str | None,
+           source: str = "claude-code") -> str:
+    from menhir.domain.session import new_session
+
+    result = asyncio.run(
+        ingest.queue_episode_for_enrichment(
+            text,
+            new_session(user_id="u", session_id=session_id),
+            source,
+            namespace=namespace,
+            turn_evidence_uuid=turn_id,
+        )
+    )
+    return result.episode_id
+
+
 # ---------------------------------------------------------------------------
-# 1. The normal production path -- no endpoint call anywhere
+# 1. The normal production path -- through queue_episode_for_enrichment
 # ---------------------------------------------------------------------------
 
 @pytest.mark.online
-def test_the_write_path_draws_the_edge_without_any_endpoint_call(
-    test_neo4j_repo, graph
+def test_the_queue_path_draws_the_edge_without_any_endpoint_call(
+    test_neo4j_repo, graph, ingest
 ) -> None:
-    """Capture a turn, create the memory, and require the edge -- with nothing calling
+    """Capture a turn, queue a memory, require the edge -- with nothing calling
     `/api/episode-admission`.
 
-    This is the property CF-229 is about. A later hook call being RESPONSIBLE for the join
-    recreates exactly the failure that was measured: both halves exist, the endpoint works, the
-    tests pass, and nobody performs the join.
+    Drives `queue_episode_for_enrichment`, the function production runs, rather than the two
+    repository helpers it calls.
     """
     namespace = f"ns-{uuidlib.uuid4().hex[:8]}"
     session_id = f"sess-{uuidlib.uuid4().hex[:8]}"
     turn_id = _capture_turn(
         test_neo4j_repo, text="I own 25 postcards", namespace=namespace, session_id=session_id
     )
-    episode_uuid = f"ep-{uuidlib.uuid4().hex}"
 
-    graph.create_pending_episode(
-        episode_uuid=episode_uuid,
-        name="memory",
-        content="I own 25 postcards",
-        session_id=session_id,
-        user_id="u",
-        source="user",
-        source_confidence=1.0,
-        namespace=namespace,
-    )
-    # The same call `ingest_intake` makes inline, in the same operation as the write.
-    graph.link_episode_admission(
-        episode_uuid=episode_uuid, turn_evidence_uuid=turn_id, namespace=namespace
+    episode_uuid = _queue(
+        ingest, text="I own 25 postcards", namespace=namespace,
+        session_id=session_id, turn_id=turn_id,
     )
 
     assert _admitted_on_edges(test_neo4j_repo, episode_uuid) == [turn_id], (
-        "the write path did not draw ADMITTED_ON -- the memory is unauditable"
+        "the queue path did not draw ADMITTED_ON -- the memory is unauditable"
     )
 
 
 @pytest.mark.online
-def test_the_edge_makes_the_memory_re_evaluable(test_neo4j_repo, graph) -> None:
-    """The point of the edge, asserted as the CF-17 audit measures it.
+def test_a_user_tier_memory_queued_this_way_is_re_evaluable(
+    test_neo4j_repo, graph, ingest
+) -> None:
+    """The property that actually matters, measured by the CF-17 audit tool itself.
 
-    CF-17's residue question returned 60/60 UNEVALUABLE precisely because this edge was absent.
-    A memory with the edge can be re-checked against today's gate; one without it cannot be
-    checked at all, now or ever. That is what "future evaluability" means here, and it is the
-    metric worth tracking rather than the edge count.
+    CF-17's residue question returned 60/60 UNEVALUABLE because this edge was absent. A memory
+    written through the real path must be re-checkable against today's gate -- that is what
+    "future evaluability" means, and it is the metric worth tracking rather than an edge count.
     """
     from scripts.audit_cf17_apex_residue import fetch_apex_claims, reevaluate
 
@@ -122,116 +153,97 @@ def test_the_edge_makes_the_memory_re_evaluable(test_neo4j_repo, graph) -> None:
     turn_id = _capture_turn(
         test_neo4j_repo, text="I own 25 postcards", namespace=namespace, session_id=session_id
     )
-    episode_uuid = f"ep-{uuidlib.uuid4().hex}"
-    graph.create_pending_episode(
-        episode_uuid=episode_uuid, name="memory", content="I own 25 postcards",
-        session_id=session_id, user_id="u", source="user", source_confidence=1.0,
-        namespace=namespace,
-    )
-    graph.link_episode_admission(
-        episode_uuid=episode_uuid, turn_evidence_uuid=turn_id, namespace=namespace
+
+    episode_uuid = _queue(
+        ingest, text="I own 25 postcards", namespace=namespace,
+        session_id=session_id, turn_id=turn_id, source="user",
     )
 
     rows = [r for r in fetch_apex_claims(test_neo4j_repo, 50) if r["uuid"] == episode_uuid]
-    assert rows, "the audit did not see the newly written apex memory"
+    assert rows, "the audit did not see the newly queued apex memory"
     bucket, reason = reevaluate(rows[0])
-    assert bucket == "still_granted", f"newly written apex memory is {bucket}: {reason}"
+    assert bucket == "still_granted", f"a newly written apex memory is {bucket}: {reason}"
 
 
 # ---------------------------------------------------------------------------
-# 2. Fail-closed identity across the tenancy boundary
+# 2. Fail-closed identity, through the same path
 # ---------------------------------------------------------------------------
 
 @pytest.mark.online
-def test_a_memory_cannot_pair_with_another_namespaces_turn(test_neo4j_repo, graph) -> None:
-    """Identity is fail-closed: a memory in namespace A must not pair with B's captured turn.
+def test_the_queue_path_cannot_pair_across_namespaces(test_neo4j_repo, graph, ingest) -> None:
+    """The defect this rewrite exposed, pinned at the layer that had it.
 
-    Both ids come from the caller, so without the predicate a caller could draw a permanent
-    provenance edge to any turn in the database -- and this edge is what makes an apex claim
-    auditable, so a wrong one is worse than none. Guarded by CF-225's namespace scoping; asserted
-    here because CF-229's fix is what makes that path actually run.
+    A NON-user source is the dangerous case: no admission gate runs, so `turn_evidence_uuid` is
+    taken at face value. Before the fix this drew `episode in A -[:ADMITTED_ON]-> turn in B`,
+    reproduced directly against a real graph. The helper already refused it when given a
+    namespace; the caller was passing None, which means "do not filter".
     """
     ns_a = f"ns-a-{uuidlib.uuid4().hex[:6]}"
     ns_b = f"ns-b-{uuidlib.uuid4().hex[:6]}"
     turn_b = _capture_turn(
         test_neo4j_repo, text="B private turn", namespace=ns_b, session_id="sess-b"
     )
-    episode_a = f"ep-{uuidlib.uuid4().hex}"
-    graph.create_pending_episode(
-        episode_uuid=episode_a, name="m", content="A memory", session_id="sess-a",
-        user_id="u", source="user", source_confidence=1.0, namespace=ns_a,
+
+    episode_a = _queue(
+        ingest, text="A memory", namespace=ns_a, session_id="sess-a", turn_id=turn_b
     )
 
-    linked = graph.link_episode_admission(
-        episode_uuid=episode_a, turn_evidence_uuid=turn_b, namespace=ns_a
+    assert _admitted_on_edges(test_neo4j_repo, episode_a) == [], (
+        "a memory paired with another namespace's captured turn through the queue path"
     )
-
-    assert linked is False, "a memory paired with another namespace's captured turn"
-    assert _admitted_on_edges(test_neo4j_repo, episode_a) == []
 
 
 @pytest.mark.online
-def test_an_unrelated_session_in_the_same_namespace_still_pairs(test_neo4j_repo, graph) -> None:
-    """The boundary is the NAMESPACE, not the session -- asserted so the fail-closed test above
-    is not satisfied by a rule that refuses everything.
+def test_the_queue_path_still_pairs_across_sessions_in_one_namespace(
+    test_neo4j_repo, graph, ingest
+) -> None:
+    """The boundary is the NAMESPACE, not the session -- asserted so the test above is not
+    satisfied by a rule that refuses everything.
 
-    A memory written in a later session about an earlier turn is legitimate: the admission gate
-    treats session mismatch as a grounding signal, not as an identity violation.
+    A memory written in a later session about an earlier turn is legitimate; the admission gate
+    treats a session mismatch as a grounding signal, not an identity violation.
     """
     namespace = f"ns-{uuidlib.uuid4().hex[:8]}"
     turn_id = _capture_turn(
         test_neo4j_repo, text="I own 25 postcards", namespace=namespace, session_id="sess-early"
     )
-    episode_uuid = f"ep-{uuidlib.uuid4().hex}"
-    graph.create_pending_episode(
-        episode_uuid=episode_uuid, name="m", content="I own 25 postcards",
-        session_id="sess-later", user_id="u", source="user", source_confidence=1.0,
-        namespace=namespace,
+
+    episode_uuid = _queue(
+        ingest, text="I own 25 postcards", namespace=namespace,
+        session_id="sess-later", turn_id=turn_id,
     )
 
-    assert graph.link_episode_admission(
-        episode_uuid=episode_uuid, turn_evidence_uuid=turn_id, namespace=namespace
-    ) is True
     assert _admitted_on_edges(test_neo4j_repo, episode_uuid) == [turn_id]
 
 
 # ---------------------------------------------------------------------------
-# 3. Vacuity: the suite must fail on the MISSING EDGE
+# 3. Vacuity: removing the INLINE link must fail the queue-path test
 # ---------------------------------------------------------------------------
 
 @pytest.mark.online
-def test_a_disconnected_pairing_fails_on_the_edge_not_on_a_counter(
-    test_neo4j_repo, graph, monkeypatch
+def test_disabling_the_inline_link_fails_the_queue_path_e2e(
+    test_neo4j_repo, graph, ingest, monkeypatch
 ) -> None:
-    """Disconnect the pairing and require the failure to be the ABSENT EDGE.
+    """Disconnect the link INSIDE the write path and require the queue-path assertion to fail.
 
-    This is the check CF-229 itself failed. The endpoint returned `linked: true`, every unit test
-    passed, and the graph had zero edges -- because nothing asserted on the edge in the path
-    production uses. So this deliberately breaks the link call and proves the assertion that
-    catches it is a graph read, not a return value or a counter.
+    The stub reports success, which is the exact shape CF-229 had: `linked: true`, every test
+    green, and zero edges on the live graph. What catches that is a graph read after the real
+    call, and this proves the file has one.
     """
     namespace = f"ns-{uuidlib.uuid4().hex[:8]}"
     turn_id = _capture_turn(
         test_neo4j_repo, text="I own 25 postcards", namespace=namespace, session_id="s"
     )
-    episode_uuid = f"ep-{uuidlib.uuid4().hex}"
-    graph.create_pending_episode(
-        episode_uuid=episode_uuid, name="m", content="I own 25 postcards", session_id="s",
-        user_id="u", source="user", source_confidence=1.0, namespace=namespace,
-    )
 
-    # A link that reports success and draws nothing -- the exact shape of the CF-229 failure.
     monkeypatch.setattr(
         type(graph), "link_episode_admission", lambda *a, **kw: True, raising=True
     )
-    reported = graph.link_episode_admission(
-        episode_uuid=episode_uuid, turn_evidence_uuid=turn_id, namespace=namespace
+    episode_uuid = _queue(
+        ingest, text="I own 25 postcards", namespace=namespace, session_id="s", turn_id=turn_id
     )
 
-    assert reported is True, "the stub should report success, as the real failure mode did"
     assert _admitted_on_edges(test_neo4j_repo, episode_uuid) == [], (
         "precondition: the disconnected link must draw nothing"
     )
-    # And that is what a real assertion has to catch: the edge, not the return value.
     with pytest.raises(AssertionError):
         assert _admitted_on_edges(test_neo4j_repo, episode_uuid) == [turn_id]
