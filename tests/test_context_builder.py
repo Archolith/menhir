@@ -752,3 +752,99 @@ class TestTodoBudgetContract:
 
         assert "Fact" in result.context
         assert "Related open TODOs" not in result.context
+
+
+# ---------------------------------------------------------------------------
+# CF-74: the linked-doc preview read must not run on the event loop.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_linked_doc_preview_helper_reads_and_closes(tmp_path):
+    from menhir.services.context_builder import _read_linked_doc_previews
+
+    doc = tmp_path / "note.md"
+    doc.write_text("x" * 500, encoding="utf-8")
+
+    lines = _read_linked_doc_previews(
+        [{"root_path": str(doc), "name": "note", "doc_type": "wiki"}]
+    )
+
+    assert len(lines) == 1
+    assert lines[0].startswith("- [[note]] [wiki]: ")
+    assert len(lines[0].split(": ", 1)[1]) == 200  # unchanged 200-char prefix
+
+
+@pytest.mark.unit
+def test_linked_doc_preview_skips_unreadable_without_losing_the_rest(tmp_path):
+    """One bad file must not lose the whole section -- the original per-doc swallow."""
+    from menhir.services.context_builder import _read_linked_doc_previews
+
+    good = tmp_path / "good.md"
+    good.write_text("hello", encoding="utf-8")
+
+    lines = _read_linked_doc_previews([
+        {"root_path": str(tmp_path / "missing.md"), "name": "missing"},
+        {"root_path": str(good), "name": "good"},
+    ])
+
+    assert len(lines) == 1
+    assert "[[good]]" in lines[0]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_build_context_does_not_starve_the_loop_reading_linked_docs(tmp_path, monkeypatch):
+    """CF-74 at the far end, THROUGH build_context.
+
+    Driving the helper through `asyncio.to_thread` from inside the test proves nothing about
+    this defect: the helper is correct either way, and deleting the `to_thread` from the caller
+    leaves such a test green. The defect lives in how build_context calls it, so the test has to
+    go through build_context. Control: with the call put back on the loop this drops to ~1 tick.
+    """
+    import asyncio
+    import time
+
+    import menhir.services.context_builder as cb
+
+    doc = tmp_path / "slow.md"
+    doc.write_text("y" * 500, encoding="utf-8")
+    real_open = open
+
+    def _slow_open(*args, **kwargs):
+        time.sleep(0.12)
+        return real_open(*args, **kwargs)
+
+    monkeypatch.setattr(cb, "open", _slow_open, raising=False)
+
+    mem = _mem("m1", "linked note", "a linked note", 0.9)
+    mock_recall = AsyncMock()
+    mock_recall.recall = AsyncMock(return_value=_recall_result([mem]))
+    mock_adapter = MagicMock()
+    mock_adapter.list_todos_matching_query.return_value = []
+    mock_adapter.get_linked_documents.return_value = [
+        {"root_path": str(doc), "name": "slow", "doc_type": "wiki"}
+    ]
+    svc = ContextBuilderService(recall_service=mock_recall, graph_adapter=mock_adapter)
+
+    ticks = 0
+    stop = False
+
+    async def _heartbeat():
+        nonlocal ticks
+        while not stop:
+            ticks += 1
+            await asyncio.sleep(0.01)
+
+    beat = asyncio.create_task(_heartbeat())
+    await asyncio.sleep(0)
+
+    result = await svc.build_context("linked note", max_tokens=2000)
+
+    stop = True
+    await beat
+
+    assert "Wiki Context" in result.context, (
+        "the linked-doc branch did not run, so the tick count below would be vacuous"
+    )
+    assert ticks >= 3, f"event loop starved while reading linked docs ({ticks} ticks)"

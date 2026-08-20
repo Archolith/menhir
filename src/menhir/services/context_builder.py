@@ -19,9 +19,34 @@ from menhir.domain.recall import (
 
 logger = logging.getLogger(__name__)
 
+
 if TYPE_CHECKING:
     from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
     from menhir.services.recall_service import RecallService
+
+
+def _read_linked_doc_previews(docs: list[dict]) -> list[str]:
+    """Read the first 200 characters of each linked document. BLOCKING BY DESIGN.
+
+    Runs inside ``asyncio.to_thread`` (CF-74): it does a stat and an open per document, and it
+    sat on the event loop until then -- directly beside an adapter call that was already
+    correctly threaded. Behaviour is otherwise unchanged: the same 200-character prefix, the
+    same ``errors="replace"``, and the same per-document swallow so one unreadable file cannot
+    lose the rest of the section.
+    """
+    lines: list[str] = []
+    for doc in docs:
+        root_path = doc.get("root_path", "")
+        if root_path and os.path.isfile(root_path):
+            try:
+                with open(root_path, "r", encoding="utf-8", errors="replace") as handle:
+                    content = handle.read(200)
+                doc_type = doc.get("doc_type", "generic")
+                tag = f" [{doc_type}]" if doc_type != "generic" else ""
+                lines.append(f"- [[{doc['name']}]]{tag}: {content}")
+            except Exception:
+                logger.debug("Failed to read wiki doc %s", root_path, exc_info=True)
+    return lines
 
 # ---------------------------------------------------------------------------
 # Token estimation
@@ -525,22 +550,13 @@ class ContextBuilderService:
                     self.graph_adapter.get_linked_documents, memory_ids[:10]
                 )
                 if linked_docs:
-                    # Build wiki context: read first 200 chars of each linked doc
-                    wiki_lines = []
-                    for doc in linked_docs[:5]:  # cap at 5 docs
-                        root_path = doc.get("root_path", "")
-                        if root_path and os.path.isfile(root_path):
-                            try:
-                                content = open(
-                                    root_path, "r", encoding="utf-8", errors="replace"
-                                ).read(200)
-                                doc_type = doc.get("doc_type", "generic")
-                                tag = f" [{doc_type}]" if doc_type != "generic" else ""
-                                wiki_lines.append(
-                                    f"- [[{doc['name']}]]{tag}: {content}"
-                                )
-                            except Exception:
-                                logger.debug("Failed to read wiki doc %s", root_path, exc_info=True)
+                    # CF-74: the stat+read below is blocking filesystem I/O on the recall request
+                    # path. The graph call directly above is already threaded; this ran on the
+                    # event loop in the same block, up to five times, and a linked doc on a slow
+                    # or network mount stalled every other request in the process.
+                    wiki_lines = await asyncio.to_thread(
+                        _read_linked_doc_previews, linked_docs[:5]  # cap at 5 docs
+                    )
                     if wiki_lines:
                         wiki_section = "\n\n=== Wiki Context ===\n" + "\n".join(
                             wiki_lines
