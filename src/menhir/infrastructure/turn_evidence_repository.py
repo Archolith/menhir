@@ -257,14 +257,21 @@ class TurnEvidenceRepository:
         self,
         turn_id: str,
         *,
+        namespace: str,
         limit: int = 2,
     ) -> list[dict[str, Any]]:
         """Return the bounded user/assistant turns immediately preceding one captured turn.
 
-        This is extraction repair context, not a memory read. It stays inside the current turn's
-        namespace and session, excludes the current turn itself, and orders the final result oldest
-        first so the transcript remains readable. Tool/agent records are deliberately excluded:
-        they are not dialogue and may contain large or instruction-like payloads.
+        This is extraction repair context, not a memory read. It excludes the current turn
+        itself and orders the final result oldest first so the transcript remains readable.
+        Tool/agent records are deliberately excluded: they are not dialogue and may contain
+        large or instruction-like payloads.
+
+        ``namespace`` is REQUIRED and is the CALLER's namespace (CF-236). The
+        ``prior.namespace = current.namespace`` term below looks like scoping and is not: it
+        scopes the prior turns to the ANCHOR's namespace, and the anchor is whatever `turn_id`
+        the caller named. Without an independent check the caller could name a foreign turn and
+        receive that namespace's raw prompt text, which then reaches the extraction prompt.
         """
 
         safe_limit = max(1, min(int(limit), 4))
@@ -273,6 +280,7 @@ class TurnEvidenceRepository:
             MATCH (current:TurnEvidence {turn_id: $turn_id})
             WHERE current.namespace IS NOT NULL AND current.session_id IS NOT NULL
                   AND current.recorded_at IS NOT NULL
+                  AND coalesce(current.namespace, 'default') = $namespace
             MATCH (prior:TurnEvidence)
             WHERE prior.namespace = current.namespace
                   AND prior.session_id = current.session_id
@@ -286,7 +294,7 @@ class TurnEvidenceRepository:
             RETURN prior.role AS role, prior.text AS text,
                    toString(prior.recorded_at) AS recorded_at
             """,
-            params={"turn_id": turn_id, "limit": safe_limit},
+            params={"turn_id": turn_id, "limit": safe_limit, "namespace": namespace},
         )
         return [dict(row) for row in reversed(rows)]
 

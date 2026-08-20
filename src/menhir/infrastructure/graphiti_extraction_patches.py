@@ -877,6 +877,42 @@ def _load_relationless_repair_context(
     return tuple(reversed(bounded_reversed))
 
 
+#: The section delimiters graphiti's prompt templates wrap `previous_episodes` in. Stored turn
+#: text is rendered inside them via `to_prompt_json`, which is `json.dumps` -- it escapes quotes
+#: and newlines but NOT angle brackets, so a turn containing the closing tag reproduces it
+#: verbatim in the rendered prompt and can appear to end the quoted section (CF-194).
+#:
+#: This is coupled to the vendored template by construction: if graphiti renames these tags the
+#: neutralisation goes stale silently. The pairing is asserted in the extraction-patch tests.
+_PROMPT_SECTION_TAGS = ("<PREVIOUS MESSAGES>", "</PREVIOUS MESSAGES>",
+                        "<CURRENT MESSAGE>", "</CURRENT MESSAGE>")
+
+
+def _neutralize_prompt_delimiters(text: str) -> str:
+    """Defang the prompt's own structural tags inside attacker-influenced context text.
+
+    Deliberately narrow: only the exact tags are rewritten, and only by breaking the angle
+    brackets, so ordinary prose and code in a captured turn survive unchanged. Escaping every
+    `<`/`>` would mangle legitimate content for no additional guarantee.
+    """
+    out = text
+    for tag in _PROMPT_SECTION_TAGS:
+        if tag.lower() in out.lower():
+            # Case-insensitive replace without regex, preserving surrounding text.
+            lowered, needle, cursor, pieces = out.lower(), tag.lower(), 0, []
+            while True:
+                hit = lowered.find(needle, cursor)
+                if hit == -1:
+                    pieces.append(out[cursor:])
+                    break
+                pieces.append(out[cursor:hit])
+                pieces.append(out[hit:hit + len(tag)].replace("<", "(").replace(">", ")"))
+                cursor = hit + len(tag)
+            out = "".join(pieces)
+            lowered = out.lower()
+    return out
+
+
 def _relationless_repair_previous_episodes(
     episode: Any,
     previous_episodes: list[Any],
@@ -902,7 +938,7 @@ def _relationless_repair_previous_episodes(
             labels=[],
             source=EpisodeType.message,
             source_description="menhir_relationless_repair_context",
-            content=text,
+            content=_neutralize_prompt_delimiters(text),
             created_at=created_at,
             valid_at=valid_at,
         )

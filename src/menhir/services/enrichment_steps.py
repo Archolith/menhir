@@ -604,9 +604,15 @@ async def run_graphiti_extraction(
             ).strip()
             relationless_repair_context_loader: Callable[[], tuple[str, ...]] | None = None
             if turn_evidence_uuid:
+                repair_namespace = str(ctx.claimed.get("namespace") or "default")
+
                 def _load_relationless_repair_context() -> tuple[str, ...]:
+                    # turn_evidence_uuid is caller-supplied. Scoping the read to THIS episode's
+                    # namespace is what stops a foreign turn's text entering this extraction
+                    # (CF-236); the admission gate governs trust tier, not this path.
                     rows = ctx.graph_adapter.load_preceding_turn_evidence_context(
                         turn_evidence_uuid,
+                        namespace=repair_namespace,
                         limit=2,
                     )
                     return tuple(

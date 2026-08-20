@@ -1282,10 +1282,17 @@ class MemoryGraphAdapter:
         self,
         turn_id: str,
         *,
+        namespace: str,
         limit: int = 2,
     ) -> list[dict[str, Any]]:
-        """Load adjacent dialogue turns for a bounded relationless-extraction repair."""
-        return self._turn_evidence.load_preceding_context(turn_id, limit=limit)
+        """Load adjacent dialogue turns for a bounded relationless-extraction repair.
+
+        ``namespace`` is the CALLER's namespace and is required: `turn_id` is caller-supplied,
+        so without it a foreign turn's text reaches this namespace's extraction (CF-236).
+        """
+        return self._turn_evidence.load_preceding_context(
+            turn_id, namespace=namespace, limit=limit
+        )
 
     def turn_evidence_stats(self) -> dict[str, Any]:
         return self._turn_evidence.evidence_stats()
