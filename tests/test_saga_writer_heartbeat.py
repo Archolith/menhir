@@ -267,7 +267,14 @@ def test_a_claim_lost_mid_retry_stops_further_attempts(repo_and_calls, monkeypat
     monkeypatch.setattr(n4.time, "sleep", lambda _s: None)
 
     with pytest.raises(n4.SagaOwnershipRevoked):
-        repo.execute("MATCH (n) RETURN n", should_continue=lambda: alive["ok"])
+        # safe_to_reexecute=True keeps this scenario reachable: since CF-158 an ambiguous
+        # failure is not retried unless declared safe, and without a second attempt there
+        # is no second ownership check for this test to observe.
+        repo.execute(
+            "MATCH (n) RETURN n",
+            should_continue=lambda: alive["ok"],
+            safe_to_reexecute=True,
+        )
 
 
 @pytest.mark.unit

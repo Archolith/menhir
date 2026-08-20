@@ -8,6 +8,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from neo4j.exceptions import ServiceUnavailable, SessionExpired
+
 from menhir.infrastructure.neo4j import Neo4jRepository, _TRANSIENT_RETRIES
 
 
@@ -123,7 +125,9 @@ class TestExecuteRetry:
         # Patch the exception classes to include our fake
         with patch("menhir.infrastructure.neo4j.ServiceUnavailable", FakeTransientError):
             with patch("menhir.infrastructure.neo4j._TRANSIENT_BACKOFF_BASE", 0.01):
-                rows = repo.execute("RETURN 1")
+                # A pure read, so it declares itself safe to re-execute (CF-158). Without
+                # that declaration an ambiguous failure is no longer retried at all.
+                rows = repo.execute("RETURN 1", safe_to_reexecute=True)
 
         assert rows == [{"ok": True}]
         assert call_count == 2
@@ -146,7 +150,7 @@ class TestExecuteRetry:
         with patch("menhir.infrastructure.neo4j.ServiceUnavailable", FakeTransientError):
             with patch("menhir.infrastructure.neo4j._TRANSIENT_BACKOFF_BASE", 0.01):
                 with pytest.raises(FakeTransientError, match="down"):
-                    repo.execute("RETURN 1")
+                    repo.execute("RETURN 1", safe_to_reexecute=True)
 
         assert mock_session.run.call_count == _TRANSIENT_RETRIES
 
@@ -165,3 +169,69 @@ class TestExecuteRetry:
             repo.execute("BAD")
 
         mock_session.run.assert_called_once()
+
+
+class TestAmbiguousCommitIsNotRetried:
+    """CF-158: an ambiguous failure must not silently re-execute the statement.
+
+    ``ServiceUnavailable``/``SessionExpired`` are connection failures and can be raised AFTER the
+    server committed -- the acknowledgement is what was lost, not the write. Re-running the
+    statement is then a double-apply, and nothing below this layer can undo it.
+    """
+
+    @staticmethod
+    def _repo_seeing(exc_type, executed):
+        repo = _make_repo()
+
+        class _Sess:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def run(self, stmt, **params):
+                executed.append(str(stmt))  # the server applied it BEFORE the ack was lost
+                raise exc_type("ack lost after commit")
+
+        driver = MagicMock()
+        driver.session.return_value = _Sess()
+        repo._driver = driver
+        return repo
+
+    @pytest.mark.unit
+    def test_ambiguous_failure_is_not_retried_by_default(self):
+        executed: list[str] = []
+        repo = self._repo_seeing(ServiceUnavailable, executed)
+
+        with patch("menhir.infrastructure.neo4j._TRANSIENT_BACKOFF_BASE", 0.0):
+            with pytest.raises(ServiceUnavailable):
+                repo.execute("MATCH (n) SET n.c = coalesce(n.c, 0) + 1")
+
+        assert executed == ["MATCH (n) SET n.c = coalesce(n.c, 0) + 1"], (
+            "the statement reached the server more than once, so the retry double-applied it"
+        )
+
+    @pytest.mark.unit
+    def test_session_expired_is_also_ambiguous(self):
+        executed: list[str] = []
+        repo = self._repo_seeing(SessionExpired, executed)
+
+        with patch("menhir.infrastructure.neo4j._TRANSIENT_BACKOFF_BASE", 0.0):
+            with pytest.raises(SessionExpired):
+                repo.execute("CREATE (n:Thing {uuid: $u})", params={"u": "abc"})
+
+        assert len(executed) == 1
+
+    @pytest.mark.unit
+    def test_declaring_the_statement_safe_restores_the_retry(self):
+        executed: list[str] = []
+        repo = self._repo_seeing(ServiceUnavailable, executed)
+
+        with patch("menhir.infrastructure.neo4j._TRANSIENT_BACKOFF_BASE", 0.0):
+            with pytest.raises(ServiceUnavailable):
+                repo.execute("RETURN 1", safe_to_reexecute=True)
+
+        # Positive control on the harness itself: the opt-in really does still retry, so the
+        # single execution asserted above is the flag's doing and not a broken fake.
+        assert len(executed) == 3

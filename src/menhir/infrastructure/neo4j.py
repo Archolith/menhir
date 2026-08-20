@@ -233,11 +233,35 @@ class Neo4jRepository:
         *,
         timeout_s: float | None = None,
         should_continue: Any = None,
+        safe_to_reexecute: bool = False,
     ) -> list[dict[str, Any]]:
         """Execute a Cypher statement and return materialized rows.
 
-        Retries up to ``_TRANSIENT_RETRIES`` times on transient Neo4j errors
-        (connection drops, leader switches) with exponential backoff.
+        Retries on transient Neo4j errors with exponential backoff, but NOT uniformly -- the
+        retryable errors fall into two classes with different safety properties (CF-158):
+
+        * ``TransientError`` is raised BY THE SERVER, which has already rolled the transaction
+          back. Re-executing is sound, so it is always retried.
+        * ``ServiceUnavailable`` and ``SessionExpired`` are CONNECTION failures. They can be
+          raised after the server committed -- what was lost is the acknowledgement, not the
+          write. The outcome is AMBIGUOUS, and re-executing a statement that already applied is
+          a double-apply.
+
+        ``safe_to_reexecute`` is the caller's assertion that running this statement twice is
+        indistinguishable from running it once -- a pure read, or a genuinely idempotent write
+        (MERGE on a stable key, SET to an absolute value). It defaults to False, so an ambiguous
+        failure propagates rather than silently double-applying. Pass True only when re-execution
+        is provably harmless; when in doubt, leave it.
+
+        This is deliberately an explicit flag rather than an inference from the query text. A
+        heuristic looking for CREATE/SET/MERGE tokens is not a proof: ``CALL`` into a procedure
+        can mutate with none of them present, and a safety control that guesses is not one.
+
+        **What this does not fix.** Non-idempotent statements still exist -- counter increments
+        (``coalesce(n.hot_count, 0) + 1``) and unguarded node creates carrying a client-generated
+        uuid, which duplicate because the Entity uuid property carries no uniqueness constraint.
+        This stops the retry loop from re-running them; it does not make them idempotent, and it
+        says nothing about retries originating above this layer.
 
         ``timeout_s`` attaches a SERVER-side transaction timeout (CF-211). Opt-in per call rather
         than a blanket default: saga mutations want their server work bounded, while unrelated
@@ -292,7 +316,26 @@ class Neo4jRepository:
                 with self._get_driver().session(database=self.database) as session:
                     result = session.run(statement, **(params or {}))
                     return [record.data() for record in result]
-            except (ServiceUnavailable, SessionExpired, TransientError) as exc:
+            except (ServiceUnavailable, SessionExpired) as exc:
+                # Ambiguous: the server may have committed before the connection died. Retrying
+                # is a double-apply unless the caller has asserted re-execution is harmless.
+                if not safe_to_reexecute:
+                    logger.warning(
+                        "Neo4j ambiguous failure (attempt %d/%d); NOT retrying because the "
+                        "statement is not declared safe to re-execute: %s",
+                        attempt + 1, _TRANSIENT_RETRIES, exc,
+                    )
+                    raise
+                last_exc = exc
+                wait = _TRANSIENT_BACKOFF_BASE * (2 ** attempt)
+                logger.warning(
+                    "Neo4j ambiguous failure (attempt %d/%d), retrying in %.1fs: %s",
+                    attempt + 1, _TRANSIENT_RETRIES, wait, exc,
+                )
+                time.sleep(wait)
+            except TransientError as exc:
+                # Server-side and already rolled back, so re-execution is sound regardless of
+                # what the statement does.
                 last_exc = exc
                 wait = _TRANSIENT_BACKOFF_BASE * (2 ** attempt)
                 logger.warning(
