@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import threading
+from typing import Any
 import contextlib
 import logging
 from collections import deque
@@ -104,6 +106,13 @@ class IngestService(IngestQueueMixin, IngestWorkerMixin, IngestIntakeMixin):
     )
     _session_llm_budget_lock: asyncio.Lock = field(
         default_factory=asyncio.Lock, init=False, repr=False
+    )
+    #: Guards the per-CALL session ledger. A THREADING lock, not the asyncio one above, because
+    #: the LLM usage callback fires from wherever the model call happens -- and
+    #: `graphiti_client` dispatches those through `asyncio.to_thread`, so the reservation runs on
+    #: a worker thread where an asyncio lock cannot be taken at all (CF-79 session half).
+    _session_llm_call_lock: Any = field(
+        default_factory=threading.Lock, init=False, repr=False
     )
     _budget_settings_max_calls: int = field(default=50, init=False, repr=False)
     _budget_settings_window_s: int = field(default=900, init=False, repr=False)

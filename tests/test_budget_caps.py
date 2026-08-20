@@ -24,6 +24,24 @@ def _make_service() -> IngestService:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# CF-79 session half: the WINDOW NOW METERS CALLS, NOT ATTEMPTS.
+#
+# `_check_session_budget` used to APPEND one timestamp per invocation, so these tests consumed
+# budget by calling the gate. That append WAS the defect -- an attempt making twenty model calls
+# consumed the same single slot as one making one, so the control bounded attempt rate and never
+# call volume.
+#
+# The gate is now READ-ONLY and `reserve_session_llm_call` writes the ledger, once per actual
+# model call. Every property these tests assert is unchanged and still worth having -- rolling
+# expiry, retry-after bounding, per-session independence, the episode-uuid fallback key -- so
+# each test keeps its assertions and switches only the thing that CONSUMES budget.
+#
+# This is a deliberate contract change, filed as CF-79's remaining half, not a refactor. Tests
+# describing the old contract had to change with it; tests describing behaviour that did not
+# change were left alone.
+# ---------------------------------------------------------------------------
+
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_check_session_budget_returns_none_when_under_budget() -> None:
@@ -69,9 +87,9 @@ async def test_check_session_budget_returns_retry_when_exceeded() -> None:
     svc = _make_service()
     svc.configure(max_llm_calls_per_session_window=2, llm_session_window_seconds=60)
 
-    # Consume the full budget.
+    # Consume the full budget -- through the CALL ledger, which is what spends it now.
     for _ in range(2):
-        assert await svc._check_session_budget("ep-1", "session-a") is None
+        assert svc.reserve_session_llm_call("session-a") is True
 
     # The next call should be rejected with a positive retry_after_s.
     retry = await svc._check_session_budget("ep-1", "session-a")
@@ -86,7 +104,7 @@ async def test_retry_after_is_bounded_by_window() -> None:
     svc = _make_service()
     svc.configure(max_llm_calls_per_session_window=1, llm_session_window_seconds=30)
 
-    assert await svc._check_session_budget("ep-1", "sess-1") is None
+    assert svc.reserve_session_llm_call("sess-1") is True
 
     retry = await svc._check_session_budget("ep-1", "sess-1")
     assert retry is not None
@@ -110,9 +128,9 @@ async def test_rolling_window_expires_old_calls() -> None:
     with patch("menhir.services.ingest_queue.monotonic") as mock_mono:
         mock_mono.return_value = fake_now
 
-        # Fill the budget.
-        assert await svc._check_session_budget("ep-1", "sess-1") is None
-        assert await svc._check_session_budget("ep-1", "sess-1") is None
+        # Fill the budget through the CALL ledger (the gate no longer consumes).
+        assert svc.reserve_session_llm_call("sess-1") is True
+        assert svc.reserve_session_llm_call("sess-1") is True
 
         # Still within window — should be blocked.
         mock_mono.return_value = fake_now + 5.0
@@ -134,11 +152,11 @@ async def test_partial_window_expiry_frees_some_budget() -> None:
     with patch("menhir.services.ingest_queue.monotonic") as mock_mono:
         # First call at t=1000.
         mock_mono.return_value = 1000.0
-        assert await svc._check_session_budget("ep-1", "sess-1") is None
+        assert svc.reserve_session_llm_call("sess-1") is True
 
         # Second call at t=1005.
         mock_mono.return_value = 1005.0
-        assert await svc._check_session_budget("ep-1", "sess-1") is None
+        assert svc.reserve_session_llm_call("sess-1") is True
 
         # At t=1009, first call is still in window (age 9 < 10), so blocked.
         mock_mono.return_value = 1009.0
@@ -214,8 +232,8 @@ async def test_independent_budgets_per_session_id() -> None:
     svc = _make_service()
     svc.configure(max_llm_calls_per_session_window=1, llm_session_window_seconds=60)
 
-    # Session A exhausts its budget.
-    assert await svc._check_session_budget("ep-1", "session-a") is None
+    # Session A exhausts its budget -- through the call ledger.
+    assert svc.reserve_session_llm_call("session-a") is True
     assert await svc._check_session_budget("ep-1", "session-a") is not None
 
     # Session B should still be allowed — independent budget.
@@ -230,7 +248,9 @@ async def test_same_session_different_episodes_share_budget() -> None:
     svc.configure(max_llm_calls_per_session_window=1, llm_session_window_seconds=60)
 
     # Same session_id, different episode UUIDs — should share the session budget.
-    assert await svc._check_session_budget("ep-1", "shared-session") is None
+    # The property is unchanged and is now STRONGER: one episode's CALLS, not merely its
+    # attempt, are what exhaust the shared window.
+    assert svc.reserve_session_llm_call("shared-session") is True
     retry = await svc._check_session_budget("ep-2", "shared-session")
     assert retry is not None, "Same session_id should share budget across episodes"
 
@@ -246,8 +266,13 @@ async def test_no_session_id_uses_episode_uuid_as_key() -> None:
     svc = _make_service()
     svc.configure(max_llm_calls_per_session_window=1, llm_session_window_seconds=60)
 
-    # session_id=None — should use "episode:<uuid>" as the budget key.
-    assert await svc._check_session_budget("ep-abc", None) is None
+    # session_id=None — should use "episode:<uuid>" as the budget key. The key rule now lives in
+    # `session_budget_key`, shared by the gate and the reservation so the two cannot meter
+    # different windows.
+    from menhir.services.ingest_queue import session_budget_key
+
+    assert session_budget_key("ep-abc", None) == "episode:ep-abc"
+    assert svc.reserve_session_llm_call("episode:ep-abc") is True
     retry = await svc._check_session_budget("ep-abc", None)
     assert retry is not None, "Same episode key should be rate-limited"
 
@@ -262,7 +287,7 @@ async def test_no_session_different_episodes_have_independent_budgets() -> None:
     svc.configure(max_llm_calls_per_session_window=1, llm_session_window_seconds=60)
 
     # Two different episode UUIDs with no session_id — independent keys.
-    assert await svc._check_session_budget("ep-1", None) is None
+    assert svc.reserve_session_llm_call("episode:ep-1") is True
     assert await svc._check_session_budget("ep-1", None) is not None  # blocked
 
     # ep-2 should still be allowed.

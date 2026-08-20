@@ -28,6 +28,7 @@ someone to close the finding.
 from __future__ import annotations
 
 import asyncio
+import threading
 
 import pytest
 
@@ -69,11 +70,20 @@ class _Worker:
     than a copy of its logic.
     """
 
-    def __init__(self, *, max_per_job: int) -> None:
+    def __init__(self, *, max_per_job: int, session: object | None = None) -> None:
         from menhir.services.ingest_worker import IngestWorkerMixin
 
         self._job_llm_call_counts: dict[str, int] = {}
         self._budget_settings_max_per_job = max_per_job
+        # IngestService mixes the queue and worker together, so one object owns both budgets.
+        # Mirroring that here is what lets the per-call reservation be exercised through the
+        # real callback rather than called directly.
+        if session is not None:
+            self._budget_settings_max_calls = session._budget_settings_max_calls
+            self._budget_settings_window_s = session._budget_settings_window_s
+            self._session_llm_call_times = session._session_llm_call_times
+            self._session_llm_call_lock = session._session_llm_call_lock
+            self.reserve_session_llm_call = session.reserve_session_llm_call
         self._record_episode_llm_usage = (
             IngestWorkerMixin._record_episode_llm_usage.__get__(self)
         )
@@ -85,10 +95,12 @@ class _Worker:
         self.graph_adapter = _Graph()
 
 
-def _under_budget(worker: _Worker, episode_uuid: str):
-    """Install the usage callback exactly as `_process_episode` does."""
+def _under_budget(worker: _Worker, episode_uuid: str, budget_key: str | None = None):
+    """Install the usage callback exactly as `_process_episode` does, session key included."""
     return set_llm_usage_callback(
-        lambda event: worker._record_episode_llm_usage(episode_uuid, event)
+        lambda event: worker._record_episode_llm_usage(
+            episode_uuid, event, budget_key=budget_key
+        )
     )
 
 
@@ -186,82 +198,145 @@ def _queue(*, max_calls: int, window_s: int):
     q._budget_settings_window_s = window_s
     q._session_llm_call_times = {}
     q._session_llm_budget_lock = asyncio.Lock()
-    q._check_session_budget = IngestQueueMixin._check_session_budget.__get__(q)
+    # A THREADING lock, matching production: the per-call reservation fires from worker threads.
+    q._session_llm_call_lock = threading.Lock()
+    for name in (
+        "_check_session_budget",
+        "_session_window_retry_after",
+        "reserve_session_llm_call",
+    ):
+        setattr(q, name, getattr(IngestQueueMixin, name).__get__(q))
     return q
 
-
 @pytest.mark.asyncio
-async def test_the_session_window_bounds_ATTEMPTS_across_jobs() -> None:
-    """What the session control genuinely does today, asserted honestly.
+async def test_the_session_window_bounds_CALLS_across_MULTIPLE_EPISODES() -> None:
+    """The CF-79 session half, and the acceptance condition: count executed model calls across
+    several episodes sharing one session.
 
-    It is a rate limit on enrichment ATTEMPTS per session per window, and within that reading it
-    works: the fourth attempt in a 3-attempt window is deferred with a retry hint rather than
-    admitted.
+    **The contract changed deliberately, so the old tests for it did too.** The window used to
+    consume one slot per enrichment ATTEMPT, which is why an attempt making twenty calls cost the
+    same as one making one. It now consumes one slot per CALL, so this is the first test that can
+    tell those two designs apart -- three episodes making two calls each exhaust a budget of five
+    on the sixth CALL, wherever it falls.
     """
-    q = _queue(max_calls=3, window_s=60)
-
-    for _ in range(3):
-        assert await q._check_session_budget("ep", "session-A") is None
-
-    retry_after = await q._check_session_budget("ep", "session-A")
-    assert retry_after is not None and retry_after > 0
-
-
-@pytest.mark.asyncio
-async def test_sessions_do_not_share_a_window() -> None:
-    q = _queue(max_calls=2, window_s=60)
-    for _ in range(2):
-        assert await q._check_session_budget("ep", "session-A") is None
-    assert await q._check_session_budget("ep", "session-A") is not None
-    assert await q._check_session_budget("ep", "session-B") is None, (
-        "one session exhausted another session's budget"
-    )
-
-
-@pytest.mark.asyncio
-async def test_concurrent_attempts_compete_for_one_session_budget() -> None:
-    """The lock is load-bearing: without it, N concurrent attempts each read the deque before any
-    appends, and all N are admitted against a budget of one."""
-    q = _queue(max_calls=3, window_s=60)
-
-    results = await asyncio.gather(
-        *[q._check_session_budget(f"ep-{i}", "session-A") for i in range(10)]
-    )
-    admitted = [r for r in results if r is None]
-    assert len(admitted) == 3, (
-        f"{len(admitted)} concurrent attempts were admitted against a budget of 3"
-    )
-
-
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "CF-79 remaining half: the session window meters ATTEMPTS, not CALLS. One attempt "
-        "making twenty model calls consumes the same single slot as one making one, so the "
-        "session control does not bound call VOLUME at all. Closing it means threading the "
-        "session key into the usage callback so the deque is appended per call. Asserted "
-        "strict so that this file FAILS the day it is fixed, rather than silently passing and "
-        "leaving the finding open in the register."
-    ),
-)
-@pytest.mark.asyncio
-async def test_the_session_window_should_bound_CALLS_not_attempts() -> None:
-    """The defect this file exists to name, written as the test that will pass once it is fixed.
-
-    One attempt, twenty model calls. The session budget of 3 should be exhausted by call volume;
-    today it sees a single attempt and stays almost untouched.
-    """
-    q = _queue(max_calls=3, window_s=60)
-    worker = _Worker(max_per_job=100)  # per-job budget deliberately not the constraint here
+    q = _queue(max_calls=5, window_s=60)
     seam = _ModelSeam()
-    _under_budget(worker, "ep-1")
+    key = "session-A"
+
+    with pytest.raises(LlmBudgetExceeded):
+        for episode in ("ep-1", "ep-2", "ep-3"):
+            worker = _Worker(max_per_job=100, session=q)  # per-job is not the constraint here
+            _under_budget(worker, episode, key)
+            for _ in range(2):
+                seam.call()
+
+    assert seam.executed == 5, (
+        f"executed {seam.executed} calls across three episodes against a session budget of 5"
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_pre_attempt_gate_refuses_a_session_whose_calls_are_spent() -> None:
+    """The gate survives the change and now reads the CALL ledger.
+
+    Refusing to start work whose budget is already gone is cheaper than refusing it
+    mid-extraction, and it keeps the retry-after behaviour that requeues the episode rather than
+    failing it.
+    """
+    q = _queue(max_calls=3, window_s=60)
+    seam = _ModelSeam()
+    worker = _Worker(max_per_job=100, session=q)
+    _under_budget(worker, "ep-1", "session-A")
 
     assert await q._check_session_budget("ep-1", "session-A") is None
-    for _ in range(20):
+    for _ in range(3):
         seam.call()
+    assert seam.executed == 3
 
-    assert seam.executed == 20
-    # If the window metered CALLS, twenty of them would have exhausted a budget of three.
-    assert await q._check_session_budget("ep-2", "session-A") is not None, (
-        "twenty model calls did not consume the session budget"
+    retry_after = await q._check_session_budget("ep-2", "session-A")
+    assert retry_after is not None and retry_after > 0, (
+        "a session whose call budget is spent still admitted a new episode"
     )
+
+
+@pytest.mark.asyncio
+async def test_sessions_do_not_share_a_call_window() -> None:
+    """One tenant's session exhausting the budget must not stop another's."""
+    q = _queue(max_calls=2, window_s=60)
+    seam = _ModelSeam()
+
+    worker_a = _Worker(max_per_job=100, session=q)
+    _under_budget(worker_a, "ep-a", "session-A")
+    seam.call()
+    seam.call()
+    with pytest.raises(LlmBudgetExceeded):
+        seam.call()
+    assert seam.executed == 2
+
+    worker_b = _Worker(max_per_job=100, session=q)
+    _under_budget(worker_b, "ep-b", "session-B")
+    seam.call()
+    assert seam.executed == 3, "one session exhausted another session's call budget"
+
+
+@pytest.mark.asyncio
+async def test_concurrent_episodes_compete_for_one_session_call_budget() -> None:
+    """Concurrency on real worker THREADS, dispatched the way production dispatches.
+
+    `asyncio.to_thread` is not interchangeable with `threading.Thread` here, and getting it wrong
+    is silent. The usage callback is held in a CONTEXTVAR: `asyncio.to_thread` copies the context
+    into the worker, so the budget applies; a bare `threading.Thread` starts with a fresh context,
+    `_emit_llm_usage_event` finds no callback, and every call runs UNMETERED. A first version of
+    this test used `threading.Thread` and saw 40 of 40 calls execute -- which looked like a broken
+    budget and was actually a test that had disconnected the budget it meant to measure.
+
+    Production is clean: every LLM dispatch goes through `asyncio.to_thread` (`graphiti_client`),
+    and the only raw thread in the codebase is the saga gate heartbeat, which makes no model
+    calls. But it is a live hazard for anything added later -- an LLM call dispatched on a raw
+    thread or a plain executor escapes both budgets entirely and nothing reports it.
+
+    **What this does NOT prove, stated because the inverse test was run and came back negative:**
+    removing the lock from `reserve_session_llm_call` leaves this test PASSING. Under CPython the
+    critical section is a deque trim and a length compare, and the GIL makes the interleaving that
+    would double-admit vanishingly unlikely at this scale. So the lock is correct practice for a
+    structure genuinely reached from multiple threads -- but it is defensive here rather than
+    demonstrated load-bearing, and claiming otherwise on the strength of a green test would be
+    exactly the counter-vs-execution mistake this file exists to avoid.
+    """
+    q = _queue(max_calls=5, window_s=60)
+    seam = _ModelSeam()
+    worker = _Worker(max_per_job=1000, session=q)
+    _under_budget(worker, "ep-shared", "session-A")
+
+    refused: list[int] = []
+
+    def attempt() -> None:
+        try:
+            seam.call()
+        except LlmBudgetExceeded:
+            refused.append(1)
+
+    await asyncio.gather(*[asyncio.to_thread(attempt) for _ in range(40)])
+
+    assert seam.executed == 5, (
+        f"{seam.executed} of 40 concurrent calls executed against a session budget of 5"
+    )
+    assert len(refused) == 35
+
+
+def test_the_per_job_budget_still_binds_inside_a_generous_session() -> None:
+    """Both controls apply, and the per-job one is checked FIRST.
+
+    Ordering matters for diagnosis rather than safety: attributing a single runaway episode's
+    overrun to "session exhausted" would point an operator at the wrong cause.
+    """
+    q = _queue(max_calls=1000, window_s=60)
+    seam = _ModelSeam()
+    worker = _Worker(max_per_job=2, session=q)
+    _under_budget(worker, "ep-1", "session-A")
+
+    seam.call()
+    seam.call()
+    with pytest.raises(LlmBudgetExceeded, match="per-job"):
+        seam.call()
+    assert seam.executed == 2

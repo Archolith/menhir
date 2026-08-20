@@ -134,8 +134,17 @@ class IngestWorkerMixin:
             self._processing_heartbeat_loop(episode_uuid, heartbeat_stop),
             name=f"menhir-enrichment-heartbeat-{episode_uuid}",
         )
+        # The session key is captured HERE, not looked up inside the callback: the callback fires
+        # from worker threads (graphiti dispatches model calls through asyncio.to_thread), where
+        # per-request context is not available. Closing over it is what lets the per-call
+        # reservation know which window it is spending from.
+        from menhir.services.ingest_queue import session_budget_key
+
+        budget_key = session_budget_key(episode_uuid, claimed.get("session_id"))
         usage_token = set_llm_usage_callback(
-            lambda event: self._record_episode_llm_usage(episode_uuid, event)
+            lambda event: self._record_episode_llm_usage(
+                episode_uuid, event, budget_key=budget_key
+            )
         )
 
         ctx = EnrichmentContext(
@@ -255,7 +264,7 @@ class IngestWorkerMixin:
         return
 
     def _record_episode_llm_usage(
-        self, episode_uuid: str, event: LLMUsageEvent
+        self, episode_uuid: str, event: LLMUsageEvent, *, budget_key: str | None = None
     ) -> None:
         """Increment live LLM task counters for one processing episode."""
 
@@ -284,6 +293,27 @@ class IngestWorkerMixin:
                 raise LlmBudgetExceeded(
                     f"episode {episode_uuid} exceeded its per-job LLM budget "
                     f"({count} calls, limit {self._budget_settings_max_per_job})"
+                )
+
+            # CF-79 session half: reserve the SAME call against the session window, so the window
+            # meters calls rather than attempts. Ordered after the per-job reservation so a single
+            # runaway episode is attributed to itself first -- reporting a per-job overrun as a
+            # session exhaustion would point the operator at the wrong cause.
+            #
+            # `budget_key` is None only for direct invocation in tests; production always passes
+            # it. Refusing on absence would break those call sites for no safety gain, since a
+            # caller with no session has no window to exhaust.
+            if budget_key is not None and not self.reserve_session_llm_call(budget_key):
+                logger.warning(
+                    "Session LLM budget exhausted for key %s while episode %s was running "
+                    "-- refusing the call",
+                    budget_key,
+                    episode_uuid,
+                )
+                raise LlmBudgetExceeded(
+                    f"session {budget_key} exhausted its LLM call budget "
+                    f"(limit {self._budget_settings_max_calls} calls per "
+                    f"{self._budget_settings_window_s}s)"
                 )
 
         scheduler_task = build_episode_scheduler_task(

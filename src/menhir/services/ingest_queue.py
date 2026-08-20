@@ -60,6 +60,12 @@ from menhir.services.ingest_models import (
     _parse_occurred_at,
 )
 
+def session_budget_key(episode_uuid: str, session_id: str | None) -> str:
+    """The window key. One definition, because the pre-attempt gate and the per-call reservation
+    MUST agree -- two spellings of "which session is this" would silently meter two windows."""
+    return session_id or f"episode:{episode_uuid}"
+
+
 class IngestQueueMixin:
     def configure(
         self,
@@ -237,30 +243,61 @@ class IngestQueueMixin:
     ) -> float | None:
         """Check rolling-window session budget. Returns retry_after_s if exceeded, else None."""
 
+        budget_key = session_budget_key(episode_uuid, session_id)
+        retry_after_s = self._session_window_retry_after(budget_key)
+        if retry_after_s is not None:
+            logger.warning(
+                "LLM session budget exceeded for key %s (%d calls in %ds). "
+                "Episode queued for retry in %.1fs.",
+                budget_key,
+                len(self._session_llm_call_times.get(budget_key, ())),
+                self._budget_settings_window_s,
+                retry_after_s,
+            )
+        return retry_after_s
+
+    def _session_window_retry_after(self, budget_key: str) -> float | None:
+        """READ-ONLY window check: is this session already out of budget?
+
+        It no longer APPENDS. That single line was the CF-79 session defect: one timestamp per
+        enrichment ATTEMPT meant an attempt making twenty model calls consumed the same slot as
+        one making a single call, so the control bounded attempt RATE and never call VOLUME.
+
+        The ledger is now written by `reserve_session_llm_call`, once per actual model call. This
+        stays as the pre-attempt gate -- refusing to START work whose budget is already spent is
+        cheaper than refusing it mid-extraction, and it keeps the existing retry-after behaviour
+        that requeues the episode rather than failing it.
+        """
         now = monotonic()
         window_s = self._budget_settings_window_s
-        budget_key = session_id or f"episode:{episode_uuid}"
-
-        async with self._session_llm_budget_lock:
+        with self._session_llm_call_lock:
             calls = self._session_llm_call_times.setdefault(budget_key, deque())
-
             while calls and now - calls[0] >= window_s:
                 calls.popleft()
-
             if len(calls) >= self._budget_settings_max_calls:
-                retry_after_s = max(1.0, window_s - (now - calls[0]))
-                logger.warning(
-                    "LLM session budget exceeded for key %s (%d calls in %ds). "
-                    "Episode queued for retry in %.1fs.",
-                    budget_key,
-                    len(calls),
-                    window_s,
-                    retry_after_s,
-                )
-                return retry_after_s
-
-            calls.append(now)
+                return max(1.0, window_s - (now - calls[0]))
         return None
+
+    def reserve_session_llm_call(self, budget_key: str) -> bool:
+        """Reserve ONE model call against the session window. False means refuse the call.
+
+        Called from the LLM usage callback on `phase="started"`, so the ledger counts CALLS.
+
+        Thread-safe by construction rather than by convention: `graphiti_client` dispatches model
+        calls through `asyncio.to_thread`, so this runs on worker threads as well as the loop.
+        The critical section is a deque trim and a length compare -- microseconds -- which is why
+        a threading lock briefly held from the event loop is acceptable here.
+        """
+        now = monotonic()
+        window_s = self._budget_settings_window_s
+        with self._session_llm_call_lock:
+            calls = self._session_llm_call_times.setdefault(budget_key, deque())
+            while calls and now - calls[0] >= window_s:
+                calls.popleft()
+            if len(calls) >= self._budget_settings_max_calls:
+                return False
+            calls.append(now)
+        return True
 
     async def resume_pending_episodes(self, limit: int = 100) -> int:
         """Requeue any persisted pending episodes on runtime startup."""
