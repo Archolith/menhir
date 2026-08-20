@@ -467,11 +467,23 @@ class TestApplyPromptVariant:
         )
         assert restored_user == default_user
 
+    @pytest.mark.online
+    @pytest.mark.needs_llm
     def test_model_and_temperature_override_land_on_the_real_client(self):
         """Regression coverage for the model/temperature fidelity gap: these tuning
         knobs must actually reach clients.llm_client, not silently no-op like the
         original prompt-variant bug did. No live LLM call -- construction alone is
-        enough to verify the override lands in the right place."""
+        enough to verify the override lands in the right place.
+
+        MARKED `online`/`needs_llm` (CF-152). It was unmarked and therefore ran in the
+        default offline lane, where it does two things an offline unit test must not:
+        `MemorySettings.from_env()` loads the operator's REAL OpenAI/Gemini keys (conftest's
+        pytest_configure overrides only the NEO4J_* variables, so the graph is safely pinned to
+        the disposable instance but the LLM credentials are genuine), and
+        `GraphitiClient.from_settings` applies sixteen irreversible `_patch_graphiti_*` mutations
+        to `graphiti_core` that persist for the rest of the process and affect every test that
+        follows it in that worker.
+        """
         from menhir.config import MemorySettings
         from menhir.infrastructure.graphiti_client import GraphitiClient
 
