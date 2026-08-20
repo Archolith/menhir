@@ -140,7 +140,9 @@ class Neo4jRepository:
     uri: str
     database: str
     user: str
-    password: str
+    #: repr=False because this renders through str()/f-strings and at any nesting depth,
+    #: and every dataclass holding this one inherits the leak (EpisodeRepository does).
+    password: str = field(repr=False)
     _driver: Driver | None = field(default=None, init=False, repr=False)
     _driver_lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
 
