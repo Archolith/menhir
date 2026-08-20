@@ -422,6 +422,7 @@ async def test_ensure_enrichment_worker_spawns_pool_of_size_concurrency(
 
 
 @pytest.mark.unit
+@pytest.mark.timing
 @pytest.mark.asyncio
 async def test_concurrent_enrichment_parallelizes_across_namespaces(
     stub_memory_graph_adapter: "StubMemoryGraphAdapter",
