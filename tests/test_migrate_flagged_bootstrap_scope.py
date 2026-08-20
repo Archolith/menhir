@@ -80,6 +80,88 @@ def test_candidate_classification_separates_structure_from_bootstrap_scope() -> 
     assert bootstrap["proposed_structure_role"] is None
 
 
+def test_scoped_entity_is_its_own_kind_not_a_bootstrap_candidate() -> None:
+    """A flagged entity that already has a scope is the cleanup population.
+
+    BOOTSTRAP_CANDIDATE is scope IS NULL. Mixing the two would drag the large
+    retention-only propagated population into a review that does not need it.
+    """
+    scoped = MODULE._classify_candidate(_base_row("e1", bootstrap_scope="general"))
+    unscoped = MODULE._classify_candidate(_base_row("b1"))
+
+    assert scoped["candidate_kind"] == MODULE.SCOPED_ENTITY_CLEANUP_CANDIDATE
+    assert scoped["proposed_structure_role"] is None
+    assert unscoped["candidate_kind"] == MODULE.BOOTSTRAP_CANDIDATE
+
+    # An unflagged scoped entity is not a candidate at all.
+    try:
+        MODULE._classify_candidate(
+            _base_row("e2", bootstrap_scope="general", user_flagged=False)
+        )
+    except ValueError:
+        pass
+    else:  # pragma: no cover
+        raise AssertionError("unflagged scoped entity must not classify as a candidate")
+
+
+def test_scoped_entity_cleanup_defaults_preserve_retention() -> None:
+    manifest = MODULE._manifest_candidate(
+        MODULE._classify_candidate(_base_row("e1", bootstrap_scope="general"))
+    )
+
+    assert manifest["target_user_flagged"] is True
+    assert manifest["target_bootstrap_scope"] == MODULE.UNREVIEWED
+    assert manifest["target_structure_role"] is None
+
+
+def test_scoped_entity_cleanup_clears_pin_without_unflagging() -> None:
+    """`none` nulls bootstrap_scope while user_flagged stays true.
+
+    The parent flagged episode intended the retention; only the startup pin was
+    inherited. Clearing the flag here would make the entity decay- and merge-eligible.
+    """
+    row = _manifest_row(
+        _base_row("e1", bootstrap_scope="general"), target_bootstrap_scope="none"
+    )
+
+    assert MODULE._normalize_manifest_candidate(row) == []
+    assert row["target_bootstrap_scope"] is None
+    assert MODULE._target_state(row) == {
+        "user_flagged": True,
+        "bootstrap_scope": None,
+        "structure_role": None,
+    }
+
+
+def test_scoped_entity_cleanup_can_keep_a_deliberate_pin() -> None:
+    row = _manifest_row(
+        _base_row("e1", bootstrap_scope="workspace:archolith"),
+        target_bootstrap_scope=" Workspace: Archolith ",
+    )
+
+    assert MODULE._normalize_manifest_candidate(row) == []
+    assert row["target_bootstrap_scope"] == "workspace:archolith"
+    assert row["target_user_flagged"] is True
+
+
+def test_scoped_entity_cleanup_rejects_unreviewed_and_unflagging() -> None:
+    unreviewed = _manifest_row(_base_row("e1", bootstrap_scope="general"))
+    assert any(
+        "explicitly reviewed" in problem
+        for problem in MODULE._normalize_manifest_candidate(unreviewed)
+    )
+
+    unflagging = _manifest_row(
+        _base_row("e2", bootstrap_scope="general"),
+        target_bootstrap_scope="none",
+        target_user_flagged=False,
+    )
+    assert any(
+        "target_user_flagged=true" in problem
+        for problem in MODULE._normalize_manifest_candidate(unflagging)
+    )
+
+
 def test_manifest_validation_normalizes_reviewed_targets() -> None:
     structure = _manifest_row(
         _base_row(

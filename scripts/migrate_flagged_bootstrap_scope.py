@@ -50,8 +50,27 @@ UNREVIEWED = "UNREVIEWED"
 BOOTSTRAP_CANDIDATE = "bootstrap_scope"
 LEGACY_STRUCTURE_CANDIDATE = "legacy_structure"
 STRUCTURAL_CLEANUP_CANDIDATE = "structural_cleanup"
+#: Flagged semantic entities that already carry a bootstrap_scope. Until the fix in
+#: services/enrichment_steps.py, propagate_user_flag forwarded a flagged episode's
+#: bootstrap_scope onto every entity extracted from it, so shared hubs landed in the
+#: startup read (which requires user_flagged AND an allowed scope). The node alone
+#: cannot prove whether its scope was inherited or set deliberately via
+#: flag_memory(uuid, bootstrap_scope=...), so every row is reviewed, never cleared
+#: automatically. Kept separate from BOOTSTRAP_CANDIDATE so this cleanup does not drag
+#: in the large retention-only population that has scope IS NULL.
+SCOPED_ENTITY_CLEANUP_CANDIDATE = "scoped_entity_cleanup"
 STRUCTURAL_CANDIDATE_KINDS = frozenset(
     {LEGACY_STRUCTURE_CANDIDATE, STRUCTURAL_CLEANUP_CANDIDATE}
+)
+#: Semantic kinds: retention is preserved, only the startup pin is reviewed.
+SEMANTIC_CANDIDATE_KINDS = frozenset(
+    {BOOTSTRAP_CANDIDATE, SCOPED_ENTITY_CLEANUP_CANDIDATE}
+)
+ALL_CANDIDATE_KINDS = (
+    LEGACY_STRUCTURE_CANDIDATE,
+    STRUCTURAL_CLEANUP_CANDIDATE,
+    BOOTSTRAP_CANDIDATE,
+    SCOPED_ENTITY_CLEANUP_CANDIDATE,
 )
 
 
@@ -101,6 +120,16 @@ def _classify_candidate(row: dict[str, Any]) -> dict[str, Any]:
             "candidate_kind": BOOTSTRAP_CANDIDATE,
             "proposed_structure_role": None,
         }
+    if (
+        "Entity" in (row.get("labels") or [])
+        and bool(row.get("user_flagged"))
+        and row.get("bootstrap_scope") is not None
+    ):
+        return {
+            **row,
+            "candidate_kind": SCOPED_ENTITY_CLEANUP_CANDIDATE,
+            "proposed_structure_role": None,
+        }
     raise ValueError(f"{row.get('uuid')}: row does not match a migration candidate kind")
 
 
@@ -120,6 +149,12 @@ def _candidates(repo: Neo4jRepository, *, limit: int) -> list[dict[str, Any]]:
             OR (
               coalesce(n.user_flagged, false)
               AND n.bootstrap_scope IS NULL
+              AND ({non_structure})
+            )
+            OR (
+              n:Entity
+              AND coalesce(n.user_flagged, false)
+              AND n.bootstrap_scope IS NOT NULL
               AND ({non_structure})
             )
           )
@@ -196,11 +231,7 @@ def cmd_plan(repo: Neo4jRepository, uri: str, args: argparse.Namespace) -> int:
     candidate_fingerprints = [str(row["fingerprint"]) for row in manifest_candidates]
     counts = {
         kind: sum(row["candidate_kind"] == kind for row in manifest_candidates)
-        for kind in (
-            LEGACY_STRUCTURE_CANDIDATE,
-            STRUCTURAL_CLEANUP_CANDIDATE,
-            BOOTSTRAP_CANDIDATE,
-        )
+        for kind in ALL_CANDIDATE_KINDS
     }
     header = {
         "kind": MANIFEST_KIND,
@@ -216,8 +247,12 @@ def cmd_plan(repo: Neo4jRepository, uri: str, args: argparse.Namespace) -> int:
         "preserved_fields": ["namespace", "group_id", "relationships"],
         "instructions": (
             "For structure candidates, replace target_structure_role=UNREVIEWED with the reviewed "
-            "role; structural flags/scopes will be cleared. For bootstrap candidates, replace "
-            "target_bootstrap_scope=UNREVIEWED with general, workspace:<key>, or none. "
+            "role; structural flags/scopes will be cleared. For bootstrap and "
+            "scoped_entity_cleanup candidates, replace target_bootstrap_scope=UNREVIEWED with "
+            "general, workspace:<key>, or none; target_user_flagged stays true either way, so "
+            "'none' clears the startup pin WITHOUT removing lifecycle retention. For "
+            "scoped_entity_cleanup use none when the scope was inherited from a flagged episode, "
+            "or restate the existing scope to keep a deliberate pin. "
             "namespace and group_id are fingerprinted invariants and are never written."
         ),
     }
@@ -272,7 +307,7 @@ def _normalize_manifest_candidate(row: dict[str, Any]) -> list[str]:
             problems.append(f"{uuid}: structural candidates must explicitly use scope none")
         else:
             row["target_bootstrap_scope"] = None
-    elif kind == BOOTSTRAP_CANDIDATE:
+    elif kind in SEMANTIC_CANDIDATE_KINDS:
         if row.get("target_structure_role") is not None:
             problems.append(f"{uuid}: semantic bootstrap candidates cannot set structure_role")
         if row.get("target_user_flagged") is not True:
@@ -393,11 +428,7 @@ def cmd_apply(repo: Neo4jRepository, uri: str, args: argparse.Namespace) -> int:
 
     pending_counts = {
         kind: sum(row["candidate_kind"] == kind for row in pending)
-        for kind in (
-            LEGACY_STRUCTURE_CANDIDATE,
-            STRUCTURAL_CLEANUP_CANDIDATE,
-            BOOTSTRAP_CANDIDATE,
-        )
+        for kind in ALL_CANDIDATE_KINDS
     }
     print(
         f"Validated {len(candidates)} reviewed row(s): pending={len(pending)}, "
@@ -493,11 +524,7 @@ def cmd_verify(repo: Neo4jRepository, uri: str, args: argparse.Namespace) -> int
     remaining = _candidates(repo, limit=args.limit)
     counts = {
         kind: sum(row["candidate_kind"] == kind for row in remaining)
-        for kind in (
-            LEGACY_STRUCTURE_CANDIDATE,
-            STRUCTURAL_CLEANUP_CANDIDATE,
-            BOOTSTRAP_CANDIDATE,
-        )
+        for kind in ALL_CANDIDATE_KINDS
     }
     print(
         f"READ-ONLY verify against {uri}: {len(remaining)} candidate(s) "
