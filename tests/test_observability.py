@@ -357,3 +357,86 @@ async def test_build_async_openai_client_strips_auth_for_local_llama() -> None:
     await hooks[0](request)
 
     assert "Authorization" not in request.headers
+
+
+# ---------------------------------------------------------------------------
+# CF-191: the embedding cache must map upstream results by the contract's `index`,
+# not by arrival position. A reorder preserves the COUNT, so the length guard cannot see it.
+# ---------------------------------------------------------------------------
+
+_CF191_VECTORS = {"alpha": [1.0, 1.0, 1.0], "beta": [2.0, 2.0, 2.0], "gamma": [3.0, 3.0, 3.0]}
+
+
+class _Item:
+    def __init__(self, index, embedding):
+        self.index, self.embedding = index, embedding
+
+
+def _resp(items):
+    return SimpleNamespace(data=items)
+
+
+class _Upstream:
+    """Returns correctly-indexed items in an order chosen by the subclass."""
+
+    def __init__(self, order):
+        self._order = order
+
+    async def create(self, **kwargs):
+        texts = kwargs["input"]
+        texts = [texts] if isinstance(texts, str) else texts
+        items = [_Item(i, _CF191_VECTORS[t]) for i, t in enumerate(texts)]
+        return _resp(self._order(items))
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_reordered_upstream_response_still_maps_each_text_to_its_own_vector():
+    from menhir.infrastructure.embedding_cache import EmbeddingCache
+
+    cache = EmbeddingCache()
+    endpoint = observability._CachingEmbeddingsEndpoint(_Upstream(lambda i: list(reversed(i))), cache)
+    texts = ["alpha", "beta", "gamma"]
+
+    await endpoint.create(input=texts, model="m")
+
+    for text in texts:
+        assert cache.get(text, model="m") == _CF191_VECTORS[text], (
+            f"{text} was cached against another text's embedding"
+        )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_in_order_response_is_unaffected():
+    """Positive control: a fix that ignored the payload entirely would pass the test above."""
+    from menhir.infrastructure.embedding_cache import EmbeddingCache
+
+    cache = EmbeddingCache()
+    endpoint = observability._CachingEmbeddingsEndpoint(_Upstream(lambda i: i), cache)
+
+    await endpoint.create(input=["alpha", "beta", "gamma"], model="m")
+
+    assert cache.get("beta", model="m") == _CF191_VECTORS["beta"]
+    assert cache.get("gamma", model="m") == _CF191_VECTORS["gamma"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_provider_without_an_index_field_falls_back_to_arrival_order():
+    """Not every provider returns `index`; dropping those vectors would be a regression."""
+    from menhir.infrastructure.embedding_cache import EmbeddingCache
+
+    class _NoIndex:
+        async def create(self, **kwargs):
+            texts = kwargs["input"]
+            texts = [texts] if isinstance(texts, str) else texts
+            return _resp([SimpleNamespace(embedding=_CF191_VECTORS[t]) for t in texts])
+
+    cache = EmbeddingCache()
+    endpoint = observability._CachingEmbeddingsEndpoint(_NoIndex(), cache)
+
+    await endpoint.create(input=["alpha", "beta"], model="m")
+
+    assert cache.get("alpha", model="m") == _CF191_VECTORS["alpha"]
+    assert cache.get("beta", model="m") == _CF191_VECTORS["beta"]

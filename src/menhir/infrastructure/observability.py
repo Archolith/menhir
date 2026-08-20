@@ -414,11 +414,35 @@ class _CachingEmbeddingsEndpoint:
         # Extract vectors from upstream and cache them
         try:
             upstream_data = upstream_result.data if hasattr(upstream_result, "data") else []
+            seen_positions: set[int] = set()
             for j, item in enumerate(upstream_data):
                 vec = item.embedding if hasattr(item, "embedding") else item.get("embedding") if isinstance(item, dict) else None
-                if vec is not None and j < len(miss_texts):
-                    self._cache.set(miss_texts[j], list(vec), model=model)
-                    cached_vectors[miss_indices[j]] = list(vec)
+                # CF-191: map by the `index` the embeddings contract returns, NOT by arrival
+                # position. The field exists precisely because response order is not guaranteed,
+                # and a reorder preserves the COUNT -- so the length guard below cannot see it.
+                # Mis-mapping here caches a text against another text's vector permanently and
+                # hands the caller mismatched embeddings, with nothing downstream to detect it.
+                reported = item.index if hasattr(item, "index") else (
+                    item.get("index") if isinstance(item, dict) else None
+                )
+                position = j if reported is None else reported
+                if not isinstance(position, int) or not (0 <= position < len(miss_texts)):
+                    logger.warning(
+                        "Embedding cache: upstream item %d reported out-of-range index %r for a "
+                        "batch of %d; skipping it rather than guessing a text",
+                        j, reported, len(miss_texts),
+                    )
+                    continue
+                if position in seen_positions:
+                    logger.warning(
+                        "Embedding cache: upstream returned index %d more than once; skipping "
+                        "the duplicate rather than overwriting", position,
+                    )
+                    continue
+                if vec is not None:
+                    seen_positions.add(position)
+                    self._cache.set(miss_texts[position], list(vec), model=model)
+                    cached_vectors[miss_indices[position]] = list(vec)
         except (AttributeError, TypeError, IndexError):
             logger.debug("Embedding cache: failed to extract/cache upstream vectors", exc_info=True)
 
