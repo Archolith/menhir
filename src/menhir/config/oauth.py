@@ -42,14 +42,23 @@ def _get_setting(
 
 
 def _as_tuple(value: object, default: tuple[str, ...] = ()) -> tuple[str, ...]:
-    if value in (None, "", ()):
+    """Coerce a configured value to a tuple, distinguishing UNSET from EXPLICITLY EMPTY.
+
+    Only ``None`` means "not configured" and falls back to ``default``. An empty string or an
+    empty collection is an operator saying "none of these", and is returned as ``()`` (CF-102).
+
+    This previously collapsed ``None``, ``""`` and ``()`` into one branch, which made the
+    fallback asymmetric in the one direction that matters: a privilege-ADDING override was
+    honoured while a privilege-REMOVING one was discarded and the built-in default silently
+    restored. Emptying ``MENHIR_OAUTH_ADMIN_SCOPES`` to revoke admin therefore left
+    ``menhir:admin`` in force. Callers that want "unset" must now pass ``None``, not ``()``.
+    """
+    if value is None:
         return default
     if isinstance(value, str):
-        parsed = _split_csv(value)
-        return parsed or default
+        return _split_csv(value)
     if isinstance(value, (list, tuple, set)):
-        parsed = tuple(str(item).strip() for item in value if str(item).strip())
-        return parsed or default
+        return tuple(str(item).strip() for item in value if str(item).strip())
     return default
 
 
@@ -183,7 +192,7 @@ def build_oauth_config(settings: object) -> OAuthConfig:
                 settings,
                 "oauth_scopes_supported",
                 "MENHIR_OAUTH_SCOPES_SUPPORTED",
-                (),
+                None,
             ),
             OAuthConfig.scopes_supported,
         ),
@@ -192,7 +201,7 @@ def build_oauth_config(settings: object) -> OAuthConfig:
                 settings,
                 "oauth_read_scopes",
                 "MENHIR_OAUTH_READ_SCOPES",
-                (),
+                None,
             ),
             OAuthConfig.read_scopes,
         ),
@@ -201,7 +210,7 @@ def build_oauth_config(settings: object) -> OAuthConfig:
                 settings,
                 "oauth_write_scopes",
                 "MENHIR_OAUTH_WRITE_SCOPES",
-                (),
+                None,
             ),
             OAuthConfig.write_scopes,
         ),
@@ -210,7 +219,7 @@ def build_oauth_config(settings: object) -> OAuthConfig:
                 settings,
                 "oauth_admin_scopes",
                 "MENHIR_OAUTH_ADMIN_SCOPES",
-                (),
+                None,
             ),
             OAuthConfig.admin_scopes,
         ),
@@ -243,7 +252,7 @@ def build_oauth_config(settings: object) -> OAuthConfig:
                 settings,
                 "oauth_allowed_algorithms",
                 "MENHIR_OAUTH_ALLOWED_ALGORITHMS",
-                (),
+                None,
             ),
             OAuthConfig.allowed_algorithms,
         ),

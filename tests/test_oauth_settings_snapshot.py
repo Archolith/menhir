@@ -84,3 +84,49 @@ def test_consent_html_security_headers_are_fail_closed():
     assert response.headers["x-frame-options"] == "DENY"
     assert "frame-ancestors 'none'" in response.headers["content-security-policy"]
     assert response.headers["referrer-policy"] == "no-referrer"
+
+
+# ---------------------------------------------------------------------------
+# CF-102: an explicitly-empty scope list must REVOKE, not silently restore the default.
+# ---------------------------------------------------------------------------
+
+
+def test_emptying_admin_scopes_actually_revokes_admin():
+    """The asymmetry that made this a security defect: a privilege-ADDING override was
+    honoured while a privilege-REMOVING one was discarded and `menhir:admin` left in force."""
+    settings = MemorySettings(oauth_admin_scopes=())
+
+    assert build_oauth_config(settings).admin_scopes == ()
+
+
+def test_a_non_empty_scope_override_is_still_honoured():
+    """Positive control for the test above: without this, an implementation that returned ()
+    for everything would pass the revocation test while being completely broken."""
+    settings = MemorySettings(oauth_admin_scopes=("custom:admin",))
+
+    assert build_oauth_config(settings).admin_scopes == ("custom:admin",)
+
+
+def test_unset_scopes_still_fall_back_to_the_built_in_default():
+    """The fallback must survive: only None means unset, and a bare snapshot has no override."""
+    assert build_oauth_config(SimpleNamespace()).admin_scopes == ("menhir:admin",)
+
+
+def test_emptying_read_and_write_scopes_revokes_them_too():
+    """The register filed this against admin only; read and write shared the defect."""
+    settings = MemorySettings(oauth_read_scopes=(), oauth_write_scopes=())
+    cfg = build_oauth_config(settings)
+
+    assert cfg.read_scopes == ()
+    assert cfg.write_scopes == ()
+
+
+def test_revoked_admin_scope_denies_the_operator_tier():
+    """Far-end assertion: config alone proves nothing, the tier mapping is what enforces."""
+    from menhir.api.oauth import tier_from_scopes
+
+    granted = build_oauth_config(SimpleNamespace())
+    assert tier_from_scopes({"menhir:admin"}, granted) == "operator"  # control
+
+    revoked = build_oauth_config(MemorySettings(oauth_admin_scopes=()))
+    assert tier_from_scopes({"menhir:admin"}, revoked) != "operator"
