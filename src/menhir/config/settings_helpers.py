@@ -182,3 +182,53 @@ def assert_bind_safe(settings: object, *, host: str | None = None) -> None:
             getattr(settings, "allow_insecure_remote_no_auth", False)
         ),
     )
+
+
+#: Stand-in for a URI that cannot be parsed well enough to prove it carries no credential.
+UNPARSEABLE_URI = "[unparseable-uri]"
+
+
+def redact_uri_credentials(uri: str | None) -> str:
+    """Strip userinfo from a URI so the value is safe to disclose to a caller or write to a log.
+
+    ``NEO4J_URI`` and the LLM base URLs are supported in the ``scheme://user:password@host:port``
+    form, so any surface that echoes one back -- an MCP resource payload, a provider-config dict,
+    an operator-facing failure string -- discloses the credential verbatim.
+
+    Unconditional by design: this is NOT gated on ``MENHIR_PRIVACY_REDACT``. That toggle governs
+    display of memory *content*; a credential must never be disclosed regardless of its setting.
+
+    A URI with no userinfo is returned byte-for-byte, so the common case never mangles the
+    operator's exact string. Only when an ``@`` appears in the authority is the URI rebuilt, and
+    a URI we cannot rebuild safely degrades to ``UNPARSEABLE_URI`` rather than passing through --
+    a value we cannot parse is a value we cannot prove is credential-free.
+    """
+    from urllib.parse import urlparse, urlunparse
+
+    if not uri:
+        return ""
+    try:
+        parsed = urlparse(uri)
+    except ValueError:
+        return UNPARSEABLE_URI
+
+    # `netloc` is the authority only, so an `@` in a path or query cannot be mistaken for
+    # userinfo. No `@` means there is nothing to strip and nothing to rebuild.
+    if "@" not in parsed.netloc:
+        return uri
+
+    try:
+        host = parsed.hostname or ""
+        port = parsed.port
+    except ValueError:
+        # urlparse defers validation: a malformed port raises on attribute access, not on parse.
+        return UNPARSEABLE_URI
+    if not host:
+        return UNPARSEABLE_URI
+
+    # `hostname` strips the brackets from an IPv6 literal; without them the rebuilt authority
+    # would read `::1:7687`, where the port is indistinguishable from another hextet.
+    authority = f"[{host}]" if ":" in host else host
+    if port is not None:
+        authority = f"{authority}:{port}"
+    return urlunparse(parsed._replace(netloc=authority))

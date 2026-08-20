@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 from uuid import UUID
 
-from menhir.config import MemorySettings
+from menhir.config import MemorySettings, redact_uri_credentials
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
@@ -225,7 +225,10 @@ def _neo4j_dependency_snapshot() -> dict[str, Any]:
     port = int(parsed.port or 7687)
     reachable = _socket_reachable(host, port)
     return {
-        "uri": settings.neo4j_uri,
+        # Redacted, not raw: NEO4J_URI is supported in the `neo4j://user:password@host` form,
+        # and resources carry no tier requirement (CF-16), so the lowest authenticated caller
+        # reads this payload. Host and port above are already derived, so nothing is lost.
+        "uri": redact_uri_credentials(settings.neo4j_uri),
         "host": host,
         "port": port,
         "reachable": reachable,

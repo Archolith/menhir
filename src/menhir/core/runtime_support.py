@@ -7,7 +7,7 @@ import threading
 from dataclasses import dataclass, field, fields
 from typing import TYPE_CHECKING
 
-from menhir.config import MemorySettings
+from menhir.config import MemorySettings, redact_uri_credentials
 from menhir.core.reader_identity import normalize_reader_id
 from menhir.core.runtime_preflight import RuntimeCapabilities
 from menhir.domain.bootstrap_scope import bootstrap_selection
@@ -137,7 +137,8 @@ def _annotate_runtime_failures(failures: list[str], settings: MemorySettings) ->
     for failure in failures:
         if failure == "Neo4j connectivity check failed.":
             annotated.append(
-                f"{failure} Expected {settings.neo4j_uri}. Start Docker Desktop and the yawn-neo4j container."
+                f"{failure} Expected {redact_uri_credentials(settings.neo4j_uri)}. "
+                "Start Docker Desktop and the yawn-neo4j container."
             )
             continue
         annotated.append(failure)
