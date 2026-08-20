@@ -48,7 +48,15 @@ _EVIDENCE_LEXICON: dict[str, str] = {
 }
 _HISTORICAL_MARKERS = ("used to", "previously", "no longer", "deprecated", "formerly",
                        "back then", "old approach", "we removed")
-_CURRENT_MARKERS = ("now ", "currently", "current ", "as of today", "today we")
+_CURRENT_MARKERS = ("now", "currently", "current", "as of today", "today we")
+# Negation guard per marker; skip negator-prefixed markers ("no longer") so they don't veto themselves.
+_HISTORICAL_NEGATION: dict[str, re.Pattern] = {
+    marker: re.compile(
+        rf"(?:\bnot\b|\bnever\b|n't)(?:\s+\w+){{0,2}}\s+{re.escape(marker)}\b"
+    )
+    for marker in _HISTORICAL_MARKERS
+    if not any(marker.startswith(token) for token in ("no ", "not ", "never "))
+}
 
 _MAX_TEXT_SYMBOLS = 8
 _MAX_OBJECTS = 6
@@ -123,9 +131,14 @@ def _extract_objects(text: str) -> set[str]:
 
 
 def _extract_bucket(lower: str) -> str | None:
-    if any(marker in lower for marker in _HISTORICAL_MARKERS):
+    for marker in _HISTORICAL_MARKERS:
+        if not _word_present(marker, lower):
+            continue
+        negation = _HISTORICAL_NEGATION.get(marker)
+        if negation is not None and negation.search(lower):
+            continue  # directly negated -> not historical
         return "historical"
-    if any(marker in lower for marker in _CURRENT_MARKERS):
+    if any(_word_present(marker, lower) for marker in _CURRENT_MARKERS):
         return "current"
     return None
 

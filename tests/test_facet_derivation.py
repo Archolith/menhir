@@ -90,6 +90,37 @@ def test_anchored_test_symbol_classified_as_test_not_symbol() -> None:
 
 
 @pytest.mark.unit
+def test_belief_bucket_word_boundaries_reject_partial_matches() -> None:
+    # "now " / "current " inside other words must not classify as current.
+    assert derive_facets(content="I know the answer").belief_bucket != "current"
+    assert derive_facets(content="concurrent writes are safe").belief_bucket != "current"
+
+
+@pytest.mark.unit
+def test_belief_bucket_trailing_marker_word_is_current() -> None:
+    # a sentence ENDING in "current" (no trailing space) still derives "current".
+    assert derive_facets(content="the concurrency model is current").belief_bucket == "current"
+
+
+@pytest.mark.unit
+def test_belief_bucket_negated_historical_marker_is_not_historical() -> None:
+    assert derive_facets(
+        content="This API is NOT deprecated and is fully current"
+    ).belief_bucket != "historical"
+    assert derive_facets(
+        content="do not use the deprecated flag; use the new one"
+    ).belief_bucket != "historical"
+
+
+@pytest.mark.unit
+def test_belief_bucket_positive_controls() -> None:
+    # without these, the negative assertions above would pass against a classifier
+    # that returned None for everything.
+    assert derive_facets(content="this API is deprecated").belief_bucket == "historical"
+    assert derive_facets(content="we now use the new client").belief_bucket == "current"
+
+
+@pytest.mark.unit
 def test_regular_memory_has_no_structural_but_has_scope_and_interpretive() -> None:
     # A regular (unanchored) memory: no anchors, but still carries scope + interpretive
     # facets — the corpus-wide fashion.
