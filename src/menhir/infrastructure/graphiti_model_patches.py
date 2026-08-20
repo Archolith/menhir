@@ -247,8 +247,31 @@ def _patch_graphiti_none_replace() -> None:
     logger.debug("Graphiti NoneType.replace safety patch applied (%d/3 methods)", patched)
 
 
+#: Cap on distinct record keys retained per log-once set. Both sets are keyed by entity ``uuid``,
+#: so their cardinality is bounded only by the malformed-entity population -- on a large corrupt
+#: store they grow without bound, and they grow inside a patch that runs once per record of every
+#: node search. Kept as ``set`` (not an insertion-ordered dict) because these objects are imported
+#: BY REFERENCE elsewhere and the tests use the set API; eviction therefore mutates in place and
+#: never rebinds the global.
+_MALFORMED_LOG_KEYS_MAX = 512
+
 _MALFORMED_ENTITY_GROUP_IDS_LOGGED: set[str] = set()
 _MALFORMED_ENTITY_DATES_LOGGED: set[str] = set()
+
+
+def _first_time_seen(seen: set[str], key: str) -> bool:
+    """True the first time ``key`` is offered; evicts an arbitrary key at capacity.
+
+    The victim is arbitrary rather than oldest because a ``set`` has no insertion order. That is
+    acceptable here: the worst consequence of evicting the wrong key is one extra ERROR line for a
+    record already reported, which is strictly better than unbounded growth.
+    """
+    if key in seen:
+        return False
+    if len(seen) >= _MALFORMED_LOG_KEYS_MAX:
+        seen.pop()
+    seen.add(key)
+    return True
 
 
 def _patch_graphiti_entity_record_group_id() -> None:
@@ -286,8 +309,7 @@ def _patch_graphiti_entity_record_group_id() -> None:
                 inferred_group_id = "" if namespace in (None, "", "default") else str(namespace)
                 copied["group_id"] = inferred_group_id
                 record_key = str(copied.get("uuid") or f"{copied.get('name')}:{namespace}")
-                if record_key not in _MALFORMED_ENTITY_GROUP_IDS_LOGGED:
-                    _MALFORMED_ENTITY_GROUP_IDS_LOGGED.add(record_key)
+                if _first_time_seen(_MALFORMED_ENTITY_GROUP_IDS_LOGGED, record_key):
                     logger.error(
                         "Graphiti search encountered Entity with NULL group_id; "
                         "search continued with inferred_group_id=%r uuid=%r name=%r namespace=%r",
@@ -301,8 +323,7 @@ def _patch_graphiti_entity_record_group_id() -> None:
             if isinstance(created_at, str) and created_at.endswith("Z[UTC]"):
                 copied["created_at"] = created_at.removesuffix("Z[UTC]") + "+00:00"
                 record_key = str(copied.get("uuid") or f"{copied.get('name')}:{created_at}")
-                if record_key not in _MALFORMED_ENTITY_DATES_LOGGED:
-                    _MALFORMED_ENTITY_DATES_LOGGED.add(record_key)
+                if _first_time_seen(_MALFORMED_ENTITY_DATES_LOGGED, record_key):
                     logger.error(
                         "Graphiti search encountered Entity with non-ISO created_at; "
                         "search continued with normalized timestamp uuid=%r name=%r created_at=%r",
