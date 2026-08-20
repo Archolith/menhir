@@ -31,7 +31,10 @@ REDACTED_FIELDS: frozenset[str] = frozenset(
     }
 )
 
-# Structural fields that must survive redaction so the view stays usable.
+# Structural fields that MUST survive redaction so the view stays usable. This
+# set is ENFORCED: in redact_mapping (which redact_rows delegates to), a field
+# listed here is never masked, even when the caller's `fields` deny-list names it.
+# Structural wins over the deny-list (see the collision guard in redact_mapping).
 STRUCTURAL_FIELDS: frozenset[str] = frozenset(
     {
         "uuid",
@@ -87,15 +90,17 @@ def redact_mapping(
 ) -> dict:
     """Return a shallow copy of ``row`` with configured free-text fields masked.
 
-    Structural fields are left intact. Nested dict/list/tuple values under a
-    redacted field key are recursed with their shape preserved, so consumers can
-    still iterate items or index into nested structures after redaction.
+    Structural fields are left intact -- a field in ``STRUCTURAL_FIELDS`` is never
+    masked, even if it also appears in the caller's ``fields`` deny-list. Nested
+    dict/list/tuple values under a redacted field key are recursed with their shape
+    preserved, so consumers can still iterate items or index into nested structures
+    after redaction.
     """
     if reveal:
         return row
     out = dict(row)
     for key in list(out.keys()):
-        if key in fields:
+        if key in fields and key not in STRUCTURAL_FIELDS:
             out[key] = _redact_value(out[key])
     return out
 
