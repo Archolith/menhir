@@ -133,7 +133,19 @@ def _classify_candidate(row: dict[str, Any]) -> dict[str, Any]:
     raise ValueError(f"{row.get('uuid')}: row does not match a migration candidate kind")
 
 
-def _candidates(repo: Neo4jRepository, *, limit: int) -> list[dict[str, Any]]:
+def _candidates(
+    repo: Neo4jRepository, *, limit: int, kinds: frozenset[str] | None = None
+) -> list[dict[str, Any]]:
+    """Return classified candidates, optionally narrowed to specific kinds.
+
+    ``limit`` always bounds the SCAN, never the filtered result, so a narrowed run
+    still fails closed when the underlying population exceeds the bound: you either
+    see every row of the selected kind or you get an error, never a silent subset.
+    Filtering happens after classification because ``_classify_candidate`` is the
+    source of truth (it runs ``infer_legacy_structure_role``, which the Cypher
+    predicate cannot reproduce) -- duplicating the kind rules in the query would let
+    the two drift apart.
+    """
     legacy_structure = legacy_structural_memory_cypher("n")
     non_structure = non_structural_memory_cypher("n")
     rows = repo.execute(
@@ -177,7 +189,19 @@ def _candidates(repo: Neo4jRepository, *, limit: int) -> list[dict[str, Any]]:
         raise ValueError(
             f"candidate count exceeds bounded limit {limit}; narrow the dataset or raise --limit explicitly"
         )
-    return [_classify_candidate(row) for row in materialized]
+    classified = [_classify_candidate(row) for row in materialized]
+    if kinds is None:
+        return classified
+    return [row for row in classified if row["candidate_kind"] in kinds]
+
+
+def selected_kinds(args: argparse.Namespace) -> frozenset[str]:
+    """Resolve --candidate-kind into an explicit kind set (absent = every kind)."""
+
+    chosen = getattr(args, "candidate_kind", None)
+    if not chosen:
+        return frozenset(ALL_CANDIDATE_KINDS)
+    return frozenset(chosen)
 
 
 def _write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> None:
@@ -226,7 +250,8 @@ def _manifest_candidate(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def cmd_plan(repo: Neo4jRepository, uri: str, args: argparse.Namespace) -> int:
-    candidates = _candidates(repo, limit=args.limit)
+    kinds = selected_kinds(args)
+    candidates = _candidates(repo, limit=args.limit, kinds=kinds)
     manifest_candidates = [_manifest_candidate(row) for row in candidates]
     candidate_fingerprints = [str(row["fingerprint"]) for row in manifest_candidates]
     counts = {
@@ -240,6 +265,9 @@ def cmd_plan(repo: Neo4jRepository, uri: str, args: argparse.Namespace) -> int:
         "source_uri": uri,
         "candidate_count": len(manifest_candidates),
         "candidate_counts": counts,
+        #: Which kinds this manifest is authoritative for. A narrowed manifest covers
+        #: only these, so apply/verify must not treat it as covering the whole graph.
+        "candidate_kinds": sorted(kinds),
         "limit": args.limit,
         "expected_graph_fingerprint": hashlib.sha256(
             "|".join(candidate_fingerprints).encode("utf-8")
@@ -329,9 +357,37 @@ def _normalize_manifest_candidate(row: dict[str, Any]) -> list[str]:
 
 
 def validate_manifest(
-    header: dict[str, Any], candidates: list[dict[str, Any]], *, uri: str, max_rows: int
+    header: dict[str, Any],
+    candidates: list[dict[str, Any]],
+    *,
+    uri: str,
+    max_rows: int,
+    kinds: frozenset[str] | None = None,
 ) -> list[str]:
     problems: list[str] = []
+    declared = header.get("candidate_kinds")
+    if declared is not None:
+        declared_set = frozenset(str(kind) for kind in declared)
+        unknown = sorted(declared_set - frozenset(ALL_CANDIDATE_KINDS))
+        if unknown:
+            problems.append(f"manifest declares unknown candidate_kinds {unknown}")
+        stray = sorted({str(row.get("candidate_kind")) for row in candidates} - declared_set)
+        if stray:
+            problems.append(
+                f"manifest contains rows of kind {stray}, outside its declared coverage "
+                f"{sorted(declared_set)}"
+            )
+        if kinds is not None and declared_set != kinds:
+            problems.append(
+                f"--candidate-kind {sorted(kinds)} does not match this manifest's coverage "
+                f"{sorted(declared_set)}"
+            )
+    elif kinds is not None and kinds != frozenset(ALL_CANDIDATE_KINDS):
+        # A pre-coverage manifest cannot prove which kinds it was planned for, so a
+        # narrowed apply/verify against one would be guessing.
+        problems.append(
+            "manifest predates candidate_kinds coverage; re-plan before using --candidate-kind"
+        )
     if int(header.get("version", -1)) != MANIFEST_VERSION:
         problems.append(f"manifest version must be {MANIFEST_VERSION}")
     if header.get("source_uri") != uri:
@@ -407,7 +463,13 @@ def _print_errors(problems: Iterable[str]) -> None:
 
 def cmd_apply(repo: Neo4jRepository, uri: str, args: argparse.Namespace) -> int:
     header, candidates = _read_jsonl(Path(args.manifest))
-    problems = validate_manifest(header, candidates, uri=uri, max_rows=args.max_rows)
+    problems = validate_manifest(
+        header,
+        candidates,
+        uri=uri,
+        max_rows=args.max_rows,
+        kinds=selected_kinds(args) if getattr(args, "candidate_kind", None) else None,
+    )
     if args.batch_size < 1 or args.batch_size > args.max_rows:
         problems.append("--batch-size must be between 1 and --max-rows")
     backup = Path(args.backup)
@@ -482,7 +544,10 @@ def cmd_apply(repo: Neo4jRepository, uri: str, args: argparse.Namespace) -> int:
 def cmd_verify(repo: Neo4jRepository, uri: str, args: argparse.Namespace) -> int:
     if args.manifest:
         header, candidates = _read_jsonl(Path(args.manifest))
-        problems = validate_manifest(header, candidates, uri=uri, max_rows=args.limit)
+        requested = selected_kinds(args) if getattr(args, "candidate_kind", None) else None
+        problems = validate_manifest(
+            header, candidates, uri=uri, max_rows=args.limit, kinds=requested
+        )
         if problems:
             _print_errors(problems)
             return 2
@@ -494,7 +559,14 @@ def cmd_verify(repo: Neo4jRepository, uri: str, args: argparse.Namespace) -> int
             if row["candidate_kind"] == BOOTSTRAP_CANDIDATE
             and row.get("target_bootstrap_scope") is None
         }
-        remaining = _candidates(repo, limit=args.limit)
+        # Sweep only what this manifest claims to cover. A narrowed manifest must not
+        # fail because rows of an unrelated kind are still unreviewed -- and a cleaned
+        # scoped_entity_cleanup row legitimately reclassifies as bootstrap_scope once
+        # its pin is null, so it leaves this kind's population by design.
+        covered = frozenset(
+            str(kind) for kind in (header.get("candidate_kinds") or ALL_CANDIDATE_KINDS)
+        )
+        remaining = _candidates(repo, limit=args.limit, kinds=covered)
         unexpected = [
             str(row["uuid"])
             for row in remaining
@@ -521,7 +593,7 @@ def cmd_verify(repo: Neo4jRepository, uri: str, args: argparse.Namespace) -> int
         )
         return 0
 
-    remaining = _candidates(repo, limit=args.limit)
+    remaining = _candidates(repo, limit=args.limit, kinds=selected_kinds(args))
     counts = {
         kind: sum(row["candidate_kind"] == kind for row in remaining)
         for kind in ALL_CANDIDATE_KINDS
@@ -541,6 +613,12 @@ def main() -> int:
     plan = sub.add_parser("plan", help="READ-ONLY: export a combined review manifest")
     plan.add_argument("--out", default="recall-hygiene.jsonl")
     plan.add_argument("--limit", type=int, default=DEFAULT_LIMIT)
+    plan.add_argument(
+        "--candidate-kind",
+        action="append",
+        choices=ALL_CANDIDATE_KINDS,
+        help="Restrict to one candidate kind (repeatable). Default: every kind.",
+    )
     plan.set_defaults(fn=cmd_plan)
     apply = sub.add_parser("apply", help="Dry-run or apply a reviewed manifest")
     apply.add_argument("--manifest", required=True)
@@ -548,10 +626,22 @@ def main() -> int:
     apply.add_argument("--max-rows", type=int, default=DEFAULT_LIMIT)
     apply.add_argument("--batch-size", type=int, default=100)
     apply.add_argument("--yes", action="store_true")
+    apply.add_argument(
+        "--candidate-kind",
+        action="append",
+        choices=ALL_CANDIDATE_KINDS,
+        help="Restrict to one candidate kind (repeatable). Default: every kind.",
+    )
     apply.set_defaults(fn=cmd_apply)
     verify = sub.add_parser("verify", help="READ-ONLY: verify migration candidates/idempotence")
     verify.add_argument("--manifest")
     verify.add_argument("--limit", type=int, default=DEFAULT_LIMIT)
+    verify.add_argument(
+        "--candidate-kind",
+        action="append",
+        choices=ALL_CANDIDATE_KINDS,
+        help="Restrict to one candidate kind (repeatable). Default: every kind.",
+    )
     verify.set_defaults(fn=cmd_verify)
 
     args = parser.parse_args()

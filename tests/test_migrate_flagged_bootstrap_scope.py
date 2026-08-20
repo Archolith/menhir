@@ -203,6 +203,108 @@ def test_manifest_requires_explicit_review_for_both_candidate_kinds() -> None:
     assert any("b1: target_bootstrap_scope must be explicitly reviewed" in item for item in problems)
 
 
+def test_candidate_kind_filter_narrows_without_unbounding_the_scan() -> None:
+    class _Repo:
+        def __init__(self) -> None:
+            self.limits: list[int] = []
+
+        def execute(self, _query: str, params: dict[str, Any]) -> list[dict[str, Any]]:
+            self.limits.append(int(params["limit"]))
+            return [
+                _base_row("e1", bootstrap_scope="general"),
+                _base_row("b1"),
+            ]
+
+    repo = _Repo()
+    scoped = MODULE._candidates(
+        repo, limit=10, kinds=frozenset({MODULE.SCOPED_ENTITY_CLEANUP_CANDIDATE})
+    )
+    assert [row["uuid"] for row in scoped] == ["e1"]
+    assert MODULE._candidates(repo, limit=10, kinds=None).__len__() == 2
+    # The scan stays bounded by --limit even when the result is filtered down.
+    assert repo.limits == [11, 11]
+
+
+def test_narrowed_manifest_declares_its_coverage() -> None:
+    args = Namespace(
+        limit=10, out="unused", candidate_kind=[MODULE.SCOPED_ENTITY_CLEANUP_CANDIDATE]
+    )
+    assert MODULE.selected_kinds(args) == frozenset({MODULE.SCOPED_ENTITY_CLEANUP_CANDIDATE})
+    assert MODULE.selected_kinds(Namespace(candidate_kind=None)) == frozenset(
+        MODULE.ALL_CANDIDATE_KINDS
+    )
+
+
+def test_validation_rejects_manifest_outside_its_declared_coverage() -> None:
+    """A narrowed manifest must not silently carry rows it never reviewed."""
+    scoped = _manifest_row(
+        _base_row("e1", bootstrap_scope="general"), target_bootstrap_scope="none"
+    )
+    stray = _manifest_row(_base_row("b1"), target_bootstrap_scope="none")
+    rows = [scoped, stray]
+    header = {
+        **_header(rows),
+        "candidate_kinds": [MODULE.SCOPED_ENTITY_CLEANUP_CANDIDATE],
+    }
+
+    problems = MODULE.validate_manifest(header, rows, uri="bolt://test", max_rows=10)
+
+    assert any("outside its declared coverage" in problem for problem in problems)
+
+
+def test_validation_rejects_mismatched_and_legacy_coverage() -> None:
+    # validate_manifest normalizes target_bootstrap_scope in place ("none" -> None),
+    # so each call needs its own rows.
+    def _rows() -> list[dict[str, Any]]:
+        return [
+            _manifest_row(
+                _base_row("e1", bootstrap_scope="general"), target_bootstrap_scope="none"
+            )
+        ]
+
+    rows = _rows()
+    header = {
+        **_header(rows),
+        "candidate_kinds": [MODULE.SCOPED_ENTITY_CLEANUP_CANDIDATE],
+    }
+
+    mismatch = MODULE.validate_manifest(
+        header,
+        rows,
+        uri="bolt://test",
+        max_rows=10,
+        kinds=frozenset({MODULE.BOOTSTRAP_CANDIDATE}),
+    )
+    assert any("does not match this manifest's coverage" in p for p in mismatch)
+
+    legacy_header = {k: v for k, v in header.items() if k != "candidate_kinds"}
+    legacy = MODULE.validate_manifest(
+        legacy_header,
+        _rows(),
+        uri="bolt://test",
+        max_rows=10,
+        kinds=frozenset({MODULE.SCOPED_ENTITY_CLEANUP_CANDIDATE}),
+    )
+    assert any("predates candidate_kinds coverage" in p for p in legacy)
+
+    # Unnarrowed use of a pre-coverage manifest stays valid.
+    assert MODULE.validate_manifest(
+        legacy_header, _rows(), uri="bolt://test", max_rows=10
+    ) == []
+
+
+def test_cleaned_scoped_entity_leaves_its_kind_after_apply() -> None:
+    """Nulling the pin moves the row into the scope-IS-NULL population by design.
+
+    verify sweeps only the manifest's declared coverage, so a cleaned row does not
+    read as an unreviewed leftover of the kind that was just migrated.
+    """
+    cleaned = MODULE._classify_candidate(_base_row("e1", bootstrap_scope=None))
+
+    assert cleaned["candidate_kind"] == MODULE.BOOTSTRAP_CANDIDATE
+    assert cleaned["candidate_kind"] != MODULE.SCOPED_ENTITY_CLEANUP_CANDIDATE
+
+
 def test_manifest_rejects_partition_mismatch_duplicate_and_wrong_version() -> None:
     row = _manifest_row(_base_row("b1"), target_bootstrap_scope="general")
     duplicate = dict(row)
