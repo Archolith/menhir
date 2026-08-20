@@ -80,3 +80,52 @@ def test_channels_are_independent():
 
 def test_recall_channel_registered():
     assert RECALL.component == "recall_audit"
+
+
+# ---------------------------------------------------------------------------
+# CF-19 / CF-146: one truthy authority.  CF-110: failures must be visible.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [("true", True), ("1", True), ("yes", True), ("TRUE", True),
+     ("on", False), ("", False), ("0", False), ("nonsense", False)],
+)
+def test_channel_toggle_matches_the_canonical_bool_parser(monkeypatch, value, expected):
+    """This module kept its own truthy table that also accepted "on". parse_bool_env rejects it
+    deliberately (SSOT-07), so the same value enabled an audit channel while leaving every
+    settings-driven flag off."""
+    from menhir.config.settings_helpers import parse_bool_env
+
+    monkeypatch.setenv("MENHIR_TRUTHY_PROBE", value)
+    channel = AuditChannel("truthy_probe", "MENHIR_TRUTHY_PROBE")
+
+    assert channel._enabled is expected
+    assert channel._enabled is parse_bool_env(value)
+
+
+@pytest.mark.unit
+def test_audit_write_failure_is_logged_where_it_can_be_seen(monkeypatch, caplog):
+    """CF-110: this was logger.debug while the shipped level is INFO, so an audit-trail write
+    failure produced no record at any sink. An audit trail whose failures are invisible cannot
+    be used as evidence, which is the entire point of having one."""
+    import logging
+
+    import menhir.infrastructure.audit_trail as audit_trail
+
+    monkeypatch.setenv("MENHIR_FAILVIS_PROBE", "true")
+    channel = AuditChannel("failvis", "MENHIR_FAILVIS_PROBE")
+
+    def _boom(**_kwargs):
+        raise RuntimeError("sidecar down")
+
+    monkeypatch.setattr(audit_trail, "record_lifecycle_event", _boom)
+
+    with caplog.at_level(logging.INFO, logger="menhir.infrastructure.audit_trail"):
+        channel.audit("evt", "state")  # must not raise into the caller
+
+    assert any(r.levelno >= logging.WARNING for r in caplog.records), (
+        "the audit write failure was not recorded at a level the shipped config emits"
+    )

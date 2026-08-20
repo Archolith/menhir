@@ -26,12 +26,10 @@ import threading
 import uuid
 from typing import Any, Optional, Sequence
 
+from menhir.config.settings_helpers import parse_bool_env
 from menhir.infrastructure.telemetry import record_lifecycle_event, telemetry_store
 
 logger = logging.getLogger(__name__)
-
-_TRUTHY = {"1", "true", "yes", "on"}
-
 
 class AuditChannel:
     """One toggleable audit trail for a domain (a telemetry ``component``)."""
@@ -41,7 +39,10 @@ class AuditChannel:
         self._env_var = env_var
         self._corr_prefix = corr_prefix
         self._lock = threading.Lock()
-        self._enabled = os.getenv(env_var, "").strip().lower() in _TRUTHY
+        # CF-19/CF-146: one truthy authority. This module carried its own table that also
+        # accepted "on", which parse_bool_env deliberately rejects (SSOT-07) -- so the same
+        # value enabled this channel while leaving every settings-driven flag off.
+        self._enabled = parse_bool_env(os.getenv(env_var, ""))
         self._current: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
             f"audit_corr_{component}", default=None
         )
@@ -109,7 +110,12 @@ class AuditChannel:
                 details=payload or None,
             )
         except Exception as exc:  # pragma: no cover - audit must never break the caller
-            logger.debug("%s audit emit failed (%s.%s): %s", self.component, event, state, exc)
+            # CF-110: warning, not debug. The shipped level is INFO, so a debug record here
+            # emitted at no sink at all -- an audit trail whose write failures are invisible
+            # cannot be used as evidence. The caller is still never broken.
+            logger.warning(
+                "%s audit emit failed (%s.%s): %s", self.component, event, state, exc
+            )
 
     # -- read ---------------------------------------------------------------------------------
     def read(self, corr_id: str, *, limit: int = 200, store: Any = telemetry_store) -> list[dict[str, Any]]:

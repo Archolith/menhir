@@ -30,15 +30,15 @@ from typing import Any, Optional, Sequence
 
 from menhir.infrastructure.telemetry import record_lifecycle_event, telemetry_store
 
+from menhir.config.settings_helpers import parse_bool_env
+
 logger = logging.getLogger(__name__)
 
 COMPONENT = "consolidation_audit"
 
-_TRUTHY = {"1", "true", "yes", "on"}
-
-
 def _env_default() -> bool:
-    return os.getenv("MENHIR_PERSONAL_MEMORY_CONSOLIDATION_AUDIT_ENABLED", "").strip().lower() in _TRUTHY
+    # CF-19/CF-146: shares the one truthy authority; the local table also accepted "on".
+    return parse_bool_env(os.getenv("MENHIR_PERSONAL_MEMORY_CONSOLIDATION_AUDIT_ENABLED", ""))
 
 
 _lock = threading.Lock()
@@ -128,7 +128,8 @@ def audit(
             details=payload or None,
         )
     except Exception as exc:  # pragma: no cover - audit must never break consolidation
-        logger.debug("consolidation_audit emit failed (%s.%s): %s", event, state, exc)
+        # CF-110: warning, not debug -- DEBUG emits at no sink under the shipped INFO level.
+        logger.warning("consolidation_audit emit failed (%s.%s): %s", event, state, exc)
 
 
 def read_pass(pass_id: str, *, limit: int = 200, store: Any = telemetry_store) -> list[dict[str, Any]]:
