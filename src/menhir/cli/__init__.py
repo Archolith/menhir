@@ -395,8 +395,8 @@ def console(
     # ignores the header.
     api_key = (
         settings.readonly_key
-        or settings.operator_key
         or settings.agent_key
+        or settings.operator_key
         or settings.api_key
         or None
     )
