@@ -392,6 +392,15 @@ the client may call.
 If no credential is configured, Menhir permits open access only on a loopback bind. See
 [Security](#security) before exposing the service to another machine.
 
+Clients may also identify themselves by name with the `X-Menhir-Client-Name` header, which
+`MENHIR_CLIENT_NAMESPACES` and `MENHIR_CLIENT_TOOLS` use to pin a client to one namespace or
+restrict it to a subset of tools. These are unset by default and most deployments need none of
+them. **Configuring the first one is a breaking change for every other client:** once any
+per-client restriction exists, an unrecognized name is refused rather than treated as
+unrestricted, so every remaining client must be listed in `MENHIR_KNOWN_CLIENTS` in the same
+edit. See [`.env.example`](.env.example) for the full rules, including which names must *not*
+be added to `MENHIR_KNOWN_CLIENTS`.
+
 ## Docker test stack
 
 The deployment compose file starts Menhir and an isolated, disposable Neo4j instance.
