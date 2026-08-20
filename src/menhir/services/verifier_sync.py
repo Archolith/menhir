@@ -171,6 +171,28 @@ def sync_verifiers(
             except Exception:
                 name_embedding = None  # BM25-only; never block the write
 
+        # Flag BEFORE the new value becomes durable. `changed` is an edge-triggered signal
+        # computed from `prev`, and `record_counter` supersedes `prev` -- so once it lands, the
+        # condition that produced this signal is gone and no later sync can recompute it. Any
+        # failure between the record and the flag (process death, a Neo4j error from
+        # `ensure_verified_edge` or `stamp_verifier`, a lost lease) lost the flag PERMANENTLY:
+        # next sync sees prev["value"] == res.value, `changed` is False, and nothing retries.
+        #
+        # Flagging first inverts that. `flag_referencing_beliefs` needs only `vid` -- it
+        # traverses the ALREADY-DURABLE (reg)-[:VERIFIED_BY]->(v) edge and never reads the
+        # register's value -- so it does not depend on this sync's write. If anything below
+        # fails, `prev` is untouched, the next sync recomputes `changed` as True, and the flag
+        # is reissued. The SET is idempotent, so a retry costs nothing.
+        #
+        # The transient state this admits is beliefs flagged for review slightly before the
+        # register shows the new value. That is the fail-safe direction: a belief flagged early
+        # is corrected on read, a belief never flagged is silently stale forever.
+        flagged = 0
+        if changed:
+            flagged = repo.flag_referencing_beliefs(
+                verifier_uuid=vid, new_value=res.value, display=res.display, at=now
+            )
+
         rec = graph_adapter.record_counter(
             subject=subject,
             counter=counter,
@@ -183,12 +205,6 @@ def sync_verifiers(
         if register_uuid:
             repo.ensure_verified_edge(register_uuid=register_uuid, verifier_uuid=vid)
         repo.stamp_verifier(verifier_uuid=vid, value=res.value, display=res.display, at=now)
-
-        flagged = 0
-        if changed:
-            flagged = repo.flag_referencing_beliefs(
-                verifier_uuid=vid, new_value=res.value, display=res.display, at=now
-            )
         results.append({
             "verifier": vid, "kind": kind, "subject": subject, "counter": counter,
             "value": res.value, "display": res.display, "changed": changed,
