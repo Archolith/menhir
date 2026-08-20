@@ -297,7 +297,19 @@ async def backend_invoke_impl(
     except InvalidQueryPresetError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception:
-        logger.exception("backend_invoke failed: operation=%s body=%r", operation, body)
+        # NEVER log the body. It carries caller content -- raw episode text via
+        # queue_episode, and whatever else a client submits -- and this path runs at
+        # ERROR under the default INFO threshold, so it persists to server.log with no
+        # debug mode and no redaction (privacy.py does not sit on this boundary).
+        # Argument NAMES are not caller content; values always are.
+        keys = sorted(body) if isinstance(body, dict) else []
+        logger.exception(
+            "backend_invoke failed: operation=%s body_type=%s body_keys=%d %r",
+            operation,
+            type(body).__name__,
+            len(keys),
+            keys,
+        )
         raise
     warnings = drain_background_errors(caller_session.session_id)
     if not warnings:
