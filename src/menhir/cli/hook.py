@@ -29,6 +29,27 @@ _HOOK_MARKER = "menhir.cli"
 CONTEXT_TIMEOUT_S: float = 8.0
 
 
+def _entry_has_menhir_hook(entry: object) -> bool:
+    """True when `entry` is a settings hook-entry containing a menhir hook command.
+
+    Total on arbitrary JSON: `~/.claude/settings.json` is hand-edited, so a malformed
+    entry is expected input, not an exceptional one. Returns False rather than raising
+    so a bad entry cannot abort an uninstall part-way through.
+    """
+    if not isinstance(entry, dict):
+        return False
+    hooks = entry.get("hooks")
+    if not isinstance(hooks, list):
+        return False
+    for hook in hooks:
+        if not isinstance(hook, dict):
+            continue
+        command = hook.get("command")
+        if isinstance(command, str) and _HOOK_MARKER in command:
+            return True
+    return False
+
+
 # ---------------------------------------------------------------------------
 # hook run
 # ---------------------------------------------------------------------------
@@ -370,16 +391,17 @@ def uninstall(
     removed = 0
 
     # Remove from all event types that might contain menhir entries
+    if not isinstance(hooks, dict):
+        hooks = {}
     for event_key in ("UserPromptSubmit", "Stop", "PostCompact"):
         event_hooks: list = hooks.get(event_key, [])
+        if not isinstance(event_hooks, list):
+            continue
         original_len = len(event_hooks)
         event_hooks[:] = [
             entry
             for entry in event_hooks
-            if not any(
-                _HOOK_MARKER in h.get("command", "")
-                for h in entry.get("hooks", [])
-            )
+            if not _entry_has_menhir_hook(entry)
         ]
         removed += original_len - len(event_hooks)
         if not event_hooks:
@@ -408,13 +430,7 @@ def _upsert_hook_entry(hooks: dict, event_key: str, entry: dict) -> None:
     for i, existing_entry in enumerate(event_hooks):
         if not isinstance(existing_entry, dict):
             continue
-        entry_hooks = existing_entry.get("hooks", [])
-        if not isinstance(entry_hooks, list):
-            continue
-        if any(
-            isinstance(hook, dict) and _HOOK_MARKER in hook.get("command", "")
-            for hook in entry_hooks
-        ):
+        if _entry_has_menhir_hook(existing_entry):
             event_hooks[i] = entry
             return
     event_hooks.append(entry)

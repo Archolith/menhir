@@ -14,7 +14,7 @@ from typing import Annotated
 
 import typer
 
-from menhir.cli.hook import install_hooks
+from menhir.cli.hook import _entry_has_menhir_hook, install_hooks
 
 
 class SetupError(RuntimeError):
@@ -90,13 +90,7 @@ def _claude_hooks_installed(repo: Path, location: str) -> bool:
     hooks = data.get("hooks", {}) if isinstance(data, dict) else {}
     for event in ("UserPromptSubmit", "Stop", "PostCompact"):
         entries = hooks.get(event, []) if isinstance(hooks, dict) else []
-        if not any(
-            "menhir.cli" in hook.get("command", "")
-            for entry in entries
-            if isinstance(entry, dict)
-            for hook in entry.get("hooks", [])
-            if isinstance(hook, dict)
-        ):
+        if not any(_entry_has_menhir_hook(entry) for entry in entries):
             return False
     return True
 

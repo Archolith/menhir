@@ -620,10 +620,219 @@ def test_uninstall_no_settings_file(tmp_path: Path, monkeypatch: pytest.MonkeyPa
 
 
 # ---------------------------------------------------------------------------
-# context recall timeout (CF-23)
+# _entry_has_menhir_hook predicate + malformed settings (CF-46)
 # ---------------------------------------------------------------------------
 
 
+def _write_settings(settings_file: Path, existing: dict) -> None:
+    settings_file.write_text(json.dumps(existing))
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "malformed_entry",
+    [
+        "just a string",
+        {"hooks": {"not": "a list"}},
+        {"hooks": ["a string member"]},
+        {"hooks": [{"command": 123}]},
+    ],
+)
+def test_uninstall_tolerates_malformed_entries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, malformed_entry: object
+) -> None:
+    from menhir.cli import hook as hook_module
+    from menhir.cli.hook import hook_app
+    from typer.testing import CliRunner
+
+    settings_file = tmp_path / "settings.local.json"
+    _write_settings(settings_file, {"hooks": {"UserPromptSubmit": [malformed_entry]}})
+    monkeypatch.setattr(hook_module, "_resolve_settings_path", lambda loc: settings_file)
+
+    result = CliRunner().invoke(hook_app, ["uninstall", "--location", "user"])
+    assert result.exit_code == 0
+    assert "No menhir hooks found to remove." in result.output
+
+
+@pytest.mark.unit
+def test_uninstall_mixed_malformed_and_real_removes_only_real(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from menhir.cli import hook as hook_module
+    from menhir.cli.hook import hook_app
+    from typer.testing import CliRunner
+
+    settings_file = tmp_path / "settings.local.json"
+    existing = {
+        "hooks": {
+            "UserPromptSubmit": [
+                "malformed string entry",
+                {
+                    "hooks": [
+                        {"type": "command", "command": "python -m menhir.cli hook run --frequency 5"}
+                    ]
+                },
+            ]
+        }
+    }
+    _write_settings(settings_file, existing)
+    monkeypatch.setattr(hook_module, "_resolve_settings_path", lambda loc: settings_file)
+
+    result = CliRunner().invoke(hook_app, ["uninstall", "--location", "user"])
+    assert result.exit_code == 0
+    assert "1 menhir hook(s)" in result.output
+
+    config = json.loads(settings_file.read_text())
+    remaining = config["hooks"]["UserPromptSubmit"]
+    assert len(remaining) == 1
+    assert remaining[0] == "malformed string entry"
+
+
+@pytest.mark.unit
+def test_uninstall_removes_wellformed_menhir_hook(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from menhir.cli import hook as hook_module
+    from menhir.cli.hook import hook_app
+    from typer.testing import CliRunner
+
+    settings_file = tmp_path / "settings.local.json"
+    existing = {
+        "hooks": {
+            "UserPromptSubmit": [
+                {
+                    "hooks": [
+                        {"type": "command", "command": "python -m menhir.cli hook run --frequency 5"}
+                    ]
+                }
+            ]
+        }
+    }
+    _write_settings(settings_file, existing)
+    monkeypatch.setattr(hook_module, "_resolve_settings_path", lambda loc: settings_file)
+
+    result = CliRunner().invoke(hook_app, ["uninstall", "--location", "user"])
+    assert result.exit_code == 0
+    assert "1 menhir hook(s)" in result.output
+    config = json.loads(settings_file.read_text())
+    assert "hooks" not in config
+
+
+@pytest.mark.unit
+def test_uninstall_keeps_wellformed_non_menhir_hook(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from menhir.cli import hook as hook_module
+    from menhir.cli.hook import hook_app
+    from typer.testing import CliRunner
+
+    settings_file = tmp_path / "settings.local.json"
+    existing = {
+        "hooks": {
+            "UserPromptSubmit": [
+                {"hooks": [{"type": "command", "command": "some-other-hook"}]}
+            ]
+        }
+    }
+    _write_settings(settings_file, existing)
+    monkeypatch.setattr(hook_module, "_resolve_settings_path", lambda loc: settings_file)
+
+    result = CliRunner().invoke(hook_app, ["uninstall", "--location", "user"])
+    assert result.exit_code == 0
+    assert "No menhir hooks found to remove." in result.output
+    config = json.loads(settings_file.read_text())
+    assert config["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"] == "some-other-hook"
+
+
+@pytest.mark.unit
+def test_marker_change_followed_in_uninstall(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from menhir.cli import hook as hook_module
+    from menhir.cli.hook import hook_app
+    from typer.testing import CliRunner
+
+    monkeypatch.setattr(hook_module, "_HOOK_MARKER", "custom.marker")
+    settings_file = tmp_path / "settings.local.json"
+    existing = {
+        "hooks": {
+            "UserPromptSubmit": [
+                {"hooks": [{"type": "command", "command": "python -m custom.marker hook run"}]},
+                {"hooks": [{"type": "command", "command": "python -m menhir.cli hook run"}]},
+            ]
+        }
+    }
+    _write_settings(settings_file, existing)
+    monkeypatch.setattr(hook_module, "_resolve_settings_path", lambda loc: settings_file)
+
+    result = CliRunner().invoke(hook_app, ["uninstall", "--location", "user"])
+    assert result.exit_code == 0
+    config = json.loads(settings_file.read_text())
+    remaining = config["hooks"]["UserPromptSubmit"]
+    assert len(remaining) == 1
+    assert "menhir.cli" in remaining[0]["hooks"][0]["command"]
+
+
+@pytest.mark.unit
+def test_marker_change_followed_in_upsert(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from menhir.cli import hook as hook_module
+    from menhir.cli.hook import hook_app
+    from typer.testing import CliRunner
+
+    monkeypatch.setattr(hook_module, "_HOOK_MARKER", "custom.marker")
+    settings_file = tmp_path / "settings.local.json"
+    existing = {
+        "hooks": {
+            "UserPromptSubmit": [
+                {"hooks": [{"type": "command", "command": "python -m custom.marker hook run --frequency 5"}]}
+            ]
+        }
+    }
+    _write_settings(settings_file, existing)
+    monkeypatch.setattr(hook_module, "_resolve_settings_path", lambda loc: settings_file)
+
+    result = CliRunner().invoke(hook_app, ["install", "--location", "user", "--frequency", "3"])
+    assert result.exit_code == 0
+    config = json.loads(settings_file.read_text())
+    prompt_hooks = config["hooks"]["UserPromptSubmit"]
+    assert len(prompt_hooks) == 1
+    assert "--frequency 3" in prompt_hooks[0]["hooks"][0]["command"]
+
+
+@pytest.mark.unit
+def test_marker_change_followed_in_setup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from menhir.cli import hook as hook_module
+    from menhir.cli.setup import _claude_hooks_installed
+
+    repo = tmp_path
+    settings = repo / ".claude" / "settings.local.json"
+    settings.parent.mkdir(parents=True)
+    _write_settings(
+        settings,
+        {
+            "hooks": {
+                event: [
+                    {"hooks": [{"type": "command", "command": "python -m custom.marker hook run"}]}
+                ]
+                for event in ("UserPromptSubmit", "Stop", "PostCompact")
+            }
+        },
+    )
+
+    monkeypatch.setattr(hook_module, "_HOOK_MARKER", "custom.marker")
+    assert _claude_hooks_installed(repo, "project") is True
+
+    monkeypatch.setattr(hook_module, "_HOOK_MARKER", "menhir.cli")
+    assert _claude_hooks_installed(repo, "project") is False
+
+
+# ---------------------------------------------------------------------------
+# context recall timeout (CF-23)
+# ---------------------------------------------------------------------------
 class _FakeStdin(io.StringIO):
     def isatty(self) -> bool:
         return False
