@@ -311,18 +311,40 @@ class CorrelationService:
         return result
 
     # ------------------------------------------------------------------
-    # Batch correlation check (used during consolidation/promotion)
+    # Batch correlation check (NO production caller -- see the docstring)
     # ------------------------------------------------------------------
 
     async def check_correlation_batch(
         self,
         candidates: list[dict[str, Any]],
+        *,
+        namespace: str | None = None,
     ) -> CorrelationBatchResult:
         """Check a batch of promotion candidates for correlations.
 
         Returns results segmented by action so the caller can route
         conflicts to the conflict pipeline and handle merges/edges
         independently.
+
+        **This method has no production caller.** The banner and docstring previously said it was
+        "used during consolidation/promotion"; nothing in consolidation or promotion reaches it,
+        and the only callers in the corpus are in ``tests/test_correlation_service.py``. That
+        claim mattered because anyone wiring this up would reasonably have believed it had already
+        been exercised in that role -- with an UNSCOPED search behind it.
+
+        Args:
+            candidates: Promotion candidates. Each may carry its own ``namespace``.
+            namespace: Scopes the search for every candidate. A candidate's own ``namespace`` key
+                is used when this is not supplied, because a batch can span namespaces and pinning
+                the whole batch to one would be wrong.
+
+        Scoping matters here specifically: results feed ``classify_pair()`` and merge proposal
+        handling, so an unscoped hit is a cross-namespace merge, which is permanent.
+
+        Known residual, shared with ``check_correlation`` and NOT introduced here: when no
+        namespace can be resolved the search is global rather than refused. Making that path
+        fail closed is a change to both methods and to their existing tests, so it is deliberately
+        not made under this finding.
         """
         batch_result = CorrelationBatchResult(checked=len(candidates))
 
@@ -333,10 +355,16 @@ class CorrelationService:
                 batch_result.skipped += 1
                 continue
 
+            # Scoped the way `check_correlation` scopes it (see the search there). A batch can
+            # span namespaces, so resolve per candidate rather than once for the batch.
+            node_namespace = namespace or node.get("namespace")
+            search_kwargs: dict[str, Any] = {"num_results": 5}
+            if node_namespace:
+                from menhir.domain.namespace import namespace_to_group_ids
+                search_kwargs["group_ids"] = namespace_to_group_ids(str(node_namespace))
+
             try:
-                similar = await self._graphiti.search_scored(
-                    query, num_results=5
-                )
+                similar = await self._graphiti.search_scored(query, **search_kwargs)
             except Exception:
                 logger.warning(
                     "Correlation search failed for node=%s", uuid, exc_info=True
