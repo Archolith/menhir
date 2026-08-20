@@ -16,6 +16,10 @@ from menhir.infrastructure.cypher import (
 #: ``:Entity`` by ``raw_capture_for``, so this bounds both the fetch and the write loop above it.
 _EXHAUSTED_EPISODE_FETCH_LIMIT = 200
 
+#: Minimum age before an orphan episode is eligible for cleanup. Inlined into the query text
+#: rather than passed as a parameter so the parameter set stays exactly ``{session_id}``.
+_ORPHAN_EPISODE_MIN_AGE_DAYS = 7
+
 
 class EpisodeMaintenanceRepository:
     """Scheduled reset, recovery, and cleanup operations."""
@@ -267,6 +271,32 @@ class EpisodeMaintenanceRepository:
         return int(rows[0].get("pending", 0)) if rows else 0
 
     def cleanup_orphan_episodes(self, session_id: str | None = None) -> int:
+        """Delete SESSION episodes that are edgeless, empty, and old, from the daily job.
+
+        **Isolation is not authorization.** Two siblings forbid that inference by name --
+        ``delete_coordinator`` ("Evidence that becomes unreferenced is REPORTED, never deleted")
+        and ``lifecycle_decay`` ("A normal decay sweep must never delete a node for being
+        isolated") -- and this sweep, which runs from the default-on daily consolidation job,
+        was making it with no age bound and no journal.
+
+        The blast radius was specific: an episode whose extraction produced no entities is
+        ``READY``, unflagged, and has zero ``:Entity`` edges, because ``stamp_and_finalize``
+        marks that state READY as a *success*. So the rows most likely to be destroyed were ones
+        the pipeline considered correctly processed, and their text is unrecoverable -- recall
+        searches ``:Entity``, and the ``:Episodic`` node is not one.
+
+        Two conditions now gate the delete, and neither is inferable from isolation:
+
+        - **the episode carries no text.** Isolation alone never authorizes destroying content;
+          if there is text to lose, this sweep is not the thing that may lose it.
+        - **the episode is at least ``_ORPHAN_EPISODE_MIN_AGE_DAYS`` old**, so a just-processed
+          episode is out of reach of a sweep that runs every day.
+
+        The deleted uuids are captured from the mutation itself and logged, so the delete is
+        journalled rather than reported as a bare count.
+        """
+        import logging
+
         params: dict[str, Any] = {}
         if session_id is not None:
             params["session_id"] = session_id
@@ -278,14 +308,27 @@ class EpisodeMaintenanceRepository:
                 "n.processing_state = 'READY'",
                 "coalesce(n.user_flagged, false) = false",
                 "NOT EXISTS { MATCH (n)-[]-(e:Entity) }",
+                "coalesce(trim(n.content), '') = ''",
+                f"n.created_at < datetime() - duration({{days: {_ORPHAN_EPISODE_MIN_AGE_DAYS}}})",
             )
             .where_if(session_id is not None, "n.session_id = $session_id")
+            .with_clause("n, n.uuid AS deleted_uuid")
             .detach_delete("n")
-            .return_raw("count(n) AS deleted")
+            .return_raw("collect(deleted_uuid) AS deleted_uuids, count(*) AS deleted")
             .build()
         )
         rows = self.neo4j.execute(query, params=params)
-        return int(rows[0].get("deleted", 0)) if rows else 0
+        if not rows:
+            return 0
+        deleted = int(rows[0].get("deleted", 0))
+        if deleted:
+            logging.getLogger(__name__).info(
+                "cleanup_orphan_episodes deleted %d empty orphan episode(s) older than %d days: %s",
+                deleted,
+                _ORPHAN_EPISODE_MIN_AGE_DAYS,
+                rows[0].get("deleted_uuids") or [],
+            )
+        return deleted
 
     def create_raw_capture_entity(
         self,
