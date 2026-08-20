@@ -275,7 +275,6 @@ async def retry_process_candidate(
                     graph_adapter,
                     entity_uuids,
                     episode_uuid=episode_uuid,
-                    bootstrap_scope=row.get("bootstrap_scope"),
                 )
             if await asyncio.to_thread(
                 graph_adapter.mark_episode_ready,

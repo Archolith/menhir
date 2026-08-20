@@ -757,6 +757,33 @@ class TestPropagateUserFlag:
 
         propagate_user_flag(FakeAdapter(), [], episode_uuid="ep-1")
 
+    def test_never_forwards_bootstrap_scope(self):
+        """Retention propagates; startup selection does not.
+
+        A flagged episode's bootstrap_scope must not reach its extracted entities --
+        the bootstrap read requires user_flagged AND an allowed scope, so forwarding
+        it put shared hub entities into startup context.
+        """
+        import inspect
+
+        from menhir.services.enrichment_steps import propagate_user_flag
+
+        calls: list[tuple[str, dict]] = []
+
+        class FakeAdapter:
+            def flag_memory(self, uuid: str, **kwargs: object) -> bool:
+                calls.append((uuid, dict(kwargs)))
+                return True
+
+        propagate_user_flag(FakeAdapter(), ["sem-1", "sem-2"], episode_uuid="ep-1")
+
+        assert [uuid for uuid, _ in calls] == ["sem-1", "sem-2"]
+        assert all(kwargs == {} for _, kwargs in calls), (
+            f"propagation passed kwargs to flag_memory: {calls}"
+        )
+        # The parameter is gone, so a caller cannot reintroduce forwarding silently.
+        assert "bootstrap_scope" not in inspect.signature(propagate_user_flag).parameters
+
 
 # ===========================================================================
 # #17 — Transitive conflicts not joined

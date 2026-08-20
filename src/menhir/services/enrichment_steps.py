@@ -123,7 +123,6 @@ def propagate_user_flag(
     node_uuids: list[str],
     *,
     episode_uuid: str,
-    bootstrap_scope: str | None = None,
 ) -> None:
     """Flag each extracted entity node for retention, skipping structural nodes.
 
@@ -135,14 +134,19 @@ def propagate_user_flag(
     enrichment or reconcile. Every enrichment/reconcile path must call this instead
     of looping over ``flag_memory`` directly (the guard previously lived in three
     copies and drifted out of sync).
+
+    Propagates retention only. The episode's ``bootstrap_scope`` is deliberately NOT
+    forwarded: ``user_flagged`` is the retention override, ``bootstrap_scope`` is the
+    separate startup-selection bit (domain/bootstrap_scope.py). Forwarding it put every
+    extracted entity -- including shared hubs like "PostgreSQL 16" -- into the bootstrap
+    read, which requires both. An entity still gets a scope when flagged directly via
+    ``flag_memory(uuid, bootstrap_scope=...)``, and that existing scope survives here
+    because scope-less ``flag_memory`` leaves the property untouched.
     """
 
     for node_uuid in node_uuids:
         try:
-            if bootstrap_scope is None:
-                graph_adapter.flag_memory(node_uuid)
-            else:
-                graph_adapter.flag_memory(node_uuid, bootstrap_scope=bootstrap_scope)
+            graph_adapter.flag_memory(node_uuid)
         except ValueError:
             logger.debug(
                 "Skipping flag on structural node uuid=%s during flag propagation "
@@ -293,7 +297,6 @@ async def try_reconcile_existing(ctx: EnrichmentContext) -> bool:
                 ctx.graph_adapter,
                 entity_uuids,
                 episode_uuid=ctx.episode_uuid,
-                bootstrap_scope=ctx.claimed.get("bootstrap_scope"),
             )
         marked_ready = ctx.graph_adapter.mark_episode_ready(
             ctx.episode_uuid,
@@ -1169,7 +1172,6 @@ async def stamp_and_finalize(
             ctx.graph_adapter,
             [node.uuid for node in extracted_nodes],
             episode_uuid=ctx.episode_uuid,
-            bootstrap_scope=ctx.claimed.get("bootstrap_scope"),
         )
     # M6 Phase 5: Record scope assignment for extracted entity nodes
     if ctx.settings_record_revisions:
