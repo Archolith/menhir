@@ -1174,9 +1174,11 @@ class StructureGraphWriter:
         rows = self.neo4j.execute(
             """
             MATCH (f:Entity {structure_project: $p, structure_path: $path})
-            OPTIONAL MATCH (f)-[:IMPORTS]->(imp:Entity)
-            OPTIONAL MATCH (importer:Entity)-[:IMPORTS]->(f)
-            OPTIONAL MATCH (tester:Entity)-[:TESTS]->(f)
+            // CF-224: these UUIDs are consumed by recall_support, so a foreign uuid does not
+            // merely display -- it selects another project's node for retrieval.
+            OPTIONAL MATCH (f)-[:IMPORTS]->(imp:Entity {structure_project: $p})
+            OPTIONAL MATCH (importer:Entity {structure_project: $p})-[:IMPORTS]->(f)
+            OPTIONAL MATCH (tester:Entity {structure_project: $p})-[:TESTS]->(f)
             RETURN f.uuid AS file_uuid,
                    collect(DISTINCT imp.uuid) AS import_uuids,
                    collect(DISTINCT importer.uuid) AS importer_uuids,
@@ -1207,9 +1209,13 @@ class StructureGraphWriter:
             """
             UNWIND $projects AS p
             MATCH (f:Entity {structure_project: p, structure_path: $path})
-            OPTIONAL MATCH (f)-[:IMPORTS]->(imp:Entity)
-            OPTIONAL MATCH (importer:Entity)-[:IMPORTS]->(f)
-            OPTIONAL MATCH (tester:Entity)-[:TESTS]->(f)
+            // CF-224: scoped to `p`, the UNWIND variable -- NOT `$p`, which does not exist on
+            // this query and made it fail with ParameterMissing rather than leak. The two
+            // sibling queries look identical and bind their project differently; a copied
+            // predicate is wrong in exactly one of them.
+            OPTIONAL MATCH (f)-[:IMPORTS]->(imp:Entity {structure_project: p})
+            OPTIONAL MATCH (importer:Entity {structure_project: p})-[:IMPORTS]->(f)
+            OPTIONAL MATCH (tester:Entity {structure_project: p})-[:TESTS]->(f)
             RETURN p AS matched_project,
                    f.uuid AS file_uuid,
                    collect(DISTINCT imp.uuid) AS import_uuids,
@@ -1458,7 +1464,7 @@ class StructureGraphWriter:
             CALL {
                 WITH f
                 OPTIONAL MATCH (f)-[:DEFINES]->(sym:Entity)
-                WHERE sym.structure_role = 'symbol'
+                WHERE sym.structure_role = 'symbol' AND sym.structure_project = $p
                 WITH sym ORDER BY sym.symbol_line
                 RETURN collect(CASE WHEN sym IS NULL THEN null ELSE {
                     name: sym.name, kind: sym.symbol_kind, sig: sym.symbol_signature,
@@ -1468,19 +1474,23 @@ class StructureGraphWriter:
             }
             CALL {
                 WITH f
-                OPTIONAL MATCH (f)-[:IMPORTS]->(imp:Entity)
+                OPTIONAL MATCH (f)-[:IMPORTS]->(imp:Entity {structure_project: $p})
                 WITH imp ORDER BY imp.structure_path
                 RETURN collect(imp.structure_path) AS raw_imports
             }
             CALL {
                 WITH f
-                OPTIONAL MATCH (importer:Entity)-[:IMPORTS]->(f)
+            // CF-224: every branch carries `structure_project`, not only the anchor. An
+            // unqualified `MATCH (importer:Entity)` returns importers from EVERY project in the
+            // database -- and because two projects routinely share file paths, the leaked value
+            // looks exactly like one of the caller's own files.
+                OPTIONAL MATCH (importer:Entity {structure_project: $p})-[:IMPORTS]->(f)
                 WITH importer ORDER BY importer.structure_path
                 RETURN collect(importer.structure_path) AS raw_imported_by
             }
             CALL {
                 WITH f
-                OPTIONAL MATCH (t:Entity)-[:TESTS]->(f)
+                OPTIONAL MATCH (t:Entity {structure_project: $p})-[:TESTS]->(f)
                 WITH t ORDER BY t.structure_path
                 RETURN collect(t.structure_path) AS raw_tested_by
             }

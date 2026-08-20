@@ -163,8 +163,7 @@ def test_context_missing_truncated_property_coalesces_to_false(writer) -> None:
 
 @pytest.mark.online
 def test_context_does_not_cross_project_boundaries(test_neo4j_repo, writer) -> None:
-    """Both queries key on `structure_project`, and a combined query has to keep that on every
-    branch -- not only on the anchor -- or another project's importer leaks in."""
+    """Every branch keys on `structure_project`, not only the anchor (CF-224)."""
     test_neo4j_repo.execute(
         """
         CREATE (other:Entity {structure_project: 'other-project', structure_role: 'file',
@@ -178,13 +177,16 @@ def test_context_does_not_cross_project_boundaries(test_neo4j_repo, writer) -> N
     )
     result = writer.query_context(PROJECT, "src/app.py")
 
-    # The ORIGINAL does not filter importers/testers by project -- `MATCH (importer:Entity)`
-    # is unqualified -- so a cross-project importer IS returned today. Confirmed by execution,
-    # not inferred. Pinned as observed behaviour, NOT endorsed: a performance rewrite must not
-    # quietly change what a query returns, so this stays as-is here and the leak is filed
-    # separately as CF-224.
-    assert result["imported_by"] == ["other/thing.py", "src/cli.py"]
-    assert result["tested_by"] == ["other/thing.py", "tests/test_app.py"]
+    # UPDATED when CF-224 was fixed. This test originally asserted that a cross-project importer
+    # IS returned -- pinned as observed behaviour, explicitly NOT endorsed, because a PERFORMANCE
+    # rewrite must not quietly change what a query returns. That was the right call for CF-73 and
+    # it is why the leak was filed rather than fixed in passing.
+    #
+    # CF-224 then fixed it deliberately, as its own change, and this test failed -- which is the
+    # characterisation suite doing exactly what it exists for: a behaviour change cannot land
+    # without someone editing the test that describes the old behaviour.
+    assert result["imported_by"] == ["src/cli.py"]
+    assert result["tested_by"] == ["tests/test_app.py"]
 
 
 @pytest.mark.online
