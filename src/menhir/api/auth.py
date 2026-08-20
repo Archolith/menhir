@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -568,7 +569,9 @@ class BearerAuthMiddleware:
             if admin_token and self._token_matches(admin_token, self._operator_key):
                 admin_identity = ("operator-key", "operator-key")
             elif admin_token:
-                record = self._client_token_store.resolve(admin_token)
+                # Blocking sqlite read on the auth hot path; `resolve` is a
+                # lock-free read-only SELECT, so it is safe off the loop.
+                record = await asyncio.to_thread(self._client_token_store.resolve, admin_token)
                 if record is not None and record.tier == "operator":
                     admin_identity = (record.client_id, record.client_name)
             if (
@@ -623,7 +626,11 @@ class BearerAuthMiddleware:
                 token_str = qs_tok
                 used_query = True
 
-        record = self._client_token_store.resolve(token_str) if token_str else None
+        record = (
+            await asyncio.to_thread(self._client_token_store.resolve, token_str)
+            if token_str
+            else None
+        )
         if record is None:
             await self._send_auth_error(
                 scope,
