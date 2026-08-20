@@ -494,7 +494,7 @@ async def run_graphiti_extraction(
     namespace = str(ctx.claimed.get("namespace") or "default")
     group_id = namespace_to_group_id(namespace if namespace != "default" else None)
 
-    ctx.graph_adapter.update_episode_processing(
+    stamped_ok = ctx.graph_adapter.update_episode_processing(
         ctx.episode_uuid,
         worker_id=ctx.worker_id,
         stage="graphiti_extracting",
@@ -504,6 +504,22 @@ async def run_graphiti_extraction(
         steps_completed=1,
         llm_active_task="memory: graphiti add_episode",
     )
+    if not stamped_ok:
+        # CF-233: the stamp did not apply. The sibling terminal writes
+        # (mark_episode_ready/mark_episode_failed) have the identical bool contract and
+        # every caller checks it; these five discarded it, so a worker whose lease had
+        # already gone kept running the pipeline -- LLM calls included -- until the
+        # terminal write finally refused.
+        #
+        # Reported, NOT acted on, because False is ambiguous: episode_stamping returns
+        # it for lost ownership, for a missing node, AND for a call with no fields to
+        # set. Treating it as proof of ownership loss would repeat CF-205 exactly.
+        logger.warning(
+            "Episode progress stamp did not apply episode_id=%s worker=%s; "
+            "the episode is no longer owned by this worker or no longer exists",
+            ctx.episode_uuid,
+            ctx.worker_id,
+        )
     record_lifecycle_event(
         component="ingest_worker",
         event="graphiti_extracting",
@@ -962,7 +978,7 @@ async def stamp_and_finalize(
 ) -> None:
     """Stamp metadata, rehydrate compressed nodes, and mark episode ready."""
 
-    ctx.graph_adapter.update_episode_processing(
+    stamped_ok = ctx.graph_adapter.update_episode_processing(
         ctx.episode_uuid,
         worker_id=ctx.worker_id,
         stage="stamping",
@@ -972,6 +988,22 @@ async def stamp_and_finalize(
         steps_completed=2,
         clear_llm_active=True,
     )
+    if not stamped_ok:
+        # CF-233: the stamp did not apply. The sibling terminal writes
+        # (mark_episode_ready/mark_episode_failed) have the identical bool contract and
+        # every caller checks it; these five discarded it, so a worker whose lease had
+        # already gone kept running the pipeline -- LLM calls included -- until the
+        # terminal write finally refused.
+        #
+        # Reported, NOT acted on, because False is ambiguous: episode_stamping returns
+        # it for lost ownership, for a missing node, AND for a call with no fields to
+        # set. Treating it as proof of ownership loss would repeat CF-205 exactly.
+        logger.warning(
+            "Episode progress stamp did not apply episode_id=%s worker=%s; "
+            "the episode is no longer owned by this worker or no longer exists",
+            ctx.episode_uuid,
+            ctx.worker_id,
+        )
 
     resolved_episode_uuid = graphiti_result.episode.uuid
     extracted_nodes = graphiti_result.nodes
@@ -1150,7 +1182,7 @@ async def stamp_and_finalize(
                 changed_by="ingest",
                 episode_uuid=ctx.episode_uuid,
             )
-    ctx.graph_adapter.update_episode_processing(
+    stamped_ok = ctx.graph_adapter.update_episode_processing(
         ctx.episode_uuid,
         worker_id=ctx.worker_id,
         stage="post_process",
@@ -1159,6 +1191,22 @@ async def stamp_and_finalize(
         steps_total=ctx.processing_steps_total,
         steps_completed=3,
     )
+    if not stamped_ok:
+        # CF-233: the stamp did not apply. The sibling terminal writes
+        # (mark_episode_ready/mark_episode_failed) have the identical bool contract and
+        # every caller checks it; these five discarded it, so a worker whose lease had
+        # already gone kept running the pipeline -- LLM calls included -- until the
+        # terminal write finally refused.
+        #
+        # Reported, NOT acted on, because False is ambiguous: episode_stamping returns
+        # it for lost ownership, for a missing node, AND for a call with no fields to
+        # set. Treating it as proof of ownership loss would repeat CF-205 exactly.
+        logger.warning(
+            "Episode progress stamp did not apply episode_id=%s worker=%s; "
+            "the episode is no longer owned by this worker or no longer exists",
+            ctx.episode_uuid,
+            ctx.worker_id,
+        )
     # Best-effort LLM repair of synthetic edge facts
     await _repair_synthetic_edge_facts(
         ctx, extracted_edges, compose_episode_body(ctx.claimed),
@@ -1205,7 +1253,7 @@ async def stamp_and_finalize(
         entity_uuids = [node.uuid for node in extracted_nodes]
         freshness_map = ctx.graph_adapter.fetch_node_freshness(entity_uuids)
         episode_content = compose_episode_body(ctx.claimed)
-        ctx.graph_adapter.update_episode_processing(
+        stamped_ok = ctx.graph_adapter.update_episode_processing(
             ctx.episode_uuid,
             worker_id=ctx.worker_id,
             stage="rehydrating",
@@ -1214,6 +1262,22 @@ async def stamp_and_finalize(
             steps_total=ctx.processing_steps_total,
             steps_completed=4,
         )
+        if not stamped_ok:
+            # CF-233: the stamp did not apply. The sibling terminal writes
+            # (mark_episode_ready/mark_episode_failed) have the identical bool contract and
+            # every caller checks it; these five discarded it, so a worker whose lease had
+            # already gone kept running the pipeline -- LLM calls included -- until the
+            # terminal write finally refused.
+            #
+            # Reported, NOT acted on, because False is ambiguous: episode_stamping returns
+            # it for lost ownership, for a missing node, AND for a call with no fields to
+            # set. Treating it as proof of ownership loss would repeat CF-205 exactly.
+            logger.warning(
+                "Episode progress stamp did not apply episode_id=%s worker=%s; "
+                "the episode is no longer owned by this worker or no longer exists",
+                ctx.episode_uuid,
+                ctx.worker_id,
+            )
         for node_uuid, freshness in freshness_map.items():
             if freshness != FreshnessState.COMPRESSED:
                 continue
@@ -1238,7 +1302,7 @@ async def stamp_and_finalize(
                 duration_ms=rehydrate_duration_ms,
                 success=rehydrated,
             )
-    ctx.graph_adapter.update_episode_processing(
+    stamped_ok = ctx.graph_adapter.update_episode_processing(
         ctx.episode_uuid,
         worker_id=ctx.worker_id,
         stage="finalizing",
@@ -1248,6 +1312,22 @@ async def stamp_and_finalize(
         steps_completed=5,
         clear_llm_active=True,
     )
+    if not stamped_ok:
+        # CF-233: the stamp did not apply. The sibling terminal writes
+        # (mark_episode_ready/mark_episode_failed) have the identical bool contract and
+        # every caller checks it; these five discarded it, so a worker whose lease had
+        # already gone kept running the pipeline -- LLM calls included -- until the
+        # terminal write finally refused.
+        #
+        # Reported, NOT acted on, because False is ambiguous: episode_stamping returns
+        # it for lost ownership, for a missing node, AND for a call with no fields to
+        # set. Treating it as proof of ownership loss would repeat CF-205 exactly.
+        logger.warning(
+            "Episode progress stamp did not apply episode_id=%s worker=%s; "
+            "the episode is no longer owned by this worker or no longer exists",
+            ctx.episode_uuid,
+            ctx.worker_id,
+        )
     marked_ready = ctx.graph_adapter.mark_episode_ready(
         ctx.episode_uuid,
         worker_id=ctx.worker_id,

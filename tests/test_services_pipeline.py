@@ -3444,3 +3444,128 @@ async def test_run_graphiti_finalization_respects_namespace_boundary(
         release_first_finalize.set()
     await asyncio.gather(first, second)
     assert second_extraction_started.is_set()
+
+
+# ---------------------------------------------------------------------------
+# CF-233 — progress stamp ownership loss is reported, success is silent
+# (src/menhir/services/enrichment_steps.py: the five update_episode_processing
+# calls now read the returned bool and WARN when the stamp did not apply)
+# ---------------------------------------------------------------------------
+
+def _build_stamp_ctx(adapter, *, episode_uuid: str, worker_id: str = "w-1"):
+    from menhir.services.enrichment_steps import EnrichmentContext
+    from menhir.services.ingest_gate import IngestGate
+
+    return EnrichmentContext(
+        episode_uuid=episode_uuid,
+        claimed={"content": "queued event", "namespace": "default"},
+        started=0.0,
+        processing_attempts=1,
+        worker_id=worker_id,
+        graph_adapter=adapter,
+        graphiti_client=_FakeGraphitiClientForShadow(),
+        lifecycle_service=None,
+        llm=None,
+        ingest_gate=IngestGate(1),
+        processing_steps_total=5,
+        settings_record_revisions=False,
+        ready_warning_ms=5000,
+        graphiti_add_episode_timeout_s=5.0,
+        graphiti_episode_max_estimated_tokens=8000,
+        get_queue_depth=lambda: 0,
+    )
+
+
+def _stamp_ready_result():
+    return SimpleNamespace(
+        episode=SimpleNamespace(uuid="episode-1"),
+        nodes=[],
+        edges=[],
+        episodic_edges=[],
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_progress_stamp_ownership_loss_is_reported(
+    stub_memory_graph_adapter: "StubMemoryGraphAdapter",
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """CF-233: when update_episode_processing does not apply (ownership lost), the caller
+    must WARN about it instead of silently discarding the False. Behavioural — drives the
+    real pipeline step, not a grep of the source."""
+    import logging
+
+    from menhir.services import enrichment_steps as es
+
+    adapter = stub_memory_graph_adapter
+    episode_uuid = adapter.create_pending_episode(
+        episode_uuid="pending-stamp-owner-lost",
+        name="episode-session-1-pending-stamp-owner-lost",
+        content="queued event",
+        session_id="session-1",
+        user_id="user-1",
+        source="unit-test",
+        source_confidence=0.5,
+    )
+    # The caller no longer owns the episode: a DIFFERENT worker holds the lease, so the
+    # stub's update_episode_processing returns False.
+    adapter.pending_episode_rows[episode_uuid]["processing_state"] = ProcessingState.ENRICHING
+    adapter.pending_episode_rows[episode_uuid]["processing_owner"] = "other-worker"
+
+    ctx = _build_stamp_ctx(adapter, episode_uuid=episode_uuid)
+
+    with caplog.at_level(logging.INFO, logger="menhir.services.enrichment_steps"):
+        with contextlib.suppress(Exception):
+            # The early ownership-lost return is expected; a raise here would be incidental.
+            # The assertion is about the warning, not the return.
+            await es.stamp_and_finalize(ctx, _stamp_ready_result())
+
+    warning_records = [
+        record
+        for record in caplog.records
+        if record.name == "menhir.services.enrichment_steps"
+        and record.levelno >= logging.WARNING
+    ]
+    assert any("stamp did not apply" in record.getMessage() for record in warning_records)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_progress_stamp_success_is_silent(
+    stub_memory_graph_adapter: "StubMemoryGraphAdapter",
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """CF-233 positive control: with a MATCHING processing_owner the stamp applies and NO
+    "stamp did not apply" warning is emitted (guards against logging it unconditionally)."""
+    import logging
+
+    from menhir.services import enrichment_steps as es
+
+    adapter = stub_memory_graph_adapter
+    episode_uuid = adapter.create_pending_episode(
+        episode_uuid="pending-stamp-owner-ok",
+        name="episode-session-1-pending-stamp-owner-ok",
+        content="queued event",
+        session_id="session-1",
+        user_id="user-1",
+        source="unit-test",
+        source_confidence=0.5,
+    )
+    # Matching owner: the caller still holds the lease, so the stamp applies.
+    adapter.pending_episode_rows[episode_uuid]["processing_state"] = ProcessingState.ENRICHING
+    adapter.pending_episode_rows[episode_uuid]["processing_owner"] = "w-1"
+
+    ctx = _build_stamp_ctx(adapter, episode_uuid=episode_uuid)
+
+    with caplog.at_level(logging.INFO, logger="menhir.services.enrichment_steps"):
+        with contextlib.suppress(Exception):
+            await es.stamp_and_finalize(ctx, _stamp_ready_result())
+
+    warning_records = [
+        record
+        for record in caplog.records
+        if record.name == "menhir.services.enrichment_steps"
+        and record.levelno >= logging.WARNING
+    ]
+    assert not any("stamp did not apply" in record.getMessage() for record in warning_records)
