@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import stat
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -56,6 +58,50 @@ def test_apply_setup_creates_env_and_wires_git_hooks_idempotently(tmp_path: Path
     assert len(first) >= 2
     assert second == []
     assert all(item.status == "ok" for item in inspect_setup(repo))
+
+
+@pytest.mark.unit
+def test_created_env_is_not_world_readable(tmp_path: Path, monkeypatch) -> None:
+    """CF-43: `.env` holds the Neo4j password and every API key.
+
+    `shutil.copyfile` copies CONTENTS only, so the destination landed at the process default
+    mode (typically 0o644) -- and setup then tells the operator to put secrets in it. The tell
+    was thirteen lines further down, where the git hook IS chmod'ed.
+
+    Asserted through a recorder rather than a mode read because this suite's host is Windows,
+    where chmod only toggles the read-only bit. The real-mode assertion lives in the POSIX test
+    below.
+    """
+    repo = _make_checkout(tmp_path / "menhir")
+    seen: list[tuple[str, int]] = []
+    real_chmod = Path.chmod
+
+    def _record(self: Path, mode: int, **kwargs) -> None:
+        seen.append((self.name, mode))
+        real_chmod(self, mode, **kwargs)
+
+    monkeypatch.setattr(Path, "chmod", _record)
+    changes = apply_setup(repo)
+
+    # POSITIVE CONTROL: the env branch actually executed and produced the file. Without this,
+    # the assertions below would pass against a setup run that skipped .env creation entirely
+    # (it is guarded by `if not env_path.exists()`), recording no chmod and asserting nothing.
+    assert any("created" in c and ".env" in c for c in changes), changes
+    assert (repo / ".env").read_text(encoding="utf-8") == "NEO4J_URI=bolt://localhost:7687\n"
+
+    modes = dict(seen)
+    assert ".env" in modes, f"setup never chmod'ed .env; recorded: {seen}"
+    assert modes[".env"] == 0o600
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX file modes only")
+def test_created_env_has_no_group_or_other_bits(tmp_path: Path) -> None:
+    """The real-behaviour half of CF-43, on platforms where the mode means something."""
+    repo = _make_checkout(tmp_path / "menhir")
+    apply_setup(repo)
+    mode = stat.S_IMODE((repo / ".env").stat().st_mode)
+    assert mode & 0o077 == 0, f"world/group readable: {oct(mode)}"
 
 
 @pytest.mark.unit

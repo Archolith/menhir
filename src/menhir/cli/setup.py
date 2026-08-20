@@ -175,6 +175,10 @@ def apply_setup(
             if not env_example.is_file():
                 raise SetupError(f"Missing environment template: {env_example}")
             shutil.copyfile(env_example, env_path)
+            # copyfile copies CONTENTS only, so the new file lands at the process
+            # default mode (typically 0o644). This file holds the Neo4j password and
+            # every API key, so restrict it before the operator is told to fill it in.
+            env_path.chmod(0o600)
             changes.append(f"created {env_path}")
 
     if configure_git_hooks:
