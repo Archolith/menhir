@@ -8,6 +8,7 @@ from menhir.infrastructure.episode_repository import PolicyStampResult
 
 if TYPE_CHECKING:
     from menhir.infrastructure.project_scanner import ProjectScanResult
+    from menhir.services.lifecycle_models import ConsolidationResult, DecayResult
 
 
 class SchedulerIngestService(Protocol):
