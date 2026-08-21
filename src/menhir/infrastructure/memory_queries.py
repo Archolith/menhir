@@ -25,6 +25,29 @@ from menhir.infrastructure.neo4j import Neo4jRepository
 
 logger = logging.getLogger(__name__)
 
+#: Turn capture is running and the admission join has NEVER been drawn (CF-229).
+ADMISSION_NEVER_LINKED = "never_linked"
+#: Turns captured and at least one join drawn -- the wiring works.
+ADMISSION_LINKED = "linked"
+#: No turns captured, so there is nothing to pair and nothing to report.
+ADMISSION_NO_TURNS = "no_turns"
+
+
+def admission_provenance_state(*, turn_evidence_count: int, admission_edge_count: int) -> str:
+    """Classify the `:TurnEvidence` -> `ADMITTED_ON` wiring from two counts (CF-229).
+
+    Deliberately narrow. The only state asserted as broken is `never_linked`: turns exist and NOT
+    ONE edge does. That is unambiguous -- a producer captures turns and no caller ever reports the
+    pairing -- and it is the state this deployment sat in unnoticed while every test was green.
+
+    A partial ratio is NOT flagged. Not every memory is admitted on a turn, so "fewer edges than
+    turns" is the normal, healthy shape and a threshold on it would be a guess dressed as a
+    diagnosis. Zero-of-many is the only signal that carries its own proof.
+    """
+    if turn_evidence_count <= 0:
+        return ADMISSION_NO_TURNS
+    return ADMISSION_LINKED if admission_edge_count > 0 else ADMISSION_NEVER_LINKED
+
 
 class MemoryQueryRepository:
     """Encapsulates memory read/query operations and simple mutations (flag, delete)."""
@@ -35,7 +58,15 @@ class MemoryQueryRepository:
     # --- Overview & listing -------------------------------------------------
 
     def fetch_memory_overview(self) -> dict[str, Any]:
-        """Return high-level graph counts for MCP metadata resources."""
+        """Return high-level graph counts for MCP metadata resources.
+
+        Includes the admission-provenance pair (CF-229). `:TurnEvidence` capture and the
+        `ADMITTED_ON` join it feeds are written by DIFFERENT callers, so the join can be dead while
+        every unit test, every E2E and every health surface stays green -- which is exactly what
+        happened: 576 turns captured, 0 edges drawn, and nothing said so. The two counts are
+        reported side by side because neither is meaningful alone; it is their RATIO that reveals a
+        producer that captures turns and never reports the pairing.
+        """
 
         rows = self.neo4j.execute(
             """
@@ -54,9 +85,17 @@ class MemoryQueryRepository:
                    count(CASE WHEN n:Episodic AND n.processing_state = 'FAILED' THEN 1 END) AS failed_count
             """
         )
-        if rows:
-            return rows[0]
-        return {
+        # Separate statement: :TurnEvidence is neither :Entity nor :Episodic, so it cannot be
+        # folded into the CASE aggregation above. Both counts come from label/type indexes.
+        admission_rows = self.neo4j.execute(
+            """
+            CALL () { MATCH (t:TurnEvidence) RETURN count(t) AS turns }
+            CALL () { MATCH ()-[r:ADMITTED_ON]->() RETURN count(r) AS edges }
+            RETURN turns AS turn_evidence_count, edges AS admission_edge_count
+            """
+        )
+        admission = admission_rows[0] if admission_rows else {}
+        overview = dict(rows[0]) if rows else {
             "total_memories": 0,
             "entity_count": 0,
             "episode_count": 0,
@@ -69,6 +108,13 @@ class MemoryQueryRepository:
             "ready_count": 0,
             "failed_count": 0,
         }
+        overview["turn_evidence_count"] = int(admission.get("turn_evidence_count") or 0)
+        overview["admission_edge_count"] = int(admission.get("admission_edge_count") or 0)
+        overview["admission_provenance"] = admission_provenance_state(
+            turn_evidence_count=overview["turn_evidence_count"],
+            admission_edge_count=overview["admission_edge_count"],
+        )
+        return overview
 
     def fetch_recent_memories(
         self, limit: int = 10, namespace: str | None = None
