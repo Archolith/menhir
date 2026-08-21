@@ -29,14 +29,13 @@ from pathlib import Path
 from typing import Any
 
 from menhir.infrastructure.telemetry import connect_telemetry_db, default_telemetry_db_path
+from menhir.clock import utc_now_iso as _utc_now_iso
 
 logger = logging.getLogger(__name__)
 
 RECEIPT_KINDS = frozenset({"TELEMETRY_FOLD", "RUN_TALLY", "LEGACY_MIGRATION"})
 
 
-def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 class MetricReceiptError(RuntimeError):

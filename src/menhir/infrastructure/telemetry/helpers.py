@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from menhir.infrastructure.paths import telemetry_db_path
+from menhir.clock import utc_now_iso as _utc_now_iso
 
 logger = logging.getLogger(__name__)
 
@@ -45,8 +46,6 @@ def connect_telemetry_db(db_path: Path) -> sqlite3.Connection:
     return conn
 
 
-def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 def _json_default(value: Any) -> Any:

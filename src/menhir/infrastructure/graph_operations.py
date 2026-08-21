@@ -40,6 +40,7 @@ from typing import Any
 
 from menhir.infrastructure import operation_owner as oo
 from menhir.infrastructure.telemetry import connect_telemetry_db, default_telemetry_db_path
+from menhir.clock import utc_now_iso as _utc_now_iso
 
 logger = logging.getLogger(__name__)
 
@@ -97,8 +98,6 @@ _PARTICIPANT_KINDS = _PARTICIPANT_PAIR_KINDS | _PARTICIPANT_DELETE_KINDS
 _LOCK_RELEASE_STATES = frozenset({"COMMITTED", "REVERSED", "FAILED"})
 
 
-def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 def _participant_uuids(operation_kind: str, request: dict[str, Any]) -> list[str]:

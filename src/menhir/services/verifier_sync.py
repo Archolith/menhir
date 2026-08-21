@@ -27,6 +27,7 @@ from typing import Any, Callable, Mapping, Protocol
 
 from menhir.infrastructure.view_repository import ViewRepository
 from menhir.services.seam_types import Embed
+from menhir.clock import utc_now_iso as _utc_now_iso
 
 logger = logging.getLogger(__name__)
 
@@ -115,10 +116,6 @@ class CounterGraphProtocol(Protocol):
 # --------------------------------------------------------------------------- graph-driven sync
 
 
-def _utc_now_iso() -> str:
-    from datetime import datetime, timezone
-
-    return datetime.now(timezone.utc).isoformat()
 
 
 def sync_verifiers(

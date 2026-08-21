@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from menhir.infrastructure.telemetry import connect_telemetry_db, default_telemetry_db_path
+from menhir.clock import utc_now_iso as _utc_now_iso
 
 # Closed enum of subject kinds a read-suppression check can ask about. Kept as a plain
 # frozenset so callers pass validated strings.
@@ -79,8 +80,6 @@ def suppressed_node_uuids(db_path, candidates) -> frozenset[str]:
         return frozenset(wanted)
 
 
-def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 @dataclass

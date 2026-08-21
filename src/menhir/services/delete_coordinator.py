@@ -40,6 +40,7 @@ from menhir.services.saga_reconcile_outcomes import (
     WOULD_NEEDS_REVIEW,
     summarize_outcomes,
 )
+from menhir.clock import utc_now_iso as _utc_now_iso
 
 logger = logging.getLogger(__name__)
 
@@ -52,8 +53,6 @@ class DeleteDrift(RuntimeError):
     """The graph did not reach the expected after-state (targets still present)."""
 
 
-def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 @dataclass

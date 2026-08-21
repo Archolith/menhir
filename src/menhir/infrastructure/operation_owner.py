@@ -26,6 +26,7 @@ from menhir.infrastructure.neo4j import (
     SAGA_MUTATION_TIMEOUT_S,
     mutation_window_seconds,
 )
+from menhir.clock import utc_now_iso as _clock_utc_now_iso
 
 #: Extra margin on top of the computed mutation window. Absorbs scheduling jitter, a slow
 #: heartbeat thread waking late, and clock granularity -- none of which the window itself models.
@@ -134,8 +135,10 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def utc_now_iso() -> str:
-    return _utc_now().isoformat()
+#: Re-exported from `menhir.clock` (CF-93). This module declared its own copy -- the 17th -- under
+#: the PUBLIC name, which is why a scan for `_utc_now_iso` did not see it. It is in `__all__` but
+#: has no caller inside or outside this module; the name is kept so the export surface is unchanged.
+utc_now_iso = _clock_utc_now_iso
 
 
 # The nonce is generated once, at import, so it is fixed for the life of the process and

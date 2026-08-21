@@ -38,6 +38,7 @@ from menhir.services.merge_coordinator import (
     merge_state_fingerprint,
     pair_key,
 )
+from menhir.clock import utc_now_iso as _utc_now_iso
 
 logger = logging.getLogger(__name__)
 
@@ -51,8 +52,6 @@ MISSING_PEER = "MISSING_PEER"
 PREPARE_FAILED = "PREPARE_FAILED"
 
 
-def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 @dataclass

@@ -54,6 +54,7 @@ from menhir.services.saga_reconcile_outcomes import (
     WOULD_RESTORE,
     summarize_outcomes,
 )
+from menhir.clock import utc_now_iso as _utc_now_iso
 
 logger = logging.getLogger(__name__)
 
@@ -67,8 +68,6 @@ PREPARE_FAILED = "PREPARE_FAILED"
 ALREADY_RESTORED = "ALREADY_RESTORED"
 
 
-def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 @dataclass

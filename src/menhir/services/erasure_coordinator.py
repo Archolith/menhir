@@ -33,6 +33,7 @@ from menhir.services.saga_reconcile_outcomes import (
     WOULD_REPLAY,
 )
 from menhir.services.saga_writer_heartbeat import owned_mutation
+from menhir.clock import utc_now_iso as _utc_now_iso
 
 logger = logging.getLogger(__name__)
 
@@ -53,8 +54,6 @@ ERASED_INCOMPLETE = "erased_incomplete"
 DELETION_SUCCEEDED_REASONS = frozenset({ERASED, GRAPH_ALREADY_ABSENT})
 
 
-def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 def _subjects_for_uuids(

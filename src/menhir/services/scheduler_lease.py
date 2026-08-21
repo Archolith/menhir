@@ -16,12 +16,11 @@ from pathlib import Path
 from menhir.infrastructure import operation_owner
 from menhir.infrastructure import process_liveness
 from menhir.infrastructure.telemetry import connect_telemetry_db, default_telemetry_db_path
+from menhir.clock import utc_now_iso as _utc_now_iso
 
 logger = logging.getLogger(__name__)
 
 
-def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 @dataclass

@@ -21,6 +21,7 @@ from menhir.domain.typed_assertion import (
     validate_value,
 )
 from menhir.services.seam_types import LlmComplete
+from menhir.clock import utc_now_iso as _utc_now_iso
 #: canonical snake_case for the REQUIRED `attribute` (state family): lowercase start letter, then
 #: lowercase/digits/underscores. It must match or the proposal fails closed — we never silently
 #: normalize a malformed state-family key, because it would fork durable slot identity. `scope` and
@@ -1277,8 +1278,6 @@ def advisory_subject_uuid(source_key: str) -> str:
     return f"{_ADVISORY_UUID_PREFIX}{source_key}"
 
 
-def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 #: correction cues (lowercase), matched span-locally against the grounded stated_span ONLY (never the

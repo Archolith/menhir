@@ -45,6 +45,7 @@ from menhir.services.saga_reconcile_outcomes import (
     WOULD_REPLAY,
     summarize_outcomes,
 )
+from menhir.clock import utc_now_iso as _utc_now_iso
 
 logger = logging.getLogger(__name__)
 
@@ -72,8 +73,6 @@ class MergeGraphAdapter(Protocol):
     ) -> dict[str, Any]: ...
 
 
-def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 def _canonical(payload: Any) -> str:

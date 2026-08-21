@@ -33,12 +33,11 @@ from typing import Any, Protocol
 from menhir.domain.scalar_history import MALFORMED_VALID_AT, build_history
 from menhir.domain.scalar_state_fold import Expiry, FoldResult, fold_assertions
 from menhir.infrastructure import consolidation_audit as _audit
+from menhir.clock import utc_now_iso as _utc_now_iso
 
 logger = logging.getLogger(__name__)
 
 
-def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 class _AssertionSource(Protocol):
