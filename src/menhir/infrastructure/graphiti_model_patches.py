@@ -208,39 +208,46 @@ def _patch_graphiti_none_replace() -> None:
     try:
         from graphiti_core.edges import EntityEdge
 
-        _orig_edge_embed = EntityEdge.generate_embedding
+        if not getattr(EntityEdge, "_menhir_none_replace_patched", False):
+            _orig_edge_embed = EntityEdge.generate_embedding
 
-        async def _safe_edge_embed(self: Any, embedder: Any) -> None:
-            if self.fact is None:
-                self.fact = ""
-            await _orig_edge_embed(self, embedder)
+            async def _safe_edge_embed(self: Any, embedder: Any) -> None:
+                if self.fact is None:
+                    self.fact = ""
+                await _orig_edge_embed(self, embedder)
 
-        EntityEdge.generate_embedding = _safe_edge_embed  # type: ignore[assignment]
-        patched += 1
+            EntityEdge.generate_embedding = _safe_edge_embed  # type: ignore[assignment]
+            EntityEdge._menhir_none_replace_patched = True  # type: ignore[attr-defined]
+            patched += 1
     except (ImportError, AttributeError) as exc:
         logger.warning("Failed to patch EntityEdge.generate_embedding: %s", exc)
 
     try:
         from graphiti_core.nodes import CommunityNode, EntityNode
 
-        _orig_entity_embed = EntityNode.generate_name_embedding
+        if not getattr(EntityNode, "_menhir_none_replace_patched", False):
+            _orig_entity_embed = EntityNode.generate_name_embedding
 
-        async def _safe_entity_embed(self: Any, embedder: Any) -> None:
-            if self.name is None:
-                self.name = ""
-            await _orig_entity_embed(self, embedder)
+            async def _safe_entity_embed(self: Any, embedder: Any) -> None:
+                if self.name is None:
+                    self.name = ""
+                await _orig_entity_embed(self, embedder)
 
-        EntityNode.generate_name_embedding = _safe_entity_embed  # type: ignore[assignment]
+            EntityNode.generate_name_embedding = _safe_entity_embed  # type: ignore[assignment]
+            EntityNode._menhir_none_replace_patched = True  # type: ignore[attr-defined]
+            patched += 1
 
-        _orig_community_embed = CommunityNode.generate_name_embedding
+        if not getattr(CommunityNode, "_menhir_none_replace_patched", False):
+            _orig_community_embed = CommunityNode.generate_name_embedding
 
-        async def _safe_community_embed(self: Any, embedder: Any) -> None:
-            if self.name is None:
-                self.name = ""
-            await _orig_community_embed(self, embedder)
+            async def _safe_community_embed(self: Any, embedder: Any) -> None:
+                if self.name is None:
+                    self.name = ""
+                await _orig_community_embed(self, embedder)
 
-        CommunityNode.generate_name_embedding = _safe_community_embed  # type: ignore[assignment]
-        patched += 2
+            CommunityNode.generate_name_embedding = _safe_community_embed  # type: ignore[assignment]
+            CommunityNode._menhir_none_replace_patched = True  # type: ignore[attr-defined]
+            patched += 1
     except (ImportError, AttributeError) as exc:
         logger.warning("Failed to patch Node.generate_name_embedding: %s", exc)
 
