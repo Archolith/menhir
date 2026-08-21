@@ -833,9 +833,9 @@ class MemoryGraphAdapter:
     def bridge_and_delete(self, node_uuid: str) -> dict[str, int]:
         return self._consolidation.bridge_and_delete(node_uuid)
 
-    def fetch_memory_overview(self) -> dict[str, Any]:
-        """Return high-level graph counts for MCP metadata resources."""
-        return self._memory_queries.fetch_memory_overview()
+    def fetch_memory_overview(self, namespace: str | None = None) -> dict[str, Any]:
+        """Return high-level graph counts, optionally scoped to one silo (CF-33)."""
+        return self._memory_queries.fetch_memory_overview(namespace)
 
     def fetch_recent_memories(
         self, limit: int = 10, namespace: str | None = None

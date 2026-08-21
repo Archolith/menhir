@@ -12,7 +12,7 @@ import logging
 from typing import Any
 
 from menhir.domain.bootstrap_scope import bootstrap_selection, normalize_bootstrap_scope
-from menhir.domain.namespace import namespace_to_group_ids
+from menhir.domain.namespace import namespace_spellings, namespace_to_group_ids
 from menhir.domain.structural_memory import non_structural_memory_cypher
 from menhir.infrastructure.cypher import (
     Cypher,
@@ -57,8 +57,18 @@ class MemoryQueryRepository:
 
     # --- Overview & listing -------------------------------------------------
 
-    def fetch_memory_overview(self) -> dict[str, Any]:
-        """Return high-level graph counts for MCP metadata resources.
+    def fetch_memory_overview(self, namespace: str | None = None) -> dict[str, Any]:
+        """Return high-level graph counts, optionally scoped to one silo (CF-33).
+
+        ``namespace=None`` counts every silo and is the default, because most callers of this are
+        operational -- the scheduler's queue-health job and the metadata resource want the whole
+        deployment. `get_memory_stats` passes the caller's (pinned) namespace so a tenant sees its
+        own cardinality rather than the graph's.
+
+        Scoping goes through the two domain helpers, never a predicate spelled here: ``:Entity`` /
+        ``:Episodic`` match on graphiti's ``group_id`` (``namespace_to_group_ids``) while
+        ``:TurnEvidence`` matches on its own ``namespace`` property (``namespace_spellings``).
+        Both encode the same owner ruling, 2026-08-21: ``''`` and ``'default'`` are the SAME silo.
 
         Includes the admission-provenance pair (CF-229). `:TurnEvidence` capture and the
         `ADMITTED_ON` join it feeds are written by DIFFERENT callers, so the join can be dead while
@@ -68,10 +78,17 @@ class MemoryQueryRepository:
         producer that captures turns and never reports the pairing.
         """
 
+        group_ids = namespace_to_group_ids(namespace)
+        params: dict[str, Any] = {}
+        node_filter = ""
+        if group_ids is not None:
+            node_filter = " AND n.group_id IN $group_ids"
+            params["group_ids"] = group_ids
+
         rows = self.neo4j.execute(
-            """
+            f"""
             MATCH (n)
-            WHERE n:Entity OR n:Episodic
+            WHERE (n:Entity OR n:Episodic){node_filter}
             RETURN count(n) AS total_memories,
                    count(CASE WHEN n:Entity THEN 1 END) AS entity_count,
                    count(CASE WHEN n:Episodic THEN 1 END) AS episode_count,
@@ -83,16 +100,29 @@ class MemoryQueryRepository:
                    count(CASE WHEN n:Episodic AND n.processing_state = 'ENRICHING' THEN 1 END) AS enriching_count,
                    count(CASE WHEN n:Episodic AND n.processing_state = 'READY' THEN 1 END) AS ready_count,
                    count(CASE WHEN n:Episodic AND n.processing_state = 'FAILED' THEN 1 END) AS failed_count
-            """
+            """,
+            params or None,
         )
         # Separate statement: :TurnEvidence is neither :Entity nor :Episodic, so it cannot be
         # folded into the CASE aggregation above. Both counts come from label/type indexes.
+        #
+        # Scoped on `namespace`, NOT `group_id`: :TurnEvidence carries no group_id at all
+        # (verified on the live graph -- 576 nodes, group_id absent on every one), so a group_id
+        # predicate here would silently count zero and report a false `never_linked`.
+        turn_spellings = namespace_spellings(namespace)
+        admission_params: dict[str, Any] = {}
+        turn_filter = edge_filter = ""
+        if turn_spellings is not None:
+            turn_filter = " WHERE t.namespace IN $ns"
+            edge_filter = " WHERE t.namespace IN $ns"
+            admission_params["ns"] = turn_spellings
         admission_rows = self.neo4j.execute(
-            """
-            CALL () { MATCH (t:TurnEvidence) RETURN count(t) AS turns }
-            CALL () { MATCH ()-[r:ADMITTED_ON]->() RETURN count(r) AS edges }
+            f"""
+            CALL () {{ MATCH (t:TurnEvidence){turn_filter} RETURN count(t) AS turns }}
+            CALL () {{ MATCH ()-[r:ADMITTED_ON]->(t:TurnEvidence){edge_filter} RETURN count(r) AS edges }}
             RETURN turns AS turn_evidence_count, edges AS admission_edge_count
-            """
+            """,
+            admission_params or None,
         )
         admission = admission_rows[0] if admission_rows else {}
         overview = dict(rows[0]) if rows else {

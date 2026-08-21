@@ -302,9 +302,13 @@ class RuntimeProviderAdminOpsMixin:
             reviewed_by=reviewed_by,
         )
 
-    async def fetch_memory_overview(self) -> dict[str, Any]:
+    async def fetch_memory_overview(self, namespace: str | None = None) -> dict[str, Any]:
+        # Threaded, not dropped: CF-239 was this exact method shape forgetting its namespace on
+        # the runtime limb while the HTTP limb forwarded it.
         return _to_jsonable(
-            await self._off_loop(self.built.graph_adapter.fetch_memory_overview)
+            await self._off_loop(
+                self.built.graph_adapter.fetch_memory_overview, namespace
+            )
         )
 
     async def circuit_breaker_snapshots(self) -> dict[str, dict[str, Any]]:

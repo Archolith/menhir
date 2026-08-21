@@ -28,7 +28,7 @@ class _Backend:
         outer = self
 
         class _Adapter:
-            def fetch_memory_overview(self) -> dict[str, object]:
+            def fetch_memory_overview(self, namespace=None) -> dict[str, object]:
                 outer.overview_calls += 1
                 return {"failed_count": outer._failed_count}
 
@@ -98,7 +98,7 @@ async def test_counting_failure_never_breaks_the_write() -> None:
             super().__init__()
 
             class _Adapter:
-                def fetch_memory_overview(self):
+                def fetch_memory_overview(self, namespace=None):
                     raise RuntimeError("neo4j down")
 
                 def list_episode_processing(self, processing_states=None, limit=200):
@@ -127,7 +127,7 @@ async def test_http_backend_path_is_supported() -> None:
         async def scheduler_status_snapshot(self):
             return {"running": True}
 
-        async def fetch_memory_overview(self) -> dict[str, object]:
+        async def fetch_memory_overview(self, namespace=None) -> dict[str, object]:
             return {"failed_count": 3}
 
     summary = await _queue_summary(_HttpBackend())

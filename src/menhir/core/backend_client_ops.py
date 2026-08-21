@@ -469,8 +469,8 @@ class BackendClientOpsMixin:
             },
         )
 
-    async def fetch_memory_overview(self) -> dict[str, Any]:
-        return await self._request("fetch_memory_overview")
+    async def fetch_memory_overview(self, namespace: str | None = None) -> dict[str, Any]:
+        return await self._request("fetch_memory_overview", {"namespace": namespace})
 
     async def circuit_breaker_snapshots(self) -> dict[str, dict[str, Any]]:
         return await self._request("circuit_breaker_snapshots")

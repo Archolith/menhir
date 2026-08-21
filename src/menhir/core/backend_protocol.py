@@ -494,8 +494,12 @@ class MemoryBackend(Protocol):
     # System / Metadata
     # ------------------------------------------------------------------
 
-    async def fetch_memory_overview(self) -> dict[str, Any]:
-        """Fetch high-level memory graph overview (node/edge counts, etc.)."""
+    async def fetch_memory_overview(self, namespace: str | None = None) -> dict[str, Any]:
+        """Fetch high-level memory graph overview (node/edge counts, etc.).
+
+        ``namespace=None`` counts every silo (operational callers); an explicit namespace scopes
+        the graph counts to that tenant (CF-33).
+        """
         ...
 
     async def circuit_breaker_snapshots(self) -> dict[str, dict[str, Any]]:

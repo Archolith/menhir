@@ -136,7 +136,7 @@ class StubGraphAdapter:
             }
         ]
 
-    def fetch_memory_overview(self):
+    def fetch_memory_overview(self, namespace=None):
         return {
             "total_memories": 3,
             "entity_count": 2,

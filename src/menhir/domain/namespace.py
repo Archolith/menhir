@@ -33,6 +33,31 @@ DEFAULT_NAMESPACE = "default"
 _GROUP_ID_SAFE_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 
+def namespace_spellings(namespace: str | None) -> list[str] | None:
+    """Every persisted spelling of *namespace*, for matching a raw node property.
+
+    OWNER RULING 2026-08-21: ``''`` and ``'default'`` are **the same legacy/default silo**, and
+    ``'default'`` is the canonical value going forward -- an explicit value is far less ambiguous
+    than an empty string.
+
+    ``namespace_to_group_ids`` already encodes that rule for graphiti's ``group_id``. This is the
+    same rule for nodes matched on their own ``namespace`` property, which is not the same field:
+    ``:TurnEvidence`` carries ``namespace`` and **no** ``group_id`` at all, so a group_id predicate
+    silently matches nothing there. Two fields, one rule, declared once.
+
+    ``None`` -> ``None`` (no filter), matching the sibling helpers.
+
+    Both spellings are accepted on READ until the persisted values are migrated to the canonical
+    one; a read that accepted only ``'default'`` would go blind to every existing row the moment
+    the ruling was adopted.
+    """
+    if namespace is None:
+        return None
+    if namespace in (DEFAULT_NAMESPACE, _GRAPHITI_DEFAULT_GROUP_ID):
+        return [DEFAULT_NAMESPACE, _GRAPHITI_DEFAULT_GROUP_ID]
+    return [namespace]
+
+
 def namespace_to_group_id(namespace: str | None) -> str:
     """Translate a menhir namespace to the graphiti ``group_id`` used on WRITE.
 

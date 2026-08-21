@@ -6,14 +6,16 @@ from menhir.mcp.tools.base import BaseTextTool
 from menhir.mcp.contracts import ToolScope
 
 
-async def get_memory_stats(since_hours: int = 24) -> str:
+async def get_memory_stats(since_hours: int = 24, namespace: str = "") -> str:
     """Return operational health summary: ingestion rate, recall latency, failure counts, enrichment queue depth.
 
     Args:
         since_hours: Lookback window in hours (default: 24).
+        namespace: Silo to scope the Graph counts to. Empty = every silo. A pinned client has it
+            forced to its own namespace. The operational sections are always deployment-wide.
     """
 
-    return await GetMemoryStatsTool().execute(since_hours=since_hours)
+    return await GetMemoryStatsTool().execute(since_hours=since_hours, namespace=namespace)
 
 
 # Operations that are user-facing (not scheduler background noise)
@@ -29,24 +31,32 @@ _SCHEDULER_PREFIX = "scheduler_"
 
 class GetMemoryStatsTool(BaseTextTool):
     name = "get_memory_stats"
-    # GLOBAL, not OBJECT: this is the operational health dashboard -- operation latencies,
-    # failure counts, enrichment rate, queue depth, circuit-breaker state. None of it is tenant
-    # memory and none of it is addressed by an object, so OBJECT was a misdeclaration rather
-    # than a missing namespace argument.
+    # NAMESPACED as of the owner ruling 2026-08-21 (CF-33 / CF-36).
     #
-    # Residue, stated rather than glossed: the Graph section reports AGGREGATE counts
-    # (entity_count, episode_count, flagged_count) summed across every silo, so a pinned client
-    # learns roughly how much data exists outside its own. That is a cardinality signal, not
-    # content, and it is the same shape as the other GLOBAL tools' operational readouts.
-    # Narrowing it means per-namespace counts, which is a feature decision, not this fix.
-    scope = ToolScope.GLOBAL
+    # This tool used to be GLOBAL, and its own comment recorded the residue honestly: the Graph
+    # section summed entity/episode/flagged counts across EVERY silo, so a pinned client learned
+    # roughly how much data existed outside its own. That was deferred as "a feature decision, not
+    # this fix". The decision has now been made, and it is the last tenant-data leak in the
+    # namespace-pin cluster -- the other ten GLOBAL tools are scheduler control, client identity
+    # and cross-silo maintenance, which genuinely have no tenant.
+    #
+    # ONLY THE GRAPH SECTION IS SCOPED, and that split is the point. Everything below it --
+    # operation latencies, failure counts, enrichment rate, queue depth, circuit breakers -- comes
+    # from the telemetry sidecar and process state. It is deployment-wide by nature and is LABELLED
+    # as such in the output, because a scoped count printed beside an unscoped one, with nothing
+    # saying which is which, is how a reader draws a false ratio between them.
+    scope = ToolScope.NAMESPACED
     required_tier = "readonly"
     description = "Return operational health summary."
 
-    async def endpoint(self, since_hours: int = 24) -> str:
+    async def endpoint(self, since_hours: int = 24, namespace: str = "") -> str:
         backend = self.get_backend()
 
-        overview = await backend.fetch_memory_overview()
+        # A pinned client cannot reach this with anything but its own silo: `_apply_pinned_namespace`
+        # overwrites the argument before the endpoint runs. An unpinned caller passing nothing gets
+        # None -> deployment-wide, which is the previous behaviour for operators.
+        scope_ns = namespace.strip() or None
+        overview = await backend.fetch_memory_overview(namespace=scope_ns)
         op_stats = await backend.fetch_operation_stats(since_hours=since_hours)
         failure_summary = await backend.fetch_failure_summary(since_hours=since_hours)
         enrichment = await backend.fetch_enrichment_rate(since_hours=since_hours)
@@ -61,7 +71,9 @@ class GetMemoryStatsTool(BaseTextTool):
         lines.append("")
 
         # ── Graph Overview ──
-        lines.append("### Graph")
+        # Labelled with the silo it covers. The sections below are deployment-wide, and saying so
+        # is what stops a reader computing a ratio across the boundary.
+        lines.append(f"### Graph ({scope_ns or 'all silos'})")
         lines.append(f"  Entities:    {overview.get('entity_count', '?'):>6}")
         lines.append(f"  Episodes:    {overview.get('episode_count', '?'):>6}")
         lines.append(f"  Flagged:     {overview.get('flagged_count', '?'):>6}")
@@ -70,7 +82,7 @@ class GetMemoryStatsTool(BaseTextTool):
         lines.append("")
 
         # ── Enrichment Pipeline ──
-        lines.append("### Enrichment")
+        lines.append("### Enrichment (deployment-wide)")
         total = enrichment["total"]
         ok = enrichment["successes"]
         failed_enrichment = total - ok
@@ -105,7 +117,7 @@ class GetMemoryStatsTool(BaseTextTool):
         lines.append("")
 
         # ── User Operations ──
-        lines.append("### Operations")
+        lines.append("### Operations (deployment-wide)")
         user_ops = [(name, ops_by_name[name]) for name in sorted(ops_by_name) if name in _USER_OPS]
         if user_ops:
             for name, s in user_ops:

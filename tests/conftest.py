@@ -1456,7 +1456,7 @@ class StubMemoryGraphAdapter:
     def phase_one_schema_ready(self) -> bool:
         return True
 
-    def fetch_memory_overview(self) -> dict[str, object]:
+    def fetch_memory_overview(self, namespace=None) -> dict[str, object]:
         return {
             "total_memories": 0,
             "entity_count": 0,

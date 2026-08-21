@@ -36,7 +36,7 @@ class _StubGraphAdapter:
         return {"entities": 5, "edges": 3}
 
     # Required by SchedulerGraphAdapter protocol but unused by watcher
-    def fetch_memory_overview(self) -> dict[str, object]:
+    def fetch_memory_overview(self, namespace=None) -> dict[str, object]:
         return {}
 
     def fetch_failed_episode_retry_candidates(self, limit: int = 100) -> list[dict[str, object]]:

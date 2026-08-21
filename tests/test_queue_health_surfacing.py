@@ -32,7 +32,7 @@ class _Adapter:
         self._signatures = signatures if signatures is not None else []
         self._failed_count = failed_count
 
-    def fetch_memory_overview(self) -> dict[str, object]:
+    def fetch_memory_overview(self, namespace=None) -> dict[str, object]:
         return {"pending_count": 0, "enriching_count": 0, "failed_count": self._failed_count}
 
     def fetch_failed_error_signatures(self, limit: int = 25) -> list[dict[str, object]]:

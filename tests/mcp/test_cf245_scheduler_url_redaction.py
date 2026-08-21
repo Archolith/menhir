@@ -85,7 +85,7 @@ class _FakeBackend:
     def __init__(self, scheduler_url: str) -> None:
         self.scheduler_url = scheduler_url
 
-    async def fetch_memory_overview(self) -> dict[str, object]:
+    async def fetch_memory_overview(self, namespace=None) -> dict[str, object]:
         return {}
 
     async def get_provider_config(self) -> dict[str, object]:

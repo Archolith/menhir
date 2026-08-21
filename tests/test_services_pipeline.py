@@ -1798,7 +1798,7 @@ async def test_maintenance_scheduler_runs_phase_one_jobs(monkeypatch: pytest.Mon
             return 3
 
     class FakeGraphAdapter:
-        def fetch_memory_overview(self) -> dict[str, object]:
+        def fetch_memory_overview(self, namespace=None) -> dict[str, object]:
             return {"pending_count": 4, "enriching_count": 2, "failed_count": 5}
 
         def fetch_failed_episode_retry_candidates(self, limit: int = 100) -> list[dict[str, object]]:
@@ -1880,7 +1880,7 @@ async def test_maintenance_scheduler_start_stop_is_idempotent() -> None:
             return 3
 
     class FakeGraphAdapter:
-        def fetch_memory_overview(self) -> dict[str, object]:
+        def fetch_memory_overview(self, namespace=None) -> dict[str, object]:
             return {"pending_count": 0, "enriching_count": 0, "failed_count": 0}
 
         def fetch_failed_episode_retry_candidates(self, limit: int = 100) -> list[dict[str, object]]:
@@ -1930,7 +1930,7 @@ async def test_maintenance_scheduler_stop_ignores_cancelled_task() -> None:
             return 3
 
     class FakeGraphAdapter:
-        def fetch_memory_overview(self) -> dict[str, object]:
+        def fetch_memory_overview(self, namespace=None) -> dict[str, object]:
             return {"pending_count": 0, "enriching_count": 0, "failed_count": 0}
 
         def fetch_failed_episode_retry_candidates(self, limit: int = 100) -> list[dict[str, object]]:
@@ -1981,7 +1981,7 @@ async def test_maintenance_scheduler_allows_only_one_live_owner() -> None:
             return 3
 
     class FakeGraphAdapter:
-        def fetch_memory_overview(self) -> dict[str, object]:
+        def fetch_memory_overview(self, namespace=None) -> dict[str, object]:
             return {"pending_count": 0, "enriching_count": 0, "failed_count": 0}
 
         def fetch_failed_episode_retry_candidates(self, limit: int = 100) -> list[dict[str, object]]:
@@ -2062,7 +2062,7 @@ async def test_maintenance_scheduler_force_takeover_transfers_active_owner() -> 
             return 3
 
     class FakeGraphAdapter:
-        def fetch_memory_overview(self) -> dict[str, object]:
+        def fetch_memory_overview(self, namespace=None) -> dict[str, object]:
             return {"pending_count": 0, "enriching_count": 0, "failed_count": 0}
 
         def fetch_failed_episode_retry_candidates(self, limit: int = 100) -> list[dict[str, object]]:
@@ -2161,7 +2161,7 @@ async def test_maintenance_scheduler_heartbeat_keeps_lease_alive_during_long_job
             return 3
 
     class FakeGraphAdapter:
-        def fetch_memory_overview(self) -> dict[str, object]:
+        def fetch_memory_overview(self, namespace=None) -> dict[str, object]:
             return {"pending_count": 0, "enriching_count": 0, "failed_count": 0}
 
         def fetch_failed_episode_retry_candidates(self, limit: int = 100) -> list[dict[str, object]]:
@@ -2257,7 +2257,7 @@ async def test_maintenance_scheduler_forced_takeover_fences_displaced_owner_mid_
             return 3
 
     class FakeGraphAdapter:
-        def fetch_memory_overview(self) -> dict[str, object]:
+        def fetch_memory_overview(self, namespace=None) -> dict[str, object]:
             return {"pending_count": 0, "enriching_count": 0, "failed_count": 0}
 
         def fetch_failed_episode_retry_candidates(self, limit: int = 100) -> list[dict[str, object]]:
@@ -2392,7 +2392,7 @@ async def test_maintenance_scheduler_requeues_only_retryable_failed_episodes(
             return 6
 
     class FakeGraphAdapter:
-        def fetch_memory_overview(self) -> dict[str, object]:
+        def fetch_memory_overview(self, namespace=None) -> dict[str, object]:
             return {"pending_count": 0, "enriching_count": 0, "failed_count": 3}
 
         def find_completed_episode_artifact(
@@ -2538,7 +2538,7 @@ async def test_maintenance_scheduler_reconciles_silent_completed_failed_episode(
             return 3
 
     class FakeGraphAdapter:
-        def fetch_memory_overview(self) -> dict[str, object]:
+        def fetch_memory_overview(self, namespace=None) -> dict[str, object]:
             return {"pending_count": 0, "enriching_count": 0, "failed_count": 1}
 
         def fetch_failed_episode_retry_candidates(self, limit: int = 100) -> list[dict[str, object]]:
@@ -2683,7 +2683,7 @@ async def test_maintenance_scheduler_does_not_retry_context_window_mismatch_beyo
             return 6
 
     class FakeGraphAdapter:
-        def fetch_memory_overview(self) -> dict[str, object]:
+        def fetch_memory_overview(self, namespace=None) -> dict[str, object]:
             return {"pending_count": 0, "enriching_count": 0, "failed_count": 1}
 
         def fetch_failed_episode_retry_candidates(self, limit: int = 100) -> list[dict[str, object]]:
@@ -2771,7 +2771,7 @@ async def test_maintenance_scheduler_reconciliation_skips_when_row_is_no_longer_
             return 6
 
     class FakeGraphAdapter:
-        def fetch_memory_overview(self) -> dict[str, object]:
+        def fetch_memory_overview(self, namespace=None) -> dict[str, object]:
             return {"pending_count": 1, "enriching_count": 0, "failed_count": 0}
 
         def fetch_failed_episode_retry_candidates(self, limit: int = 100) -> list[dict[str, object]]:
@@ -2907,7 +2907,7 @@ async def test_auto_resolve_conflicts_resolves_stale_groups(monkeypatch: pytest.
             return 3
 
     class _FakeGraphAdapter:
-        def fetch_memory_overview(self) -> dict:
+        def fetch_memory_overview(self, namespace=None) -> dict:
             return {}
         def fetch_failed_episode_retry_candidates(self, limit: int = 100) -> list:
             return []
@@ -2955,7 +2955,7 @@ async def test_auto_resolve_conflicts_skips_when_no_lifecycle_service(monkeypatc
             return 3
 
     class _FakeGraphAdapter:
-        def fetch_memory_overview(self) -> dict:
+        def fetch_memory_overview(self, namespace=None) -> dict:
             return {}
         def fetch_failed_episode_retry_candidates(self, limit: int = 100) -> list:
             return []
