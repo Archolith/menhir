@@ -790,8 +790,10 @@ async def refresh_structure_graphs(
             details.append({"project": name, "status": f"write_error: {exc}"})
             logger.warning("Structure watcher write failed for %s: %s", name, exc)
 
-    # Write project index for hooks integration
-    _write_project_index(projects)
+    # Write project index for hooks integration. A synchronous JSON write to the
+    # user's home directory -- offload it like every other I/O in this job so the
+    # maintenance loop never freezes the event loop for its duration.
+    await asyncio.to_thread(_write_project_index, projects)
 
     return {
         "projects_known": len(projects),
