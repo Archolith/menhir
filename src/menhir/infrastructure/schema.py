@@ -193,13 +193,27 @@ def _artifact_index_queries() -> list[str]:
     """Indexes backing the L4 artifact loop: the artifact_id idempotency/lookup key, the
     is_artifact filter used by find_artifacts, the status filter, and the first-class
     :Evidence node keys (artifact_id is the SUPPORTED_BY dedup key, uuid the identity)."""
-    return [
+    # The :Entity indexes are NOT artifact-node indexes and must not be derived from the registry:
+    # they index artifact FIELDS carried on ordinary :Entity nodes, which is what `find_artifacts`
+    # filters on. Generating this whole list from ARTIFACT_NODE_LABELS deletes them -- silently,
+    # because an existing deployment already has the indexes and only a fresh one would notice.
+    queries: list[str] = [
         "CREATE INDEX entity_artifact_id_idx IF NOT EXISTS FOR (n:Entity) ON (n.artifact_id)",
         "CREATE INDEX entity_is_artifact_idx IF NOT EXISTS FOR (n:Entity) ON (n.is_artifact)",
         "CREATE INDEX entity_artifact_status_idx IF NOT EXISTS FOR (n:Entity) ON (n.artifact_status)",
-        "CREATE INDEX evidence_artifact_id_idx IF NOT EXISTS FOR (n:Evidence) ON (n.artifact_id)",
-        "CREATE INDEX evidence_uuid_idx IF NOT EXISTS FOR (n:Evidence) ON (n.uuid)",
     ]
+    # Only the first-class artifact NODE labels come from the registry (CF-163). The generated
+    # names must keep matching the hand-written ones -- an index is identified by its name, so a
+    # renamed statement creates a second index rather than reusing the existing one.
+    for artifact_label in ARTIFACT_NODE_LABELS:
+        label_suffix = artifact_label.lower()
+        queries.extend(
+            [
+                f"CREATE INDEX {label_suffix}_artifact_id_idx IF NOT EXISTS FOR (n:{artifact_label}) ON (n.artifact_id)",
+                f"CREATE INDEX {label_suffix}_uuid_idx IF NOT EXISTS FOR (n:{artifact_label}) ON (n.uuid)",
+            ]
+        )
+    return queries
 
 
 def _view_index_queries() -> list[str]:
