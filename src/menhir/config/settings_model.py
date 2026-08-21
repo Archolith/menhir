@@ -113,7 +113,25 @@ class MemorySettings:
     # M6 LLM budget caps
     max_llm_calls_per_session_window: int = 50
     llm_session_window_seconds: int = 900
-    max_llm_calls_per_enrichment_job: int = 10
+    # CF-234, CALIBRATED 2026-08-21 from 5,016 real chat calls across 244 enrichment jobs in
+    # `llm_usage_events` (owner ruling: measure it, do not arbitrarily raise it).
+    #
+    #   per job:  p50 14   p90 45   p95 59   p99 84   max 140
+    #
+    # The previous default of 10 sat BELOW the median: it would have refused **62.3% of real
+    # jobs** mid-enrichment. That is the failure the ruling named -- "a control that doesn't
+    # match reality" -- and in report-only mode it made the warning fire so often that the signal
+    # was worthless.
+    #
+    # 100 is chosen as a RUNAWAY guard, which is what CF-79 filed this for: it sits above p99
+    # (84) so normal work never trips it, and refuses 2 of 244 observed jobs (0.8%) -- the 140-
+    # and 108-call outliers. Raising further to 150 would refuse nothing at all and stop being a
+    # control.
+    #
+    # Enforcement remains OFF (report_only). Turning it on still needs the landing zone this
+    # entry describes: an `LlmBudgetExceeded` handler that requeues rather than failing the
+    # episode. Recalibrating first is what makes the report-only signal worth reading.
+    max_llm_calls_per_enrichment_job: int = 100
 
     # Enrichment concurrency: max episodes extracting at once, serialized per namespace.
     # 1 == single-flight (required for memory-sensitive LOCAL models); raise for cloud
