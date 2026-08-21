@@ -10,6 +10,16 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any
 
+
+class _Neo4jDriverUnavailable(Exception):
+    """Stand-in for the driver's exception types when the `neo4j` package is absent.
+
+    Bound to the three driver exception names so `except (...)` clauses in this module stay
+    catchable. Nothing ever raises it, so the real ModuleNotFoundError from `_get_driver`
+    propagates with its intended message instead of a TypeError (CF-162).
+    """
+
+
 try:
     from neo4j import GraphDatabase, Driver, Query
     from neo4j.exceptions import ServiceUnavailable, SessionExpired, TransientError
@@ -17,9 +27,9 @@ except ModuleNotFoundError as exc:  # pragma: no cover - import guard
     GraphDatabase = None  # type: ignore[assignment]
     Driver = Any  # type: ignore[assignment]
     Query = None  # type: ignore[assignment]
-    ServiceUnavailable = type(None)  # type: ignore[assignment,misc]
-    SessionExpired = type(None)  # type: ignore[assignment,misc]
-    TransientError = type(None)  # type: ignore[assignment,misc]
+    ServiceUnavailable = _Neo4jDriverUnavailable  # type: ignore[assignment]
+    SessionExpired = _Neo4jDriverUnavailable  # type: ignore[assignment]
+    TransientError = _Neo4jDriverUnavailable  # type: ignore[assignment]
     _NEO4J_IMPORT_ERROR = exc
 else:
     _NEO4J_IMPORT_ERROR = None
@@ -64,10 +74,13 @@ def mutation_window_seconds(timeout_s: float, *, statements: int = 1) -> float:
     more often than necessary, and so a lease comfortably outlives ordinary work. Getting it wrong
     costs renewal churn or delayed recovery -- it can no longer cost a double-apply.
 
-    Budget per attempt: connection acquisition + the bounded transaction. Between attempts Menhir
-    sleeps ``_TRANSIENT_BACKOFF_BASE * 2**n``. Deliberately pessimistic -- it assumes every attempt
-    burns its full acquisition wait and its full timeout, because a TTL derived from an optimistic
-    estimate is the failure this calculation exists to prevent.
+    Budget per attempt: connection acquisition + the bounded transaction. ``_TRANSIENT_RETRIES - 1``
+    sleeps now occur, because the final attempt does not sleep before raising (CF-162). The sum
+    below deliberately keeps the extra term as slack: the number bounds a lease, so the slack is
+    retained on purpose rather than shrunk to match the reduced sleep count. Deliberately
+    pessimistic -- it assumes every attempt burns its full acquisition wait and its full timeout,
+    because a TTL derived from an optimistic estimate is the failure this calculation exists to
+    prevent.
 
     ``statements`` is why this is not simply "one timeout": a saga mutation is not always one
     statement. The METRIC_WRITE path issues two (``_write_version`` then ``_link_episodes``), each
@@ -88,6 +101,29 @@ def mutation_window_seconds(timeout_s: float, *, statements: int = 1) -> float:
 
 
 logger = logging.getLogger(__name__)
+
+
+def _record_and_backoff(exc: Exception, attempt: int, *, label: str) -> None:
+    """Log a transient failure and sleep before the next attempt, if one will happen.
+
+    On the final attempt there is no next retry to announce and no sleep to take -- sleeping
+    would be pure dead latency before the exception ``execute()`` is about to raise anyway
+    (CF-162). The final attempt still logs at WARNING, but the wording says attempts are
+    exhausted rather than promising a retry.
+    """
+    is_last = attempt >= _TRANSIENT_RETRIES - 1
+    if is_last:
+        logger.warning(
+            "Neo4j %s (attempt %d/%d); attempts exhausted, no further retry: %s",
+            label, attempt + 1, _TRANSIENT_RETRIES, exc,
+        )
+        return
+    wait = _TRANSIENT_BACKOFF_BASE * (2 ** attempt)
+    logger.warning(
+        "Neo4j %s (attempt %d/%d), retrying in %.1fs: %s",
+        label, attempt + 1, _TRANSIENT_RETRIES, wait, exc,
+    )
+    time.sleep(wait)
 
 
 #: Ambient revocation predicate for the saga mutation currently in flight on this context.
@@ -329,20 +365,10 @@ class Neo4jRepository:
                     )
                     raise
                 last_exc = exc
-                wait = _TRANSIENT_BACKOFF_BASE * (2 ** attempt)
-                logger.warning(
-                    "Neo4j ambiguous failure (attempt %d/%d), retrying in %.1fs: %s",
-                    attempt + 1, _TRANSIENT_RETRIES, wait, exc,
-                )
-                time.sleep(wait)
+                _record_and_backoff(exc, attempt, label="ambiguous failure")
             except TransientError as exc:
                 # Server-side and already rolled back, so re-execution is sound regardless of
                 # what the statement does.
                 last_exc = exc
-                wait = _TRANSIENT_BACKOFF_BASE * (2 ** attempt)
-                logger.warning(
-                    "Neo4j transient error (attempt %d/%d), retrying in %.1fs: %s",
-                    attempt + 1, _TRANSIENT_RETRIES, wait, exc,
-                )
-                time.sleep(wait)
+                _record_and_backoff(exc, attempt, label="transient error")
         raise last_exc  # type: ignore[misc]
