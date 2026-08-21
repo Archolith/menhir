@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from menhir.domain.retrieval_tuning import CandidateSource, RetrievalTuningConfig
+from menhir.services.scoring_service import GRAPHITI_RRF_DUAL_METHOD_MAX
 
 if TYPE_CHECKING:
     from menhir.core.bootstrap import UnavailableGraphitiClient
@@ -41,7 +42,6 @@ if TYPE_CHECKING:
 # test_scoring_service::test_graphiti_rrf_scale_contract. Using the more common
 # k=60 changes ordering, not merely scale, so the benchmark control must use 1.
 RRF_K = 1
-RRF_COMMON_CEILING = 2.0
 
 ADMISSION_PRODUCTION_FUSED = "production_fused"
 ADMISSION_ATTRIBUTED = "attributed"
@@ -163,7 +163,7 @@ def weighted_rrf_multi(
         return []
 
     active_weight = sum(max(0.0, lane.weight) for lane in lanes)
-    scale = RRF_COMMON_CEILING / active_weight if active_weight > 0.0 else 0.0
+    scale = GRAPHITI_RRF_DUAL_METHOD_MAX / active_weight if active_weight > 0.0 else 0.0
 
     ranked_uuids = sorted(order, key=lambda u: fused[u], reverse=True)
     if limit is not None:
