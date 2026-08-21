@@ -28,7 +28,11 @@ from datetime import datetime, timezone
 from typing import Any
 
 from menhir.domain.temporal import parse_iso8601
-from menhir.domain.typed_assertion import evidence_rank, normalize_scalar
+from menhir.domain.typed_assertion import (
+    evidence_rank,
+    normalize_scalar,
+    slot_of as _slot_of,
+)
 
 # abstention reason codes (stable, for telemetry).
 NO_ANCHOR = "no_anchor"
@@ -108,16 +112,6 @@ _parse_dt = parse_iso8601
 
 def _is_number(x: Any) -> bool:
     return isinstance(x, (int, float)) and not isinstance(x, bool)
-
-
-def _slot_of(row: dict[str, Any]) -> tuple[str, str, str, str, str]:
-    return (
-        str(row.get("subject_uuid", "")).strip(),
-        str(row.get("attribute", "")).strip().lower(),
-        str(row.get("scope", "")).strip().lower(),
-        str(row.get("value_kind", "")).strip().lower(),
-        str(row.get("unit", "") or "").strip().lower(),
-    )
 
 
 def fold_assertions(

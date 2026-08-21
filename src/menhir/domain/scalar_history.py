@@ -31,7 +31,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from menhir.domain.temporal import parse_iso8601
-from menhir.domain.typed_assertion import normalize_scalar
+from menhir.domain.typed_assertion import normalize_scalar, slot_of as _slot_of
 
 _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 _parse_dt = parse_iso8601
@@ -117,16 +117,6 @@ class HistoryResult:
     """The output of `build_history`: projections + abstentions."""
     projections: list[ScalarHistoryProjection] = field(default_factory=list)
     abstentions: list[HistoryAbstention] = field(default_factory=list)
-
-
-def _slot_of(row: dict[str, Any]) -> tuple[str, str, str, str, str]:
-    return (
-        str(row.get("subject_uuid", "")).strip(),
-        str(row.get("attribute", "")).strip().lower(),
-        str(row.get("scope", "")).strip().lower(),
-        str(row.get("value_kind", "")).strip().lower(),
-        str(row.get("unit", "") or "").strip().lower(),
-    )
 
 
 def _history_signature(entries: list[HistoryEntry]) -> str:

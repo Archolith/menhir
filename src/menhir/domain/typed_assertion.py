@@ -213,6 +213,23 @@ def validate_value(value_kind: str, operation: str, value: Any) -> None:
                 f"{value_kind} value must be a finite number or a [lo, hi] finite range, got {value!r}")
 
 
+def slot_of(row: dict[str, Any]) -> tuple[str, str, str, str, str]:
+    """The scalar slot's canonical identity key from a row dict (CF-57).
+
+    ``(subject_uuid, attribute, scope, value_kind, unit)``, each stripped and
+    lowercased, blank-unit tolerant. The single definition of the slot key that
+    the scalar fold/history modules and ``TypedAssertion.slot_key`` all use, so
+    the row path and the object path cannot drift apart.
+    """
+    return (
+        str(row.get("subject_uuid", "")).strip(),
+        str(row.get("attribute", "")).strip().lower(),
+        str(row.get("scope", "")).strip().lower(),
+        str(row.get("value_kind", "")).strip().lower(),
+        str(row.get("unit", "") or "").strip().lower(),
+    )
+
+
 @dataclass(frozen=True)
 class TypedAssertion:
     """One durable typed-scalar observation. See module docstring."""
@@ -284,13 +301,13 @@ class TypedAssertion:
     @property
     def slot_key(self) -> tuple[str, str, str, str, str]:
         """The (entity, attribute, scope, value_kind, unit) tuple a ScalarStateView folds over."""
-        return (
-            self.subject_uuid.strip(),
-            self.attribute.strip().lower(),
-            self.scope.strip().lower(),
-            self.value_kind.strip().lower(),
-            (self.unit or "").strip().lower(),
-        )
+        return slot_of({
+            "subject_uuid": self.subject_uuid,
+            "attribute": self.attribute,
+            "scope": self.scope,
+            "value_kind": self.value_kind,
+            "unit": self.unit,
+        })
 
     @property
     def source_key(self) -> str:
