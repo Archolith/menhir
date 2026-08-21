@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -41,10 +42,45 @@ from menhir.domain.typed_assertion import (
     build_source_key,
 )
 
+#: Collapse any run of whitespace to a single space. Used only by ``normalize_text``.
+_WHITESPACE_RE = re.compile(r"\s+")
 
-def _norm(value: str | None) -> str:
-    """Consistent normalization for textual identity components: blank-tolerant, trimmed, lowercased."""
+
+# There are TWO normalization jobs in the event-history family and they are NOT
+# interchangeable (CF-72). Both live here so the difference is visible in one place, because the
+# four hand-written copies that preceded them differed only in a line nobody could see from a
+# call site.
+#
+#   normalize_identity_component -- for values that participate in DURABLE identity: EventLane.key,
+#       lane_key, and the sha256 assertion_key below. It must NOT collapse internal whitespace,
+#       because that would change every already-stored assertion_key and orphan the nodes keyed by
+#       them. Its output is what gets persisted, so it is also what a later read must compare
+#       against verbatim.
+#
+#   normalize_text -- for free QUERY text and anchors, where a user's arbitrary spacing must not
+#       change the match.
+#
+# Mixing them is a real defect in both directions. Collapsing an identity component produces a
+# value that no longer equals the one persisted from the same source; not collapsing query text
+# makes a double space defeat a match.
+
+
+def normalize_identity_component(value: str | None) -> str:
+    """Blank-tolerant, trimmed, lowercased. Internal whitespace is PRESERVED -- see the note above:
+    this feeds durable keys, so collapsing here would change stored identity hashes."""
     return (value or "").strip().lower()
+
+
+#: Retained as the module-local spelling of the identity normalizer; the call sites below predate
+#: the public name and mean exactly this.
+_norm = normalize_identity_component
+
+
+def normalize_text(value: str | None) -> str:
+    """Blank-tolerant, trimmed, lowercased, internal whitespace collapsed to single spaces.
+
+    For query/anchor text only. Never for a value that reaches a durable key."""
+    return _WHITESPACE_RE.sub(" ", (value or "").strip().lower()).strip()
 
 
 #: Sentinel for an unparseable ``learned_at``: sorts AFTER any parseable time (UTC-aware so it is

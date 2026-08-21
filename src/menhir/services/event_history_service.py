@@ -34,13 +34,17 @@ import json
 from datetime import timezone
 from typing import Any, Iterable, Protocol
 
-from menhir.domain.event_history import EventLane, TypedEventAssertion
+from menhir.domain.event_history import (
+    EventLane,
+    TypedEventAssertion,
+    # IDENTITY normalization, not query-text normalization (CF-72). This module compares
+    # values against `EventLane.key`, which is built with this exact function; using the
+    # whitespace-collapsing `normalize_text` here would make a stored predicate stop
+    # matching the canonical lane it was written from, so a View that should be retired
+    # would survive. See the note in menhir.domain.event_history.
+    normalize_identity_component as _norm,
+)
 from menhir.domain.temporal import parse_iso8601
-
-
-def _norm(value: str | None) -> str:
-    """Blank-tolerant, trimmed, lowercased normalization for lane/identity text components."""
-    return (value or "").strip().lower()
 
 
 def _canonical_utc_z(when: str) -> str:

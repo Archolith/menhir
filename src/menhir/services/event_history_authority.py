@@ -20,7 +20,7 @@ from __future__ import annotations
 import re
 from typing import Iterable
 
-from menhir.domain.event_history import TypedEventAssertion
+from menhir.domain.event_history import TypedEventAssertion, normalize_text as _norm
 from menhir.domain.recall import EventAuthorityVerdict
 from menhir.services.event_history_recall import (
     CANONICAL_PREDICATE_ACQUIRED,
@@ -32,9 +32,6 @@ from menhir.services.event_history_recall import (
     select_event_recall,
 )
 
-#: Collapse any run of whitespace to a single space for query normalization.
-_WHITESPACE_RE = re.compile(r"\s+")
-
 #: A guard for explicit completed-acquisition anchors in temporal questions that are intentionally
 #: broader than the narrow latest/predecessor answer selector. It does not classify an answer route
 #: or select an event; it only prevents ordinary memories from masquerading as an answer when the
@@ -45,11 +42,6 @@ _EXPLICIT_ANCHOR_GUARD_RE = re.compile(
     re.IGNORECASE,
 )
 _ANCHOR_GUARD_DETERMINER_RE = re.compile(r"^(?:a|an|the|my)\s+", re.IGNORECASE)
-
-
-def _norm(value: str | None) -> str:
-    """Blank-tolerant, trimmed, lowercased, whitespace-collapsed normalization."""
-    return _WHITESPACE_RE.sub(" ", (value or "").strip().lower()).strip()
 
 
 def _nonblank(value: str | None) -> bool:

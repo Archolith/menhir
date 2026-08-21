@@ -24,15 +24,13 @@ from menhir.domain.event_history import (
     EventSelectionIntent,
     SelectionStatus,
     TypedEventAssertion,
+    normalize_text as _norm,
     select_event_assertion,
 )
 from menhir.domain.temporal import parse_iso8601
 
 #: The single canonical predicate for completed-acquisition semantics (mirrors perception).
 CANONICAL_PREDICATE_ACQUIRED = "acquired"
-
-#: Collapse any run of whitespace to a single space for query/anchor normalization.
-_WHITESPACE_RE = re.compile(r"\s+")
 
 #: Conservative surface verbs marking a completed acquisition, including gerund inflections. This is
 #: a generic closed allowlist (never a prefix/synonym matcher), word-boundary matched.
@@ -65,11 +63,6 @@ _GENERIC_HEADS = frozenset({
     "things", "items", "objects", "gadgets", "devices", "tools", "products",
     "accessories", "supplies",
 })
-
-
-def _norm(value: str | None) -> str:
-    """Blank-tolerant, trimmed, lowercased, whitespace-collapsed normalization for identity/text."""
-    return _WHITESPACE_RE.sub(" ", (value or "").strip().lower()).strip()
 
 
 def _last_word(phrase: str) -> str | None:
