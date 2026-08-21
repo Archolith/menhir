@@ -238,6 +238,15 @@ class MergeCoordinator:
         if expected_after and observed_fp == expected_after:
             return (WOULD_MARK_ALREADY_APPLIED, diag)
 
+        # No frozen precondition -> fail closed, matching the sibling coordinators (CF-21). The
+        # before-state cannot be verified, so the row is quarantined; this is a missing precondition,
+        # not drift -- no competing writer was observed, so do not report one.
+        if expected_before is None:
+            diag["observed_error"] = (
+                "request has no expected_before_sha256; cannot verify precondition"
+            )
+            return (WOULD_NEEDS_REVIEW, diag)
+
         # Neither expected state -> quarantine. A background replay must never paper over a graph
         # that some other writer changed.
         if observed_fp != expected_before:
@@ -311,11 +320,16 @@ class MergeCoordinator:
 
         # Neither expected state -> quarantine. A background replay must never paper over a graph
         # that some other writer changed.
+        #
+        # The raised message carries the SAME reason as the journal row (CF-210). Hardcoding
+        # "neither the expected before- nor after-state" described drift for the
+        # missing-precondition case too, which is the misreport this finding is about -- an
+        # operator reading it goes hunting for a competing writer that was never there.
         if outcome == WOULD_NEEDS_REVIEW:
             self.journal.mark_needs_review(op_id, observed_error=diag["observed_error"])
             raise MergeDrift(
-                f"merge {survivor_uuid} <- {absorbed_uuid} (op {op_id}): the graph is in neither "
-                "the expected before- nor after-state; NOT mutating"
+                f"merge {survivor_uuid} <- {absorbed_uuid} (op {op_id}): "
+                f"{diag['observed_error']}; NOT mutating"
             )
 
         # Expected before-state -> mutate. merge_entity re-checks eligibility itself and repeats the
