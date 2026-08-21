@@ -35,6 +35,7 @@ from typing import Any, Protocol
 
 from menhir.infrastructure.graph_operations import GraphOperationsJournal
 from menhir.infrastructure.metric_receipts import MetricReceiptStore
+from menhir.infrastructure.telemetry import connect_telemetry_db
 from menhir.services.saga_writer_heartbeat import owned_mutation
 from menhir.services.saga_reconcile_outcomes import (
     DRIFTED,
@@ -158,6 +159,15 @@ class MetricDrift(RuntimeError):
     """The graph is in neither the expected before-state nor the expected after-state."""
 
 
+class MetricChainConflict(RuntimeError):
+    """A concurrent fold committed onto the chain head this fold was accumulating from (CF-244).
+
+    Raised BEFORE any journal row, receipt or graph mutation, so nothing was written and the fold
+    is safe to retry: it will re-read the new head and accumulate from there. Distinct from
+    `MetricDrift`, which means the GRAPH moved under a prepared operation and needs review.
+    """
+
+
 @dataclass
 class MetricWriteCoordinator:
     """Owns the telemetry sidecar and the graph adapter; the ONLY sanctioned Metric writer."""
@@ -264,6 +274,9 @@ class MetricWriteCoordinator:
             previous_receipt_op_id=prior_op,
             input_digest=digest,
             source_row_count=int(delta_count),
+            # `prior` was read outside any transaction; this makes the write conditional on the
+            # head still being it (CF-244).
+            enforce_chain_head=True,
         )
 
     def record_telemetry_absolute(
@@ -345,7 +358,13 @@ class MetricWriteCoordinator:
         previous_receipt_op_id: str | None = None,
         input_digest: str | None = None,
         source_row_count: int | None = None,
+        enforce_chain_head: bool = False,
     ) -> dict[str, Any]:
+        # `enforce_chain_head` is opt-in because only the ACCUMULATOR path chains: it derives its
+        # aggregate from the prior receipt, so a moved head invalidates the value it is about to
+        # write. The recompute path derives its aggregate from the source rows themselves and is
+        # correct regardless of what the head is, so forcing the check there would reject writes
+        # that are perfectly valid.
         key = self.view_key(namespace, subject, counter)
         op_id = uuidlib.uuid4().hex
 
@@ -396,7 +415,40 @@ class MetricWriteCoordinator:
 
         # (1) PREPARED -- journal row AND receipt commit together, in ONE SQLite transaction.
         # If this commit fails, nothing was written and no graph mutation has occurred.
-        with sqlite3.connect(self.telemetry_db_path) as conn:
+        #
+        # `connect_telemetry_db` rather than a bare `sqlite3.connect`: the seam applies the busy
+        # timeout, without which the second writer of a contended chain fails instantly with
+        # `database is locked` instead of waiting for the first to finish (CF-144's seam, and the
+        # chain check below makes contention here a normal event rather than a rarity).
+        # Both stores lazily CREATE TABLE on first use, each on a connection of its own. Under the
+        # BEGIN IMMEDIATE below that DDL would block on the write lock this transaction is holding
+        # and fail on the busy timeout -- a self-deadlock reachable only on the first fold of a
+        # process. Warm them before the lock is taken; both are no-ops afterwards.
+        self.receipts._ensure_ready()
+        self.journal._ensure_ready()
+        with connect_telemetry_db(self.telemetry_db_path) as conn:
+            if enforce_chain_head:
+                # (CF-244) COMPARE-AND-SET on the chain head. `previous_receipt_op_id` was read
+                # OUTSIDE any transaction, and `latest_for_key` only counts COMMITTED ops -- so a
+                # concurrent fold that had already PREPAREd was invisible to it, and both folds
+                # chained from the same parent. Whichever committed second overwrote the other's
+                # aggregate (one delta silently lost) and both receipts claimed the same
+                # `previous_receipt_op_id`, forking the digest chain that exists to make the fold
+                # auditable.
+                #
+                # BEGIN IMMEDIATE takes the write lock before the re-read, so the head cannot
+                # change between checking it and inserting on top of it. A losing writer raises
+                # rather than proceeding: a fold is safe to retry, a forked chain is not
+                # repairable after the fact.
+                conn.execute("BEGIN IMMEDIATE")
+                head = self.receipts.latest_for_key(key, conn=conn)
+                head_op = str(head["op_id"]) if head else None
+                if head_op != previous_receipt_op_id:
+                    raise MetricChainConflict(
+                        f"metric chain head moved for {key!r}: this fold accumulated onto "
+                        f"{previous_receipt_op_id!r} but the committed head is now {head_op!r}; "
+                        "the fold was not applied and is safe to retry"
+                    )
             self.journal.prepare(
                 operation_kind="METRIC_WRITE",
                 request_json=_canonical(request),

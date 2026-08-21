@@ -160,7 +160,13 @@ class MetricReceiptStore:
             ).fetchone()
             return dict(row) if row else None
 
-    def latest_for_key(self, view_key: str, *, committed_only: bool = True) -> dict[str, Any] | None:
+    def latest_for_key(
+        self,
+        view_key: str,
+        *,
+        committed_only: bool = True,
+        conn: sqlite3.Connection | None = None,
+    ) -> dict[str, Any] | None:
         """The head of the accumulator chain for a Metric key.
 
         ``committed_only`` (default) restricts the head to receipts whose graph operation actually
@@ -172,10 +178,25 @@ class MetricReceiptStore:
 
         rowid (SQLite insertion order) breaks created_at ties deterministically, so two receipts
         written in the same microsecond still order by write order.
+
+        Pass ``conn`` to read the head inside a caller-owned transaction (CF-244). The chain check
+        in ``MetricWriteCoordinator._saga_write`` has to re-read the head and insert the next
+        receipt atomically; opening a second connection here would read OUTSIDE that transaction
+        and could not see -- or could deadlock against -- the writer's own lock.
         """
         self._ensure_ready()
-        with connect_telemetry_db(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
+        if conn is not None:
+            return self._latest_for_key_on(conn, view_key, committed_only=committed_only)
+        with connect_telemetry_db(self.db_path) as owned:
+            return self._latest_for_key_on(owned, view_key, committed_only=committed_only)
+
+    @staticmethod
+    def _latest_for_key_on(
+        conn: sqlite3.Connection, view_key: str, *, committed_only: bool
+    ) -> dict[str, Any] | None:
+        previous_factory = conn.row_factory
+        conn.row_factory = sqlite3.Row
+        try:
             if committed_only:
                 row = conn.execute(
                     "SELECT r.* FROM metric_receipts r "
@@ -191,6 +212,9 @@ class MetricReceiptStore:
                     (view_key,),
                 ).fetchone()
             return dict(row) if row else None
+        finally:
+            # A caller-owned connection is borrowed, not ours to reconfigure.
+            conn.row_factory = previous_factory
 
     def chain_for_key(self, view_key: str) -> list[dict[str, Any]]:
         """All receipts for a Metric key, oldest first (the full accumulator lineage).
