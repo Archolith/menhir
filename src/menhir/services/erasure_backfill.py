@@ -38,6 +38,27 @@ _LEGACY_UNADDRESSABLE: dict[str, tuple[str, ...]] = {
     "extraction_lab_runs": ("current_message", "arms_json", "request_json", "result_json"),
 }
 
+#: The MCP operations whose recorded payload carries USER CONTENT rather than operational shape.
+#:
+#: Owner ruling 2026-08-21: *"There is very little value in preserving historical raw
+#: prompt/memory snippets inside an observability sidecar."* Measured on the live sidecar, these
+#: five account for 6,131 of 218,921 rows; everything else is scheduler, enrichment and identity
+#: telemetry whose previews are operation shape (`{"max_age_hours": 4.0}`) and carry nothing to
+#: erase.
+#:
+#: DELIBERATELY NOT the same selector as `_LEGACY_UNADDRESSABLE`. That one redacts rows whose
+#: LINEAGE is NULL -- 214,969 rows spanning 78 operations on this deployment -- which is the
+#: opposite of the ruling: it would mutate ~209k operational rows for no privacy gain while
+#: leaving a content row that happens to HAVE lineage untouched. Content-bearing and
+#: unaddressable are different properties and they get different functions.
+CONTENT_BEARING_OPERATIONS: tuple[str, ...] = (
+    "add_memory",
+    "add_memory_and_track",
+    "recall_memories",
+    "build_context",
+    "ingest_document",
+)
+
 
 @dataclass
 class BackfillReport:
@@ -191,6 +212,54 @@ def redact_unaddressable_legacy(
     return redacted
 
 
+def redact_content_operations(
+    conn: sqlite3.Connection,
+    *,
+    dry_run: bool = True,
+    operations: tuple[str, ...] = CONTENT_BEARING_OPERATIONS,
+) -> dict[str, int]:
+    """Redact the stored payload of telemetry rows for content-bearing OPERATIONS.
+
+    Irreversible. Sets `payload_preview` and `error` to NULL on `mcp_events` rows whose
+    `operation` is one of *operations*, regardless of lineage.
+
+    **Why lineage is not part of the predicate.** A content row that happens to carry a
+    namespace is still a verbatim copy of a user's memory text or search query sitting in an
+    observability sidecar; that it *could* be reached by a subject purge is not a reason to keep
+    it. Conversely the 209k lineage-less operational rows carry no content and redacting them
+    destroys telemetry for nothing. The selector follows the content, which is the thing being
+    protected.
+
+    Rows already redacted are matched too and simply write NULL over `[redacted]`, so re-running
+    is idempotent rather than an error.
+    """
+    if not operations:
+        return {}
+    redacted: dict[str, int] = {}
+    table = "mcp_events"
+    if not _table_exists(conn, table):
+        return {}
+    placeholders = ",".join("?" for _ in operations)
+    for column in ("payload_preview", "error"):
+        if not _column_exists(conn, table, column):
+            continue
+        where = (
+            f"operation IN ({placeholders}) AND {column} IS NOT NULL AND {column} != ''"
+        )
+        if dry_run:
+            row = conn.execute(
+                f"SELECT COUNT(*) FROM {table} WHERE {where}", operations
+            ).fetchone()
+            count = int(row[0]) if row else 0
+        else:
+            count = conn.execute(
+                f"UPDATE {table} SET {column} = NULL WHERE {where}", operations
+            ).rowcount
+        if count:
+            redacted[f"{table}.{column}"] = count
+    return redacted
+
+
 def run_backfill(
     conn: sqlite3.Connection,
     graph_adapter: Any,
@@ -226,6 +295,8 @@ __all__ = [
     "BackfillReport",
     "backfill_merge_audit_namespaces",
     "redact_unaddressable_legacy",
+    "redact_content_operations",
+    "CONTENT_BEARING_OPERATIONS",
     "run_backfill",
     "survey_unaddressable_legacy",
 ]
