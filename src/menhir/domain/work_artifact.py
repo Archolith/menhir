@@ -300,7 +300,7 @@ def status_from_header(raw: str | None, artifact_type: str) -> tuple[str | None,
 
     words = key.split(" ")
     mapped = None
-    for width in (len(words), 2, 1):
+    for width in range(len(words), 0, -1):
         candidate = " ".join(words[:width])
         mapped = STATUS_HEADER_ALIASES.get(candidate)
         if mapped is not None:
