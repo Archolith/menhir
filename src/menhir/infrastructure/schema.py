@@ -64,6 +64,12 @@ PHASE_ONE_REQUIRED_INDEXES = (
     "evidence_uuid_idx",
     # View primitive indexes — supersession lookup + current-version filters.
     "entity_view_key_idx",
+    # CF-112: the supersession lookup is a DISJUNCTION over (view_key OR qs_key). A
+    # disjunction needs EVERY branch indexed or the planner unions the seek with a full
+    # label scan -- measured at 61,005 dbHits vs 4 on 20,500 :Entity nodes, with no early
+    # exit from LIMIT 1. Required, not merely created, so an existing install reports
+    # schema_not_ready until the index that makes the write path cheap actually exists.
+    "entity_qs_key_idx",
     "entity_view_kind_idx",
     "entity_view_current_idx",
     # Entity-anchored scalar_state identity (ScalarStateView Piece B) — required so an existing
@@ -71,6 +77,7 @@ PHASE_ONE_REQUIRED_INDEXES = (
     "entity_view_subject_uuid_idx",
     # Metric class indexes — instrumentation Views under the :Metric label (Metric plan A5).
     "metric_view_key_idx",
+    "metric_qs_key_idx",
     "metric_view_kind_idx",
     "metric_view_current_idx",
     "metric_source_idx",
@@ -191,6 +198,10 @@ def _view_index_queries() -> list[str]:
     already carry these props, so no node backfill (no _SCHEMA_V bump)."""
     return [
         "CREATE INDEX entity_view_key_idx IF NOT EXISTS FOR (n:Entity) ON (n.view_key)",
+        # CF-112: qs_key is the backward-compatibility branch of the supersession
+        # disjunction in ViewRepository._current_by_key. Unindexed, it forced a full
+        # :Entity scan on EVERY View write.
+        "CREATE INDEX entity_qs_key_idx IF NOT EXISTS FOR (n:Entity) ON (n.qs_key)",
         "CREATE INDEX entity_view_kind_idx IF NOT EXISTS FOR (n:Entity) ON (n.view_kind)",
         "CREATE INDEX entity_view_current_idx IF NOT EXISTS FOR (n:Entity) ON (n.view_current)",
         # entity-anchored scalar_state Views key on the resolved UUID; index it so per-entity
@@ -209,6 +220,7 @@ def _metric_index_queries() -> list[str]:
     return [
         "CREATE CONSTRAINT metric_uuid_unique IF NOT EXISTS FOR (n:Metric) REQUIRE n.uuid IS UNIQUE",
         "CREATE INDEX metric_view_key_idx IF NOT EXISTS FOR (n:Metric) ON (n.view_key)",
+        "CREATE INDEX metric_qs_key_idx IF NOT EXISTS FOR (n:Metric) ON (n.qs_key)",
         "CREATE INDEX metric_view_kind_idx IF NOT EXISTS FOR (n:Metric) ON (n.view_kind)",
         "CREATE INDEX metric_view_current_idx IF NOT EXISTS FOR (n:Metric) ON (n.view_current)",
         "CREATE INDEX metric_source_idx IF NOT EXISTS FOR (n:Metric) ON (n.source)",
