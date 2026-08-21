@@ -317,7 +317,7 @@ class ScalarStateService:
 
         return {
             "subject_uuid": subject_uuid,
-            "complete": True,
+            "complete": not stale_skipped,
             "written": len(written),
             "retired": len(retired),
             "stale_skipped": stale_skipped,
