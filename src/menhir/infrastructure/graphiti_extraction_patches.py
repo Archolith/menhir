@@ -427,6 +427,18 @@ def _is_self_endpoint(normalized_name: str, episode_text: str) -> bool:
     return normalized_name in _SELF_THIRD_PERSON or normalized_name in _SELF_FIRST_PERSON
 
 
+def _contains_token_sequence(haystack: list[str], needle: list[str]) -> bool:
+    """True when `needle` appears as a contiguous run of whole tokens in `haystack` (CF-192)."""
+    if not needle or len(needle) > len(haystack):
+        return False
+    first = needle[0]
+    span = len(needle)
+    for i, token in enumerate(haystack):
+        if token == first and haystack[i:i + span] == needle:
+            return True
+    return False
+
+
 def _is_synthesizable_endpoint(
     name: Any,
     episode_text: str,
@@ -452,8 +464,31 @@ def _is_synthesizable_endpoint(
         text for text in grounding_texts if isinstance(text, str) and text
     )
     if available_grounding:
-        normalized = stripped.casefold()
-        return any(normalized in text.casefold() for text in available_grounding)
+        # CF-192(a): match on WORD BOUNDARIES, not bare substring containment.
+        #
+        # `normalized in text.casefold()` admitted any short hallucinated name that happened to sit
+        # inside a longer word: against "I joined the channel yesterday" it accepted `Ann`
+        # ("ch-ann-el"), `Chan`, `Ester` ("y-ester-day") and `Yes` ("yes-terday"). This guard stands
+        # between a model-hallucinated edge endpoint and a materialized KG entity, and because
+        # previous-episode texts join the grounding set it got WEAKER the more context the
+        # extractor was given.
+        #
+        # The docstring above already required the name to "appear literally"; substring
+        # containment is not that. Note this also FIXES the docstring's own worked example --
+        # `Rachel` for "She moved to Chicago" was rejected before, because the antecedent is
+        # resolved from a previous episode whose text must contain the token, and a substring test
+        # gives no better answer there than a token test does.
+        #
+        # A multi-word name ("Service Mesh") is matched as a phrase of whole tokens, so internal
+        # spacing and punctuation in the source text do not defeat it.
+        name_tokens = [t.casefold() for t in _CURRENT_MESSAGE_TOKEN_RE.findall(stripped)]
+        if not name_tokens:
+            return False
+        for text in available_grounding:
+            text_tokens = [t.casefold() for t in _CURRENT_MESSAGE_TOKEN_RE.findall(text)]
+            if _contains_token_sequence(text_tokens, name_tokens):
+                return True
+        return False
     return True
 
 
@@ -566,18 +601,30 @@ def _current_message_anchor_tokens(episode_text: str) -> set[str]:
     }
 
 
+#: Edge fields that may serve as EVIDENCE that an edge is grounded in the current turn.
+#:
+#: CF-192(b): `relation_type` is deliberately absent. It is model-supplied boilerplate -- the repair
+#: prompt (`_RELATIONLESS_REPAIR_INSTRUCTIONS`) instructs the model to emit relation labels -- so
+#: counting its tokens as evidence lets the model ground its own edge. Measured: against
+#: "Thanks, that helps me understand more." an edge whose endpoints and fact were copied entirely
+#: from prior context was admitted, matching on `more` supplied by its own
+#: `WANTS_TO_KNOW_MORE_ABOUT` label. An acknowledgement turn could persist a durable interest edge
+#: about an entity the user never mentioned, with the receipt reporting 0 suppressed.
+_EDGE_ANCHOR_EVIDENCE_FIELDS = ("source_entity_name", "target_entity_name", "fact")
+
+
 def _edge_has_current_message_anchor(edge: dict[str, Any], episode_text: str) -> bool:
+    """True when the edge shares a meaningful token with the CURRENT turn.
+
+    A deterministic precision guard against the model re-emitting a claim from preceding context.
+    Only fields carrying extracted CONTENT count as evidence -- see
+    `_EDGE_ANCHOR_EVIDENCE_FIELDS`.
+    """
     current_tokens = _current_message_anchor_tokens(episode_text)
     if not current_tokens:
         return False
     edge_text = " ".join(
-        str(edge.get(field) or "")
-        for field in (
-            "source_entity_name",
-            "target_entity_name",
-            "relation_type",
-            "fact",
-        )
+        str(edge.get(field) or "") for field in _EDGE_ANCHOR_EVIDENCE_FIELDS
     )
     edge_tokens = {
         token.casefold() for token in _CURRENT_MESSAGE_TOKEN_RE.findall(edge_text)
