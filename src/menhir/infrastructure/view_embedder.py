@@ -29,7 +29,7 @@ from menhir.infrastructure.observability import (
     fail_llm_usage_call,
     start_llm_usage_call,
 )
-from menhir.infrastructure.providers import ProviderConfig
+from menhir.infrastructure.providers import DEFAULT_REQUEST_TIMEOUT_S, ProviderConfig
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +68,17 @@ def make_view_embedder(settings: MemorySettings) -> ViewEmbedder | None:
             base_url = acquire_llama_url_sync(
                 fallback=base_url, task="memory: view counter embed", timeout_s=120.0,
             )
-        client = OpenAI(base_url=base_url, api_key=api_key)
+        # CF-190: see the note in sync_llm.py. This seam is installed as the maintenance
+        # scheduler's `experience_embed` hook with `experience_counter_enabled` defaulting True,
+        # so an SDK-default client lets a hung endpoint hold a scheduler worker thread for ~30
+        # minutes. The `except Exception` below reports only "View counter embed failed; writing
+        # BM25-only" -- the operator never sees the stall, which is why the bound must be here.
+        client = OpenAI(
+            base_url=base_url,
+            api_key=api_key,
+            timeout=DEFAULT_REQUEST_TIMEOUT_S,
+            max_retries=0,
+        )
         client_holder["client"] = client
         return client
 

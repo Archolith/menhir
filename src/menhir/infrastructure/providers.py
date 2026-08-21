@@ -7,6 +7,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
 import json
+import logging
 from typing import Any, Protocol, runtime_checkable
 from urllib import error as urllib_error
 from urllib import parse as urllib_parse
@@ -24,6 +25,8 @@ from menhir.infrastructure.observability import (
 SchedulerUrlAcquire = Callable[..., Awaitable[str]]
 OpenAIClientFactory = Callable[..., Any]
 RetrySleep = Callable[[float], Awaitable[None]]
+
+logger = logging.getLogger(__name__)
 
 
 class ProviderKind(StrEnum):
@@ -160,7 +163,20 @@ class ChatBackend(Protocol):
         max_tokens: int,
         temperature: float,
     ) -> str:
-        """Return plain text chat completion output."""
+        """Return plain text chat completion output.
+
+        An empty or refused completion returns ""; implementations must not
+        raise for that case.
+        """
+
+
+#: The package-wide fail-fast budget for one LLM/embedding HTTP call.
+#:
+#: Named and exported because the OpenAI SDK's defaults are the opposite policy -- 600 s read plus
+#: 2 automatic retries, i.e. ~30 minutes worst case per call. Every seam that constructs a client
+#: must pass this and `max_retries=0` explicitly; two seams did not, which is CF-190. Compare
+#: `llm.py`: "fail fast -- don't block MCP on a down server".
+DEFAULT_REQUEST_TIMEOUT_S: float = 30.0
 
 
 @dataclass(frozen=True)
@@ -169,7 +185,7 @@ class ProviderRuntimeDependencies:
 
     scheduler_url_acquire: SchedulerUrlAcquire = acquire_llama_url_async
     openai_client_factory: OpenAIClientFactory = build_async_openai_client
-    request_timeout_s: float = 30.0
+    request_timeout_s: float = DEFAULT_REQUEST_TIMEOUT_S
     retry_sleep: RetrySleep = asyncio.sleep
 
 
@@ -251,7 +267,10 @@ class OpenAIStyleChatBackend:
             fail_llm_usage_call(handle, exc)
             raise
         complete_llm_usage_call(handle, result=response)
-        return response.choices[0].message.content or ""
+        choices = response.choices or []
+        if not choices:
+            return ""
+        return choices[0].message.content or ""
 
 
 @dataclass
@@ -316,7 +335,8 @@ class GeminiChatBackend:
                 text = part.get("text")
                 if text:
                     return str(text)
-        raise RuntimeError("Gemini returned no text content.")
+        logger.warning("Gemini returned no text content.")
+        return ""
 
 
 @dataclass

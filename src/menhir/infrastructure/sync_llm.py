@@ -19,7 +19,11 @@ from menhir.infrastructure.observability import (
     fail_llm_usage_call,
     start_llm_usage_call,
 )
-from menhir.infrastructure.providers import ProviderConfig, ProviderKind
+from menhir.infrastructure.providers import (
+    DEFAULT_REQUEST_TIMEOUT_S,
+    ProviderConfig,
+    ProviderKind,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +73,18 @@ def make_sync_chat(
                     "sync chat seam will not fall back to the public OpenAI endpoint: the "
                     "configured chat provider is local and no local endpoint could be resolved"
                 )
-        client = OpenAI(api_key=cfg.api_key, base_url=base_url or None)
+        # CF-190: both must be explicit. The SDK defaults to a 600 s read timeout and 2 automatic
+        # retries, so an unrefused-but-hung server holds this thread for ~30 minutes per call --
+        # and this seam runs under `asyncio.to_thread`, so the stall is a consumed thread-pool
+        # slot. `llm.py` states the policy for the async path: "fail fast -- don't block MCP on a
+        # down server". Retries belong to the caller, which already implements its own bounded
+        # retry loop; SDK-level retries would multiply that budget invisibly.
+        client = OpenAI(
+            api_key=cfg.api_key,
+            base_url=base_url or None,
+            timeout=DEFAULT_REQUEST_TIMEOUT_S,
+            max_retries=0,
+        )
         client_holder["client"] = client
         return client
 
