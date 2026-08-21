@@ -7,6 +7,7 @@ import os
 import shutil
 import stat
 import subprocess
+import sys
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -174,6 +175,7 @@ def apply_setup(
             # every API key, so restrict it before the operator is told to fill it in.
             env_path.chmod(0o600)
             changes.append(f"created {env_path}")
+            changes.extend(_restrict_secret_file(env_path))
 
     if configure_git_hooks:
         pre_push = repo / ".githooks" / "pre-push"
@@ -322,3 +324,47 @@ __all__ = [
     "inspect_setup",
     "setup",
 ]
+
+
+def _restrict_secret_file(path: Path) -> list[str]:
+    """Tighten a secret-bearing file's ACL on Windows, where ``chmod`` cannot (CF-43).
+
+    ``os.chmod`` on win32 toggles ONE bit -- the read-only attribute -- and does nothing to the
+    ACL. So ``env_path.chmod(0o600)`` above is correct and sufficient on POSIX and inert on the
+    platform this project is primarily developed on: the file stays readable by every account on
+    the machine. The finding was closed on the POSIX half alone.
+
+    `icacls` is the supported way to do this without a pywin32 dependency: strip inheritance and
+    grant only the current user. Best-effort by design -- a setup command must not fail because
+    an ACL could not be tightened, and the caller is told either way rather than being left to
+    assume it worked.
+    """
+    if sys.platform != "win32":
+        return []
+
+    user = os.environ.get("USERNAME") or ""
+    if not user:
+        return [f"WARNING: could not restrict {path}: USERNAME is unset"]
+    domain = os.environ.get("USERDOMAIN") or ""
+    # Joined rather than interpolated: a literal backslash inside an f-string is an escape
+    # sequence waiting to be mangled, and DOMAIN\user is exactly the shape icacls expects.
+    principal = "\\".join([domain, user]) if domain else user
+
+    try:
+        completed = subprocess.run(
+            ["icacls", str(path), "/inheritance:r", "/grant:r", f"{principal}:F"],
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return [f"WARNING: could not restrict {path} to {principal}: {exc}"]
+
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout or "").strip().splitlines()
+        return [
+            f"WARNING: could not restrict {path} to {principal}: "
+            f"icacls exited {completed.returncode}: {detail[0] if detail else 'no output'}"
+        ]
+    return [f"restricted {path} to {principal} (ACL)"]
