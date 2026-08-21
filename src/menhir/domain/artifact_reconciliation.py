@@ -361,6 +361,11 @@ def parse_frontmatter(text: str) -> tuple[dict[str, Any], str, tuple[str, ...]]:
         return {}, text, ("frontmatter_not_terminated",)
 
     mapping: dict[str, Any] = {}
+    #: Keys a duplicate line has refused. A duplicate is ambiguous about which binding is
+    #: authoritative, and ambiguity fails closed: the value is NOT bound at all rather than picking
+    #: first or last. Tracked separately from ``mapping`` so a third occurrence cannot silently
+    #: re-bind the key after the first duplicate popped it.
+    refused_keys: set[str] = set()
     current_key: str | None = None
     for raw_line in lines[1:end]:
         line = raw_line.rstrip()
@@ -388,6 +393,11 @@ def parse_frontmatter(text: str) -> tuple[dict[str, Any], str, tuple[str, ...]]:
         key, _, value = line.partition(":")
         key = key.strip().lower()
         value = value.strip()
+        if key in mapping or key in refused_keys:
+            errors.append(f"duplicate_frontmatter_key:{key}")
+            mapping.pop(key, None)
+            refused_keys.add(key)
+            continue
         if value.startswith("[") and value.endswith("]"):
             items = [
                 part.strip().strip("'\"")
