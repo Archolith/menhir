@@ -1811,6 +1811,24 @@ def _resolve_subject(
         bound = resolve_self_subject(namespace)
         if bound is not None and bound[0]:
             return bound
+        # CF-131: the seam was CONSULTED for a real namespace and failed (ensure_self_entity
+        # raised and was swallowed). Refuse the lexical fallback -- self binds through the
+        # canonical seam or not at all.
+        #
+        # Scoped to `namespace` truthiness on purpose, because that is exactly the condition
+        # under which the fallback is dangerous. `_make_self_seam` returns None in two shapes:
+        #
+        #   ns is blank    -> it declines WITHOUT touching the adapter. ensure_self_entity never
+        #                     runs, so _absorb_self_entity_forks never runs for that namespace,
+        #                     so a per-episode `user` node is NOT doomed. Legacy lexical binding
+        #                     stays, which is what test_resolve_falls_through_when_no_seam and
+        #                     the coordinator tests pin.
+        #   ns is present  -> the MERGE was attempted and failed. The self machinery IS live here,
+        #                     so the next successful ensure_self_entity runs
+        #                     _absorb_self_entity_forks, which ends in DETACH DELETE and orphans
+        #                     any assertion bound to the twin onto a dead uuid. Refuse.
+        if namespace:
+            return None, None
     local = _bind_from_candidates(subject_text, entities)
     if local[0] is not None:
         return local

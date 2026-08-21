@@ -517,6 +517,18 @@ class _FakeAdapter:
         self._pending = pending or []
         self.calls: list[str] = []
         self.recorded: list = []
+        # CF-131: production ALWAYS wires the self seam (TypedScalarPerceptionService passes
+        # resolve_self_subject=self._make_self_seam() at both call sites, and MemoryGraphAdapter
+        # implements ensure_self_entity). This fake omitted it, so the seam raised, declined, and
+        # a first-person subject fell back to lexical name-match -- the exact bypass CF-131 is
+        # about. Modelling the seam is what makes this fake match a real deployment.
+        self.self_uuids: set[str] = set()
+
+    def ensure_self_entity(self, namespace):
+        self.calls.append("ensure_self")
+        uuid = f"self-{namespace or 'default'}"
+        self.self_uuids.add(uuid)
+        return uuid
 
     def activate_scalar_state(self):
         self.calls.append("activate")
@@ -535,7 +547,8 @@ class _FakeAdapter:
     def record_typed_assertion(self, assertion):
         self.calls.append("record")
         self.recorded.append(assertion)
-        real = any(e["uuid"] == assertion.subject_uuid for e in self._entities)
+        real = (assertion.subject_uuid in self.self_uuids
+                or any(e["uuid"] == assertion.subject_uuid for e in self._entities))
         return {"assertion_id": f"a{len(self.recorded)}", "binding_pending": not real, "created": True}
 
     def pending_advisory_assertions(self, *, namespaces=None, limit=200):
@@ -726,9 +739,12 @@ def test_repair_mismatch_is_surfaced_not_rebuilt():
 
 @pytest.mark.unit
 def test_coordinator_repair_enforces_activation_and_pulls_pending():
+    # CF-131: a third-party subject, because this test is about the REPAIR pass (activation
+    # ordering + pulling pending rows), not about self-binding. A first-person subject now always
+    # binds through the canonical self seam, which would make "still pending" unreachable here.
     adapter = _FakeAdapter(
-        entities=[{"uuid": "ent-user", "name": "user"}],
-        pending=[_pending_row(subject_display="user", episode_uuid="ep-1")])
+        entities=[{"uuid": "ent-user", "name": "Alice"}],
+        pending=[_pending_row(subject_display="Alice", episode_uuid="ep-1")])
     svc = _FakeService()
     coord = TypedScalarPerceptionService(adapter, svc)
     out = coord.repair_pending_bindings()

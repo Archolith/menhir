@@ -196,6 +196,7 @@ class _ScalarGraph(_FakeGraph):
         self.recon_calls: list = []
         self.counter_marked: list[str] = []
         self.recorded: list = []
+        self.self_uuids: set[str] = set()
         self.rebuilt: list[str] = []             # (subject) of SUCCESSFUL rebuilds
         self.rebuilt_ns: list = []               # parallel namespaces of successful rebuilds
         self.cursor: dict[str, tuple] = {}       # ns -> (cursor_at, uuid, perceiver_version)
@@ -233,6 +234,14 @@ class _ScalarGraph(_FakeGraph):
         self.advances.append((namespace, cursor_at, cursor_uuid, perceiver_version))
 
     # coordinator adapter surface
+    def ensure_self_entity(self, namespace):
+        # CF-131: production ALWAYS wires the self seam, so a fake without this method makes the
+        # seam decline and a first-person subject fall back to lexical name-match -- the bypass
+        # CF-131 is about. Modelling it is what makes this fake match a real deployment.
+        uuid = f"self-{namespace or 'default'}"
+        self.self_uuids.add(uuid)
+        return uuid
+
     def activate_scalar_state(self):
         if self._activate_raises is not None:
             raise self._activate_raises
@@ -246,8 +255,9 @@ class _ScalarGraph(_FakeGraph):
 
     def record_typed_assertion(self, assertion):
         self.recorded.append(assertion)
-        real = any(assertion.subject_uuid == e["uuid"]
-                   for ents in self._entities.values() for e in ents)
+        real = (assertion.subject_uuid in self.self_uuids
+                or any(assertion.subject_uuid == e["uuid"]
+                       for ents in self._entities.values() for e in ents))
         if real:
             # adoption on the same node: clears binding_pending, sets projection_pending (View not yet
             # rebuilt), and adopts the resolved subject — mirrors the record cypher.
@@ -357,7 +367,11 @@ def test_flag_on_runs_independent_scalar_pass_and_advances_only_scalar_cursor() 
     assert out["llm_calls"] == 3                         # includes scalar-only LLM work
     assert [a[0] for a in graph.advances] == ["lme-a"]   # scalar cursor advanced
     assert graph.counter_marked == []                    # counter watermark UNTOUCHED
-    assert graph.rebuilt == ["ent-user"]                 # bound -> View rebuilt
+    # CF-131: the episode says "I wake at 07:30", so the subject is FIRST PERSON and binds
+    # through the canonical self seam, not to the per-episode "user" entity. That is the
+    # whole point of the seam -- the per-episode node is a twin that _absorb_self_entity_forks
+    # later DETACH DELETEs.
+    assert graph.rebuilt == ["self-lme-a"]               # bound -> View rebuilt
 
 
 @pytest.mark.unit
@@ -420,7 +434,7 @@ def test_scalar_budget_cap_stops_mid_backfill_and_leaves_cursor_mid_namespace() 
 
 def _pending_row(**over):
     base = dict(
-        assertion_id="a-sk-p", source_key="sk-p", subject_uuid="unbound:sk-p", subject_display="user",
+        assertion_id="a-sk-p", source_key="sk-p", subject_uuid="unbound:sk-p", subject_display="Alice",
         binding_pending=True, projection_pending=False, attribute="wake", scope="",
         value_kind="clock_time", unit="", operation="absolute", value="07:30",
         stated_span="wake at 07:30", episode_uuid="ep-p", span_start=0, span_end=13,
@@ -438,8 +452,8 @@ def test_scheduler_runs_pending_binding_repair_after_backfill() -> None:
     graph = _ScalarGraph(
         scalar_dirty=[],                       # no backfill work; isolate the repair pass
         episodes_by_ns={},
-        entities_by_ep={"ep-p": [{"uuid": "ent-user", "name": "user"}]},
-        pending=[_pending_row(subject_display="user", episode_uuid="ep-p")],
+        entities_by_ep={"ep-p": [{"uuid": "ent-user", "name": "Alice"}]},
+        pending=[_pending_row(subject_display="Alice", episode_uuid="ep-p")],
     )
     out = asyncio.run(scheduler_tasks.consolidate_personal_memory(
         graph, llm_complete=_wake_llm, k=1, enable_scalar_state=True))
@@ -465,11 +479,11 @@ def test_scheduler_repair_is_eventually_complete_past_an_unresolved_first_page()
     # (stamps them); run 2 must REACH and repair row 3 (unattempted-first); later runs revisit 1-2.
     graph = _ScalarGraph(
         scalar_dirty=[], episodes_by_ns={},
-        entities_by_ep={"ep-1": [], "ep-2": [], "ep-3": [{"uuid": "ent-user", "name": "user"}]},
+        entities_by_ep={"ep-1": [], "ep-2": [], "ep-3": [{"uuid": "ent-user", "name": "Alice"}]},
         pending=[
             _pending_row(assertion_id="a1", source_key="s1", episode_uuid="ep-1"),
             _pending_row(assertion_id="a2", source_key="s2", episode_uuid="ep-2"),
-            _pending_row(assertion_id="a3", source_key="s3", episode_uuid="ep-3", subject_display="user"),
+            _pending_row(assertion_id="a3", source_key="s3", episode_uuid="ep-3", subject_display="Alice"),
         ],
     )
     out1 = asyncio.run(scheduler_tasks.consolidate_personal_memory(
@@ -486,13 +500,13 @@ def test_scheduler_repair_respects_explicit_namespace_override() -> None:
     # targeting: an explicit namespaces=["tenant-a"] override must never repair/rebuild tenant-b.
     graph = _ScalarGraph(
         scalar_dirty=[], episodes_by_ns={"tenant-a": []},
-        entities_by_ep={"ep-a": [{"uuid": "ent-a", "name": "user"}],
-                        "ep-b": [{"uuid": "ent-b", "name": "user"}]},
+        entities_by_ep={"ep-a": [{"uuid": "ent-a", "name": "Alice"}],
+                        "ep-b": [{"uuid": "ent-b", "name": "Alice"}]},
         pending=[
             _pending_row(assertion_id="a-a", source_key="s-a", episode_uuid="ep-a",
-                         subject_display="user", namespace="tenant-a"),
+                         subject_display="Alice", namespace="tenant-a"),
             _pending_row(assertion_id="a-b", source_key="s-b", episode_uuid="ep-b",
-                         subject_display="user", namespace="tenant-b"),
+                         subject_display="Alice", namespace="tenant-b"),
         ],
     )
     out = asyncio.run(scheduler_tasks.consolidate_personal_memory(
@@ -510,12 +524,12 @@ def test_scheduler_repair_multi_namespace_override_is_globally_bounded() -> None
     # first-namespace starvation.
     graph = _ScalarGraph(
         scalar_dirty=[], episodes_by_ns={"a": [], "b": [], "c": []},
-        entities_by_ep={"ep-a": [], "ep-b": [], "ep-c": [{"uuid": "ent-c", "name": "user"}]},
+        entities_by_ep={"ep-a": [], "ep-b": [], "ep-c": [{"uuid": "ent-c", "name": "Alice"}]},
         pending=[
             _pending_row(assertion_id="a-a", source_key="s-a", episode_uuid="ep-a", namespace="a"),
             _pending_row(assertion_id="a-b", source_key="s-b", episode_uuid="ep-b", namespace="b"),
             _pending_row(assertion_id="a-c", source_key="s-c", episode_uuid="ep-c", namespace="c",
-                         subject_display="user"),
+                         subject_display="Alice"),
         ],
     )
     out1 = asyncio.run(scheduler_tasks.consolidate_personal_memory(
@@ -534,8 +548,8 @@ def test_scheduler_repair_recovers_from_a_crashed_rebuild() -> None:
     # (not lost from the repair set), and a later run retries the rebuild without re-recording.
     graph = _ScalarGraph(
         scalar_dirty=[], episodes_by_ns={},
-        entities_by_ep={"ep-p": [{"uuid": "ent-user", "name": "user"}]},
-        pending=[_pending_row(subject_display="user", episode_uuid="ep-p")],
+        entities_by_ep={"ep-p": [{"uuid": "ent-user", "name": "Alice"}]},
+        pending=[_pending_row(subject_display="Alice", episode_uuid="ep-p")],
         rebuild_fail_first=True,
     )
     out1 = asyncio.run(scheduler_tasks.consolidate_personal_memory(
