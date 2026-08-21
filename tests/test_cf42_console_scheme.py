@@ -113,3 +113,121 @@ def test_a_junk_override_falls_back_to_the_safe_default(monkeypatch) -> None:
     monkeypatch.setenv(_SCHEME_ENV, "htp")
 
     assert _dashboard_base_url("10.0.0.5", 8099, api_key="secret") == "https://10.0.0.5:8099"
+
+
+# ---------------------------------------------------------------------------
+# CF-42, second half: the backend URL itself (owner ruling 2026-08-21)
+# ---------------------------------------------------------------------------
+#
+# The console fix above covered the dashboard. `MENHIR_BACKEND_URL` was left open as "a
+# settings-level decision"; the ruling made it: require HTTPS whenever the backend is
+# non-loopback, allow HTTP for loopback.
+#
+# WHERE THE GUARD GOES, and this took three attempts to get right:
+#   * NOT `resolve_mcp_backend_url` -- its only production caller is
+#     `build_mcp_backend_diagnostics`, and a reporting surface must DESCRIBE a bad configuration,
+#     not crash on it. Guarding there broke `menhir diagnostics` on exactly the misconfiguration
+#     it exists to surface.
+#   * NOT `_normalized_backend_url` -- it also backs `backend_client_mode_enabled`, a predicate
+#     asked all over the codebase. A raising predicate breaks everything except the thing it
+#     was meant to stop.
+#   * The construction of the `BackendClient` that will attach the bearer key. That is the one
+#     point where the credential actually leaves the process.
+#
+# The CLI's own `http://{api_host}:{api_port}` self-connection is deliberately NOT guarded: it is
+# a process reaching its own server via its bind address (`0.0.0.0` on this deployment), not an
+# operator-configured remote backend.
+
+
+def _settings(backend_url: str = ""):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(backend_url=backend_url, api_host="127.0.0.1", api_port=8090)
+
+
+@pytest.mark.parametrize("url", ["http://127.0.0.1:8090", "http://localhost:8090"])
+def test_a_loopback_backend_may_stay_plaintext(monkeypatch, url: str) -> None:
+    """POSITIVE CONTROL and the reason the rule is scoped to the HOST, not the scheme: local
+    development must be untouched. This deployment's own MENHIR_BACKEND_URL is loopback http."""
+    from menhir.mcp.service_access import resolve_mcp_backend_url
+
+    monkeypatch.delenv("MENHIR_ALLOW_INSECURE_BACKEND_URL", raising=False)
+    from menhir.mcp.service_access import _require_secure_backend_url
+
+    assert _require_secure_backend_url(url) == url
+
+
+def test_a_non_loopback_plaintext_backend_is_refused(monkeypatch) -> None:
+    """THE RULING. Every request to this URL carries an Authorization bearer key -- per CF-41
+    possibly the operator one."""
+    from menhir.mcp.service_access import _require_secure_backend_url
+
+    monkeypatch.delenv("MENHIR_ALLOW_INSECURE_BACKEND_URL", raising=False)
+    with pytest.raises(ValueError, match="Refusing a plaintext backend URL"):
+        _require_secure_backend_url("http://192.168.86.56:8090")
+
+
+def test_diagnostics_reports_a_bad_backend_url_instead_of_crashing(monkeypatch) -> None:
+    """THE REGRESSION THAT MADE ME MOVE THE GUARD. `menhir diagnostics` must still render when the
+    backend URL is exactly the misconfiguration this rule refuses -- reporting it is the surface's
+    entire purpose."""
+    from types import SimpleNamespace
+
+    from menhir.mcp.service_access import build_mcp_backend_diagnostics
+
+    monkeypatch.delenv("MENHIR_ALLOW_INSECURE_BACKEND_URL", raising=False)
+    block = build_mcp_backend_diagnostics(
+        SimpleNamespace(
+            backend_url="http://backend:8099", api_host="127.0.0.1", api_port=8090,
+            agent_key="k", api_key="",
+        )
+    )
+
+    assert block["backend_url"] == "http://backend:8099"
+
+
+def test_the_mode_predicate_does_not_raise_either(monkeypatch) -> None:
+    """`backend_client_mode_enabled` is asked all over the codebase. A raising predicate breaks
+    everything except the thing it was meant to stop."""
+    from types import SimpleNamespace
+
+    from menhir.mcp.service_access import backend_client_mode_enabled
+
+    monkeypatch.delenv("MENHIR_ALLOW_INSECURE_BACKEND_URL", raising=False)
+    assert backend_client_mode_enabled(
+        SimpleNamespace(backend_url="http://backend:8099")
+    ) is True
+
+
+def test_https_to_anywhere_is_fine(monkeypatch) -> None:
+    from menhir.mcp.service_access import resolve_mcp_backend_url
+
+    monkeypatch.delenv("MENHIR_ALLOW_INSECURE_BACKEND_URL", raising=False)
+    from menhir.mcp.service_access import _require_secure_backend_url
+
+    assert (
+        _require_secure_backend_url("https://menhir.example:8090")
+        == "https://menhir.example:8090"
+    )
+
+
+def test_the_override_is_honoured_and_warns(monkeypatch, caplog) -> None:
+    """Mirrors MENHIR_ALLOW_INSECURE_REMOTE_NO_AUTH, the codebase's existing precedent for this
+    shape: refuse by default, let an operator say otherwise out loud, and warn when they do."""
+    from menhir.mcp.service_access import _require_secure_backend_url
+
+    monkeypatch.setenv("MENHIR_ALLOW_INSECURE_BACKEND_URL", "1")
+    with caplog.at_level(logging.WARNING, logger="menhir.mcp.service_access"):
+        url = _require_secure_backend_url("http://192.168.86.56:8090")
+
+    assert url == "http://192.168.86.56:8090"
+    assert any("plaintext" in r.message for r in caplog.records)
+
+
+def test_the_default_when_nothing_is_configured_is_unchanged(monkeypatch) -> None:
+    """POSITIVE CONTROL: with no backend_url the resolver builds one from api_host/api_port and
+    that path must not start refusing itself."""
+    from menhir.mcp.service_access import resolve_mcp_backend_url
+
+    monkeypatch.delenv("MENHIR_ALLOW_INSECURE_BACKEND_URL", raising=False)
+    assert resolve_mcp_backend_url(_settings()) == "http://127.0.0.1:8090"

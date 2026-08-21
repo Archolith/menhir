@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from collections import OrderedDict
 from contextvars import Token
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
 from menhir.config import MemorySettings, redact_uri_for_display
+from menhir.config.settings_helpers import is_loopback_host
 from menhir.core.backend_config import resolve_backend_auth_key
 from menhir.core.backend_impl import BackendClient, RuntimeProvider
 from menhir.core.backend_protocol import MemoryBackend
@@ -67,12 +70,52 @@ def resolve_mcp_backend_url(
     3. ``http://<api_host>:<api_port>`` (default loopback)
 
     Trailing slashes are stripped.
+
+    PURE RESOLUTION -- this does not enforce the CF-42 scheme rule, deliberately. Its only
+    production caller is ``build_mcp_backend_diagnostics``, whose whole job is to REPORT a bad
+    configuration; raising here made ``menhir diagnostics`` crash on precisely the misconfiguration
+    it exists to surface. Enforcement lives on ``_normalized_backend_url``, the path that actually
+    hands the URL to a ``BackendClient`` along with a bearer key.
     """
     settings = settings or MemorySettings.from_env()
     raw = explicit_url or settings.backend_url
     if raw:
         return raw.strip().rstrip("/")
     return f"http://{settings.api_host}:{settings.api_port}"
+
+
+#: Opt out of the non-loopback HTTPS requirement. Named like its sibling so an operator searching
+#: for one finds the other.
+_ALLOW_INSECURE_BACKEND_ENV = "MENHIR_ALLOW_INSECURE_BACKEND_URL"
+
+
+def _require_secure_backend_url(url: str) -> str:
+    """Refuse an ``http://`` backend URL that is not loopback (CF-42)."""
+    if not url:
+        return url
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return url
+    if parsed.scheme != "http":
+        return url
+    host = (parsed.hostname or "").strip().lower()
+    if is_loopback_host(host):
+        return url
+
+    if os.getenv(_ALLOW_INSECURE_BACKEND_ENV, "").strip().lower() in ("1", "true", "yes"):
+        logger.warning(
+            "%s is set: sending the backend bearer key to %s over plaintext HTTP.",
+            _ALLOW_INSECURE_BACKEND_ENV,
+            host,
+        )
+        return url
+
+    raise ValueError(
+        f"Refusing a plaintext backend URL for non-loopback host {host!r}: every request to it "
+        f"carries an Authorization bearer key. Use https://, point at a loopback address, or set "
+        f"{_ALLOW_INSECURE_BACKEND_ENV}=1 to accept the risk explicitly."
+    )
 
 
 def resolve_mcp_backend_auth_key(settings: MemorySettings | None = None) -> str:
@@ -381,7 +424,13 @@ def build_memory_backend(settings: MemorySettings | None = None) -> MemoryBacken
     settings = settings or MemorySettings.from_env()
     backend_url = _normalized_backend_url(settings)
     if backend_url:
-        return BackendClient(backend_url, settings=settings)
+        # CF-42 is enforced HERE, at the one point the URL is handed to a client that will attach
+        # a bearer key. Not on `_normalized_backend_url`, which also backs the
+        # `backend_client_mode_enabled` predicate, and not on `resolve_mcp_backend_url`, whose only
+        # caller is diagnostics -- a reporting surface must describe a bad configuration, not die on
+        # it. Guarding a predicate or a report instead of the credential path is how a security
+        # check ends up breaking everything except the thing it was meant to stop.
+        return BackendClient(_require_secure_backend_url(backend_url), settings=settings)
 
     raise RuntimeError("menhir runtime is not ready and no backend URL configured")
 
