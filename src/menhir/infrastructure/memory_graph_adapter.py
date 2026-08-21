@@ -1160,7 +1160,42 @@ class MemoryGraphAdapter:
     def get_scan_fingerprint(self, project_name: str) -> str | None:
         return self._structure.get_scan_fingerprint(project_name)
 
+    #: The structure query types this adapter will dispatch (CF-164).
+    #:
+    #: An ALLOWLIST rather than `getattr(self._structure, f"query_{query_type}")` on the caller's
+    #: string. That form exposed every `query_*` method the repository happens to define -- 14 of
+    #: them against 13 advertised -- so `contained_repos` and `linked_memories` were reachable and
+    #: undocumented. `query_linked_memories` is CF-126's unscoped recall, which made that finding
+    #: reachable through a type the boundary does not describe.
+    #:
+    #: The exposure is not the MCP tool, which dispatches literals through its own `if` chain. It
+    #: is `POST /api/internal/backend/query_structure`: `query_structure` is in `_BACKEND_METHODS`
+    #: (`api/routes_support.py:601`) and falls to the readonly remainder, and
+    #: `backend_runtime_data_ops.query_structure` passes `query_type` straight through.
+    #:
+    #: Three advertised types are absent because they never reach here -- `projects`,
+    #: `orphan_structure_projects` and `documents` are answered upstream in
+    #: `backend_runtime_data_ops.query_structure` before this fallthrough.
+    STRUCTURE_QUERY_TYPES: frozenset[str] = frozenset({
+        "overview",
+        "files",
+        "imports",
+        "tests",
+        "endpoints",
+        "dependencies",
+        "cross_refs",
+        "blast_radius",
+        "affected_tests",
+        "symbols",
+        "context",
+    })
+
     def query_structure(self, project: str, query_type: str, **kwargs: Any) -> Any:
+        if query_type not in self.STRUCTURE_QUERY_TYPES:
+            # Same message and type as before: an unknown type was already a ValueError, and a
+            # now-refused-but-existing method must be indistinguishable from a typo, or the error
+            # itself enumerates the private surface.
+            raise ValueError(f"Unknown structure query type: {query_type}")
         method = getattr(self._structure, f"query_{query_type}", None)
         if method is None:
             raise ValueError(f"Unknown structure query type: {query_type}")
