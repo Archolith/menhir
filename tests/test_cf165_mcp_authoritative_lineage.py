@@ -119,4 +119,10 @@ async def test_denied_add_memory_does_not_treat_raw_namespace_as_ownership(monke
     assert row["namespace"] == DEFAULT_NAMESPACE
     assert row["node_uuid"] is None
     assert "private denied body" not in (row["payload_preview"] or "")
-    assert "[redacted]" in (row["payload_preview"] or "")
+    # Was `assert "[redacted]" in ...`, which pinned the MECHANISM (the redactor ran over the raw
+    # payload) rather than the property. CF-118 changed a refused call to persist no caller content
+    # at all, so there is nothing left to redact. Asserting the forged namespace is absent tests
+    # this function's own stated purpose more directly than the redaction marker did -- and under
+    # the old behaviour it FAILED: the preview read {"namespace": "caller-forged-owner", ...}.
+    # The authorized-path test above still pins `[redacted]`, which is where redaction applies.
+    assert "caller-forged-owner" not in (row["payload_preview"] or "")
