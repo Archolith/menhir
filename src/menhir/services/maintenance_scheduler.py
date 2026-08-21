@@ -272,6 +272,26 @@ class MaintenanceScheduler:
         return await self.start(force_takeover=True, takeover_reason=reason)
 
     async def stop(self) -> None:
+        """Stop the run loop and release the lease, atomically with respect to `start()`.
+
+        THE WHOLE SEQUENCE HOLDS `_state_lock` (CF-240). It used to drop the lock right after
+        clearing `_task`, then await the task and release the lease outside it. A `start()`
+        arriving in that window saw `is_running()` False, re-acquired -- `try_acquire` admits
+        `existing_owner_id == owner_id`, and this is the same instance, so the guard was no
+        guard -- cleared `_stop_event`, and created a second `_run_loop`. Then this method
+        resumed and released the lease the NEW loop believed it held: a live loop running
+        maintenance with no lease row, and any other process free to acquire and run
+        concurrently.
+
+        `owner_id` cannot distinguish those two acquires, because it is per-instance and stable
+        across start/stop cycles. Serializing the sequence is what makes the interleaving
+        impossible; detecting it afterwards would be too late, the release having already
+        happened.
+
+        Safe to hold across the await: nothing reachable from `_run_loop` takes `_state_lock`,
+        and the loop is bounded -- it checks `_stop_event` once per tick and once per job -- so
+        this cannot deadlock or hang longer than the previous code's own unguarded `await task`.
+        """
         async with self._state_lock:
             task = self._task
             if task is None:
@@ -281,13 +301,16 @@ class MaintenanceScheduler:
                 return
             self._stop_event.set()
             self._task = None
-        if task.cancelled():
-            logger.debug("Maintenance scheduler task already cancelled during stop owner_id=%s", self._owner_id)
-        else:
-            await task
-        if self._lease_acquired:
-            self.lease_store.release(lease_name=self.lease_name, owner_id=self._owner_id)
-            self._lease_acquired = False
+            if task.cancelled():
+                logger.debug(
+                    "Maintenance scheduler task already cancelled during stop owner_id=%s",
+                    self._owner_id,
+                )
+            else:
+                await task
+            if self._lease_acquired:
+                self.lease_store.release(lease_name=self.lease_name, owner_id=self._owner_id)
+                self._lease_acquired = False
 
     def status_snapshot(self) -> dict[str, object]:
         lease = self.lease_store.fetch(lease_name=self.lease_name)
