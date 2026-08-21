@@ -21,19 +21,15 @@ log, e.g. from `git log --name-status` reconciled to :File/:Symbol identities).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
 from enum import Enum
 
 from menhir.domain.belief import BeliefEvidence, EvidencePolarity, EvidenceSignal
+from menhir.domain.temporal import parse_iso8601
 
 
-def _parse(ts: str | None) -> datetime | None:
-    if ts is None:
-        return None
-    try:
-        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
-    except ValueError:
-        return None
+#: Tolerant Neo4j-timestamp parse (fail-safe: None when absent/unparseable, never raises).
+#: Single definition in `domain.temporal` -- do not re-inline it.
+_parse = parse_iso8601
 
 
 # Change kind -> the structural evidence signal it grounds.
