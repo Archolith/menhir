@@ -62,6 +62,10 @@ from menhir.infrastructure.paths import repo_root_for_project
 
 logger = logging.getLogger(__name__)
 
+# Degradation is deliberate: a slow or unavailable graph must not fail recall. But a programming
+# error raised by a call whose signature we control is a bug, not an outage -- a stale signature
+# once surfaced as a wrong answer (swallowed into `assert 0 == 1`) instead of an error. Split them.
+_PROGRAMMING_ERRORS = (TypeError, AttributeError, NameError, KeyError)
 
 
 from menhir.services.recall_policies import (
@@ -123,6 +127,8 @@ async def run_recall(
                     query, limit, pending_wait_timeout_s, namespace=namespace
                 )
             )
+        except _PROGRAMMING_ERRORS:
+            raise
         except Exception:
             logger.exception(
                 "Pending-episode wait failed query=%r; continuing with normal recall",
