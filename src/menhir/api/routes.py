@@ -226,7 +226,12 @@ async def bootstrap_flagged(
     version = await backend.fetch_flagged_memory_bootstrap_version(
         workspace=workspace, namespace=resolved_namespace
     )
-    _remember_flagged_bootstrap_read(normalized_reader, version, workspace=workspace)
+    # CF-238: the receipt is keyed on the RAW workspace and the RESOLVED namespace, separately.
+    # `/bootstrap/context` must build its key from the same two values or the handshake can
+    # never match.
+    _remember_flagged_bootstrap_read(
+        normalized_reader, version, workspace=workspace, namespace=resolved_namespace
+    )
     return {
         "reader_id": normalized_reader,
         "bootstrap_selection": selection_key,
@@ -252,13 +257,26 @@ async def bootstrap_context(
     # server-side namespace pin like every other REST read. It previously used body.namespace
     # directly and so was exempt from it.
     resolved_namespace = _resolve_namespace(request, body.namespace)
-    effective_workspace = body.workspace or resolved_namespace
-    selection_key, _allowed = bootstrap_selection(effective_workspace)
+    # CF-238. Two different tenants are in play here and conflating them is the defect.
+    #
+    # `resolved_namespace` above scopes the CONTENT this route reads, and honours `body.namespace`.
+    # The RECEIPT's tenant is a different thing: it must be whatever `/bootstrap/flagged` used, and
+    # that route takes no namespace argument at all -- it resolves server-side from the pin or the
+    # header only. Passing `body.namespace` in here made the check side ask about a tenant the
+    # record side could never have written.
+    #
+    # This route also used to fold the namespace into the workspace
+    # (`body.workspace or resolved_namespace`) and compute the version with NO namespace, while the
+    # record side keyed on the raw workspace and versioned WITH the namespace -- so both halves of
+    # the comparison diverged and a pinned client that omitted `workspace` could never clear the
+    # gate. Both halves are now derived exactly as the record side derives them.
+    receipt_namespace = _resolve_namespace(request, None)
+    selection_key, _allowed = bootstrap_selection(body.workspace)
     version = await backend.fetch_flagged_memory_bootstrap_version(
-        workspace=effective_workspace
+        workspace=body.workspace, namespace=receipt_namespace
     )
     if not _has_recent_flagged_bootstrap_read(
-        normalized_reader, version, workspace=effective_workspace
+        normalized_reader, version, workspace=body.workspace, namespace=receipt_namespace
     ):
         raise HTTPException(
             status_code=409,

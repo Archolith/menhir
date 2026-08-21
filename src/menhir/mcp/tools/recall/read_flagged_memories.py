@@ -56,17 +56,22 @@ class ReadFlaggedMemoriesTool(BaseJsonTool):
         """
         backend = self.get_backend()
         normalized_reader_id = _normalize_reader_id(reader_id)
-        selection_key, _ = bootstrap_selection(workspace)
+        # CF-238: normalized once here so the record side and `recall_context_memories`
+        # derive the receipt key from byte-identical values.
+        ws = workspace.strip() or None
         ns = namespace.strip() or None
+        selection_key, _ = bootstrap_selection(ws)
         rows = await backend.fetch_flagged_memories(
-            limit=limit, workspace=workspace or None, namespace=ns
+            limit=limit, workspace=ws, namespace=ns
         )
         rows = [row for row in rows if not is_structural_memory_row(row)]
         flagged_version = await backend.fetch_flagged_memory_bootstrap_version(
-            workspace=workspace or None, namespace=ns
+            workspace=ws, namespace=ns
         )
+        # CF-238: the receipt is keyed on the RAW workspace and the namespace, separately.
+        # `recall_context_memories` must build its key from the same two values.
         _remember_flagged_bootstrap_read(
-            normalized_reader_id, flagged_version, workspace=workspace or None
+            normalized_reader_id, flagged_version, workspace=ws, namespace=ns
         )
         return self.render_recall_json(
             {

@@ -26,18 +26,24 @@ def _shutdown_runtime_sync() -> None:
 
 
 def _remember_flagged_bootstrap_read(
-    reader_id: str, flagged_version: str, workspace: str | None = None
+    reader_id: str,
+    flagged_version: str,
+    workspace: str | None = None,
+    namespace: str | None = None,
 ) -> None:
     _runtime._remember_flagged_bootstrap_read(
-        reader_id, flagged_version, workspace=workspace
+        reader_id, flagged_version, workspace=workspace, namespace=namespace
     )
 
 
 def _has_recent_flagged_bootstrap_read(
-    reader_id: str, flagged_version: str, workspace: str | None = None
+    reader_id: str,
+    flagged_version: str,
+    workspace: str | None = None,
+    namespace: str | None = None,
 ) -> bool:
     return _runtime._has_recent_flagged_bootstrap_read(
-        reader_id, flagged_version, workspace=workspace
+        reader_id, flagged_version, workspace=workspace, namespace=namespace
     )
 
 

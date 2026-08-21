@@ -145,24 +145,44 @@ def _annotate_runtime_failures(failures: list[str], settings: MemorySettings) ->
     return annotated
 
 
-def _bootstrap_receipt_key(reader_id: str, workspace: str | None) -> str:
+def _bootstrap_receipt_key(
+    reader_id: str, workspace: str | None, namespace: str | None = None
+) -> str:
+    """Identify one bootstrap receipt slot (CF-238).
+
+    The tuple is (reader, bootstrap selection, tenant). `namespace` is part of the KEY, not only
+    of the version string it stores: without it two clients pinned to different silos share one
+    slot under the same reader id, and each one's record overwrites the other's, so both are
+    told to bootstrap again forever. Keeping it in the version as well is what stops the
+    opposite failure -- a receipt reported as fresh for content the client never saw.
+
+    Every caller must build the key from the SAME inputs. Folding a namespace into the
+    `workspace` argument on one side and not the other produces two different slots, which is
+    the shape of the defect this replaced.
+    """
     normalized_reader_id = normalize_reader_id(reader_id)
     selection_key, _ = bootstrap_selection(workspace)
-    return f"{normalized_reader_id}|{selection_key}"
+    return f"{normalized_reader_id}|{selection_key}|{(namespace or '').strip()}"
 
 
 def _remember_flagged_bootstrap_read(
-    reader_id: str, flagged_version: str, workspace: str | None = None
+    reader_id: str,
+    flagged_version: str,
+    workspace: str | None = None,
+    namespace: str | None = None,
 ) -> None:
-    receipt_key = _bootstrap_receipt_key(reader_id, workspace)
+    receipt_key = _bootstrap_receipt_key(reader_id, workspace, namespace)
     with _state._flagged_lock:
         _state.flagged_bootstrap_reads[receipt_key] = str(flagged_version)
 
 
 def _has_recent_flagged_bootstrap_read(
-    reader_id: str, flagged_version: str, workspace: str | None = None
+    reader_id: str,
+    flagged_version: str,
+    workspace: str | None = None,
+    namespace: str | None = None,
 ) -> bool:
-    receipt_key = _bootstrap_receipt_key(reader_id, workspace)
+    receipt_key = _bootstrap_receipt_key(reader_id, workspace, namespace)
     with _state._flagged_lock:
         last_seen_version = _state.flagged_bootstrap_reads.get(receipt_key)
     return str(last_seen_version or "") == str(flagged_version)

@@ -67,15 +67,22 @@ class RecallContextMemoriesTool(BaseJsonTool):
         """Read non-flagged startup context memories (recent + relevant)."""
         normalized_reader_id = _normalize_reader_id(reader_id)
         backend = self.get_backend()
-        effective_workspace = (workspace or namespace or "").strip()
-        selection_key, _ = bootstrap_selection(effective_workspace)
+        # CF-238: this folded the namespace into the workspace and then computed the version
+        # with NO namespace, while `read_flagged_memories` keys on the raw workspace and
+        # versions WITH the namespace. Both halves of the comparison diverged, so a pinned
+        # client that passed `namespace` and no `workspace` could never clear the gate. The two
+        # values are kept separate and passed identically on both sides.
+        ws = workspace.strip() or None
+        ns = namespace.strip() or None
+        selection_key, _ = bootstrap_selection(ws)
         flagged_version = await backend.fetch_flagged_memory_bootstrap_version(
-            workspace=effective_workspace or None
+            workspace=ws, namespace=ns
         )
         if not _has_recent_flagged_bootstrap_read(
             normalized_reader_id,
             flagged_version,
-            workspace=effective_workspace or None,
+            workspace=ws,
+            namespace=ns,
         ):
             return self.render_json(
                 {
@@ -86,7 +93,7 @@ class RecallContextMemoriesTool(BaseJsonTool):
                             "Context bootstrap required. "
                             "Call read_flagged_memories("
                             f"reader_id='{normalized_reader_id}', "
-                            f"workspace='{effective_workspace}') first. "
+                            f"workspace='{ws or ''}') first. "
                             f"(current_flagged_version={flagged_version})"
                         )
                     },
