@@ -15,6 +15,11 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_MCP_TIMEOUT = int(os.getenv("MENHIR_MCP_TIMEOUT", "120"))
 
+#: Stand-in preview for a call refused before the authorization gates published its arguments
+#: (CF-118). A marker rather than NULL: NULL would be indistinguishable from a caller that sent
+#: no arguments at all, and the whole point is that this row records an ATTEMPT, not an action.
+PREVIEW_UNAUTHORIZED = '{"unauthorized": true}'
+
 #: exception type names that mean the graph store (Neo4j) is unreachable/degraded.
 _GRAPH_UNREACHABLE_ERRORS = frozenset({"ServiceUnavailable", "SessionExpired", "SessionError"})
 
@@ -109,22 +114,49 @@ async def track_mcp_call(
     checks, and namespace pinning have completed. If a protected runner is denied before that
     point, telemetry falls back to the server-side pinned/default namespace and does not treat raw
     caller UUID/namespace arguments as ownership.
+
+    THE PREVIEW OBEYS THE SAME RULE AS THE LINEAGE (CF-118). It used to be rendered from the RAW
+    caller kwargs, eagerly, before the runner ran -- so a call refused at the tier or allowlist gate
+    still persisted the identifiers that caller chose. The values are redacted and caller-known, so
+    this is not a disclosure; what it is, is attacker-controlled content in the operator's durable
+    audit trail, one row per attempt, indistinguishable from a namespace the server actually acted
+    on. A refused call now persists ``PREVIEW_UNAUTHORIZED`` instead.
+
+    An authorized call previews the EFFECTIVE payload, which is also strictly more accurate: the
+    raw preview showed a pinned client's *requested* namespace rather than the one the server
+    enforced.
     """
 
     started_at = _utc_now_iso()
     started = time.perf_counter()
+    # Sizing stays on the raw payload: it measures what the caller actually sent, discloses
+    # nothing, and is the only signal that survives a refusal.
     input_size = _size_of(payload) if payload is not None else None
-    payload_preview = _safe_preview_of(payload) if payload is not None else None
+
+    def _published_payload() -> tuple[Any, bool]:
+        """(payload to describe, whether the gates published it).
+
+        ``effective_payload is None`` means a caller with no gates to pass -- background/internal
+        work -- so its raw payload IS its effective one.
+        """
+        if effective_payload is None:
+            return payload, True
+        try:
+            published = effective_payload()
+        except Exception:  # pragma: no cover - telemetry lineage is best-effort
+            logger.warning("Failed to resolve effective MCP telemetry lineage", exc_info=True)
+            return None, False
+        return (published, True) if published is not None else (None, False)
 
     def _resolved_lineage() -> tuple[str, str | None]:
-        lineage_payload = payload
-        if effective_payload is not None:
-            try:
-                lineage_payload = effective_payload()
-            except Exception:  # pragma: no cover - telemetry lineage is best-effort
-                logger.warning("Failed to resolve effective MCP telemetry lineage", exc_info=True)
-                lineage_payload = None
+        lineage_payload, _authorized = _published_payload()
         return _lineage_from_payload(lineage_payload)
+
+    def _resolved_preview() -> str | None:
+        described, authorized = _published_payload()
+        if not authorized:
+            return PREVIEW_UNAUTHORIZED
+        return _safe_preview_of(described) if described is not None else None
 
     try:
         result = await asyncio.wait_for(runner(), timeout=timeout)
@@ -149,7 +181,7 @@ async def track_mcp_call(
                 error=f"TimeoutError: exceeded {timeout}s",
                 input_size=input_size,
                 result_size=None,
-                payload_preview=payload_preview,
+                payload_preview=_resolved_preview(),
                 namespace=namespace,
                 node_uuid=node_uuid,
             )
@@ -175,7 +207,7 @@ async def track_mcp_call(
                 error=_telemetry_error(exc),
                 input_size=input_size,
                 result_size=None,
-                payload_preview=payload_preview,
+                payload_preview=_resolved_preview(),
                 namespace=namespace,
                 node_uuid=node_uuid,
             )
@@ -201,7 +233,7 @@ async def track_mcp_call(
             error=None,
             input_size=input_size,
             result_size=result_size,
-            payload_preview=payload_preview,
+            payload_preview=_resolved_preview(),
             namespace=namespace,
             node_uuid=node_uuid,
         )
