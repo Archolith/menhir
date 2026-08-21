@@ -181,7 +181,14 @@ class OpenAIStyleChatBackend:
     settings: MemorySettings
     dependencies: ProviderRuntimeDependencies = field(default_factory=ProviderRuntimeDependencies)
 
-    async def _resolve_base_url(self, operation: str, user_prompt: str) -> str:
+    async def _resolve_base_url(self, operation: str) -> str:
+        """Resolve the base URL for ``operation``, via the scheduler when one is configured.
+
+        Takes NO prompt. It previously accepted a ``user_prompt`` it never read, and the obvious
+        way to "use" that parameter is interpolating it into the scheduler ``task`` label below --
+        which the scheduler logs and renders on a dashboard. That would be a prompt-content leak.
+        The parameter is gone so it cannot be wired up; the label is built from ``operation`` alone.
+        """
         fallback_base_url = self.provider.base_url
         if not should_use_scheduler(fallback_base_url):
             return fallback_base_url
@@ -205,7 +212,7 @@ class OpenAIStyleChatBackend:
         max_tokens: int,
         temperature: float,
     ) -> str:
-        base_url = await self._resolve_base_url(operation, user_prompt)
+        base_url = await self._resolve_base_url(operation)
         client = self.dependencies.openai_client_factory(
             base_url=base_url,
             api_key=self.provider.api_key,

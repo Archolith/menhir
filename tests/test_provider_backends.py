@@ -207,7 +207,7 @@ async def test_openai_style_backend_uses_structured_scheduler_task_label() -> No
     )
 
     with patch("menhir.infrastructure.providers.should_use_scheduler", return_value=True):
-        resolved = await backend._resolve_base_url("compression", "user prompt")
+        resolved = await backend._resolve_base_url("compression")
 
     assert resolved == "http://localhost:8082/v1/t/memory--llm-compression"
     assert acquire_mock.await_args.kwargs["task"] == "memory: llm compression"
