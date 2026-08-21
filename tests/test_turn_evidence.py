@@ -286,13 +286,16 @@ def test_evidence_exists_true_and_false():
 
 @pytest.mark.unit
 def test_evidence_stats_shape_with_triage():
+    # CF-114 collapsed six queries to three: role and triage_version now come from ONE composite
+    # grouping (which also yields total and latest), source_kind keeps its own query so its
+    # server-side LIMIT 10 survives, and the triage_reason UNWIND keeps its own because it
+    # multiplies cardinality. The routes below track that; every assertion is unchanged.
     fake = FakeNeo4j(routes=[
-        ("RETURN count(t) AS c", [{"c": 3}]),
-        ("t.role AS role", [{"role": "user", "c": 3}]),
+        ("t.role AS role, t.triage_version AS version",
+         [{"role": "user", "version": "claude-hook-v1", "c": 3,
+           "latest": "2026-07-07T00:00:00Z"}]),
         ("t.source_kind AS sk", [{"sk": "claude_code_hook", "c": 3}]),
-        ("t.triage_version AS v", [{"v": "claude-hook-v1", "c": 3}]),
         ("UNWIND t.triage_reason", [{"reason": "number", "c": 3}, {"reason": "i_have", "c": 2}]),
-        ("max(t.recorded_at)", [{"latest": "2026-07-07T00:00:00Z"}]),
     ])
     stats = TurnEvidenceRepository(fake).evidence_stats()
     assert stats["turn_evidence_table_exists"] and stats["total_turn_evidence"] == 3
