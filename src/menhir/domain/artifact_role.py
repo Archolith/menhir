@@ -30,6 +30,18 @@ class ContentRole(str, Enum):
 
 # artifact_type -> role. The L4 institutional artifacts (decision/failure/incident) map
 # directly; the others are research/doc shapes the recall layer also stores.
+#
+# The work_artifact types (domain/work_artifact.py: ArtifactType) land here so they rank as
+# what they are instead of falling through to REFERENCE (which PENALIZEs them in the intent
+# affinity matrix). Meanings:
+#   review                 -> DECISION  : a review renders a verdict (approve/revise/reject),
+#                                         a decision on whether the artifact is acceptable.
+#   implementation_report  -> EVIDENCE  : a wrapup is the recorded, verifiable account of work
+#                                         actually done.
+#   investigation          -> EVIDENCE  : an investigation's deliverable is the findings/root
+#                                         cause that answers a question.
+#   handoff                -> EVIDENCE  : a handoff is a recorded statement of the working
+#                                         state handed to a successor.
 _ARTIFACT_TYPE: dict[str, ContentRole] = {
     "failure": ContentRole.FAILURE,
     "incident": ContentRole.INCIDENT,
@@ -42,6 +54,10 @@ _ARTIFACT_TYPE: dict[str, ContentRole] = {
     "evidence": ContentRole.EVIDENCE,
     "reference": ContentRole.REFERENCE,
     "doc": ContentRole.REFERENCE,
+    "review": ContentRole.DECISION,
+    "implementation_report": ContentRole.EVIDENCE,
+    "investigation": ContentRole.EVIDENCE,
+    "handoff": ContentRole.EVIDENCE,
 }
 
 
