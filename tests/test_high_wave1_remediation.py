@@ -543,7 +543,10 @@ def test_cf188_resolved_scheduler_url_is_used(monkeypatch) -> None:
     built: dict[str, object] = {}
 
     class _Client:
-        def __init__(self, api_key=None, base_url=None):
+        # **_bounds absorbs timeout/max_retries, which the seam now passes explicitly (CF-190).
+        # This test is about WHICH base_url is used, so the bounds are irrelevant to it -- but a
+        # stub narrower than the real constructor turns an added argument into a TypeError here.
+        def __init__(self, api_key=None, base_url=None, **_bounds):
             built["base_url"] = base_url
             self.chat = SimpleNamespace(
                 completions=SimpleNamespace(
