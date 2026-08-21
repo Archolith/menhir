@@ -1080,9 +1080,15 @@ class MemoryGraphAdapter:
         status: str | None = "unresolved",
         limit: int = 25,
         namespace: str | None = None,
+        created_before: datetime | None = None,
+        oldest_first: bool = False,
     ) -> list[dict[str, Any]]:
         return self._consolidation.list_conflict_groups(
-            status=status, limit=limit, namespace=namespace
+            status=status,
+            limit=limit,
+            namespace=namespace,
+            created_before=created_before,
+            oldest_first=oldest_first,
         )
 
     def list_conflict_pairs(

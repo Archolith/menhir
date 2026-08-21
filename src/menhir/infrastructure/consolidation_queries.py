@@ -608,6 +608,8 @@ class ConsolidationRepository:
         status: str | None = "unresolved",
         limit: int = 25,
         namespace: str | None = None,
+        created_before: datetime | None = None,
+        oldest_first: bool = False,
     ) -> list[dict[str, Any]]:
         """Return grouped conflicts keyed by conflict_group_id.
 
@@ -615,6 +617,11 @@ class ConsolidationRepository:
 
         ``namespace`` filters members to one silo. It is opt-in per the namespace
         contract: ``None``/empty does not filter, preserving today's behavior exactly.
+
+        ``created_before`` (a cutoff datetime) and ``oldest_first`` (bool) are opt-in for
+        the stale-auto-resolver (CF-120) only. When both are left at their defaults the
+        emitted Cypher and params are byte-for-byte identical to the pre-CF-120 form, so
+        the MCP/explorer callers keep their newest-first listing.
 
         The predicate is applied per MEMBER, not per group. Conflict groups are
         namespace-homogeneous by construction -- the only writer of
@@ -628,30 +635,45 @@ class ConsolidationRepository:
         """
         safe_limit = max(1, min(limit, 200))
         ns = str(namespace).strip() if namespace is not None else ""
+        params: dict[str, Any] = {"status": status, "limit": safe_limit, "namespace": ns or None}
+
+        # Filtered POST-aggregation. A group's age is min(conflict_created_at) over its members,
+        # so a member-level predicate would change what min() sees and could age a group by a
+        # member the filter excluded. The trade is that the conflict_created_at index cannot
+        # serve a post-aggregation filter; correctness of the age wins over the index here.
+        cutoff_clause = ""
+        if created_before is not None:
+            params["created_before"] = created_before
+            cutoff_clause = "\n            WHERE created_at < $created_before"
+
+        # Both fragments below are constants chosen here, never caller text -- Cypher cannot
+        # parameterize a sort direction, so this stays interpolation and stays a closed set.
+        order = "ASC" if oldest_first else "DESC"
+
         return self.neo4j.execute(
-            """
+            f"""
             MATCH (n:Entity)
             WHERE n.conflict_group_id IS NOT NULL
               AND ($status IS NULL OR n.conflict_status = $status)
               AND ($namespace IS NULL OR coalesce(n.namespace, 'default') = $namespace)
             WITH n.conflict_group_id AS group_id,
                  min(n.conflict_created_at) AS created_at,
-                 collect({
+                 collect({{
                    uuid: n.uuid,
                    name: n.name,
                    content: coalesce(n.summary, n.content, ''),
                    status: n.conflict_status,
                    scope: n.scope,
                    node_created_at: n.created_at
-                 }) AS members
+                 }}) AS members{cutoff_clause}
             RETURN
               group_id,
               created_at,
               members
-            ORDER BY created_at DESC
+            ORDER BY created_at {order}
             LIMIT $limit
             """,
-            params={"status": status, "limit": safe_limit, "namespace": ns or None},
+            params=params,
         )
 
     def list_conflict_pairs(

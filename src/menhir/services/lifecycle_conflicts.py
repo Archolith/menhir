@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from time import perf_counter
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 from uuid import uuid4
@@ -267,6 +267,12 @@ class LifecycleConflictMixin:
         groups = self.graph_adapter.list_conflict_groups(
             status="unresolved",
             limit=limit,
+            # Ask for the OLDEST unresolved groups and push the age cutoff into the
+            # database (CF-120). The newest-first default would return only fresh groups
+            # that the filter below drops, so the stale backlog the job exists to drain
+            # would never be fetched -- returning 0 forever while it grows.
+            created_before=datetime.now(timezone.utc) - timedelta(days=max_age_days),
+            oldest_first=True,
         )
         resolved = 0
         now = datetime.now(timezone.utc)
@@ -282,6 +288,8 @@ class LifecycleConflictMixin:
                 age_s = (now - created_at).total_seconds()
             except (ValueError, TypeError, AttributeError, OverflowError):
                 continue
+            # Redundant guard: the cutoff is already pushed into Cypher, but a graph_adapter
+            # that ignores the new parameters must still not resolve anything young.
             if age_s < max_age_days * 86400:
                 continue
             group_id = str(group.get("group_id") or "")

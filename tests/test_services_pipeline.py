@@ -2991,7 +2991,8 @@ def test_lifecycle_service_auto_resolve_stale_conflicts_resolves_old_groups() ->
 
     class _FakeAdapter:
         def list_conflict_groups(
-            self, *, status: str | None, limit: int, namespace: str | None = None
+            self, *, status: str | None, limit: int, namespace: str | None = None,
+            created_before: object | None = None, oldest_first: bool = False,
         ) -> list[dict]:
             return [
                 {"group_id": "stale-group", "created_at": stale_created},
