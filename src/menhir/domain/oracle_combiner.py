@@ -28,6 +28,7 @@ from menhir.domain.oracles import (
     OracleTarget,
     QueryContext,
 )
+from menhir.domain.temporal_lens import TemporalLens
 
 # Support weights by source family (calibration placeholders, from the research doc).
 FAMILY_ALPHA: dict[str, float] = {
@@ -191,8 +192,8 @@ class LogSpaceOracleCombiner:
     @staticmethod
     def _ranking_score(query: QueryContext, z: dict[str, float]) -> float:
         """Intent picks which role eligibility ranks the candidate."""
-        if query.intent == "historical":
+        if query.intent == TemporalLens.HISTORICAL:
             return z["relevant"] + z["historical"] - z["blocked"]
-        if query.intent == "any":
+        if query.intent == TemporalLens.ANY:
             return z["relevant"] - z["blocked"]
         return z["relevant"] + z["current"] - z["blocked"] - z["conflict"]

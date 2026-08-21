@@ -24,6 +24,8 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass, field
 
+from menhir.domain.temporal_lens import TemporalLens
+
 SET_FACETS: tuple[str, ...] = (
     "actor", "object", "operation", "file", "symbol", "test", "evidence_type",
 )
@@ -91,7 +93,7 @@ class FacetedQuery:
 
     facets: MemoryFacetSet = field(default_factory=MemoryFacetSet)
     required_facets: list[str] = field(default_factory=list)
-    intent: str = "current"  # current | historical | any
+    intent: str = TemporalLens.CURRENT  # one of TemporalLens: current | historical | any
 
 
 class MemoryFacetIndex:

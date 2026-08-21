@@ -21,6 +21,7 @@ from enum import Enum
 
 from menhir.domain.artifact_role import ContentRole
 from menhir.domain.query_intent import TaskIntent
+from menhir.domain.temporal_lens import TemporalLens
 
 
 class Affinity(str, Enum):
@@ -78,25 +79,27 @@ INTENT_ROLE_MATRIX: dict[TaskIntent, dict[ContentRole, Affinity]] = {
     intent: dict(zip(_ROLES, row)) for intent, row in _ROWS.items()
 }
 
-# Temporal lens routing (the string lens read by QueryContext.intent / TemporalOracle).
-#   AVOID_REPEAT       -> "historical" : the past attempt IS the answer (boost superseded).
-#   VERIFY_CURRENTNESS -> "any"        : surface current + superseded side by side for the
+# Temporal lens routing (the lens read by QueryContext.intent / TemporalOracle).
+#   AVOID_REPEAT       -> TemporalLens.HISTORICAL : the past attempt IS the answer (boost superseded).
+#   VERIFY_CURRENTNESS -> TemporalLens.ANY        : surface current + superseded side by side for the
 #                                        drift check WITHOUT boosting the stale one. (This is
 #                                        the belief.QueryIntent.CONFLICT equivalent; the bench
 #                                        found routing verify to "historical" wrongly boosts
 #                                        the stale item via TemporalOracle.)
-#   everything else    -> "current"    : superseded suppressed as today.
-_LENS: dict[TaskIntent, str] = {
-    TaskIntent.AVOID_REPEAT: "historical",
+#   everything else    -> TemporalLens.CURRENT    : superseded suppressed as today.
+_LENS: dict[TaskIntent, TemporalLens] = {
+    TaskIntent.AVOID_REPEAT: TemporalLens.HISTORICAL,
     #   RECALL_PERSONAL_HISTORY -> "historical" : a "what was the ... I had / did I ..."
     #     question asks for the lived past episode; the answer fact is often belief-superseded
     #     (a later turn re-mentioned it), and under "current" the TemporalOracle refuses it as
     #     superseded. The historical lens makes superseded facts SUPPORT the answer instead.
-    TaskIntent.RECALL_PERSONAL_HISTORY: "historical",
-    TaskIntent.VERIFY_CURRENTNESS: "any",
+    TaskIntent.RECALL_PERSONAL_HISTORY: TemporalLens.HISTORICAL,
+    TaskIntent.VERIFY_CURRENTNESS: TemporalLens.ANY,
 }
 # History-wanting lens wins when intents disagree (design 4A): historical > any > current.
-_LENS_PRIORITY: tuple[str, ...] = ("historical", "any", "current")
+_LENS_PRIORITY: tuple[TemporalLens, ...] = (
+    TemporalLens.HISTORICAL, TemporalLens.ANY, TemporalLens.CURRENT,
+)
 
 
 @dataclass(frozen=True)
@@ -138,14 +141,16 @@ def resolve_affinity(
     return best
 
 
-def task_intents_to_lens(intents: list[TaskIntent]) -> str:
-    """Select the temporal lens string; the history-wanting lens wins on conflict (design 4A).
+def task_intents_to_lens(intents: list[TaskIntent]) -> TemporalLens:
+    """Select the temporal lens; the history-wanting lens wins on conflict (design 4A).
 
-    Returns one of "current" | "historical" | "any" — the value QueryContext.intent carries
-    into the oracle stack. The classifier picks the lens; temporal.py / belief.py still own
-    what the lens does (no second supersession rule)."""
-    selected = {_LENS.get(i, "current") for i in intents}
+    Returns one of TemporalLens.CURRENT | HISTORICAL | ANY -- the value QueryContext.intent
+    carries into the oracle stack. A TemporalLens member is a ``str``, so callers comparing
+    against the plain strings "current"/"historical"/"any" keep working. The classifier picks
+    the lens; temporal.py / belief.py still own what the lens does (no second supersession
+    rule)."""
+    selected = {_LENS.get(i, TemporalLens.CURRENT) for i in intents}
     for lens in _LENS_PRIORITY:
         if lens in selected:
             return lens
-    return "current"
+    return TemporalLens.CURRENT

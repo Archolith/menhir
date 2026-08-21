@@ -21,6 +21,8 @@ from enum import Enum
 from types import MappingProxyType
 from typing import Mapping, Protocol, runtime_checkable
 
+from menhir.domain.temporal_lens import TemporalLens
+
 SCOPE_KEYS: tuple[str, ...] = ("repo", "branch", "project", "namespace")
 
 
@@ -57,7 +59,7 @@ class QueryContext:
     """Immutable query snapshot handed to every oracle."""
 
     text: str
-    intent: str = "current"  # current | historical | any
+    intent: str = TemporalLens.CURRENT  # one of TemporalLens: current | historical | any
     as_of_time: str | None = None
     repo: str | None = None
     branch: str | None = None
