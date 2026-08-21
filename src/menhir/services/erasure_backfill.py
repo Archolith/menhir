@@ -240,20 +240,36 @@ def redact_content_operations(
     if not _table_exists(conn, table):
         return {}
     placeholders = ",".join("?" for _ in operations)
+    # TWO SELECTORS, because content reaches this table in two shapes.
+    #
+    # (1) `operation` is the content tool itself -- `add_memory`, `recall_memories`, ...
+    # (2) the row is a GATEWAY call whose preview WRAPS one: the operation is `memory_gateway`
+    #     and the payload is `{"action": "add_memory", "payload_json": "{\"text\": ...}"}`.
+    #
+    # Selector (1) alone misses (2) entirely, and it did: a first pass over operations left 611
+    # rows holding verbatim memory text and search queries under `memory_gateway`. Matching the
+    # embedded `"text":` / `"query":` field catches content by SHAPE, so a future action name --
+    # the gateway calls recall `recall`, not `recall_memories` -- cannot slip past a name list.
+    # Measured precise on the live sidecar: all 611 matches are `memory_gateway`, no other
+    # operation false-positives.
+    envelope = f'({{col}} LIKE ? OR {{col}} LIKE ?)'
+    env_params = ('%\\"text\\":%', '%\\"query\\":%')
     for column in ("payload_preview", "error"):
         if not _column_exists(conn, table, column):
             continue
         where = (
-            f"operation IN ({placeholders}) AND {column} IS NOT NULL AND {column} != ''"
+            f"({column} IS NOT NULL AND {column} != '') AND ("
+            f"operation IN ({placeholders}) OR {envelope.format(col=column)})"
         )
+        params = tuple(operations) + env_params
         if dry_run:
             row = conn.execute(
-                f"SELECT COUNT(*) FROM {table} WHERE {where}", operations
+                f"SELECT COUNT(*) FROM {table} WHERE {where}", params
             ).fetchone()
             count = int(row[0]) if row else 0
         else:
             count = conn.execute(
-                f"UPDATE {table} SET {column} = NULL WHERE {where}", operations
+                f"UPDATE {table} SET {column} = NULL WHERE {where}", params
             ).rowcount
         if count:
             redacted[f"{table}.{column}"] = count

@@ -170,3 +170,71 @@ def test_the_unaddressable_selector_would_hit_operational_rows(tmp_path) -> None
 
     assert unaddressable["mcp_events.payload_preview"] == 7  # includes the 3 operational rows
     assert content["mcp_events.payload_preview"] == 5  # content operations only
+
+
+# ---------------------------------------------------------------------------
+# the gateway envelope -- content that the operation name does not reveal
+# ---------------------------------------------------------------------------
+
+
+def _db_with_envelopes(tmp_path) -> sqlite3.Connection:
+    conn = _db(tmp_path)
+    conn.executemany(
+        "INSERT INTO mcp_events (operation, payload_preview, error, node_uuid, namespace) VALUES (?,?,?,?,?)",
+        [
+            # The gateway wraps the real call. `operation` says nothing about the content.
+            ("memory_gateway", '{"action": "add_memory", "payload_json": "{\\"text\\": \\"private\\"}"}', None, None, None),
+            ("memory_gateway", '{"action": "recall", "payload_json": "{\\"query\\": \\"rename phase 9\\"}"}', None, None, None),
+            # Gateway calls that carry NO free text must survive.
+            ("memory_gateway", '{"action": "help"}', None, None, None),
+            ("memory_gateway", '{"action": "query_structure", "payload_json": "{\\"query_type\\": \\"projects\\"}"}', None, None, None),
+        ],
+    )
+    conn.commit()
+    return conn
+
+
+def test_content_wrapped_in_a_gateway_envelope_is_redacted(tmp_path) -> None:
+    """THE MISS THIS CAUGHT. A first pass selected on `operation` alone and left 611 rows on the
+    live sidecar holding verbatim memory text and search queries under `memory_gateway` -- the
+    operation name says `memory_gateway`, so a name list never sees them."""
+    conn = _db_with_envelopes(tmp_path)
+    redact_content_operations(conn, dry_run=False)
+
+    surviving = [
+        p for (p,) in conn.execute(
+            "SELECT payload_preview FROM mcp_events WHERE operation='memory_gateway' AND payload_preview IS NOT NULL"
+        )
+    ]
+    assert not any("private" in s for s in surviving)
+    assert not any("rename phase 9" in s for s in surviving)
+
+
+def test_the_envelope_selector_matches_on_shape_not_action_name(tmp_path) -> None:
+    """`recall` here is the GATEWAY's name for `recall_memories`; it is not in
+    CONTENT_BEARING_OPERATIONS and never will be. Matching the embedded text/query field is what
+    makes a future action name unable to slip past."""
+    conn = _db_with_envelopes(tmp_path)
+    assert "recall" not in CONTENT_BEARING_OPERATIONS
+
+    redact_content_operations(conn, dry_run=False)
+
+    row = conn.execute(
+        "SELECT count(*) FROM mcp_events WHERE payload_preview LIKE '%rename phase 9%'"
+    ).fetchone()
+    assert row[0] == 0
+
+
+def test_gateway_calls_without_free_text_are_left_alone(tmp_path) -> None:
+    """POSITIVE CONTROL, and the ruling's other half: do not mutate operational rows. A selector
+    that redacted every memory_gateway row would pass the two tests above."""
+    conn = _db_with_envelopes(tmp_path)
+    redact_content_operations(conn, dry_run=False)
+
+    kept = {
+        p for (p,) in conn.execute(
+            "SELECT payload_preview FROM mcp_events WHERE operation='memory_gateway' AND payload_preview IS NOT NULL"
+        )
+    }
+    assert '{"action": "help"}' in kept
+    assert any("query_type" in k for k in kept)
