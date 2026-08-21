@@ -100,8 +100,19 @@ class _QueryAuthAllowlistProxy:
 QUERY_AUTH_ALLOWED_TOOLS = _QueryAuthAllowlistProxy()
 QUERY_AUTH_ADD_MEMORY_LIMIT = 10
 QUERY_AUTH_ADD_MEMORY_WINDOW_SECONDS = 600.0
+#: Max keys EXAMINED per call by the expired-key sweep (CF-89). A round-robin cursor keeps the
+#: per-call examination cost fixed no matter how large the dict has grown, and the advancing
+#: cursor means stale keys keep coming back around to be removed.
+#:
+#: Stated precisely, because the sweep still snapshots the key list on each call and that part is
+#: O(len(dict)): what is fixed is the number of buckets pruned and deleted, not the whole call.
+#: The dict is nonetheless self-draining, which is the property that matters -- a call adds at
+#: most one key and examines 32, so eviction always outruns arrival and the size plateaus at
+#: roughly "distinct keys seen within one window" before draining back down.
+_QUERY_AUTH_SWEEP_BUDGET = 32
 _query_add_memory_events: dict[str, deque[float]] = {}
 _query_add_memory_lock = threading.Lock()
+_query_add_memory_sweep_cursor = 0
 
 
 def _query_auth_rate_limit_key() -> str:
@@ -111,11 +122,46 @@ def _query_auth_rate_limit_key() -> str:
     return session.client_id or session.session_id or session.user_id or "query-auth:anonymous"
 
 
+def _sweep_query_add_memory_keys(current_key: str, cutoff: float) -> None:
+    """Remove rate-limit buckets whose window has fully expired (CF-89).
+
+    Only deletes a bucket when pruning against *cutoff* empties it — every timestamp it
+    holds is ``<= cutoff``, which is exactly the same state as a fresh deque. Removing a
+    fully-expired key is therefore safe, while leaving every bucket that still holds a live
+    timestamp (so a caller can never gain a free reset — that would be a rate-limit bypass).
+
+    Work is bounded per call: a round-robin cursor examines at most
+    ``_QUERY_AUTH_SWEEP_BUDGET`` keys each sweep, so cost is constant regardless of how the
+    dict has grown, and the advancing cursor guarantees every stale key is eventually
+    revisited. The caller's own key is never evicted during the call using it.
+    """
+    global _query_add_memory_sweep_cursor
+    keys = list(_query_add_memory_events.keys())
+    n = len(keys)
+    if n == 0:
+        return
+    idx = _query_add_memory_sweep_cursor % n
+    examined = 0
+    while examined < _QUERY_AUTH_SWEEP_BUDGET:
+        k = keys[idx % n]
+        if k != current_key:
+            bucket = _query_add_memory_events.get(k)
+            if bucket is not None:
+                while bucket and bucket[0] <= cutoff:
+                    bucket.popleft()
+                if not bucket:
+                    del _query_add_memory_events[k]
+        idx += 1
+        examined += 1
+    _query_add_memory_sweep_cursor = idx % n
+
+
 def _consume_query_add_memory_budget(now: float | None = None) -> tuple[int, float]:
     current = time.time() if now is None else now
     key = _query_auth_rate_limit_key()
     cutoff = current - QUERY_AUTH_ADD_MEMORY_WINDOW_SECONDS
     with _query_add_memory_lock:
+        _sweep_query_add_memory_keys(key, cutoff)
         bucket = _query_add_memory_events.get(key)
         if bucket is None:
             bucket = deque()

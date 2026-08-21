@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections import OrderedDict
 from contextvars import Token
 from typing import Any
 from urllib.parse import urlparse, urlunparse
@@ -29,7 +30,17 @@ from menhir.core.request_context import (
 from menhir.domain.session import MemorySession, new_session
 
 _client_session: MemorySession | None = None
-_session_cache: dict[tuple[str, str | None, str, str], MemorySession] = {}
+#: Upper bound on memoized MCP caller sessions (CF-89). ``MemorySession`` is a frozen
+#: dataclass and nothing mutates a cached one, so eviction cannot lose a write.
+#:
+#: It is not free, though. When the cached key carries ``session_id=None``, this cache is what
+#: gives that caller a STABLE synthetic id: ``new_session`` mints a fresh ``uuid4()`` and a new
+#: ``started_at`` on a miss. So evicting such an entry splits one logical conversation into two
+#: in session_registry and telemetry. Nothing is corrupted and no gate is affected -- the id is
+#: not an authorization input -- but the bound is set well above the number of concurrent
+#: callers a deployment sees so this stays a theoretical cost rather than a routine one.
+_SESSION_CACHE_MAX = 256
+_session_cache: "OrderedDict[tuple[str, str | None, str, str], MemorySession]" = OrderedDict()
 _session_cache_lock = threading.Lock()
 logger = logging.getLogger(__name__)
 
@@ -160,6 +171,10 @@ def _cached_session_for(
         if session is None:
             session = new_session(user_id, session_id=session_id, client_id=client_id, client_name=client_name)
             _session_cache[key] = session
+            if len(_session_cache) > _SESSION_CACHE_MAX:
+                _session_cache.popitem(last=False)
+        else:
+            _session_cache.move_to_end(key)
     return session
 
 
