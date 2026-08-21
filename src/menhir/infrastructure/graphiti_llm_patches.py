@@ -17,9 +17,13 @@ from menhir.infrastructure.graphiti_helpers import (
     _extract_first_json_payload,
     _normalize_graphiti_json_payload,
     _raw_preview,
+    check_graphiti_version,
 )
 
 logger = logging.getLogger(__name__)
+
+# Version guard - run once at import, matching the other patch modules (CF-87).
+check_graphiti_version()
 
 # ---------------------------------------------------------------------------
 # Graphiti OpenAI-generic-client patch

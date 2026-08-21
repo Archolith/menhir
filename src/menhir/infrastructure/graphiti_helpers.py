@@ -2,11 +2,36 @@
 
 from __future__ import annotations
 
+import importlib.metadata
 import json
+import logging
 import re
 from typing import Any
 
+logger = logging.getLogger(__name__)
+
 SYNTHETIC_FACT_PREFIX = "[synthetic] "
+
+#: Single declaration of the graphiti-core version the three patch modules are
+#: validated against. Consumed by `check_graphiti_version`, which every patch
+#: module runs at import time so a dependency bump is re-audited instead of
+#: silently misbehaving (CF-87).
+_EXPECTED_GRAPHITI_PREFIX = "0.29."
+
+
+def check_graphiti_version() -> None:
+    """Warn once if the installed graphiti-core version is outside the tested range."""
+    try:
+        version = importlib.metadata.version("graphiti-core")
+    except importlib.metadata.PackageNotFoundError:
+        return  # graphiti not installed - patches will no-op via ImportError guards
+    if not version.startswith(_EXPECTED_GRAPHITI_PREFIX):
+        logger.warning(
+            "graphiti-core %s detected - patches were written for %sx. "
+            "Patches may silently misbehave; re-audit before relying on them.",
+            version,
+            _EXPECTED_GRAPHITI_PREFIX,
+        )
 
 
 def _extract_first_json_payload(raw: str) -> str:

@@ -17,6 +17,7 @@ from menhir.infrastructure.graphiti_helpers import (
     _extract_first_json_payload,
     _normalize_graphiti_json_payload,
     _raw_preview,
+    check_graphiti_version,
 )
 from menhir.infrastructure.graphiti_extraction_patches import (
     _combined_extraction_cache,
@@ -25,6 +26,9 @@ from menhir.infrastructure.graphiti_extraction_patches import (
 from menhir.infrastructure.graphiti_llm_patches import GraphitiRequestTooLargeError
 
 logger = logging.getLogger(__name__)
+
+# Version guard - run once at import, matching the other patch modules (CF-87).
+check_graphiti_version()
 
 _GRAPHITI_PROMPT_MODULES = (
     "graphiti_core.prompts.prompt_helpers",

@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from contextvars import ContextVar
 from dataclasses import dataclass
-import importlib
-import importlib.metadata
 import json
 import logging
 import re
@@ -19,9 +17,15 @@ from menhir.infrastructure.graphiti_helpers import (
     _extract_first_json_payload,
     _normalize_graphiti_json_payload,
     _raw_preview,
+    check_graphiti_version,
 )
 
 logger = logging.getLogger(__name__)
+
+# Version guard - run once at import like the pre-CF-87 local check did. The
+# shared helper (graphiti_helpers.check_graphiti_version) owns the expected
+# prefix declaration and the warn-only logic.
+check_graphiti_version()
 
 _combined_extraction_cache: ContextVar[tuple[str, list[Any]] | None] = ContextVar(
     "menhir_graphiti_combined_extraction_cache",
@@ -863,31 +867,6 @@ def _sanitize_combined_payload(
     data["extracted_entities"] = entities
     data["edges"] = edges
     return data
-
-# ---------------------------------------------------------------------------
-# Version guard — patches are validated against graphiti-core 0.29.x only
-# (upgraded from 0.28.x 2026-07-12; see
-# .agent/reviews/menhir-graphiti-0.29-dependency-probe-2026-07-12.md).
-# If the installed version drifts outside this range, log a loud warning
-# so the patches get re-audited before silently misbehaving.
-# ---------------------------------------------------------------------------
-_EXPECTED_GRAPHITI_PREFIX = "0.29."
-
-def _check_graphiti_version() -> None:
-    """Warn once if the installed graphiti-core version is outside the tested range."""
-    try:
-        version = importlib.metadata.version("graphiti-core")
-    except importlib.metadata.PackageNotFoundError:
-        return  # graphiti not installed — patches will no-op via ImportError guards
-    if not version.startswith(_EXPECTED_GRAPHITI_PREFIX):
-        logger.warning(
-            "graphiti-core %s detected — patches were written for %sx. "
-            "Patches may silently misbehave; re-audit before relying on them.",
-            version,
-            _EXPECTED_GRAPHITI_PREFIX,
-        )
-
-_check_graphiti_version()
 
 
 # ---------------------------------------------------------------------------
