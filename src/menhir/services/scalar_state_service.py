@@ -132,6 +132,31 @@ def _slot_of_view(v: dict[str, Any]) -> tuple[str, str, str, str]:
     )
 
 
+def _retirement_reason(vslot: tuple[str, str, str, str], result: FoldResult) -> str:
+    """Why a current View's slot is absent from the freshly-folded desired set.
+
+    Compares the 4-tuple view slot (attribute, scope, value_kind, unit) against the
+    5-tuple Expiry/Abstention slot_keys, dropping the leading subject_uuid (both sides are
+    scoped to one subject, so discarding it cannot cross subjects)."""
+    if any(tuple(e.slot_key[1:]) == vslot for e in result.expiries):
+        return "expiry"
+    if any(tuple(a.slot_key[1:]) == vslot for a in result.abstentions):
+        return "abstain"
+    return "vanished"
+
+
+def _blocked_slots(result: FoldResult) -> set[tuple[str, str, str, str]]:
+    """Slots whose history projection is blocked by a malformed source time (MALFORMED_VALID_AT).
+
+    Emitted as 4-tuples in the view-slot coordinate system (attribute, scope, value_kind,
+    unit): keep the trailing four elements of the 5-tuple slot_key, dropping only
+    subject_uuid, so the elements carry the unit and stay comparable module-wide."""
+    return {
+        tuple(a.slot_key[1:5]) for a in result.abstentions
+        if a.reason == MALFORMED_VALID_AT
+    }
+
+
 def _projection_complete(result: Any) -> bool:
     """Return whether a rebuild result is safe to use as a durable completion proof."""
     if not isinstance(result, dict) or result.get("complete") is False:
@@ -294,8 +319,7 @@ class ScalarStateService:
                     # The load-bearing "why did the current View vanish" signal: the slot folded to no
                     # desired state (abstention / expiry / vanished / moved), so its View is retired with
                     # NO replacement. Record the reason class so a replay explains it without log spelunk.
-                    _reason = "expiry" if any(tuple(e.slot_key) == vslot for e in result.expiries) else (
-                        "abstain" if any(tuple(a.slot_key) == vslot for a in result.abstentions) else "vanished")
+                    _reason = _retirement_reason(vslot, result)
                     _audit.audit(
                         "reconcile_retire", _reason, namespace=namespace,
                         subject_uuid=subject_uuid, slot=vslot,
@@ -439,10 +463,7 @@ class ScalarStateService:
         # A malformed slot is an incomplete source projection, not evidence that an existing
         # known-good View vanished.  Keep it current/stale for observability until the next retry;
         # never delete it while claiming this rebuild complete.
-        blocked_slots = {
-            tuple(a.slot_key[:4]) for a in result.abstentions
-            if a.reason == MALFORMED_VALID_AT
-        }
+        blocked_slots = _blocked_slots(result)
 
         # Reconcile only after every desired contributor set was durably written.  A partial
         # failure must not retire unrelated current history while the repair marker is pending.
