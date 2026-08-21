@@ -169,8 +169,14 @@ class IngestIntakeMixin:
             evidence_projection_uuid: str | None = None
             if verdict is not None:
                 admitted_on_uuid = verdict.turn_evidence_uuid if verdict.granted else None
+                # Granted-verdict case: the edge records WHY the elevated tier was granted, so its
+                # loss is an auditability gap an operator must be able to see.
+                admission_is_load_bearing = verdict.granted
             else:
                 admitted_on_uuid = (turn_evidence_uuid or "").strip() or None
+                # Caller-supplied case: provenance only, the tier was already agent and does not
+                # depend on this edge, so a failure stays non-fatal and quiet.
+                admission_is_load_bearing = False
             if admitted_on_uuid:
                 try:
                     self.graph_adapter.link_episode_admission(
@@ -189,11 +195,18 @@ class IngestIntakeMixin:
                         namespace=stamped_namespace(namespace),
                     )
                 except Exception:
-                    logger.debug(
-                        "Failed to link episode=%s to turn evidence=%s; provenance edge missing "
-                        "(non-fatal)",
-                        episode_uuid, admitted_on_uuid, exc_info=True,
-                    )
+                    if admission_is_load_bearing:
+                        logger.warning(
+                            "Failed to link episode=%s to turn evidence=%s; episode remains at its "
+                            "granted tier with no supporting provenance edge (audit gap, not a transient)",
+                            episode_uuid, admitted_on_uuid, exc_info=True,
+                        )
+                    else:
+                        logger.debug(
+                            "Failed to link episode=%s to turn evidence=%s; provenance edge missing "
+                            "(non-fatal)",
+                            episode_uuid, admitted_on_uuid, exc_info=True,
+                        )
 
                 # Evidence projection (best-effort): also enrich the TURN's verbatim text, so entities
                 # exist in the user's own vocabulary rather than only in this memory's paraphrase of
