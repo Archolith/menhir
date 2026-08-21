@@ -12,8 +12,10 @@ So the contract is deliberately hostile to accidents:
   operation reports what it *would* do, and what it *cannot* do, and stops.
 * **It never claims exactness.** Every result carries ``exact: False`` and the explicit list of state
   classes the snapshot structurally cannot restore.
-* **Journaled and atomic** exactly like the exact lane: PREPARED before mutation, one atomic restore,
-  after-state verified before COMMITTED.
+* **Journaled, owned and atomic** exactly like the exact lane: PREPARED before mutation, the
+  restore performed inside ``owned_mutation`` so the writer's claim is held and its revocation
+  predicate published, one atomic restore, after-state verified before COMMITTED. The ownership
+  half was missing until CF-232 -- this bullet asserted it while the code did not do it.
 
 Lineage-only records (a merge with no snapshot at all) cannot enter this lane. They are
 nonrecoverable, and the inventory reports them as such rather than inventing a before-state.
@@ -29,6 +31,7 @@ from typing import Any
 
 from menhir.domain import legacy_snapshot as ls
 from menhir.infrastructure.graph_operations import GraphOperationsJournal
+from menhir.services.saga_writer_heartbeat import owned_mutation
 from menhir.services.merge_coordinator import (
     MergeDrift,
     _canonical,
@@ -201,27 +204,42 @@ class LegacyUnmergeCoordinator:
                 "degradations": degradations, "diagnostics": {"error": str(exc)},
             }
 
-        try:
-            result = self.graph_adapter.restore_merge_snapshot(
-                survivor_uuid=survivor_uuid,
-                absorbed_uuid=absorbed_uuid,
-                operation_id=op_id,
-                **plan,
-            )
-        except Exception as exc:  # noqa: BLE001
-            self.journal.record_attempt(op_id, error=f"{type(exc).__name__}: {exc}")
-            raise
+        # CF-232: the mutation window runs under `owned_mutation`, exactly as the five sibling
+        # coordinators do. It holds the writer's claim AND publishes the revocation predicate that
+        # `Neo4jRepository.execute` consults; without it the lease was never renewed during the
+        # restore and `_revocation` stayed at its default `None`, so every statement dispatched
+        # unconditionally.
+        #
+        # This lane was safe only by a mechanism in ANOTHER module -- `saga_reconcile_dispatcher`
+        # maps LEGACY_ENTITY_UNMERGE to a disposition that always quarantines and never replays, so
+        # there was no concurrent writer to protect against. That is a fact about the dispatcher,
+        # not about this code, and the module docstring asserted the opposite mechanism. The safety
+        # argument now lives where the mutation does.
+        #
+        # `LEGACY_ENTITY_UNMERGE` is already registered in `SAGA_STATEMENT_COUNTS` at 1, which is
+        # correct: `correlation_queries.restore_merge_snapshot` issues exactly one `execute`.
+        with owned_mutation(self.journal, op_id, operation_kind="LEGACY_ENTITY_UNMERGE"):
+            try:
+                result = self.graph_adapter.restore_merge_snapshot(
+                    survivor_uuid=survivor_uuid,
+                    absorbed_uuid=absorbed_uuid,
+                    operation_id=op_id,
+                    **plan,
+                )
+            except Exception as exc:  # noqa: BLE001
+                self.journal.record_attempt(op_id, error=f"{type(exc).__name__}: {exc}")
+                raise
 
-        after_fp = merge_state_fingerprint(
-            self.graph_adapter.fetch_merge_state(survivor_uuid, absorbed_uuid), op_id=op_id
-        )
-        if after_fp != restored_fp:
-            self.journal.mark_needs_review(
-                op_id, observed_error=f"legacy unmerge after-state mismatch: {after_fp}"
+            after_fp = merge_state_fingerprint(
+                self.graph_adapter.fetch_merge_state(survivor_uuid, absorbed_uuid), op_id=op_id
             )
-            raise MergeDrift(f"legacy unmerge after-state drift (op {op_id})")
+            if after_fp != restored_fp:
+                self.journal.mark_needs_review(
+                    op_id, observed_error=f"legacy unmerge after-state mismatch: {after_fp}"
+                )
+                raise MergeDrift(f"legacy unmerge after-state drift (op {op_id})")
 
-        self.journal.mark_committed(op_id)
+            self.journal.mark_committed(op_id)
         out = dict(result)
         out.update({
             "op_id": op_id,
