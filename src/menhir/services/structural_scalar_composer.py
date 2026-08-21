@@ -305,7 +305,9 @@ def _money_validator(
     return None
 
 
-def _clock_value(text: str) -> str | None:
+def _clock_value_or_none(text: str) -> str | None:
+    # Fails silently (returns None) so ``_clock_validator`` can report a reason code instead of
+    # raising; mirrors ``_clock_value_or_raise`` in ``deterministic_scalar_extractor``.
     match = re.fullmatch(r"(?P<hour>[01]?\d|2[0-3]):(?P<minute>[0-5]\d)\s*(?P<meridiem>am|pm)?", text,
                          re.IGNORECASE)
     if match is None:
@@ -329,7 +331,7 @@ def _clock_validator(
 ) -> str | None:
     if proposal.unit.strip():
         return REASON_CONSTRAINT_MISMATCH
-    if _clock_value(match.group("clock")) != proposal.normalized_value:
+    if _clock_value_or_none(match.group("clock")) != proposal.normalized_value:
         return REASON_VALUE_MISMATCH
     return None
 

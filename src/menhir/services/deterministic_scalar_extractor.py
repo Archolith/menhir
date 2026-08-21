@@ -139,12 +139,16 @@ def _parse_number(text: str | None) -> int | float:
     return float(cleaned)
 
 
-def _clock_value(match: re.Match[str]) -> str:
+def _clock_value_or_raise(match: re.Match[str]) -> str:
     """Normalize a captured clock time to zero-padded HH:MM.
 
     A 12h AM/PM suffix is only valid on hours 1..12; mixed 24h+meridiem forms ("22:15 PM",
     "00:15 am") raise ValueError so the candidate drops as a template mismatch and the episode
     is never router-eligible. 24h-without-meridiem and 12h forms stay distinct and valid.
+
+    The ``_or_raise`` suffix is load-bearing (CF-92): ``structural_scalar_composer`` applies the
+    identical rule and returns ``None`` instead, because its caller reports a reason code. The two
+    were both named ``_clock_value``, which read as interchangeable and was not.
     """
     hour = int(match.group("hour"))
     minute = match.group("minute")
@@ -284,16 +288,16 @@ TEMPLATE_REGISTRY: tuple[SurfaceTemplate, ...] = (
     # ---- c_clock_time: standing-property times only (no event times) -------------------------
     SurfaceTemplate("clock_wake_at", "c_clock_time", "wake_time", "clock_time", "", "absolute",
                     re.compile(rf"(?<!now\s)\bi\s+wake\s+up\s+at\s+{_CLOCK}\b", re.IGNORECASE),
-                    value_from=_clock_value),
+                    value_from=_clock_value_or_raise),
     SurfaceTemplate("clock_wake_my", "c_clock_time", "wake_time", "clock_time", "", "absolute",
                     re.compile(rf"\bmy\s+wake\s+time\s+is\s+{_CLOCK}\b", re.IGNORECASE),
-                    value_from=_clock_value),
+                    value_from=_clock_value_or_raise),
     SurfaceTemplate("clock_bed_at", "c_clock_time", "bed_time", "clock_time", "", "absolute",
                     re.compile(rf"(?<!now\s)\bi\s+go\s+to\s+bed\s+at\s+{_CLOCK}\b", re.IGNORECASE),
-                    value_from=_clock_value),
+                    value_from=_clock_value_or_raise),
     SurfaceTemplate("clock_bed_my", "c_clock_time", "bed_time", "clock_time", "", "absolute",
                     re.compile(rf"\bmy\s+bedtime\s+is\s+{_CLOCK}\b", re.IGNORECASE),
-                    value_from=_clock_value),
+                    value_from=_clock_value_or_raise),
     # ---- c_duration: standing self durations -------------------------------------------------
     SurfaceTemplate("duration_commute", "c_duration", "commute_duration", "duration", "minutes",
                     "absolute",
@@ -346,10 +350,10 @@ TEMPLATE_REGISTRY: tuple[SurfaceTemplate, ...] = (
     # ---- c_expire: values that ENDED (used-to forms only) ------------------------------------
     SurfaceTemplate("expire_wake", "c_expire", "wake_time", "clock_time", "", "expire",
                     re.compile(rf"\bi\s+used\s+to\s+wake\s+up\s+at\s+{_CLOCK}\b", re.IGNORECASE),
-                    value_from=_clock_value),
+                    value_from=_clock_value_or_raise),
     SurfaceTemplate("expire_bed", "c_expire", "bed_time", "clock_time", "", "expire",
                     re.compile(rf"\bi\s+used\s+to\s+go\s+to\s+bed\s+at\s+{_CLOCK}\b", re.IGNORECASE),
-                    value_from=_clock_value),
+                    value_from=_clock_value_or_raise),
     SurfaceTemplate("expire_weight", "c_expire", "weight", "measurement", "kg", "expire",
                     re.compile(rf"\bi\s+used\s+to\s+weigh\s+(?P<n>{_NUM_TOKEN})\s+(?P<unit>{_MASS_UNIT})\b",
                                re.IGNORECASE),
