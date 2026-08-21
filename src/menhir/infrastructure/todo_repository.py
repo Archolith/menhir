@@ -15,7 +15,11 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from menhir.domain.namespace import namespace_to_group_id, stamped_namespace
+from menhir.domain.namespace import (
+    DEFAULT_NAMESPACE,
+    namespace_to_group_id,
+    stamped_namespace,
+)
 from menhir.domain.todo_location import (
     DEFAULT_TODO_NAMESPACE,
     code_ref_file_predicate,
@@ -28,9 +32,10 @@ _VALID_STATUSES = frozenset({"open", "closed"})
 #: Shared silo. Every :Todo carries a non-null namespace -- "unscoped" is not
 #: representable. Reads that request a silo also see this bucket, so todos
 #: written before namespacing (backfilled to 'default') stay visible.
+#: Imported directly from domain.namespace (CF-76): it IS the canonical
+#: constant, not a local rebind that could silently diverge from it.
 #: Defined in the domain module so structural consumers can apply the same rule
 #: without importing this repository.
-DEFAULT_NAMESPACE = DEFAULT_TODO_NAMESPACE
 
 
 def _safe_namespace(namespace: str | None) -> str:

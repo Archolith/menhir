@@ -20,11 +20,15 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from menhir.domain.namespace import DEFAULT_NAMESPACE
+
 #: Bumped when artifact normalization rules change.
 ARTIFACT_SCHEMA_VERSION = 1
 
-#: Shared silo, matching the :Todo invariant -- namespace is never null.
-DEFAULT_ARTIFACT_NAMESPACE = "default"
+#: Alias of the canonical :Todo/shared namespace constant (CF-76). Kept so the
+#: public name "DEFAULT_ARTIFACT_NAMESPACE" still resolves as this module's
+#: public surface; the value is single-sourced in domain.namespace.
+DEFAULT_ARTIFACT_NAMESPACE = DEFAULT_NAMESPACE
 
 
 class ArtifactType:

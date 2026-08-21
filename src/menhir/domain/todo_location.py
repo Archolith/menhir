@@ -19,6 +19,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from menhir.domain.namespace import DEFAULT_NAMESPACE
+
 #: Bumped when the normalization rules change, so a re-run can tell already
 #: migrated locations from ones produced by older rules.
 LOCATION_SCHEMA_VERSION = 1
@@ -26,7 +28,10 @@ LOCATION_SCHEMA_VERSION = 1
 #: Shared todo silo. Lives here rather than in the repository so consumers that
 #: read todos structurally (blast radius) can apply the same visibility rule
 #: without importing the repository and creating a cycle.
-DEFAULT_TODO_NAMESPACE = "default"
+#: Alias of the canonical namespace constant (CF-76). Kept so the public name
+#: "DEFAULT_TODO_NAMESPACE" still resolves as this module's public surface; the
+#: value is single-sourced in domain.namespace.
+DEFAULT_TODO_NAMESPACE = DEFAULT_NAMESPACE
 
 #: Author-declared segments are separated by comma, semicolon, or " + ".
 _SEGMENT_SPLIT = re.compile(r"\s*[;,]\s*|\s+\+\s+")
