@@ -19,6 +19,7 @@ from typing import Any
 from uuid import uuid4
 
 from menhir.domain.namespace import stamped_namespace
+from menhir.infrastructure.cypher import non_derived_view_cypher
 
 
 class VerifierRepository:
@@ -133,9 +134,9 @@ class VerifierRepository:
         review, so recall can down-rank prose that may now restate a stale value. Returns the count.
         Registers themselves are excluded (they self-supersede via record_counter)."""
         rows = self._neo4j.execute(
-            """
-            MATCH (v:Entity {uuid: $verifier})<-[:VERIFIED_BY]-(reg:Entity)<-[:REFERENCES]-(b:Entity)
-            WHERE coalesce(b.is_view, false) = false
+            f"""
+            MATCH (v:Entity {{uuid: $verifier}})<-[:VERIFIED_BY]-(reg:Entity)<-[:REFERENCES]-(b:Entity)
+            WHERE {non_derived_view_cypher("b")}
             SET b.needs_review = true,
                 b.review_reason = 'verifier value changed to ' + $display,
                 b.review_flagged_at = datetime($at)

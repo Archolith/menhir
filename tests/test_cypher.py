@@ -1117,5 +1117,9 @@ class TestExports:
             "SHADOW_CANDIDATE_FACT_EDGE_FIELDS",
             "LLM_RESET_SET",
             "build_reset_or_fail_query",
+            # CF-200: the shared View-exclusion predicate. This test exists to force a deliberate
+            # decision whenever the module's public surface changes, which is exactly what adding
+            # a shared Cypher fragment helper is.
+            "non_derived_view_cypher",
         }
         assert set(cypher.__all__) == expected

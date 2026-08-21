@@ -17,6 +17,7 @@ __all__ = [
     "SHADOW_CANDIDATE_FACT_EDGE_FIELDS",
     "LLM_RESET_SET",
     "build_reset_or_fail_query",
+    "non_derived_view_cypher",
 ]
 
 
@@ -461,3 +462,25 @@ def build_reset_or_fail_query(
         ))
         .return_raw(f"count(n) AS {return_alias}")
         .build())
+
+
+def non_derived_view_cypher(variable: str = "n") -> str:
+    """Return a Cypher predicate that is true only for nodes that are NOT derived Views.
+
+    Derived Views are stored as ``:Entity``: recallable Views carry ``is_view``/``view_kind``, and
+    counter Views additionally ``is_quantstate``. The predicate is true when NONE of the three is
+    present, i.e. the node is an ordinary, bindable, recallable memory -- the inverse of what a
+    bind/merge/flag gate must exclude.
+
+    Shared here rather than at each call site because the rule previously existed as five
+    hand-written spellings across four modules (`episode_lifecycle`, `correlation_queries`,
+    `verifier_repository`). Two of them tested only ``is_view`` and thereby admitted legacy
+    counters (`is_view=false`, `is_quantstate=true`, `view_kind=null`), and one even inverted the
+    form (`coalesce(x.is_view, false) = false`). One shared predicate means a gate that forgets
+    ``is_quantstate`` or ``view_kind`` is the failure mode designed out.
+    """
+    return (
+        f"NOT coalesce({variable}.is_view, false) "
+        f"AND NOT coalesce({variable}.is_quantstate, false) "
+        f"AND {variable}.view_kind IS NULL"
+    )

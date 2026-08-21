@@ -11,6 +11,7 @@ import logging
 from typing import Any
 
 from menhir.domain import merge_delta as md
+from menhir.infrastructure.cypher import non_derived_view_cypher
 from menhir.infrastructure.neo4j import SAGA_MUTATION_TIMEOUT_S
 
 logger = logging.getLogger(__name__)
@@ -136,8 +137,7 @@ class CorrelationRepository:
     #: INELIGIBLE if any of them says it is derived. Counters written today carry `is_view` too,
     #: so `is_quantstate` covers pre-View registers specifically.
     _INELIGIBLE_ROLE_PREDICATE = (
-        r"(n.structure_role IS NOT NULL) OR coalesce(n.is_view, false) OR "
-        r"coalesce(n.is_quantstate, false) OR (n.view_kind IS NOT NULL) OR "
+        f"(n.structure_role IS NOT NULL) OR NOT ({non_derived_view_cypher('n')}) OR "
         r"(n.name =~ '(?i).*([\\/]|\\.(py|md|txt|json|ya?ml|ps1|sh|java|ts|tsx|js|sql|env|toml|"
         r"cfg|ini|gradle|html|css|png|jpg|svg))(\b|$).*')"
     )

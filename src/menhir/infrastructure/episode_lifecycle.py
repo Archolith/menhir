@@ -14,6 +14,7 @@ from menhir.infrastructure.cypher import (
     EPISODE_PROCESSING_FIELDS,
     EPISODE_RETRY_FIELDS,
     MEMORY_RETURN_FIELDS,
+    non_derived_view_cypher,
 )
 
 logger = logging.getLogger(__name__)
@@ -877,13 +878,11 @@ class EpisodeLifecycleRepository:
         forks = [
             str(row["uuid"])
             for row in self.neo4j.execute(
-                """
+                f"""
                 MATCH (f:Entity)
                 WHERE f.group_id = $namespace AND f.uuid <> $self_uuid
                       AND toLower(f.name) = $name
-                      AND NOT coalesce(f.is_view, false)
-                      AND NOT coalesce(f.is_quantstate, false)
-                      AND f.view_kind IS NULL
+                      AND {non_derived_view_cypher("f")}
                 RETURN f.uuid AS uuid
                 """,
                 params={"namespace": namespace, "self_uuid": self_uuid, "name": _SELF_ENTITY_NAME},
@@ -997,14 +996,12 @@ class EpisodeLifecycleRepository:
         if not (namespace and namespace.strip()) or not safe_spellings:
             return []
         rows = self.neo4j.execute(
-            """
+            f"""
             MATCH (n:Entity)
             WHERE n.group_id = $namespace
               AND toLower(trim(n.name)) IN $spellings
               AND n.uuid IS NOT NULL AND trim(toString(n.uuid)) <> ''
-              AND NOT coalesce(n.is_view, false)
-              AND NOT coalesce(n.is_quantstate, false)
-              AND n.view_kind IS NULL
+              AND {non_derived_view_cypher("n")}
             RETURN DISTINCT n.uuid AS uuid, n.name AS name,
                    coalesce(n.is_view, false) AS is_view,
                    coalesce(n.is_quantstate, false) AS is_quantstate,
@@ -1048,16 +1045,16 @@ class EpisodeLifecycleRepository:
         # content-identical twins created by different writers; the pending node points at its twin
         # through `resolved_episode_uuid`. Anchoring on the pending node alone returns nothing, so
         # the anchor set is BOTH: whichever node the id names, plus its resolved twin.
-        query = """
+        # f-string: the helper is interpolated, so every LITERAL Cypher brace below is doubled.
+        query = f"""
             MATCH (a:Episodic)
             WHERE a.uuid = $episode_uuid
-               OR EXISTS { (a)-[:ADMITTED_ON]->(:TurnEvidence {turn_id: $episode_uuid}) }
-            OPTIONAL MATCH (g:Episodic {uuid: a.resolved_episode_uuid})
+               OR EXISTS {{ (a)-[:ADMITTED_ON]->(:TurnEvidence {{turn_id: $episode_uuid}}) }}
+            OPTIONAL MATCH (g:Episodic {{uuid: a.resolved_episode_uuid}})
             WITH collect(DISTINCT a) + collect(DISTINCT g) AS anchors
             UNWIND anchors AS e
             MATCH (e)-[]-(n:Entity)
-            WHERE NOT coalesce(n.is_view, false)
-              AND NOT coalesce(n.is_quantstate, false) AND n.view_kind IS NULL
+            WHERE {non_derived_view_cypher("n")}
             RETURN DISTINCT n.uuid AS uuid, n.name AS name,
                    coalesce(n.is_view, false) AS is_view,
                    coalesce(n.is_quantstate, false) AS is_quantstate,
