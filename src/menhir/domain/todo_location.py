@@ -42,6 +42,13 @@ _WORKSPACE_PREFIX = re.compile(r"^projects/[^/]+/([^/]+)/(.+)$")
 #: A drive-letter absolute Windows path.
 _WINDOWS_ABSOLUTE = re.compile(r"^[A-Za-z]:[\\/]")
 
+#: Default workspace root marker used to trim a machine-specific absolute Windows
+#: path down to its portable workspace-relative remainder. This is a default, not a
+#: domain truth: the pure domain layer must not read the environment, so a caller
+#: whose checkout lives under a different root should override it via the
+#: ``workspace_marker`` keyword argument rather than editing this literal.
+DEFAULT_WORKSPACE_MARKER = "/IdeaProjects/"
+
 #: Trailing ":123", ":123-456", ":name", or "::name".
 _LINE_RANGE = re.compile(r"^(?P<path>.+?):(?P<start>\d+)-(?P<end>\d+)$")
 _LINE_ONLY = re.compile(r"^(?P<path>.+?):(?P<start>\d+)$")
@@ -170,6 +177,7 @@ def _parse_segment(
     *,
     explicit_project: str | None,
     known_projects: frozenset[str] | None,
+    workspace_marker: str | None,
 ) -> ParsedLocation:
     segment = raw_segment.strip()
     if not segment:
@@ -182,12 +190,16 @@ def _parse_segment(
 
     if _WINDOWS_ABSOLUTE.match(text):
         # Keep only the part below the workspace root; anything else is
-        # machine-specific and not portable into the graph.
-        marker = "/IdeaProjects/"
-        idx = text.find(marker)
-        if idx == -1:
+        # machine-specific and not portable into the graph. An empty/None marker
+        # means "do not strip a workspace root", so an absolute path then keeps
+        # the outside-workspace rejection below.
+        if workspace_marker:
+            marker = _normalize_separators(workspace_marker)
+            idx = text.find(marker)
+            if idx != -1:
+                text = text[idx + len(marker):]
+        if _WINDOWS_ABSOLUTE.match(text):
             return ParsedLocation(ordinal, raw_segment, unresolved_reason="absolute_path_outside_workspace")
-        text = text[idx + len(marker):]
 
     path_part, line_start, line_end, symbol = _split_trailing(text)
 
@@ -239,12 +251,17 @@ def parse_code_ref(
     *,
     structure_project: str | None = None,
     known_projects: frozenset[str] | None = None,
+    workspace_marker: str | None = DEFAULT_WORKSPACE_MARKER,
 ) -> list[ParsedLocation]:
     """Normalize a ``code_ref`` into zero or more locations.
 
     ``structure_project`` is the author's explicit declaration and takes
     precedence over any project parsed out of the path. ``known_projects``
     lets a bare ``<project>/<path>`` form be recognized without guessing.
+    ``workspace_marker`` is the workspace root used to trim an absolute Windows
+    path; it defaults to ``DEFAULT_WORKSPACE_MARKER`` and may be overridden by a
+    caller whose checkout lives under a different root. Pass an empty string or
+    None to disable workspace-root stripping entirely.
 
     Ordering is the author's; ``ordinal`` preserves it. Exact duplicate
     normalized locations collapse to the first occurrence.
@@ -262,6 +279,7 @@ def parse_code_ref(
             len(locations),
             explicit_project=structure_project,
             known_projects=known_projects,
+            workspace_marker=workspace_marker,
         )
         key = (loc.project, loc.path, loc.line_start, loc.line_end, loc.symbol, loc.resolution_status)
         if loc.resolution_status == "resolved" and key in seen:
