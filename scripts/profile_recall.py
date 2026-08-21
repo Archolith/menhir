@@ -1,22 +1,62 @@
-"""Profile recall latency phases against live Neo4j.
+"""Profile recall latency phases against a Neo4j instance.
 
 This script directly queries Neo4j to measure each phase of the recall pipeline
 without needing the full service stack (GraphitiClient, OpenAI keys, etc.).
+
+IT MUTATES THE GRAPH. Two of its benchmarks are writes -- `SET e.last_accessed` on ten entities
+and a weight increment on ten edges -- so pointing it at a real deployment perturbs recall ranking
+inputs for the nodes it touches. It is therefore GATED: it refuses to run unless
+`MENHIR_PROFILE_ALLOW_WRITES=1` is set, and it will not connect to a non-loopback host at all.
+
+Credentials and target come from the environment (`NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD`)
+rather than the hardcoded `("neo4j", "password")` this used to carry.
 """
 
 from __future__ import annotations
 
+import os
+import sys
 import time
+from urllib.parse import urlparse
+
 from neo4j import GraphDatabase
 
-URI = "bolt://localhost:7687"
-AUTH = ("neo4j", "password")
+#: Loopback only. This script writes; a remote target is never a profiling target.
+_LOOPBACK = frozenset({"127.0.0.1", "localhost", "::1", ""})
+
+
+def _resolve_target() -> tuple[str, tuple[str, str]]:
+    uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+    user = os.getenv("NEO4J_USER", "neo4j")
+    password = os.getenv("NEO4J_PASSWORD", "")
+    if not password:
+        raise SystemExit(
+            "NEO4J_PASSWORD is not set. This script no longer carries a hardcoded credential."
+        )
+    host = (urlparse(uri).hostname or "").strip().lower()
+    if host not in _LOOPBACK:
+        raise SystemExit(
+            f"Refusing to profile against non-loopback host {host!r}: this script WRITES to the "
+            "graph (last_accessed and edge weights) and must not touch a shared deployment."
+        )
+    return uri, (user, password)
+
+
+def _require_write_consent() -> None:
+    if os.getenv("MENHIR_PROFILE_ALLOW_WRITES", "").strip().lower() not in {"1", "true", "yes"}:
+        raise SystemExit(
+            "Refusing to run: this profiler MUTATES the graph (SET e.last_accessed on 10 entities, "
+            "and an edge-weight increment on 10 edges), which perturbs recall ranking inputs. "
+            "Re-run with MENHIR_PROFILE_ALLOW_WRITES=1 if that is what you want."
+        )
 
 
 def main() -> None:
-    driver = GraphDatabase.driver(URI, auth=AUTH)
+    _require_write_consent()
+    uri, auth = _resolve_target()
+    driver = GraphDatabase.driver(uri, auth=auth)
     driver.verify_connectivity()
-    print("Connected to Neo4j")
+    print(f"Connected to Neo4j at {uri}")
 
     with driver.session() as session:
         # --- Indexes and stats ---
