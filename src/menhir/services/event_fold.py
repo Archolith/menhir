@@ -15,8 +15,8 @@ from typing import Any, Callable, Protocol
 
 from menhir.domain.fold_algebra import REDUCERS, Event, latest, timeline
 from menhir.infrastructure.view_repository import ViewRepository
+from menhir.services.seam_types import Embed
 
-Embed = Callable[[str], "list[float] | None"]
 
 #: reducers whose accumulator is the scalar a counter stores.
 _SCALAR_REDUCERS = ("sum", "count", "distinct_count")

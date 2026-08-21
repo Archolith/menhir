@@ -42,12 +42,11 @@ from menhir.domain.fold_algebra import (
     latest, sum_,
 )
 from menhir.infrastructure import consolidation_audit as _audit
+from menhir.services.seam_types import Embed, LlmComplete
 
 logger = logging.getLogger(__name__)
 
 #: (system, user) -> completion text. Injected so perception is decoupled from any specific LLM.
-LlmComplete = Callable[[str, str], str]
-Embed = Callable[[str], "list[float] | None"]
 
 # ---------------------------------------------------------------------------- reducers this boundary can gate
 #: measure kind -> scalar reducer. A counter View stores exactly one scalar, so perception only

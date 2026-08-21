@@ -17,9 +17,8 @@ import json
 import re
 from dataclasses import dataclass
 from typing import Any, Callable, Protocol
+from menhir.services.seam_types import Embed, LlmComplete
 
-LlmComplete = Callable[[str, str], str]
-Embed = Callable[[str], list[float]]
 
 SYSTEM_PROMPT = (
  "You maintain a coding agent's EXPERIENTIAL COUNTERS from its work log. Read the numbered log "

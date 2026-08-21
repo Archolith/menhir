@@ -36,6 +36,7 @@ from menhir.services.typed_scalar_rules import (
     _req_episode_index,
     _req_str,
 )
+from menhir.services.seam_types import LlmComplete
 
 #: The single canonical predicate for completed-acquisition semantics.
 CANONICAL_PREDICATE_ACQUIRED = "acquired"
@@ -199,7 +200,6 @@ def _has_completed_acquisition_evidence(text: str) -> bool:
 
 #: (system, user) -> completion text. Injected so this boundary is decoupled from any specific LLM,
 #: exactly like ``perception.LlmComplete`` and the typed-scalar boundary.
-LlmComplete = Callable[[str, str], str]
 
 EVENT_SYSTEM_PROMPT = (
     "You read a user's memory episodes and extract COMPLETED ACQUISITION EVENTS only, for a "

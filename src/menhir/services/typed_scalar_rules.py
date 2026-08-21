@@ -20,6 +20,7 @@ from menhir.domain.typed_assertion import (
     normalize_scalar,
     validate_value,
 )
+from menhir.services.seam_types import LlmComplete
 #: canonical snake_case for the REQUIRED `attribute` (state family): lowercase start letter, then
 #: lowercase/digits/underscores. It must match or the proposal fails closed — we never silently
 #: normalize a malformed state-family key, because it would fork durable slot identity. `scope` and
@@ -145,7 +146,6 @@ logger = logging.getLogger(__name__)
 
 #: (system, user) -> completion text. Injected so this boundary is decoupled from any specific LLM,
 #: exactly like `perception.LlmComplete`.
-LlmComplete = Callable[[str, str], str]
 
 TYPED_SCALAR_SYSTEM_PROMPT = (
     "You convert a user's memory episodes into TYPED STATE OBSERVATIONS for a deterministic memory "

@@ -26,10 +26,10 @@ from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Protocol
 
 from menhir.infrastructure.view_repository import ViewRepository
+from menhir.services.seam_types import Embed
 
 logger = logging.getLogger(__name__)
 
-Embed = Callable[[str], "list[float] | None"]
 
 
 @dataclass(frozen=True)

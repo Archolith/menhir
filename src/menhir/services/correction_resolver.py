@@ -29,7 +29,6 @@ from menhir.domain.fold_algebra import Event
 
 logger = logging.getLogger(__name__)
 
-Embed = Callable[[str], "list[float] | None"]
 
 _NUM = r"(\d+(?:\.\d+)?)"
 
@@ -37,6 +36,7 @@ _NUM = r"(\d+(?:\.\d+)?)"
 # Imported rather than duplicated so the cue vocabulary has ONE definition. typed_scalar_rules
 # does not import this module, so there is no cycle.
 from menhir.services.typed_scalar_rules import _CORRECTION_CUES, _CORRECTION_NOT_RE
+from menhir.services.seam_types import Embed
 
 #: Edit verbs. Note these are NOT sufficient on their own — see `correction_intent_is_established`.
 _EDIT_VERB = r"(?:chang(?:e|ed|ing)|bump(?:ed)?|updat(?:e|ed)|set|mak(?:e|ing)|switch(?:ed)?|revis(?:e|ed)|correct(?:ed)?|fix(?:ed)?)"

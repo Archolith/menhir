@@ -45,8 +45,8 @@ from menhir.services.typed_scalar_perception import (
     _parse_json_array,
     parse_scalar_row,
 )
+from menhir.services.seam_types import LlmComplete
 
-LlmComplete = Callable[[str, str], str]
 
 #: verdicts a reviewer may return for a proposed card.
 SUPPORTED = "SUPPORTED"
