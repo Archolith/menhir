@@ -75,6 +75,43 @@ class RetrievalScoreKind(str, Enum):
     FACT_EDGE_RRF = "fact_edge_rrf"
 
 
+# Candidates below this score are noise and should be filtered before scoring.
+#
+# NOTE (verified live 2026-06-28, see .agent/plans/deferred-verification.md): the
+# `similarity` this gates is graphiti's RRF node_reranker_score (search_scored),
+# NOT a cosine similarity. With graphiti's default rank_const=1 the score is
+# sum_methods 1/(rank+1) -- a dual-method top hit = 2.0, single-method top = 1.0 --
+# so a 0.15 floor behaves as a RANK CUT (~top 12-13 dual / ~top 6 single), not a
+# cosine cutoff. The value is reasonable only by luck of rank_const=1; revisit the
+# scale (rescale or re-document as a rank cut) before tuning hybrid_alpha.
+#
+# The floor is SOURCE-AWARE: it only gates candidates whose relevance is a
+# vector-similarity score (CandidateSource.VECTOR). Candidates that were injected
+# by provenance -- an exact lexical/BM25 hit, a linked pending episode, a
+# structural file neighbor -- carry their relevance in their source, not in the
+# RRF score, and must not be silently dropped by this gate. Those sources are
+# listed in FLOOR_EXEMPT_SOURCES (see FLOOR_EXEMPT_SOURCES below).
+#
+# SCALE CONTRACT (plan 1a): this floor is a RANK CUT on graphiti's RRF scale, not
+# a cosine threshold. graphiti's NodeReranker.rrf scores each hit as
+# sum_methods 1/(rank + rank_const) with rank_const=1, so a dual-method (bm25 +
+# cosine) top hit tops out at 1/(0+1) + 1/(0+1) = GRAPHITI_RRF_DUAL_METHOD_MAX.
+# 0.15 on that scale admits roughly the top ~12-13 dual / ~6 single hits.
+# test_scoring_service::test_graphiti_rrf_scale_contract pins the rank_const=1
+# assumption against the graphiti package and fails loudly if upstream changes it.
+# Semantic normalization of this lane to [0,1] is a ranking change, staged behind
+# RetrievalTuningConfig.similarity_scale="normalized" (plan 1b); default "rrf" is
+# today's behavior byte-for-byte.
+MIN_SIMILARITY_THRESHOLD = 0.15
+
+# The dual-method (bm25 + cosine) top-hit ceiling of graphiti's RRF reranker score
+# under rank_const=1. This is the scale MIN_SIMILARITY_THRESHOLD and the [0,1]
+# SOURCE_PRIORS are (accidentally) mixed across today; plan 1b's normalized mode
+# divides search scores by this constant to put them on the [0,1] prior scale.
+# Pinned by test_graphiti_rrf_scale_contract so an upstream RRF change is caught.
+GRAPHITI_RRF_DUAL_METHOD_MAX = 2.0
+
+
 # Baseline prior per source, intended on the [0, 1] scale the scoring floor uses.
 #
 # These are the values that let non-vector candidates clear
@@ -220,7 +257,7 @@ class RetrievalTuningConfig:
     fact_edge_mode: str = "pointer"
     # Similarity scale contract (plan 1a/1b). "rrf" == today: graphiti's RRF
     # reranker score feeds the additive relevance formula on its native ~[0, 2]
-    # scale (see scoring_service.GRAPHITI_RRF_DUAL_METHOD_MAX), and the 0.15 floor
+    # scale (see GRAPHITI_RRF_DUAL_METHOD_MAX, owned by this module), and the 0.15 floor
     # / [0, 1] SOURCE_PRIORS are (by accident) mixed across it. "normalized"
     # divides the VECTOR/BM25 search scores by that pinned max so `similarity` is
     # [0, 1] and PENDING=1.0 regains its intended top-pin; the floor scales to
