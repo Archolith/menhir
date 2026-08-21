@@ -312,7 +312,7 @@ class SystemMetadataResource(BaseJsonResource):
                 "neo4j_uri": provider_config.get("neo4j_uri"),
                 "neo4j_database": provider_config.get("neo4j_database", "neo4j"),
                 "local_llm_base_url": provider_config.get("local_llm_base_url"),
-                "scheduler_url": os.getenv("SCHEDULER_URL", "http://localhost:8082"),
+                "scheduler_url": provider_config.get("scheduler_url"),
                 "chat_provider": provider_config.get("chat_provider", "local"),
                 "graphiti_provider": provider_config.get("graphiti_provider", "local"),
                 "graphiti_embed_provider": provider_config.get("graphiti_embed_provider")
