@@ -49,7 +49,12 @@ class IngestProjectTool(BaseTextTool):
     scope = ToolScope.NAMESPACED
     description = "Scan a project directory and ingest its structure into the memory graph."
 
-    def timeout_for(self, path: str = "", name: str | None = None, force: bool = False) -> int:
+    def timeout_for(
+        self, path: str = "", name: str | None = None,
+        force: bool = False, **_unused: object,
+    ) -> int:
+        # timeout_for is dispatched with the caller's raw kwargs, so it must
+        # accept everything endpoint accepts (including namespace).
         return 120
 
     async def endpoint(

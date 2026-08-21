@@ -55,8 +55,11 @@ class IngestDocumentTool(BaseTextTool):
     description = "Ingest a doc/markdown/text file into the memory graph as a document entity + semantic episode."
 
     def timeout_for(
-        self, path: str = "", project: str | None = None, document_type: str = "generic"
+        self, path: str = "", project: str | None = None,
+        document_type: str = "generic", **_unused: object,
     ) -> int:
+        # timeout_for is dispatched with the caller's raw kwargs, so it must
+        # accept everything endpoint accepts (including namespace).
         return 30
 
     async def endpoint(
