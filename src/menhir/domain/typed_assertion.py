@@ -40,7 +40,9 @@ from typing import Any
 #: the source_key/assertion_key identity spaces never mix. Bump only on a real identity change.
 IDENTITY_VERSION: int = 2
 
-#: the typed scalar families a TypedAssertion may carry (matches ScalarStateKind.VALUE_KINDS).
+#: the typed scalar families a TypedAssertion may carry. The DOMAIN owns this allowlist;
+#: infrastructure's ScalarStateKind.VALUE_KINDS derives from it (inverted direction: the domain
+#: never cites an infrastructure definition).
 VALUE_KINDS: frozenset[str] = frozenset({
     "boolean", "status", "count", "duration", "frequency",
     "money", "measurement", "clock_time", "weekday",

@@ -47,6 +47,7 @@ from typing import Any
 from uuid import uuid4
 
 from menhir.domain.temporal import parse_iso8601
+from menhir.domain.typed_assertion import VALUE_KINDS as DOMAIN_VALUE_KINDS, normalize_scalar
 
 try:  # neo4j is a hard runtime dep; guard the import so unit imports without the driver still load.
     from neo4j.exceptions import ConstraintError as _Neo4jConstraintError
@@ -339,25 +340,25 @@ class AdmissionAuditKind(ViewKind):
 def _scalar_norm(value: Any) -> str:
     """Stable normalized string for a typed scalar value — the register content AND the signature
     basis. Handles the heterogeneous typed ValueKinds: numbers, ranges ``[lo, hi]``, booleans, and
-    string states (clock_time ``07:30``, weekday ``saturday``, status ``finished``)."""
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    if isinstance(value, (int, float)):
-        return _fmt(float(value))
-    if isinstance(value, (list, tuple)):
-        parts = [
-            _fmt(float(x)) if isinstance(x, (int, float)) and not isinstance(x, bool)
-            else str(x).strip()
-            for x in value
-        ]
-        # Degenerate range [N, N] -> the point N. MUST mirror domain.typed_assertion.normalize_scalar
-        # exactly (see its comment): this function is the View/signature side of the same value
-        # identity, so a collapse applied on only one side would make the assertion and the View
-        # disagree about the same value. A genuine range (lo != hi) is left intact.
-        if len(parts) == 2 and parts[0] == parts[1]:
-            return parts[0]
-        return "-".join(parts)
-    return str(value).strip()
+    string states (clock_time ``07:30``, weekday ``saturday``, status ``finished``).
+
+    CF-56: this now DELEGATES to ``domain.typed_assertion.normalize_scalar`` instead of
+    re-implementing it. Both sides feed the same value identity — the domain's output becomes the
+    ``assertion_key``, this one becomes the View signature — and the old comment here said the two
+    "MUST mirror ... exactly". They did not. The hand-written copy routed every number through
+    ``_fmt(float(value))`` and diverged in two ways the domain's ``_num_norm`` docstring already
+    names as the reasons for its design:
+
+      * ``float()`` is lossy above 2**53, so ``9007199254740993`` normalized to
+        ``'9007199254740992'`` here and to the exact digits in the domain — the assertion and the
+        View disagreeing about the same value, which is precisely what the mirror comment forbade.
+      * ``_fmt`` raises ``OverflowError`` on ``inf``/``nan``; the domain stringifies them
+        defensively so the key builder never crashes.
+
+    Delegation is safe on every value the two already agreed on, which is every finite number
+    representable in a float — i.e. everything ``validate_value`` admits in practice.
+    """
+    return normalize_scalar(value)
 
 
 def _duration_seconds_endpoint_display(value: Any) -> str | None:
@@ -444,11 +445,9 @@ class ScalarStateKind(ViewKind):
         "toString(n.valid_at) AS valid_at"
     )
 
-    #: the typed ValueKinds a scalar_state slot may carry (fail-closed allowlist).
-    VALUE_KINDS = frozenset({
-        "boolean", "status", "count", "duration", "frequency",
-        "money", "measurement", "clock_time", "weekday",
-    })
+    #: the typed ValueKinds a scalar_state slot may carry (fail-closed allowlist). Single-sourced
+    #: from the domain's VALUE_KINDS — domain owns the allowlist; this class only consumes it.
+    VALUE_KINDS = DOMAIN_VALUE_KINDS
 
     @classmethod
     def _slot(cls, payload: dict[str, Any]) -> dict[str, str]:
