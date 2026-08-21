@@ -131,6 +131,17 @@ def _node_index_queries() -> list[str]:
             "CREATE INDEX entity_structure_role_idx IF NOT EXISTS FOR (n:Entity) ON (n.structure_role)",
             "CREATE INDEX entity_structure_path_idx IF NOT EXISTS FOR (n:Entity) ON (n.structure_path)",
             "CREATE INDEX entity_structure_project_path_idx IF NOT EXISTS FOR (n:Entity) ON (n.structure_project, n.structure_path)",
+            # CF-176(a): `resolve_structural_entities` matches structure_path as a DISJUNCTION --
+            # `= candidate` OR `ENDS WITH '/' + candidate`. The RANGE index above serves only the
+            # equality branch; a disjunction needs EVERY branch indexed or the planner falls back to
+            # pulling every structural node and filtering. ENDS WITH needs a TEXT index, so both
+            # index kinds coexist on this one property and the planner picks per branch.
+            # Measured: 4,006 -> 5 dbHits (2,000 structural nodes among 22,003 :Entity).
+            "CREATE TEXT INDEX entity_structure_path_text_idx IF NOT EXISTS FOR (n:Entity) ON (n.structure_path)",
+            # CF-176(b): `list_verifiers` is `MATCH (v:Entity {is_verifier: true})` with no LIMIT.
+            # Unindexed that is a full :Entity label scan on the highest-cardinality label to find a
+            # handful of verifiers. Measured: 44,013 -> 7 dbHits for 3 verifiers among 22,003.
+            "CREATE INDEX entity_is_verifier_idx IF NOT EXISTS FOR (n:Entity) ON (n.is_verifier)",
         ]
     )
     # :Todo and its owned :TodoLocation value objects. Before these, :Todo had no
