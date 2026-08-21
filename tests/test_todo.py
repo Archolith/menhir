@@ -214,9 +214,11 @@ def test_create_todo_with_code_ref_issues_references_file_query() -> None:
 
     repo.create_todo(content="Fix handler", code_ref="src/api/routes.py:42")
 
-    # calls: CREATE, REFERENCES_FILE, known-projects lookup, HAS_LOCATION,
-    # location->file audit edges.
-    assert len(neo4j.calls) == 5
+    # calls: CREATE, REFERENCES_FILE, known-projects lookup, HAS_LOCATION.
+    # The trailing location->file audit-edge write was removed in CF-143 -- it MERGEd
+    # (l)-[:REFERENCES_FILE]->(f) from :TodoLocation and nothing ever traversed it. The
+    # :Todo-level REFERENCES_FILE edge asserted below is a different edge and IS read.
+    assert len(neo4j.calls) == 4
     file_query = neo4j.calls[1]["query"]
     assert "REFERENCES_FILE" in file_query
     assert neo4j.calls[1]["params"]["file_path"] == "src/api/routes.py"
@@ -294,15 +296,14 @@ def test_create_todo_no_episode_uuid_skips_created_from() -> None:
 
 @pytest.mark.unit
 def test_create_todo_all_params_together() -> None:
-    # Call order: CREATE, REFERENCES_FILE, CREATED_FROM, known-projects lookup,
-    # HAS_LOCATION, location->file audit edges
+    # Call order: CREATE, REFERENCES_FILE, CREATED_FROM, known-projects lookup, HAS_LOCATION.
+    # The location->file audit-edge write that used to follow was removed in CF-143 (dead write).
     neo4j = _StubNeo4j(responses=[
         [],
         [{"linked_path": "src/api/routes.py"}],
         [],
         [{"p": "menhir"}],
         [],
-        [{"linked": 1}],
     ])
     repo = TodoRepository(neo4j)
 
@@ -312,7 +313,7 @@ def test_create_todo_all_params_together() -> None:
         episode_uuid="ep-123",
     )
 
-    assert len(neo4j.calls) == 6
+    assert len(neo4j.calls) == 5
     assert result["linked_file_path"] == "src/api/routes.py"
     assert result["episode_uuid"] == "ep-123"
     assert [(l["path"], l["line_start"]) for l in result["locations"]] == [

@@ -7,7 +7,11 @@ carries meaning and is referenced by other semantic objects.
 Graph shape:
   (:WorkArtifact)-[:EMBODIED_IN]->(:ArtifactSource)     — where the doc itself lives
   (:WorkArtifact)-[:HAS_LOCATION]->(:ArtifactLocation)  — code the doc discusses
-  (:ArtifactLocation)-[:RESOLVES_TO]->(:Entity)         — structural file entity
+
+There is deliberately NO location->file edge. `(:ArtifactLocation)-[:RESOLVES_TO]->(:Entity)` was
+written on every create and read by nothing -- removed in CF-143. Consumers reach files through
+`:HAS_LOCATION` and match on `l.path` / `l.project`, which is what `structure_queries` already
+does; that is also why it resolves todos the old edge missed.
 
 EMBODIED_IN and HAS_LOCATION answer different questions and must never be
 merged: the first is what the artifact IS, the second is what it talks about.
@@ -28,7 +32,7 @@ except ModuleNotFoundError:  # pragma: no cover - import guard
     _Neo4jConstraintError = ()  # type: ignore[assignment]
 
 from menhir.domain.artifact_shape import ShapeReport, ShapeStatus, validate_shape
-from menhir.domain.todo_location import code_ref_file_predicate, parse_code_ref
+from menhir.domain.todo_location import parse_code_ref
 from menhir.domain.artifact_reconciliation import (
     ARTIFACT_SOURCE_SCHEMA_VERSION,
     ArtifactSourceSnapshot,
@@ -1157,25 +1161,7 @@ class WorkArtifactRepository:
             """,
             {"uuid": artifact_uuid, "rows": rows},
         )
-        self._link_location_files(artifact_uuid)
         return rows
-
-    def _link_location_files(self, artifact_uuid: str) -> int:
-        """Resolve each location to a structural file entity where one exists."""
-        rows = self.neo4j.execute(
-            f"""
-            MATCH (a:WorkArtifact {{artifact_uuid: $uuid}})-[:HAS_LOCATION]->(l:ArtifactLocation)
-            WHERE l.resolution_status = 'resolved' AND l.path IS NOT NULL
-            MATCH (f:Entity)
-            WHERE f.structure_role IN ['file', 'entrypoint', 'config', 'test']
-              AND {code_ref_file_predicate('f', 'l.path')}
-              AND (l.project IS NULL OR f.structure_project = l.project)
-            MERGE (l)-[:RESOLVES_TO]->(f)
-            RETURN count(*) AS linked
-            """,
-            {"uuid": artifact_uuid},
-        )
-        return int(rows[0].get("linked", 0)) if rows else 0
 
     def transition_status(
         self, artifact_uuid: str, to_status: str, *, namespace: str | None = None

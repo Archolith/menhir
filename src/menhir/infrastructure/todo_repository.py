@@ -150,36 +150,7 @@ class TodoRepository:
             """,
             {"uuid": todo_uuid, "rows": rows},
         )
-        self._link_location_files(todo_uuid)
         return rows
-
-    def _link_location_files(self, todo_uuid: str) -> int:
-        """Resolve each location to a structural file entity, if one exists.
-
-        The edge hangs off the :TodoLocation rather than the :Todo, so the trail
-        reads raw declaration -> normalized location -> resolved entity. With a
-        multi-location todo, a todo-level edge could not say which declaration
-        produced which file.
-
-        Matching mirrors blast radius: exact path, plus a basename-only fallback
-        for a bare filename, which is underspecified but still a real
-        declaration. Unresolvable locations simply get no edge -- the location
-        itself is retained either way.
-        """
-        rows = self.neo4j.execute(
-            f"""
-            MATCH (t:Todo {{uuid: $uuid}})-[:HAS_LOCATION]->(l:TodoLocation)
-            WHERE l.resolution_status = 'resolved' AND l.path IS NOT NULL
-            MATCH (f:Entity)
-            WHERE f.structure_role IN ['file', 'entrypoint', 'config', 'test']
-              AND {code_ref_file_predicate('f', 'l.path')}
-              AND (l.project IS NULL OR f.structure_project = l.project)
-            MERGE (l)-[:REFERENCES_FILE]->(f)
-            RETURN count(*) AS linked
-            """,
-            {"uuid": todo_uuid},
-        )
-        return int(rows[0].get("linked", 0)) if rows else 0
 
     # ------------------------------------------------------------------
     # Write
