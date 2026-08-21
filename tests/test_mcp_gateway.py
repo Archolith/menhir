@@ -13,36 +13,77 @@ import pytest
 from menhir.mcp import server as mcp_server
 
 
+# Registration is where several per-tool properties live (namespace threading,
+# ownership guards, pinned-namespace application), and a membership-only subset
+# assert cannot see any of them regress by deletion. Equality asserts both that
+# nothing expected was dropped and that nothing was added without updating this list.
+EXPECTED_TOOL_NAMES = frozenset({
+    "add_candidate",
+    "add_memory",
+    "add_memory_and_track",
+    "add_todo",
+    "audit_artifact_corpus",
+    "build_context",
+    "close_memory",
+    "close_stale_todos",
+    "close_todo",
+    "delete_memory",
+    "delete_namespace",
+    "flag_memory",
+    "force_reenrich",
+    "force_release_enrichment_lease",
+    "force_scheduler_takeover",
+    "get_artifact",
+    "get_artifact_relationships",
+    "get_client_context",
+    "get_enrichment_status",
+    "get_episode_trace",
+    "get_memory_stats",
+    "get_provenance",
+    "get_todo",
+    "ingest_document",
+    "ingest_project",
+    "link_artifacts",
+    "list_artifact_questions",
+    "list_artifacts",
+    "list_clients",
+    "list_conflicts",
+    "list_enrichment_queue",
+    "list_todos",
+    "mint_client",
+    "pause_scheduler",
+    "promote_memory",
+    "query_structure",
+    "rate_recall",
+    "read_flagged_memories",
+    "recall_context_memories",
+    "recall_memories",
+    "recover_orphans",
+    "relocate_artifact_source",
+    "repair_stale_enrichment",
+    "requeue_conflicts_for_llm_review",
+    "resolve_conflict",
+    "resume_scheduler",
+    "revoke_client",
+    "run_llm_conflict_review",
+    "scan_for_conflicts",
+    "supersede_artifact",
+    "transition_artifact",
+    "unflag_memory",
+    "view_entropy",
+    "watch_enrichment",
+})
+
+
 def test_mcp_server_lists_all_expected_tools():
-    """Verify all key tools are registered on the MCP server."""
+    """Verify every expected tool is registered, and no extra tool is registered."""
     mcp_tools = asyncio.run(mcp_server.mcp._list_tools())
     registered_names = {t.name for t in mcp_tools}
 
-    expected_tools = [
-        "recall_memories",
-        "add_memory",
-        "query_structure",
-        "build_context",
-        "read_flagged_memories",
-        "recall_context_memories",
-        "list_todos",
-        "add_todo",
-        "flag_memory",
-        "unflag_memory",
-        "delete_memory",
-        "ingest_project",
-        "ingest_document",
-        "close_todo",
-        "get_client_context",
-        "get_enrichment_status",
-        "watch_enrichment",
-        "list_enrichment_queue",
-        "list_conflicts",
-        "resolve_conflict",
-    ]
-
-    for name in expected_tools:
-        assert name in registered_names, f"{name} not registered in MCP server"
+    missing = sorted(EXPECTED_TOOL_NAMES - registered_names)
+    unexpected = sorted(registered_names - EXPECTED_TOOL_NAMES)
+    assert not missing, f"tool(s) dropped from registration: {missing}"
+    assert not unexpected, f"tool(s) added without updating EXPECTED_TOOL_NAMES: {unexpected}"
 
 
 def test_mcp_server_has_search_and_call_tools():
