@@ -214,5 +214,5 @@ def classify_outcome(corruption: CorruptionScenario) -> tuple[CorruptionOutcome,
     if selected in corruption.acceptable_selections:
         outcome = CorruptionOutcome.CORRECT if selected is not None else CorruptionOutcome.SAFE_ABSTAIN
     else:
-        outcome = CorruptionOutcome.DANGEROUS
+        outcome = CorruptionOutcome.SAFE_ABSTAIN if selected is None else CorruptionOutcome.DANGEROUS
     return outcome, result
