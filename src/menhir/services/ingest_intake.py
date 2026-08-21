@@ -80,15 +80,13 @@ class IngestIntakeMixin:
         """
 
         from menhir.domain.namespace import stamped_namespace
-        from menhir.domain.bootstrap_scope import normalize_bootstrap_scope
+        from menhir.domain.bootstrap_scope import normalize_bootstrap_scope_for_flag
         from menhir.domain.truth.admission_gate import evaluate_user_tier_claim
 
         episode_uuid = str(uuid4())
         episode_name = f"episode-{session.session_id}-{episode_uuid}"
         reference_time = _parse_occurred_at(occurred_at)
-        normalized_bootstrap_scope = normalize_bootstrap_scope(bootstrap_scope)
-        if normalized_bootstrap_scope is not None and not flagged:
-            raise ValueError("bootstrap_scope requires flagged=true")
+        normalized_bootstrap_scope = normalize_bootstrap_scope_for_flag(bootstrap_scope, flagged)
 
         try:
             # Gate user-tier claims: fetch turn evidence and evaluate.

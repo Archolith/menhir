@@ -48,6 +48,21 @@ def normalize_bootstrap_scope(value: str | None) -> str | None:
     )
 
 
+def normalize_bootstrap_scope_for_flag(value: str | None, flagged: bool) -> str | None:
+    """Normalize a write-side bootstrap scope AND enforce the pin/flagged pair.
+
+    A bootstrap pin is a retained memory injected into startup context; an
+    unflagged pin is exactly what lifecycle decay removes, so a pin requires
+    ``flagged=True``. Returns the normalized scope (``None`` when there is no
+    pin), raising ``ValueError`` when a pin is present but the memory is not
+    flagged. The raised message is load-bearing for callers.
+    """
+    normalized = normalize_bootstrap_scope(value)
+    if normalized is not None and not flagged:
+        raise ValueError("bootstrap_scope requires flagged=true")
+    return normalized
+
+
 def bootstrap_selection(workspace: str | None) -> tuple[str, list[str]]:
     """Return the receipt key and allowed pin scopes for a bootstrap read."""
 
