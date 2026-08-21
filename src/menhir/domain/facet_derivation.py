@@ -18,6 +18,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 
+from . import temporal_lexicon
 from .facets import MemoryFacetSet
 
 # PascalCase types, snake_case + SCREAMING_SNAKE identifiers, and `foo(` calls.
@@ -46,9 +47,20 @@ _EVIDENCE_LEXICON: dict[str, str] = {
     "logs": "log", "traceback": "log", "stack trace": "log", "issue": "issue",
     "benchmark": "benchmark", "bench": "benchmark", "trace": "trace",
 }
-_HISTORICAL_MARKERS = ("used to", "previously", "no longer", "deprecated", "formerly",
-                       "back then", "old approach", "we removed")
-_CURRENT_MARKERS = ("now", "currently", "current", "as of today", "today we")
+# Text-classifier extras. ON PURPOSE audience-specific -- do NOT merge them into the
+# shared core (temporal_lexicon), or the QUERY classifier (temporal_intent) would start
+# matching them. The shared core is the prefix; order is load-bearing because
+# _HISTORICAL_NEGATION iterates _HISTORICAL_MARKERS below.
+_TEXT_HISTORICAL_EXTRAS: tuple[str, ...] = (
+    "deprecated", "formerly", "back then", "old approach", "we removed",
+)
+_TEXT_CURRENT_EXTRAS: tuple[str, ...] = ("as of today", "today we")
+_HISTORICAL_MARKERS: tuple[str, ...] = (
+    temporal_lexicon._SHARED_HISTORICAL_MARKERS + _TEXT_HISTORICAL_EXTRAS
+)
+_CURRENT_MARKERS: tuple[str, ...] = (
+    temporal_lexicon._SHARED_CURRENT_MARKERS + _TEXT_CURRENT_EXTRAS
+)
 # Negation guard per marker; skip negator-prefixed markers ("no longer") so they don't veto themselves.
 _HISTORICAL_NEGATION: dict[str, re.Pattern] = {
     marker: re.compile(
@@ -131,14 +143,18 @@ def _extract_objects(text: str) -> set[str]:
 
 
 def _extract_bucket(lower: str) -> str | None:
-    for marker in _HISTORICAL_MARKERS:
+    # Read the shared core at call time (via the module object) so a change to the
+    # single source flows into this classifier -- see CF-58.
+    historical = temporal_lexicon._SHARED_HISTORICAL_MARKERS + _TEXT_HISTORICAL_EXTRAS
+    for marker in historical:
         if not _word_present(marker, lower):
             continue
         negation = _HISTORICAL_NEGATION.get(marker)
         if negation is not None and negation.search(lower):
             continue  # directly negated -> not historical
         return "historical"
-    if any(_word_present(marker, lower) for marker in _CURRENT_MARKERS):
+    current = temporal_lexicon._SHARED_CURRENT_MARKERS + _TEXT_CURRENT_EXTRAS
+    if any(_word_present(marker, lower) for marker in current):
         return "current"
     return None
 

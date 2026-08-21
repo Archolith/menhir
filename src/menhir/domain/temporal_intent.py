@@ -17,16 +17,39 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from menhir.domain import temporal_lexicon
 from menhir.domain.temporal import TemporalQuery
 
-# History / belief-drift / regression cues -> include invalidated, AS_KNOWN_AT lens.
-_HISTORY_CUES = (
-    "used to", "previously", "originally", "before", "what broke", "what did we believe",
-    "what did i believe", "regress", "history", "historically", "earlier",
-    "back when", "at the time", "former", "no longer", "stopped working", "since when",
+# Query-classifier extras. ON PURPOSE audience-specific -- do NOT merge them into the
+# shared core (temporal_lexicon), or the TEXT classifier (facet_derivation) would start
+# matching them. The shared historical markers are not contiguous here, so they are
+# threaded back in at their original positions (see _history_cues) to keep the cue
+# order -- and therefore which cue fires first for explainability -- byte-identical.
+_HISTORY_EXTRAS_PREFIX: tuple[str, ...] = (
+    "originally", "before", "what broke", "what did we believe", "what did i believe",
+    "regress", "history", "historically", "earlier", "back when", "at the time", "former",
 )
+_HISTORY_EXTRAS_SUFFIX: tuple[str, ...] = ("stopped working", "since when")
+_CURRENT_EXTRAS: tuple[str, ...] = ("today", "latest", "at present", "these days")
+
+
+def _history_cues() -> tuple[str, ...]:
+    """Full history-cue list with the shared core threaded at its original positions."""
+    return (
+        temporal_lexicon._SHARED_HISTORICAL_MARKERS[:2]
+        + _HISTORY_EXTRAS_PREFIX
+        + temporal_lexicon._SHARED_HISTORICAL_MARKERS[2:]
+        + _HISTORY_EXTRAS_SUFFIX
+    )
+
+
+def _current_cues() -> tuple[str, ...]:
+    return temporal_lexicon._SHARED_CURRENT_MARKERS + _CURRENT_EXTRAS
+
+
+_HISTORY_CUES: tuple[str, ...] = _history_cues()
 # Explicit current cues -> CURRENT_BELIEF (also the default).
-_CURRENT_CUES = ("now", "currently", "current", "today", "latest", "at present", "these days")
+_CURRENT_CUES: tuple[str, ...] = _current_cues()
 
 # "as of <date>" / "on <date>" world-time cue.
 _AS_OF_RE = re.compile(r"\b(?:as of|on|at)\s+(\d{4}-\d{2}-\d{2})\b", re.IGNORECASE)
@@ -52,11 +75,11 @@ def classify_temporal_intent(text: str) -> TemporalIntent:
     if m:
         return TemporalIntent(TemporalQuery.AS_OF_WORLD, include_invalidated=True, as_of=m.group(1), cue=m.group(0))
 
-    for cue in _HISTORY_CUES:
+    for cue in _history_cues():
         if cue in lowered:
             return TemporalIntent(TemporalQuery.AS_KNOWN_AT, include_invalidated=True, cue=cue)
 
-    for cue in _CURRENT_CUES:
+    for cue in _current_cues():
         if cue in lowered:
             return TemporalIntent(TemporalQuery.CURRENT_BELIEF, include_invalidated=False, cue=cue)
 
