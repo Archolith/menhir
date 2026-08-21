@@ -30,6 +30,11 @@ Two evaluation layers:
      real Phase 4b candidate pools, and see whether the final context selection is still
      correct. Perfect field accuracy that still selects harmful context would not be a
      useful result -- so this is scored independently of (1), never inferred from it.
+
+Provenance: contains conversation data derived from the LongMemEval benchmark
+(Wu et al., ICLR 2025; arXiv:2410.10813), MIT-licensed, Copyright (c) 2024 Di Wu.
+The full copyright and permission notice is reproduced in NOTICE at the repo root,
+which ships with the package -- MIT requires it in redistributions (CF-153).
 """
 
 from __future__ import annotations

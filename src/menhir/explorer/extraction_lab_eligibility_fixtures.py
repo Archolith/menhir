@@ -3,6 +3,11 @@
 reference_time for each fixture is the REAL valid_at of that fixture's current_message
 episode, pulled directly from the live LME graph during earlier phases -- kept here for
 continuity/realism rather than an arbitrary date.
+
+Provenance: contains conversation data derived from the LongMemEval benchmark
+(Wu et al., ICLR 2025; arXiv:2410.10813), MIT-licensed, Copyright (c) 2024 Di Wu.
+The full copyright and permission notice is reproduced in NOTICE at the repo root,
+which ships with the package -- MIT requires it in redistributions (CF-153).
 """
 
 from __future__ import annotations

@@ -29,6 +29,11 @@ ablation-handoff.md's Phase 4 "Required negative-control test matrix"):
   3. same facet, multiple subjects (the false-grounding trap, made explicit)
   4. stale + current fact, same subject/facet (must prefer current)
   5. no relevant fact at all (must select nothing, not a loosely-adjacent decoy)
+
+Provenance: contains conversation data derived from the LongMemEval benchmark
+(Wu et al., ICLR 2025; arXiv:2410.10813), MIT-licensed, Copyright (c) 2024 Di Wu.
+The full copyright and permission notice is reproduced in NOTICE at the repo root,
+which ships with the package -- MIT requires it in redistributions (CF-153).
 """
 
 from __future__ import annotations

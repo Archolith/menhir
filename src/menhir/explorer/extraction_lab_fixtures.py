@@ -2,6 +2,11 @@
 
 Contains the 7 required test messages from .agent/plans/menhir-extraction-prompt-recency-recall-research.md
 plus the 3 real RCA cases (830ce83f, 852ce960, 2698e78f).
+
+Provenance: contains conversation data derived from the LongMemEval benchmark
+(Wu et al., ICLR 2025; arXiv:2410.10813), MIT-licensed, Copyright (c) 2024 Di Wu.
+The full copyright and permission notice is reproduced in NOTICE at the repo root,
+which ships with the package -- MIT requires it in redistributions (CF-153).
 """
 
 from datetime import datetime
