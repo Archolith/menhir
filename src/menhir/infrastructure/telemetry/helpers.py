@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import sqlite3
@@ -11,6 +12,8 @@ from pathlib import Path
 from typing import Any
 
 from menhir.infrastructure.paths import telemetry_db_path
+
+logger = logging.getLogger(__name__)
 
 
 def default_telemetry_db_path() -> Path:
@@ -24,13 +27,21 @@ _SQLITE_BUSY_TIMEOUT_S = float(os.getenv("MENHIR_TELEMETRY_BUSY_TIMEOUT_S", "5")
 def connect_telemetry_db(db_path: Path) -> sqlite3.Connection:
     """Single connect seam for every store sharing the telemetry DB file.
 
-    Applies ``MENHIR_TELEMETRY_BUSY_TIMEOUT_S`` to all of them.
+    Applies ``MENHIR_TELEMETRY_BUSY_TIMEOUT_S`` and the WAL journal mode to all of them.
+    WAL is set here rather than in any single store's init because at least five stores
+    share this file and whichever writes first is the one that creates it; applying the
+    pragma on every connect means the file is created in WAL mode no matter which writer
+    gets there first. ``PRAGMA journal_mode=WAL`` is a cheap no-op when already WAL.
     """
     conn = sqlite3.connect(db_path, timeout=_SQLITE_BUSY_TIMEOUT_S)
     try:
         conn.execute(f"PRAGMA busy_timeout = {int(_SQLITE_BUSY_TIMEOUT_S * 1000)}")
     except sqlite3.Error:  # pragma: no cover - a pragma failure must never break a connect
         pass
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+    except sqlite3.Error:  # pragma: no cover - a pragma failure must never break a connect
+        logger.debug("Could not enable WAL on telemetry DB", exc_info=True)
     return conn
 
 

@@ -76,8 +76,12 @@ class McpTelemetryStore(
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
             with self._connect() as conn:
                 # WAL lets readers proceed while a writer holds the DB, which is the durable
-                # fix for "database is locked" contention on mcp_telemetry.db. This is an
-                # on-disk, persistent setting -- applied once at init, not per connection.
+                # fix for "database is locked" contention on mcp_telemetry.db. It is applied
+                # on every connect by the shared seam connect_telemetry_db -- the file is
+                # created in WAL mode no matter which of the five writers touches it first,
+                # so application here is NOT the guarantee of init-time setup it once looked
+                # like. This explicit pragma is harmless duplication kept as a belt-and-braces
+                # guard against a future store path that bypasses the seam.
                 try:
                     conn.execute("PRAGMA journal_mode=WAL")
                 except sqlite3.Error:  # pragma: no cover - never let a pragma break init
