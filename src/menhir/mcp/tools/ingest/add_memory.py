@@ -28,6 +28,8 @@ async def add_memory(
         type: Memory type. Use "TEMPORAL" with valid_at to create a time-bound reminder.
         valid_at: ISO date for TEMPORAL memories (YYYY-MM-DD), e.g. "2027-02-16".
                   Required when type="TEMPORAL". Ignored for other types.
+                  TEMPORAL + valid_at bypasses the enrichment queue and writes directly:
+                  the memory persists immediately but receives no graph enrichment.
         namespace: Optional silo to scope this operation to. Empty = default/global behavior.
         flagged: If True, mark this memory as permanently retained (exempt from decay).
         bootstrap_scope: Optional startup pin: general or workspace:<registered-key>.
@@ -44,7 +46,7 @@ async def add_memory(
 class AddMemoryTool(BaseTextTool):
     name = "add_memory"
     scope = ToolScope.NAMESPACED
-    description = "Queue a memory for enrichment."
+    description = "Queue a memory for enrichment (TEMPORAL + valid_at writes directly instead)."
 
     async def endpoint(
         self,
@@ -66,6 +68,9 @@ class AddMemoryTool(BaseTextTool):
             diff: Optional git diff to attach as context for what changed alongside this memory.
             type: Memory type. Use "TEMPORAL" with valid_at to create a time-bound reminder.
             valid_at: ISO date for TEMPORAL memories (YYYY-MM-DD), e.g. "2027-02-16".
+                      Required when type="TEMPORAL". Ignored for other types.
+                      TEMPORAL + valid_at bypasses the enrichment queue and writes directly:
+                      the memory persists immediately but receives no graph enrichment.
             namespace: Optional silo to scope this operation to. Empty = default/global behavior.
             flagged: If True, mark this memory as permanently retained (exempt from decay).
             bootstrap_scope: Optional startup pin: general or workspace:<registered-key>.
