@@ -232,3 +232,57 @@ def redact_uri_credentials(uri: str | None) -> str:
     if port is not None:
         authority = f"{authority}:{port}"
     return urlunparse(parsed._replace(netloc=authority))
+
+
+#: Stand-in left in the authority when userinfo was present and removed. Purely an operator
+#: signal: "a credential was configured here", which a silently-cleaned URI cannot convey.
+USERINFO_MASK = "***:***"
+
+
+def redact_uri_for_display(uri: str | None) -> str:
+    """Reduce a URI to scheme, authority and path for operator-facing DISPLAY (CF-97).
+
+    Strictly stronger than :func:`redact_uri_credentials`: userinfo is stripped by delegating to
+    it, and then the query and fragment are dropped as well. A credential does not have to sit in
+    the ``user:pass@`` slot -- ``https://backend.example/path?token=<secret>`` has no userinfo at
+    all, so the credential-grade redactor returns it verbatim and it prints in full.
+
+    **Two different jobs, deliberately two functions.** ``redact_uri_credentials`` promises to
+    return a userinfo-free URI byte-for-byte, and callers rely on that: `_normalize_embed_stamp_base`
+    persists its output as the `embed_version` stamp that decides which rows get re-embedded, and
+    the provider-config payloads echo an operator's exact string back. Dropping the query there
+    would silently change a stored identity. This function is for surfaces where the value is only
+    ever read by a human -- diagnostics blocks, preflight reports -- and is never used to address
+    anything.
+
+    Fails closed the same way its base does: an unparseable URI degrades to ``UNPARSEABLE_URI``
+    rather than passing through.
+
+    Userinfo is replaced by ``USERINFO_MASK`` rather than simply deleted. The base function
+    deletes it, which is right for a value that may be re-read as configuration; here the reader
+    is a human debugging a deployment, and ``http://host:8099`` cannot be distinguished from a URL
+    that never had a credential at all. The query and fragment carry no such marker -- there is no
+    established one, and inventing a second notation for a display string is not worth it.
+    """
+    from urllib.parse import urlparse, urlunparse
+
+    if not uri:
+        return ""
+    try:
+        had_userinfo = "@" in urlparse(uri).netloc
+    except ValueError:
+        return UNPARSEABLE_URI
+
+    base = redact_uri_credentials(uri)
+    if not base or base == UNPARSEABLE_URI:
+        return base
+    try:
+        parsed = urlparse(base)
+    except ValueError:
+        return UNPARSEABLE_URI
+
+    if had_userinfo:
+        parsed = parsed._replace(netloc=f"{USERINFO_MASK}@{parsed.netloc}")
+    elif not parsed.query and not parsed.fragment:
+        return base
+    return urlunparse(parsed._replace(query="", fragment=""))

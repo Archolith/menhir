@@ -15,6 +15,7 @@ from .settings_helpers import (
     parse_client_tools,
     parse_csv_env,
     redact_uri_credentials,
+    redact_uri_for_display,
     validate_no_auth_bind_safety,
 )
 from .settings_model import MemorySettings
@@ -23,6 +24,7 @@ __all__ = [
     "MemorySettings",
     "assert_bind_safe",
     "redact_uri_credentials",
+    "redact_uri_for_display",
     "is_loopback_host",
     "parse_bool_env",
     "parse_client_namespaces",

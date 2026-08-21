@@ -7,11 +7,10 @@ import threading
 from collections import OrderedDict
 from contextvars import Token
 from typing import Any
-from urllib.parse import urlparse, urlunparse
 
 import httpx
 
-from menhir.config import MemorySettings
+from menhir.config import MemorySettings, redact_uri_for_display
 from menhir.core.backend_config import resolve_backend_auth_key
 from menhir.core.backend_impl import BackendClient, RuntimeProvider
 from menhir.core.backend_protocol import MemoryBackend
@@ -91,21 +90,17 @@ def resolve_mcp_backend_auth_key(settings: MemorySettings | None = None) -> str:
 
 
 def redact_url_for_diagnostics(raw: str) -> str:
-    """Redact userinfo from a URL for safe diagnostic display.
+    """Reduce a URL to scheme, authority and path for safe diagnostic display.
 
-    ``http://user:pass@host:8099/path`` -> ``http://***:***@host:8099/path``
+    ``http://user:pass@host:8099/path`` -> ``http://host:8099/path``
+    ``https://backend.example/p?token=s`` -> ``https://backend.example/p``
+
+    CF-97: this used to strip userinfo and nothing else, so a credential in a query string --
+    the shape ``MENHIR_BACKEND_URL`` actually takes when an operator uses a token -- printed
+    verbatim in ``menhir diagnostics``. It also failed OPEN, returning the raw string on any
+    parse error. It now delegates to the one shared reducer, which fails closed.
     """
-    try:
-        parsed = urlparse(raw)
-        if parsed.username or parsed.password:
-            netloc = parsed.hostname or ""
-            if parsed.port:
-                netloc = f"{netloc}:{parsed.port}"
-            redacted = parsed._replace(netloc=f"***:***@{netloc}")
-            return urlunparse(redacted)
-        return raw
-    except Exception:
-        return raw
+    return redact_uri_for_display(raw)
 
 
 def build_mcp_backend_diagnostics(

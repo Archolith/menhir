@@ -2,31 +2,25 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import urlparse
 
+from menhir.config import redact_uri_for_display
 from menhir.config.oauth import OAuthConfig
 from menhir.config.settings import is_loopback_host
 
 
 def _redact_url_credentials(url: str) -> str:
-    """Redact userinfo from a URL.
+    """Reduce a URL to scheme, authority and path for preflight output.
 
-    ``http://user:pass@host:8099/path`` → ``http://***:***@host:8099/path``
+    ``http://user:pass@host:8099/path`` → ``http://host:8099/path``
+
+    CF-97: was a byte-for-byte copy of the naive redactor in ``mcp/service_access.py`` -- userinfo
+    only, failing open on a parse error -- so a secret in a query string printed verbatim. Both now
+    delegate to the one shared reducer.
     """
-    if not url:
-        return url
-    try:
-        parsed = urlparse(url)
-        if parsed.username or parsed.password:
-            netloc = parsed.hostname or ""
-            if parsed.port:
-                netloc = f"{netloc}:{parsed.port}"
-            redacted = parsed._replace(netloc=f"***:***@{netloc}")
-            return urlunparse(redacted)
-        return url
-    except Exception:
-        return url
+    return redact_uri_for_display(url)
 
 
 def _check(name: str, status: str, message: str) -> dict[str, str]:
@@ -59,18 +53,38 @@ def _is_https_or_loopback_http(url: str) -> bool:
         return True
 
 
+#: A URL embedded in prose: everything up to the first whitespace. Trailing punctuation is peeled
+#: off in the substitution rather than excluded here, so a sentence-final period survives instead
+#: of being absorbed into the path.
+_URL_IN_TEXT = re.compile(r"https?://\S+")
+
+
 def _redact_url_in_message(message: str) -> str:
-    """Redact credentials from any URLs found in a message string."""
-    import re
-    pattern = re.compile(r"(https?://)[^@\s]+@")
-    return pattern.sub(r"\1***:***@", message)
+    """Reduce every URL found in a message string to scheme, authority and path.
+
+    CF-97, second half. The structured fields below are not the only place a URL reaches an
+    operator: ``:238`` and ``:244`` interpolate ``metadata_url`` straight into a check message.
+    This used to substitute only the ``user:pass@`` form, so fixing the structured fields alone
+    would have left the identical leak in the message beside them.
+    """
+
+    def _sub(match: re.Match[str]) -> str:
+        raw = match.group(0)
+        trailing = ""
+        while raw and raw[-1] in ".,;:)]}\"'":
+            trailing = raw[-1] + trailing
+            raw = raw[:-1]
+        return _redact_url_credentials(raw) + trailing
+
+    return _URL_IN_TEXT.sub(_sub, message)
 
 
 def build_oauth_preflight(config: OAuthConfig) -> dict[str, object]:
     """Pure offline OAuth configuration preflight checks.
 
     No HTTP calls, no JWKS fetch, no IdP interaction.
-    All URLs in the output are redacted of credentials.
+    All URLs in the output -- structured fields and check messages alike -- are reduced to
+    scheme, authority and path, so neither userinfo nor a query-string secret can reach an operator.
     """
     if not config.enabled:
         return {
