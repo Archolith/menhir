@@ -192,24 +192,39 @@ def test_stats_exact_keys_and_counters():
     assert stats["size"] == 1
 
 
-def test_the_singleton_actually_uses_the_resolved_capacity(monkeypatch):
+def test_the_singleton_actually_uses_the_resolved_capacity() -> None:
     """CALLER BOUNDARY: `_default_max_size()` can be perfectly correct and still be wired to
     nothing. Unwiring it from the module-level singleton leaves every other test in this file
     passing, so this asserts the construction site itself.
 
-    Reloads the module, so it restores the singleton afterwards -- the suite runs with `-n 8`
-    and other tests hold `get_embedding_cache()`.
+    Checked by parsing the module rather than by `importlib.reload`. Reloading rebinds
+    `EmbeddingCache` to a NEW class object while other test modules still hold the old one, so
+    `isinstance(get_embedding_cache(), EmbeddingCache)` in `tests/test_embedding_cache.py` starts
+    failing depending on which xdist worker runs first. That is a real cross-test break, not a
+    flake -- so this test must have no import-time side effects at all.
     """
-    import importlib
+    import ast
+    import inspect
 
     from menhir.infrastructure import embedding_cache as module
 
-    monkeypatch.setenv("MENHIR_EMBEDDING_CACHE_MAX_SIZE", "77")
-    try:
-        reloaded = importlib.reload(module)
-        assert reloaded.get_embedding_cache()._max_size == 77
-    finally:
-        monkeypatch.delenv("MENHIR_EMBEDDING_CACHE_MAX_SIZE", raising=False)
-        restored = importlib.reload(module)
+    tree = ast.parse(inspect.getsource(module))
 
-    assert restored.get_embedding_cache()._max_size == 512, "singleton not restored for the suite"
+    construction = None
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(
+            isinstance(t, ast.Name) and t.id == "_default_embedding_cache" for t in node.targets
+        ):
+            construction = node.value
+
+    assert construction is not None, "module-level singleton assignment not found"
+    assert isinstance(construction, ast.Call), "singleton is not constructed by a call"
+
+    called = {
+        n.func.id
+        for n in ast.walk(construction)
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+    }
+    assert "_default_max_size" in called, (
+        "the singleton does not call _default_max_size(); the env override is wired to nothing"
+    )
