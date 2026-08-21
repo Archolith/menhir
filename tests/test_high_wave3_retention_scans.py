@@ -50,9 +50,21 @@ def test_cf6_a_row_past_the_window_is_excluded() -> None:
     assert bool(newer) is False, "a row written now must fall inside it"
 
     # And the unfixed comparison is what the finding recorded.
+    #
+    # Pinned rather than wall-clock: the defect is that 'T' (0x54) sorts above ' ' (0x20) at
+    # index 10, which only decides the comparison when the two date PREFIXES are equal. With a
+    # live clock, `now - 25h` and `now - 24h` straddle midnight for one hour every day, the date
+    # prefixes differ, the comparison resolves before reaching the separator, and this assertion
+    # fails on a correct implementation. Fixed instants keep the control on the character the
+    # finding is actually about.
+    pinned_cutoff = "2026-08-19 23:00:00"  # the shape datetime('now','-24 hours') emits
+    pinned_row = "2026-08-19T22:00:00.123456+00:00"  # an hour OLDER, so genuinely outside
     assert bool(
-        conn.execute("SELECT ? < datetime('now','-24 hours')", (old,)).fetchone()[0]
-    ) is False
+        conn.execute("SELECT ? < ?", (pinned_row, pinned_cutoff)).fetchone()[0]
+    ) is False, "unnormalized compare must read an out-of-window row as inside it"
+    assert bool(
+        conn.execute(f"SELECT {normalized} < ?", (pinned_row, pinned_cutoff)).fetchone()[0]
+    ) is True, "normalizing the row side must restore the correct ordering"
 
 
 def test_cf6_no_unnormalized_window_comparison_remains() -> None:
