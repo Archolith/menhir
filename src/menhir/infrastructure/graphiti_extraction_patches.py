@@ -151,7 +151,60 @@ _LIST_BULLET_RE = re.compile(r"^\s*(?:[-*•]|\d{1,2}[.)])\s+")
 
 #: An item must look like a NAME, not a sentence. Verbs and sentence punctuation disqualify the whole
 #: block -- one prose line is enough to refuse, because a half-parsed list is worse than none.
+#: Verbs come from the closed allowlist `_LIST_VERBS` below -- the same style as
+#: `_ACQUISITION_VERBS` in services/event_history_recall.py. No stemming, no synonyms, no
+#: part-of-speech call.
+#:
+#: The rule is POSITIONAL: an item that BEGINS with a verb or a pronoun and continues is a clause,
+#: not a name -- "buy milk", "fixed the bug", "ate lunch", "we are working today".
+#:
+#: Matching an allowlisted verb ANYWHERE was tried first and over-refused badly, because most of
+#: these words are also common nouns: it rejected "Tools:/saw/hammer/drill",
+#: "Races:/fun run/night run" and an album named "Work" -- exactly the NAME lists this parser
+#: exists to accept. Anchoring at the start costs the mid-item case (a clause whose first word is
+#: neither verb nor pronoun still passes THIS guard) and buys back that whole class of lists.
+#: Sentence punctuation and the 6-word cap remain as the other two guards.
 _LIST_ITEM_MAX_WORDS = 6
+
+#: Verbs that disqualify an item (and therefore the whole block) under the "items are NAMES, not
+#: clauses" rule. A closed, conservative allowlist matched at word boundaries; includes the
+#: inflections observed on the CF-193 probes (`buy`, `walk`, `call`, `fixed`, `shipped`, `ate`).
+_LIST_VERBS: tuple[str, ...] = (
+    "buy", "bought", "buying", "purchase", "purchased", "purchasing",
+    "walk", "walked", "walking",
+    "call", "called", "calling",
+    "fix", "fixed", "fixing",
+    "ship", "shipped", "shipping",
+    "eat", "ate", "eating",
+    "get", "got", "getting",
+    "make", "made", "making",
+    "go", "went", "going",
+    "run", "ran", "running",
+    "do", "did", "doing",
+    "take", "took", "taking",
+    "see", "saw", "seen", "seeing",
+    "say", "said", "saying",
+    "have", "had", "having",
+    "finish", "finished", "finishing",
+    "complete", "completed", "completing",
+    "work", "worked", "working",
+    "read", "reading",
+    "write", "wrote", "written", "writing",
+)
+#: Personal pronouns. A NAME does not begin with one; a clause does ("we are working today",
+#: "i bought milk"). Same leading-token rule as the verbs, so this stays one concept.
+_LIST_CLAUSE_PRONOUNS: tuple[str, ...] = (
+    "i", "we", "you", "he", "she", "they", "it", "my", "our", "your", "their",
+)
+
+#: An item that BEGINS with a verb or a pronoun and continues is a clause, not a name.
+#: Anchored at the start on purpose -- see the note above `_LIST_ITEM_MAX_WORDS`.
+_LIST_VERB_RE = re.compile(
+    r"^(?:"
+    + "|".join(re.escape(w) for w in (*_LIST_VERBS, *_LIST_CLAUSE_PRONOUNS))
+    + r")\s+\S",
+    re.IGNORECASE,
+)
 
 
 def parse_titled_list(episode_text: str) -> tuple[str, list[str]] | None:
@@ -163,7 +216,8 @@ def parse_titled_list(episode_text: str) -> tuple[str, list[str]] | None:
 
       * the first line must contain ':' -- an explicit author-written "a list follows" marker
       * at least 3 items, so a colon in ordinary prose cannot produce a two-node "list"
-      * every item <= 6 words and free of sentence punctuation -- items are NAMES, not clauses
+      * every item <= 6 words, free of sentence punctuation, and free of allowlisted verbs
+        (`_LIST_VERBS`) -- items are NAMES, not clauses
       * ONE non-conforming item refuses the WHOLE block (no partial parse)
 
     The FIRST ITEM MAY SIT ON THE TITLE LINE (`agents names below:Admon`), which is how the turn that
@@ -195,6 +249,8 @@ def parse_titled_list(episode_text: str) -> tuple[str, list[str]] | None:
         if not item:
             return None
         if len(item.split()) > _LIST_ITEM_MAX_WORDS:
+            return None
+        if _LIST_VERB_RE.match(item):       # leading verb + object => a clause, not a name
             return None
         if any(ch in item for ch in ".!?"):  # sentence punctuation => prose, refuse the block
             return None
