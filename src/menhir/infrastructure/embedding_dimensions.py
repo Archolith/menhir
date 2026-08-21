@@ -74,7 +74,9 @@ def embedding_dimension_health(
     inferred), the wrong-dimension counts are reported as 0 (nothing to compare
     against) but the raw per-dimension distributions and the model-agnostic
     ``mixed`` flag are still computed — so a mixed-dimension graph is caught even
-    for an unknown embedding model.
+    for an unknown embedding model. Zero-length vectors (``size() == 0``) are
+    counted separately as ``zero_*_count`` and always count as wrong, regardless
+    of ``expected_dim``.
 
     With ``use_cache=True`` the result is memoized per (uri, database, expected_dim) for the
     process lifetime. Only the two startup callers opt in; see ``_HEALTH_CACHE`` (CF-173).
@@ -128,23 +130,45 @@ def embedding_dimension_health(
         "AND a.structure_role IS NULL AND b.structure_role IS NULL RETURN count(r) AS c"
     ) or [{}])[0].get("c", 0) or 0)
 
-    # Only meaningful when we know the target dimension; otherwise report 0 wrong
-    # (there is nothing to compare against) and rely on the model-agnostic `mixed`
-    # signal below.
-    if expected_dim is None:
-        wrong_entity_count = wrong_community_count = wrong_edge_count = 0
-    else:
-        wrong_entity_count = sum(int(row.get("count") or 0) for row in entity_rows if int(row.get("dim") or -1) != expected_dim)
-        wrong_community_count = sum(int(row.get("count") or 0) for row in community_rows if int(row.get("dim") or -1) != expected_dim)
-        wrong_edge_count = sum(int(row.get("count") or 0) for row in edge_rows if int(row.get("dim") or -1) != expected_dim)
-
     entity_dims = {int(row.get("dim") or 0): int(row.get("count") or 0) for row in entity_rows}
     community_dims = {int(row.get("dim") or 0): int(row.get("count") or 0) for row in community_rows}
     edge_dims = {int(row.get("dim") or 0): int(row.get("count") or 0) for row in edge_rows}
 
+    # Zero-length vectors are a first-class corruption signal (CF-187): a stored
+    # empty list is a real, non-NULL property whose size() is 0, so it is invisible
+    # to the IS NULL sweeps below. Any vector of dimension 0 is wrong against every
+    # expected dimension, known or not. Counted from the dim distributions above --
+    # no extra Cypher query needed, the rows already come back grouped by size().
+    zero_entity_count = int(entity_dims.get(0, 0) or 0)
+    zero_community_count = int(community_dims.get(0, 0) or 0)
+    zero_edge_count = int(edge_dims.get(0, 0) or 0)
+
+    # Only meaningful when we know the target dimension; otherwise report 0 wrong
+    # (there is nothing to compare against) and rely on the model-agnostic `mixed`
+    # signal below. Zero-length vectors are the deliberate exception: they are wrong against
+    # every dimension, so they count as wrong in BOTH branches -- explicitly in the unknown-dim
+    # branch, and already included by `dim != expected_dim` in the known-dim one.
+    if expected_dim is None:
+        # Nothing to compare against, so the zero counts are the ONLY wrong-ness we can assert --
+        # and this is the branch CF-187 is about, since expected_dim is None by default.
+        wrong_entity_count = zero_entity_count
+        wrong_community_count = zero_community_count
+        wrong_edge_count = zero_edge_count
+    else:
+        # `dim != expected_dim` already counts the zero-dimension rows, so they must NOT be added
+        # again below: doing so double-counted them and made `reason` report twice the number of
+        # bad vectors that exist (the verdict booleans were unaffected, the operator-facing count
+        # was not).
+        wrong_entity_count = sum(int(row.get("count") or 0) for row in entity_rows if int(row.get("dim") or -1) != expected_dim)
+        wrong_community_count = sum(int(row.get("count") or 0) for row in community_rows if int(row.get("dim") or -1) != expected_dim)
+        wrong_edge_count = sum(int(row.get("count") or 0) for row in edge_rows if int(row.get("dim") or -1) != expected_dim)
+
     # Model-agnostic corruption signal: the graph holds vectors of more than one
     # distinct (non-zero) dimension. This is the signature of an embedder change
     # mid-life and is broken regardless of whether the current model is known.
+    # Dimension 0 is deliberately excluded from `mixed`: zeros have their own
+    # corruption signal (zero_*_count), and `mixed` means "two real dimensions",
+    # so a zero vector must not be read as a second dimension (CF-187).
     def _distinct(dims: dict[int, int]) -> list[int]:
         return sorted(d for d in dims if d > 0)
 
@@ -168,6 +192,9 @@ def embedding_dimension_health(
         "null_entity_count": null_entity_count,
         "null_community_count": null_community_count,
         "null_edge_count": null_edge_count,
+        "zero_entity_count": zero_entity_count,
+        "zero_community_count": zero_community_count,
+        "zero_edge_count": zero_edge_count,
         "entity_dims": entity_dims,
         "community_dims": community_dims,
         "edge_dims": edge_dims,
@@ -181,12 +208,23 @@ def embedding_dimension_health(
 class EmbeddingCompatibility:
     """Verdict on whether the configured embedder matches the graph's vectors.
 
+    ``ok`` means the graph's semantic embeddings are healthy — no wrong-dimension
+    vectors, no null (missing) vectors, no zero-length vectors, and no mixed
+    dimensions. It is the same health predicate ``embedding_dimension_health``
+    computes, so the two cannot drift.
+
     ``blocking`` is True only when a mismatch is *certain* — either the graph holds
     multiple embedding dimensions (an embedder was changed mid-life, always broken),
-    or the current model's dimension is known and stored vectors of a different
-    dimension exist. An unknown embedding model over a uniform graph is
-    unverifiable and is deliberately NOT blocking, so a legitimate unlisted model
-    never locks the operator out of their own memory.
+    the current model's dimension is known and stored vectors of a different
+    dimension exist, or stored vectors have dimension 0 (a certain corruption). An
+    unknown embedding model over a uniform graph is unverifiable and is deliberately
+    NOT blocking, so a legitimate unlisted model never locks the operator out of
+    their own memory.
+
+    ``missing_vectors`` is the count of rows with no embedding at all (NULL
+    ``name_embedding``/``fact_embedding``). Those are invisible to vector recall but
+    are deliberately NOT blocking — a backfill gap must not lock the operator out —
+    so a caller can warn loudly without refusing to start.
     """
 
     ok: bool
@@ -195,6 +233,7 @@ class EmbeddingCompatibility:
     model_name: str
     stored_entity_dims: dict[int, int]
     mixed: bool
+    missing_vectors: int
     reason: str
 
     def banner(self) -> str:
@@ -218,9 +257,10 @@ def evaluate_embedding_compatibility(
 
     Note on why the ``serve`` guard is NOT gated on ``expected_dim is not None`` to match
     preflight, which is what CF-173 proposes: ``blocking`` is
-    ``mixed or (expected_dim is not None and wrong > 0)``, and ``mixed`` is the model-agnostic
-    corruption signal that exists precisely for the case where the dimension cannot be inferred.
-    Gating the guard would delete the check in the only situation it was written for.
+    ``mixed or (expected_dim is not None and wrong > 0) or zero_vectors > 0``, and ``mixed``
+    (plus the model-agnostic zero-length signal) is the corruption signal that exists precisely
+    for the case where the dimension cannot be inferred. Gating the guard would delete the check
+    in the only situation it was written for.
     """
     provider = ProviderConfig.for_graphiti_embedder(settings)
     model_name = provider.embed_model or ""
@@ -234,19 +274,43 @@ def evaluate_embedding_compatibility(
         + int(health["wrong_community_count"])
         + int(health["wrong_edge_count"])
     )
+    missing_vectors = (
+        int(health["null_entity_count"])
+        + int(health["null_community_count"])
+        + int(health["null_edge_count"])
+    )
+    zero_vectors = (
+        int(health["zero_entity_count"])
+        + int(health["zero_community_count"])
+        + int(health["zero_edge_count"])
+    )
 
-    blocking = mixed or (expected_dim is not None and wrong > 0)
+    blocking = (
+        mixed
+        or (expected_dim is not None and wrong > 0)
+        or zero_vectors > 0
+    )
     if blocking:
         if mixed:
             reason = (
                 f"graph holds multiple embedding dimensions {sorted(stored)} — "
                 "an embedding model was changed after data was written"
             )
+        elif zero_vectors > 0:
+            reason = (
+                f"{zero_vectors} stored vector(s) have dimension 0 (empty embeddings); "
+                "they are corrupted and invisible to vector recall"
+            )
         else:
             reason = (
                 f"{wrong} stored vector(s) differ from the current embedder "
                 f"dimension {expected_dim}"
             )
+    elif missing_vectors > 0:
+        reason = (
+            f"{missing_vectors} stored node(s)/edge(s) have no embedding; they are "
+            "invisible to vector recall (not blocking)"
+        )
     elif expected_dim is None and stored:
         reason = (
             f"embedding model '{model_name}' dimension is unknown; cannot verify "
@@ -256,12 +320,13 @@ def evaluate_embedding_compatibility(
         reason = "ok"
 
     return EmbeddingCompatibility(
-        ok=not blocking,
+        ok=bool(health["ok"]),
         blocking=blocking,
         expected_dim=expected_dim,
         model_name=model_name,
         stored_entity_dims=stored,
         mixed=mixed,
+        missing_vectors=missing_vectors,
         reason=reason,
     )
 

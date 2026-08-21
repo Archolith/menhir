@@ -515,6 +515,19 @@ def serve(
             print(banner, file=sys.stderr, flush=True)
             raise SystemExit(EXIT_EMBEDDING_MISMATCH)
 
+        if _compat.missing_vectors > 0:
+            # Same stderr treatment as the blocking banner above, and for the reason its comment
+            # gives: logging is not configured until `build_logging_config()` reaches
+            # `uvicorn.run` below, so a `logger.warning` alone can be filtered or lost -- which
+            # is how CF-198's 551 missing vectors stayed invisible in the first place.
+            missing = (
+                f"Embedding health: {_compat.missing_vectors} stored node(s)/edge(s) have no "
+                "embedding; they are invisible to vector recall (not blocking). "
+                "Run the embedding backfill to restore them."
+            )
+            logger.warning("%s", missing)
+            print(missing, file=sys.stderr, flush=True)
+
     logger.info("Launching menhir server on %s:%d", final_host, final_port)
 
     uvicorn.run(
