@@ -21,6 +21,11 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 logger = logging.getLogger(__name__)
 
+#: The prompt patch is process-global, so the patched window is a critical section:
+#: two concurrent lab requests would otherwise run arms under each other's prompts
+#: and silently mis-measure.
+_PROMPT_PATCH_LOCK = asyncio.Lock()
+
 # Prompt variant identifiers — must match .agent/plans/menhir-extraction-prompt-recency-recall-research.md
 PROMPT_VARIANTS = Literal[
     "baseline",
@@ -441,6 +446,7 @@ async def _run_extraction_arm(
     """Run a single extraction arm: apply patches, extract, score."""
     started = perf_counter()
     restore_prompt: Callable[[], None] | None = None
+    _prompt_patch_lock_held = False
 
     try:
         # Import here to ensure patches are applied at construction time if needed
@@ -503,6 +509,15 @@ async def _run_extraction_arm(
         # is process-global shared state (see _apply_extraction_patches docstring) --
         # restore is MANDATORY even on exception, or a later arm/request would silently
         # inherit this arm's variant.
+        #
+        # Serialize the ENTIRE patched window with _PROMPT_PATCH_LOCK: the patch, every
+        # awaited extraction call below, and the restore in the finally. The lock spans
+        # from here (just before the patch) to the finally's restore_prompt() -- that is
+        # the narrowest span that still contains the whole window, and it leaves the
+        # candidate lookup above (no shared global state) outside the critical section.
+        await _PROMPT_PATCH_LOCK.acquire()
+        _prompt_patch_lock_held = True
+
         restore_prompt = _apply_extraction_patches(
             arm.tuning.prompt_variant, known_entities, arm.tuning.retrieved_context
         )
@@ -630,9 +645,15 @@ async def _run_extraction_arm(
         # Mandatory even on the success path above (which already returned) -- this
         # covers every exception exit. prompt_library.extract_nodes.extract_message is
         # process-global; leaving a variant patched after this arm fails would silently
-        # corrupt every subsequent arm/request until the process restarts.
+        # corrupt every subsequent arm/request until the process restarts. This finally
+        # covers SEQUENTIAL reuse (one arm after another); _PROMPT_PATCH_LOCK covers
+        # CONCURRENT reuse (two in-process lab requests on the same event loop), so
+        # neither can be deleted as redundant. The lock is released here too, after the
+        # restore, so an arm that raised still hands the critical section back.
         if restore_prompt is not None:
             restore_prompt()
+        if _prompt_patch_lock_held:
+            _PROMPT_PATCH_LOCK.release()
 
 
 #: The exact sentence in graphiti-core's real default extraction prompt
