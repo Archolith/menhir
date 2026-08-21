@@ -16,6 +16,7 @@ ProgressCallback = Callable[[int, int, str], Awaitable[None]]
 from menhir.domain.memory_types import get_policy
 from menhir.domain.models import FreshnessState, NodeScope
 from menhir.domain.namespace import namespace_to_group_ids
+from menhir.domain.temporal import parse_iso8601
 from menhir.domain.utils import days_ago
 from menhir.config import MemorySettings
 from menhir.infrastructure.cypher import Cypher
@@ -280,17 +281,22 @@ class LifecycleConflictMixin:
             created_at = group.get("created_at")
             if created_at is None:
                 continue
-            try:
-                if not hasattr(created_at, "tzinfo"):
-                    created_at = datetime.fromisoformat(str(created_at))
-                if created_at.tzinfo is None:
-                    created_at = created_at.replace(tzinfo=timezone.utc)
-                age_s = (now - created_at).total_seconds()
-            except (ValueError, TypeError, AttributeError, OverflowError):
+            # `parse_iso8601` is the canonical read-back parser and handles all three shapes this
+            # field actually arrives in: a neo4j.time.DateTime from the live driver, a stdlib
+            # datetime, and an ISO string from a fake adapter.
+            #
+            # The hand-rolled version here branched on `hasattr(created_at, "tzinfo")` to decide
+            # whether to parse -- but a neo4j.time.DateTime HAS tzinfo and is NOT a stdlib
+            # datetime, so parsing was skipped and `now - created_at` raised TypeError. The bare
+            # `except` swallowed it and `continue`d, skipping EVERY group: on the live driver this
+            # job was a total no-op, not merely starved of old rows (CF-120).
+            parsed = parse_iso8601(created_at)
+            if parsed is None:
+                # Fail closed: a timestamp we cannot age is left alone rather than auto-resolved.
                 continue
             # Redundant guard: the cutoff is already pushed into Cypher, but a graph_adapter
             # that ignores the new parameters must still not resolve anything young.
-            if age_s < max_age_days * 86400:
+            if (now - parsed).total_seconds() < max_age_days * 86400:
                 continue
             group_id = str(group.get("group_id") or "")
             if not group_id:
