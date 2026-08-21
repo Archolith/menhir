@@ -45,7 +45,7 @@ from menhir.infrastructure.llama_endpoint import (
     should_use_scheduler,
 )
 from menhir.infrastructure.observability import build_async_openai_client
-from menhir.infrastructure.providers import ProviderConfig
+from menhir.infrastructure.providers import ProviderConfig, reset_client_cache
 from menhir.infrastructure.scheduler_trace import (
     build_episode_child_details,
     build_episode_scheduler_task,
@@ -86,6 +86,31 @@ def _is_vector_dimension_mismatch_error(exc: Exception) -> bool:
     ) or "do not have the same number of dimensions" in text
 
 
+def _schedule_client_close(client: Any) -> asyncio.Task | None:
+    """Schedule `aclose()` on a replaced OpenAI/httpx client if a loop is running.
+
+    The three base-URL rebind paths are synchronous, so they cannot `await aclose()`. When an
+    event loop is running we schedule the async close on it and return the task so the caller
+    can hold a strong reference (an unreferenced task can be garbage-collected mid-flight).
+    Returns None when there is nothing to close or no loop is running, in which case the caller
+    leaves the close out rather than blocking or leaking an un-awaited coroutine.
+    """
+    if client is None:
+        return None
+    inner = getattr(client, "_inner", client)
+    http_client = getattr(inner, "_client", None)
+    if http_client is None:
+        return None
+    aclose = getattr(http_client, "aclose", None)
+    if aclose is None:
+        return None
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return None
+    return loop.create_task(aclose())
+
+
 def _patch_graphiti_openai_generic_client(max_request_estimated_tokens: int | None = None) -> None:
     """Patch Graphiti's OpenAI-compatible client to handle loose JSON output."""
     _patch_graphiti_openai_generic_client_impl(
@@ -114,16 +139,60 @@ class GraphitiClient:
     llm_client_ref: Any | None = field(default=None, repr=False)
     embedder_ref: Any | None = field(default=None, repr=False)
     reranker_ref: Any | None = field(default=None, repr=False)
+    embedding_cache: Any | None = field(default=None, repr=False)
     _indices_ready: bool = field(default=False, init=False, repr=False)
     scheduler_request_stall_timeout_s: float = field(default=45.0, repr=False)
     _llm_breaker: CircuitBreaker = field(default=None, init=False, repr=False)  # type: ignore[assignment]
     _embed_breaker: CircuitBreaker = field(default=None, init=False, repr=False)  # type: ignore[assignment]
     _reranker_breaker: CircuitBreaker = field(default=None, init=False, repr=False)  # type: ignore[assignment]
+    _scheduler_status_client: httpx.AsyncClient | None = field(default=None, init=False, repr=False)
+    _pending_client_closes: list[asyncio.Task] = field(default_factory=list, init=False, repr=False)
 
     def __post_init__(self) -> None:
         self._llm_breaker = CircuitBreaker(name=f"llm:{self.llm_base_url or 'default'}")
         self._embed_breaker = CircuitBreaker(name=f"embed:{self.embed_base_url or 'default'}")
         self._reranker_breaker = CircuitBreaker(name=f"reranker:{self.reranker_base_url or 'default'}")
+
+    def _referenced_clients(self) -> list[Any]:
+        """Clients still held by live llm/embed/reranker refs, for close-safety checks."""
+        clients: list[Any] = []
+        for ref in (self.llm_client_ref, self.embedder_ref, self.reranker_ref):
+            if ref is None:
+                continue
+            client = getattr(ref, "client", None)
+            if client is not None:
+                clients.append(client)
+        return clients
+
+    def _schedule_close_replaced(self, old: Any) -> None:
+        """Close a client being replaced by a rebind, unless a sibling ref still uses it.
+
+        llm/embed/reranker share one client when their base URLs match, so an old client may
+        still be the live client of a sibling ref. Closing it there would strand that sibling
+        on a closed connection pool, so we skip clients that remain referenced.
+        """
+        if old is None:
+            return
+        if any(client is old for client in self._referenced_clients()):
+            return
+        task = _schedule_client_close(old)
+        if task is not None:
+            # Prune finished tasks first: rebinds happen on every endpoint rotation, so an
+            # append-only list is a slow leak of completed task objects in a long-lived process.
+            self._pending_client_closes = [
+                t for t in self._pending_client_closes if not t.done()
+            ]
+            self._pending_client_closes.append(task)
+
+    def _reset_and_close_cached_chat_clients(self) -> None:
+        """Evict the shared chat-client cache on a rebind AND close what was evicted.
+
+        `reset_client_cache` returns the clients it dropped precisely so they can be closed
+        here: clearing the dict alone would trade CF-177's per-call construction for a pool
+        leak on every rotation, which is CF-161's defect wearing a different hat.
+        """
+        for evicted in reset_client_cache():
+            self._schedule_close_replaced(evicted)
 
     @classmethod
     def from_settings(cls, settings: MemorySettings) -> "GraphitiClient":
@@ -312,19 +381,29 @@ class GraphitiClient:
             llm_client_ref=llm_client,
             embedder_ref=embedder,
             reranker_ref=cross_encoder,
+            embedding_cache=_embed_cache,
             scheduler_request_stall_timeout_s=max(
                 5.0,
                 float(settings.graphiti_request_stall_timeout_seconds),
             ),
         )
 
+    def _get_scheduler_status_client(self) -> httpx.AsyncClient:
+        """Return the persistent client for scheduler-status polling, creating it on first use.
+
+        One client is held for the poll loop's lifetime instead of building a fresh
+        `httpx.AsyncClient` (and connection pool) per 2-second poll iteration.
+        """
+        if self._scheduler_status_client is None:
+            self._scheduler_status_client = httpx.AsyncClient(timeout=3.0)
+        return self._scheduler_status_client
+
     async def _fetch_scheduler_status(self) -> dict[str, Any] | None:
         url = f"{scheduler_url_from_env().rstrip('/')}/watchdog-status"
         try:
-            async with httpx.AsyncClient(timeout=3.0) as client:
-                response = await client.get(url)
-                response.raise_for_status()
-                payload = response.json()
+            response = await self._get_scheduler_status_client().get(url)
+            response.raise_for_status()
+            payload = response.json()
         except (httpx.HTTPError, OSError, ValueError):
             return None
         return payload if isinstance(payload, dict) else None
@@ -486,6 +565,10 @@ class GraphitiClient:
                 )
                 raise TimeoutError(message)
         finally:
+            status_client = self._scheduler_status_client
+            self._scheduler_status_client = None
+            if status_client is not None:
+                await status_client.aclose()
             if watchdog_started:
                 await asyncio.to_thread(
                     partial(
@@ -512,12 +595,15 @@ class GraphitiClient:
             return
 
         client = None
+        old_client = None
         llm_client = self.llm_client_ref
         if llm_client is not None:
+            old_client = getattr(llm_client, "client", None)
             client = build_async_openai_client(
                 base_url=llm_base_url,
                 api_key=self.scheduler_api_key,
                 settings=settings,
+                embedding_cache=self.embedding_cache,
             )
             if hasattr(llm_client, "client"):
                 llm_client.client = client
@@ -527,15 +613,17 @@ class GraphitiClient:
             self.llm_base_url = llm_base_url
 
         embedder = self.embedder_ref
-        if embedder is None or not embed_tracks_llm:
-            return
+        if embedder is not None and embed_tracks_llm:
+            if client is not None and hasattr(embedder, "client"):
+                embedder.client = client
+            embed_config = getattr(embedder, "config", None)
+            if embed_config is not None and hasattr(embed_config, "base_url"):
+                embed_config.base_url = llm_base_url
+            self.embed_base_url = llm_base_url
 
-        if client is not None and hasattr(embedder, "client"):
-            embedder.client = client
-        embed_config = getattr(embedder, "config", None)
-        if embed_config is not None and hasattr(embed_config, "base_url"):
-            embed_config.base_url = llm_base_url
-        self.embed_base_url = llm_base_url
+        if client is not None:
+            self._schedule_close_replaced(old_client)
+            self._reset_and_close_cached_chat_clients()
 
     def _maybe_update_embed_base_url(self, *, embed_base_url: str) -> None:
         settings = self.scheduler_settings
@@ -546,10 +634,12 @@ class GraphitiClient:
         if embedder is None:
             return
 
+        old_client = getattr(embedder, "client", None)
         client = build_async_openai_client(
             base_url=embed_base_url,
             api_key=self.scheduler_embed_api_key,
             settings=settings,
+            embedding_cache=self.embedding_cache,
         )
         if hasattr(embedder, "client"):
             embedder.client = client
@@ -557,6 +647,8 @@ class GraphitiClient:
         if embed_config is not None and hasattr(embed_config, "base_url"):
             embed_config.base_url = embed_base_url
         self.embed_base_url = embed_base_url
+        self._schedule_close_replaced(old_client)
+        self._reset_and_close_cached_chat_clients()
 
     def _maybe_update_reranker_base_url(self, *, reranker_base_url: str) -> None:
         settings = self.scheduler_settings
@@ -567,6 +659,7 @@ class GraphitiClient:
         if reranker is None:
             return
 
+        old_client = getattr(reranker, "client", None)
         client = build_async_openai_client(
             base_url=reranker_base_url,
             api_key=self.scheduler_reranker_api_key,
@@ -578,6 +671,8 @@ class GraphitiClient:
         if reranker_config is not None and hasattr(reranker_config, "base_url"):
             reranker_config.base_url = reranker_base_url
         self.reranker_base_url = reranker_base_url
+        self._schedule_close_replaced(old_client)
+        self._reset_and_close_cached_chat_clients()
 
     async def _ensure_graphiti_endpoints_alive(self, *, task: str) -> None:
         """Wake scheduler-managed OpenAI-compatible endpoints used by Graphiti."""

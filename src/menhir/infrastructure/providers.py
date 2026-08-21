@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 import json
 import logging
+import threading
 from typing import Any, Protocol, runtime_checkable
 from urllib import error as urllib_error
 from urllib import parse as urllib_parse
@@ -178,6 +179,67 @@ class ChatBackend(Protocol):
 #: `llm.py`: "fail fast -- don't block MCP on a down server".
 DEFAULT_REQUEST_TIMEOUT_S: float = 30.0
 
+#: Process-wide cache of OpenAI/httpx chat clients, keyed on every input that changes a
+#: client's identity (see `build_async_openai_client`). Without it, `create_chat_completion`
+#: built a fresh client -- and a fresh `httpx.AsyncClient`/connection pool (or a full TLS
+#: handshake for a remote provider) -- on every call. One client is now reused for repeated
+#: calls with the same configuration. Reset via `reset_client_cache()`, which the graphiti
+#: base-URL rebind path calls so a rotated endpoint never reuses a client built for the old
+#: one. It is a module dict, not a singleton class, so tests can reset it freely.
+_openai_client_cache: dict[tuple[Any, ...], Any] = {}
+_openai_client_cache_lock = threading.Lock()
+
+
+def reset_client_cache() -> list[Any]:
+    """Drop every cached OpenAI/httpx client and RETURN them, so the caller can close them.
+
+    Called by CF-161's base-URL rebind path: a rotated endpoint must not keep reusing a
+    client (and its connection pool) built for the previous base URL.
+
+    Returning the evicted clients rather than closing them here is deliberate. Closing is
+    async and this function is sync, and `graphiti_client` already owns the one mechanism
+    that schedules an async close safely from a sync path. Clearing without returning would
+    have traded the reuse defect for a slow pool leak on every rotation -- the same class of
+    bug CF-161 is about.
+    """
+    with _openai_client_cache_lock:
+        evicted = list(_openai_client_cache.values())
+        _openai_client_cache.clear()
+    return evicted
+
+
+def _chat_client_cache_key(
+    *,
+    factory: Callable[..., Any],
+    base_url: str,
+    api_key: str,
+    settings: MemorySettings | None,
+    request_timeout_s: float | None,
+    embedding_cache: Any,
+) -> tuple[Any, ...]:
+    """Build the cache key from every input that changes a client's identity.
+
+    Beyond the base URL and API key (the two the brief names), `build_async_openai_client`
+    also branches on Langfuse config and the request timeout, and the factory itself is part
+    of the identity (different injected factories must never share a cached client).
+    """
+    if settings is None:
+        langfuse = (None, None, None)
+    else:
+        langfuse = (
+            settings.langfuse_host,
+            settings.langfuse_public_key,
+            settings.langfuse_secret_key,
+        )
+    return (
+        factory,
+        base_url,
+        api_key,
+        request_timeout_s,
+        embedding_cache,
+        *langfuse,
+    )
+
 
 @dataclass(frozen=True)
 class ProviderRuntimeDependencies:
@@ -229,12 +291,25 @@ class OpenAIStyleChatBackend:
         temperature: float,
     ) -> str:
         base_url = await self._resolve_base_url(operation)
-        client = self.dependencies.openai_client_factory(
+        cache_key = _chat_client_cache_key(
+            factory=self.dependencies.openai_client_factory,
             base_url=base_url,
             api_key=self.provider.api_key,
             settings=self.settings,
             request_timeout_s=self.dependencies.request_timeout_s,
+            embedding_cache=None,
         )
+        with _openai_client_cache_lock:
+            client = _openai_client_cache.get(cache_key)
+        if client is None:
+            client = self.dependencies.openai_client_factory(
+                base_url=base_url,
+                api_key=self.provider.api_key,
+                settings=self.settings,
+                request_timeout_s=self.dependencies.request_timeout_s,
+            )
+            with _openai_client_cache_lock:
+                _openai_client_cache[cache_key] = client
         # CF-234: this backend announced nothing, so every `LLMAdapter` call it served was
         # invisible to both LLM budgets -- including the judge fan-out (3 calls per proposal per
         # extracted node) that CF-79 was filed to bound. `build_chat_backend` routes both LOCAL
