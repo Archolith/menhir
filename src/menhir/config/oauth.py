@@ -5,9 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
-
-def _split_csv(raw: str) -> tuple[str, ...]:
-    return tuple(part.strip() for part in raw.split(",") if part.strip())
+from menhir.config.settings_helpers import parse_csv_env
 
 
 def _quote_header_value(value: str) -> str:
@@ -56,7 +54,7 @@ def _as_tuple(value: object, default: tuple[str, ...] = ()) -> tuple[str, ...]:
     if value is None:
         return default
     if isinstance(value, str):
-        return _split_csv(value)
+        return parse_csv_env(value)
     if isinstance(value, (list, tuple, set)):
         return tuple(str(item).strip() for item in value if str(item).strip())
     return default
