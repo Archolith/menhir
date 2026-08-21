@@ -270,13 +270,13 @@ async def bootstrap_context(
     # record side keyed on the raw workspace and versioned WITH the namespace -- so both halves of
     # the comparison diverged and a pinned client that omitted `workspace` could never clear the
     # gate. Both halves are now derived exactly as the record side derives them.
-    receipt_namespace = _resolve_namespace(request, None)
+    resolved_receipt_namespace = _resolve_namespace(request, None)
     selection_key, _allowed = bootstrap_selection(body.workspace)
     version = await backend.fetch_flagged_memory_bootstrap_version(
-        workspace=body.workspace, namespace=receipt_namespace
+        workspace=body.workspace, namespace=resolved_receipt_namespace
     )
     if not _has_recent_flagged_bootstrap_read(
-        normalized_reader, version, workspace=body.workspace, namespace=receipt_namespace
+        normalized_reader, version, workspace=body.workspace, namespace=resolved_receipt_namespace
     ):
         raise HTTPException(
             status_code=409,
