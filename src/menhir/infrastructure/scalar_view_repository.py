@@ -236,6 +236,21 @@ class ScalarViewRepositoryMixin:
         """
         safe_limit = max(1, min(int(limit), 50))
         safe_offset = max(0, int(offset))
+        # CF-113: push SKIP/LIMIT into the row stream BEFORE collect(), so the database bounds what
+        # it materialises instead of collecting every contributor then slicing in memory. The order
+        # below is TOTAL: relation_rank, then valid_at (directional), then `a.assertion_id` as a
+        # unique tiebreaker, so a page boundary can never duplicate or skip a row. `total` comes
+        # from a separate count() aggregation, not size(all_rows).
+        total_rows = self.neo4j.execute(
+            """
+            MATCH (v:Entity {uuid: $view_uuid})
+                  -[r:CURRENT_ANCHOR|CONTRIBUTED_TO|SUPERSEDED_ANCHOR]->(a:TypedAssertion)
+            WHERE $namespace IS NULL OR v.group_id = $namespace
+            RETURN count(*) AS total
+            """,
+            params={"view_uuid": view_uuid, "namespace": namespace},
+        )
+        total = int(total_rows[0].get("total") or 0) if total_rows else 0
         rows = self.neo4j.execute(
             """
             MATCH (v:Entity {uuid: $view_uuid})
@@ -248,19 +263,20 @@ class ScalarViewRepositoryMixin:
                      CASE WHEN type(r) = 'CONTRIBUTED_TO' THEN a.valid_at END ASC,
                      CASE WHEN type(r) = 'SUPERSEDED_ANCHOR' THEN a.valid_at END DESC,
                      a.assertion_id ASC
+            SKIP $offset
+            LIMIT $limit
             WITH collect({
                 assertion_id: a.assertion_id, relation: type(r), operation: a.operation,
                 value: coalesce(a.value, a.value_json), stated_span: a.stated_span,
                 valid_at: toString(a.valid_at), evidence_tier: a.evidence_tier,
                 episode_uuid: a.episode_uuid
-            }) AS all_rows
-            RETURN all_rows[$offset..($offset + $limit)] AS contributors, size(all_rows) AS total
+            }) AS contributors
+            RETURN contributors
             """,
             params={"view_uuid": view_uuid, "limit": safe_limit, "offset": safe_offset,
                     "namespace": namespace},
         )
         row = dict(rows[0]) if rows else {}
-        total = int(row.get("total", 0) or 0)
         end = safe_offset + len(row.get("contributors") or [])
         return {
             "contributors": [dict(c) for c in (row.get("contributors") or [])],
@@ -545,6 +561,19 @@ class ScalarViewRepositoryMixin:
         Ordered by ordinal (chronological). Returns {entries, total, next_offset}."""
         safe_limit = max(1, min(int(limit), 50))
         safe_offset = max(0, int(offset))
+        # CF-113: push SKIP/LIMIT before collect() so only the page is materialised. `he.ordinal` is
+        # unique per View (one HISTORY_ENTRY edge per ordinal), so `ORDER BY he.ordinal ASC` is a
+        # TOTAL order within the fixed view_uuid -- a page boundary can never duplicate or skip a row.
+        total_rows = self.neo4j.execute(
+            """
+            MATCH (v:Entity {uuid: $view_uuid})
+                  -[he:HISTORY_ENTRY]->(a:TypedAssertion)
+            WHERE $namespace IS NULL OR v.group_id = $namespace
+            RETURN count(*) AS total
+            """,
+            {"view_uuid": view_uuid, "namespace": namespace},
+        )
+        total = int(total_rows[0].get("total") or 0) if total_rows else 0
         rows = self.neo4j.execute(
             """
             MATCH (v:Entity {uuid: $view_uuid})
@@ -554,6 +583,8 @@ class ScalarViewRepositoryMixin:
             OPTIONAL MATCH (source_ep:Episodic)-[:ADMITTED_ON]->(te)
             WITH he, a, te, collect(DISTINCT source_ep.uuid) AS admitted_episode_uuids
             ORDER BY he.ordinal ASC
+            SKIP $offset
+            LIMIT $limit
             WITH collect({
                 assertion_id: a.assertion_id, ordinal: he.ordinal,
                 operation: he.operation, value: coalesce(a.value, a.value_json),
@@ -564,14 +595,13 @@ class ScalarViewRepositoryMixin:
                 source_episode_uuid: CASE WHEN te IS NULL THEN coalesce(a.episode_uuid, '')
                                           ELSE coalesce(admitted_episode_uuids[0], '') END,
                 turn_id: CASE WHEN te IS NULL THEN '' ELSE coalesce(te.turn_id, '') END
-            }) AS all_rows
-            RETURN all_rows[$offset..($offset + $limit)] AS entries, size(all_rows) AS total
+            }) AS entries
+            RETURN entries
             """,
             {"view_uuid": view_uuid, "offset": safe_offset, "limit": safe_limit,
              "namespace": namespace},
         )
         row = dict(rows[0]) if rows else {}
-        total = int(row.get("total", 0) or 0)
         end = safe_offset + len(row.get("entries") or [])
         return {
             "entries": [dict(e) for e in (row.get("entries") or [])],
