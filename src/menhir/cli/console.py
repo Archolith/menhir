@@ -13,6 +13,7 @@ Windows keypress uses ``msvcrt``; POSIX is a best-effort ``select`` on stdin.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from pathlib import Path
 
@@ -23,7 +24,10 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+from menhir.config.settings_helpers import is_loopback_host
 from menhir.privacy import redact_log_line
+
+logger = logging.getLogger(__name__)
 
 _REFRESH_HZ = 4
 
@@ -166,6 +170,47 @@ async def _poll_json(
     return None
 
 
+#: Scheme override for a dashboard pointed at a TLS-terminating backend.
+_SCHEME_ENV = "MENHIR_CONSOLE_SCHEME"
+
+
+def _dashboard_base_url(host: str, port: int, *, api_key: str | None) -> str:
+    """Build the dashboard base URL, refusing to put a bearer key on a plaintext LAN wire (CF-42).
+
+    The scheme was a hard-coded ``http://`` literal with no TLS option and no warning, while
+    ``_poll_json`` attaches ``Authorization: Bearer <key>`` to every request. On loopback that is
+    harmless. The service is deliberately LAN-exposable (``MENHIR_API_HOST=0.0.0.0``) and
+    ``--host`` is an ordinary user-facing flag, so pointing the dashboard at a non-loopback
+    address put a bearer key -- possibly the operator one, per CF-41 -- in the clear.
+
+    Loopback keeps ``http`` so the default workflow is unchanged. A remote host with a key
+    defaults to ``https``; set ``MENHIR_CONSOLE_SCHEME=http`` to override deliberately, which
+    warns rather than failing silently. A remote host with NO key stays on ``http``: there is no
+    credential to protect and refusing would break an unauthenticated dashboard that works today.
+    """
+    override = (os.getenv(_SCHEME_ENV) or "").strip().lower()
+    if override in {"http", "https"}:
+        if override == "http" and api_key and not is_loopback_host(host):
+            logger.warning(
+                "%s=http with an API key against non-loopback host %s: the bearer key is sent "
+                "in the clear.",
+                _SCHEME_ENV,
+                host,
+            )
+        return f"{override}://{host}:{port}"
+
+    if api_key and not is_loopback_host(host):
+        logger.warning(
+            "Dashboard is sending an API key to non-loopback host %s; using https. "
+            "Set %s=http to override if the backend really is plaintext.",
+            host,
+            _SCHEME_ENV,
+        )
+        return f"https://{host}:{port}"
+
+    return f"http://{host}:{port}"
+
+
 async def run_console(
     *,
     host: str,
@@ -177,7 +222,7 @@ async def run_console(
     log_lines: int = 14,
 ) -> None:
     """Run the live dashboard loop until the user quits."""
-    base = f"http://{host}:{port}"
+    base = _dashboard_base_url(host, port, api_key=api_key)
     async with httpx.AsyncClient() as client:
         with Live(auto_refresh=False, screen=False, refresh_per_second=_REFRESH_HZ) as live:
             while True:
