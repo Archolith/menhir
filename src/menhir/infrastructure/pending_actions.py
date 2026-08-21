@@ -26,7 +26,7 @@ import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from menhir.infrastructure.telemetry import connect_telemetry_db, default_telemetry_db_path
 
@@ -39,17 +39,35 @@ def _utc_now_iso() -> str:
 
 @dataclass
 class PendingActionStore:
-    """Manages the pending_actions table in the telemetry SQLite database."""
+    """Manages the pending_actions table in the telemetry SQLite database.
+
+    Schema initialization (``mkdir`` + ``CREATE TABLE``) is memoized per ``db_path`` at the class
+    level, keyed on the resolved path, so cheap per-request constructions of this dataclass do not
+    re-run DDL. The memo is keyed by path -- NOT a module-level singleton -- so stores built
+    against the per-test redirected ``MENHIR_MCP_TELEMETRY_DB`` keep resolving to that test's
+    isolated DB instead of binding once to the operator's real telemetry database, and stores on
+    two different paths each initialize their own schema.
+    """
 
     db_path: Path = field(default_factory=default_telemetry_db_path)
-    _initialized: bool = field(default=False, init=False, repr=False)
-    _lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
+
+    #: Resolved ``db_path`` values whose schema has already been created this process. Keyed on
+    #: the normalized path so two spellings of the same file (relative vs absolute, ``..``, etc.)
+    #: initialize only once.
+    _initialized_paths: ClassVar[set[Path]] = set()
+    #: Class-level lock so first-run DDL actually serializes across instances sharing a path.
+    _class_lock: ClassVar[threading.Lock] = threading.Lock()
+
+    def _resolve_db_key(self) -> Path:
+        """Return the normalized key for memoizing this store's initialization."""
+        return self.db_path.expanduser().resolve()
 
     def _ensure_ready(self) -> None:
-        if self._initialized:
+        key = self._resolve_db_key()
+        if key in type(self)._initialized_paths:
             return
-        with self._lock:
-            if self._initialized:
+        with type(self)._class_lock:
+            if key in type(self)._initialized_paths:
                 return
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
             with connect_telemetry_db(self.db_path) as conn:
@@ -74,7 +92,7 @@ class PendingActionStore:
                     """
                 )
                 conn.commit()
-            self._initialized = True
+            type(self)._initialized_paths.add(key)
 
     def upsert(
         self,
