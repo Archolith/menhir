@@ -162,6 +162,9 @@ class MaintenanceScheduler:
     _last_force_takeover_at: str | None = field(default=None, init=False, repr=False)
     _last_force_takeover_reason: str | None = field(default=None, init=False, repr=False)
     _last_force_takeover_from: dict[str, object] | None = field(default=None, init=False, repr=False)
+    # Monotonic deadline before which THIS owner must not run jobs, because a displaced owner's
+    # own provable window has not expired yet (CF-241). 0.0 means "no displaced owner to outlive".
+    _jobs_blocked_until: float = field(default=0.0, init=False, repr=False)
 
     def __post_init__(self) -> None:
         self._jobs = {
@@ -229,11 +232,14 @@ class MaintenanceScheduler:
                 self._last_force_takeover_at = _utc_now_iso()
                 self._last_force_takeover_reason = (takeover_reason or "manual").strip() or "manual"
                 self._last_force_takeover_from = previous_owner
+                self._block_jobs_until_displaced_owner_expires(previous_owner, acquire_started)
                 logger.warning(
-                    "Maintenance scheduler lease force takeover; lease=%s previous_owner_pid=%s reason=%s",
+                    "Maintenance scheduler lease force takeover; lease=%s previous_owner_pid=%s "
+                    "reason=%s jobs_deferred_s=%.1f",
                     self.lease_name,
                     previous_owner.get("owner_pid") if previous_owner is not None else None,
                     self._last_force_takeover_reason,
+                    max(0.0, self._jobs_blocked_until - time.monotonic()),
                 )
             else:
                 acquired = self.lease_store.try_acquire(
@@ -355,6 +361,53 @@ class MaintenanceScheduler:
         heartbeats fit inside every lease, and floored so tests with tiny leases still tick.
         """
         return max(0.05, min(self.lease_heartbeat_s, self.lease_duration_s / 3.0))
+
+    def _block_jobs_until_displaced_owner_expires(
+        self, previous_owner: dict[str, object] | None, acquire_started: float
+    ) -> None:
+        """Defer THIS owner's jobs until the displaced owner can no longer believe it owns the
+        lease (CF-241).
+
+        `force_acquire` overwrites the row unconditionally -- that is what an operator escape hatch
+        is for, and it stays. What it cannot do is tell the displaced process anything. That process
+        gates its own mutations on `_lease_is_provable()`, a MONOTONIC deadline stamped at its last
+        successful renewal, so it keeps running jobs until its next heartbeat renewal fails. Between
+        the takeover and that heartbeat, two loops run maintenance against the same graph -- which
+        is the one thing the lease exists to prevent.
+
+        The durable fact that bounds the displaced owner is the row we just replaced:
+        `lease_expires_at` is the latest moment it could still consider itself provable, because its
+        own deadline was stamped from a renewal no later than that. Waiting past it is therefore a
+        PROOF, not an estimate. Detecting the displacement faster from the other side would be an
+        improvement, not a substitute: nothing the taking process does can make a stalled or
+        suspended peer notice sooner.
+
+        The lease is still claimed immediately, so no third process can take it while we wait, and
+        the loop still starts -- only job EXECUTION is deferred. Takeover of an already-expired,
+        absent, or self-owned lease waits for nothing.
+        """
+        self._jobs_blocked_until = 0.0
+        if not previous_owner:
+            return
+        if str(previous_owner.get("owner_id") or "") == self._owner_id:
+            return
+        try:
+            expires_at = float(previous_owner.get("lease_expires_at"))  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            # An unreadable expiry is not evidence the peer is finished. Fall back to a full lease
+            # duration, which is the longest any owner's provable window can be.
+            self._jobs_blocked_until = acquire_started + self.lease_duration_s
+            return
+        # The row's clock is wall-clock (`time.time`); the gate is monotonic. Convert through the
+        # REMAINING interval rather than comparing the two clocks, which are not commensurable.
+        remaining = expires_at - time.time()
+        if remaining <= 0.0:
+            return
+        self._jobs_blocked_until = acquire_started + min(remaining, self.lease_duration_s)
+
+    def _jobs_are_deferred(self) -> bool:
+        """True while a displaced owner could still be mutating (CF-241)."""
+        return time.monotonic() < self._jobs_blocked_until
 
     def _stamp_lease_deadline(self, acquired_at: float) -> None:
         """Record how long this process can prove it owns the lease.
@@ -482,6 +535,16 @@ class MaintenanceScheduler:
                 # a displaced owner does not keep running maintenance (FC-02 / AR-02 / CF-100).
                 # `_lease_is_provable` rather than `_lease_lost`, because the dangerous case is
                 # the one where nothing set that flag: the deadline passed unnoticed.
+                return
+            if self._jobs_are_deferred():
+                # We force-took this lease and the owner we displaced could still believe it holds
+                # it (CF-241). Its provable window is bounded by the row we replaced; until that
+                # passes, running a job here would put two loops on the same graph.
+                logger.warning(
+                    "Maintenance jobs deferred for %.1fs after a forced takeover; the displaced "
+                    "owner's lease has not expired yet",
+                    self._jobs_blocked_until - time.monotonic(),
+                )
                 return
             if job.last_started_at is not None:
                 last_started = datetime.fromisoformat(job.last_started_at)
