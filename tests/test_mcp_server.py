@@ -1062,8 +1062,14 @@ def test_get_episode_trace_returns_compact_debug_bundle(stubbed_mcp_state, monke
         assert payload["current"]["state"] == "ENRICHING"
         assert payload["task_events"][0]["phase"] == "started"
         assert payload["failure_events"][0]["failure_stage"] == "graphiti_exception"
-        assert payload["failure_events"][0]["traceback_preview"] == "line1\nline2"
-        assert payload["failure_events"][0]["details"]["traceback"] == "line1\nline2"
+        # CF-36: this call binds no request tier, and an unbound tier does not satisfy
+        # `operator`, so both traceback fields are withheld. BOTH is the point -- `details`
+        # carries the full traceback next to the preview, and gating one would leave the same
+        # content one key over. The rest of the bundle is unchanged, which is the ruling:
+        # gate the raw stack, keep the diagnostics.
+        withheld = "[withheld: requires operator tier]"
+        assert payload["failure_events"][0]["traceback_preview"] == withheld
+        assert payload["failure_events"][0]["details"]["traceback"] == withheld
         assert payload["lifecycle_events"][0]["event"] == "graphiti_add_episode"
     finally:
         _cleanup_db_path(db_path)
