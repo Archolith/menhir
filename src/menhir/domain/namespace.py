@@ -19,6 +19,7 @@ Mapping rules (see Phase 0 evidence in
 from __future__ import annotations
 
 import re
+from enum import StrEnum
 from typing import Any
 
 # Graphiti's default Neo4j group partition (see graphiti_core.helpers.get_default_group_id).
@@ -26,6 +27,11 @@ _GRAPHITI_DEFAULT_GROUP_ID = ""
 
 #: The reserved namespace name for the shared/default silo (existing data lives here).
 DEFAULT_NAMESPACE = "default"
+
+#: The one parameter name for the tenancy filter. CF-127 found seven spellings in use
+#: ($namespace, $ns, $namespaces, $group_id, $group_ids, $ns_stamped, $namespace_norm); a builder
+#: that let callers choose would have made it eight.
+_TENANT_PARAM = "tenant_namespaces"
 
 # Mirrors graphiti_core.helpers.validate_group_id's character rule exactly. A namespace
 # that fails this becomes an invalid group_id and graphiti rejects it -- but only deep in
@@ -84,6 +90,82 @@ def namespace_spellings(namespace: str | None) -> list[str] | None:
     if namespace in (DEFAULT_NAMESPACE, _GRAPHITI_DEFAULT_GROUP_ID):
         return [DEFAULT_NAMESPACE, _GRAPHITI_DEFAULT_GROUP_ID]
     return [namespace]
+
+
+class TenancyScheme(StrEnum):
+    """Which tenancy key a label is partitioned by. There are exactly two, and they are blind to
+    each other -- that blindness is CF-127's whole finding.
+
+    ``StrEnum``, not ``class X(str, Enum)``: the latter formats as ``"TenancyScheme.MEMORY"`` under
+    ``str()`` and f-strings, which would land inside a Cypher fragment (trap T20).
+    """
+
+    #: Memory entities: partitioned by ``namespace`` (menhir's stamp) over ``group_id``
+    #: (graphiti's real partition key). Both may be present, absent, or disagree on legacy rows.
+    MEMORY = "memory"
+
+    #: Structure entities: NOT namespace-partitioned at all. See :func:`tenant_scope_cypher`.
+    STRUCTURE = "structure"
+
+
+def tenant_scope_params(namespace: str | None) -> dict[str, list[str] | None]:
+    """The parameter dict that :func:`tenant_scope_cypher`'s fragment expects.
+
+    ``None`` (caller did not scope) yields ``None``, which makes the fragment a no-op -- the
+    opt-in isolation contract at the top of this module.
+    """
+    return {_TENANT_PARAM: namespace_spellings(namespace)}
+
+
+def tenant_scope_cypher(variable: str = "n", *, scheme: TenancyScheme = TenancyScheme.MEMORY) -> str:
+    """One Cypher predicate for "this row belongs to the caller's silo" (CF-127).
+
+    CF-127 counted 107 hand-written tenancy predicates across 23 files in seven parameter
+    spellings, with no shared helper -- while the OTHER cross-cutting Cypher concern
+    (``non_structural_memory_cypher``) had exactly the named, imported, reusable predicate this
+    one lacked. Four separately-filed bugs (CF-104, CF-106, CF-63, CF-126) are the same omission
+    by four different authors, each of whom had to independently remember that scoping is needed,
+    which of two keys applies, and which spelling the surrounding file uses.
+
+    **The fragment is a no-op when unscoped, on purpose.** It reads
+    ``($tenant_namespaces IS NULL OR ...)``, so a caller ALWAYS includes it and passes ``None``
+    for the unscoped case. "Forgot to add the predicate" is the failure this exists to prevent,
+    so the predicate must not be the thing you can forget.
+
+    **It matches BOTH persisted spellings of the default silo, which the existing idiom does
+    not.** ``coalesce(n.namespace, n.group_id, 'default')`` -- the spelling at
+    ``correlation_queries.py:147`` -- returns ``''`` for a legacy row with no ``namespace`` and
+    ``group_id = ''``, because ``''`` is not NULL and coalesce never reaches its default. Compared
+    against ``'default'`` that is FALSE, so it misses every such row; there are 33,442 of them on
+    this deployment. Comparing against :func:`namespace_spellings` instead makes both spellings
+    match, which is also what keeps this correct while the ``''`` -> ``'default'`` migration is
+    only partly applied.
+
+    Raises for :attr:`TenancyScheme.STRUCTURE` rather than returning a fragment. Structure
+    entities wear the same ``:Entity`` label but are **deliberately a single shared silo**, keyed
+    on ``(structure_project, structure_path)`` and written with ``group_id = ''`` and no
+    ``namespace`` at all (owner ruling 2026-08-21). Handing back a namespace predicate for them
+    would silently match nothing; handing back an empty string would look like "no scoping needed
+    here" at every call site. Refusing makes the contract arrive at the moment an author assumes
+    otherwise.
+
+    **Known residual of that ruling, unfixed and deliberate:** because the MERGE identity is
+    ``(structure_project, structure_path)`` with no tenancy component, two callers scanning
+    differently-named repositories that share a directory basename still overwrite each other's
+    ``content``, ``name`` and ``structure_role``.
+    """
+    if scheme is TenancyScheme.STRUCTURE:
+        raise ValueError(
+            "structure entities are a single shared silo keyed on (structure_project, "
+            "structure_path); they carry no namespace to scope on. Filter on structure_project "
+            "instead, and see tenant_scope_cypher's docstring for why this refuses."
+        )
+    if not variable or not variable.isidentifier():
+        raise ValueError(f"variable must be a Cypher identifier, got {variable!r}")
+    return (
+        f"(${_TENANT_PARAM} IS NULL OR "
+        f"coalesce({variable}.namespace, {variable}.group_id, '') IN ${_TENANT_PARAM})"
+    )
 
 
 def namespace_to_group_id(namespace: str | None) -> str:
