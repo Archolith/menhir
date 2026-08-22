@@ -30,8 +30,19 @@ class TelemetryEventStoreMixin:
         payload_preview: str | None,
         namespace: str | None = None,
         node_uuid: str | None = None,
+        client_name: str | None = None,
+        client_id: str | None = None,
+        session_id: str | None = None,
+        tier: str | None = None,
+        stage: str | None = None,
     ) -> None:
-        """Persist a single MCP event."""
+        """Persist a single MCP event.
+
+        CF-29: the identity columns (`client_name`, `client_id`, `session_id`, `tier`) and `stage`
+        are resolved by the caller from the request context, not read here -- this layer has no
+        request scope. All five default to None so background/internal writers that have no caller
+        are unaffected.
+        """
 
         self._ensure_ready()
         with self._connect() as conn:
@@ -49,8 +60,13 @@ class TelemetryEventStoreMixin:
                     result_size,
                     payload_preview,
                     namespace,
-                    node_uuid
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    node_uuid,
+                    client_name,
+                    client_id,
+                    session_id,
+                    tier,
+                    stage
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     started_at,
@@ -65,6 +81,11 @@ class TelemetryEventStoreMixin:
                     payload_preview,
                     namespace,
                     node_uuid,
+                    client_name,
+                    client_id,
+                    session_id,
+                    tier,
+                    stage,
                 ),
             )
             conn.commit()

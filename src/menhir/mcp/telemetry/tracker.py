@@ -9,6 +9,39 @@ from typing import Any, Awaitable, Callable, TypeVar, cast
 
 from menhir.infrastructure.telemetry.helpers import _safe_preview_of, _size_of, _utc_now_iso
 from menhir.infrastructure.telemetry.store import McpTelemetryStore, telemetry_store
+from menhir.core.request_context import get_request_session, get_request_tier
+
+#: Execution stage, so a failed row says WHERE it failed (CF-29).
+#:
+#: HONEST LIMIT, and the reason there is no "committed"/"rolled back" pair here: this wrapper sees
+#: only the boundary of `runner()`. It cannot know whether a mutation inside the runner reached the
+#: graph. `TIMEOUT` is exactly the case where that is unknown -- the runner was cancelled mid-flight
+#: -- which narrows CF-28 to one stage rather than resolving it. Claiming more would be a stage
+#: label that lies.
+STAGE_DENIED = "denied"       # gates refused before the runner published its arguments
+STAGE_FAILED = "failed"       # runner raised; the call did not return
+STAGE_TIMEOUT = "timeout"     # runner cancelled at the deadline; commit state UNKNOWN
+STAGE_COMPLETED = "completed"  # runner returned
+
+
+def _caller_identity() -> tuple[str | None, str | None, str | None, str | None]:
+    """(client_name, client_id, session_id, tier) for the current request, or Nones.
+
+    Read from the request context, which is the same source the namespace pin keys on -- so the
+    recorded client is the SERVER-resolved identity, never a value the caller supplied in its
+    arguments. A background or internal call has no session and yields Nones, which is the truthful
+    answer for work no client invoked.
+    """
+    session = get_request_session()
+    tier = get_request_tier() or None
+    if session is None:
+        return None, None, None, tier
+    return (
+        (getattr(session, "client_name", "") or "").strip() or None,
+        (getattr(session, "client_id", "") or "").strip() or None,
+        (getattr(session, "session_id", "") or "").strip() or None,
+        tier,
+    )
 
 T = TypeVar("T")
 logger = logging.getLogger(__name__)
@@ -158,6 +191,19 @@ async def track_mcp_call(
             return PREVIEW_UNAUTHORIZED
         return _safe_preview_of(described) if described is not None else None
 
+    def _resolved_stage(outcome: str) -> str:
+        """DENIED wins over the outcome. A call refused at the tier/allowlist gate raises inside
+        the runner like any other failure, so the exception path alone cannot tell "your request
+        was rejected" from "the work broke" -- which is the distinction an operator triaging a
+        failure needs first. Non-published arguments is the same signal `PREVIEW_UNAUTHORIZED`
+        already keys on (CF-118), reused rather than re-derived."""
+        _described, authorized = _published_payload()
+        return outcome if authorized else STAGE_DENIED
+
+    # Resolved BEFORE the runner: the request context belongs to the caller at this point, and a
+    # runner that swaps or clears it must not change who the row says invoked the call.
+    client_name, client_id, session_id, tier = _caller_identity()
+
     try:
         result = await asyncio.wait_for(runner(), timeout=timeout)
     except asyncio.TimeoutError:
@@ -184,6 +230,11 @@ async def track_mcp_call(
                 payload_preview=_resolved_preview(),
                 namespace=namespace,
                 node_uuid=node_uuid,
+                client_name=client_name,
+                client_id=client_id,
+                session_id=session_id,
+                tier=tier,
+                stage=_resolved_stage(STAGE_TIMEOUT),
             )
         except sqlite3.Error:
             logger.exception("Failed to record timeout telemetry")
@@ -210,6 +261,11 @@ async def track_mcp_call(
                 payload_preview=_resolved_preview(),
                 namespace=namespace,
                 node_uuid=node_uuid,
+                client_name=client_name,
+                client_id=client_id,
+                session_id=session_id,
+                tier=tier,
+                stage=_resolved_stage(STAGE_FAILED),
             )
         except sqlite3.Error:
             logger.exception("Failed to record error telemetry")
@@ -236,6 +292,11 @@ async def track_mcp_call(
             payload_preview=_resolved_preview(),
             namespace=namespace,
             node_uuid=node_uuid,
+            client_name=client_name,
+            client_id=client_id,
+            session_id=session_id,
+            tier=tier,
+            stage=STAGE_COMPLETED,
         )
     except sqlite3.Error:
         logger.exception("Failed to record success telemetry")

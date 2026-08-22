@@ -109,11 +109,17 @@ CONTENT_COLUMNS: tuple[ContentColumn, ...] = (
         table="mcp_events",
         column="payload_preview",
         shape=ErasureShape.ANY_SUBJECT,
-        key_columns=("node_uuid", "namespace"),
+        key_columns=("node_uuid", "namespace", "session_id"),
         note=(
             "Legacy rows can contain memory text; current writers privacy-minimize the preview. "
             "Rows are addressable by a specific node UUID when one exists or by the effective "
-            "namespace for namespace erasure. Pre-lineage NULL/NULL rows remain explicit residue."
+            "namespace for namespace erasure. Pre-lineage NULL/NULL rows remain explicit residue. "
+            "CF-29 added session_id as a third key. Not for rows lacking a namespace -- the CF-165 "
+            "insert trigger stamps 'default' on any row without one -- but so a single "
+            "session's calls can be erased WITHOUT erasing the whole silo they landed in. "
+            "Most traffic is namespace='default', where a namespace-keyed purge is far too "
+            "wide to be the only option. ANY_SUBJECT ORs the keys, so this widens reach and "
+            "never narrows it."
         ),
     ),
     ContentColumn(
@@ -258,10 +264,11 @@ CONTENT_COLUMNS: tuple[ContentColumn, ...] = (
         table="mcp_events",
         column="error",
         shape=ErasureShape.ANY_SUBJECT,
-        key_columns=("node_uuid", "namespace"),
+        key_columns=("node_uuid", "namespace", "session_id"),
         note=(
             "Legacy tool errors can embed request payload content; current writers persist only a "
-            "redacted/classification label. Rows are addressable by node UUID or effective namespace."
+            "redacted/classification label. Rows are addressable by node UUID or effective "
+            "namespace, and since CF-29 also by the session that made the call."
         ),
     ),
     ContentColumn(
@@ -286,6 +293,18 @@ NON_CONTENT_COLUMNS: frozenset[tuple[str, str]] = frozenset(
         ("mcp_events", "operation"),
         ("mcp_events", "kind"),
         ("mcp_events", "namespace"),
+        # CF-29 caller identity and execution stage. Operational metadata, not content: a client
+        # name and tier come from server-side config, `stage` is one of four fixed labels, and the
+        # ids are identifiers rather than text anyone wrote.
+        #
+        # `session_id` is listed here as NON-CONTENT while ALSO being a key_column on this table's
+        # two content columns. Those are different questions and both answers are right: the column
+        # holds nothing to erase, and it is a subject you can erase BY.
+        ("mcp_events", "client_name"),
+        ("mcp_events", "client_id"),
+        ("mcp_events", "session_id"),
+        ("mcp_events", "tier"),
+        ("mcp_events", "stage"),
         ("mcp_events", "node_uuid"),
         # failure_events
         ("failure_events", "recorded_at"),

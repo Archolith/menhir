@@ -304,6 +304,11 @@ def _ensure_forward_lineage_guards(conn: sqlite3.Connection) -> None:
         )
 
 
+#: Stamped onto `mcp_events` rows that predate CF-29's identity columns. Deliberately not a
+#: plausible value: no client is named `pre-cf29`, so it can never be mistaken for a real caller.
+_PRE_CF29_SENTINEL = "pre-cf29"
+
+
 def ensure_lineage_columns(conn: sqlite3.Connection) -> None:
     """Ensure current sidecar content has a sound erasure key where one is derivable (CF-165).
 
@@ -316,7 +321,12 @@ def ensure_lineage_columns(conn: sqlite3.Connection) -> None:
     """
     additions: dict[str, tuple[str, ...]] = {
         "merge_audit": ("survivor_namespace", "absorbed_namespace"),
-        "mcp_events": ("namespace", "node_uuid"),
+        # CF-29: caller identity and execution stage. `track_mcp_call` recorded what ran and how
+        # long it took, but not who invoked it, under which tier, or where a failure landed.
+        "mcp_events": (
+            "namespace", "node_uuid",
+            "client_name", "client_id", "session_id", "tier", "stage",
+        ),
         "extraction_lab_runs": ("namespace",),
     }
     for table, columns in additions.items():
@@ -326,6 +336,25 @@ def ensure_lineage_columns(conn: sqlite3.Connection) -> None:
         for column in columns:
             if column not in existing:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT")
+
+    # CF-29 (owner ruling 2026-08-21): stamp pre-existing rows with an explicit sentinel rather
+    # than leaving them NULL, so a consumer never has to branch on NULL for these columns.
+    #
+    # THE TRADE THIS MAKES, recorded because it is not free: NULL would have distinguished "this
+    # row predates the column" from "we had no identity for this call". The sentinel collapses
+    # both into one value. It is chosen to be unmistakable rather than plausible -- nothing will
+    # ever read `pre-cf29` as a real client, whereas an empty string or "unknown" could be
+    # confused with a live call that carried no session.
+    #
+    # Bounded and idempotent: it touches only rows where the column IS NULL, so a second run is a
+    # no-op, and rows written after this migration are never rewritten.
+    mcp_columns = _table_columns(conn, "mcp_events")
+    for column in ("client_name", "client_id", "session_id", "tier", "stage"):
+        if column in mcp_columns:
+            conn.execute(
+                f"UPDATE mcp_events SET {column} = ? WHERE {column} IS NULL",
+                (_PRE_CF29_SENTINEL,),
+            )
 
     recall_columns = _table_columns(conn, "recall_receipts")
     if "reason" in recall_columns:
