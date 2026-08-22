@@ -8,7 +8,12 @@ never modified.
 Design rules:
 - Structural fields (uuid, labels, scope, session_id, timestamps, counts, kinds)
   are NEVER redacted, so the graph stays navigable. Only free text is hidden.
-- Redaction is conservative for log lines: better to over-mask than to leak.
+- Log-line redaction is conservative about STRUCTURE, not about content: it preserves uuids,
+  key=value metrics and enum tokens so a line stays diagnosable. It is not conservative in the
+  masking direction. `redact_log_line` masks only quoted spans clearing a length-and-whitespace
+  floor, so it UNDER-masks by construction. CF-141: this line used to claim the opposite, which
+  is the more dangerous error of the two -- it is what an operator reads before screen-sharing.
+  See the two-tier note below.
 - ``reveal=True`` is a full passthrough (privacy off / explicitly revealed).
 
 **TWO TIERS, AND THEY ARE NOT EQUALLY STRONG (CF-96).** One setting governs both, so the

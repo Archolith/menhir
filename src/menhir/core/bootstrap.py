@@ -309,7 +309,12 @@ async def prepare_memory_runtime(
         edge_count_sync = 0
         edge_count_sync_error = str(exc)
     return {
-        "graphiti": "ok" if graphiti_ready else "skipped",
+        # CF-141: reports BOTH conjuncts of the gate above. It previously read
+        # `"ok" if graphiti_ready else "skipped"`, so an Unavailable client -- indices not
+        # built -- still reported "ok". Latent only because the sole production caller
+        # (`core/runtime.py`) discards this dict; it is consumed by tests, which is exactly
+        # where a wrong status is most misleading.
+        "graphiti": "ok" if (graphiti_ready and graphiti_client_available) else "skipped",
         "schema": schema,
         "edge_count_sync": edge_count_sync,
         "edge_count_sync_error": edge_count_sync_error,

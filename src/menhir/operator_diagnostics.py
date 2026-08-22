@@ -28,7 +28,11 @@ from menhir.mcp.service_access import build_mcp_backend_diagnostics
 @dataclass(frozen=True)
 class OperatorDiagnosticCheck:
     name: str
-    status: str  # pass | warn | fail
+    #: One of "pass" | "warn" | "fail" | "info" (CF-141: the comment previously omitted
+    #: "info", which `admin_key_status` emits at :190). Only "fail" and "warn" affect the
+    #: aggregate `status`; "info" and "pass" are both non-escalating, so an informational
+    #: row is reported to the operator without changing the verdict. That is intended.
+    status: str
     message: str
 
 
@@ -253,6 +257,12 @@ def build_operator_diagnostics(settings: MemorySettings) -> dict[str, Any]:
             )))
 
     # -- Aggregate status --
+    # CF-141: `status` is derived from checks + the OAuth preflight's own checks, while the
+    # `checks` key returns only the first list. That is deliberate -- the OAuth rows are returned
+    # under `oauth_resource_server.checks`, so nothing is dropped from the response -- but a
+    # consumer that reads `status` and scans `checks` alone can see "fail" with no failing row.
+    # Recorded rather than restructured: merging the two lists would change a published response
+    # shape for a documentation defect.
     all_checks = list(checks)
     oauth_checks = oauth_preflight.get("checks")
     if isinstance(oauth_checks, list):
