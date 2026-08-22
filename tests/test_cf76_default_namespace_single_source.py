@@ -11,6 +11,12 @@ object — `is` passes on exactly the defect it was meant to catch. Verified by 
 So the binding is asserted STRUCTURALLY, by parsing each module and checking the constant is
 assigned from the canonical NAME, not from a string literal. The identity assertions are kept
 underneath as a cheap consistency check, with their real limitation stated rather than implied.
+
+CF-150 later folded the two private ``_safe_namespace`` helpers into
+``domain.namespace.normalize_namespace``. The two aliases below are imported *through each
+repository module* rather than from the domain module, so these assertions still exercise the name
+each repository's own call sites resolve. That the call sites actually reach it is asserted
+structurally in ``test_cf150_normalize_namespace_single_source.py``.
 """
 
 from __future__ import annotations
@@ -21,10 +27,10 @@ from menhir.domain.namespace import DEFAULT_NAMESPACE
 from menhir.domain.todo_location import DEFAULT_TODO_NAMESPACE
 from menhir.domain.work_artifact import DEFAULT_ARTIFACT_NAMESPACE
 from menhir.infrastructure.todo_repository import (
-    _safe_namespace as _todo_safe_namespace,
+    normalize_namespace as _todo_safe_namespace,
 )
 from menhir.infrastructure.work_artifact_repository import (
-    _safe_namespace as _artifact_safe_namespace,
+    normalize_namespace as _artifact_safe_namespace,
 )
 
 
@@ -54,7 +60,9 @@ def test_repository_default_namespace_is_not_a_local_rebind() -> None:
     [None, "", "   ", "tenant-a", "  tenant-a  "],
 )
 def test_both_safe_namespace_helpers_agree(namespace) -> None:
-    # Separate functions in separate modules; CF-76 merges only their constant.
+    # Was: separate functions in separate modules, CF-76 merging only their constant. Since CF-150
+    # they are one function, so this now holds by construction -- kept as the behavioural half,
+    # with `test_call_sites_resolve_the_canonical_helper` in the CF-150 file as the structural guard.
     assert _todo_safe_namespace(namespace) == _artifact_safe_namespace(namespace)
 
 

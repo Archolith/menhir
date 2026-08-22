@@ -19,6 +19,7 @@ Mapping rules (see Phase 0 evidence in
 from __future__ import annotations
 
 import re
+from typing import Any
 
 # Graphiti's default Neo4j group partition (see graphiti_core.helpers.get_default_group_id).
 _GRAPHITI_DEFAULT_GROUP_ID = ""
@@ -31,6 +32,33 @@ DEFAULT_NAMESPACE = "default"
 # the background enrichment worker, long after the MCP caller that supplied it is gone.
 # Checking it here, at write time, turns that into an immediate, visible error instead.
 _GROUP_ID_SAFE_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
+
+
+def normalize_namespace(value: Any) -> str:
+    """Resolve any namespace-shaped value to the canonical silo name it denotes.
+
+    CF-150: this was declared three times -- here (as the canonical one, with **no caller outside
+    its own module**, see CF-147) and as a private ``_safe_namespace`` in each of
+    ``todo_repository`` and ``work_artifact_repository``. All three agreed on every ``str | None``
+    input, which is the finding: they agreed, and nothing kept them agreeing.
+
+    Empty, whitespace-only and ``None`` all collapse to :data:`DEFAULT_NAMESPACE`. Case and inner
+    whitespace are preserved beyond a strip -- namespaces are stamped through one path, so an exact
+    match after coalescing the empty case is the correct normalized comparison.
+
+    ``Any`` rather than ``str | None`` on purpose: this reads values straight off graph nodes, where
+    a property is not guaranteed to be a string. The repositories' typed ``str | None`` callers are
+    a strict subset and behave identically -- the two former helpers would raise ``AttributeError``
+    on a non-string, so nothing that used to work stops working.
+
+    **Not the same function as** :func:`stamped_namespace`. That one answers "what do I write onto a
+    node", and today it deliberately passes ``''`` through unchanged (the pre-canonicalization
+    spelling; see .agent/plans/menhir-default-namespace-canonicalization.md stage 2). This one
+    answers "which silo does this value mean", where ``''`` means the default. Merging them would
+    quietly make stage 2 of that plan happen early.
+    """
+    text = str(value).strip() if value is not None else ""
+    return text or DEFAULT_NAMESPACE
 
 
 def namespace_spellings(namespace: str | None) -> list[str] | None:

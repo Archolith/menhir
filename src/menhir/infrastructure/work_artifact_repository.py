@@ -32,6 +32,7 @@ except ModuleNotFoundError:  # pragma: no cover - import guard
     _Neo4jConstraintError = ()  # type: ignore[assignment]
 
 from menhir.domain.artifact_shape import ShapeReport, ShapeStatus, validate_shape
+from menhir.domain.namespace import normalize_namespace
 from menhir.domain.todo_location import parse_code_ref
 from menhir.domain.artifact_reconciliation import (
     ARTIFACT_SOURCE_SCHEMA_VERSION,
@@ -77,8 +78,6 @@ from menhir.infrastructure.schema import (
 )
 
 
-def _safe_namespace(namespace: str | None) -> str:
-    return (namespace or "").strip() or DEFAULT_ARTIFACT_NAMESPACE
 
 
 def _safe_namespace_filter(namespace: str | None) -> str | None:
@@ -144,7 +143,7 @@ class WorkArtifactRepository:
         # minting a second one for the same record.
         artifact_uuid = artifact_uuid or str(uuid4())
         now = datetime.now(timezone.utc).isoformat()
-        safe_namespace = _safe_namespace(namespace)
+        safe_namespace = normalize_namespace(namespace)
 
         self.neo4j.execute(
             """
@@ -1181,7 +1180,7 @@ class WorkArtifactRepository:
         ns_filter = "AND a.namespace = $namespace" if scoped else ""
         params: dict[str, Any] = {"uuid": artifact_uuid}
         if scoped:
-            params["namespace"] = _safe_namespace(namespace)
+            params["namespace"] = normalize_namespace(namespace)
 
         rows = self.neo4j.execute(
             f"""
@@ -1218,7 +1217,7 @@ class WorkArtifactRepository:
             "uuid": artifact_uuid, "to_status": to_status, "now": now
         }
         if scoped:
-            write_params["namespace"] = _safe_namespace(namespace)
+            write_params["namespace"] = normalize_namespace(namespace)
         self.neo4j.execute(
             f"""
             MATCH (a:WorkArtifact {{artifact_uuid: $uuid}})
@@ -1541,7 +1540,7 @@ class WorkArtifactRepository:
         questions carry no copy of it.
         """
         namespaces = (
-            [_safe_namespace(namespace), DEFAULT_ARTIFACT_NAMESPACE]
+            [normalize_namespace(namespace), DEFAULT_ARTIFACT_NAMESPACE]
             if namespace
             else None
         )
@@ -1611,7 +1610,7 @@ class WorkArtifactRepository:
         unchecked documents pass for valid ones.
         """
         namespaces = (
-            [_safe_namespace(namespace), DEFAULT_ARTIFACT_NAMESPACE]
+            [normalize_namespace(namespace), DEFAULT_ARTIFACT_NAMESPACE]
             if namespace
             else None
         )
@@ -1950,7 +1949,7 @@ class WorkArtifactRepository:
     ) -> dict[str, Any] | None:
         """Fetch one artifact with its embodiments and locations."""
         namespaces = (
-            [_safe_namespace(namespace), DEFAULT_ARTIFACT_NAMESPACE]
+            [normalize_namespace(namespace), DEFAULT_ARTIFACT_NAMESPACE]
             if namespace
             else None
         )
@@ -2000,7 +1999,7 @@ class WorkArtifactRepository:
         pinned client sees shared artifacts rather than nothing.
         """
         namespaces = (
-            [_safe_namespace(namespace), DEFAULT_ARTIFACT_NAMESPACE]
+            [normalize_namespace(namespace), DEFAULT_ARTIFACT_NAMESPACE]
             if namespace
             else None
         )

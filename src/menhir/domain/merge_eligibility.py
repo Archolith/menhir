@@ -28,6 +28,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from menhir.domain.namespace import normalize_namespace
+
 
 # Stable reason codes. These are contract surface -- telemetry, tests, and operator tooling key on
 # them, so do not rename without updating those. ELIGIBLE is the single allow value.
@@ -115,16 +117,6 @@ def mutable_eligibility_cypher(survivor: str = "survivor", absorbed: str = "abso
         f" = coalesce({absorbed}.namespace, {absorbed}.group_id, 'default')"
     )
     return "\n              AND ".join(clauses)
-
-
-def normalize_namespace(value: Any) -> str:
-    """Normalize a namespace for equality comparison. Empty/None collapse to 'default'.
-
-    Case and surrounding whitespace are preserved beyond a strip: namespaces are stamped through one
-    path, so an exact match after coalescing the empty case is the correct 'normalized' comparison.
-    """
-    text = str(value).strip() if value is not None else ""
-    return text or "default"
 
 
 @dataclass(frozen=True)

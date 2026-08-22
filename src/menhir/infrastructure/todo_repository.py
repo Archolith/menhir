@@ -18,6 +18,7 @@ from uuid import uuid4
 from menhir.domain.namespace import (
     DEFAULT_NAMESPACE,
     namespace_to_group_id,
+    normalize_namespace,
     stamped_namespace,
 )
 from menhir.domain.todo_location import (
@@ -38,9 +39,6 @@ _VALID_STATUSES = frozenset({"open", "closed"})
 #: without importing this repository.
 
 
-def _safe_namespace(namespace: str | None) -> str:
-    """Resolve a namespace argument to a non-null value."""
-    return (namespace or "").strip() or DEFAULT_NAMESPACE
 
 
 #: Inbound semantic relations a memory may declare against a todo, mapped to their
@@ -180,7 +178,7 @@ class TodoRepository:
           - CREATED_FROM    → :Episodic matching episode_uuid
         """
         safe_priority = priority if priority in _VALID_PRIORITIES else "normal"
-        safe_namespace = _safe_namespace(namespace)
+        safe_namespace = normalize_namespace(namespace)
         todo_uuid = str(uuid4())
         now = datetime.now(timezone.utc).isoformat()
 
@@ -523,7 +521,7 @@ class TodoRepository:
         safe_status = status if status in _VALID_STATUSES else "open"
         safe_limit = max(1, min(limit, 200))
         namespaces = (
-            [_safe_namespace(namespace), DEFAULT_NAMESPACE] if namespace else None
+            [normalize_namespace(namespace), DEFAULT_NAMESPACE] if namespace else None
         )
         return self.neo4j.execute(
             """
@@ -574,7 +572,7 @@ class TodoRepository:
         ``DEFAULT_NAMESPACE`` bucket. The namespace is always reported.
         """
         namespaces = (
-            [_safe_namespace(namespace), DEFAULT_NAMESPACE] if namespace else None
+            [normalize_namespace(namespace), DEFAULT_NAMESPACE] if namespace else None
         )
         rows = self.neo4j.execute(
             """
@@ -669,7 +667,7 @@ class TodoRepository:
 
         Scoping deliberately differs from this file's READ idiom. ``list_todos`` and
         ``get_todo`` use the requested-plus-default rule
-        (``[_safe_namespace(namespace), DEFAULT_NAMESPACE]``), which is a convenience: seeing
+        (``[normalize_namespace(namespace), DEFAULT_NAMESPACE]``), which is a convenience: seeing
         the shared bucket alongside your own costs nothing. This is a BULK MUTATION, so it
         matches the requested namespace EXACTLY. A client scoped to one silo -- or pinned to
         it server-side -- must not close todos in the shared default bucket as a side effect
@@ -685,7 +683,7 @@ class TodoRepository:
         ns_filter = "AND n.namespace = $namespace" if scoped else ""
         params: dict[str, Any] = {"days": safe_days}
         if scoped:
-            params["namespace"] = _safe_namespace(namespace)
+            params["namespace"] = normalize_namespace(namespace)
 
         # Find stale todos
         rows = self.neo4j.execute(
