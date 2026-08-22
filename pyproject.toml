@@ -42,6 +42,23 @@ menhir = "menhir.main:main"
 [tool.setuptools.package-data]
 "menhir.explorer" = ["templates/*.html", "static/*.css", "static/*.js"]
 
+[tool.coverage.run]
+# CF-140: every coverage figure this programme has reported came from a run WITHOUT --branch, so
+# `coverage.xml` carried branches-valid="0" and every quoted rate was line-only. A line rate counts
+# a guard clause covered the moment its body runs once, which is precisely the shape this codebase
+# keeps finding defects in -- an untaken `if` that nobody exercised.
+#
+# Set here rather than in a command line so it applies however coverage is invoked. The previous
+# figures were ad hoc runs, which is how the flag went missing in the first place.
+branch = true
+source = ["src/menhir"]
+
+[tool.coverage.report]
+# Surfacing partial branches is the point: a file at 100% line coverage with unexercised branches
+# should not read as fully covered.
+skip_covered = false
+show_missing = true
+
 [dependency-groups]
 dev = [
     "pytest>=9.0.2",
