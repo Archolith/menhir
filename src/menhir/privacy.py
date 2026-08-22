@@ -10,6 +10,24 @@ Design rules:
   are NEVER redacted, so the graph stays navigable. Only free text is hidden.
 - Redaction is conservative for log lines: better to over-mask than to leak.
 - ``reveal=True`` is a full passthrough (privacy off / explicitly revealed).
+
+**TWO TIERS, AND THEY ARE NOT EQUALLY STRONG (CF-96).** One setting governs both, so the
+difference is easy to miss:
+
+- :func:`redact_mapping` / :func:`redact_rows` are **field-exact**. They mask by KEY against
+  :data:`REDACTED_FIELDS`, so every value under a memory-bearing field is masked regardless of
+  its shape. This is what the explorer UI uses.
+- :func:`redact_log_line` is **heuristic, and bounded by what it can see**. It masks only QUOTED
+  spans in an already-rendered string, so memory content interpolated through an unquoted
+  ``%s`` passes through untouched. Short quoted values pass too, by design -- the free-text
+  floor is :data:`_MIN_FREE_TEXT_LEN` characters.
+
+The durable fix for the second tier is field-aware structured logging, where memory-bearing
+fields are marked before rendering rather than recovered from the finished string. Until then the
+rule for producers is: **do not put memory content into a log line**. Log the uuid instead -- it
+is structural, it is never masked, and it identifies the node for anyone debugging. CF-96's
+demonstrated leak (`services/correlation_service.py`, judge votes) was fixed that way, not by
+teaching this regex another shape.
 """
 
 from __future__ import annotations

@@ -65,6 +65,15 @@ loopback posture, not by in-app controls** (operator checklist:
   un-redact, but only on a loopback bind — privacy cannot be defeated by a cookie on a remote bind.
   The console dashboard toggles the same state live with the `p` key.
 
+  **The two surfaces are not equally strong, and this setting governs both (CF-96).** The explorer
+  UI is masked **field-exactly**: every value under a memory-bearing field is hidden regardless of
+  its shape. The console log tail is masked **heuristically** — it operates on already-rendered log
+  strings and can only mask *quoted* spans, so memory content interpolated through an unquoted
+  `%s`, or a quoted value shorter than 12 characters, passes through in the clear. Treat the log
+  tail as a demo aid that removes most content, **not** as a guarantee that none is displayed. If
+  you are screen-sharing where a leak would matter, raise the log level rather than relying on the
+  mask.
+
 ## 3. Authentication modes and precedence
 
 **Single source of truth.** The effective auth mode is resolved in exactly one place —

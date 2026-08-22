@@ -588,9 +588,16 @@ class CorrelationService:
                 content_b=str(meta_b.get("summary") or meta_b.get("content") or ""),
             )
             judge_votes.append(vote)
+            # CF-96: uuids, not names. This is the finding's demonstrated leak -- two entity
+            # names rendered through unquoted %s, which `redact_log_line` cannot see because it
+            # only masks QUOTED spans. Quoting them here would not fix it either: a single-word
+            # name is under the 12-char free-text floor and would pass the heuristic anyway.
+            # The uuids are already in scope, are structural by `privacy.STRUCTURAL_FIELDS`, and
+            # identify the pair for anyone debugging a judge vote. Not emitting the content beats
+            # emitting it and hoping a regex catches it.
             logger.debug(
                 "Judge %d: %s vs %s → %s",
-                judge_id, meta_a.get("name"), meta_b.get("name"), vote,
+                judge_id, survivor_uuid, absorbed_uuid, vote,
             )
 
         # Tally votes: merge only on unanimous yes

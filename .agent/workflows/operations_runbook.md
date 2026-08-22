@@ -94,6 +94,9 @@ tail), `q` quits. The dashboard sends the least-privileged configured API key
 
 **Privacy:** set `MENHIR_PRIVACY_REDACT=true` to start the dashboard (and the explorer web
 UI) with memory contents hidden by default; toggle live in the dashboard with `p`.
+The explorer UI is masked field-exactly; the dashboard's **log tail is best-effort only** — it can
+mask only quoted spans in a rendered log line, so unquoted or short content survives (CF-96). See
+`docs/security-posture.md` before relying on it while screen-sharing.
 
 Raw fallback (foreground server, bypasses the remote-Neo4j readiness probe and the watchdog —
 direct process output only):
