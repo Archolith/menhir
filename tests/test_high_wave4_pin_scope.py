@@ -208,6 +208,54 @@ def test_cf217_unscoped_call_is_unchanged() -> None:
     assert "namespace" not in params
 
 
+def test_cf217_the_pin_actually_forces_the_namespace_on_this_tool() -> None:
+    """DECLARING the parameter is not the same as the pin REACHING it (trap T17).
+
+    The test below asserts the signature, which is what `_apply_pinned_namespace` introspects --
+    but a signature check passes just as well if the forcing never runs for this tool. Since the
+    whole containment argument for CF-217 is "an unpinned sweep is the opt-in contract, a pinned
+    client is forced", assert the forcing on the real tool object, not on a test double.
+
+    Both directions matter: a pinned client that OMITS the argument (the small-model case the pin
+    exists for) and one that passes a different silo.
+    """
+    from menhir.mcp import contracts as _contracts
+    from menhir.mcp.tools.ops.close_stale_todos import CloseStaleTodosTool
+
+    original = _contracts.get_pinned_namespace
+    _contracts.get_pinned_namespace = lambda: "tenant-a"
+    try:
+        tool = CloseStaleTodosTool()
+        omitted = tool._apply_pinned_namespace({"older_than_days": 60, "dry_run": False})
+        assert omitted["namespace"] == "tenant-a", "pinned client's omitted namespace not supplied"
+
+        overridden = tool._apply_pinned_namespace({"dry_run": False, "namespace": "tenant-b"})
+        assert overridden["namespace"] == "tenant-a", "pinned client escaped its silo"
+    finally:
+        _contracts.get_pinned_namespace = original
+
+
+def test_cf217_an_unpinned_client_is_still_unscoped_by_design() -> None:
+    """THE RESIDUAL, PINNED SO IT IS NOT MISREAD AS CLOSED. CF-217's fix scopes the query when a
+    namespace arrives; it does not make one arrive. An unpinned agent-tier caller still sweeps
+    every silo, which is the opt-in isolation contract in `domain/namespace.py`, not an oversight.
+
+    Whether that contract is right is CF-127's question, not this entry's."""
+    from menhir.mcp import contracts as _contracts
+    from menhir.mcp.tools.ops.close_stale_todos import CloseStaleTodosTool
+
+    original = _contracts.get_pinned_namespace
+    _contracts.get_pinned_namespace = lambda: ""
+    try:
+        tool = CloseStaleTodosTool()
+        assert "namespace" not in tool._apply_pinned_namespace({"dry_run": False})
+    finally:
+        _contracts.get_pinned_namespace = original
+
+    query, params = _close_stale_call(None)[0]
+    assert "n.namespace" not in query and "namespace" not in params
+
+
 def test_cf217_tool_declares_namespace_so_the_pin_can_reach_it() -> None:
     tree = ast.parse(
         (_SRC / "mcp/tools/ops/close_stale_todos.py").read_text(encoding="utf-8")
