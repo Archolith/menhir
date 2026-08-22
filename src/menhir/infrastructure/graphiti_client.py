@@ -674,8 +674,68 @@ class GraphitiClient:
         self._schedule_close_replaced(old_client)
         self._reset_and_close_cached_chat_clients()
 
+    #: The wake sequence's three endpoint branches, in the order their rebinds must be applied.
+    #:
+    #: ORDER IS LOAD-BEARING and is why the acquires are gathered but the rebinds are not.
+    #: `_maybe_update_client_base_url` does not only touch the LLM: when the embedder currently
+    #: shares the LLM's base URL it drags the embedder along too, deciding that by reading
+    #: `self.embed_base_url` *before* the embed branch has spoken. That is a read-modify-write on
+    #: state a sibling branch also writes, so applying the three rebinds in completion order
+    #: instead of this order would make the final embedder target depend on which HTTP response
+    #: landed first. Gathering only the acquires keeps the fix to what CF-174 is actually about --
+    #: latency -- and leaves the rebind sequence bit-identical to the serial version.
+    _WAKE_BRANCHES: tuple[tuple[str, str, str, str], ...] = (
+        # (kind, fallback attribute, task suffix, rebind method)
+        ("llm", "scheduler_fallback_base_url", "", "_maybe_update_client_base_url"),
+        ("embed", "scheduler_fallback_embed_base_url", " embed", "_maybe_update_embed_base_url"),
+        (
+            "reranker",
+            "scheduler_fallback_reranker_base_url",
+            " reranker",
+            "_maybe_update_reranker_base_url",
+        ),
+    )
+
+    #: What the serial version swallowed per branch, kept exactly. Anything outside this set still
+    #: propagates out of the whole wake, as it did before.
+    _WAKE_TOLERATED = (httpx.HTTPError, OSError, asyncio.TimeoutError, RuntimeError)
+
+    async def _acquire_wake_endpoint(self, *, kind: str, fallback: str, task: str) -> str:
+        """Acquire one endpoint URL, recording the same lifecycle events the serial wake did."""
+
+        started = perf_counter()
+        logger.debug(
+            "Graphiti endpoint wake start kind=%s task=%s fallback=%s", kind, task, fallback
+        )
+        await asyncio.to_thread(
+            partial(
+                record_lifecycle_event,
+                component="graphiti_client",
+                event=f"wake_{kind}_endpoint",
+                state="started",
+                details={"task": task, "fallback": fallback},
+            )
+        )
+        acquired_url = await acquire_llama_url_async(fallback=fallback, task=task)
+        logger.debug(
+            "Graphiti endpoint wake complete kind=%s task=%s acquired=%s duration_ms=%s",
+            kind,
+            task,
+            acquired_url,
+            int((perf_counter() - started) * 1000),
+        )
+        return acquired_url
+
     async def _ensure_graphiti_endpoints_alive(self, *, task: str) -> None:
-        """Wake scheduler-managed OpenAI-compatible endpoints used by Graphiti."""
+        """Wake scheduler-managed OpenAI-compatible endpoints used by Graphiti.
+
+        The three endpoints are acquired concurrently and rebound in `_WAKE_BRANCHES` order.
+        Every branch still issues its own `/acquire` with its own task label: the scheduler
+        routes and traces by task id, and `_last_acquire_time` -- which drives its idle
+        watchdog -- is refreshed per acquire. Suppressing any of them to save a round trip would
+        trade a correct trace and a live keepalive for latency the reuse of the HTTP client
+        already recovered (CF-174 ruling, 2026-08-22: no memoization).
+        """
 
         logger.debug("Graphiti wake sequence start task=%s", task)
         await asyncio.to_thread(
@@ -687,159 +747,54 @@ class GraphitiClient:
                 details={"task": task},
             )
         )
-        llm_fallback = self.scheduler_fallback_base_url
         try:
-            if llm_fallback and should_use_scheduler(llm_fallback):
-                try:
-                    started = perf_counter()
-                    logger.debug(
-                        "Graphiti endpoint wake start kind=llm task=%s fallback=%s",
-                        task,
-                        llm_fallback,
-                    )
-                    await asyncio.to_thread(
-                        partial(
-                            record_lifecycle_event,
-                            component="graphiti_client",
-                            event="wake_llm_endpoint",
-                            state="started",
-                            details={"task": task, "fallback": llm_fallback},
-                        )
-                    )
-                    acquired_url = await acquire_llama_url_async(fallback=llm_fallback, task=task)
-                    self._maybe_update_client_base_url(llm_base_url=acquired_url)
-                    logger.debug(
-                        "Graphiti endpoint wake complete kind=llm task=%s acquired=%s duration_ms=%s",
-                        task,
-                        acquired_url,
-                        int((perf_counter() - started) * 1000),
-                    )
-                    await asyncio.to_thread(
-                        partial(
-                            record_lifecycle_event,
-                            component="graphiti_client",
-                            event="wake_llm_endpoint",
-                            state="completed",
-                            details={"task": task, "acquired": acquired_url},
-                        )
-                    )
-                except (httpx.HTTPError, OSError, asyncio.TimeoutError, RuntimeError) as exc:
-                    logger.warning("scheduler acquire failed for graphiti llm; continuing with fallback endpoint: %s", exc)
-                    await asyncio.to_thread(
-                        partial(
-                            record_lifecycle_event,
-                            component="graphiti_client",
-                            event="wake_llm_endpoint",
-                            state="failed",
-                            details={"task": task, "error": str(exc)},
-                        )
-                    )
+            planned: list[tuple[str, str, str, str]] = []
+            for kind, fallback_attr, suffix, rebind in self._WAKE_BRANCHES:
+                fallback = getattr(self, fallback_attr)
+                if fallback and should_use_scheduler(fallback):
+                    planned.append((kind, fallback, f"{task}{suffix}", rebind))
+            if not planned:
+                return
 
-            embed_fallback = self.scheduler_fallback_embed_base_url
-            if embed_fallback and should_use_scheduler(embed_fallback):
+            results = await asyncio.gather(
+                *(
+                    self._acquire_wake_endpoint(kind=kind, fallback=fallback, task=branch_task)
+                    for kind, fallback, branch_task, _rebind in planned
+                ),
+                return_exceptions=True,
+            )
+
+            for (kind, _fallback, branch_task, rebind), result in zip(
+                planned, results, strict=True
+            ):
                 try:
-                    started = perf_counter()
-                    embed_task = f"{task} embed"
-                    logger.debug(
-                        "Graphiti endpoint wake start kind=embed task=%s fallback=%s",
-                        embed_task,
-                        embed_fallback,
-                    )
-                    await asyncio.to_thread(
-                        partial(
-                            record_lifecycle_event,
-                            component="graphiti_client",
-                            event="wake_embed_endpoint",
-                            state="started",
-                            details={"task": embed_task, "fallback": embed_fallback},
-                        )
-                    )
-                    acquired_embed_url = await acquire_llama_url_async(
-                        fallback=embed_fallback,
-                        task=embed_task,
-                    )
-                    self._maybe_update_embed_base_url(embed_base_url=acquired_embed_url)
-                    logger.debug(
-                        "Graphiti endpoint wake complete kind=embed task=%s acquired=%s duration_ms=%s",
-                        embed_task,
-                        acquired_embed_url,
-                        int((perf_counter() - started) * 1000),
-                    )
-                    await asyncio.to_thread(
-                        partial(
-                            record_lifecycle_event,
-                            component="graphiti_client",
-                            event="wake_embed_endpoint",
-                            state="completed",
-                            details={"task": embed_task, "acquired": acquired_embed_url},
-                        )
-                    )
-                except (httpx.HTTPError, OSError, asyncio.TimeoutError, RuntimeError) as exc:
+                    if isinstance(result, BaseException):
+                        raise result
+                    # llm/embed/reranker -> llm_base_url/embed_base_url/reranker_base_url
+                    getattr(self, rebind)(**{f"{kind}_base_url": result})
+                except self._WAKE_TOLERATED as exc:
                     logger.warning(
-                        "scheduler acquire failed for graphiti embedder; continuing with fallback endpoint: %s",
+                        "scheduler acquire failed for graphiti %s; continuing with fallback endpoint: %s",
+                        kind,
                         exc,
                     )
                     await asyncio.to_thread(
                         partial(
                             record_lifecycle_event,
                             component="graphiti_client",
-                            event="wake_embed_endpoint",
+                            event=f"wake_{kind}_endpoint",
                             state="failed",
-                            details={"task": embed_task, "error": str(exc)},
+                            details={"task": branch_task, "error": str(exc)},
                         )
                     )
-
-            reranker_fallback = self.scheduler_fallback_reranker_base_url
-            if reranker_fallback and should_use_scheduler(reranker_fallback):
-                try:
-                    started = perf_counter()
-                    reranker_task = f"{task} reranker"
-                    logger.debug(
-                        "Graphiti endpoint wake start kind=reranker task=%s fallback=%s",
-                        reranker_task,
-                        reranker_fallback,
-                    )
+                else:
                     await asyncio.to_thread(
                         partial(
                             record_lifecycle_event,
                             component="graphiti_client",
-                            event="wake_reranker_endpoint",
-                            state="started",
-                            details={"task": reranker_task, "fallback": reranker_fallback},
-                        )
-                    )
-                    acquired_reranker_url = await acquire_llama_url_async(
-                        fallback=reranker_fallback,
-                        task=reranker_task,
-                    )
-                    self._maybe_update_reranker_base_url(reranker_base_url=acquired_reranker_url)
-                    logger.debug(
-                        "Graphiti endpoint wake complete kind=reranker task=%s acquired=%s duration_ms=%s",
-                        reranker_task,
-                        acquired_reranker_url,
-                        int((perf_counter() - started) * 1000),
-                    )
-                    await asyncio.to_thread(
-                        partial(
-                            record_lifecycle_event,
-                            component="graphiti_client",
-                            event="wake_reranker_endpoint",
+                            event=f"wake_{kind}_endpoint",
                             state="completed",
-                            details={"task": reranker_task, "acquired": acquired_reranker_url},
-                        )
-                    )
-                except (httpx.HTTPError, OSError, asyncio.TimeoutError, RuntimeError) as exc:
-                    logger.warning(
-                        "scheduler acquire failed for graphiti reranker; continuing with fallback endpoint: %s",
-                        exc,
-                    )
-                    await asyncio.to_thread(
-                        partial(
-                            record_lifecycle_event,
-                            component="graphiti_client",
-                            event="wake_reranker_endpoint",
-                            state="failed",
-                            details={"task": reranker_task, "error": str(exc)},
+                            details={"task": branch_task, "acquired": result},
                         )
                     )
         finally:
@@ -853,6 +808,7 @@ class GraphitiClient:
                     details={"task": task},
                 )
             )
+
 
     async def _count_existing_indices(self) -> int:
         """Query Neo4j for current index count."""
@@ -1374,13 +1330,25 @@ class GraphitiClient:
         supported = {"bm25", "cosine_similarity"}
         effective_group_ids = group_ids if group_ids and group_ids != [""] else None
         search_filter = SearchFilters()
-        query_vector: list[float] | None = None
 
-        ranked: dict[str, list[tuple[str, str]]] = {}
-        failures: dict[str, Exception] = {}
+        # CF-175: the lanes are independent -- each writes its own `ranked`/`failures` key, the
+        # query vector is read only by the cosine branch, and neither reads the other's output --
+        # so total latency was bm25 + embed + cosine where it only had to be
+        # max(bm25, embed + cosine). Running them concurrently is the whole fix.
+        #
+        # Validation is hoisted OUT of the lanes on purpose. Serially, an unsupported method
+        # raised only after every earlier lane had already run its query; concurrently there is no
+        # "earlier", so the check has to happen before anything is launched or the ValueError
+        # would race the work it is meant to prevent. Production callers pass a fixed
+        # {"bm25", "cosine_similarity"} list, so this moves the raise earlier for nobody.
         for method in methods:
             if method not in supported:
                 raise ValueError(f"Unsupported search method: {method!r}")
+
+        ranked: dict[str, list[tuple[str, str]]] = {}
+        failures: dict[str, Exception] = {}
+
+        async def _run_lane(method: str) -> None:
             try:
                 if method == "bm25":
                     nodes = await node_fulltext_search(
@@ -1391,8 +1359,7 @@ class GraphitiClient:
                         2 * num_results,
                     )
                 else:
-                    if query_vector is None:
-                        query_vector = await self.embed_query(query)
+                    query_vector = await self.embed_query(query)
                     nodes = await node_similarity_search(
                         self.client.driver,
                         query_vector,
@@ -1407,7 +1374,7 @@ class GraphitiClient:
                     )
                     ranked[method] = []
                     failures[method] = exc
-                    continue
+                    return
                 logger.error(
                     "Graphiti %s lane failed query=%r; other retrieval lanes will continue: %s: %s",
                     method,
@@ -1418,7 +1385,7 @@ class GraphitiClient:
                 )
                 ranked[method] = []
                 failures[method] = exc
-                continue
+                return
 
             hits: list[tuple[str, str]] = []
             for node in nodes:
@@ -1440,6 +1407,10 @@ class GraphitiClient:
                         exc_info=True,
                     )
             ranked[method] = hits
+
+        # `_run_lane` swallows its own failures into `failures`, so nothing here can raise and
+        # `return_exceptions` would only hide a genuine bug in the lane body.
+        await asyncio.gather(*(_run_lane(method) for method in methods))
 
         if methods and len(failures) == len(methods):
             detail = ", ".join(

@@ -14,7 +14,10 @@ from menhir.config import MemorySettings
 from menhir.core import build_memory_services, prepare_memory_runtime
 from menhir.core.runtime_preflight import collect_runtime_capabilities
 from menhir.domain import new_session
-from menhir.infrastructure.llama_endpoint import ensure_scheduler_running
+from menhir.infrastructure.llama_endpoint import (
+    aclose_scheduler_http_client,
+    ensure_scheduler_running,
+)
 from menhir.infrastructure.scheduler_trace import register_scheduler_task_source
 from menhir.infrastructure.telemetry import enable_llm_usage_telemetry, record_lifecycle_event
 from menhir.infrastructure.view_embedder import make_view_embedder, view_embedder_version
@@ -621,6 +624,20 @@ async def _shutdown_runtime() -> None:
                     state="failed",
                 )
                 logger.exception("Neo4j driver close failed")
+        try:
+            await aclose_scheduler_http_client()
+            record_lifecycle_event(
+                component="runtime_shutdown",
+                event="scheduler_http_client_close",
+                state="completed",
+            )
+        except Exception:
+            record_lifecycle_event(
+                component="runtime_shutdown",
+                event="scheduler_http_client_close",
+                state="failed",
+            )
+            logger.exception("Scheduler HTTP client close failed")
         await _stop_scheduler()
     finally:
         _clear_runtime_state()

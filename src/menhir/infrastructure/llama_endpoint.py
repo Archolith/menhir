@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import weakref
 from functools import partial
 from pathlib import Path
 from threading import Lock
@@ -29,6 +30,55 @@ _DEFAULT_LOCAL_BASES = {
     "http://127.0.0.1:8081/v1",
     "http://localhost:8081/v1",
 }
+#: One shared `httpx.AsyncClient` per event loop, for the scheduler control-plane calls.
+#:
+#: CF-174 filed the wake sequence's cost as three serialized scheduler round trips. Measured
+#: against a stub scheduler, that is the minority of it: building a fresh `httpx.AsyncClient`
+#: per acquire costs ~190 ms on this host (SSL context construction, which never warms up), so
+#: a three-endpoint wake paid ~570 ms before a single byte moved. It is CPU, not I/O, which is
+#: why gathering the acquires alone barely helped at localhost latency -- one event loop cannot
+#: parallelize CPU. Reuse is the fix that matters; see CF-161/CF-177 for the same defect on the
+#: chat path.
+#:
+#: KEYED ON THE LOOP, NOT A PLAIN GLOBAL. An `httpx.AsyncClient` binds its connection pool to
+#: the loop that first drives it; a process-wide singleton would be reused across `asyncio.run`
+#: boundaries (every CLI entry point, every test) and fail or leak there. Weak keys so a
+#: finished loop's client is dropped with the loop rather than pinning it.
+_scheduler_http_clients: weakref.WeakKeyDictionary[
+    asyncio.AbstractEventLoop, httpx.AsyncClient
+] = weakref.WeakKeyDictionary()
+
+
+def _shared_scheduler_http_client() -> httpx.AsyncClient:
+    """Return the running loop's scheduler client, building it on first use."""
+
+    loop = asyncio.get_running_loop()
+    client = _scheduler_http_clients.get(loop)
+    if client is not None and not client.is_closed:
+        return client
+    # No default timeout is set here on purpose: every call site passes an explicit per-request
+    # timeout, and a client-level default would silently outrank a caller that asked for less.
+    client = httpx.AsyncClient()
+    _scheduler_http_clients[loop] = client
+    return client
+
+
+async def aclose_scheduler_http_client() -> None:
+    """Close and forget the running loop's shared scheduler client.
+
+    Called from runtime shutdown. Closing must happen on the loop the pool is bound to, which
+    is why this is a coroutine rather than something the sync teardown path can call.
+    """
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    client = _scheduler_http_clients.pop(loop, None)
+    if client is not None and not client.is_closed:
+        await client.aclose()
+
+
 _SCHEDULER_STARTUP_MARKER_TTL_S = 20.0
 _SCHEDULER_AUTOSTART_RETRY_COOLDOWN_S = 30.0
 _scheduler_autostart_state_lock = Lock()
@@ -418,41 +468,42 @@ async def acquire_llama_url_async(
                 details=details,
             )
         )
-        async with httpx.AsyncClient(timeout=timeout_s) as client:
-            await asyncio.to_thread(
-                partial(
-                    record_lifecycle_event,
-                    component="llama_endpoint",
-                    event="scheduler_acquire_request",
-                    state="started",
-                    details=details,
-                )
+        client = _shared_scheduler_http_client()
+        await asyncio.to_thread(
+            partial(
+                record_lifecycle_event,
+                component="llama_endpoint",
+                event="scheduler_acquire_request",
+                state="started",
+                details=details,
             )
-            response = await client.post(
-                f"{scheduler_url}/acquire",
-                json={"task": task} if task else {},
+        )
+        response = await client.post(
+            f"{scheduler_url}/acquire",
+            json={"task": task} if task else {},
+            timeout=timeout_s,
+        )
+        response.raise_for_status()
+        acquired_url = str(response.json()["url"])
+        await asyncio.to_thread(
+            partial(
+                record_lifecycle_event,
+                component="llama_endpoint",
+                event="scheduler_acquire_request",
+                state="completed",
+                details={**details, "acquired_url": acquired_url},
             )
-            response.raise_for_status()
-            acquired_url = str(response.json()["url"])
-            await asyncio.to_thread(
-                partial(
-                    record_lifecycle_event,
-                    component="llama_endpoint",
-                    event="scheduler_acquire_request",
-                    state="completed",
-                    details={**details, "acquired_url": acquired_url},
-                )
+        )
+        await asyncio.to_thread(
+            partial(
+                record_lifecycle_event,
+                component="llama_endpoint",
+                event="acquire_async",
+                state="completed",
+                details={**details, "acquired_url": acquired_url},
             )
-            await asyncio.to_thread(
-                partial(
-                    record_lifecycle_event,
-                    component="llama_endpoint",
-                    event="acquire_async",
-                    state="completed",
-                    details={**details, "acquired_url": acquired_url},
-                )
-            )
-            return acquired_url
+        )
+        return acquired_url
     except (httpx.HTTPError, OSError, ValueError, asyncio.TimeoutError) as exc:
         await asyncio.to_thread(
             partial(

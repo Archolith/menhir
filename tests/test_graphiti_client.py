@@ -987,22 +987,31 @@ async def test_add_episode_skips_scheduler_trace_for_non_scheduler_endpoint(
 async def test_graphiti_client_refreshes_llm_base_url_from_scheduler_acquire(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(graphiti_client_module, "should_use_scheduler", lambda _base_url: True)
 
-    acquired_urls = iter(
-        [
-            "http://127.0.0.1:8082/v1/t/memory--graphiti-bootstrap",
-            "http://127.0.0.1:8082/v1/t/memory--graphiti-embed-bootstrap",
-            "http://127.0.0.1:8082/v1/t/memory--graphiti-reranker-bootstrap",
-            "http://127.0.0.1:8082/v1/t/memory--graphiti-add-episode",
-            "http://127.0.0.1:8082/v1/t/memory--graphiti-add-episode-embed",
-            "http://127.0.0.1:8082/v1/t/memory--graphiti-add-episode-reranker",
-        ]
-    )
+    # Keyed on `task`, not a call-order queue. The real scheduler derives the URL it returns
+    # from the task it was asked for (`handle_acquire` returns `{base}/v1/t/{task_id}`), so a
+    # queue only reproduced its answers while the acquires happened to run in a fixed order.
+    # CF-174 made the three endpoint acquires concurrent, which is not a change to which URL a
+    # branch receives -- each still passes its own task -- but it did make the queue's
+    # order-as-identity assumption observable. Every assertion below is unchanged; only the stub
+    # now models the contract it is standing in for.
+    _ACQUIRED_URLS = {
+        "memory: graphiti bootstrap": "http://127.0.0.1:8082/v1/t/memory--graphiti-bootstrap",
+        "memory: graphiti embed bootstrap": "http://127.0.0.1:8082/v1/t/memory--graphiti-embed-bootstrap",
+        "memory: graphiti reranker bootstrap": "http://127.0.0.1:8082/v1/t/memory--graphiti-reranker-bootstrap",
+        "memory: graphiti add_episode": "http://127.0.0.1:8082/v1/t/memory--graphiti-add-episode",
+        "memory: graphiti add_episode embed": "http://127.0.0.1:8082/v1/t/memory--graphiti-add-episode-embed",
+        "memory: graphiti add_episode reranker": "http://127.0.0.1:8082/v1/t/memory--graphiti-add-episode-reranker",
+    }
+
+    def _url_for(task: str | None) -> str:
+        assert task in _ACQUIRED_URLS, f"unexpected acquire task {task!r}"
+        return _ACQUIRED_URLS[task]
 
     def _fake_acquire_sync(*, fallback: str, task: str | None = None, timeout_s: float = 30.0) -> str:
-        return next(acquired_urls)
+        return _url_for(task)
 
     async def _fake_acquire_async(*, fallback: str, task: str | None = None, timeout_s: float = 30.0) -> str:
-        return next(acquired_urls)
+        return _url_for(task)
 
     observed_clients: list[tuple[str, object]] = []
 

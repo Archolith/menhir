@@ -101,20 +101,20 @@ async def test_acquire_llama_url_async_ensures_scheduler(monkeypatch: pytest.Mon
         def json(self) -> dict[str, str]:
             return {"url": "http://127.0.0.1:8081/v1"}
 
+    # CF-174: the client is now shared per event loop instead of built and closed per acquire,
+    # and the caller's budget is passed per request rather than baked into the constructor. The
+    # assertions below are unchanged; the stub tracks the two contract changes.
     class _Client:
-        async def __aenter__(self):
-            return self
+        is_closed = False
 
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-        async def post(self, _url: str, json: dict[str, str]):
+        async def post(self, _url: str, json: dict[str, str], timeout: float | None = None):
             assert json == {"task": "memory: graphiti add_episode"}
+            assert timeout == 1.0, "the caller's timeout must reach the request"
             return _Response()
 
     monkeypatch.setattr(llama_endpoint, "ensure_scheduler_running", _fake_ensure)
     monkeypatch.setattr(llama_endpoint.asyncio, "to_thread", _fake_to_thread)
-    monkeypatch.setattr(llama_endpoint.httpx, "AsyncClient", lambda timeout=0: _Client())
+    monkeypatch.setattr(llama_endpoint.httpx, "AsyncClient", lambda **kw: _Client())
     monkeypatch.setattr(
         llama_endpoint,
         "record_lifecycle_event",
@@ -216,19 +216,18 @@ async def test_acquire_llama_url_async_records_failure_and_returns_fallback(
     async def _fake_to_thread(fn):
         fn()
 
+    # CF-174: the client is now shared per event loop instead of built and closed per acquire,
+    # and the caller's budget is passed per request rather than baked into the constructor. The
+    # assertions below are unchanged; the stub tracks the two contract changes.
     class _Client:
-        async def __aenter__(self):
-            return self
+        is_closed = False
 
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-        async def post(self, _url: str, json: dict[str, str]):
+        async def post(self, _url: str, json: dict[str, str], timeout: float | None = None):
             raise httpx.ReadTimeout("timed out")
 
     monkeypatch.setattr(llama_endpoint, "ensure_scheduler_running", _fake_ensure)
     monkeypatch.setattr(llama_endpoint.asyncio, "to_thread", _fake_to_thread)
-    monkeypatch.setattr(llama_endpoint.httpx, "AsyncClient", lambda timeout=0: _Client())
+    monkeypatch.setattr(llama_endpoint.httpx, "AsyncClient", lambda **kw: _Client())
     monkeypatch.setattr(
         llama_endpoint,
         "record_lifecycle_event",
