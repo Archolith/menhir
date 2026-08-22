@@ -36,6 +36,53 @@ logger = logging.getLogger(__name__)
 
 
 
+def _migrate_pending_actions_key(conn: sqlite3.Connection) -> bool:
+    """Rebuild `pending_actions` if it still carries the single-column key (CF-243).
+
+    Returns True when a rebuild happened. Idempotent: a table already on the composite key is
+    left alone, so this is safe to run on every startup.
+
+    Rows are carried across, collapsing any that collide on `(node_uuid, action)` -- there can be
+    at most one such row per pair under the OLD key too, so nothing is actually merged; the
+    INSERT ... SELECT is written defensively rather than because a collision is possible.
+    """
+    cols = conn.execute("PRAGMA table_info(pending_actions)").fetchall()
+    if not cols:
+        return False
+    # cols rows are (cid, name, type, notnull, dflt, pk); pk is the 1-based position in the key.
+    key = sorted((c[5], c[1]) for c in cols if c[5])
+    if [name for _, name in key] == ["node_uuid", "action"]:
+        return False
+
+    conn.execute("ALTER TABLE pending_actions RENAME TO pending_actions_old")
+    conn.execute(
+        """
+        CREATE TABLE pending_actions (
+            node_uuid       TEXT NOT NULL,
+            action          TEXT NOT NULL,
+            context         TEXT,
+            source_uuid     TEXT,
+            attempts        INTEGER DEFAULT 0,
+            failed_at       TEXT,
+            failure_reason  TEXT,
+            created_at      TEXT NOT NULL,
+            PRIMARY KEY (node_uuid, action)
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO pending_actions
+            (node_uuid, action, context, source_uuid, attempts, failed_at, failure_reason, created_at)
+        SELECT node_uuid, action, context, source_uuid, attempts, failed_at, failure_reason, created_at
+        FROM pending_actions_old
+        """
+    )
+    conn.execute("DROP TABLE pending_actions_old")
+    logger.info("pending_actions migrated to the (node_uuid, action) key (CF-243)")
+    return True
+
+
 @dataclass
 class PendingActionStore:
     """Manages the pending_actions table in the telemetry SQLite database.
@@ -73,17 +120,28 @@ class PendingActionStore:
                 conn.execute(
                     """
                     CREATE TABLE IF NOT EXISTS pending_actions (
-                        node_uuid       TEXT PRIMARY KEY,
+                        node_uuid       TEXT NOT NULL,
                         action          TEXT NOT NULL,
                         context         TEXT,
                         source_uuid     TEXT,
                         attempts        INTEGER DEFAULT 0,
                         failed_at       TEXT,
                         failure_reason  TEXT,
-                        created_at      TEXT NOT NULL
+                        created_at      TEXT NOT NULL,
+                        PRIMARY KEY (node_uuid, action)
                     )
                     """
                 )
+                # CF-243 migration. The original key was `node_uuid` alone, so a node could hold
+                # only ONE pending action: enqueuing a second kind overwrote the first (losing its
+                # attempts/failed_at/failure_reason) and `complete()` deleted whichever had won.
+                # Two kinds exist in production -- `compress` and `rehydrate` -- and a node can
+                # legitimately be pending both.
+                #
+                # CREATE TABLE IF NOT EXISTS does nothing to a table that already exists, so an
+                # existing deployment keeps the old key unless it is rebuilt here. Detected by
+                # reading the actual key rather than a version marker.
+                _migrate_pending_actions_key(conn)
                 conn.execute(
                     """
                     CREATE INDEX IF NOT EXISTS idx_pending_actions_action
@@ -111,8 +169,7 @@ class PendingActionStore:
                 INSERT INTO pending_actions
                     (node_uuid, action, context, source_uuid, attempts, failed_at, failure_reason, created_at)
                 VALUES (?, ?, ?, ?, 1, ?, ?, ?)
-                ON CONFLICT(node_uuid) DO UPDATE SET
-                    action = excluded.action,
+                ON CONFLICT(node_uuid, action) DO UPDATE SET
                     context = COALESCE(excluded.context, pending_actions.context),
                     source_uuid = COALESCE(excluded.source_uuid, pending_actions.source_uuid),
                     attempts = pending_actions.attempts + 1,
@@ -123,14 +180,28 @@ class PendingActionStore:
             )
             conn.commit()
 
-    def complete(self, node_uuid: str) -> bool:
-        """Remove a pending action after successful processing."""
+    def complete(self, node_uuid: str, action: str | None = None) -> bool:
+        """Remove a pending action after successful processing.
+
+        *action* identifies WHICH pending action completed (CF-243). Omitting it clears every
+        pending action for the node, which is the pre-CF-243 behaviour and is why the parameter is
+        optional rather than required: a caller that genuinely means "this node is done with
+        everything" still has a way to say so.
+
+        Every production caller passes it. A node can hold both a `compress` and a `rehydrate`,
+        and completing one used to delete the other.
+        """
         self._ensure_ready()
         with connect_telemetry_db(self.db_path) as conn:
-            cursor = conn.execute(
-                "DELETE FROM pending_actions WHERE node_uuid = ?",
-                (node_uuid,),
-            )
+            if action is None:
+                cursor = conn.execute(
+                    "DELETE FROM pending_actions WHERE node_uuid = ?", (node_uuid,)
+                )
+            else:
+                cursor = conn.execute(
+                    "DELETE FROM pending_actions WHERE node_uuid = ? AND action = ?",
+                    (node_uuid, action),
+                )
             conn.commit()
             return cursor.rowcount > 0
 

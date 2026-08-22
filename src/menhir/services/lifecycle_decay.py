@@ -156,7 +156,7 @@ class LifecycleDecayMixin:
         node = metadata[0]
         freshness = str(node.get("freshness") or FreshnessState.ACTIVE)
         if freshness != FreshnessState.COMPRESSED:
-            await asyncio.to_thread(self.pending_actions.complete, node_uuid)
+            await asyncio.to_thread(self.pending_actions.complete, node_uuid, "rehydrate")
             return False
 
         source_uuid = source_episode_uuid or source_node_uuid
@@ -164,7 +164,7 @@ class LifecycleDecayMixin:
         if not context_text:
             updated = await asyncio.to_thread(self.graph_adapter.complete_rehydration, node_uuid)
             if updated:
-                await asyncio.to_thread(self.pending_actions.complete, node_uuid)
+                await asyncio.to_thread(self.pending_actions.complete, node_uuid, "rehydrate")
                 record_lifecycle_action(
                     action="rehydrate",
                     node_uuid=node_uuid,
@@ -227,7 +227,7 @@ class LifecycleDecayMixin:
 
         updated = await asyncio.to_thread(self.graph_adapter.complete_rehydration, node_uuid, merged)
         if updated:
-            await asyncio.to_thread(self.pending_actions.complete, node_uuid)
+            await asyncio.to_thread(self.pending_actions.complete, node_uuid, "rehydrate")
             record_lifecycle_action(
                 action="rehydrate",
                 node_uuid=node_uuid,
@@ -323,7 +323,7 @@ class LifecycleDecayMixin:
                     changed_by="decay",
                 )
                 if await asyncio.to_thread(self.graph_adapter.compress_node, uuid, summary):
-                    await asyncio.to_thread(self.pending_actions.complete, uuid)
+                    await asyncio.to_thread(self.pending_actions.complete, uuid, "compress")
                     compressed += 1
                     record_lifecycle_action(
                         action="compress",
