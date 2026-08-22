@@ -3,12 +3,38 @@
 from __future__ import annotations
 
 import json
+import math
 import re
+import sys
 import time
 from pathlib import Path
 
+from menhir.services.context_builder import estimate_tokens
+
 MAX_SUMMARY = 120
 MAX_CONTEXT_CHARS = 8000
+
+#: Default for `--max-tokens`, owned here rather than at the CLI flag so the knob and the budget
+#: it feeds cannot drift apart.
+DEFAULT_HOOK_TOKEN_BUDGET = 1500
+
+#: Share of the budget reserved for the Context section (CF-44).
+#:
+#: `--max-tokens` used to reach only `build_context`, so Reminders, TODOs and Pinned were assembled
+#: outside any budget -- and the reminder query carried no `limit` at all, so a graph with many open
+#: reminders injected an unbounded block into every Nth turn. The budget now governs the whole
+#: block, with a floor under Context so the section the hook exists for cannot be starved by the
+#: lists above it. The reservation mirrors `context_builder`, which already reserves for its own
+#: TODO section rather than letting one part consume the total.
+CONTEXT_RESERVE_FRACTION = 0.6
+
+#: Process-wide, exactly as `context_builder` caches it: tiktoken availability cannot change
+#: mid-process, and calling the estimator per line to learn the mode would be pure overhead.
+_, _ESTIMATION_MODE = estimate_tokens("probe")
+
+#: How many reminder rows the hook asks for. Sibling sections already bound themselves -- flagged
+#: at 10, TODOs at 5 -- and this one did not.
+REMINDER_LIMIT = 10
 #: Recalled memory is data, not instruction. It is written by anyone with graph write access and
 #: rendered straight into an operator agent's turn, so it is fenced and labelled rather than
 #: appended raw (CF-39). The fence matters more than the cap: a bounded block of attacker-authored
@@ -34,12 +60,32 @@ def should_run_this_turn(
     if frequency <= 0:
         return True
 
+    # FAIL CLOSED, and the distinction below is the whole fix (CF-44).
+    #
+    # An unreadable counter used to reset `data = {}`, which yields count 0, and the gate is
+    # `count % frequency == 0` -- so 0 % N == 0 is True and a corrupt file made recall fire EVERY
+    # turn instead of every Nth. The gate degraded in the expensive direction. A missing file is
+    # NOT that case: it is the ordinary first run, and must still return True or a fresh install
+    # never recalls at all.
     data: dict[str, dict] = {}
     if counter_path.exists():
         try:
-            data = json.loads(counter_path.read_text())
-        except Exception:
-            data = {}
+            loaded = json.loads(counter_path.read_text())
+        except Exception as exc:
+            print(
+                f"menhir hook: turn counter unreadable, skipping recall this turn "
+                f"({type(exc).__name__}: {counter_path})",
+                file=sys.stderr,
+            )
+            return False
+        if not isinstance(loaded, dict):
+            print(
+                f"menhir hook: turn counter is not an object, skipping recall this turn "
+                f"({counter_path})",
+                file=sys.stderr,
+            )
+            return False
+        data = loaded
 
     raw_entry = data.get(session_id, {"count": 0, "ts": time.time()})
     # Migration: old format stored bare ints, new format uses {count, ts} dicts
@@ -57,11 +103,19 @@ def should_run_this_turn(
         if isinstance(v, dict) and now - v.get("ts", 0) < PRUNE_AGE_S
     }
 
+    # An unpersisted increment is the same defect wearing a different hat: the next turn reads the
+    # same count, so an unwritable counter pins the gate open forever. The warning is what makes
+    # failing closed safe -- silently skipping every turn would disable recall with no signal.
     try:
         counter_path.parent.mkdir(parents=True, exist_ok=True)
         counter_path.write_text(json.dumps(data))
-    except Exception:
-        pass
+    except Exception as exc:
+        print(
+            f"menhir hook: turn counter unwritable, skipping recall this turn "
+            f"({type(exc).__name__}: {counter_path})",
+            file=sys.stderr,
+        )
+        return False
 
     return count % frequency == 0
 
@@ -246,6 +300,28 @@ def _escape_inline(value: str) -> str:
     return json.dumps(flattened)
 
 
+def _trim_to_tokens(text: str, budget: int) -> tuple[str, bool]:
+    """Shrink `text` until it fits `budget` tokens. Returns (text, truncated).
+
+    The estimator is not linear in characters -- tiktoken merges differ by content -- so a
+    proportional cut is a first guess that has to be checked, not trusted.
+    """
+    if budget <= 0:
+        return "", bool(text)
+    tokens, _ = estimate_tokens(text)
+    if tokens <= budget:
+        return text, False
+    cut = max(1, int(len(text) * budget / tokens))
+    for _ in range(8):
+        candidate = text[:cut]
+        if estimate_tokens(candidate)[0] <= budget:
+            return candidate.rstrip(), True
+        cut = int(cut * 0.85)
+        if cut < 1:
+            break
+    return "", True
+
+
 def format_hook_output(
     flagged: list[dict],
     context_text: str | None = None,
@@ -254,48 +330,101 @@ def format_hook_output(
     temporal_line: str | None = None,
     todos: list[dict] | None = None,
     temporal_memories: list[dict] | None = None,
+    max_tokens: int = DEFAULT_HOOK_TOKEN_BUDGET,
 ) -> str:
-    """Build the recalled-memories block for hook injection."""
+    """Build the recalled-memories block for hook injection, bounded by `max_tokens`.
+
+    EVERYTHING GRAPH-DERIVED IS BUDGETED. `temporal_line` and `write_nudge` are not: both are
+    generated locally from the clock and the current prompt, are a single line each, and carry no
+    stored text, so no amount of graph content can inflate them. That is the bound this function
+    actually offers, stated rather than implied.
+    """
     sections: list[str] = []
+
+    # Mirror context_builder: the heuristic estimator under-counts real tokens, so it spends half
+    # the nominal budget rather than pretending its count is exact.
+    effective_budget = max(
+        0,
+        max_tokens if _ESTIMATION_MODE == "tokenizer" else math.floor(max_tokens * 0.5),
+    )
+    context_floor = math.floor(effective_budget * CONTEXT_RESERVE_FRACTION)
+    list_allowance = effective_budget - context_floor
 
     # Temporal context (client-id-specific current time + elapsed)
     if temporal_line:
         sections.append(temporal_line)
 
-    # Reminders section — TEMPORAL nodes within ±30-day window (before TODOs)
-    if temporal_memories:
-        sections.append(f"### Reminders ({len(temporal_memories)})")
-        for mem in temporal_memories:
-            target_date = mem.get("target_date") or ""
-            content = mem.get("content") or mem.get("name") or ""
-            snippet = (content[:80] + "...") if len(content) > 80 else content
-            sections.append(f"- {target_date} — {snippet}")
+    # The three graph-derived list sections, built in display order.
+    reminder_lines: list[str] = []
+    for mem in temporal_memories or []:
+        target_date = mem.get("target_date") or ""
+        content = mem.get("content") or mem.get("name") or ""
+        snippet = (content[:80] + "...") if len(content) > 80 else content
+        reminder_lines.append(f"- {target_date} — {snippet}")
 
-    # TODOs section (after Reminders, before Pinned)
-    if todos:
-        sections.append(f"### TODOs ({len(todos)} open)")
-        for todo in todos:
-            tag = (todo.get("priority") or "normal").upper()
-            ref = todo.get("code_ref") or ""
-            content = todo.get("content") or ""
-            snippet = (content[:80] + "...") if len(content) > 80 else content
-            ref_part = f" {ref} —" if ref else " —"
-            sections.append(f"- [{tag}]{ref_part} {snippet}")
+    todo_lines: list[str] = []
+    for todo in todos or []:
+        tag = (todo.get("priority") or "normal").upper()
+        ref = todo.get("code_ref") or ""
+        content = todo.get("content") or ""
+        snippet = (content[:80] + "...") if len(content) > 80 else content
+        ref_part = f" {ref} —" if ref else " —"
+        todo_lines.append(f"- [{tag}]{ref_part} {snippet}")
 
-    # Pinned section
     pinned_lines = [_format_item(item) for item in flagged]
     pinned_lines = [line for line in pinned_lines if line]
-    if pinned_lines:
-        sections.append(f"### Pinned ({len(pinned_lines)})")
-        sections.extend(pinned_lines)
+
+    list_sections = [
+        (f"### Reminders ({len(reminder_lines)})", reminder_lines),
+        (f"### TODOs ({len(todo_lines)} open)", todo_lines),
+        (f"### Pinned ({len(pinned_lines)})", pinned_lines),
+    ]
+    list_sections = [(header, items) for header, items in list_sections if items]
+
+    # Each section may spend any surplus the earlier ones left, but never the share still owed to
+    # the later ones. That reservation is what stops a long Reminders list from crowding out
+    # Pinned -- which is user-flagged, and the least droppable thing in the block.
+    per_section = list_allowance // 3
+    remaining = list_allowance
+    for index, (header, items) in enumerate(list_sections):
+        owed_to_later = per_section * (len(list_sections) - index - 1)
+        cap = max(0, remaining - owed_to_later)
+        emitted = [header]
+        used, _ = estimate_tokens(header)
+        omitted = 0
+        for position, item in enumerate(items):
+            cost, _ = estimate_tokens(item)
+            if used + cost > cap:
+                omitted = len(items) - position
+                break
+            emitted.append(item)
+            used += cost
+        if omitted:
+            marker = f"- ...[{omitted} more omitted for budget]"
+            emitted.append(marker)
+            marker_cost, _ = estimate_tokens(marker)
+            used += marker_cost
+        sections.extend(emitted)
+        remaining = max(0, remaining - used)
 
     # Context section (pre-formatted by ContextBuilderService)
     if context_text and context_text.strip():
         body = context_text.strip()
         # A fence the content can close is not a fence.
         body = body.replace("```", "'''")
+        truncated = False
         if len(body) > MAX_CONTEXT_CHARS:
-            body = body[:MAX_CONTEXT_CHARS].rstrip() + "\n...[context truncated]"
+            body = body[:MAX_CONTEXT_CHARS].rstrip()
+            truncated = True
+        # Context takes the whole surplus the list sections left. The floor has TWO independent
+        # guarantees and removing either alone leaves it standing: the allowance the lists draw
+        # from is `effective_budget - context_floor`, and the max() below re-imposes the floor on
+        # the result. Verified by mutation -- neither single removal fails a test, and the compound
+        # removal does.
+        context_budget = max(context_floor, effective_budget - (list_allowance - remaining))
+        body, budget_truncated = _trim_to_tokens(body, context_budget)
+        if truncated or budget_truncated:
+            body = body + "\n...[context truncated]"
         header = f"### Context (query={_escape_inline(query)})" if query else "### Context"
         sections.append(header)
         sections.append(_CONTEXT_NOTICE)

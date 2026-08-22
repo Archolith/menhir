@@ -187,7 +187,8 @@ class TemporalRepository:
     # ------------------------------------------------------------------
 
     def list_in_window(
-        self, *, window_days: int = 30, namespace: str | None = None
+        self, *, window_days: int = 30, namespace: str | None = None,
+        limit: int | None = None,
     ) -> list[dict[str, Any]]:
         """Return open TEMPORAL nodes whose target_date is within ±window_days of today.
 
@@ -197,6 +198,13 @@ class TemporalRepository:
         idiom the memory queries use.
         """
         safe_window = max(1, min(window_days, 365))
+        # CF-44: unbounded before. Every returned row becomes a line in the hook block, so the
+        # bound belongs in the query -- trimming in the formatter still pays for transporting
+        # and parsing rows nobody will read. `None` keeps the unbounded form for callers that
+        # genuinely want the whole window (the reminder tooling), so this narrows the hook, not
+        # everything that lists reminders.
+        safe_limit = None if limit is None else max(1, min(int(limit), 500))
+        bound = "" if safe_limit is None else "\n            LIMIT $limit"
         scope = (
             ""
             if namespace is None
@@ -216,7 +224,7 @@ class TemporalRepository:
                 n.content     AS content,
                 n.target_date AS target_date,
                 n.status      AS status
-            ORDER BY n.target_date ASC
+            ORDER BY n.target_date ASC{bound}
             """,
-            {"window": safe_window, "namespace": namespace},
+            {"window": safe_window, "namespace": namespace, "limit": safe_limit},
         )

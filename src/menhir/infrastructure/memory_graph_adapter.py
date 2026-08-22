@@ -1723,9 +1723,12 @@ class MemoryGraphAdapter:
         )
 
     def list_temporal_in_window(
-        self, *, window_days: int = 30, namespace: str | None = None
+        self, *, window_days: int = 30, namespace: str | None = None,
+        limit: int | None = None,
     ) -> list[dict[str, Any]]:
-        return self._temporal.list_in_window(window_days=window_days, namespace=namespace)
+        return self._temporal.list_in_window(
+            window_days=window_days, namespace=namespace, limit=limit
+        )
 
     def complete_temporal(self, uuid: str) -> bool:
         return self._temporal.complete_temporal(uuid)

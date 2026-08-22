@@ -296,9 +296,16 @@ def test_turn_counter_prunes_stale_sessions(tmp_path: Path) -> None:
 
 @pytest.mark.unit
 def test_turn_counter_handles_corrupted_file(tmp_path: Path) -> None:
+    """CF-44, DELIBERATE BEHAVIOUR CHANGE: a corrupt counter now SKIPS the turn.
+
+    This assertion used to be `is True`, and it was pinning the defect. An unreadable file reset
+    the counter to `{}`, which gives count 0, and the gate is `count % frequency == 0` -- so
+    `0 % 5 == 0` fired recall on EVERY turn instead of every fifth. The gate degraded in the
+    expensive direction, which is exactly what the finding is about.
+    """
     counter = tmp_path / "counter.json"
     counter.write_text("not valid json!!!")
-    assert should_run_this_turn("sess1", 5, counter) is True
+    assert should_run_this_turn("sess1", 5, counter) is False
 
 
 @pytest.mark.unit

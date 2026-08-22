@@ -13,6 +13,8 @@ from typing import Annotated
 import typer
 
 from menhir.cli.output import (
+    DEFAULT_HOOK_TOKEN_BUDGET,
+    REMINDER_LIMIT,
     detect_write_signals,
     format_hook_output,
     format_save_checkpoint,
@@ -57,7 +59,10 @@ def _entry_has_menhir_hook(entry: object) -> bool:
 @hook_app.command()
 def run(
     query: Annotated[str, typer.Option(help="Override recall query.")] = "",
-    max_tokens: Annotated[int, typer.Option(help="Token budget for context recall.")] = 1500,
+    max_tokens: Annotated[
+        int,
+        typer.Option(help="Token budget for the whole injected block, context recall included."),
+    ] = DEFAULT_HOOK_TOKEN_BUDGET,
     frequency: Annotated[int, typer.Option(help="Run every N turns (0 = every turn).")] = 5,
     event: Annotated[str, typer.Option(help="Hook event type: 'prompt' (UserPromptSubmit) or 'stop' (Stop).")] = "prompt",
     workspace: Annotated[str, typer.Option(help="Explicit workspace key for scoped bootstrap recall.")] = "",
@@ -168,7 +173,7 @@ def _run_prompt_impl(
     temporal_memories: list[dict] = []
     try:
         temporal_memories = svc.graph_adapter.list_temporal_in_window(
-            window_days=30, namespace=workspace
+            window_days=30, namespace=workspace, limit=REMINDER_LIMIT
         )
     except Exception as exc:
         print(f"menhir hook: temporal recall failed ({type(exc).__name__})", file=sys.stderr)
@@ -203,7 +208,10 @@ def _run_prompt_impl(
                 file=sys.stderr,
             )
 
-    output = format_hook_output(flagged, context_text, effective_query, write_nudge, temporal_line, todos=todos, temporal_memories=temporal_memories)
+    output = format_hook_output(
+        flagged, context_text, effective_query, write_nudge, temporal_line,
+        todos=todos, temporal_memories=temporal_memories, max_tokens=max_tokens,
+    )
     print(wrap_hook_response(output or None), flush=True)
 
 
@@ -256,7 +264,7 @@ def _run_postcompact_impl(*, max_tokens: int, workspace: str | None = None) -> N
     temporal_memories: list[dict] = []
     try:
         temporal_memories = svc.graph_adapter.list_temporal_in_window(
-            window_days=30, namespace=workspace
+            window_days=30, namespace=workspace, limit=REMINDER_LIMIT
         )
     except Exception as exc:
         print(f"menhir hook: temporal recall failed ({type(exc).__name__})", file=sys.stderr)
@@ -290,7 +298,10 @@ def _run_postcompact_impl(*, max_tokens: int, workspace: str | None = None) -> N
                 file=sys.stderr,
             )
 
-    output = format_hook_output(flagged, context_text, effective_query, None, temporal_line, todos=todos, temporal_memories=temporal_memories)
+    output = format_hook_output(
+        flagged, context_text, effective_query, None, temporal_line,
+        todos=todos, temporal_memories=temporal_memories, max_tokens=max_tokens,
+    )
     print(wrap_hook_response(output or None), flush=True)
 
 
