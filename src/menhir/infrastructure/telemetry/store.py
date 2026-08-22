@@ -360,9 +360,12 @@ class McpTelemetryStore(
                     ON recall_receipts (operation, created_at)
                     """
                 )
-                # Durable Recall Lab experiments. The stored result is the same
-                # privacy-filtered payload shown to the operator; raw judge-only
-                # memory text is never persisted here.
+                # Durable Recall Lab experiments. CF-179: `query`, `request_json` and
+                # `result_json` hold RAW user text at rest -- redaction is display-time and
+                # `privacy_redact` defaults False. Intended (a redacted lab run records nothing),
+                # so erasability is the control: both lab tables are namespace-keyed in
+                # `erasure_inventory` and reached by `erasure_purge`. Proven by executing the
+                # purge in `tests/test_cf179_lab_table_erasure.py`.
                 conn.execute(
                     """
                     CREATE TABLE IF NOT EXISTS recall_lab_runs (
