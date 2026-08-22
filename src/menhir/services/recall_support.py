@@ -314,12 +314,15 @@ class RecallSupportMixin:
             for uuid in row.get("linked_entity_uuids", []) or []
             if uuid
         ]
+        # CF-75: one round trip for every resolved episode, not one per episode. The re-ordering
+        # below is not decorative -- `dict.fromkeys` downstream dedupes by FIRST occurrence, so the
+        # entity order has to stay the serial loop's order or recall's candidate order shifts.
+        linked_by_episode = await asyncio.to_thread(
+            self.graph_adapter.fetch_linked_entity_uuids_for_episodes, resolved_episode_uuids,
+        )
         resolved_linked_entity_uuids: list[str] = []
         for episode_uuid in resolved_episode_uuids:
-            uuids = await asyncio.to_thread(
-                self.graph_adapter.fetch_linked_entity_uuids_for_episode, episode_uuid,
-            )
-            resolved_linked_entity_uuids.extend(uuids)
+            resolved_linked_entity_uuids.extend(linked_by_episode.get(episode_uuid, []))
         entity_uuids = list(dict.fromkeys(inline_linked_entity_uuids + resolved_linked_entity_uuids))
         return visible_pending_rows, entity_uuids
 
@@ -402,14 +405,24 @@ class RecallSupportMixin:
         result_uuids = [r.uuid for r in top_results if r.memory_type != "EPISODIC_PENDING"]
         nodes_touched = await asyncio.to_thread(self.graph_adapter.touch_retrieved_nodes, result_uuids)
 
+        # CF-75: one ratchet query for every traversed edge, not one per edge. Each call was an
+        # all-relationship scan, so the serial loop cost N scans of the whole relationship store --
+        # 3,150,400 dbHits for 50 edges on a 21k-edge graph, growing with the graph as well as the
+        # result set. Dedupe stays here (it decides which edges are traversed at all); the ratchet
+        # itself is one round trip.
         result_uuid_set = set(result_uuids)
+        traversed_edge_uuids: list[str] = []
         seen_edges: set[str] = set()
         for (a, b), edge_uuids in edge_index.items():
             if a in result_uuid_set and b in result_uuid_set:
                 for edge_uuid in edge_uuids:
                     if edge_uuid not in seen_edges:
-                        await asyncio.to_thread(self.graph_adapter.increment_edge_weight, edge_uuid)
+                        traversed_edge_uuids.append(edge_uuid)
                         seen_edges.add(edge_uuid)
+        if traversed_edge_uuids:
+            await asyncio.to_thread(
+                self.graph_adapter.increment_edge_weights, traversed_edge_uuids,
+            )
 
         if self.lifecycle_service is not None:
             for result in top_results:

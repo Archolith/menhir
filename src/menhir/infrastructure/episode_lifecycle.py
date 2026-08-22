@@ -818,6 +818,38 @@ class EpisodeLifecycleRepository:
         rows = self.neo4j.execute(query, params={"episode_uuid": episode_uuid})
         return [str(row["uuid"]) for row in rows if row.get("uuid")]
 
+    def fetch_linked_entity_uuids_for_episodes(
+        self, episode_uuids: list[str]
+    ) -> dict[str, list[str]]:
+        """Same as the singular form, for many episodes in ONE round trip.
+
+        CF-75: the recall path ran the singular query once per resolved episode, serially, each
+        awaiting a full round trip before starting the next. The saving here is round trips, NOT
+        database work -- measured against Neo4j 5, the batched form costs slightly MORE dbHits
+        (1,150 vs 900 for 50 episodes) because of the UNWIND and the aggregation. That is the
+        opposite of the edge-weight loop, where batching removes N whole-store scans, and the
+        difference is why the two were measured separately rather than assumed to share a profile.
+
+        Returns a uuid -> linked-entity-uuids map. The caller re-orders by its own input list, so
+        this deliberately does not promise UNWIND's row order survives the aggregation.
+        """
+        if not episode_uuids:
+            return {}
+        rows = self.neo4j.execute(
+            """
+            UNWIND $episode_uuids AS episode_uuid
+            MATCH (e:Episodic)-[]-(n:Entity)
+            WHERE e.uuid = episode_uuid
+            RETURN episode_uuid AS episode_uuid, collect(DISTINCT n.uuid) AS uuids
+            """,
+            params={"episode_uuids": list(dict.fromkeys(episode_uuids))},
+        )
+        return {
+            str(row["episode_uuid"]): [str(u) for u in (row.get("uuids") or []) if u]
+            for row in rows
+            if row.get("episode_uuid")
+        }
+
     def ensure_self_entity(self, namespace: str) -> str:
         """Idempotently MERGE the ONE canonical self :Entity for `namespace` and return its uuid.
 

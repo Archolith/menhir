@@ -546,6 +546,11 @@ class MemoryGraphAdapter:
     def fetch_linked_entity_uuids_for_episode(self, episode_uuid: str) -> list[str]:
         return self._episodes.fetch_linked_entity_uuids_for_episode(episode_uuid)
 
+    def fetch_linked_entity_uuids_for_episodes(
+        self, episode_uuids: list[str]
+    ) -> dict[str, list[str]]:
+        return self._episodes.fetch_linked_entity_uuids_for_episodes(episode_uuids)
+
     def fetch_linked_entities_for_episode(self, episode_uuid: str) -> list[dict[str, str]]:
         """Surviving entities linked to an episode as {uuid, name} rows — the post-finalization
         binding candidates for ScalarStateView typed-scalar perception (C.4.3)."""
@@ -1066,6 +1071,9 @@ class MemoryGraphAdapter:
 
     def increment_edge_weight(self, edge_uuid: str) -> bool:
         return self._consolidation.increment_edge_weight(edge_uuid)
+
+    def increment_edge_weights(self, edge_uuids: list[str]) -> int:
+        return self._consolidation.increment_edge_weights(edge_uuids)
 
     def update_edge_facts(self, updates: list[dict[str, str]]) -> int:
         return self._consolidation.update_edge_facts(updates)

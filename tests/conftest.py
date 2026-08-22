@@ -414,6 +414,13 @@ class StubMemoryGraphAdapter:
         self.weighted_edges.append(edge_uuid)
         return True
 
+    def increment_edge_weights(self, edge_uuids: list[str]) -> int:
+        # CF-75 batched the recall path onto this. Recorded into the same `weighted_edges` list
+        # the singular form uses, so the existing assertions keep testing what they always did:
+        # which edges got reinforced, not how many round trips it took.
+        self.weighted_edges.extend(edge_uuids)
+        return len(edge_uuids)
+
     def update_edge_facts(self, updates: list[dict[str, str]]) -> int:
         self.edge_fact_updates = updates
         return len(updates)
@@ -1072,6 +1079,15 @@ class StubMemoryGraphAdapter:
         row = self.pending_episode_rows.get(episode_uuid, {})
         linked = row.get("linked_entity_uuids", [])
         return list(linked)
+
+    def fetch_linked_entity_uuids_for_episodes(
+        self, episode_uuids: list[str]
+    ) -> dict[str, list[str]]:
+        # CF-75's batched form. Defined in terms of the singular stub so the two cannot drift.
+        return {
+            episode_uuid: self.fetch_linked_entity_uuids_for_episode(episode_uuid)
+            for episode_uuid in episode_uuids
+        }
 
     # --- Consolidation stubs ---
     session_entities: list[dict[str, object]] = field(default_factory=list)

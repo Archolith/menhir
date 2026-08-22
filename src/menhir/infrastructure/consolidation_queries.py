@@ -70,12 +70,29 @@ class ConsolidationRepository:
         )
         return int(rows[0].get("synced", 0)) if rows else 0
 
+    #: DIRECTED on purpose, and it is a bug fix rather than a style choice.
+    #:
+    #: This match was `()-[r]-()`, which yields every relationship TWICE -- once per direction --
+    #: so the SET ran twice and each call raised the weight by 0.2 against a documented "+0.1 per
+    #: traversal", reaching the 5.0 cap in half the traversals the ratchet was designed for.
+    #: Confirmed by execution against Neo4j 5, not by reading: weight 1.0 -> 1.2 and
+    #: `count(r)` -> 2. `test_edge_weight_cap_contract` could not catch it because it greps this
+    #: source for the string "0.1" rather than running the query. `()-[r]->()` matches each
+    #: relationship exactly once regardless of type, so it fixes the rate and halves the scan
+    #: without narrowing what can be reinforced.
+    #:
+    #: STILL UNTYPED, deliberately. A typed pattern would let the per-type `uuid` relationship
+    #: indexes turn this from an all-relationship scan into an index seek (42,100 -> 351 dbHits at
+    #: N=50 on a 21k-edge graph), but `edge_index` is populated by `fetch_adjacency_pairs`, which
+    #: is also untyped -- so naming a type list here and not there would silently stop reinforcing
+    #: every edge outside the list. See CF-247: the graph has 35+ relationship types, and deciding
+    #: which of them earn traversal reinforcement is a contract question, not an optimization.
     def increment_edge_weight(self, edge_uuid: str) -> bool:
         """Increment traversal weight for an edge while capping at the v1 max."""
 
         rows = self.neo4j.execute(
             """
-            MATCH ()-[r]-()
+            MATCH ()-[r]->()
             WHERE r.uuid = $edge_uuid
             SET r.weight = CASE
                     WHEN coalesce(toFloat(r.weight), 1.0) < 5.0
@@ -88,6 +105,33 @@ class ConsolidationRepository:
             params={"edge_uuid": edge_uuid},
         )
         return bool(rows and int(rows[0].get("edges_updated", 0)) > 0)
+
+    def increment_edge_weights(self, edge_uuids: list[str]) -> int:
+        """Ratchet many edges in ONE round trip. Returns the number of edges updated.
+
+        CF-75's recall path called `increment_edge_weight` once per traversed edge, serially, and
+        each of those calls is an all-relationship scan. The cost was therefore N scans of the
+        whole relationship store: 3,150,400 dbHits for 50 edges on a 21k-edge graph, growing with
+        BOTH the result size and the graph. One `IN` collapses that to a single scan (42,100),
+        because the scan is per-query, not per-uuid.
+        """
+        if not edge_uuids:
+            return 0
+        rows = self.neo4j.execute(
+            """
+            MATCH ()-[r]->()
+            WHERE r.uuid IN $edge_uuids
+            SET r.weight = CASE
+                    WHEN coalesce(toFloat(r.weight), 1.0) < 5.0
+                    THEN coalesce(toFloat(r.weight), 1.0) + 0.1
+                    ELSE 5.0
+                END,
+                r.last_traversed = datetime()
+            RETURN count(r) AS edges_updated
+            """,
+            params={"edge_uuids": list(dict.fromkeys(edge_uuids))},
+        )
+        return int(rows[0].get("edges_updated", 0)) if rows else 0
 
     def update_edge_facts(self, updates: list[dict[str, str]]) -> int:
         """Bulk-update edge facts and provenance. Returns count updated."""
