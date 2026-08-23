@@ -14,6 +14,7 @@ from typing import Any
 from menhir.domain.bootstrap_scope import bootstrap_selection, normalize_bootstrap_scope
 from menhir.domain.namespace import namespace_spellings, namespace_to_group_ids
 from menhir.domain.structural_memory import non_structural_memory_cypher
+from menhir.domain.recall import adjacency_edge_pattern
 from menhir.infrastructure.cypher import (
     Cypher,
     ENTITY_METADATA_FIELDS,
@@ -528,8 +529,13 @@ class MemoryQueryRepository:
         all_uuids = list(dict.fromkeys(candidate_uuids + (context_uuids or [])))
         if len(all_uuids) < 2:
             return []
-        query = """
-            MATCH (a)-[r]-(b)
+        # CF-247: TYPED, from the domain's `ADJACENCY_EDGE_TYPES`. This was `-[r]-`, which made the
+        # contract "every relationship type in the graph establishes adjacency" -- not a decision
+        # anyone recorded, just what an untyped pattern gives you. The consumer
+        # (`increment_edge_weights`) emits the SAME list: narrowing one alone would let recall rank
+        # on an edge it then declines to reinforce.
+        query = f"""
+            MATCH (a)-[r:{adjacency_edge_pattern()}]-(b)
             WHERE a.uuid IN $all_uuids AND b.uuid IN $all_uuids
               AND a.uuid <> b.uuid
         """

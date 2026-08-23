@@ -46,6 +46,47 @@ def parse_query_preset(value: str) -> QueryPreset:
 # delta is non-zero only for CONFLICT preset — it surfaces nodes that are
 # actively involved in an unresolved conflict when the caller wants to review them.
 # EMOTIONAL preset retains delta=0.0; emotional arousal signals are deferred post-v1.
+#: The relationship types that establish RECALL ADJACENCY (CF-247, owner ruling 2026-08-23).
+#:
+#: Before this existed, both the adjacency producer and the reinforcement consumer matched
+#: relationships UNTYPED -- `MATCH (a)-[r]-(b)` and `MATCH ()-[r]->()`. The effective contract was
+#: "every relationship type in the graph establishes adjacency", which nobody decided; it is simply
+#: what an untyped pattern gives you. 30+ types are created across the codebase.
+#:
+#: **Only four of those could ever reach adjacency**, because both endpoints must be recall
+#: candidates -- non-structural `:Entity`/`:Episodic` -- and `context_node_ids` is never populated
+#: by any caller. `ANCHORED_TO` targets a structural entity the recall filter excludes; the view
+#: plumbing (`CURRENT_ANCHOR`, `CONTRIBUTED_TO`, `SUPERSEDED_ANCHOR`, `HISTORY_ENTRY`) targets
+#: `:TypedAssertion`; `ADMITTED_ON` targets `:TurnEvidence`; `HAS_MEMBER`/`HAS_EPISODE` target
+#: communities. None of them is recallable, so none of them was ever in play.
+#:
+#: The four that were: `RELATES_TO`, `MENTIONS`, `NEXT_EPISODE`, and `SUPERSEDES`.
+#:
+#: `SUPERSEDES` is the one that was doing damage. `artifact_repository.supersede_artifact` writes
+#: it between two `:Entity` artifacts, so recalling a current artifact gave its SUPERSEDED
+#: predecessor an adjacency boost -- the ranker learning that stale content is strongly associated
+#: with the thing that replaced it. `NEXT_EPISODE` is dropped by the same ruling for a weaker
+#: reason: temporal succession is not semantic relatedness, and two consecutive episodes about
+#: unrelated subjects should not rank each other up.
+ADJACENCY_EDGE_TYPES: tuple[str, ...] = ("RELATES_TO", "MENTIONS")
+
+
+def adjacency_edge_pattern() -> str:
+    """Emit the type disjunction for an adjacency relationship pattern (CF-247).
+
+    Used by BOTH the producer (`fetch_adjacency_pairs`) and the consumer
+    (`increment_edge_weights`). Emitting it from one place is the point of the finding: narrowing
+    the consumer alone would produce a silent producer/consumer disagreement, where recall ranks on
+    an edge it then declines to reinforce.
+
+    The fragment is a constant built from this module's own tuple, never caller input.
+    """
+    # Read through the module global rather than closing over it at import: a test that swaps the
+    # ruling must see the emitter follow, and that indirection is what makes this a single source
+    # of truth rather than two copies that agree today.
+    return "|".join(ADJACENCY_EDGE_TYPES)
+
+
 PRESET_WEIGHTS: dict[QueryPreset, tuple[float, float, float, float]] = {
     QueryPreset.RECENT: (0.1, 0.5, 0.1, 0.0),
     QueryPreset.KNOWLEDGE: (0.2, 0.1, 0.1, 0.0),

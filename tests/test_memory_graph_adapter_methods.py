@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 
 import pytest
 
+from menhir.domain.recall import adjacency_edge_pattern
 from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter, PolicyStampResult
 
 
@@ -280,7 +281,9 @@ def test_fetch_adjacency_pairs_returns_connected_pairs() -> None:
     assert len(result) == 1
     assert result[0]["source"] == "a"
     assert result[0]["weight"] == 1.5
-    assert "MATCH (a)-[r]-(b)" in neo4j.calls[0]["query"]
+    # CF-247 typed this pattern deliberately: it was `-[r]-`, which made every relationship type
+    # in the graph establish adjacency. The types now come from `ADJACENCY_EDGE_TYPES`.
+    assert f"MATCH (a)-[r:{adjacency_edge_pattern()}]-(b)" in neo4j.calls[0]["query"]
 
 
 @pytest.mark.unit

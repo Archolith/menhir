@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from menhir.domain.recall import adjacency_edge_pattern
 from menhir.infrastructure.cypher import Cypher
 from menhir.infrastructure.neo4j import SAGA_MUTATION_TIMEOUT_S, Neo4jRepository
 
@@ -91,8 +92,8 @@ class ConsolidationRepository:
         """Increment traversal weight for an edge while capping at the v1 max."""
 
         rows = self.neo4j.execute(
-            """
-            MATCH ()-[r]->()
+            f"""
+            MATCH ()-[r:{adjacency_edge_pattern()}]->()
             WHERE r.uuid = $edge_uuid
             SET r.weight = CASE
                     WHEN coalesce(toFloat(r.weight), 1.0) < 5.0
@@ -118,8 +119,8 @@ class ConsolidationRepository:
         if not edge_uuids:
             return 0
         rows = self.neo4j.execute(
-            """
-            MATCH ()-[r]->()
+            f"""
+            MATCH ()-[r:{adjacency_edge_pattern()}]->()
             WHERE r.uuid IN $edge_uuids
             SET r.weight = CASE
                     WHEN coalesce(toFloat(r.weight), 1.0) < 5.0
