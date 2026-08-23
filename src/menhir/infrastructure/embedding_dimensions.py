@@ -19,6 +19,40 @@ _KNOWN_EMBEDDING_DIMENSIONS = {
 }
 
 
+#: The relationship types whose ``fact`` is a semantic fact worth embedding (CF-252).
+#:
+#: The two edge sweeps below used to be label-less -- ``MATCH (a)-[r]->(b)`` -- and excluded
+#: structural anchors by testing BOTH endpoints for ``structure_role``. That is a property test,
+#: and a property test is defeated by any row missing the property: production holds 285 code-file
+#: entities with no ``structure_role``, which let 284 ``ANCHORED_TO`` edges be counted as "semantic
+#: facts missing an embedding" -- 61% of the operator-facing total. Their ``fact`` is the synthetic
+#: string ``'Memory linked to code file: <path>'`` written by
+#: ``structural_anchoring.create_anchor_edges``, so the backfill that count exists to trigger would
+#: have embedded file paths into the semantic vector space: the exact pollution the endpoint test
+#: was written to prevent.
+#:
+#: Typing the scans replaces a predicate bad rows can fail with one they cannot. ``RELATES_TO`` is
+#: the only type that can carry ``fact_embedding``, established two ways because a claim about the
+#: writer is not a claim about the rows (ledger T28): graphiti's ``get_entity_edge_save_query`` and
+#: ``get_entity_edge_save_bulk_query`` are the only writers of the property and both MERGE
+#: ``[e:RELATES_TO]`` (``MENTIONS`` carries group_id/created_at only), AND a production census
+#: found 7,959 of 7,959 rows holding a ``fact_embedding`` are ``RELATES_TO``.
+#:
+#: Known residual, deliberate: a stray ``fact_embedding`` on some other type would no longer be
+#: seen by ``mixed`` or ``wrong_edge_count``, so it could not block startup. Nothing writes one.
+#: The repair script's wrong-dimension CLEAR stays label-less so that if one ever exists it is
+#: still removed -- the asymmetry is in the safe direction on the side that writes.
+SEMANTIC_FACT_EDGE_TYPES: tuple[str, ...] = ("RELATES_TO",)
+
+
+def semantic_fact_edge_pattern() -> str:
+    """Cypher relationship-type pattern for the edges that carry an embeddable fact."""
+    # Read through the module global rather than closing over it at import time: a test that swaps
+    # the ruling has to see every emitted query follow it (CF-247's mutation M7 was missed by a
+    # test that asserted the join instead of the effect).
+    return "|".join(SEMANTIC_FACT_EDGE_TYPES)
+
+
 def infer_embedding_dimension_for_model(model_name: str) -> int | None:
     normalized = (model_name or "").strip().lower()
     if not normalized:
@@ -102,8 +136,8 @@ def embedding_dimension_health(
         """
     )
     edge_rows = neo4j.execute(
-        """
-        MATCH ()-[r]->()
+        f"""
+        MATCH ()-[r:{semantic_fact_edge_pattern()}]->()
         WHERE r.fact_embedding IS NOT NULL
         RETURN size(r.fact_embedding) AS dim, count(r) AS count
         ORDER BY count DESC
@@ -125,8 +159,12 @@ def embedding_dimension_health(
     ) or [{}])[0].get("c", 0) or 0)
     # ANCHORED_TO and other edges touching a structural node are structural
     # anchors ("Memory linked to code file: ..."), not semantic facts -- exclude.
+    # The relationship type is the primary exclusion (CF-252); the endpoint test is kept behind
+    # it, because a RELATES_TO that did somehow land on a structural node is still not a fact
+    # anyone wrote. Losing only the endpoint test is what let 284 anchors into this count.
     null_edge_count = int((neo4j.execute(
-        "MATCH (a)-[r]->(b) WHERE r.fact IS NOT NULL AND r.fact_embedding IS NULL "
+        f"MATCH (a)-[r:{semantic_fact_edge_pattern()}]->(b) "
+        "WHERE r.fact IS NOT NULL AND r.fact_embedding IS NULL "
         "AND a.structure_role IS NULL AND b.structure_role IS NULL RETURN count(r) AS c"
     ) or [{}])[0].get("c", 0) or 0)
 

@@ -15,6 +15,7 @@ from menhir.config import MemorySettings
 from menhir.infrastructure.embedding_dimensions import (
     embedding_dimension_health,
     expected_graphiti_embedding_dimension,
+    semantic_fact_edge_pattern,
 )
 from menhir.infrastructure.llama_endpoint import acquire_llama_url_sync, should_use_scheduler
 from menhir.infrastructure.neo4j import Neo4jRepository
@@ -97,10 +98,14 @@ def _snapshot_records(neo4j: Neo4jRepository, *, expected_dim: int, output_dir: 
         """,
         {"expected_dim": expected_dim},
     )
+    # Typed, not label-less (CF-252). This is the query that decides what gets EMBEDDED, so an
+    # anchor edge selected here does not merely inflate a count -- it puts
+    # 'Memory linked to code file: <path>' into the semantic vector space. The endpoint
+    # structure_role test alone did not hold: 285 production code-file entities lack the stamp.
     edge_rows = _query_rows(
         neo4j,
-        """
-        MATCH (a)-[r]->(b)
+        f"""
+        MATCH (a)-[r:{semantic_fact_edge_pattern()}]->(b)
         WHERE r.fact IS NOT NULL AND a.structure_role IS NULL AND b.structure_role IS NULL
           AND (r.fact_embedding IS NULL OR size(r.fact_embedding) <> $expected_dim)
         RETURN elementId(r) AS element_id,
@@ -157,6 +162,9 @@ def _clear_wrong_dimensions(neo4j: Neo4jRepository, *, expected_dim: int) -> dic
         """,
         {"expected_dim": expected_dim},
     )
+    # Deliberately NOT typed, unlike the selection query above: this REMOVES wrong-dimension
+    # vectors, so casting the widest net is the safe direction. If some type outside
+    # SEMANTIC_FACT_EDGE_TYPES ever held a stale vector, it should still be cleared.
     removed_edge_rows = _query_rows(
         neo4j,
         """
