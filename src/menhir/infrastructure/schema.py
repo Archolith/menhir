@@ -468,11 +468,18 @@ def _node_defaults_queries() -> list[str]:
 
 
 def _edge_defaults_queries() -> list[str]:
+    #: DIRECTED, like `increment_edge_weight` and `update_edge_facts` (CF-75, CF-250). A match
+    #: whose endpoints are both anonymous yields every relationship twice -- once per assignment
+    #: of the two free endpoints -- so this backfill visited each edge twice on every startup.
+    #: Every SET here is `coalesce`-idempotent or a constant, so the second visit never wrote a
+    #: different value and no data was wrong; the cost was. Five edge labels, five full scans,
+    #: each doing double the traversals, at every startup -- and the `_menhir_schema_v` filter
+    #: does not avoid the scan, it is evaluated per row against an unindexed property.
     queries: list[str] = []
     for edge_label in EDGE_LABELS:
         queries.append(
             f"""
-            MATCH ()-[r:{edge_label}]-()
+            MATCH ()-[r:{edge_label}]->()
             WHERE r._menhir_schema_v IS NULL OR r._menhir_schema_v < {_SCHEMA_V}
             SET r.weight = coalesce(toFloat(r.weight), 1.0),
                 r.created_at = coalesce(r.created_at, datetime()),

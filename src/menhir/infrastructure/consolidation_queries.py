@@ -134,13 +134,26 @@ class ConsolidationRepository:
         return int(rows[0].get("edges_updated", 0)) if rows else 0
 
     def update_edge_facts(self, updates: list[dict[str, str]]) -> int:
-        """Bulk-update edge facts and provenance. Returns count updated."""
+        """Bulk-update edge facts and provenance. Returns count updated.
+
+        DIRECTED, for the same reason `increment_edge_weight` above is (CF-75). An anonymous
+        undirected match yields every relationship twice -- once per assignment of its two free
+        endpoints -- so this returned exactly double the number of edges it had updated. The `SET`
+        is idempotent, so no fact was ever corrupted by the second visit; the count was wrong and
+        the scan did twice the work it needed to. Confirmed by execution, 2 reported against 1
+        real edge, not by reading. CF-250.
+
+        This is the instance the CF-75 fix missed: the hazard was written up 70 lines above, in
+        this same file, while its sibling kept the defect. Anchored patterns like `(n)-[r]-(peer)`
+        do NOT have this problem -- one endpoint is bound, so each incident relationship is
+        yielded once -- which is why every other undirected match in the codebase is fine.
+        """
         if not updates:
             return 0
         rows = self.neo4j.execute(
             """
             UNWIND $updates AS update
-            MATCH ()-[r]-()
+            MATCH ()-[r]->()
             WHERE r.uuid = update.uuid
             SET r.fact = update.fact, r.fact_source = update.fact_source
             RETURN count(r) AS updated
