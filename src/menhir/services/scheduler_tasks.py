@@ -19,7 +19,11 @@ from menhir.domain.utils import source_confidence_for
 from menhir.infrastructure import consolidation_audit as _audit
 from menhir.infrastructure.episode_repository import is_recoverable_context_window_error
 from menhir.infrastructure.telemetry import record_failure_event
-from menhir.services.enrichment_failures import classify_enrichment_failure, is_budget_refusal
+from menhir.services.enrichment_failures import (
+    classify_enrichment_failure,
+    is_budget_refusal,
+    is_session_window_refusal,
+)
 from menhir.services.enrichment_steps import propagate_user_flag
 from menhir.services.event_consolidation import (
     EventConsolidationConfig,
@@ -140,7 +144,10 @@ async def observe_queue_health(
         count = int(row.get("count") or 0)
         classification = classify_enrichment_failure(error)
         buckets[classification] = buckets.get(classification, 0) + count
-        if is_budget_refusal(error):
+        if is_budget_refusal(error) and classification in _NEVER_RETRIED_CLASSIFICATIONS:
+            # Only refusals nothing will retry are "parked". A session-window refusal is now
+            # retryable and clears itself, so counting it here would report a backlog that
+            # needs no operator action -- the exact dilution this metric was split out to avoid.
             budget_parked += count
         if classification in _NEVER_RETRIED_CLASSIFICATIONS:
             if worst is None or count > worst[0]:
@@ -291,6 +298,7 @@ async def retry_process_candidate(
     # terminal gate below and earns the extended retry cap. A hosted provider's hard limit is
     # also a context-window error, but re-sending the same payload cannot ever succeed.
     context_window_mismatch = is_recoverable_context_window_error(row.get("processing_error"))
+    session_window_refusal = is_session_window_refusal(row.get("processing_error"))
     error_text = str(row.get("processing_error") or "")
     queue_depth = ingest_service.get_queue_depth()
     context_cap = ingest_service.get_context_window_retry_attempts()
@@ -333,6 +341,12 @@ async def retry_process_candidate(
 
     completed_at = _parse_timestamp(row.get("processing_completed_at"))
     retry_delay_s = compute_failed_retry_delay_s(processing_attempts)
+    if session_window_refusal:
+        # The ordinary backoff starts at 30s. The session window is 900s by default, so without
+        # this floor every attempt would land inside the same exhausted window, fail identically,
+        # and burn the attempt ceiling -- parking the episode exactly as before while spending
+        # calls to get there. Deferring past the window is what makes the retry meaningful.
+        retry_delay_s = max(retry_delay_s, int(ingest_service.get_llm_session_window_seconds()))
     if completed_at is not None and (now - completed_at).total_seconds() < retry_delay_s:
         record_failure_event(
             operation="scheduler_retry_failed_enrichments",

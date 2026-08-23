@@ -163,6 +163,16 @@ class IngestQueueMixin:
 
         return self._context_window_retry_attempts
 
+    def get_llm_session_window_seconds(self) -> int:
+        """Expose the session budget's window length, as a retry-delay floor.
+
+        A session-window refusal clears only when the window rolls, so the scheduler has to
+        defer past it rather than apply the ordinary backoff -- which starts at 30s against a
+        900s window and would burn every attempt inside the same dead window.
+        """
+
+        return self._budget_settings_window_s
+
     async def _ensure_enrichment_worker(self) -> None:
         if not self._enrichment_enabled:
             return

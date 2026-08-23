@@ -30,6 +30,9 @@ class SchedulerIngestService(Protocol):
     def get_context_window_retry_attempts(self) -> int:
         ...
 
+    def get_llm_session_window_seconds(self) -> int:
+        ...
+
 
 class SchedulerGraphAdapter(Protocol):
     def fetch_memory_overview(self) -> dict[str, object]:
