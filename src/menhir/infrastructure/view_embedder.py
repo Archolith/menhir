@@ -129,8 +129,13 @@ def view_embedder_version(settings: MemorySettings) -> str | None:
     different endpoint is a different embedding space. base_url is normalized (whitespace, trailing
     slash, and any userinfo stripped) so two spellings of the same endpoint produce the SAME stamp.
 
-    What this still does NOT catch: a weight swap behind the SAME alias AND the SAME URL remains
-    invisible — this is not a fingerprint of the weights, only of where they are served from.
+    What this still does NOT catch AUTOMATICALLY: a weight swap behind the SAME alias AND the SAME
+    URL — this is not a fingerprint of the weights, only of where they are served from. `MENHIR_EMBED_VERSION`
+    is the operator's lever for that case (CF-195): set it to anything new and the stamp changes, so the
+    next backfill re-embeds. It is APPENDED rather than substituted, so it can only ever split one
+    embedding identity into two -- it can never merge two real endpoints into one, which is what a
+    replacement stamp would allow an operator to do by accident. Blank leaves the stamp byte-identical,
+    so defining the setting is not itself a migration.
 
     Migration cost: this stamp format differs from the previous (model-name-only) one, so every
     existing stamped row now mismatches and the next `backfill_assertion_embeddings` run re-embeds the
@@ -142,7 +147,11 @@ def view_embedder_version(settings: MemorySettings) -> str | None:
         if not provider.supports_graphiti_openai_contract() or not provider.embed_model:
             return None
         base_url = _normalize_embed_stamp_base(provider.base_url)
-        return f"{base_url}|{provider.embed_model}"
+        stamp = f"{base_url}|{provider.embed_model}"
+        override = str(getattr(settings, "embed_version_override", "") or "").strip()
+        if override:
+            stamp = f"{stamp}|{override}"
+        return stamp
     except Exception:
         logger.warning("embed-version resolution failed; write-time observation embedding disabled",
                        exc_info=True)

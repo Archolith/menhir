@@ -83,6 +83,23 @@ class MemorySettings:
     chat_provider: str = "local"
     graphiti_provider: str = "local"
     graphiti_embed_provider: str = ""   # inherits graphiti_provider when blank
+
+    # CF-195: operator-settable component of the embedding-identity stamp.
+    #
+    # `view_embedder_version` stamps `<base_url>|<embed_model>`, which catches a model change and
+    # an endpoint change but CANNOT catch a weight swap behind the same alias at the same URL --
+    # the file changes, the embedding space changes, and nothing in the configuration moves. A
+    # server-side digest would detect it automatically; llama-server exposing one is unverified,
+    # so this is the operator's manual lever for the case they already know about.
+    #
+    # APPENDED to the stamp, never a replacement: an operator who set this to a constant would
+    # otherwise collapse two genuinely different endpoints to one identity, which is a worse
+    # failure than the one being fixed. Blank means "absent" and leaves the stamp byte-identical,
+    # so merely defining the setting does not trigger a corpus-wide re-embed.
+    #
+    # Changing it re-embeds the whole observation corpus on the next backfill. That is the point,
+    # and it is not free -- set it only when the weights really did change.
+    embed_version_override: str = ""
     graphiti_reranker_provider: str = ""  # inherits graphiti_provider when blank
 
     # Graphiti tuning
@@ -603,6 +620,7 @@ class MemorySettings:
             # graphiti_embed_provider / graphiti_reranker_provider inherit this when blank.
             graphiti_provider=_getenv("GRAPHITI_LLM_PROVIDER", "MEMORY_GRAPHITI_PROVIDER", "GRAPHITI_PROVIDER", default=cls.graphiti_provider),
             graphiti_embed_provider=_getenv("GRAPHITI_EMBED_PROVIDER", "MEMORY_GRAPHITI_EMBED_PROVIDER", default=cls.graphiti_embed_provider),
+            embed_version_override=_getenv("MENHIR_EMBED_VERSION", default=cls.embed_version_override),
             graphiti_reranker_provider=_getenv("GRAPHITI_RERANKER_PROVIDER", "MEMORY_GRAPHITI_RERANKER_PROVIDER", default=cls.graphiti_reranker_provider),
             # Graphiti tuning
             graphiti_add_episode_timeout_seconds=_parse_float(
