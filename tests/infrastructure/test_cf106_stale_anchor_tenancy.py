@@ -142,12 +142,24 @@ def test_both_readonly_routes_and_recall_pass_a_namespace() -> None:
     from menhir.services import recall_pipeline
 
     route_src = inspect.getsource(routes)
-    assert route_src.count(
-        "adapter.stale_anchored_memories, project=project"
-    ) == 2, "both /tool-events routes must still call it"
-    assert route_src.count(
-        "namespace=_resolve_namespace(request, None),"
-    ) >= 2, "both routes must resolve and pass a namespace"
+    # Per CALL SITE, not a total count. An earlier version asserted the resolver appeared ">= 2"
+    # times, which stayed true when one of the four sites dropped it -- a mutation walked straight
+    # through. Each tenant-bearing adapter call is checked where it actually is.
+    for method in (
+        "adapter.stale_anchored_memories",
+        "adapter.record_stale_anchor_verification",
+        "adapter.list_stale_anchor_verifications",
+    ):
+        starts = [
+            i for i in range(len(route_src))
+            if route_src.startswith(method, i)
+        ]
+        assert starts, f"{method} is no longer called from routes"
+        for start in starts:
+            window = route_src[start : start + 320]
+            assert "_resolve_namespace(request, None)" in window, (
+                f"{method} at offset {start} does not resolve a namespace"
+            )
 
     recall_src = inspect.getsource(recall_pipeline)
     assert "service.graph_adapter.stale_anchored_memories," in recall_src
@@ -263,3 +275,148 @@ def test_scoping_the_file_side_would_have_matched_nothing(test_neo4j_repo) -> No
         params={"namespace": "tenant-a"},
     )
     assert rows == [], "structure nodes carry no namespace; this is the trap being avoided"
+
+
+# ---------------------------------------------------------------------------
+# The verification receipts -- CF-106's genuine schema half.
+#
+# PRODUCTION CENSUS, read-only, under an explicit operator go-ahead 2026-08-22:
+# the `StaleAnchorVerification` label DOES NOT EXIST on the production graph. Not "zero
+# rows" -- Neo4j reports the label as unknown, which is stronger. So the migration this
+# entry feared was never work, and only the forward path needed fixing.
+#
+# Two DIFFERENT defects live here and are kept apart on purpose: the GET was
+# cross-tenant DISCLOSURE, the POST was cross-tenant INTEGRITY. Their exploit
+# conditions and their fixes differ, so proving one says nothing about the other.
+# ---------------------------------------------------------------------------
+
+
+def _seed_two_tenants(repo: Any) -> None:
+    repo.execute("MATCH (n) DETACH DELETE n")
+    repo.execute(
+        """
+        CREATE (:Entity {uuid:'mem-a', name:'A memory', namespace:'tenant-a'})
+        CREATE (:Entity {uuid:'mem-b', name:'B memory', namespace:'tenant-b'})
+        """
+    )
+
+
+@pytest.mark.online
+def test_a_receipt_is_stamped_with_the_writers_namespace(test_neo4j_repo) -> None:
+    """Stamped at WRITE time, not derived at read time -- so a receipt keeps its owner even after
+    the memory it refers to is deleted."""
+    from menhir.infrastructure.tool_event_repository import ToolEventRepository
+
+    _seed_two_tenants(test_neo4j_repo)
+    repo = ToolEventRepository(test_neo4j_repo)
+
+    repo.record_stale_anchor_verification(
+        memory_uuid="mem-a", namespace="tenant-a", path="src/x.py", outcome="still_valid",
+    )
+
+    rows = test_neo4j_repo.execute(
+        "MATCH (v:StaleAnchorVerification) RETURN v.namespace AS ns, v.memory_uuid AS m"
+    )
+    assert [(r["ns"], r["m"]) for r in rows] == [("tenant-a", "mem-a")]
+
+
+@pytest.mark.online
+def test_a_cross_tenant_write_is_refused(test_neo4j_repo) -> None:
+    """THE INTEGRITY DEFECT. `memory_uuid` is caller-supplied at `agent` tier and had no ownership
+    check, so a caller could attach a receipt -- and free-text notes -- to another tenant's memory.
+    Stamping the namespace alone would have fixed the READ and left this open."""
+    from menhir.infrastructure.tool_event_repository import ToolEventRepository
+
+    _seed_two_tenants(test_neo4j_repo)
+    repo = ToolEventRepository(test_neo4j_repo)
+
+    with pytest.raises(ValueError, match="does not resolve to a memory in this namespace"):
+        repo.record_stale_anchor_verification(
+            memory_uuid="mem-b", namespace="tenant-a", path="src/x.py", outcome="still_valid",
+        )
+
+    assert test_neo4j_repo.execute(
+        "MATCH (v:StaleAnchorVerification) RETURN count(v) AS n"
+    )[0]["n"] == 0, "the refusal must happen BEFORE the CREATE"
+
+
+@pytest.mark.online
+def test_a_write_naming_a_nonexistent_memory_is_refused(test_neo4j_repo) -> None:
+    """A uuid that resolves to nothing is refused too. A verification of an anchor that does not
+    exist is not a receipt -- it is an unbounded write surface keyed on a caller-chosen string."""
+    from menhir.infrastructure.tool_event_repository import ToolEventRepository
+
+    _seed_two_tenants(test_neo4j_repo)
+    repo = ToolEventRepository(test_neo4j_repo)
+
+    with pytest.raises(ValueError, match="does not resolve to a memory in this namespace"):
+        repo.record_stale_anchor_verification(
+            memory_uuid="no-such-memory", namespace="tenant-a", path="src/x.py",
+            outcome="still_valid",
+        )
+
+
+@pytest.mark.online
+def test_the_listing_is_bounded_by_tenant_not_merely_filtered(test_neo4j_repo) -> None:
+    """THE DISCLOSURE DEFECT. Every filter on this listing is optional, so an unfiltered call
+    returned every tenant's receipts -- including operator-written notes -- at `readonly`."""
+    from menhir.infrastructure.tool_event_repository import ToolEventRepository
+
+    _seed_two_tenants(test_neo4j_repo)
+    repo = ToolEventRepository(test_neo4j_repo)
+    repo.record_stale_anchor_verification(
+        memory_uuid="mem-a", namespace="tenant-a", path="src/x.py", outcome="still_valid",
+        notes="TENANT A PRIVATE NOTE",
+    )
+    repo.record_stale_anchor_verification(
+        memory_uuid="mem-b", namespace="tenant-b", path="src/y.py", outcome="outdated",
+        notes="TENANT B PRIVATE NOTE",
+    )
+
+    a_rows = repo.list_stale_anchor_verifications(namespace="tenant-a")
+    assert [r["memory_uuid"] for r in a_rows] == ["mem-a"]
+    assert "TENANT B PRIVATE NOTE" not in str(a_rows)
+
+
+@pytest.mark.online
+def test_a_caller_filter_cannot_widen_past_the_tenant_boundary(test_neo4j_repo) -> None:
+    """THE POINT OF MAKING IT A BOUNDARY. Naming another tenant's `memory_uuid` explicitly must
+    narrow within your own silo, never reach across it -- otherwise the predicate is just another
+    optional filter wearing a stricter name."""
+    from menhir.infrastructure.tool_event_repository import ToolEventRepository
+
+    _seed_two_tenants(test_neo4j_repo)
+    repo = ToolEventRepository(test_neo4j_repo)
+    repo.record_stale_anchor_verification(
+        memory_uuid="mem-b", namespace="tenant-b", path="src/y.py", outcome="outdated",
+        notes="TENANT B PRIVATE NOTE",
+    )
+
+    assert repo.list_stale_anchor_verifications(namespace="tenant-a", memory_uuid="mem-b") == []
+
+
+@pytest.mark.unit
+def test_both_receipt_paths_require_a_namespace() -> None:
+    """REQUIRED, not optional. An optional tenant on these would leave every existing caller
+    unscoped by default, which is the CF-236 reasoning applied to a second surface."""
+    repo, _neo4j = _repo()
+
+    with pytest.raises(ValueError, match="namespace is required"):
+        repo.list_stale_anchor_verifications(namespace="")
+
+    with pytest.raises(ValueError, match="namespace is required"):
+        repo.record_stale_anchor_verification(
+            memory_uuid="m1", namespace="", path="src/x.py", outcome="still_valid",
+        )
+
+
+@pytest.mark.unit
+def test_the_verification_label_is_indexed_on_namespace() -> None:
+    """The label carried no index at all, so every listing was a full label scan before the new
+    predicate could narrow it."""
+    from menhir.infrastructure.schema import get_phase1_bootstrap_queries
+
+    assert any(
+        "StaleAnchorVerification" in q and "n.namespace" in q
+        for q in get_phase1_bootstrap_queries()
+    )

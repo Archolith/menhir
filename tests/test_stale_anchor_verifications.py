@@ -53,9 +53,13 @@ class FakeNeo4j:
         return self.default
 
 
-def _repo(routes=None, default=None):
+def _repo(routes=None, default=None, *, owned=True):
+    """CF-106 added an ownership probe before the CREATE: the caller's namespace must actually own
+    the supplied `memory_uuid`. These tests are about outcome/timestamp validation and listing, so
+    the probe answers "owned" by default; `owned=False` exercises the refusal."""
     from menhir.infrastructure.tool_event_repository import ToolEventRepository
-    return ToolEventRepository(FakeNeo4j(routes=routes, default=default))
+    probe = [("MATCH (m:Entity)", [{"n": 1 if owned else 0}])]
+    return ToolEventRepository(FakeNeo4j(routes=probe + list(routes or []), default=default))
 
 
 class TestRecordVerification:
@@ -69,7 +73,7 @@ class TestRecordVerification:
             }]),
         ])
         result = r.record_stale_anchor_verification(
-            memory_uuid="m1", project="menhir", path="src/foo.py",
+            namespace="tenant-a", memory_uuid="m1", project="menhir", path="src/foo.py",
             outcome="still_valid",
         )
         assert result["accepted"] is True
@@ -79,21 +83,21 @@ class TestRecordVerification:
         r = _repo()
         with pytest.raises(ValueError, match="outcome must be one of"):
             r.record_stale_anchor_verification(
-                memory_uuid="m1", path="src/foo.py", outcome="bogus",
+                namespace="tenant-a", memory_uuid="m1", path="src/foo.py", outcome="bogus",
             )
 
     def test_missing_memory_uuid_rejected(self):
         r = _repo()
         with pytest.raises(ValueError, match="memory_uuid is required"):
             r.record_stale_anchor_verification(
-                memory_uuid="", path="src/foo.py", outcome="still_valid",
+                namespace="tenant-a", memory_uuid="", path="src/foo.py", outcome="still_valid",
             )
 
     def test_missing_path_rejected(self):
         r = _repo()
         with pytest.raises(ValueError, match="path is required"):
             r.record_stale_anchor_verification(
-                memory_uuid="m1", path="", outcome="still_valid",
+                namespace="tenant-a", memory_uuid="m1", path="", outcome="still_valid",
             )
 
     def test_all_valid_outcomes_accepted(self):
@@ -105,7 +109,7 @@ class TestRecordVerification:
                 }]),
             ])
             result = r.record_stale_anchor_verification(
-                memory_uuid="m1", path="src/x.py", outcome=outcome,
+                namespace="tenant-a", memory_uuid="m1", path="src/x.py", outcome=outcome,
             )
             assert result["accepted"] is True
 
@@ -113,7 +117,7 @@ class TestRecordVerification:
         r = _repo()
         with pytest.raises(ValueError, match="verified_at must be a valid"):
             r.record_stale_anchor_verification(
-                memory_uuid="m1", path="src/foo.py",
+                namespace="tenant-a", memory_uuid="m1", path="src/foo.py",
                 outcome="still_valid", verified_at="zzz",
             )
 
@@ -125,7 +129,7 @@ class TestRecordVerification:
             }]),
         ])
         result = r.record_stale_anchor_verification(
-            memory_uuid="m1", path="src/foo.py",
+            namespace="tenant-a", memory_uuid="m1", path="src/foo.py",
             outcome="still_valid", verified_at="2026-07-09T12:00:00Z",
         )
         assert result["accepted"] is True
@@ -134,7 +138,7 @@ class TestRecordVerification:
         r = _repo()
         with pytest.raises(ValueError, match="verified_at must be a valid"):
             r.record_stale_anchor_verification(
-                memory_uuid="m1", path="src/foo.py",
+                namespace="tenant-a", memory_uuid="m1", path="src/foo.py",
                 outcome="still_valid", verified_at="2026-07-09T00:00:00",
             )
 
@@ -149,7 +153,7 @@ class TestListVerifications:
                 "created_at": "t",
             }]),
         ])
-        rows = r.list_stale_anchor_verifications(memory_uuid="m1")
+        rows = r.list_stale_anchor_verifications(namespace="tenant-a", memory_uuid="m1")
         assert len(rows) == 1
         assert rows[0]["memory_uuid"] == "m1"
 
@@ -162,7 +166,7 @@ class TestListVerifications:
                 "created_at": "t",
             }]),
         ])
-        rows = r.list_stale_anchor_verifications(project="p1", path="src/a.py")
+        rows = r.list_stale_anchor_verifications(namespace="tenant-a", project="p1", path="src/a.py")
         assert len(rows) == 1
         assert rows[0]["path"] == "src/a.py"
 
@@ -174,7 +178,7 @@ class TestListVerifications:
             for i in range(10)
         ]
         r = _repo(default=many)
-        rows = r.list_stale_anchor_verifications(limit=3)
+        rows = r.list_stale_anchor_verifications(namespace="tenant-a", limit=3)
         assert len(rows) == 10  # fake returns all; real Neo4j limits
         # (the fake doesn't enforce LIMIT; we test that the param is passed)
         assert rows[0]["uuid"] == "v0"
@@ -182,7 +186,7 @@ class TestListVerifications:
     def test_optional_schema_is_accessed_dynamically(self):
         r = _repo(default=[])
 
-        r.list_stale_anchor_verifications(memory_uuid="m1")
+        r.list_stale_anchor_verifications(namespace="tenant-a", memory_uuid="m1")
 
         query, params = r._neo4j.executed[-1]
         assert "MATCH (v:$($verification_label))" in query

@@ -608,7 +608,8 @@ async def record_stale_anchor_verification(request: Request,
     try:
         result = await asyncio.to_thread(
             adapter.record_stale_anchor_verification,
-            memory_uuid=body.memory_uuid, project=body.project, path=body.path,
+            memory_uuid=body.memory_uuid, namespace=_resolve_namespace(request, None),
+            project=body.project, path=body.path,
             outcome=body.outcome, verified_by=body.verified_by, basis=body.basis,
             current_file_hash=body.current_file_hash, notes=body.notes,
             verified_at=verified_at,
@@ -635,6 +636,7 @@ async def list_stale_anchor_verifications(
         raise HTTPException(status_code=503, detail="stale-anchor verification unavailable")
     rows = await asyncio.to_thread(
         adapter.list_stale_anchor_verifications,
+        namespace=_resolve_namespace(request, None),
         memory_uuid=memory_uuid, project=project, path=path, limit=limit,
     )
     return {"verifications": rows, "count": len(rows)}

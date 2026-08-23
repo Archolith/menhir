@@ -154,6 +154,9 @@ def _node_index_queries() -> list[str]:
         [
             "CREATE INDEX todo_namespace_status_idx IF NOT EXISTS FOR (n:Todo) ON (n.namespace, n.status)",
             "CREATE INDEX todo_uuid_idx IF NOT EXISTS FOR (n:Todo) ON (n.uuid)",
+        # CF-106: the read is now namespace-scoped, and the label carried no index at all,
+        # so every listing was a full label scan before the predicate could narrow it.
+        "CREATE INDEX stale_anchor_verification_namespace_idx IF NOT EXISTS FOR (n:StaleAnchorVerification) ON (n.namespace)",
             "CREATE INDEX todo_location_path_idx IF NOT EXISTS FOR (n:TodoLocation) ON (n.path)",
             "CREATE INDEX todo_location_project_path_idx IF NOT EXISTS FOR (n:TodoLocation) ON (n.project, n.path)",
         ]

@@ -251,6 +251,7 @@ class ToolEventRepository:
         self,
         *,
         memory_uuid: str,
+        namespace: str,
         project: str | None = None,
         path: str,
         outcome: str,
@@ -260,8 +261,21 @@ class ToolEventRepository:
         notes: str | None = None,
         verified_at: str | None = None,
     ) -> dict[str, Any]:
-        """Create a durable StaleAnchorVerification receipt. Validates outcome
-        and verified_at. Returns ``{accepted, verification}``."""
+        """Create a durable StaleAnchorVerification receipt, owned by ``namespace``.
+
+        CF-106: `memory_uuid` is caller-supplied and was written with no ownership check at all, so
+        an `agent`-tier caller could attach a receipt -- and free-text `notes` -- to ANOTHER
+        tenant's memory. Stamping the namespace alone would have fixed the read side while leaving
+        that write open, so the ownership check is the load-bearing half, not the stamp.
+
+        `namespace` is REQUIRED, not optional. An optional tenant on a write is the shape that
+        leaves every existing caller unscoped by default (the CF-236 reasoning), and there is no
+        legitimate unscoped writer here.
+
+        The namespace is stamped at WRITE time rather than derived from the memory at read time, so
+        a receipt keeps its correct owner even after that memory is deleted. Deriving on read would
+        make an orphaned receipt un-ownable and therefore either invisible or global.
+        """
         outcome = (outcome or "").strip().lower()
         if outcome not in self.ALLOWED_VERIFICATION_OUTCOMES:
             raise ValueError(
@@ -274,9 +288,31 @@ class ToolEventRepository:
         if not uid:
             raise ValueError("memory_uuid is required for a stale-anchor verification")
         verified_at = self._validate_verified_at(verified_at)
+        tenant = (namespace or "").strip()
+        if not tenant:
+            raise ValueError("namespace is required to record a stale-anchor verification")
+
+        # OWNERSHIP CHECK, and it must precede the write. Refusing a uuid the caller's tenant does
+        # not own is what stops a cross-tenant receipt; a uuid that resolves to nothing is refused
+        # too, because a verification of an anchor that does not exist is not a receipt, it is an
+        # unbounded write surface keyed on a string the caller chose.
+        owned = self._neo4j.execute(
+            f"""
+            MATCH (m:Entity) WHERE m.uuid = $memory_uuid
+                  AND {tenant_scope_cypher("m")}
+            RETURN count(m) AS n
+            """,
+            params={"memory_uuid": uid, **tenant_scope_params(tenant)},
+        )
+        if not owned or int(owned[0].get("n", 0)) < 1:
+            raise ValueError(
+                "memory_uuid does not resolve to a memory in this namespace"
+            )
+
         rows = self._neo4j.execute(
             """
             CREATE (v:StaleAnchorVerification {
+                namespace: $namespace,
                 uuid: randomUUID(),
                 memory_uuid: $memory_uuid,
                 project: $project,
@@ -296,6 +332,7 @@ class ToolEventRepository:
             """,
             params={
                 "memory_uuid": uid,
+                "namespace": tenant,
                 "project": project,
                 "path": text,
                 "outcome": outcome,
@@ -312,15 +349,26 @@ class ToolEventRepository:
     def list_stale_anchor_verifications(
         self,
         *,
+        namespace: str,
         memory_uuid: str | None = None,
         project: str | None = None,
         path: str | None = None,
         limit: int = 50,
     ) -> list[dict[str, Any]]:
-        """Return verification receipts, optionally filtered."""
-        conditions = ["1 = 1"]
+        """Return verification receipts for ``namespace``, optionally filtered further.
+
+        CF-106: every filter here is optional, so an unfiltered call returned EVERY tenant's
+        receipts -- including operator-written `notes` -- at `readonly` tier. `namespace` is
+        therefore mandatory and is a tenant BOUNDARY, not another optional filter: the caller's
+        filters narrow within it and can never widen past it.
+        """
+        tenant = (namespace or "").strip()
+        if not tenant:
+            raise ValueError("namespace is required to list stale-anchor verifications")
+        conditions = [tenant_scope_cypher("v")]
         params: dict[str, Any] = {
             "limit": int(limit),
+            **tenant_scope_params(tenant),
             "verification_label": "StaleAnchorVerification",
             "uuid_key": "uuid",
             "memory_uuid_key": "memory_uuid",
