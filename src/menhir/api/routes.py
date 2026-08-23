@@ -568,7 +568,10 @@ async def tool_events_dirty(request: Request, project: str | None = None) -> dic
     if adapter is None or not hasattr(adapter, "list_dirty_files"):
         raise HTTPException(status_code=503, detail="tool-event diagnostics unavailable")
     dirty = await asyncio.to_thread(adapter.list_dirty_files, project=project)
-    stale = await asyncio.to_thread(adapter.stale_anchored_memories, project=project)
+    stale = await asyncio.to_thread(
+        adapter.stale_anchored_memories, project=project,
+        namespace=_resolve_namespace(request, None),
+    )
     return {"dirty_files": dirty, "stale_anchors": stale,
             "counts": {"dirty_files": len(dirty), "stale_anchors": len(stale)}}
 
@@ -582,7 +585,10 @@ async def tool_events_stale(request: Request, project: str | None = None,
     adapter = getattr(runtime_ctx.built, "graph_adapter", None)
     if adapter is None or not hasattr(adapter, "stale_anchored_memories"):
         raise HTTPException(status_code=503, detail="tool-event diagnostics unavailable")
-    stale = await asyncio.to_thread(adapter.stale_anchored_memories, project=project, limit=limit)
+    stale = await asyncio.to_thread(
+        adapter.stale_anchored_memories, project=project, limit=limit,
+        namespace=_resolve_namespace(request, None),
+    )
     return {"stale_anchors": stale, "count": len(stale)}
 
 

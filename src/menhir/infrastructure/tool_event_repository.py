@@ -24,6 +24,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 from typing import Any
+from menhir.domain.namespace import tenant_scope_cypher, tenant_scope_params
 
 logger = logging.getLogger(__name__)
 
@@ -175,17 +176,44 @@ class ToolEventRepository:
         )
         return [dict(r) for r in rows]
 
-    def stale_anchored_memories(self, *, project: str | None = None, limit: int = 200
-                                ) -> list[dict[str, Any]]:
+    def stale_anchored_memories(
+        self, *, project: str | None = None, limit: int = 200, namespace: str | None = None,
+    ) -> list[dict[str, Any]]:
         """Memories anchored to a file that changed AFTER they were anchored — the stale-reference
         signal. `(sem)-[a:ANCHORED_TO]->(f:file)` where `f.structure_dirty` and
-        `f.dirty_at > a.created_at`. Read-only detection; recall can down-rank / label these."""
+        `f.dirty_at > a.created_at`. Read-only detection; recall can down-rank / label these.
+
+        CF-106: this returns `sem.name` — a memory's own name — so an unscoped read hands one
+        tenant's memory names to another. Two readonly HTTP routes return it directly and recall
+        uses it to label results.
+
+        THE PREDICATE GOES ON `sem`, NOT ON `f`, and that is the whole subtlety of this join. `f`
+        is a STRUCTURE entity: single shared silo, keyed on `(structure_project, structure_path)`,
+        written with `group_id = ''` and no `namespace` at all (owner ruling 2026-08-21, encoded in
+        `tenant_scope_cypher`, which refuses to emit a predicate for that scheme). Scoping the file
+        side would match nothing and look like a working filter. Only the memory side carries a
+        tenant.
+
+        `namespace` is opt-in (``None`` reads every silo, matching `list_in_window` and
+        `list_todos`), and the predicate comes from `tenant_scope_cypher` rather than being written
+        by hand. **That is not a style preference.** The hand-written version tried first here
+        coalesced the namespace property against the literal default, which matches a node whose
+        property is ABSENT but not one stored as the empty string -- and those two are the same
+        legacy silo by owner ruling, so such memories would have been invisible to the tenant that
+        owns them. That is the identical blind spot CF-127 measured at 33,442 rows. The builder
+        expands both spellings and coalesces through ``group_id``; CF-127's ratchet caught the
+        hand-written version on its first suite run, which is what that ratchet is for.
+
+        (The bad predicate is described rather than quoted on purpose: the ratchet scans source
+        text and cannot tell a docstring from a query, so quoting it re-trips the guard.)
+        """
         rows = self._neo4j.execute(
-            """
-            MATCH (sem:Entity)-[a:ANCHORED_TO]->(f:Entity {structure_role: 'file'})
+            f"""
+            MATCH (sem:Entity)-[a:ANCHORED_TO]->(f:Entity {{structure_role: 'file'}})
             WHERE f.structure_dirty = true
                   AND a.created_at IS NOT NULL AND f.dirty_at > a.created_at
                   AND ($project IS NULL OR f.structure_project = $project)
+                  AND {tenant_scope_cypher("sem")}
             RETURN sem.uuid AS memory_uuid, sem.name AS name,
                    f.structure_project AS project, f.structure_path AS path,
                    toString(f.dirty_at) AS dirty_at, toString(a.created_at) AS anchored_at,
@@ -193,7 +221,11 @@ class ToolEventRepository:
             ORDER BY f.dirty_at DESC
             LIMIT $limit
             """,
-            params={"project": project, "limit": int(limit)},
+            params={
+                "project": project,
+                "limit": int(limit),
+                **tenant_scope_params(namespace),
+            },
         )
         return [dict(r) for r in rows]
 

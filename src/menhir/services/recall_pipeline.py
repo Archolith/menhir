@@ -1516,6 +1516,7 @@ async def run_recall(
             service.graph_adapter.stale_anchored_memories,
             project=file_context_project,
             limit=200,
+            namespace=namespace,
         )
         stale_by_uuid: dict[str, dict[str, Any]] = {
             str(r["memory_uuid"]): r
