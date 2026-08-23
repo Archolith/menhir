@@ -111,7 +111,32 @@ class MemorySettings:
     telemetry_diagnostic_retention_days: int = 90
 
     # M6 LLM budget caps
-    max_llm_calls_per_session_window: int = 50
+    #
+    # OWNER RULING 2026-08-23: 50 -> 5000, interim. The 50 dated to the initial public release
+    # (7274cccb, 2026-08-10) and was never calibrated against anything -- unlike the per-job cap
+    # below, which CF-234 measured. Three things were wrong with it:
+    #
+    #   1. It sat BELOW the size of a single job. Against CF-234's own per-job measurement
+    #      (p50 14, p90 45, p95 59, p99 84, max 140), a p95 job could not finish inside a fresh
+    #      window at all, and the per-job cap of 100 was unreachable -- the two caps contradicted
+    #      each other.
+    #   2. Embeddings share this counter. `view_embedder` announces kind="embedding" into the
+    #      same window as chat, so cheap embedding calls evict expensive extraction calls from a
+    #      guard that exists to bound runaway CHAT fan-out.
+    #   3. It was refusing work while the comments claimed enforcement was off. Only
+    #      `providers.py` passes report_only; the graphiti client wrapper, `sync_llm` and
+    #      `view_embedder` do not, and the flag defaults to False -- so those paths enforced.
+    #
+    # 26 episodes were marked FAILED and left unrecallable by this between 2026-08-20 and
+    # 2026-08-23, which is exactly the outcome `providers.py` predicted in writing: a refusal has
+    # no handler and falls into `_process_episode`'s generic `except Exception`.
+    #
+    # 5000 is deliberately a ceiling that normal work cannot reach, not a calibrated value. It
+    # keeps a runaway bound in place while removing a throttle that was deleting memories. The
+    # real fix is still open and is NOT this number: budget refusals need a requeue handler
+    # rather than terminal failure, embeddings need to stop counting against a chat guard, and
+    # the window should then be set from measured traffic the way CF-234 set the per-job cap.
+    max_llm_calls_per_session_window: int = 5000
     llm_session_window_seconds: int = 900
     # CF-234, CALIBRATED 2026-08-21 from 5,016 real chat calls across 244 enrichment jobs in
     # `llm_usage_events` (owner ruling: measure it, do not arbitrarily raise it).
