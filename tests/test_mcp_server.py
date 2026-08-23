@@ -27,6 +27,7 @@ from menhir.mcp.tools.ops.repair_stale_enrichment import repair_stale_enrichment
 from menhir.mcp.tools.ops.watch_enrichment import watch_enrichment
 from menhir.mcp.tools.recall.read_flagged_memories import read_flagged_memories
 from menhir.mcp.tools.recall.recall_context_memories import recall_context_memories
+from menhir.core.request_context import bind_request_tier, reset_request_tier
 
 
 _TEST_TMP_ROOT = Path(__file__).resolve().parents[1] / ".agent" / "test_tmp"
@@ -1052,11 +1053,16 @@ def test_get_episode_trace_returns_compact_debug_bundle(stubbed_mcp_state, monke
             ),
         )
 
+        # CF-34's autouse fixture binds operator -- exactly the tier this assertion must NOT
+        # have, since the withheld marker below is CF-36's contract for callers BELOW
+        # operator. Bind readonly so the test states its own subject rather than inheriting one.
+        _tier_token = bind_request_tier("readonly")
         payload = _parse_json_text(
             asyncio.run(
                 get_episode_trace("123e4567-e89b-12d3-a456-426614174998", limit=10)
             )
         )
+        reset_request_tier(_tier_token)
 
         assert payload["episode_uuid"] == "123e4567-e89b-12d3-a456-426614174998"
         assert payload["current"]["state"] == "ENRICHING"

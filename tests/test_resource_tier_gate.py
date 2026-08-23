@@ -63,13 +63,16 @@ def test_valid_tier_serves_resource(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.unit
-def test_no_tier_preserves_existing_behaviour(monkeypatch: pytest.MonkeyPatch) -> None:
-    # The gate is skipped when no tier is bound (unauthenticated/internal path).
+def test_no_tier_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    """CF-34, DELIBERATE BEHAVIOUR CHANGE. This asserted `ok is True` -- it was pinning the
+    fail-open. An authorization check that cannot determine the subject must deny, and this one
+    admitted. Every production reader binds a tier (HTTP via the auth middleware, stdio via
+    `bind_stdio_local_trust()`), so nothing legitimate reaches this branch."""
     monkeypatch.setattr(contracts, "get_request_tier", lambda: None)
     result = asyncio.run(_StubResource().execute())
     payload = _payload(result)
-    assert payload["ok"] is True
-    assert payload["value"] == 42
+    assert payload["ok"] is False
+    assert "No request tier is bound" in str(payload)
 
 
 @pytest.mark.unit

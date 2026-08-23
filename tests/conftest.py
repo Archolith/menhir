@@ -1733,3 +1733,29 @@ def _clear_saga_admission_refusal():
         yield
     finally:
         _runtime._saga_admission_refusal = None
+
+
+@pytest.fixture(autouse=True)
+def _bound_request_tier():
+    """Stand in for the transport, which is what binds a tier in production (CF-34).
+
+    CF-34 made an absent tier a REFUSAL rather than a pass. In production every caller binds one --
+    HTTP through the auth middleware, stdio through `bind_stdio_local_trust()` -- but a test that
+    calls a tool function directly has no transport, so without this it would exercise the
+    unbound-tier refusal instead of the behaviour it is actually about. 30 of the 32 test files
+    that import `menhir.mcp.tools` were in that position.
+
+    `operator` because it is permissive: a test asserting a LOWER tier's refusal binds its own
+    inside the test body, and that nested bind wins. So this fixture cannot mask a tier-gate test,
+    only supply the tier the transport would have.
+
+    It deliberately does NOT hide a missing bind in PRODUCTION code -- see
+    `test_cf34_absent_tier_is_refused.py`, which asserts the real entry points bind one.
+    """
+    from menhir.core.request_context import bind_request_tier, reset_request_tier
+
+    token = bind_request_tier("operator")
+    try:
+        yield
+    finally:
+        reset_request_tier(token)

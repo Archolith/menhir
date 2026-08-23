@@ -15,10 +15,22 @@ from menhir.mcp.service_access import (
 
 
 def test_bind_stdio_local_trust_binds_operator():
-    assert get_request_tier() == ""  # unbound default
-    token = bind_stdio_local_trust()
+    """The helper binds operator and its token round-trips.
+
+    The whole body runs inside a cleared tier because the autouse fixture (CF-34) stands in for the
+    transport, and this test is specifically about the UNBOUND baseline the helper exists to
+    replace -- so it has to establish that baseline itself rather than inherit one.
+    """
+    from menhir.core.request_context import bind_request_tier, reset_request_tier
+
+    cleared = bind_request_tier("")
     try:
-        assert get_request_tier() == "operator"
+        assert get_request_tier() == ""  # unbound default
+        token = bind_stdio_local_trust()
+        try:
+            assert get_request_tier() == "operator"
+        finally:
+            reset_request_tier(token)
+        assert get_request_tier() == ""  # restored after reset
     finally:
-        reset_request_tier(token)
-    assert get_request_tier() == ""  # restored after reset
+        reset_request_tier(cleared)

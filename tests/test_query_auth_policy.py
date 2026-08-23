@@ -219,9 +219,10 @@ def test_operator_tier_allows_operator_tool():
     assert _run_with_tier(_OperatorTierTool(), "operator") == "ok"
 
 
-def test_no_tier_set_does_not_enforce():
-    # Empty tier → bypass enforcement entirely
-    assert _run_with_tier(_OperatorTierTool(), "") == "ok"
+def test_no_tier_set_is_refused():
+    """CF-34, DELIBERATE BEHAVIOUR CHANGE. This asserted the empty tier bypassed enforcement
+    entirely -- the defect, asserted as the contract. It now refuses."""
+    assert "No request tier is bound" in _run_with_tier(_OperatorTierTool(), "")
 
 
 def test_query_auth_add_memory_limit_is_per_client(monkeypatch):

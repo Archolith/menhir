@@ -377,7 +377,13 @@ class BaseJsonResource(ABC):
                     f"query-string auth cannot read `{self.uri}`; use Authorization header for resources"
                 )
             tier = get_request_tier()
-            if tier and not _tier_allows(tier, self.required_tier):
+            if not tier:
+                raise PermissionError(
+                    f"No request tier is bound; refusing to read `{self.uri}`. "
+                    "Every caller must bind one -- HTTP via the auth middleware, stdio via "
+                    "bind_stdio_local_trust()."
+                )
+            if not _tier_allows(tier, self.required_tier):
                 raise PermissionError(
                     f"Token tier '{tier}' cannot read `{self.uri}` (requires '{self.required_tier}')"
                 )
@@ -531,8 +537,30 @@ class BaseTool:
             # itself something unconfigured, and an unknown name meant unrestricted.
             require_trusted_client_identity()
 
+            # CF-34: FAIL CLOSED ON AN ABSENT TIER.
+            #
+            # The old form conjoined a truthiness check with the allows check, so an unbound
+            # tier short-circuited to a PASS. (Described rather than quoted: the guard test
+            # greps this function's source, so quoting the defect re-trips it.) The safe
+            # default for an authorization check is to deny when it cannot determine the subject,
+            # and this one admitted. It was never network-reachable -- HTTP binds a tier in the auth
+            # middleware -- but it made the gate conditional on the transport having done its job,
+            # which is the shape that turns a future refactor moving a call off that path into a
+            # silent authorization hole rather than a crash.
+            #
+            # The empty tier used to be a DOCUMENTED supported state for local stdio. It is not any
+            # more: `bind_stdio_local_trust()` (mcp/server.py:63) binds operator explicitly for that
+            # process, which is the same trust decision made visibly instead of implicitly. Owner
+            # ruling 2026-08-22: absent tier becomes denial, and every legitimate in-process path
+            # binds one deliberately.
             tier = get_request_tier()
-            if tier and not _tier_allows(tier, self.required_tier):
+            if not tier:
+                raise PermissionError(
+                    f"No request tier is bound; refusing to invoke `{self.name}`. "
+                    "Every caller must bind one -- HTTP via the auth middleware, stdio via "
+                    "bind_stdio_local_trust()."
+                )
+            if not _tier_allows(tier, self.required_tier):
                 raise PermissionError(
                     f"Token tier '{tier}' cannot invoke `{self.name}` (requires '{self.required_tier}')"
                 )
