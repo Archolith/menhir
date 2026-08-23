@@ -206,6 +206,48 @@ def require_known_medium(medium: str) -> str:
     return medium
 
 
+#: Parameter name the emitted namespace predicate binds. The repository must supply it.
+NAMESPACE_COMPATIBILITY_PARAMS: dict[str, Any] = {
+    "default_ns": DEFAULT_ARTIFACT_NAMESPACE,
+}
+
+
+def namespaces_are_compatible(owner: str | None, subordinate: str | None) -> bool:
+    """Whether an owner may link to a subordinate object in that namespace (CF-48).
+
+    The rule: a subordinate lives in the owner's own namespace, or in the shared default one.
+    Asymmetric on purpose -- a namespaced artifact may reach shared records, a shared artifact may
+    not reach into a tenant's silo.
+
+    This is the Python form, for the one site that compares values already fetched.
+    :func:`namespace_compatibility_cypher` is the same rule for the sites whose predicate has to
+    travel into a MATCH. They are defined together so that changing one is visibly changing both.
+
+    **They do not agree on NULL, and that is recorded here rather than fixed.** Cypher's
+    ``x IN [NULL, 'default']`` evaluates to NULL and so refuses; Python's ``None in (None,
+    'default')`` is True and admits. Every row this repository writes carries a normalized
+    namespace (``normalize_namespace`` collapses None and '' to 'default'), so the two forms agree
+    on all of them; only a legacy row predating that normalization could be judged differently.
+    Unifying the NULL answer is CF-147's question. Deciding it inside a move-the-predicate refactor
+    would be a silent tenancy change, which is the failure mode CF-147 declined a mass rewrite to
+    avoid.
+    """
+    return subordinate in (owner, DEFAULT_ARTIFACT_NAMESPACE)
+
+
+def namespace_compatibility_cypher(owner: str = "a", subordinate: str = "t") -> str:
+    """Emit :func:`namespaces_are_compatible` as a Cypher predicate (CF-48).
+
+    Four sites in the artifact repository hand-wrote this list membership -- supersession, todo
+    links, and the two declaration resolvers. They agreed, and nothing kept them agreeing, which is
+    the shape CF-150 already found once in this same file's namespace helpers.
+
+    The fragment is a constant: `owner` and `subordinate` are Cypher variable names this codebase
+    chooses, never caller input.
+    """
+    return f"{subordinate}.namespace IN [{owner}.namespace, $default_ns]"
+
+
 #: Parameter names `supersession_cypher` binds. The repository must supply these.
 SUPERSESSION_PARAMS: dict[str, Any] = {
     "terminal": sorted(TERMINAL_ANY),
@@ -232,7 +274,7 @@ def supersession_cypher(new: str = "new", old: str = "old") -> str:
         f"{new}.artifact_type = {old}.artifact_type",
         f"{new}.artifact_uuid <> {old}.artifact_uuid",
         f"NOT {old}.status IN $terminal",
-        f"{old}.namespace IN [{new}.namespace, $default_ns]",
+        namespace_compatibility_cypher(owner=new, subordinate=old),
     ])
 
 
@@ -405,6 +447,39 @@ QUESTION_STATUSES: frozenset[str] = frozenset({
 #: Deferring needs no evidence, because deferring is a decision rather than an
 #: answer.
 ANSWERS_QUESTION_EDGE = "ANSWERS_QUESTION"
+
+
+#: The OpenQuestion state machine (CF-48). It previously existed only as a ``q.status = $open``
+#: clause inside each of ``answer_question`` and ``defer_question``, so a fourth question status
+#: would have meant two edits in infrastructure and none in the domain that defines the statuses --
+#: the asymmetry :func:`can_transition` exists to prevent for artifacts, reproduced one class down.
+#:
+#: Both non-open states are terminal. Re-answering would overwrite which artifact actually resolved
+#: the question, and that record is the whole point of answering rather than closing.
+_QUESTION_FORWARD: dict[str, frozenset[str]] = {
+    QuestionStatus.OPEN: frozenset({QuestionStatus.ANSWERED, QuestionStatus.DEFERRED}),
+    QuestionStatus.ANSWERED: frozenset(),
+    QuestionStatus.DEFERRED: frozenset(),
+}
+
+
+def question_can_transition(from_status: str, to_status: str) -> bool:
+    """Whether an OpenQuestion may move ``from_status -> to_status`` (CF-48)."""
+    return to_status in _QUESTION_FORWARD.get(from_status, frozenset())
+
+
+def question_statuses_allowing(to_status: str) -> frozenset[str]:
+    """Every status from which ``to_status`` is reachable in one step (CF-48).
+
+    The compare-and-set form the repository needs. Its guard runs inside the same statement as the
+    mutation -- an answered question with no answering edge is a claim with no evidence, so the two
+    cannot be split -- but the guard can still ask the domain which statuses are admissible instead
+    of restating the rule in Cypher. An unrecognised target yields the empty set, which admits
+    nothing: fail closed, matching how the artifact status graph treats an unknown type.
+    """
+    return frozenset(
+        source for source, targets in _QUESTION_FORWARD.items() if to_status in targets
+    )
 
 
 class DeclarationKind:

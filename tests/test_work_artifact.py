@@ -550,13 +550,20 @@ def test_answering_records_evidence_and_status_in_one_statement() -> None:
 
 @pytest.mark.unit
 def test_only_an_open_question_may_be_answered() -> None:
-    """Re-answering would overwrite which artifact actually resolved it."""
+    """Re-answering would overwrite which artifact actually resolved it.
+
+    CF-48 moved WHICH statuses are answerable into `domain.work_artifact`, so the guard is now
+    spelled `q.status IN $answerable` and the admissible set is supplied by the domain. This
+    asserts the bound set rather than the clause text: the property under test is "only an open
+    question", and pinning the literal Cypher tested the spelling instead -- which is why this
+    test, and not the behaviour, broke when the rule moved.
+    """
     neo4j = _StubNeo4j(responses=[[{"applied": 1}]])
     repo = WorkArtifactRepository(neo4j)
 
     repo.answer_question("q1", "a2")
 
-    assert "q.status = $open" in neo4j.calls[0]["query"]
+    assert neo4j.calls[0]["params"]["answerable"] == [QuestionStatus.OPEN]
 
 
 @pytest.mark.unit

@@ -53,6 +53,7 @@ from menhir.domain.work_artifact import (
     ARTIFACT_TYPES,
     DEFAULT_ARTIFACT_NAMESPACE,
     INITIAL_STATUS,
+    NAMESPACE_COMPATIBILITY_PARAMS,
     REFERENCES_TODO_EDGE,
     SUPERSEDES_EDGE,
     SUPERSESSION_PARAMS,
@@ -65,6 +66,9 @@ from menhir.domain.work_artifact import (
     QuestionStatus,
     can_transition,
     legal_next_statuses,
+    namespace_compatibility_cypher,
+    namespaces_are_compatible,
+    question_statuses_allowing,
     require_known_medium,
     resolve_registration,
     supersession_cypher,
@@ -1270,7 +1274,9 @@ class WorkArtifactRepository:
         if not ok:
             return {"linked": False, "reason": reason, "relation": relation}
 
-        if row["target_ns"] not in (row["source_ns"], DEFAULT_ARTIFACT_NAMESPACE):
+        # CF-48: the rule lives in the domain beside `supersession_cypher`, which enforces the
+        # same namespace compatibility for the one relation this method refuses.
+        if not namespaces_are_compatible(row["source_ns"], row["target_ns"]):
             return {
                 "linked": False,
                 "reason": "namespace_incompatible",
@@ -1364,14 +1370,15 @@ class WorkArtifactRepository:
             f"""
             MATCH (a:WorkArtifact {{artifact_uuid: $artifact_uuid}})
             MATCH (t:Todo {{uuid: $todo_uuid}})
-            WHERE t.namespace IN [a.namespace, $default_ns]
+            WHERE {namespace_compatibility_cypher()}
             MERGE (a)-[:{REFERENCES_TODO_EDGE}]->(t)
             RETURN count(t) AS linked
             """,
             {
                 "artifact_uuid": artifact_uuid,
                 "todo_uuid": todo_uuid,
-                "default_ns": DEFAULT_ARTIFACT_NAMESPACE,
+                # CF-48: bound by the domain's own `namespace_compatibility_cypher`.
+                **NAMESPACE_COMPATIBILITY_PARAMS,
             },
         )
         if rows and int(rows[0].get("linked", 0)) > 0:
@@ -1483,7 +1490,7 @@ class WorkArtifactRepository:
         rows = self.neo4j.execute(
             f"""
             MATCH (q:OpenQuestion {{question_uuid: $question_uuid}})
-            WHERE q.status = $open
+            WHERE q.status IN $answerable
             MATCH (a:WorkArtifact {{artifact_uuid: $answering_uuid}})
             MERGE (a)-[:{ANSWERS_QUESTION_EDGE}]->(q)
             SET q.status = $answered, q.answered_at = $now
@@ -1492,7 +1499,10 @@ class WorkArtifactRepository:
             {
                 "question_uuid": question_uuid,
                 "answering_uuid": answering_artifact_uuid,
-                "open": QuestionStatus.OPEN,
+                # CF-48: which statuses may be answered is the domain's question, not this
+                # statement's. The compare-and-set stays here because the guard and the edge
+                # must land together; the RULE does not.
+                "answerable": sorted(question_statuses_allowing(QuestionStatus.ANSWERED)),
                 "answered": QuestionStatus.ANSWERED,
                 "now": now,
             },
@@ -1510,13 +1520,14 @@ class WorkArtifactRepository:
         rows = self.neo4j.execute(
             """
             MATCH (q:OpenQuestion {question_uuid: $question_uuid})
-            WHERE q.status = $open
+            WHERE q.status IN $deferrable
             SET q.status = $deferred, q.deferred_at = $now
             RETURN count(q) AS applied
             """,
             {
                 "question_uuid": question_uuid,
-                "open": QuestionStatus.OPEN,
+                # CF-48: see `answer_question`.
+                "deferrable": sorted(question_statuses_allowing(QuestionStatus.DEFERRED)),
                 "deferred": QuestionStatus.DEFERRED,
                 "now": datetime.now(timezone.utc).isoformat(),
             },
@@ -1783,7 +1794,9 @@ class WorkArtifactRepository:
             MATCH (a:WorkArtifact {artifact_uuid: $uuid})
             MATCH (t:WorkArtifact)
             WHERE t.artifact_uuid <> $uuid
-              AND t.namespace IN [a.namespace, $default_ns]
+              AND """
+            + namespace_compatibility_cypher()
+            + """
             OPTIONAL MATCH (t)-[:EMBODIED_IN]->(s:ArtifactSource)
             WITH t, collect(toLower(coalesce(s.locator_path, ''))) AS paths
             WHERE toLower(t.title) = $needle
@@ -1860,7 +1873,9 @@ class WorkArtifactRepository:
             MATCH (a:WorkArtifact {artifact_uuid: $uuid})
             MATCH (t:Todo)
             WHERE (t.uuid = $needle OR t.uuid STARTS WITH $needle)
-              AND t.namespace IN [a.namespace, $default_ns]
+              AND """
+            + namespace_compatibility_cypher()
+            + """
             RETURN t.uuid AS todo_uuid
             LIMIT 5
             """,
