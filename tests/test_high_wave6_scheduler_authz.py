@@ -192,7 +192,16 @@ async def test_cf100_heartbeat_survives_a_store_error_instead_of_dying_silently(
 
     sched._renew_lease = exploding_renew  # type: ignore[method-assign]
     task = asyncio.ensure_future(sched._heartbeat_loop())
-    await asyncio.sleep(0.08)
+
+    # Wait for the SECOND attempt instead of sleeping a fixed span and hoping one arrived. The
+    # property under test is "it keeps retrying after an error"; a fixed 0.08s window with a 0.01s
+    # interval was really measuring how much CPU the event loop got, which under `-n 8` is not a
+    # constant -- observed failing at n==1 on a loaded run, and passing in isolation. The
+    # assertions below are unchanged.
+    deadline = time.monotonic() + 5.0
+    while calls["n"] < 2 and not task.done() and time.monotonic() < deadline:
+        await asyncio.sleep(0.01)
+
     still_running = not task.done()
     sched._stop_event.set()
     await asyncio.sleep(0.03)
