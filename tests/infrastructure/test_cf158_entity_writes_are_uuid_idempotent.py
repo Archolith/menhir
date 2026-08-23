@@ -277,11 +277,17 @@ def test_a_retried_todo_reminder_leaves_one_entity_and_one_edge(test_neo4j_repo)
 
 @pytest.mark.online
 def test_the_counter_remainder_is_still_open(test_neo4j_repo) -> None:
-    """CRITERION 2, PINNED AS STILL BROKEN -- not an aspiration, an assertion.
+    """CRITERION 2, PINNED AS STILL NON-IDEMPOTENT -- not an aspiration, an assertion.
 
-    MERGE fixes node identity and does nothing for a double-applied increment. This test exists so
-    that nobody reads criterion 1's closure as closing the counter half: if someone later makes
-    increments idempotent, this test fails and forces the register to be updated deliberately.
+    Criterion 2 was CLOSED BY ACCEPTANCE on 2026-08-23 (owner ruling), not by a fix. The behaviour
+    asserted here is therefore still exactly what production does, and this test still holds: MERGE
+    fixes node identity and does nothing for a double-applied increment. It stays so that nobody
+    reads either criterion 1's closure or criterion 2's ACCEPTANCE as meaning the increment became
+    safe. If someone later makes increments idempotent, this fails and forces the register to be
+    updated deliberately.
+
+    The acceptance rests on a premise, and `test_no_production_caller_opts_into_reexecution` below
+    is what keeps that premise from expiring silently.
     """
     node_uuid = str(uuid4())
     test_neo4j_repo.execute(
@@ -298,4 +304,47 @@ def test_the_counter_remainder_is_still_open(test_neo4j_repo) -> None:
     assert rows[0]["c"] == 2, (
         "the counter became idempotent; CF-158 criterion 2 may now be closable -- "
         "update the register rather than deleting this test"
+    )
+
+
+def test_no_production_caller_opts_into_reexecution() -> None:
+    """CRITERION 2's ACCEPTANCE PREMISE, made falsifiable.
+
+    Criterion 2 (a retried `SET n.hot_count = coalesce(n.hot_count, 0) + 1` writes a wrong number)
+    was closed by accepting the risk rather than by building a mechanism. That acceptance is only
+    sound while the retry it depends on cannot fire: `Neo4jRepository.execute` re-runs a statement
+    after an ambiguous commit ONLY when the caller passes `safe_to_reexecute=True`, and the driver's
+    own auto-commit retry is disabled (`disable_auto_commit_retries=True`).
+
+    So the accepted risk has a premise -- no production caller opts in -- and a premise that nobody
+    checks is how an accepted risk turns back into a live defect without anyone deciding to let it.
+    This test fails the moment a caller opts in, which is the moment the acceptance has to be
+    re-argued rather than inherited.
+
+    Source-level on purpose: the failure mode is a NEW call site being written, which no runtime
+    test over today's call graph can observe.
+    """
+    import ast
+
+    src = pathlib.Path(__import__("menhir").__file__).parent
+    opted_in = []
+    for path in src.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            for kw in node.keywords:
+                # An AST walk, not a text search: the parameter is named in its own signature and
+                # discussed in its own docstring, and a text match cannot tell either of those from
+                # a call site. Only a keyword argument in a Call node is an opt-in.
+                if kw.arg == "safe_to_reexecute" and not (
+                    isinstance(kw.value, ast.Constant) and kw.value.value is False
+                ):
+                    opted_in.append(f"{path.relative_to(src)}:{kw.value.lineno}")
+
+    assert not opted_in, (
+        "a production caller now opts into re-executing a write after an ambiguous commit. "
+        "CF-158 criterion 2 was closed by ACCEPTING that non-idempotent counter increments can be "
+        "double-applied, on the premise that this retry can never fire. That premise no longer "
+        "holds -- re-open criterion 2 and decide on a mechanism:\n  " + "\n  ".join(opted_in)
     )
