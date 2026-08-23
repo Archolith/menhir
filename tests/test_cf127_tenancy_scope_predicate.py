@@ -9,9 +9,15 @@ OWNER RULING 2026-08-21, and it shapes this file:
 
 1. Structure entities **stay a single shared silo** keyed on `(structure_project, structure_path)`.
    Documented as a contract, not treated as a missed predicate.
-2. **Builder plus a guard; convert nothing.** The 107 existing hand-written predicates are correct
+2. **Builder plus a guard; convert nothing.** The existing hand-written predicates are correct
    today and are left alone. Converting the tenancy boundary across 23 files is the risky half and
    buys nothing that is broken now.
+
+   The count in this ruling was **107, and it was wrong** -- not in a way that changes the ruling,
+   but worth stating. This file's regex could not distinguish a tenancy predicate from a tenancy
+   WRITE, so it counted both. Separating them (CF-158, 2026-08-23) gives 92 predicates and 21
+   writes. The writes were never candidates for the builder: `SET n.namespace = $ns` stamps a
+   tenant onto a new node, it does not decide which tenant's rows a caller may see.
 3. The `''` -> `'default'` migration is untouched. Writes still spell the default `''`.
 
 So the guard is a RATCHET, not a ban: it freezes the current per-file counts and fails when one
@@ -46,29 +52,46 @@ HANDWRITTEN = re.compile(
     r"(?:coalesce\s*\(\s*)?\b\w+\.(?:namespace|group_id)\b[^\n]{0,80}?(?:=|\bIN\b|<>)\s*\$\w+"
 )
 
-#: Frozen 2026-08-21. Counts, not line numbers -- line numbers churn on every unrelated edit.
+#: Clause tracking, added by CF-158. `HANDWRITTEN` cannot tell `WHERE n.namespace = $ns` (a
+#: tenancy PREDICATE) from `SET n.namespace = $ns` (a tenancy WRITE) -- both are a property, an
+#: `=` and a parameter. Writes are not predicates: they stamp the tenant onto a new node rather
+#: than deciding which tenant's rows a query may see, and no builder should ever replace them.
+#:
+#: This is the same distinction CF-147's AST census made explicitly ("track Cypher clause context
+#: so SET / ON CREATE SET / CREATE are classified as writes and never as predicates"). This file's
+#: cheaper regex never had it, so its census counted 113 where 92 are predicates -- 21 writes
+#: graded as hand-written predicates. Found when CF-158 converted three `CREATE (n:X {ns: $ns})`
+#: property maps to `MERGE ... ON CREATE SET n.namespace = $ns`: identical semantics, no new
+#: predicate, and the ratchet fired. The spelling changed shape and the instrument saw a defect.
+_SET_OPENS = re.compile(r"\bSET\b", re.I)
+_SET_CLOSES = re.compile(
+    r"\b(MATCH|MERGE|WHERE|RETURN|WITH|CREATE|UNWIND|CALL|FOREACH|DELETE|REMOVE)\b", re.I
+)
+
+#: Frozen 2026-08-21, RE-BASELINED 2026-08-23 when the census learned to exclude tenancy
+#: WRITES (see `_SET_OPENS`). Every number below moved DOWN or stayed put, and three files
+#: left the census entirely -- the drops are the classifier getting more accurate, not sites
+#: being converted. Lowering keeps the ratchet strictly tighter, so no guard is relaxed.
+#: Counts, not line numbers -- line numbers churn on every unrelated edit.
 #: A file may DROP below its entry (that is progress); it may not exceed it, and a new file may
 #: not appear. Lower a number here when you convert a site; never raise one.
 BASELINE: dict[str, int] = {
     "explorer/extraction_lab.py": 1,
-    "infrastructure/candidate_repository.py": 2,
     "infrastructure/consolidation_queries.py": 3,
-    "infrastructure/episode_lifecycle.py": 9,
+    "infrastructure/episode_lifecycle.py": 7,
     "infrastructure/episode_maintenance.py": 3,
     "infrastructure/episode_stamping.py": 1,
     "infrastructure/memory_graph_adapter.py": 11,
     "infrastructure/memory_queries.py": 23,
-    "infrastructure/scalar_view_repository.py": 10,
+    "infrastructure/scalar_view_repository.py": 8,
     "infrastructure/structure_queries.py": 2,
     "infrastructure/temporal_repository.py": 1,
     "infrastructure/todo_repository.py": 3,
-    "infrastructure/turn_evidence_repository.py": 2,
-    "infrastructure/typed_assertion_models.py": 2,
-    "infrastructure/typed_assertion_reconciliation.py": 6,
+    "infrastructure/turn_evidence_repository.py": 1,
+    "infrastructure/typed_assertion_reconciliation.py": 3,
     "infrastructure/typed_assertion_repair_repository.py": 2,
     "infrastructure/typed_assertion_write_repository.py": 6,
-    "infrastructure/typed_event_repository.py": 3,
-    "infrastructure/verifier_repository.py": 2,
+    "infrastructure/typed_event_repository.py": 2,
     "infrastructure/view_query_repository.py": 5,
     "infrastructure/work_artifact_repository.py": 8,
     "services/lifecycle_conflicts.py": 1,
@@ -77,9 +100,26 @@ BASELINE: dict[str, int] = {
 
 
 def _census() -> dict[str, int]:
+    """Count hand-written tenancy PREDICATES per file, excluding tenancy writes.
+
+    Line-oriented rather than parsed: a line opening a SET clause puts the scanner in write mode,
+    and the next clause keyword takes it out again. Crude, and deliberately biased toward
+    OVER-counting -- a missed write inflates a number the ratchet only compares against itself,
+    while a missed predicate would be a silent hole.
+    """
     found: dict[str, int] = {}
     for path in sorted(SRC.rglob("*.py")):
-        n = len(HANDWRITTEN.findall(path.read_text(encoding="utf-8")))
+        n = 0
+        in_write_clause = False
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if _SET_CLOSES.search(line) and not _SET_OPENS.search(line):
+                in_write_clause = False
+            if _SET_OPENS.search(line):
+                in_write_clause = True
+                continue
+            if in_write_clause:
+                continue
+            n += len(HANDWRITTEN.findall(line))
         if n:
             found[path.relative_to(SRC).as_posix()] = n
     return found
@@ -98,7 +138,10 @@ def test_the_detector_is_not_vacuous() -> None:
     Two independent checks: the total is in the right order of magnitude, and a specific known
     site is still seen."""
     census = _census()
-    assert sum(census.values()) >= 90, f"detector found only {sum(census.values())}; expected ~107"
+    assert sum(census.values()) >= 80, (
+        f"detector found only {sum(census.values())}; expected ~92 after CF-158 separated "
+        "tenancy writes from tenancy predicates (it was ~113 counting both)"
+    )
 
     known = (SRC / "infrastructure/memory_queries.py").read_text(encoding="utf-8")
     assert HANDWRITTEN.search(known), "the largest known offender no longer matches"

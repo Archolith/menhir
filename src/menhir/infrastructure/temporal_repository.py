@@ -106,26 +106,32 @@ class TemporalRepository:
 
         self.neo4j.execute(
             """
-            CREATE (n:Entity {
-                uuid:        $uuid,
-                name:        $name,
-                summary:     '',
-                content:     $content,
-                group_id:    $group_id,
-                namespace:   $namespace,
-                type:        'TEMPORAL',
-                target_date: $target_date,
-                status:      'open',
-                source:      $source,
-                scope:       'PERSISTENT',
-                user_flagged: $user_flagged,
-                bootstrap_scope: $bootstrap_scope,
-                created_at:  $now,
-                last_accessed: $now,
-                freshness:   'ACTIVE',
-                edge_count:  0,
-                sharpness:   1.0
-            })
+            // CF-158 criterion 1: MERGE on the uuid, not CREATE. `:Entity.uuid` carries no
+            // uniqueness constraint and cannot be given one (graphiti owns a plain index on that
+            // property and recreates it every startup), so a re-executed CREATE leaves TWO nodes
+            // sharing one uuid. MERGE makes re-execution of this exact statement a no-op instead.
+            // ON CREATE SET, never a bare SET: a match means the node already exists, and
+            // overwriting it would reset `status`, `last_accessed` and any later edit back to the
+            // values this call was born with.
+            MERGE (n:Entity {uuid: $uuid})
+            ON CREATE SET
+                n.name         = $name,
+                n.summary      = '',
+                n.content      = $content,
+                n.group_id     = $group_id,
+                n.namespace    = $namespace,
+                n.type         = 'TEMPORAL',
+                n.target_date  = $target_date,
+                n.status       = 'open',
+                n.source       = $source,
+                n.scope        = 'PERSISTENT',
+                n.user_flagged = $user_flagged,
+                n.bootstrap_scope = $bootstrap_scope,
+                n.created_at   = $now,
+                n.last_accessed = $now,
+                n.freshness    = 'ACTIVE',
+                n.edge_count   = 0,
+                n.sharpness    = 1.0
             """,
             {
                 "uuid": node_uuid,

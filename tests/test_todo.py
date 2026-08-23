@@ -60,7 +60,10 @@ def test_create_todo_coerces_invalid_priority_to_normal() -> None:
 
 
 @pytest.mark.unit
-def test_create_todo_issues_create_cypher() -> None:
+def test_create_todo_issues_one_idempotent_write() -> None:
+    """Renamed and re-pointed by CF-158: the single write is now a uuid MERGE rather than a
+    CREATE. What the test is FOR -- one statement, no inferred edges, params carried -- is
+    unchanged; only the verb it pinned moved."""
     neo4j = _StubNeo4j()
     repo = TodoRepository(neo4j)
 
@@ -68,7 +71,7 @@ def test_create_todo_issues_create_cypher() -> None:
 
     # A todo with no code_ref is now a single write: no inferred edges remain.
     assert len(neo4j.calls) == 1
-    assert "CREATE (n:Todo" in neo4j.calls[0]["query"]
+    assert "MERGE (n:Todo {uuid: $uuid})" in neo4j.calls[0]["query"]
     params = neo4j.calls[0]["params"]
     assert params["content"] == "Do something"
     assert params["priority"] == "normal"
@@ -786,7 +789,7 @@ def test_create_todo_writes_namespace_into_the_node() -> None:
 
     repo.create_todo(content="Task")
 
-    assert "namespace:  $namespace" in neo4j.calls[0]["query"]
+    assert "$namespace" in neo4j.calls[0]["query"]
 
 
 @pytest.mark.unit
@@ -796,14 +799,14 @@ def test_reminder_is_stamped_with_its_todos_namespace() -> None:
 
     repo.create_todo(content="x", due_date="2027-02-16", namespace="tenantA")
 
-    # call 0 is the :Todo CREATE, call 1 is the reminder CREATE
+    # call 0 is the :Todo write, call 1 is the reminder write
     params = neo4j.calls[1]["params"]
     assert params["r_namespace"] == "tenantA"
     assert params["r_group_id"] == "tenantA"
 
     query = neo4j.calls[1]["query"]
-    assert "namespace:     $r_namespace" in query
-    assert "group_id:      ''" not in query
+    assert "$r_namespace" in query
+    assert "r.group_id      = ''" not in query
 
 
 @pytest.mark.unit
@@ -813,7 +816,7 @@ def test_reminder_defaults_to_the_default_namespace() -> None:
 
     repo.create_todo(content="x", due_date="2027-02-16")
 
-    # call 0 is the :Todo CREATE, call 1 is the reminder CREATE
+    # call 0 is the :Todo write, call 1 is the reminder write
     params = neo4j.calls[1]["params"]
     assert params["r_namespace"] == "default"
     assert params["r_group_id"] == ""
@@ -821,8 +824,8 @@ def test_reminder_defaults_to_the_default_namespace() -> None:
     # Assert the QUERY consumes them. Checking only the params dict is vacuous: the values are
     # computed whether or not the Cypher binds them, so unstamping the node leaves this green.
     query = neo4j.calls[1]["query"]
-    assert "namespace:     $r_namespace" in query
-    assert "group_id:      $r_group_id" in query
+    assert "$r_namespace" in query
+    assert "$r_group_id" in query
 
 
 @pytest.mark.unit

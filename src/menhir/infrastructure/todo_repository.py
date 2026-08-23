@@ -184,18 +184,22 @@ class TodoRepository:
 
         self.neo4j.execute(
             """
-            CREATE (n:Todo {
-                uuid:       $uuid,
-                content:    $content,
-                code_ref:   $code_ref,
-                priority:   $priority,
-                status:     'open',
-                source:     $source,
-                created_at: $now,
-                closed_at:  null,
-                due_date:   $due_date,
-                namespace:  $namespace
-            })
+            // CF-158 criterion 1. `:Todo.uuid` carries no uniqueness constraint either (verified
+            // against the disposable instance: 13 constraints, none on this label), so this is the
+            // same hazard as the :Entity and :Episodic writes. It also matters to the reminder
+            // statement below: that one MERGEs its HAS_REMINDER edge, and an edge MERGE cannot
+            // stay single if the :Todo it hangs off duplicates first.
+            MERGE (n:Todo {uuid: $uuid})
+            ON CREATE SET
+                n.content    = $content,
+                n.code_ref   = $code_ref,
+                n.priority   = $priority,
+                n.status     = 'open',
+                n.source     = $source,
+                n.created_at = $now,
+                n.closed_at  = null,
+                n.due_date   = $due_date,
+                n.namespace  = $namespace
             """,
             {
                 "uuid": todo_uuid,
@@ -217,25 +221,29 @@ class TodoRepository:
             self.neo4j.execute(
                 """
                 MATCH (t:Todo {uuid: $todo_uuid})
-                CREATE (r:Entity {
-                    uuid:          $r_uuid,
-                    name:          $r_name,
-                    summary:       '',
-                    content:       $content,
-                    group_id:      $r_group_id,
-                    type:          'TEMPORAL',
-                    target_date:   $due_date,
-                    status:        'open',
-                    source:        $source,
-                    scope:         'PERSISTENT',
-                    namespace:     $r_namespace,
-                    created_at:    $now,
-                    last_accessed: $now,
-                    freshness:     'ACTIVE',
-                    edge_count:    0,
-                    sharpness:     1.0
-                })
-                CREATE (t)-[:HAS_REMINDER]->(r)
+                // CF-158 criterion 1: see `temporal_repository.create_temporal_memory`. This
+                // reminder is the same TEMPORAL :Entity shape and inherits the same hazard -- a
+                // re-executed CREATE would leave two nodes under one uuid, on a property that
+                // cannot carry a uniqueness constraint. The edge MERGEs for the same reason:
+                // re-execution must not leave a second HAS_REMINDER between the same two nodes.
+                MERGE (r:Entity {uuid: $r_uuid})
+                ON CREATE SET
+                    r.name          = $r_name,
+                    r.summary       = '',
+                    r.content       = $content,
+                    r.group_id      = $r_group_id,
+                    r.type          = 'TEMPORAL',
+                    r.target_date   = $due_date,
+                    r.status        = 'open',
+                    r.source        = $source,
+                    r.scope         = 'PERSISTENT',
+                    r.namespace     = $r_namespace,
+                    r.created_at    = $now,
+                    r.last_accessed = $now,
+                    r.freshness     = 'ACTIVE',
+                    r.edge_count    = 0,
+                    r.sharpness     = 1.0
+                MERGE (t)-[:HAS_REMINDER]->(r)
                 """,
                 {
                     "todo_uuid": todo_uuid,
