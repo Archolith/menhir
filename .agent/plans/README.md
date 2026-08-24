@@ -14,7 +14,7 @@ This index routes all 13 top-level plan records plus the execution ladder exactl
 
 | Document | Current ownership |
 |---|---|
-| [`menhir-oauth-refresh-chatgpt-integration-plan.md`](menhir-oauth-refresh-chatgpt-integration-plan.md) | Complete AS-005 refresh-token wiring and prove a durable ChatGPT web OAuth connection against `/mcp-http`. |
+| [`menhir-oauth-refresh-chatgpt-integration-plan.md`](menhir-oauth-refresh-chatgpt-integration-plan.md) | Close the current ChatGPT web MCP compatibility contract: transport, client identity, OAuth signaling/refresh, complete tool metadata, and real end-to-end proof against `/mcp-http`. |
 | [`menhir-research-execution-ladder.md`](menhir-research-execution-ladder.md) | Dependency-ordered research → code → bench sequence. Read-side rungs are closed; Track W6 is the remaining write-side rung. |
 | [`menhir-work-artifact-reconciliation-2026-08-11.md`](menhir-work-artifact-reconciliation-2026-08-11.md) | Add read-only corpus parity auditing, hash/Git-backed source reconciliation, bounded move detectors, and a separately approved live-graph repair. |
 | [`menhir-conflict-detection-signal-2026-08-09.md`](menhir-conflict-detection-signal-2026-08-09.md) | Separate fused-retrieval score semantics from cosine conflict thresholds. |
