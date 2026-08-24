@@ -756,6 +756,7 @@ async def refresh_structure_graphs(
     """Re-scan all known projects whose file fingerprint has changed."""
     from menhir.infrastructure.project_scanner import ProjectScanner
     from menhir.infrastructure.repo_topology import classify_root
+    from menhir.infrastructure.structure_write_fence import StructureWritesFrozen
 
     projects = await asyncio.to_thread(graph_adapter.list_structure_projects)
     if not projects:
@@ -819,6 +820,13 @@ async def refresh_structure_graphs(
                 "entities": str(counts.get("entities", 0)),
                 "edges": str(counts.get("edges", 0)),
             })
+        except StructureWritesFrozen:
+            # CF-257 phase 2. A migration holds the fence. Reported like `path_missing` and
+            # `identity_refused` rather than raised: the sweep must not die because a migration is
+            # in progress, and the next cycle picks the project up once the fence lifts.
+            skipped += 1
+            details.append({"project": name, "status": "frozen_for_migration"})
+            continue
         except Exception as exc:
             errors += 1
             details.append({"project": name, "status": f"write_error: {exc}"})

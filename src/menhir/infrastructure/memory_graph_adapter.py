@@ -1142,7 +1142,24 @@ class MemoryGraphAdapter:
         session_id: str,
         user_id: str,
     ) -> dict[str, int]:
-        return self._structure.write_project(scan, session_id, user_id)
+        """Write a project's structure graph, subject to the migration fence.
+
+        THE choke point, and that is why the fence sits here rather than at the four call sites:
+        the REST scan path, the deprecated raw-payload path, the background symbol rescan and the
+        unattended watcher all arrive through this one method. Guarding the callers instead would
+        mean four places to keep in step, and the next writer added would silently miss it.
+        """
+        from menhir.infrastructure.structure_write_fence import (
+            admit_structure_writer, release_structure_writer,
+        )
+
+        handle = admit_structure_writer(
+            self.neo4j, label=str(getattr(scan, "name", "") or "")
+        )
+        try:
+            return self._structure.write_project(scan, session_id, user_id)
+        finally:
+            release_structure_writer(self.neo4j, handle)
 
     def write_document(
         self,
