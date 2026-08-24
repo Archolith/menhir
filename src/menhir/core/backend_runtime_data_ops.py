@@ -635,8 +635,38 @@ class RuntimeProviderDataOpsMixin:
         import asyncio as _asyncio
 
         from menhir.core.ingest_guard import ensure_ingest_path_allowed
+        from menhir.domain.project_identity import ensure_scan_root_owns_identity
+        from menhir.infrastructure.repo_topology import classify_root
 
         scan_obj = _project_scan_from_dict(scan)
+
+        # CF-257 phase 0, second entry point. `scan_and_write_project` scans and writes; THIS
+        # writes a scan the caller already produced, at agent tier, so guarding only the former
+        # left the refusals bypassable by choosing this endpoint instead -- an older or
+        # client-side scanner can submit a worktree's or a fork's structure under a canonical
+        # project's name and it lands unchallenged.
+        #
+        # This is the same miss SEC-02 records in the block below ("The guard was applied to that
+        # sibling and skipped here"), in the same function, one guard later. A new refusal has to
+        # be applied to every writer, not to the path where the refusal was conceived.
+        #
+        # `allow_unobservable_root`: the payload's root_path may legitimately name a directory
+        # that exists only on the sender's machine, so shape cannot be observed here. That makes
+        # the worktree/submodule refusal unavailable BY CONSTRUCTION on this path -- stated
+        # rather than silently true -- while the recorded-root refusal, which is what catches a
+        # fork, still applies with full force.
+        identity_tier = get_request_tier()
+        ensure_scan_root_owns_identity(
+            topology=await _asyncio.to_thread(classify_root, scan_obj.root_path),
+            project_name=scan_obj.name,
+            recorded_root_path=await self._off_loop(
+                self.built.graph_adapter.get_project_root_path, scan_obj.name
+            ),
+            tier=identity_tier,
+            force=False,
+            allow_unobservable_root=True,
+        )
+
         # If 'symbols' key is absent, the sender is an older MCP process that
         # predates symbol extraction.  Write the structural data now (fast), then
         # fire off a background task to rescan and fill in symbol nodes.
@@ -681,6 +711,28 @@ class RuntimeProviderDataOpsMixin:
         try:
             root = str(ensure_ingest_path_allowed(root, tier=tier))
         except IngestPathNotAllowedError as exc:
+            _log.warning("Background symbol rescan refused: project=%s error=%s", name, exc)
+            return
+        # Re-checked here for the reason stated directly above about the ingest path: this is a
+        # detached task, so the decision made at the scheduling site is stale by the time it runs.
+        # The directory can be replaced by a worktree, or the project can be claimed by another
+        # root, in that window -- and unlike the caller-supplied write, this one reads the tree
+        # off disk, so the shape IS observable and the full refusal applies.
+        from menhir.domain.project_identity import (
+            ProjectIdentityRefused, ensure_scan_root_owns_identity,
+        )
+        from menhir.infrastructure.repo_topology import classify_root
+        try:
+            ensure_scan_root_owns_identity(
+                topology=await _asyncio.to_thread(classify_root, root),
+                project_name=name,
+                recorded_root_path=await _asyncio.to_thread(
+                    self.built.graph_adapter.get_project_root_path, name
+                ),
+                tier=tier,
+                force=False,
+            )
+        except ProjectIdentityRefused as exc:
             _log.warning("Background symbol rescan refused: project=%s error=%s", name, exc)
             return
         try:

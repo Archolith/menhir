@@ -490,6 +490,13 @@ def test_cf103_rescan_refuses_a_root_outside_the_allowed_ingest_roots(monkeypatc
     monkeypatch.setattr(scanner_module, "ProjectScanner", _Scanner)
 
     ops = RuntimeProviderDataOpsMixin()
+    # CF-257 phase 0 gave the rescan a second guard, which reads the project's recorded root_path
+    # to refuse a fork. That is a new collaborator, not a new assertion: everything this test
+    # checks about CF-103's containment is unchanged below. `None` means "no project has claimed
+    # this name", which is the state that lets the operator-tier case proceed exactly as before.
+    ops.built = SimpleNamespace(
+        graph_adapter=SimpleNamespace(get_project_root_path=lambda name: None)
+    )
     asyncio.run(
         ops._background_symbol_rescan(str(outside), "proj", "s", "u", tier="agent")
     )

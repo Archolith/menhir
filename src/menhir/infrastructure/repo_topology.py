@@ -63,6 +63,16 @@ class RootKind(Enum):
     UNRESOLVABLE = "unresolvable"
     """``.git`` is a file whose pointer cannot be followed. Fail closed."""
 
+    MISSING = "missing"
+    """The directory is not present on this host, so its shape cannot be observed at all.
+
+    Distinct from :attr:`PLAIN` on purpose. A caller-supplied scan payload can name a root that
+    only exists on the sender's machine, and reporting that as "not a git repository" would be a
+    claim this process is in no position to make -- it would let a remotely-scanned worktree read
+    as an ordinary directory. The caller decides what an unobservable root may do; the classifier
+    only refuses to guess.
+    """
+
 
 @dataclass(frozen=True)
 class RootTopology:
@@ -86,7 +96,13 @@ class RootTopology:
 
     @property
     def may_scan(self) -> bool:
-        """True only for shapes that own their identity outright."""
+        """True only for shapes OBSERVED to own their identity outright.
+
+        :attr:`RootKind.MISSING` is excluded deliberately: nothing was observed, so this cannot
+        be a positive answer. Callers that legitimately accept an unobservable root -- the
+        compatibility write path, where a remote client scanned on its own machine -- must handle
+        that kind explicitly rather than reading silence as approval.
+        """
         return self.kind in (RootKind.CLONE, RootKind.PLAIN)
 
 
@@ -146,6 +162,13 @@ def classify_root(root: str | Path) -> RootTopology:
     except OSError:
         return RootTopology(
             kind=RootKind.UNRESOLVABLE, root=Path(root), detail="root path could not be resolved"
+        )
+
+    if not root_path.is_dir():
+        return RootTopology(
+            kind=RootKind.MISSING,
+            root=root_path,
+            detail="directory is not present on this host; shape cannot be observed",
         )
 
     git_marker = root_path / ".git"

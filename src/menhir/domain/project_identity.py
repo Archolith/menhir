@@ -28,7 +28,8 @@ classifying the directory happen at the call site, so both are trivially fake-ab
 
 from __future__ import annotations
 
-from pathlib import PurePath
+import os
+from pathlib import PurePosixPath, PureWindowsPath
 
 from menhir.infrastructure.repo_topology import RootKind, RootTopology
 
@@ -48,19 +49,46 @@ class ProjectIdentityRefused(ValueError):
     """Raised when a scan root may not write under the project identity it is claiming."""
 
 
+def _looks_like_windows_path(value: str) -> bool:
+    """True for a drive-letter or UNC path, which are case-insensitive in practice."""
+    stripped = value.strip()
+    if stripped.startswith("\\\\") or stripped.startswith("//"):
+        return True
+    return len(stripped) >= 2 and stripped[1] == ":" and stripped[0].isalpha()
+
+
+def _normalized(value: str) -> str:
+    """Canonical spelling for comparison, respecting the path flavor's case rules.
+
+    Separator- and trailing-slash-insensitive for both flavors. **Case is folded only for Windows
+    paths.** Folding it for POSIX was a defect: ``/srv/Foo`` and ``/srv/foo`` are different
+    directories on Linux, and treating them as equal makes the guard ADMIT the second under the
+    first's identity -- a false allow, which is the direction that loses data. A false refusal
+    merely annoys someone; a false allow prunes a project's files.
+    """
+    raw = value.strip().rstrip("/\\")
+    if _looks_like_windows_path(raw):
+        return PureWindowsPath(raw.replace("/", "\\")).as_posix().casefold()
+    return PurePosixPath(raw.replace("\\", "/")).as_posix()
+
+
 def _same_path(left: str | None, right: str | None) -> bool:
     """Compare two recorded paths for practical equality.
 
-    Case-insensitive and separator-insensitive: the graph holds Windows paths written by several
-    clients, and ``C:\\x\\y`` and ``C:/x/y`` are the same directory. A trailing separator is not a
-    difference either. This is deliberately lenient, because a FALSE mismatch refuses a legitimate
-    scan -- the failure this guard must not have.
+    ``os.path.samefile`` first when both exist locally: it resolves symlinks, junctions and
+    Windows 8.3 short names, so it answers "the same directory" rather than "the same spelling",
+    and it consults the real filesystem's own case rules instead of inferring them. It needs both
+    paths to exist, which a recorded root_path from another host will not, so string comparison
+    remains the fallback rather than the primary.
     """
     if not left or not right:
         return False
-    def norm(value: str) -> str:
-        return str(PurePath(value.replace("\\", "/"))).rstrip("/\\").casefold()
-    return norm(left) == norm(right)
+    try:
+        if os.path.exists(left) and os.path.exists(right):
+            return os.path.samefile(left, right)
+    except OSError:
+        pass  # unreadable or cross-device; fall through to the textual comparison
+    return _normalized(left) == _normalized(right)
 
 
 def ensure_scan_root_owns_identity(
@@ -70,6 +98,7 @@ def ensure_scan_root_owns_identity(
     recorded_root_path: str | None,
     tier: str | None,
     force: bool = False,
+    allow_unobservable_root: bool = False,
 ) -> None:
     """Raise :class:`ProjectIdentityRefused` unless this root may write as *project_name*.
 
@@ -81,12 +110,23 @@ def ensure_scan_root_owns_identity(
         tier: The caller's request tier. ``None`` means no auth is configured (local dev), which
             the rest of the auth model treats as unrestricted.
         force: The caller passed the explicit override.
+        allow_unobservable_root: Accept a root that is not present on this host. Set ONLY by the
+            compatibility write path, where a remote client scanned on its own machine and
+            shipped the result. The shape refusal is unavailable there by construction; the
+            recorded-root refusal below still applies and is what catches a fork.
 
     The override is checked FIRST for the two refusals but never suppresses
     :attr:`RootKind.UNRESOLVABLE`. Forcing means "I know this is a second checkout and I want it
     anyway", which is a coherent intention; there is no coherent version of "I know this pointer
     is broken and I want it anyway", because nothing downstream knows what identity was meant.
     """
+    if topology.kind is RootKind.MISSING and not allow_unobservable_root:
+        raise ProjectIdentityRefused(
+            f"Cannot identify the scan root {topology.root}: {topology.detail}. "
+            "A root this process cannot see cannot be checked for being a worktree or a "
+            "submodule, so admitting it would make the shape refusal optional."
+        )
+
     if topology.kind is RootKind.UNRESOLVABLE:
         raise ProjectIdentityRefused(
             f"Cannot identify the scan root {topology.root}: {topology.detail}. "

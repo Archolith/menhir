@@ -294,3 +294,97 @@ def test_a_submodule_refusal_says_submodule_not_worktree(tmp_path):
     directly as its own project, a worktree is scanned from its primary."""
     with pytest.raises(ProjectIdentityRefused, match="submodule"):
         _guard(classify_root(_submodule(tmp_path)), recorded=None)
+
+
+# ---------------------------------------------------------------------------
+# Review round 3: the two write-safety defects
+# ---------------------------------------------------------------------------
+
+@pytest.mark.unit
+def test_posix_paths_differing_only_in_case_are_different_directories(tmp_path):
+    """P1.2. `/srv/Foo` and `/srv/foo` are two directories on Linux.
+
+    The first version case-folded every path, so the second compared equal to the first and was
+    ADMITTED under its identity. That is the false-ALLOW direction: a false refusal annoys
+    someone, a false allow prunes a project's files.
+
+    Uses paths that do not exist locally on purpose -- this pins the textual fallback, which is
+    what runs when the recorded root_path came from another host.
+    """
+    from menhir.domain.project_identity import _same_path
+    assert not _same_path("/srv/Foo", "/srv/foo")
+    assert _same_path("/srv/foo", "/srv/foo/")
+
+
+@pytest.mark.unit
+def test_windows_paths_still_compare_case_and_separator_insensitively():
+    """The leniency that must survive the fix: one directory spelled two ways in the graph."""
+    from menhir.domain.project_identity import _same_path
+    assert _same_path(r"C:\Users\thron\proj", "c:/users/thron/proj")
+    assert _same_path(r"C:\Users\thron\proj\\", "C:/Users/thron/proj")
+
+
+@pytest.mark.unit
+def test_two_spellings_of_one_real_directory_are_the_same_path(tmp_path):
+    """`samefile` answers 'the same directory', not 'the same spelling', when both exist."""
+    from menhir.domain.project_identity import _same_path
+    real = _clone(tmp_path, "proj")
+    assert _same_path(str(real), str(tmp_path / "." / "proj"))
+
+
+@pytest.mark.unit
+def test_a_root_absent_from_this_host_is_missing_not_plain(tmp_path):
+    """P1.1 support. Reporting an unobservable root as 'not a git repository' would be a claim
+    this process cannot make -- it would let a remotely-scanned worktree read as an ordinary
+    directory."""
+    t = classify_root(tmp_path / "not-here")
+    assert t.kind is RootKind.MISSING
+    assert not t.may_scan
+
+
+@pytest.mark.unit
+def test_an_unobservable_root_is_refused_by_default(tmp_path):
+    """Silence is not approval: the default answer for a root we cannot see is no."""
+    with pytest.raises(ProjectIdentityRefused, match="cannot see"):
+        _guard(classify_root(tmp_path / "not-here"), recorded=None)
+
+
+@pytest.mark.unit
+def test_the_compatibility_path_may_accept_an_unobservable_root(tmp_path):
+    """A remote client legitimately scans on its own machine and ships the result."""
+    ensure_scan_root_owns_identity(
+        topology=classify_root(tmp_path / "not-here"), project_name="remote-proj",
+        recorded_root_path=None, tier="agent", allow_unobservable_root=True,
+    )
+
+
+@pytest.mark.unit
+def test_the_compatibility_path_still_refuses_a_fork(tmp_path):
+    """The concession is narrow: shape cannot be checked, IDENTITY still can.
+
+    This is what stops the caller-supplied write from being a bypass -- an agent submitting a
+    fork's structure under a canonical project's name is refused on the recorded root_path even
+    though nothing about the directory is observable here.
+    """
+    with pytest.raises(ProjectIdentityRefused, match="already recorded at"):
+        ensure_scan_root_owns_identity(
+            topology=classify_root(tmp_path / "elsewhere" / "yawn.frontend"),
+            project_name="yawn.frontend",
+            recorded_root_path="/srv/projects/yawn/yawn.frontend",
+            tier="agent", allow_unobservable_root=True,
+        )
+
+
+@pytest.mark.unit
+def test_the_compatibility_path_still_refuses_an_observable_worktree(tmp_path):
+    """`allow_unobservable_root` must relax ONLY the unobservable case.
+
+    If the submitted root does exist here and is a worktree, the shape refusal is available and
+    must still fire -- otherwise the flag would be a general bypass rather than a narrow one.
+    """
+    root, _ = _worktree(tmp_path)
+    with pytest.raises(ProjectIdentityRefused, match="worktree"):
+        ensure_scan_root_owns_identity(
+            topology=classify_root(root), project_name="canonical",
+            recorded_root_path=None, tier="agent", allow_unobservable_root=True,
+        )
