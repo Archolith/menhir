@@ -1168,6 +1168,9 @@ class MemoryGraphAdapter:
     def get_scan_fingerprint(self, project_name: str) -> str | None:
         return self._structure.get_scan_fingerprint(project_name)
 
+    def get_project_root_path(self, project_name: str) -> str | None:
+        return self._structure.get_project_root_path(project_name)
+
     #: The structure query types this adapter will dispatch (CF-164).
     #:
     #: An ALLOWLIST rather than `getattr(self._structure, f"query_{query_type}")` on the caller's

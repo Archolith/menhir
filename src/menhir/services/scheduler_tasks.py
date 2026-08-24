@@ -755,6 +755,7 @@ async def refresh_structure_graphs(
 ) -> dict[str, object]:
     """Re-scan all known projects whose file fingerprint has changed."""
     from menhir.infrastructure.project_scanner import ProjectScanner
+    from menhir.infrastructure.repo_topology import classify_root
 
     projects = await asyncio.to_thread(graph_adapter.list_structure_projects)
     if not projects:
@@ -772,6 +773,25 @@ async def refresh_structure_graphs(
         if not root_path or not os.path.isdir(root_path):
             errors += 1
             details.append({"project": name, "status": "path_missing"})
+            continue
+
+        # CF-257 phase 0. The watcher is unattended and re-scans every known project on a timer,
+        # so if a recorded root_path ever became a worktree -- a checkout moved, a directory
+        # replaced -- it would refresh the canonical project from the wrong copy on every cycle
+        # with nobody watching. The ingest guard cannot cover this: it runs at claim time, and
+        # this path re-scans an already-claimed project. Reported like `path_missing`, never
+        # raised: one unscannable project must not stop the sweep.
+        topology = await asyncio.to_thread(classify_root, root_path)
+        if not topology.may_scan:
+            errors += 1
+            details.append({
+                "project": name,
+                "status": f"identity_refused: {topology.kind.value}",
+                "detail": topology.detail,
+            })
+            logger.warning(
+                "Structure watcher refused %s at %s: %s", name, root_path, topology.detail
+            )
             continue
 
         try:

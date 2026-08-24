@@ -23,6 +23,7 @@ class ProjectIngestBackend(Protocol):
         force: bool,
         session_id: str,
         user_id: str,
+        force_identity: bool = False,
     ) -> dict[str, Any]: ...
 
     async def queue_episode(
@@ -135,6 +136,7 @@ async def execute_project_ingest(
     user_id: str,
     queue_timeout_s: float = 10.0,
     namespace: str | None = None,
+    force_identity: bool = False,
 ) -> ProjectIngestOutcome:
     """Run project scan/write and best-effort semantic queueing outside transport code.
 
@@ -158,6 +160,10 @@ async def execute_project_ingest(
         force=force,
         session_id=session_id,
         user_id=user_id,
+        # Forwarded only when set, matching `namespace` below: the override is rare and this
+        # keeps the call byte-identical for every caller that does not use it, so no existing
+        # contract test has to be rewritten to accommodate a parameter it never passes.
+        **({"force_identity": True} if force_identity else {}),
     )
     if result.get("skipped"):
         return ProjectIngestOutcome(project_name=project_name, skipped=True)

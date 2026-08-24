@@ -528,15 +528,40 @@ class RuntimeProviderDataOpsMixin:
         force: bool,
         session_id: str,
         user_id: str,
+        force_identity: bool = False,
     ) -> dict[str, Any]:
         import asyncio
         import logging as _logging
         from menhir.core.ingest_guard import ensure_ingest_path_allowed
         from menhir.infrastructure.project_scanner import ProjectScanner
         _log = _logging.getLogger(__name__)
+        from menhir.domain.project_identity import ensure_scan_root_owns_identity
+        from menhir.infrastructure.repo_topology import classify_root
         # SEC-02: confine non-operator callers to the allowed ingest roots before scanning.
-        path = str(ensure_ingest_path_allowed(path, tier=get_request_tier()))
+        tier = get_request_tier()
+        path = str(ensure_ingest_path_allowed(path, tier=tier))
         project_name = name or path.rstrip("/\\").split("/")[-1].split("\\")[-1]
+
+        # CF-257 phase 0. Project identity is a directory basename, so a worktree, a submodule or
+        # a fork sharing that basename writes into the canonical project's silo -- and because the
+        # fingerprint is looked up by the same name it mismatches, so the scan runs in full and
+        # the per-project stale prune deletes the rows that copy does not have.
+        #
+        # Ordered BEFORE the scan, not before the write: scanning a large tree we are going to
+        # refuse costs minutes for nothing, and the refusal does not depend on anything the scan
+        # produces.
+        topology = await asyncio.to_thread(classify_root, path)
+        recorded_root_path = await self._off_loop(
+            self.built.graph_adapter.get_project_root_path, project_name
+        )
+        ensure_scan_root_owns_identity(
+            topology=topology,
+            project_name=project_name,
+            recorded_root_path=recorded_root_path,
+            tier=tier,
+            force=force_identity,
+        )
+
         scanner = ProjectScanner()
         scan = await asyncio.to_thread(scanner.scan, path, project_name)
 

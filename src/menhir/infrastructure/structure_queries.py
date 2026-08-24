@@ -467,6 +467,28 @@ class StructureGraphWriter:
             return str(rows[0]["fp"])
         return None
 
+    def get_project_root_path(self, project_name: str) -> str | None:
+        """Read the directory a project was last scanned from, or None if unknown.
+
+        CF-257 phase 0. This is the only witness that a project has already been claimed by a
+        directory, and it is what catches a FORK -- an independent clone passes every git check,
+        so filesystem shape alone cannot refuse it.
+
+        Returns None both for "no such project" and for a project entity that exists only as the
+        MERGE target of a cross-project reference (measured: 2 of 63 carry no root_path). Neither
+        is a claim, so neither should refuse a scan.
+        """
+        rows = self.neo4j.execute(
+            """
+            MATCH (n:Entity {structure_project: $name, structure_role: 'project'})
+            RETURN n.root_path AS root_path
+            """,
+            {"name": project_name},
+        )
+        if rows and rows[0].get("root_path"):
+            return str(rows[0]["root_path"])
+        return None
+
     def get_file_mtimes(self, project_name: str) -> dict[str, float]:
         """Return stored file mtimes keyed by rel_path for a project.
 

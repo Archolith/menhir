@@ -17,6 +17,7 @@ async def ingest_project(
     name: str | None = None,
     force: bool = False,
     namespace: str = "",
+    force_identity: bool = False,
 ) -> str:
     """Scan a project directory and ingest its structure into the memory graph.
 
@@ -32,12 +33,17 @@ async def ingest_project(
         namespace: Optional silo for the QUEUED EPISODE -- the recallable memory this
             produces. Empty = default/global behavior. The structural graph itself is shared
             and is keyed by project, not by namespace.
+        force_identity: Operator-tier override for the CF-257 identity guard -- scan a worktree,
+            a submodule, or a directory whose basename is already claimed by another project.
+            Deliberately writes across an identity boundary; the second scan prunes the first
+            project's files.
 
     Returns:
         Summary of entities and edges written plus episode queue status.
     """
     return await IngestProjectTool().execute(
-        path=path, name=name, force=force, namespace=namespace
+        path=path, name=name, force=force, namespace=namespace,
+        **({"force_identity": True} if force_identity else {}),
     )
 
 
@@ -63,6 +69,7 @@ class IngestProjectTool(BaseTextTool):
         name: str | None = None,
         force: bool = False,
         namespace: str = "",
+        force_identity: bool = False,
     ) -> str:
         """Scan a project directory and ingest its structure into the memory graph.
 
@@ -83,7 +90,8 @@ class IngestProjectTool(BaseTextTool):
             force=force,
             session_id=session.session_id,
             user_id=session.user_id,
-            # Forwarded only when set: byte-identical call when unpinned.
+            # Both forwarded only when set: byte-identical call when neither is used.
+            **({"force_identity": True} if force_identity else {}),
             **({"namespace": namespace} if namespace else {}),
         )
         return _format_project_ingest_outcome(outcome)
