@@ -29,7 +29,10 @@ from menhir.domain.project_identity_resolution import (
     ResolutionStatus,
     resolve_identity,
 )
-from menhir.infrastructure.project_identity_binding import bind_project_identity
+from menhir.infrastructure.project_identity_binding import (
+    bind_project_identity,
+    binding_for_root,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -95,9 +98,25 @@ def settle_project_identity(
     except MalformedIdentityFile:
         raise
 
+    # A binding that already names THIS directory on THIS host is not an open question -- it is
+    # this checkout, recorded server-side. Treating it as a decision meant every one of the 60
+    # projects backfilled in phase 2b would have needed an operator answer before it could be
+    # re-scanned, and the unattended watcher would have refreshed nothing in the meantime. The
+    # host is part of the match because a path alone is not unique across machines, which is the
+    # whole reason identity is a minted id rather than a path.
+    bound_id = None
+    if existing is None and identity_action is None:
+        try:
+            bound_id = binding_for_root(graph_adapter.neo4j, str(root_path))
+        except Exception:  # pragma: no cover - an aid, never a gate
+            logger.warning("binding lookup failed for %s", root_path, exc_info=True)
+        if bound_id:
+            ensure_ignore_rule(root_path)
+            mint_identity(root_path, project_id=bound_id, display_name=display_name)
+
     resolution = resolve_identity(
         root_path=str(root_path),
-        existing_file_id=existing.project_id if existing else None,
+        existing_file_id=(existing.project_id if existing else None) or bound_id,
         candidate=None if existing else _candidate_for(graph_adapter, root_path),
         action=IdentityAction(identity_action) if identity_action else None,
         adopt_project_id=adopt_project_id,
@@ -107,20 +126,30 @@ def settle_project_identity(
         return None, resolution
 
     project_id = resolution.project_id
-    if project_id is None:
-        # action=new: mint. The ignore rule is a precondition of minting, so it is established
-        # first -- an untracked identity file eventually gets committed, and a committed id is
-        # inherited by every clone and fork.
+    adopting = identity_action == IdentityAction.ADOPT.value
+
+    if project_id is None or identity_action == IdentityAction.NEW.value:
+        # action=new: mint. An explicit `new` replaces any existing file -- that is the escape
+        # hatch after a mistaken adopt, and without it the operator has no way back.
         ensure_ignore_rule(root_path)
+        if existing is not None:
+            Path(existing.path).unlink()
         project_id = mint_identity(root_path, display_name=display_name).project_id
-    elif existing is None:
+    elif adopting and (existing is None or existing.project_id != project_id):
         # action=adopt: write the adopted id into this checkout so the next scan resolves without
-        # a decision.
+        # a decision. Replaces a file naming a different id, which is the point of adopting.
         ensure_ignore_rule(root_path)
+        if existing is not None:
+            Path(existing.path).unlink()
         project_id = mint_identity(
             root_path, project_id=project_id, display_name=display_name
         ).project_id
 
     # Compare-and-set LAST, so a conflicted identity is refused before any structure is written.
-    bind_project_identity(graph_adapter.neo4j, project_id=project_id, root_path=str(root_path))
+    # `rebind` on adopt: the recovery cases -- a moved repo, a new machine, a fresh clone -- are
+    # exactly the ones where the recorded root does NOT match, so treating adopt as a collision
+    # made the repair path break the project it was repairing.
+    bind_project_identity(
+        graph_adapter.neo4j, project_id=project_id, root_path=str(root_path), rebind=adopting
+    )
     return project_id, resolution

@@ -25,6 +25,31 @@ class _StubGraphAdapter:
     _fingerprints: dict[str, str] = field(default_factory=dict)
     _write_calls: list[tuple[str, str, str]] = field(default_factory=list)
 
+    @property
+    def neo4j(self):
+        """CF-257. The watcher now settles identity before writing, so it needs a graph handle.
+
+        Returns a binding for whatever root it is asked about, which models the state after the
+        phase 2b backfill: every known project is already bound to its directory, so a re-scan is
+        an unambiguous continuation rather than a decision. That is the behaviour these tests are
+        about -- a watcher that stopped refreshing until an operator answered would be a
+        regression, not a safeguard.
+        """
+        projects = self._projects
+
+        class _Neo4j:
+            @staticmethod
+            def execute(cypher, params=None):
+                if "MATCH (p:ProjectIdentity)" in cypher and "RETURN p.project_id AS id, " in cypher:
+                    return [{"id": f"id-{p['name']}", "root": p.get("root_path", "")}
+                            for p in projects]
+                if "MERGE (p:ProjectIdentity" in cypher:
+                    return [{"bound_root": (params or {}).get("root_path"), "state": "bound",
+                             "bound_host": (params or {}).get("host")}]
+                return []
+
+        return _Neo4j()
+
     def list_structure_projects(self) -> list[dict[str, str]]:
         return self._projects
 

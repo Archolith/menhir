@@ -110,7 +110,11 @@ def resolve_identity(
     site. Keeping the decision separate is what lets every branch -- including the ones that only
     occur on a fresh clone or a replaced machine -- be exercised without a filesystem or a graph.
     """
-    if existing_file_id:
+    # An EXPLICIT action outranks the file. Checking the file first made `identity_action` a no-op
+    # wherever one already existed, so the two cases an operator most needs -- re-pointing a
+    # checkout at a different identity, and forcing a fresh one after a bad adopt -- were
+    # unreachable, silently, with the call reporting success.
+    if existing_file_id and action is None:
         return IdentityResolution(
             status=ResolutionStatus.RESOLVED, project_id=existing_file_id
         )

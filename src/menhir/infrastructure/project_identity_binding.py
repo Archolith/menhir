@@ -21,8 +21,17 @@ identity conflicted stops both and surfaces the decision immediately.
 
 from __future__ import annotations
 
+import socket
 from dataclasses import dataclass
 from typing import Any
+
+
+def _host() -> str:
+    try:
+        return socket.gethostname().casefold()
+    except OSError:  # pragma: no cover
+        return ""
+
 
 __all__ = [
     "IdentityBindingConflict",
@@ -64,7 +73,9 @@ def ensure_binding_constraint(neo4j: Any) -> None:
     neo4j.execute(PROJECT_IDENTITY_CONSTRAINT, {})
 
 
-def bind_project_identity(neo4j: Any, *, project_id: str, root_path: str) -> BindingState:
+def bind_project_identity(
+    neo4j: Any, *, project_id: str, root_path: str, rebind: bool = False
+) -> BindingState:
     """Bind *project_id* to *root_path*, or raise if it is already bound elsewhere.
 
     One statement does the compare and the set: `MERGE` on the id, then a conditional `SET` that
@@ -77,10 +88,12 @@ def bind_project_identity(neo4j: Any, *, project_id: str, root_path: str) -> Bin
         MERGE (p:ProjectIdentity {project_id: $project_id})
           ON CREATE SET p.canonical_root_path = $root_path,
                         p.state = 'bound',
-                        p.bound_at = datetime()
-        RETURN p.canonical_root_path AS bound_root, coalesce(p.state, 'bound') AS state
+                        p.bound_at = datetime(),
+                        p.bound_host = $host
+        RETURN p.canonical_root_path AS bound_root, coalesce(p.state, 'bound') AS state,
+               p.bound_host AS bound_host
         """,
-        {"project_id": project_id, "root_path": root_path},
+        {"project_id": project_id, "root_path": root_path, "host": _host()},
     )
     if not rows:  # pragma: no cover - MERGE always returns a row
         raise IdentityBindingConflict(f"could not bind {project_id}")
@@ -96,6 +109,26 @@ def bind_project_identity(neo4j: Any, *, project_id: str, root_path: str) -> Bin
         )
 
     if _norm(bound_root) != _norm(root_path):
+        if rebind:
+            # ADOPTION. The operator has said this directory continues that project, which is the
+            # documented recovery for a moved repo, a replacement machine or a fresh clone -- and
+            # in every one of those the old root is exactly what does NOT match. Treating an adopt
+            # as a collision made the recovery path conflict with the thing it was recovering, and
+            # then marked the identity unusable for the original too, so a repair broke a working
+            # project. A rebind is deliberate and is recorded.
+            neo4j.execute(
+                """
+                MATCH (p:ProjectIdentity {project_id: $project_id})
+                SET p.previous_root_path = p.canonical_root_path,
+                    p.canonical_root_path = $root_path,
+                    p.state = 'bound',
+                    p.rebound_at = datetime()
+                """,
+                {"project_id": project_id, "root_path": root_path},
+            )
+            return BindingState(
+                project_id=project_id, canonical_root_path=root_path, state="bound"
+            )
         # Disable it for the incumbent too -- see the module docstring.
         neo4j.execute(
             """
@@ -114,6 +147,35 @@ def bind_project_identity(neo4j: Any, *, project_id: str, root_path: str) -> Bin
         )
 
     return BindingState(project_id=project_id, canonical_root_path=bound_root, state=state)
+
+
+def binding_for_root(neo4j: Any, root_path: str) -> str | None:
+    """The project id already bound to *root_path* ON THIS HOST, or None.
+
+    The host is part of the match on purpose. A path alone is not a unique identity -- two
+    machines can carry the same folder layout, which is the reason identity is a minted id rather
+    than a path at all. But the same path on the SAME host, already bound, is not ambiguous: it is
+    this checkout, and asking an operator to confirm it every time would mean 60 decisions after
+    the backfill and an unattended watcher that refreshes nothing until they are made.
+    """
+    rows = neo4j.execute(
+        """
+        MATCH (p:ProjectIdentity)
+        WHERE coalesce(p.state, 'bound') = 'bound'
+          AND coalesce(p.bound_host, $host) = $host
+        RETURN p.project_id AS id, p.canonical_root_path AS root
+        """,
+        {"host": _host()},
+    )
+    # Path normalisation happens in Python, not Cypher. Comparing separator-insensitively in
+    # Cypher needs an escaped backslash literal, which is easy to get subtly wrong and impossible
+    # to notice: a mis-escaped pattern simply matches nothing, and "no binding" reads as "new
+    # project" -- a silent wrong answer of exactly the kind CF-258 records elsewhere.
+    target = _norm(root_path)
+    for row in rows:
+        if row.get("root") and _norm(str(row["root"])) == target:
+            return str(row["id"])
+    return None
 
 
 def read_binding(neo4j: Any, project_id: str) -> BindingState | None:

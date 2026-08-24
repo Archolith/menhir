@@ -1153,6 +1153,22 @@ class MemoryGraphAdapter:
             admit_structure_writer, release_structure_writer,
         )
 
+        # CF-257. The identity invariant belongs HERE, beside the fence, for the same reason the
+        # fence does: this is the one method every structure writer funnels through. Settling
+        # identity only in `scan_and_write_project` left the watcher and the deprecated raw path
+        # writing id-less nodes -- and a NULL key does not violate a uniqueness constraint, so the
+        # invariant eroded silently from zero to 1,816 nodes with both constraints live and no
+        # error anywhere. Refusing at the choke point is what makes "every structure node carries
+        # an id" a property of the system rather than of one call path.
+        if not getattr(scan, "project_id", None):
+            raise ValueError(
+                f"Refusing to write structure for {getattr(scan, 'name', '<unknown>')!r} with no "
+                "structure_project_id. Callers must settle identity first "
+                "(services.project_identity_service.settle_project_identity). An id-less node is "
+                "invisible to the composite uniqueness constraint, so it erodes the invariant "
+                "without failing."
+            )
+
         handle = admit_structure_writer(
             self.neo4j, label=str(getattr(scan, "name", "") or "")
         )

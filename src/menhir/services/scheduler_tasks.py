@@ -757,6 +757,7 @@ async def refresh_structure_graphs(
     from menhir.infrastructure.project_scanner import ProjectScanner
     from menhir.infrastructure.repo_topology import classify_root
     from menhir.infrastructure.structure_write_fence import StructureWritesFrozen
+    from menhir.services.project_identity_service import settle_project_identity
 
     projects = await asyncio.to_thread(graph_adapter.list_structure_projects)
     if not projects:
@@ -807,6 +808,29 @@ async def refresh_structure_graphs(
         if stored_fp and stored_fp == scan.scan_fingerprint:
             skipped += 1
             continue
+
+        # CF-257. The watcher writes through the same adapter method as everything else, so it
+        # must settle identity too -- it re-scans every known project on a timer, which is exactly
+        # why leaving it out produced 1,816 id-less nodes rather than a handful. It never mints:
+        # an unattended job inventing an identity is the silent-mint failure this design refuses.
+        try:
+            project_id, resolution = await asyncio.to_thread(
+                settle_project_identity,
+                graph_adapter, root_path=root_path, display_name=name,
+            )
+        except Exception as exc:  # noqa: BLE001 - one project must not stop the sweep
+            errors += 1
+            details.append({"project": name, "status": f"identity_error: {exc}"})
+            continue
+        if project_id is None:
+            skipped += 1
+            details.append({
+                "project": name,
+                "status": "identity_needs_decision",
+                "reason": resolution.reason,
+            })
+            continue
+        scan.project_id = project_id
 
         try:
             # write_project_structure MERGEs thousands of nodes/edges — a heavy synchronous Neo4j

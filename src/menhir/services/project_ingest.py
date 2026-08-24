@@ -64,6 +64,12 @@ class ProjectIngestOutcome:
     background: bool = False
     skipped: bool = False
     error: str | None = None
+    #: CF-257. Set when the scan could not settle WHICH identity to write under. This is not a
+    #: success and not an error: no work was done and the caller can retry with a decision. It
+    #: needs its own field because a zero-count result is indistinguishable from a real scan of an
+    #: empty project -- which is exactly how "Scanned demo: 0 entities, 0 edges" got reported as
+    #: success while nothing had been written.
+    needs_decision: dict[str, Any] | None = None
     episode: ProjectEpisodeOutcome = field(
         default_factory=lambda: ProjectEpisodeOutcome(ProjectEpisodeStatus.NOT_REQUESTED)
     )
@@ -137,6 +143,8 @@ async def execute_project_ingest(
     queue_timeout_s: float = 10.0,
     namespace: str | None = None,
     force_identity: bool = False,
+    identity_action: str | None = None,
+    adopt_project_id: str | None = None,
 ) -> ProjectIngestOutcome:
     """Run project scan/write and best-effort semantic queueing outside transport code.
 
@@ -164,7 +172,11 @@ async def execute_project_ingest(
         # keeps the call byte-identical for every caller that does not use it, so no existing
         # contract test has to be rewritten to accommodate a parameter it never passes.
         **({"force_identity": True} if force_identity else {}),
+        **({"identity_action": identity_action} if identity_action else {}),
+        **({"adopt_project_id": adopt_project_id} if adopt_project_id else {}),
     )
+    if result.get("status") == "needs_decision":
+        return ProjectIngestOutcome(project_name=project_name, needs_decision=result)
     if result.get("skipped"):
         return ProjectIngestOutcome(project_name=project_name, skipped=True)
 

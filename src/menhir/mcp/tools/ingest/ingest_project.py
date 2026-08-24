@@ -18,6 +18,8 @@ async def ingest_project(
     force: bool = False,
     namespace: str = "",
     force_identity: bool = False,
+    identity_action: str | None = None,
+    adopt_project_id: str | None = None,
 ) -> str:
     """Scan a project directory and ingest its structure into the memory graph.
 
@@ -44,6 +46,8 @@ async def ingest_project(
     return await IngestProjectTool().execute(
         path=path, name=name, force=force, namespace=namespace,
         **({"force_identity": True} if force_identity else {}),
+        **({"identity_action": identity_action} if identity_action else {}),
+        **({"adopt_project_id": adopt_project_id} if adopt_project_id else {}),
     )
 
 
@@ -70,6 +74,8 @@ class IngestProjectTool(BaseTextTool):
         force: bool = False,
         namespace: str = "",
         force_identity: bool = False,
+        identity_action: str | None = None,
+        adopt_project_id: str | None = None,
     ) -> str:
         """Scan a project directory and ingest its structure into the memory graph.
 
@@ -90,8 +96,10 @@ class IngestProjectTool(BaseTextTool):
             force=force,
             session_id=session.session_id,
             user_id=session.user_id,
-            # Both forwarded only when set: byte-identical call when neither is used.
+            # Forwarded only when set: byte-identical call when none is used.
             **({"force_identity": True} if force_identity else {}),
+            **({"identity_action": identity_action} if identity_action else {}),
+            **({"adopt_project_id": adopt_project_id} if adopt_project_id else {}),
             **({"namespace": namespace} if namespace else {}),
         )
         return _format_project_ingest_outcome(outcome)
@@ -100,6 +108,26 @@ class IngestProjectTool(BaseTextTool):
 def _format_project_ingest_outcome(outcome: ProjectIngestOutcome) -> str:
     """Format a transport-neutral project-ingest outcome for the MCP text surface."""
 
+    if outcome.needs_decision:
+        nd = outcome.needs_decision
+        lines = [
+            f"NOT SCANNED -- {outcome.project_name} needs an identity decision "
+            f"({nd.get('reason')}).",
+            f"  directory: {nd.get('directory')}",
+        ]
+        for c in nd.get("candidates") or []:
+            lines.append(
+                f"  candidate: project_id={c.get('project_id')} "
+                f"name={c.get('display_name')} entities={c.get('entity_count')} "
+                f"last_scan={c.get('last_scan')} recorded_root={c.get('recorded_root_path')}"
+            )
+        if not (nd.get("candidates") or []):
+            lines.append("  no candidate: nothing recorded at this directory.")
+        lines.append(
+            "  Retry with identity_action='adopt' and adopt_project_id=<id> to continue an "
+            "existing project, or identity_action='new' to mint a fresh identity."
+        )
+        return chr(10).join(lines)
     if outcome.error:
         return f"Error: {outcome.error}"
     if outcome.skipped:
