@@ -596,6 +596,38 @@ class RuntimeProviderDataOpsMixin:
         # asynchronously and is logged on completion.
         async def _do_write() -> None:
             try:
+                # CF-257 phase 0. The ownership decision above was made BEFORE the scan, and
+                # scanning a large tree takes minutes; this task then runs later still. In that
+                # window another root can claim the name, or this directory can become a
+                # worktree -- after which the write below would land under an identity that is no
+                # longer this root's, and the per-project stale prune would delete the other
+                # copy's files. Re-checked here for the same reason `_background_symbol_rescan`
+                # re-checks: a detached task cannot inherit a decision's freshness, only its
+                # value. The root was scannable moments ago, so shape is observable and the full
+                # refusal applies.
+                from menhir.domain.project_identity import (
+                    ProjectIdentityRefused, ensure_scan_root_owns_identity,
+                )
+                from menhir.infrastructure.repo_topology import classify_root
+                try:
+                    ensure_scan_root_owns_identity(
+                        topology=await asyncio.to_thread(classify_root, path),
+                        project_name=project_name,
+                        recorded_root_path=await self._off_loop(
+                            self.built.graph_adapter.get_project_root_path, project_name
+                        ),
+                        tier=tier,
+                        force=force_identity,
+                    )
+                except ProjectIdentityRefused as exc:
+                    _log.warning(
+                        "scan_and_write_project write refused: project=%s error=%s",
+                        project_name, exc,
+                    )
+                    _push_background_error(
+                        session_id, f"ingest {project_name} refused: {exc}"
+                    )
+                    return
                 counts = await asyncio.to_thread(
                     self.built.graph_adapter.write_project_structure,
                     scan,

@@ -674,10 +674,20 @@ _OP_TIER_OPERATOR = {
     "scheduler_force_takeover", "scheduler_pause", "scheduler_resume",
     "promote_candidate", "reject_candidate", "approve_candidate",
     "promote_memory",
+    # CF-257 phase 0. Raised from agent tier. This op writes a structure payload the CALLER
+    # produced, and judges it using a `root_path` the same caller supplied -- so the server
+    # classifies a path string, never the directory that actually produced the payload. A remote
+    # worktree that reports the server's canonical path is classified as the canonical clone and
+    # accepted, and the write carries the per-project stale prune. No metadata check can close
+    # that, because every input to it is attacker-controlled; the only sound options are a
+    # trusted server-side scan (`scan_and_write_project`, which is the modern path) or operator
+    # tier. It also always belonged here by this file's own rule: the sets below reserve operator
+    # for what deletes, and the stale prune deletes.
+    "write_project_structure",
 }
 _OP_TIER_AGENT = {
     "queue_episode", "flag_memory", "unflag_memory", "enqueue_pending_episode",
-    "ingest_document", "scan_and_write_project", "write_project_structure",
+    "ingest_document", "scan_and_write_project",
     "create_todo", "close_todo", "delete_todo", "close_stale_todos",
     "create_temporal", "complete_temporal", "create_candidate",
     # Artifact writes. Declaring a relationship or moving a lifecycle state is
