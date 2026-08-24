@@ -243,6 +243,8 @@ class BackendClientOpsMixin:
     async def scan_and_write_project(
         self, path: str, *, name: str | None, force: bool, session_id: str, user_id: str,
         force_identity: bool = False,
+        identity_action: str | None = None,
+        adopt_project_id: str | None = None,
     ) -> dict[str, Any]:
         return await self._request(
             "scan_and_write_project",
@@ -253,6 +255,8 @@ class BackendClientOpsMixin:
                 "session_id": session_id,
                 "user_id": user_id,
                 "force_identity": force_identity,
+                "identity_action": identity_action,
+                "adopt_project_id": adopt_project_id,
             },
         )
 

@@ -106,6 +106,7 @@ class StructureGraphWriter:
         # 1. Project entity
         self._merge_entity(
             structure_project=scan.name,
+            structure_project_id=getattr(scan, "project_id", None),
             structure_path=".",
             structure_role="project",
             name=scan.name,
@@ -133,6 +134,7 @@ class StructureGraphWriter:
             {
                 "uuid": str(uuid4()),
                 "structure_project": scan.name,
+                "structure_project_id": getattr(scan, "project_id", None),
                 "structure_path": d.rel_path,
                 "structure_role": "directory",
                 "name": d.rel_path.rstrip("/").split("/")[-1],
@@ -161,6 +163,7 @@ class StructureGraphWriter:
             {
                 "uuid": str(uuid4()),
                 "structure_project": scan.name,
+                "structure_project_id": getattr(scan, "project_id", None),
                 "structure_path": f.rel_path,
                 "structure_role": f.role,
                 "name": f.rel_path.split("/")[-1],
@@ -211,6 +214,7 @@ class StructureGraphWriter:
             {
                 "uuid": str(uuid4()),
                 "structure_project": scan.name,
+                "structure_project_id": getattr(scan, "project_id", None),
                 "structure_path": f"dep:{dep}",
                 "structure_role": "dependency",
                 "name": dep,
@@ -241,6 +245,7 @@ class StructureGraphWriter:
             {
                 "uuid": str(uuid4()),
                 "structure_project": scan.name,
+                "structure_project_id": getattr(scan, "project_id", None),
                 "structure_path": f"endpoint:{ep.name}",
                 "structure_role": "endpoint",
                 "name": ep.name,
@@ -1667,10 +1672,12 @@ class StructureGraphWriter:
         user_id: str,
         now: str,
         extra: dict[str, Any] | None = None,
+        structure_project_id: str | None = None,
     ) -> None:
         props = {
             **_ENTITY_DEFAULTS,
             "structure_project": structure_project,
+            "structure_project_id": structure_project_id,
             "structure_path": structure_path,
             "structure_role": structure_role,
             "name": name,
@@ -1689,12 +1696,14 @@ class StructureGraphWriter:
             ON CREATE SET n += $props, n.uuid = $uuid
             ON MATCH SET n += $extra, n.content = $content, n.last_accessed = $now,
                          n.structure_role = $role, n.name = $name,
+                         n.structure_project_id = coalesce($spid, n.structure_project_id),
                          n.group_id = coalesce(n.group_id, ''),
                          n.summary = coalesce(n.summary, '')
             """,
             {
                 "sp": structure_project,
                 "spath": structure_path,
+                "spid": structure_project_id,
                 "uuid": str(uuid4()),
                 "props": props,
                 "extra": extra or {},
@@ -1725,6 +1734,7 @@ class StructureGraphWriter:
                 n.group_id = '',
                 n.structure_role = row.structure_role,
                 n.structure_project = row.structure_project,
+                n.structure_project_id = row.structure_project_id,
                 n.structure_path = row.structure_path,
                 n.file_mtime = coalesce(row.file_mtime, 0.0),
                 n.hot_count = 0,
@@ -1764,6 +1774,7 @@ class StructureGraphWriter:
                 n.summary = '',
                 n.structure_role = row.structure_role,
                 n.structure_project = row.structure_project,
+                n.structure_project_id = row.structure_project_id,
                 n.structure_path = row.structure_path,
                 n.symbol_kind = row.symbol_kind,
                 n.symbol_line = row.symbol_line,

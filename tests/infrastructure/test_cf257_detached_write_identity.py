@@ -55,6 +55,13 @@ def ops(monkeypatch, tmp_path):
         mod, "_push_background_error", lambda session_id, msg: errors.append(msg)
     )
 
+    class _Neo4j:
+        """Enough of the graph for identity settling: no candidate, binding always accepted."""
+        def execute(self, cypher, params=None):
+            if "MERGE (p:ProjectIdentity" in cypher:
+                return [{"bound_root": (params or {}).get("root_path"), "state": "bound"}]
+            return []
+
     instance = RuntimeProviderDataOpsMixin()
     # The mixin normally gets `_off_loop` from the class it is mixed into; here it just has to
     # run the callable, since the stubs do no blocking I/O.
@@ -66,6 +73,7 @@ def ops(monkeypatch, tmp_path):
             get_scan_fingerprint=lambda name: None,
             get_project_root_path=lambda name: None,
             write_project_structure=lambda scan, s, u: written.append(scan.name) or {},
+            neo4j=_Neo4j(),
         )
     )
     return SimpleNamespace(
@@ -75,6 +83,10 @@ def ops(monkeypatch, tmp_path):
 
 
 async def _run_and_drain(ops_bundle, **kwargs):
+    # `identity_action="new"` models a first scan of a fresh checkout: CF-257 phase 1 never mints
+    # silently, so without an action every call here would return needs_decision and no test below
+    # would reach the write it is actually about.
+    kwargs.setdefault("identity_action", "new")
     result = await ops_bundle.ops.scan_and_write_project(
         str(ops_bundle.root), name="proj", force=True,
         session_id="s", user_id="u", **kwargs,

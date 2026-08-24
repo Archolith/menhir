@@ -253,6 +253,8 @@ class MemoryBackend(Protocol):
         session_id: str,
         user_id: str,
         force_identity: bool = False,
+        identity_action: str | None = None,
+        adopt_project_id: str | None = None,
     ) -> dict[str, Any]:
         """Run the project scanner server-side and write the structure graph.
 

@@ -529,6 +529,8 @@ class RuntimeProviderDataOpsMixin:
         session_id: str,
         user_id: str,
         force_identity: bool = False,
+        identity_action: str | None = None,
+        adopt_project_id: str | None = None,
     ) -> dict[str, Any]:
         import asyncio
         import logging as _logging
@@ -562,8 +564,30 @@ class RuntimeProviderDataOpsMixin:
             force=force_identity,
         )
 
+        # CF-257 phase 1. Settle WHICH identity this scan writes under, before scanning: an
+        # undecidable identity is not worth a multi-minute walk, and the decision cannot depend on
+        # anything the scan produces. `project_id` is stamped alongside the name -- the MERGE key
+        # is still the name until phase 3, so this records the identity without yet relying on it.
+        from menhir.services.project_identity_service import settle_project_identity
+        project_id, resolution = await asyncio.to_thread(
+            settle_project_identity,
+            self.built.graph_adapter,
+            root_path=path,
+            display_name=project_name,
+            identity_action=identity_action,
+            adopt_project_id=adopt_project_id,
+        )
+        if project_id is None:
+            # A typed result, not an exception: the callers are one-shot MCP and HTTP requests
+            # with no interactive channel, and the watcher is unattended. Returning the payload
+            # lets each decide -- retry with an action, or skip and report.
+            return resolution.as_dict()
+
         scanner = ProjectScanner()
         scan = await asyncio.to_thread(scanner.scan, path, project_name)
+        # Carried on the scan so every writer under `write_project` stamps it without a second
+        # parameter threaded through four batch helpers.
+        scan.project_id = project_id
 
         if not force:
             stored_fp = await self._off_loop(
