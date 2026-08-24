@@ -71,6 +71,17 @@ def sidecar(tmp_path) -> Path:
             "INSERT INTO lifecycle_actions (node_uuid, notes) VALUES (?, ?)",
             [("node-1", "a note about node-1"), (None, "a stranded note with no key")],
         )
+        # Keyed ONLY by session_id, which a namespace filter cannot resolve. This is the table
+        # that exercises the omission branch; lifecycle_actions resolves via node_uuid and so
+        # exercises narrowing instead.
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS recall_receipts "
+            "(id INTEGER PRIMARY KEY, session_id TEXT, reason TEXT)"
+        )
+        conn.executemany(
+            "INSERT INTO recall_receipts (session_id, reason) VALUES (?, ?)",
+            [("sess-1", "why this was recalled"), ("sess-2", "another reason")],
+        )
     return db_path
 
 
@@ -330,3 +341,160 @@ def test_the_export_runs_against_a_real_graph(test_neo4j_repo, tmp_path, sidecar
     assert len(edges) == 1
     assert edges[0]["properties"]["fact"] == "a relates to b"
     assert "fact_embedding" not in edges[0]["properties"]
+
+
+# ---------------------------------------------------------------------------
+# Defects found reviewing the first implementation (bf1b79ee)
+# ---------------------------------------------------------------------------
+
+
+def test_the_export_never_creates_the_erasure_subjects_table(tmp_path):
+    """READ-ONLY, enforced. The obvious helper would have made an export MUTATE the sidecar.
+
+    `ErasureSubjectStore.has_live_erasure` calls `_ensure_ready`, which issues CREATE TABLE,
+    CREATE INDEX and mkdirs the parent directory. The first implementation used it, so pointing an
+    "export" at a telemetry database created schema in it. The suppression state is now read
+    through a `mode=ro` URI instead.
+    """
+    db_path = tmp_path / "no_erasures.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "CREATE TABLE lifecycle_actions (id INTEGER PRIMARY KEY, node_uuid TEXT, notes TEXT)"
+        )
+        conn.execute("INSERT INTO lifecycle_actions (node_uuid, notes) VALUES ('node-1', 'hi')")
+
+    export_subject_data(
+        _FakeNeo4j([_node("node-1")]), output_dir=tmp_path / "bundle", telemetry_db_path=db_path
+    )
+
+    with sqlite3.connect(db_path) as conn:
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert "erasure_subjects" not in tables, "the export created schema in the operator's sidecar"
+
+
+def test_the_sidecar_connection_refuses_writes(tmp_path, sidecar):
+    """The read-only claim is enforced by SQLite, not by reviewing the statements."""
+    from menhir.services.subject_export import _connect_readonly
+
+    conn = _connect_readonly(sidecar)
+    try:
+        with pytest.raises(sqlite3.OperationalError, match="readonly"):
+            conn.execute("CREATE TABLE should_not_exist (x INTEGER)")
+    finally:
+        conn.close()
+
+
+def test_a_namespace_level_erasure_withholds_its_nodes_from_a_whole_store_export(tmp_path, sidecar):
+    """The first implementation checked only NODE_UUID subjects.
+
+    `suppressed_node_uuids` matches NODE_UUID rows, so a namespace-level erasure suppressed
+    nothing in a whole-store export: every node in the doomed namespace was exported while the
+    manifest simultaneously listed that namespace as suppressed. The suppression set is now read
+    whole and covers every subject type.
+    """
+    _record_live_erasure(sidecar, "NAMESPACE", "doomed")
+    out = tmp_path / "bundle"
+
+    manifest = export_subject_data(
+        _FakeNeo4j(
+            [_node("keep-1", namespace="default"), _node("doomed-1", namespace="doomed")],
+            [],
+        ),
+        output_dir=out,
+        telemetry_db_path=sidecar,
+    )
+
+    assert {r["uuid"] for r in _lines(out / "graph_nodes.jsonl")} == {"keep-1"}
+    assert manifest["withheld_node_uuids"] == 1
+
+
+def test_no_exported_edge_references_a_node_the_bundle_lacks(tmp_path, sidecar):
+    """A bundle that names nodes it does not contain is not a standalone record.
+
+    The first implementation filtered relationships on the START node only, so an edge leaving the
+    exported set kept a dangling `end_uuid` -- and under a namespace filter carried its `fact` text
+    about a node outside the scope.
+    """
+    out = tmp_path / "bundle"
+    export_subject_data(
+        _FakeNeo4j([_node("node-1")], [_rel("node-1", "node-elsewhere")]),
+        output_dir=out,
+        telemetry_db_path=sidecar,
+    )
+
+    exported = {r["uuid"] for r in _lines(out / "graph_nodes.jsonl")}
+    for edge in _lines(out / "graph_relationships.jsonl"):
+        assert edge["start_uuid"] in exported and edge["end_uuid"] in exported
+
+
+def test_a_namespace_filter_narrows_a_table_it_can_resolve(tmp_path, sidecar):
+    """`lifecycle_actions` is keyed by node_uuid, so the filter narrows it to exported nodes."""
+    out = tmp_path / "bundle"
+    manifest = export_subject_data(
+        _FakeNeo4j([_node("node-9", namespace="yawn")]),
+        output_dir=out,
+        telemetry_db_path=sidecar,
+        namespace="yawn",
+    )
+
+    rows = _lines(out / "sidecar_lifecycle_actions.jsonl")
+    assert all(r["node_uuid"] == "node-9" for r in rows), (
+        "a namespace-filtered bundle contains rows for nodes outside the namespace"
+    )
+    assert "lifecycle_actions" not in manifest["coverage"]["omitted_sidecar_tables"]
+
+
+def test_a_namespace_filter_omits_a_table_it_cannot_narrow_and_names_it(tmp_path, sidecar):
+    """Over-export into a scoped extract is the direction that LEAKS.
+
+    `recall_receipts` is keyed only by session_id, which a namespace filter cannot resolve. The
+    first implementation exported every row of such a table regardless of the filter, so a 'yawn'
+    bundle carried other projects' telemetry. Omission is the safe side of that trade, and the
+    manifest has to name what it dropped or the omission is just a different silent gap.
+
+    NOTE this must be a table the filter genuinely cannot resolve. An earlier version of this test
+    used lifecycle_actions, which resolves via node_uuid and returns zero rows anyway -- so it
+    passed whether or not the omission branch existed, and a mutation removing that branch escaped.
+    """
+    out = tmp_path / "bundle"
+    manifest = export_subject_data(
+        _FakeNeo4j([_node("node-9", namespace="yawn")]),
+        output_dir=out,
+        telemetry_db_path=sidecar,
+        namespace="yawn",
+    )
+
+    assert "recall_receipts" in manifest["coverage"]["omitted_sidecar_tables"]
+    assert "recall_receipts" not in manifest["sidecar_rows"]
+    assert not (out / "sidecar_recall_receipts.jsonl").exists()
+    assert any("OMITTED" in note or "omitted" in note for note in manifest["coverage"]["notes"])
+
+
+def test_a_whole_store_export_still_includes_that_table(tmp_path, sidecar):
+    """The omission is a property of the FILTER, not of the table. Without this, the test above is
+    satisfied by an export that simply never emits recall_receipts."""
+    out = tmp_path / "bundle"
+    manifest = export_subject_data(
+        _FakeNeo4j([_node("node-1")]), output_dir=out, telemetry_db_path=sidecar
+    )
+
+    assert manifest["sidecar_rows"]["recall_receipts"] == 2
+    assert not manifest["coverage"]["omitted_sidecar_tables"]
+
+
+def test_a_failure_partway_through_leaves_no_bundle(tmp_path, sidecar, monkeypatch):
+    """A directory of JSONL with no manifest still looks like a record."""
+    import menhir.services.subject_export as se
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("sidecar exploded")
+
+    monkeypatch.setattr(se, "_export_sidecar", _boom)
+    out = tmp_path / "bundle"
+
+    with pytest.raises(RuntimeError, match="sidecar exploded"):
+        export_subject_data(
+            _FakeNeo4j([_node("node-1")]), output_dir=out, telemetry_db_path=sidecar
+        )
+
+    assert not out.exists(), "a partial bundle survived a mid-export failure"
