@@ -177,3 +177,65 @@ def test_the_raw_structure_writer_requires_operator_tier():
     # The server-side scan remains available at agent tier: it produces the structure itself, so
     # the payload is not caller-controlled and the guard judges a directory it actually read.
     assert "scan_and_write_project" in _OP_TIER_AGENT
+
+
+# ---------------------------------------------------------------------------
+# Deprecation bridge: loud refusal, measured use, evidence-gated removal
+# ---------------------------------------------------------------------------
+
+@pytest.mark.unit
+def test_the_raw_writer_is_marked_deprecated_with_an_actionable_message():
+    """A refusal that only says 'wrong tier' teaches a client nothing.
+
+    The operator gate is a migration bridge, so the failure has to carry the migration target --
+    a caller learns it from the error itself rather than from a changelog they may never read.
+    """
+    from menhir.api.routes_support import DEPRECATED_OPERATIONS, deprecated_operation_notice
+
+    notice = deprecated_operation_notice("write_project_structure")
+    assert notice is not None
+    assert "scan_and_write_project" in notice, "must name the replacement"
+    assert "operator" in notice, "must name the other way through"
+    assert "write_project_structure" in DEPRECATED_OPERATIONS
+    # A current operation must not be flagged, or the notice means nothing.
+    assert deprecated_operation_notice("scan_and_write_project") is None
+
+
+@pytest.mark.unit
+def test_both_admitted_and_refused_calls_are_recorded(monkeypatch):
+    """Removal is gated on evidence of no LEGITIMATE use, which refusals alone cannot show.
+
+    A window with zero refusals proves only that nobody under-privileged tried. If the admitted
+    count were not also recorded, an endpoint an operator still runs could be deleted on the
+    strength of a silence that was never about them.
+    """
+    import menhir.api.routes_support as rs
+
+    seen: list[dict] = []
+    # Patch the FUNCTION on the real module: `from pkg import mod` resolves the package
+    # attribute, so swapping sys.modules leaves the already-imported package untouched and the
+    # test silently observes nothing.
+    monkeypatch.setattr(
+        "menhir.infrastructure.telemetry.recorders.record_mcp_event",
+        lambda **kwargs: seen.append(kwargs),
+    )
+    rs.record_deprecated_operation_call("write_project_structure", admitted=False)
+    rs.record_deprecated_operation_call("write_project_structure", admitted=True)
+
+    assert [e["success"] for e in seen] == [False, True]
+    assert {e["operation"] for e in seen} == {"write_project_structure"}
+    assert all(e["kind"] == "deprecated_operation" for e in seen)
+
+
+@pytest.mark.unit
+def test_measurement_failure_never_breaks_the_request(monkeypatch):
+    """This runs on the path of an already-failing call. Telemetry must not add a second fault."""
+    import menhir.api.routes_support as rs
+
+    def _boom(**kwargs):
+        raise RuntimeError("telemetry down")
+
+    monkeypatch.setattr(
+        "menhir.infrastructure.telemetry.recorders.record_mcp_event", _boom
+    )
+    rs.record_deprecated_operation_call("write_project_structure", admitted=False)  # must not raise

@@ -705,6 +705,58 @@ assert _OP_TIER_OPERATOR <= _BACKEND_METHODS and _OP_TIER_AGENT <= _BACKEND_METH
 )
 
 
+#: Operations kept alive only as a migration bridge, with the message a caller should act on.
+#:
+#: CF-257. `write_project_structure` writes a structure payload the CALLER produced and judges it
+#: with a `root_path` the same caller supplied, so the server classifies a path string rather than
+#: the directory that produced the payload -- and the write carries the per-project stale prune.
+#: No metadata check closes that, because every input to it is caller-controlled. The operator gate
+#: is a bridge, NOT the permanent design: the endpoint is removed once phase 3 makes project ids
+#: authoritative and an observation window shows no legitimate use.
+#:
+#: Failing loudly beats silently accepting an unverifiable payload that deletes rows, so the
+#: refusal must say what to do instead rather than only what went wrong.
+DEPRECATED_OPERATIONS: dict[str, str] = {
+    "write_project_structure": (
+        "write_project_structure is DEPRECATED and will be removed. It accepts a structure "
+        "payload the caller produced and cannot verify which directory produced it, so a stale "
+        "or secondary checkout can overwrite a project and prune its files. "
+        "Use scan_and_write_project instead -- it scans server-side, so the structure is "
+        "verified against a directory the server actually read. If you must submit a "
+        "pre-computed payload, call this operation with an operator-tier credential."
+    ),
+}
+
+
+def deprecated_operation_notice(operation: str) -> str | None:
+    """The actionable message for a deprecated operation, or None if it is current."""
+    return DEPRECATED_OPERATIONS.get(operation)
+
+
+def record_deprecated_operation_call(operation: str, *, admitted: bool) -> None:
+    """Count a call to a deprecated operation, so removal rests on evidence.
+
+    BOTH outcomes are recorded, not only refusals. A window with zero refusals proves only that
+    nobody under-privileged tried; showing there is no LEGITIMATE use needs the admitted count to
+    be zero as well. Removing on refusals alone would delete an endpoint an operator still runs.
+
+    Best-effort by construction: telemetry must never break the operation it observes, and this
+    sits on the request path of an already-failing call.
+    """
+    try:
+        from menhir.infrastructure.telemetry import recorders
+
+        recorders.record_mcp_event(
+            kind="deprecated_operation",
+            operation=operation,
+            duration_ms=0,
+            success=admitted,
+            payload={"admitted": admitted, "tier": get_request_tier() or ""},
+        )
+    except Exception:  # pragma: no cover - never let measurement break the caller
+        logger.debug("deprecated-op telemetry failed for %s", operation, exc_info=True)
+
+
 def _required_tier_for_operation(operation: str) -> str:
     if operation in _OP_TIER_OPERATOR:
         return "operator"

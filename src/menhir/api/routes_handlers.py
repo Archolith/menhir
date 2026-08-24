@@ -285,7 +285,39 @@ async def backend_invoke_impl(
     if operation not in backend_methods:
         raise RuntimeError(f"Unknown backend operation: {operation}")
     required_tier = required_tier_for_operation(operation)
-    require_tier(required_tier)
+
+    # CF-257. A deprecated operation still runs for whoever is entitled to it, but every call is
+    # counted and every refusal explains what to use instead. Both outcomes are recorded: removal
+    # is gated on an observation window showing no LEGITIMATE use, and refusals alone cannot show
+    # that -- an operator may still be relying on it.
+    from menhir.api.routes_support import (
+        deprecated_operation_notice,
+        record_deprecated_operation_call,
+    )
+    deprecation_notice = deprecated_operation_notice(operation)
+    if deprecation_notice is None:
+        require_tier(required_tier)
+    else:
+        try:
+            require_tier(required_tier)
+        except HTTPException as exc:
+            record_deprecated_operation_call(operation, admitted=False)
+            logger.warning(
+                "Refused a deprecated operation: operation=%s required_tier=%s",
+                operation, required_tier,
+            )
+            # The tier decision and its status code are preserved; only the guidance is added,
+            # so a caller learns the migration target from the failure itself rather than from
+            # a changelog they may never read.
+            raise HTTPException(
+                status_code=exc.status_code,
+                detail=f"{exc.detail}. {deprecation_notice}",
+            ) from exc
+        record_deprecated_operation_call(operation, admitted=True)
+        logger.warning(
+            "Deprecated operation invoked: operation=%s -- see DEPRECATED_OPERATIONS", operation
+        )
+
     if required_tier == "operator":
         try_record_destructive_op_rest(operation)
     caller_session = resolve_caller_session(request)

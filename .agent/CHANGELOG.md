@@ -1,5 +1,54 @@
 # Changelog
 
+## 2026-08-24 - CF-257 phase 0: a scan root must own the project identity it writes under
+
+- **Project identity is a directory basename**, so two directories sharing one are a single
+  project: the writers are `MERGE ... SET`, the fingerprint is looked up by the same name, and a
+  scan from the wrong copy overwrites the canonical rows *and* runs the per-project stale prune,
+  deleting the files that copy lacks. Measured on this workspace: 167 git repos, **7 basenames
+  claimed by more than one**, including three worktrees keeping the repo's own basename and one
+  fork (`projects/forked/yawn.frontend` against `projects/yawn/yawn.frontend`). The hazard had not
+  fired -- all 61 project entities recorded a canonical `root_path` -- but its only witness is one
+  last-writer-wins field, so the check proving it had not fired is the check that stops working
+  the moment it does.
+- Two refusals, because neither covers the other. Shape refuses a **worktree or submodule** with no
+  graph state, catching a first-ever scan. A **fork** is an independent clone that passes every git
+  check and is caught only by the project already recording a different `root_path`.
+- `repo_topology.classify_root` resolves checkout shape **from files, never from `git`**. On this
+  workspace `git rev-parse` fails two ways: `dubious ownership` on live worktrees under a different
+  user, and `not a git repository` on the 7-of-81 whose gitdir no longer exists. Reading `.git` and
+  `commondir` directly needs no ownership check. The existing `_is_independent_clone` was not
+  reusable: it is `isdir(".git")`, false for non-git directories too, so it would have refused
+  ordinary project directories.
+- The guard runs at **every writer, and again inside every detached one**. A task scheduled before
+  a minutes-long scan inherits its decision's value, not its freshness, so both the background
+  ingest write and the background symbol rescan re-classify and re-read the recorded root
+  immediately before writing. The unattended structure watcher gets the shape check too, reported
+  like `path_missing` rather than raised, so one unscannable project cannot stop the sweep.
+- Override is operator-tier and **cannot admit an unidentifiable root**: "I know this is a second
+  checkout and want it anyway" is coherent; "I know this pointer is broken and want it anyway" is
+  not, because nothing downstream knows what identity was meant.
+
+### DEPRECATED: `write_project_structure`
+
+**This operation now requires operator tier and will be REMOVED after phase 3.**
+
+It writes a structure payload the *caller* produced and judges it with a `root_path` the *same
+caller* supplied, so the server classifies a path string rather than the directory that produced
+the payload. A stale or secondary checkout reporting the canonical path is accepted -- and the
+write carries the stale prune, so it deletes rows. No metadata check closes this, because every
+input to the check is caller-controlled.
+
+- **Migrate to `scan_and_write_project`**, which scans server-side; the payload is not
+  caller-controlled and the guard judges a directory the server actually read.
+- If a pre-computed payload is genuinely required, call it with an **operator-tier credential**.
+- Refusals carry the migration target in the error body rather than only "wrong tier".
+- **Both admitted and refused calls are counted** (`kind="deprecated_operation"`). Removal is gated
+  on an observation window through phase 3 showing no *legitimate* use -- refusals alone would only
+  show that nobody under-privileged tried, and could delete an endpoint an operator still runs.
+
+The operator gate is a migration bridge, not the permanent design.
+
 ## 2026-08-18 - CF-165 wave 4: erasure is wired, recoverable, and enforced on read
 
 - `delete_memory` and `delete_namespace` now run the erasure saga instead of issuing graph-only

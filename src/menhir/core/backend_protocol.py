@@ -261,6 +261,9 @@ class MemoryBackend(Protocol):
         """
         ...
 
+    # DEPRECATED (CF-257): removed after phase 3, see `DEPRECATED_OPERATIONS` in routes_support.
+    # Prefer `scan_and_write_project`, which scans server-side so the payload is not
+    # caller-controlled. Requires operator tier as of phase 0.
     async def write_project_structure(
         self,
         scan: dict[str, Any],

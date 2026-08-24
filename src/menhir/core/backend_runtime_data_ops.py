@@ -664,6 +664,18 @@ class RuntimeProviderDataOpsMixin:
     async def write_project_structure(
         self, scan: dict[str, Any], *, session_id: str, user_id: str
     ) -> dict[str, int]:
+        """DEPRECATED (CF-257) -- removed after phase 3. Use `scan_and_write_project`.
+
+        This writes a structure payload the CALLER produced and judges it with a `root_path` the
+        same caller supplied, so the server classifies a path string rather than the directory
+        that produced the payload. A stale or secondary checkout reporting the canonical path is
+        accepted, and the write carries the per-project stale prune -- so it deletes rows. No
+        metadata check closes that, because every input to the check is caller-controlled.
+
+        Operator tier is a MIGRATION BRIDGE, not the design: it makes the failure loud for
+        agent-tier callers while legitimate use is measured. Removal is gated on an observation
+        window through phase 3 showing no admitted calls, plus a release note.
+        """
         import asyncio as _asyncio
 
         from menhir.core.ingest_guard import ensure_ingest_path_allowed
