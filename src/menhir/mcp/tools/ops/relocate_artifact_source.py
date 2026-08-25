@@ -60,6 +60,11 @@ class RelocateArtifactSourceTool(BaseTextTool):
     description = (
         "Move one work-artifact source's locator, preserving identity and every relationship."
     )
+    title = "Relocate Artifact Source"
+    oauth_scopes = ("menhir:write",)
+    read_only_hint = False
+    destructive_hint = False
+    open_world_hint = False
 
     async def endpoint(
         self,

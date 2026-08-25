@@ -31,6 +31,11 @@ class ListArtifactsTool(BaseTextTool):
     name = "list_artifacts"
     scope = ToolScope.NAMESPACED
     required_tier = "readonly"
+    title = "List Work Artifacts"
+    oauth_scopes = ("menhir:read",)
+    read_only_hint = True
+    destructive_hint = False
+    open_world_hint = False
     description = "List work artifacts filtered by type, status, or namespace."
 
     async def endpoint(

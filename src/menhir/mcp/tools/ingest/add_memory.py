@@ -46,6 +46,11 @@ async def add_memory(
 class AddMemoryTool(BaseTextTool):
     name = "add_memory"
     scope = ToolScope.NAMESPACED
+    title = "Add Memory"
+    oauth_scopes = ("menhir:write",)
+    read_only_hint = False
+    destructive_hint = False
+    open_world_hint = True
     description = "Queue a memory for enrichment (TEMPORAL + valid_at writes directly instead)."
 
     async def endpoint(

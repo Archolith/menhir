@@ -26,6 +26,11 @@ class CloseMemoryTool(BaseTextTool):
     name = "close_memory"
     scope = ToolScope.NAMESPACED
     required_tier = "operator"
+    title = "Close Memory"
+    oauth_scopes = ("menhir:admin",)
+    read_only_hint = False
+    destructive_hint = False
+    open_world_hint = False
     description = "Mark a TEMPORAL memory as completed."
 
     async def endpoint(self, uuid: str, namespace: str = "") -> str:

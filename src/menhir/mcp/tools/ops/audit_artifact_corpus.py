@@ -51,6 +51,11 @@ class AuditArtifactCorpusTool(BaseTextTool):
     # artifacts for the same repository saw each other's titles, statuses and paths -- and
     # each other's artifacts reported as conflicts in their own corpus.
     scope = ToolScope.NAMESPACED
+    title = "Audit Artifact Corpus"
+    oauth_scopes = ("menhir:write",)
+    read_only_hint = True
+    destructive_hint = False
+    open_world_hint = False
     description = (
         "Read-only parity report between a repository's work-artifact corpus and the graph."
     )

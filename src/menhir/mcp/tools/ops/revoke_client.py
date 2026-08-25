@@ -19,6 +19,11 @@ class RevokeClientTool(BaseTextTool):
     scope = ToolScope.GLOBAL
     required_tier = "operator"
     description = "revoke a client token by client_id."
+    title = "Revoke Client Token"
+    oauth_scopes = ("menhir:admin",)
+    read_only_hint = False
+    destructive_hint = True
+    open_world_hint = False
 
     async def endpoint(self, client_id: str) -> str:
         from menhir.api.client_token_store import get_client_token_store

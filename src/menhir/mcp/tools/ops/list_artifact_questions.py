@@ -32,6 +32,11 @@ class ArtifactQuestionsTool(BaseTextTool):
     name = "list_artifact_questions"
     scope = ToolScope.NAMESPACED
     required_tier = "readonly"
+    title = "List Artifact Questions"
+    oauth_scopes = ("menhir:read",)
+    read_only_hint = True
+    destructive_hint = False
+    open_world_hint = False
     description = "List open, answered, or deferred design questions on work artifacts."
 
     async def endpoint(

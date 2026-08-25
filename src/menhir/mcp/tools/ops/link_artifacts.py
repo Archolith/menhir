@@ -33,6 +33,11 @@ class LinkArtifactsTool(BaseTextTool):
     # NAMESPACED once the ownership guard exists (CF-33 step 4): an artifact uuid is
     # not proof of ownership, so each one the caller names is checked against the pin.
     scope = ToolScope.NAMESPACED
+    title = "Link Artifacts"
+    oauth_scopes = ("menhir:write",)
+    read_only_hint = False
+    destructive_hint = False
+    open_world_hint = False
     description = "Declare that one artifact reviews, implements, or informs another."
 
     _REASONS = {

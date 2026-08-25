@@ -45,6 +45,11 @@ async def add_memory_and_track(
 class AddMemoryAndTrackTool(BaseTextTool):
     name = "add_memory_and_track"
     scope = ToolScope.NAMESPACED
+    title = "Add Memory And Track"
+    oauth_scopes = ("menhir:write",)
+    read_only_hint = False
+    destructive_hint = False
+    open_world_hint = True
     description = "Queue one memory and track enrichment until completion."
 
     def timeout_for(

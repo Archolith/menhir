@@ -92,6 +92,11 @@ class QueryStructureTool(BaseTextTool):
     name = "query_structure"
     scope = ToolScope.NAMESPACED
     required_tier = "readonly"
+    title = "Query Structure"
+    oauth_scopes = ("menhir:read",)
+    read_only_hint = True
+    destructive_hint = False
+    open_world_hint = False
     description = (
         "Query the structural code graph for project layout, files, imports, tests, endpoints, "
         "and cross-project dependencies."

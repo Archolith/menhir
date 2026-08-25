@@ -26,6 +26,11 @@ class RepairStaleEnrichmentTool(BaseTextTool):
     scope = ToolScope.GLOBAL
     required_tier = "operator"
     description = "Inspect and optionally repair stale ENRICHING episodes."
+    title = "Repair Stale Enrichment"
+    oauth_scopes = ("menhir:admin",)
+    read_only_hint = False
+    destructive_hint = False
+    open_world_hint = False
 
     async def endpoint(self, dry_run: bool = True, limit: int = 100) -> str:
         backend = self.get_backend()

@@ -40,6 +40,11 @@ class DeleteNamespaceTool(BaseJsonTool):
     name = "delete_namespace"
     scope = ToolScope.NAMESPACED
     required_tier = "operator"
+    title = "Delete Namespace"
+    oauth_scopes = ("menhir:admin",)
+    read_only_hint = False
+    destructive_hint = True
+    open_world_hint = False
     description = "Tear down a throwaway/eval namespace silo, gated by node count."
 
     async def endpoint(

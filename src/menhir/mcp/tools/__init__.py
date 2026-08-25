@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from menhir.mcp.contracts import assert_tool_scopes_declared
+from menhir.mcp.contracts import assert_tool_scopes_declared, validate_tool_metadata
 
 from typing import TYPE_CHECKING
 
@@ -23,5 +23,6 @@ def register_all_tools(mcp: FastMCP) -> None:
     # CF-33: refuse to start if any tool has not declared how it relates to tenant data. This is
     # what turns "nobody considered tenancy for this tool" from a silent gap into a failed deploy.
     assert_tool_scopes_declared(ALL_TOOLS)
+    validate_tool_metadata(ALL_TOOLS)
     for tool_cls in ALL_TOOLS:
         tool_cls().register(mcp)

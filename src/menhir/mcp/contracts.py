@@ -19,6 +19,7 @@ from menhir.mcp.service_access import (
     build_memory_backend,
     get_client_tool_allowlist,
     get_pinned_namespace,
+    oauth_tool_scope_denial,
     get_request_session,
     get_request_tier,
     request_uses_query_auth,
@@ -435,11 +436,92 @@ class BaseJsonResource(ABC):
         )(handler)
 
 
+#: Mapping from required_tier to the exact OAuth scope set a tool must declare. The
+#: metadata contract keeps tier and scope coherent so the advertised securitySchemes
+#: cannot drift away from what invocation authorization actually enforces.
+_TIER_OAUTH_SCOPES: dict[str, tuple[str, ...]] = {
+    "readonly": ("menhir:read",),
+    "agent": ("menhir:write",),
+    "operator": ("menhir:admin",),
+}
+
+_SAFETY_HINT_FIELDS: tuple[str, ...] = ("read_only_hint", "destructive_hint", "open_world_hint")
+
+
+def validate_tool_metadata(tool_classes: "list[type] | tuple[type, ...]") -> None:
+    """Refuse to start when any tool has incomplete or incoherent ChatGPT metadata.
+
+    Complements :func:`assert_tool_scopes_declared`: tenancy is checked there, the
+    client-facing contract here. Every field below reaches the model choosing a tool
+    (title, description, safety hints) or the connector's authorization layer
+    (oauth_scopes), so an omission is a silent downgrade exactly like an undeclared
+    scope was -- and gets the same treatment: a loud startup failure.
+
+    Raises RuntimeError aggregating every problem across every tool rather than
+    failing on the first one, so one bad tool does not hide the rest.
+    """
+
+    missing_fields: list[str] = []
+    invalid_fields: list[str] = []
+    scope_mismatches: list[str] = []
+
+    for tool_cls in tool_classes:
+        name = getattr(tool_cls, "name", tool_cls.__name__)
+
+        for field in ("title", "description"):
+            value = getattr(tool_cls, field, None)
+            if not isinstance(value, str) or not value.strip():
+                missing_fields.append(f"{name}.{field}")
+
+        for field in _SAFETY_HINT_FIELDS:
+            value = getattr(tool_cls, field, None)
+            if not isinstance(value, bool):
+                invalid_fields.append(f"{name}.{field}={value!r} (must be bool)")
+
+        scopes = getattr(tool_cls, "oauth_scopes", None)
+        if not isinstance(scopes, tuple) or not scopes or not all(isinstance(s, str) and s for s in scopes):
+            invalid_fields.append(f"{name}.oauth_scopes={scopes!r} (must be a non-empty tuple of strings)")
+            continue
+
+        required_tier = getattr(tool_cls, "required_tier", None)
+        expected_scopes = _TIER_OAUTH_SCOPES.get(required_tier)
+        if expected_scopes is not None and tuple(scopes) != expected_scopes:
+            scope_mismatches.append(
+                f"{name}: required_tier={required_tier!r} requires oauth_scopes="
+                f"{list(expected_scopes)} but declares {list(scopes)}"
+            )
+
+    problems: list[str] = []
+    if missing_fields:
+        problems.append("tools missing required text metadata: " + ", ".join(sorted(set(missing_fields))))
+    if invalid_fields:
+        problems.append("tools with invalid metadata fields: " + "; ".join(sorted(invalid_fields)))
+    if scope_mismatches:
+        problems.append("tools whose oauth_scopes contradict their required_tier: " + "; ".join(scope_mismatches))
+
+    if problems:
+        raise RuntimeError("MCP tool metadata contract violated. " + " | ".join(problems))
+
+
 class BaseTool:
     """Contract base for MCP tools."""
 
     name: str
     description: str
+
+    #: Human-facing display name surfaced to clients (e.g. ChatGPT tool UI).
+    title: str
+
+    #: Exact OAuth scopes the connector must grant to invoke this tool. Must match
+    #: required_tier per _TIER_OAUTH_SCOPES; enforced by validate_tool_metadata.
+    oauth_scopes: tuple[str, ...]
+
+    #: MCP ToolAnnotations safety hints -- declared per tool, never defaulted, so a
+    #: new tool cannot ship without a human deciding what each hint claims.
+    read_only_hint: bool
+    destructive_hint: bool
+    open_world_hint: bool
+
     response_kind = "text"
     required_tier: str = "agent"  # minimum tier required to invoke this tool
 
@@ -561,6 +643,17 @@ class BaseTool:
                     "bind_stdio_local_trust()."
                 )
             if not _tier_allows(tier, self.required_tier):
+                declared_oauth_scopes = getattr(self, "oauth_scopes", ())
+                oauth_denial = (
+                    oauth_tool_scope_denial(
+                        tool_name=self.name,
+                        minimum_scope=declared_oauth_scopes[0],
+                    )
+                    if declared_oauth_scopes
+                    else None
+                )
+                if oauth_denial is not None:
+                    raise oauth_denial
                 raise PermissionError(
                     f"Token tier '{tier}' cannot invoke `{self.name}` (requires '{self.required_tier}')"
                 )
@@ -593,9 +686,14 @@ class BaseTool:
         )
         from menhir.core.backend_impl import drain_client_warnings
         warnings = drain_client_warnings()
-        if warnings:
+        if warnings and isinstance(result, str):
             warn_block = "\n".join(f"[background-error] {w}" for w in warnings)
             result = f"{result or ''}\n\n{warn_block}"
+        elif warnings:
+            logger.warning(
+                "Background client warnings omitted from non-text MCP result for %s",
+                self.name,
+            )
         return result or ""
 
     def registered_description(self) -> str:
@@ -622,7 +720,33 @@ class BaseTool:
 
         handler.__name__ = self.name
         handler.__qualname__ = self.name
-        mcp.tool(description=self.registered_description())(handler)
+        from mcp.types import ToolAnnotations
+
+        tool_options: dict[str, Any] = dict(
+            title=self.title,
+            description=self.registered_description(),
+            annotations=ToolAnnotations(
+                title=self.title,
+                readOnlyHint=self.read_only_hint,
+                destructiveHint=self.destructive_hint,
+                openWorldHint=self.open_world_hint,
+            ),
+            meta={
+                "securitySchemes": [
+                    {"type": "oauth2", "scopes": list(self.oauth_scopes)},
+                ],
+            },
+        )
+        # Menhir runs on the MCP SDK's FastMCP implementation, while some
+        # descriptor-only tests use the standalone fastmcp package. Disable
+        # inferred output schemas through the option supported by each runtime
+        # so a protocol-native CallToolResult is passed through unchanged.
+        tool_parameters = inspect.signature(mcp.tool).parameters
+        if "structured_output" in tool_parameters:
+            tool_options["structured_output"] = False
+        elif "output_schema" in tool_parameters:
+            tool_options["output_schema"] = None
+        mcp.tool(**tool_options)(handler)
 
 
 class BaseTextTool(BaseTool):

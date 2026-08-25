@@ -33,6 +33,11 @@ class PromoteMemoryTool(BaseTextTool):
     name = "promote_memory"
     scope = ToolScope.NAMESPACED
     required_tier = "operator"
+    title = "Promote Memory"
+    oauth_scopes = ("menhir:admin",)
+    read_only_hint = False
+    destructive_hint = False
+    open_world_hint = False
     description = "Promote a PERSISTENT memory to PROMOTED (operator-curated, verified ground truth)."
 
     async def endpoint(self, node_uuid: str, namespace: str = "") -> str:

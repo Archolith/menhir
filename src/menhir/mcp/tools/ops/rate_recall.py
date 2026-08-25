@@ -71,6 +71,11 @@ class RateRecallTool(BaseJsonTool):
     scope = ToolScope.GLOBAL
     required_tier = "agent"
     description = "Report how useful a prior recall result was (operational signal only)."
+    title = "Rate Recall Usefulness"
+    oauth_scopes = ("menhir:write",)
+    read_only_hint = False
+    destructive_hint = False
+    open_world_hint = False
 
     async def endpoint(
         self,

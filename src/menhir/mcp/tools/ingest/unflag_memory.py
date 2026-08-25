@@ -24,6 +24,11 @@ async def unflag_memory(node_uuid: str, namespace: str = "") -> str:
 class UnflagMemoryTool(BaseTextTool):
     name = "unflag_memory"
     scope = ToolScope.NAMESPACED
+    title = "Unflag Memory"
+    oauth_scopes = ("menhir:write",)
+    read_only_hint = False
+    destructive_hint = False
+    open_world_hint = False
     description = "Remove the permanent-retention flag from a memory node."
 
     async def endpoint(self, node_uuid: str, namespace: str = "") -> str:

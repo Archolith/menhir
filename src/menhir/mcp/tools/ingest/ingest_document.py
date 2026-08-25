@@ -52,6 +52,11 @@ class IngestDocumentTool(BaseTextTool):
     # makes. Omitting the argument sent it to the default group regardless of the caller's pin,
     # which is CF-220's escape in a third tool.
     scope = ToolScope.NAMESPACED
+    title = "Ingest Document"
+    oauth_scopes = ("menhir:write",)
+    read_only_hint = False
+    destructive_hint = False
+    open_world_hint = True
     description = "Ingest a doc/markdown/text file into the memory graph as a document entity + semantic episode."
 
     def timeout_for(

@@ -34,6 +34,11 @@ class SupersedeArtifactTool(BaseTextTool):
     # not proof of ownership, so each one the caller names is checked against the pin.
     scope = ToolScope.NAMESPACED
     description = "Record that one artifact supersedes another, moving status and edge together."
+    title = "Supersede Artifact"
+    oauth_scopes = ("menhir:write",)
+    read_only_hint = False
+    destructive_hint = False
+    open_world_hint = False
 
     async def endpoint(
         self, new_uuid: str, old_uuid: str, namespace: str = ""

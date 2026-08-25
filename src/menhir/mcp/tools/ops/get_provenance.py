@@ -40,6 +40,11 @@ class GetProvenanceTool(BaseJsonTool):
     # ownership, so the object the caller names is checked against the pin at load.
     scope = ToolScope.NAMESPACED
     required_tier = "readonly"
+    title = "Get Provenance"
+    oauth_scopes = ("menhir:read",)
+    read_only_hint = True
+    destructive_hint = False
+    open_world_hint = False
     description = (
         "Show a memory/View node's receipts: the source episodes it was built from, plus evidence "
         "anchors, so you can verify a summary or claim against its sources."

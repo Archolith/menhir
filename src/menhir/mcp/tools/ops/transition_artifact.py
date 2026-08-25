@@ -33,6 +33,11 @@ class TransitionArtifactTool(BaseTextTool):
     name = "transition_artifact"
     scope = ToolScope.NAMESPACED
     description = "Move a work artifact to a new lifecycle status, if the transition is legal."
+    title = "Transition Artifact Status"
+    oauth_scopes = ("menhir:write",)
+    read_only_hint = False
+    destructive_hint = False
+    open_world_hint = False
 
     async def endpoint(
         self, artifact_uuid: str, to_status: str, namespace: str = ""

@@ -14,6 +14,11 @@ class GetClientContextTool(BaseTextTool):
     name = "get_client_context"
     scope = ToolScope.GLOBAL
     required_tier = "readonly"
+    title = "Get Client Context"
+    oauth_scopes = ("menhir:read",)
+    read_only_hint = True
+    destructive_hint = False
+    open_world_hint = False
     description = (
         "Return caller identity (client_id, client_name) and last_accessed timestamp. "
         "Use at session start to know how much time has passed since you last interacted with memory."

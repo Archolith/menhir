@@ -19,6 +19,11 @@ class ListClientsTool(BaseTextTool):
     scope = ToolScope.GLOBAL
     required_tier = "operator"
     description = "list registered (non-revoked) per-client tokens (no token material)."
+    title = "List Clients"
+    oauth_scopes = ("menhir:admin",)
+    read_only_hint = True
+    destructive_hint = False
+    open_world_hint = False
 
     async def endpoint(self) -> str:
         from menhir.api.client_token_store import get_client_token_store

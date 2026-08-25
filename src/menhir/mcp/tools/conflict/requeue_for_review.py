@@ -40,6 +40,12 @@ class RequeueForReviewTool(BaseJsonTool):
     # tenancy predicate -- the same shape as CF-217.
     scope = ToolScope.NAMESPACED
     required_tier = "operator"
+    title = "Requeue Conflicts for LLM Review"
+    oauth_scopes = ("menhir:admin",)
+    # Mutates conflict_status back to 'pending_llm_review' on tenant nodes.
+    read_only_hint = False
+    destructive_hint = False
+    open_world_hint = False
     description = "Re-queue conflict groups for LLM contradiction confirmation."
 
     async def endpoint(

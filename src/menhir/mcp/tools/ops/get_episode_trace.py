@@ -51,6 +51,11 @@ class GetEpisodeTraceTool(BaseJsonTool):
     # and the uuid it addresses is checked against that pin at load (CF-33 step 4).
     scope = ToolScope.NAMESPACED
     required_tier = "readonly"
+    title = "Get Episode Trace"
+    oauth_scopes = ("menhir:read",)
+    read_only_hint = True
+    destructive_hint = False
+    open_world_hint = False
     description = "Return a compact debug trace for one episode."
 
     async def endpoint(

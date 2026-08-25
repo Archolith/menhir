@@ -25,6 +25,11 @@ class PauseSchedulerTool(BaseTextTool):
     scope = ToolScope.GLOBAL
     required_tier = "operator"
     description = "Stop the maintenance scheduler loop (enrichment retries, stale recovery, conflict jobs)."
+    title = "Pause Scheduler"
+    oauth_scopes = ("menhir:admin",)
+    read_only_hint = False
+    destructive_hint = False
+    open_world_hint = False
 
     async def endpoint(self) -> str:
         backend = self.get_backend()

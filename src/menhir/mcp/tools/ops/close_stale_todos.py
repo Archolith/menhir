@@ -27,6 +27,11 @@ async def close_stale_todos(
 class CloseStaleTodosTool(BaseTextTool):
     name = "close_stale_todos"
     scope = ToolScope.NAMESPACED
+    title = "Close Stale TODOs"
+    oauth_scopes = ("menhir:write",)
+    read_only_hint = False
+    destructive_hint = False
+    open_world_hint = False
     description = "Close stale TODO items that have been open for too long."
 
     async def endpoint(

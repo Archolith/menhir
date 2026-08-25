@@ -23,6 +23,11 @@ class ForceSchedulerTakeoverTool(BaseTextTool):
     name = "force_scheduler_takeover"
     scope = ToolScope.GLOBAL
     required_tier = "operator"
+    title = "Force Scheduler Takeover"
+    oauth_scopes = ("menhir:admin",)
+    read_only_hint = False
+    destructive_hint = False
+    open_world_hint = False
     description = "Force this MCP process to take scheduler lease ownership."
 
     async def endpoint(self, reason: str = "manual-troubleshooting") -> str:
