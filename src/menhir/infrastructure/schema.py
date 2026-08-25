@@ -82,6 +82,12 @@ PHASE_ONE_REQUIRED_INDEXES = (
     "metric_view_current_idx",
     "metric_source_idx",
     "metric_receipt_op_idx",
+    # CF-257: SHOW INDEXES also reports the backing RANGE indexes for uniqueness
+    # constraints under the constraint names. Keep both identity constraints in the
+    # readiness set, otherwise an upgraded installation with every legacy index online
+    # skips bootstrap_phase_one() and never executes the new root-identity DDL.
+    "project_identity_id_unique",
+    "project_identity_root_unique",
 )
 
 
