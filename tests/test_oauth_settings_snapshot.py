@@ -188,16 +188,22 @@ def test_refresh_grant_defaults_off_with_thirty_day_ttl():
     settings = MemorySettings()
 
     assert settings.oauth_as_refresh_tokens_enabled is False
+    assert settings.oauth_as_refresh_without_offline_access_enabled is False
     assert settings.oauth_as_refresh_ttl_s == 2592000
 
 
 def test_refresh_grant_settings_parse_from_env(monkeypatch):
     monkeypatch.setenv("MENHIR_OAUTH_AS_REFRESH_TOKENS_ENABLED", "true")
+    monkeypatch.setenv(
+        "MENHIR_OAUTH_AS_REFRESH_WITHOUT_OFFLINE_ACCESS_ENABLED",
+        "true",
+    )
     monkeypatch.setenv("MENHIR_OAUTH_AS_REFRESH_TTL_S", "86400")
 
     settings = MemorySettings.from_env()
 
     assert settings.oauth_as_refresh_tokens_enabled is True
+    assert settings.oauth_as_refresh_without_offline_access_enabled is True
     assert settings.oauth_as_refresh_ttl_s == 86400
 
 

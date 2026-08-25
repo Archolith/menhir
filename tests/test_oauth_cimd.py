@@ -146,6 +146,46 @@ def test_valid_cimd_flow_renders_consent_and_issues_code(monkeypatch):
     assert calls == [_URL]  # fresh cache served the POST too
 
 
+def test_cimd_selects_none_when_client_prefers_private_key_jwt(monkeypatch):
+    """Match ChatGPT's live CIMD shape while retaining Menhir's public-client profile."""
+    _install_resolver(
+        monkeypatch,
+        {
+            _URL: _doc(
+                token_endpoint_auth_method="private_key_jwt",
+                token_endpoint_auth_methods_supported=["none", "private_key_jwt"],
+                token_endpoint_auth_signing_alg="RS256",
+                jwks_uri="https://client.example.com/.well-known/jwks.json",
+            )
+        },
+    )
+    c = _client()
+    _, challenge = _pkce()
+
+    resp = c.get("/oauth/authorize", params=_get_params(_URL, challenge=challenge))
+
+    assert resp.status_code == 200
+    assert get_client_store().get(_URL).token_endpoint_auth_method == "none"
+
+
+def test_cimd_rejects_private_key_jwt_when_none_is_not_offered(monkeypatch):
+    _install_resolver(
+        monkeypatch,
+        {
+            _URL: _doc(
+                token_endpoint_auth_method="private_key_jwt",
+                token_endpoint_auth_methods_supported=["private_key_jwt"],
+            )
+        },
+    )
+    c = _client()
+    _, challenge = _pkce()
+
+    resp = c.get("/oauth/authorize", params=_get_params(_URL, challenge=challenge))
+
+    assert resp.status_code == 400
+
+
 def test_cimd_identity_and_redirect_must_match_exactly(monkeypatch):
     _install_resolver(monkeypatch, {"https://other.example.com/c": _doc()})
     c = _client()

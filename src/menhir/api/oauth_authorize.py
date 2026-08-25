@@ -383,8 +383,14 @@ def _client_from_cimd_document(
     ):
         raise ValueError("Metadata document redirect_uris are invalid")
     auth_method = doc.get("token_endpoint_auth_method", "none")
-    if auth_method != "none":
-        raise ValueError("Only public clients (token_endpoint_auth_method 'none') are supported")
+    supported_auth_methods = doc.get("token_endpoint_auth_methods_supported")
+    offers_public_client_auth = auth_method == "none" or (
+        isinstance(supported_auth_methods, list)
+        and all(isinstance(method, str) for method in supported_auth_methods)
+        and "none" in supported_auth_methods
+    )
+    if not offers_public_client_auth:
+        raise ValueError("Only public clients (token endpoint auth method 'none') are supported")
     client_name = str(doc.get("client_name", "")).strip()[:_MAX_CIMD_CLIENT_NAME_LEN]
     return OAuthClient(
         client_id=client_id,
@@ -392,6 +398,9 @@ def _client_from_cimd_document(
         redirect_uris=tuple(str(u) for u in redirect_uris_raw),
         scopes=_as_scopes_for_clients(settings),
         client_secret_hash="",
+        # Persist the method selected by this AS, not the client's preferred
+        # default.  Current ChatGPT CIMD metadata prefers private_key_jwt but
+        # explicitly offers both private_key_jwt and none.
         token_endpoint_auth_method="none",
         created_at=time.time(),
     )

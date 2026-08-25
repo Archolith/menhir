@@ -2,10 +2,15 @@
 artifact_schema: 1
 artifact_uuid: 304142d9-eacc-49ac-938e-86e4ed7b1b30
 artifact_type: plan
-artifact_status: PROPOSED
+artifact_status: COMPLETE
 ---
 
 # Menhir ChatGPT web MCP compatibility: OAuth refresh, identity, and tool auth
+
+> **Disposition (2026-08-25): COMPLETE.** The implementation, focused regression matrix, public
+> HTTPS preflight, real ChatGPT CIMD connection, three permission-class calls, token expiry,
+> automatic refresh, restart persistence, and post-refresh invocation all passed. Live observations
+> and the two resulting compatibility fixes are recorded in `.agent/CHANGELOG.md`.
 
 ## Objective
 

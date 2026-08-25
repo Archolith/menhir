@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-08-25 - Prove live ChatGPT OAuth compatibility
+
+- Complete a real ChatGPT developer-mode connection through a disposable public HTTPS tunnel to
+  the canonical `/mcp-http` resource. ChatGPT used its CIMD URL, exact callback, PKCE S256, RFC 8707
+  resource binding, RFC 9207 `iss`, and all three Menhir permission scopes.
+- Match ChatGPT's current CIMD auth-method negotiation: its metadata prefers `private_key_jwt` but
+  explicitly offers `none`; Menhir now selects and durably records the mutually supported public
+  method while still rejecting clients that do not offer it.
+- Add a default-off authorization-server policy seam that can issue refresh tokens after owner
+  consent when a client omits `offline_access`. The disposable ChatGPT profile enables the seam;
+  the granted Menhir scope remains unchanged and `offline_access` remains protocol-only.
+- From ChatGPT, prove read-only, disposable write, and non-destructive operator calls. After the
+  120-second access token expired, restart Menhir while preserving OAuth and Neo4j state, then prove
+  an automatic refresh and a successful post-restart tool call without reconnecting or consenting.
+- Record non-secret rotation evidence after the live run: 10 refresh rows, 9 consumed rotations,
+  one live replacement, and zero revoked rows. No authorization codes, access tokens, refresh
+  tokens, PKCE verifiers, or consent secrets were recorded.
+- Add a safe public-test launcher with exact-origin validation, disposable Neo4j isolation,
+  restart-preserved state, explicit interpreter control, interactive restart/stop commands, and
+  surfaced process-termination and sensitive-store cleanup failures.
+
 ## 2026-08-24 - Complete local ChatGPT OAuth and MCP compatibility wiring
 
 - Split protected-resource permission scopes from authorization-server `offline_access`, advertise

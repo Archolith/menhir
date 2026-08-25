@@ -32,6 +32,13 @@ _ENABLED_REFRESH = SimpleNamespace(
     oauth_as_refresh_tokens_enabled=True,
     oauth_as_refresh_ttl_s=2592000,
 )
+_ENABLED_DISCRETIONARY_REFRESH = SimpleNamespace(
+    oauth_as_enabled=True,
+    oauth_public_base_url=_BASE,
+    oauth_as_refresh_tokens_enabled=True,
+    oauth_as_refresh_without_offline_access_enabled=True,
+    oauth_as_refresh_ttl_s=2592000,
+)
 _DISABLED = SimpleNamespace(oauth_as_enabled=False)
 _CB = "https://app.example.com/cb"
 _SCOPE = "menhir:read menhir:write menhir:admin"
@@ -124,6 +131,22 @@ def _issue_initial_refresh() -> tuple[TestClient, str, dict[str, object]]:
     response = client.post("/oauth/token", data=_token_form(code, cid, verifier))
     assert response.status_code == 200
     return client, cid, response.json()
+
+
+def test_explicit_policy_issues_refresh_when_offline_access_is_omitted():
+    verifier, challenge = _pkce()
+    cid = _register_client()
+    code = _seed_code(cid, challenge, scope=_SCOPE)
+
+    response = _client(_ENABLED_DISCRETIONARY_REFRESH).post(
+        "/oauth/token",
+        data=_token_form(code, cid, verifier),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["refresh_token"]
+    assert body["scope"] == _SCOPE
 
 
 def _refresh_form(

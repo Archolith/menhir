@@ -97,6 +97,13 @@ async def token(request: Request) -> JSONResponse:
                 code_verifier=code_verifier,
                 resource=resource,
                 allowed_scopes=authorization_config.effective_scopes_supported,
+                issue_refresh_without_offline_access=bool(
+                    getattr(
+                        settings,
+                        "oauth_as_refresh_without_offline_access_enabled",
+                        False,
+                    )
+                ),
             )
         elif grant_type == "refresh_token":
             if not authorization_config.issue_refresh_tokens:

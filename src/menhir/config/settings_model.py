@@ -481,6 +481,9 @@ class MemorySettings:
     # offline-access tokens to the token endpoint, so it is an explicit operator choice.
     # TTL bounds refresh-token lifetime in seconds (default 30 days); must be > 0.
     oauth_as_refresh_tokens_enabled: bool = False
+    # Explicitly permit refresh issuance after owner consent even when a client
+    # omits the conventional offline_access scope. OFF by default.
+    oauth_as_refresh_without_offline_access_enabled: bool = False
     oauth_as_refresh_ttl_s: int = 2592000
     trusted_proxy: bool = False
     trusted_proxy_peers: tuple[str, ...] = ("127.0.0.1", "::1")
@@ -927,6 +930,10 @@ class MemorySettings:
             oauth_as_refresh_tokens_enabled=parse_bool_env(_getenv(
                 "MENHIR_OAUTH_AS_REFRESH_TOKENS_ENABLED",
                 default=str(cls.oauth_as_refresh_tokens_enabled),
+            )),
+            oauth_as_refresh_without_offline_access_enabled=parse_bool_env(_getenv(
+                "MENHIR_OAUTH_AS_REFRESH_WITHOUT_OFFLINE_ACCESS_ENABLED",
+                default=str(cls.oauth_as_refresh_without_offline_access_enabled),
             )),
             oauth_as_refresh_ttl_s=_parse_int(
                 _getenv(
