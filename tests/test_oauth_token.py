@@ -269,6 +269,28 @@ def test_offline_access_code_exchange_returns_refresh_token():
     }
 
 
+def test_code_with_scope_removed_from_current_policy_is_rejected():
+    verifier, challenge = _pkce()
+    cid = _register_client()
+    code = _seed_code(cid, challenge, scope="menhir:read menhir:admin")
+    settings = SimpleNamespace(
+        oauth_as_enabled=True,
+        oauth_public_base_url=_BASE,
+        oauth_scopes_supported=("menhir:read",),
+        oauth_write_scopes=(),
+        oauth_admin_scopes=(),
+    )
+
+    response = _client(settings).post(
+        "/oauth/token",
+        data=_token_form(code, cid, verifier),
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "invalid_grant"
+    assert "no longer supported" in response.json()["error_description"]
+
+
 def test_refresh_rotates_once_and_replay_revokes_family():
     client, cid, initial = _issue_initial_refresh()
     rotated = client.post(
@@ -317,6 +339,35 @@ def test_refresh_scope_narrowing_and_expansion_failure():
             cid,
             scope="menhir:read offline_access",
         ),
+    )
+    assert narrowed.status_code == 200
+    assert set(narrowed.json()["scope"].split()) == {
+        "menhir:read",
+        "offline_access",
+    }
+
+
+def test_refresh_policy_refusal_does_not_burn_token_and_allows_explicit_narrowing():
+    c, cid, initial = _issue_initial_refresh()
+    token = str(initial["refresh_token"])
+    c.app.state.settings = SimpleNamespace(
+        oauth_as_enabled=True,
+        oauth_public_base_url=_BASE,
+        oauth_as_refresh_tokens_enabled=True,
+        oauth_as_refresh_ttl_s=2592000,
+        oauth_scopes_supported=("menhir:read",),
+        oauth_write_scopes=(),
+        oauth_admin_scopes=(),
+    )
+
+    stale = c.post("/oauth/token", data=_refresh_form(token, cid))
+    assert stale.status_code == 400
+    assert stale.json()["error"] == "invalid_scope"
+    assert "no longer supported" in stale.json()["error_description"]
+
+    narrowed = c.post(
+        "/oauth/token",
+        data=_refresh_form(token, cid, scope="menhir:read offline_access"),
     )
     assert narrowed.status_code == 200
     assert set(narrowed.json()["scope"].split()) == {

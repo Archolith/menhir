@@ -90,6 +90,14 @@ class OAuthConfig:
     clock_skew_s: int = 60
     allowed_algorithms: tuple[str, ...] = ("RS256",)
 
+    def __post_init__(self) -> None:
+        validate_permission_scope_config(
+            scopes_supported=self.scopes_supported,
+            read_scopes=self.read_scopes,
+            write_scopes=self.write_scopes,
+            admin_scopes=self.admin_scopes,
+        )
+
     @property
     def metadata_url(self) -> str:
         base = self.public_base_url.rstrip("/")
@@ -116,6 +124,42 @@ class OAuthConfig:
         if scope:
             parts.append(f'scope="{_quote_header_value(scope)}"')
         return ", ".join(parts)
+
+
+def validate_permission_scope_config(
+    *,
+    scopes_supported: tuple[str, ...],
+    read_scopes: tuple[str, ...],
+    write_scopes: tuple[str, ...],
+    admin_scopes: tuple[str, ...],
+) -> None:
+    """Keep protocol-only scopes out of Menhir's permission policy surface."""
+    configured = {
+        "oauth_scopes_supported": tuple(scopes_supported),
+        "oauth_read_scopes": tuple(read_scopes),
+        "oauth_write_scopes": tuple(write_scopes),
+        "oauth_admin_scopes": tuple(admin_scopes),
+    }
+    protocol_only = {
+        name: sorted(set(scopes) & {"offline_access"})
+        for name, scopes in configured.items()
+        if "offline_access" in scopes
+    }
+    if protocol_only:
+        names = ", ".join(sorted(protocol_only))
+        raise ValueError(
+            "offline_access is protocol-only and cannot be configured as a Menhir "
+            f"permission scope ({names})"
+        )
+
+    supported = set(scopes_supported)
+    for name in ("oauth_read_scopes", "oauth_write_scopes", "oauth_admin_scopes"):
+        unknown = sorted(set(configured[name]) - supported)
+        if unknown:
+            raise ValueError(
+                f"{name} must be a subset of oauth_scopes_supported; unknown scopes: "
+                + ", ".join(unknown)
+            )
 
 
 def build_oauth_config(settings: object) -> OAuthConfig:

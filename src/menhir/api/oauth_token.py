@@ -96,6 +96,7 @@ async def token(request: Request) -> JSONResponse:
                 redirect_uri=redirect_uri,
                 code_verifier=code_verifier,
                 resource=resource,
+                allowed_scopes=authorization_config.effective_scopes_supported,
             )
         elif grant_type == "refresh_token":
             if not authorization_config.issue_refresh_tokens:
@@ -127,6 +128,7 @@ async def token(request: Request) -> JSONResponse:
                 client_id=client_id,
                 resource=resource,
                 scope=None if raw_scope is None else str(raw_scope),
+                allowed_scopes=authorization_config.effective_scopes_supported,
             )
         else:
             grants = (

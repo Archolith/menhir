@@ -17,7 +17,7 @@ dependencies = [
     "httpx>=0.27",
     "jinja2>=3.1,<4",
     "archolith-mcp-framework @ git+https://github.com/Archolith/archolith-mcp-framework.git@v0.2.0",
-    "archolith-oauth @ git+https://github.com/Archolith/archolith_oauth.git@8b63905ab97770bf4afbfbc0b65f209fec37dc09",
+    "archolith-oauth @ git+https://github.com/Archolith/archolith_oauth.git@dcf33f14d16f0c80e068bd1d43a43651b5b63593",
     "fastmcp>=3.2.4,<4",
     "neo4j>=6.2,<7",
     "pydantic>=2.0,<3",

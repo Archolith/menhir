@@ -547,13 +547,29 @@ class MemorySettings:
             raise ValueError("oauth_allowed_algorithms must be non-empty and cannot include 'none'")
         if self.trusted_proxy and not self.trusted_proxy_peers:
             raise ValueError("trusted_proxy requires at least one trusted_proxy_peers entry")
+        from .oauth import validate_permission_scope_config
+
+        validate_permission_scope_config(
+            scopes_supported=self.oauth_scopes_supported,
+            read_scopes=self.oauth_read_scopes,
+            write_scopes=self.oauth_write_scopes,
+            admin_scopes=self.oauth_admin_scopes,
+        )
         if self.oauth_as_enabled and not self.oauth_public_base_url:
             raise ValueError(
                 "oauth_public_base_url is required when the embedded authorization server is enabled"
             )
         if self.oauth_as_enabled:
-            parsed = urlparse(self.oauth_public_base_url)
+            normalized_base_url = self.oauth_public_base_url.strip().rstrip("/")
+            object.__setattr__(self, "oauth_public_base_url", normalized_base_url)
+            parsed = urlparse(normalized_base_url)
             host = (parsed.hostname or "").strip().lower()
+            if parsed.username is not None or parsed.password is not None:
+                raise ValueError("oauth_public_base_url must not contain credentials")
+            if parsed.query or parsed.fragment:
+                raise ValueError(
+                    "oauth_public_base_url must not contain a query string or fragment"
+                )
             if parsed.scheme != "https" and not (
                 parsed.scheme == "http" and is_loopback_host(host)
             ):

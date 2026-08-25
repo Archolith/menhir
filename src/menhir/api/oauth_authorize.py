@@ -24,6 +24,7 @@ import base64
 import hmac
 import html
 import json
+import logging
 import secrets
 import threading
 import time
@@ -33,6 +34,7 @@ from urllib.parse import urlencode, urlsplit, urlunsplit, parse_qsl
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
+from archolith_oauth import resolve_client_metadata_document as _shared_cimd_resolver
 
 from menhir.api.auth_code_store import get_auth_code_store
 from menhir.api.oauth_as_metadata import _as_enabled
@@ -42,23 +44,16 @@ from menhir.api.oauth_client_store import (
     get_client_store,
     upsert_cimd_client,
 )
-from menhir.api.oauth_rate_limit import FixedWindowLimiter, build_approve_limiter, client_ip
+from menhir.api.oauth_rate_limit import (  # noqa: F401 - test reset seam
+    FixedWindowLimiter,
+    build_approve_limiter,
+    client_ip,
+)
 from menhir.config import MemorySettings, build_oauth_config
 from menhir.config.oauth import _get_setting
 
-try:  # Shared SSRF-safe CIMD resolver (commit cfb61934+).
-    from archolith_oauth.cimd import (
-        resolve_client_metadata_document as _shared_cimd_resolver,
-    )
-except ImportError:
-    try:
-        from archolith_oauth import (
-            resolve_client_metadata_document as _shared_cimd_resolver,
-        )
-    except ImportError:  # pragma: no cover - dependency pin not yet bumped
-        _shared_cimd_resolver = None
-
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 _ADMIN_SUBJECT = "menhir-admin"
 _CONSENT_TTL_DEFAULT_S = 300.0
@@ -289,9 +284,9 @@ def _redirect(redirect_uri: str, params: dict[str, str]) -> RedirectResponse:
 
 def _as_issuer(settings: object) -> str:
     """Exact AS issuer (RFC 9207): must byte-match the advertised metadata issuer."""
-    return str(
-        _get_setting(settings, "oauth_public_base_url", "MENHIR_PUBLIC_BASE_URL", "")
-    ).strip().rstrip("/")
+    from menhir.api.oauth_as_metadata import build_authorization_server_config
+
+    return build_authorization_server_config(settings).issuer
 
 
 def _error_redirect(
@@ -426,12 +421,14 @@ async def resolve_cimd_client(client_id: str, settings: object) -> OAuthClient:
         return cached
 
     resolver = _cimd_resolver or _shared_cimd_resolver
-    if resolver is None:
-        raise ValueError("CIMD resolution is unavailable on this installation")
     try:
         doc = await resolver(client_id)
     except Exception as exc:
-        raise ValueError(f"CIMD document could not be retrieved or validated ({exc})") from exc
+        logger.warning(
+            "CIMD document retrieval or validation failed (%s)",
+            type(exc).__name__,
+        )
+        raise ValueError("CIMD document could not be retrieved or validated") from exc
     client = _client_from_cimd_document(client_id, doc, settings)
     upsert_cimd_client(client, fetched_at=now)
     return client
@@ -457,12 +454,13 @@ async def _resolve_client_and_redirect(
     return client
 
 
-def _resolve_scope(scope_raw: str, client: OAuthClient) -> str:
+def _resolve_scope(scope_raw: str, client: OAuthClient, settings: object) -> str:
     """Return the resolved, space-joined granted scope. Raises _RedirectError on a
     requested scope outside the client's grant."""
-    granted = set(client.scopes)
+    currently_supported = set(_as_scopes_for_clients(settings))
+    granted = set(client.scopes) & currently_supported
     if not scope_raw.strip():
-        return " ".join(client.scopes)
+        return " ".join(scope for scope in client.scopes if scope in granted)
     requested = [s for s in scope_raw.split() if s]
     for s in requested:
         if s not in granted:
@@ -729,7 +727,7 @@ async def authorize_get(request: Request):
             q.get("code_challenge", ""),
             q.get("code_challenge_method", ""),
         )
-        scope = _resolve_scope(q.get("scope", ""), client)
+        scope = _resolve_scope(q.get("scope", ""), client, settings)
     except _RedirectError as exc:
         return _error_redirect(redirect_uri, exc.error, exc.description, state, settings)
 
@@ -813,7 +811,7 @@ async def authorize_post(request: Request):
             submitted["code_challenge"],
             submitted["code_challenge_method"],
         )
-        scope = _resolve_scope(submitted["scope"], client)
+        scope = _resolve_scope(submitted["scope"], client, settings)
     except _RedirectError as exc:
         return _error_redirect(redirect_uri, exc.error, exc.description, state, settings)
 

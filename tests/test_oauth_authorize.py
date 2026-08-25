@@ -179,6 +179,59 @@ def test_get_scope_exceeds_grant_redirects_invalid_scope():
     assert _location_query(resp)["error"] == ["invalid_scope"]
 
 
+def test_persisted_client_cannot_request_scope_removed_from_current_policy():
+    _, challenge = _pkce()
+    cid = _register_client(scopes=("menhir:read", "menhir:admin", "offline_access"))
+    settings = SimpleNamespace(
+        oauth_as_enabled=True,
+        oauth_public_base_url="https://memory.example.com",
+        oauth_scopes_supported=("menhir:read",),
+        oauth_write_scopes=(),
+        oauth_admin_scopes=(),
+        oauth_as_refresh_tokens_enabled=False,
+        operator_key="s3cret",
+    )
+    c = _client(settings)
+
+    stale = c.get(
+        "/oauth/authorize",
+        params=_valid_get_params(cid, challenge=challenge, scope="menhir:admin"),
+    )
+    assert stale.status_code == 302
+    assert _location_query(stale)["error"] == ["invalid_scope"]
+
+    current = c.get(
+        "/oauth/authorize",
+        params=_valid_get_params(cid, challenge=challenge),
+    )
+    assert current.status_code == 200
+    assert _extract_hidden(current.text)["scope"] == "menhir:read"
+
+
+def test_scope_removed_after_consent_get_is_rechecked_before_approval():
+    _, challenge = _pkce()
+    cid = _register_client(scopes=("menhir:read", "menhir:admin"))
+    settings = SimpleNamespace(
+        oauth_as_enabled=True,
+        oauth_public_base_url="https://memory.example.com",
+        oauth_scopes_supported=("menhir:read", "menhir:admin"),
+        oauth_write_scopes=(),
+        oauth_as_refresh_tokens_enabled=False,
+        operator_key="s3cret",
+    )
+    c = _client(settings)
+    form = _consent_form(c, cid, challenge=challenge)
+    settings.oauth_scopes_supported = ("menhir:read",)
+    settings.oauth_admin_scopes = ()
+    form["admin_secret"] = "s3cret"
+    form["decision"] = "approve"
+
+    response = c.post("/oauth/authorize", data=form)
+
+    assert response.status_code == 302
+    assert _location_query(response)["error"] == ["invalid_scope"]
+
+
 def test_get_valid_renders_consent_with_token():
     _, challenge = _pkce()
     cid = _register_client()

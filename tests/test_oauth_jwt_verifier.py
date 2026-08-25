@@ -166,6 +166,7 @@ class TestTierFromScopes:
     @pytest.mark.unit
     def test_custom_scopes_map_correctly(self):
         config = _make_config(
+            scopes_supported=("myapp:read", "myapp:write", "myapp:admin"),
             read_scopes=("myapp:read",),
             write_scopes=("myapp:write",),
             admin_scopes=("myapp:admin",),

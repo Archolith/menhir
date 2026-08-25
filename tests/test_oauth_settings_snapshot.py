@@ -64,6 +64,31 @@ def test_embedded_as_allows_loopback_http_for_local_development():
     assert settings.oauth_as_enabled is True
 
 
+@pytest.mark.parametrize(
+    "public_base_url",
+    [
+        "https://user:secret@memory.example.com",
+        "https://memory.example.com?tenant=secret",
+        "https://memory.example.com#oauth",
+    ],
+)
+def test_embedded_as_rejects_noncanonical_public_url_components(public_base_url):
+    with pytest.raises(ValueError, match="credentials|query string|fragment"):
+        MemorySettings(
+            oauth_as_enabled=True,
+            oauth_public_base_url=public_base_url,
+        )
+
+
+def test_embedded_as_canonicalizes_one_trailing_slash():
+    settings = MemorySettings(
+        oauth_as_enabled=True,
+        oauth_public_base_url="https://memory.example.com/",
+    )
+
+    assert settings.oauth_public_base_url == "https://memory.example.com"
+
+
 def test_untrusted_peer_cannot_supply_forwarded_rate_limit_identity():
     request = SimpleNamespace(
         client=SimpleNamespace(host="203.0.113.10"),
@@ -102,7 +127,10 @@ def test_emptying_admin_scopes_actually_revokes_admin():
 def test_a_non_empty_scope_override_is_still_honoured():
     """Positive control for the test above: without this, an implementation that returned ()
     for everything would pass the revocation test while being completely broken."""
-    settings = MemorySettings(oauth_admin_scopes=("custom:admin",))
+    settings = MemorySettings(
+        oauth_scopes_supported=("menhir:read", "menhir:write", "custom:admin"),
+        oauth_admin_scopes=("custom:admin",),
+    )
 
     assert build_oauth_config(settings).admin_scopes == ("custom:admin",)
 
@@ -119,6 +147,25 @@ def test_emptying_read_and_write_scopes_revokes_them_too():
 
     assert cfg.read_scopes == ()
     assert cfg.write_scopes == ()
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"oauth_scopes_supported": ("menhir:read", "offline_access")},
+        {"oauth_read_scopes": ("offline_access",)},
+        {"oauth_write_scopes": ("offline_access",)},
+        {"oauth_admin_scopes": ("offline_access",)},
+    ],
+)
+def test_offline_access_is_rejected_from_every_permission_setting(overrides):
+    with pytest.raises(ValueError, match="protocol-only"):
+        MemorySettings(**overrides)
+
+
+def test_tier_scopes_must_be_supported_permission_scopes():
+    with pytest.raises(ValueError, match="subset of oauth_scopes_supported"):
+        MemorySettings(oauth_admin_scopes=("retired:admin",))
 
 
 def test_revoked_admin_scope_denies_the_operator_tier():

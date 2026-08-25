@@ -257,14 +257,26 @@ def test_durable_snapshot_survives_restart_without_network(monkeypatch):
     assert "CIMD App" in resp.text
 
 
-def test_resolver_failure_for_unknown_url_fails_closed(monkeypatch):
+def test_resolver_failure_for_unknown_url_fails_closed(monkeypatch, caplog):
     calls: list[str] = []
-    _install_resolver(monkeypatch, {}, calls)
+
+    async def resolver(url: str):
+        calls.append(url)
+        raise RuntimeError("private DNS answer 10.23.45.67 and TLS diagnostic")
+
+    from menhir.api import oauth_authorize
+
+    monkeypatch.setattr(oauth_authorize, "_cimd_resolver", resolver)
     c = _client()
     _, challenge = _pkce()
     resp = c.get("/oauth/authorize", params=_get_params(_URL, challenge=challenge))
     assert resp.status_code == 400
     assert calls == [_URL]
+    assert "private DNS answer" not in resp.text
+    assert "10.23.45.67" not in resp.text
+    assert "private DNS answer" not in caplog.text
+    assert "10.23.45.67" not in caplog.text
+    assert "CIMD document could not be retrieved or validated" in resp.text
 
 
 # ---------------------------------------------------------------------------
