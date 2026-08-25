@@ -62,6 +62,10 @@ Public REST:
 - Remote MCP over HTTP:
   - tool-only
   - narrower than stdio MCP by design
+  - every tool descriptor includes a title, input schema, reviewed MCP safety annotations, and a
+    minimum OAuth `securitySchemes` scope (`menhir:read`, `menhir:write`, or `menhir:admin`)
+  - an OAuth invocation-tier denial returns `isError=true` with
+    `_meta["mcp/www_authenticate"]`; tenancy, allowlist, and domain refusals do not
 
 Practical rule:
 

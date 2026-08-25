@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-08-24 - Complete local ChatGPT OAuth and MCP compatibility wiring
+
+- Split protected-resource permission scopes from authorization-server `offline_access`, advertise
+  refresh support truthfully, and add exact RFC 9207 `iss` to trusted authorization redirects.
+- Accept SSRF-validated URL client IDs through CIMD with a bounded, durable SQLite snapshot while
+  retaining strict public-client DCR fallback and restart-safe client identity.
+- Add default-off persistent refresh-token configuration and wire authorization-code issuance,
+  single-use rotation, replay-family revocation, optional scope narrowing, and no-store responses.
+- Declare titles, reviewed safety annotations, and minimum OAuth scopes for all 54 MCP tools; startup
+  now refuses incomplete or tier-incoherent ChatGPT metadata.
+- Return `mcp/www_authenticate` only for verified OAuth tool-tier denials, preserving 401/403/503 HTTP
+  semantics and keeping tenancy, allowlist, argument, and domain refusals out of reauthorization UI.
+- Add focused discovery, CIMD/DCR, refresh persistence/rotation, metadata census, challenge, and
+  authorization-invariant coverage. The public HTTPS/Inspector and real ChatGPT restart-refresh
+  acceptance gates remain external and the implementation plan remains open.
+
 ## 2026-08-24 - CF-257 phase 0: a scan root must own the project identity it writes under
 
 - **Project identity is a directory basename**, so two directories sharing one are a single
