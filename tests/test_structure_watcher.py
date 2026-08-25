@@ -41,11 +41,24 @@ class _StubGraphAdapter:
             @staticmethod
             def execute(cypher, params=None):
                 if "MATCH (p:ProjectIdentity)" in cypher and "RETURN p.project_id AS id, " in cypher:
-                    return [{"id": f"id-{p['name']}", "root": p.get("root_path", "")}
-                            for p in projects]
+                    # `p.project_id <> $project_id` is part of this statement and MUST be honoured:
+                    # the same read backs both `binding_for_root` (no exclusion) and the rival
+                    # scan (excludes the id being bound). A stub that ignored it reported the
+                    # project as its own rival, and every watcher re-scan was refused as contested.
+                    exclude = (params or {}).get("project_id")
+                    rows = [
+                        {
+                            "id": f"id-{p['name']}",
+                            "root": p.get("root_path", ""),
+                            "root_key": None,
+                        }
+                        for p in projects
+                    ]
+                    return [r for r in rows if r["id"] != exclude]
                 if "MERGE (p:ProjectIdentity" in cypher:
                     return [{"bound_root": (params or {}).get("root_path"), "state": "bound",
-                             "bound_host": (params or {}).get("host")}]
+                             "bound_host": (params or {}).get("host"),
+                             "root_key": (params or {}).get("root_key")}]
                 return []
 
         return _Neo4j()

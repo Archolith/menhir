@@ -492,10 +492,28 @@ def _edge_defaults_queries() -> list[str]:
     return queries
 
 
+def _project_identity_index_queries() -> list[str]:
+    """Constraints backing :ProjectIdentity (CF-257).
+
+    In the phase-1 bootstrap rather than only in the migration script: a constraint that only a
+    one-off migration creates is one a fresh deployment does not have, and the whole point of the
+    root constraint is that it is the enforcement rather than the Python check in front of it.
+
+    Both are safe to create over existing data. `project_id` was already unique. The composite is
+    not enforced for a node with NULL in either property (verified, Neo4j 5.26.21), and bindings
+    written before this change carry no `root_key`, so creating it cannot fail on legacy rows --
+    they come under it when the next bind stamps them.
+    """
+    from menhir.infrastructure.project_identity_binding import PROJECT_IDENTITY_CONSTRAINTS
+
+    return list(PROJECT_IDENTITY_CONSTRAINTS)
+
+
 def get_phase1_bootstrap_queries() -> list[str]:
     """Return idempotent DDL and backfill queries for phase-1 memory shape."""
     return (
         [query.strip() for query in _node_index_queries()]
+        + [query.strip() for query in _project_identity_index_queries()]
         + [query.strip() for query in _artifact_index_queries()]
         + [query.strip() for query in _view_index_queries()]
         + [query.strip() for query in _metric_index_queries()]

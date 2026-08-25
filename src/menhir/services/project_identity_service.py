@@ -13,6 +13,7 @@ untouched. Nothing here writes structure; it only settles WHICH identity the sca
 from __future__ import annotations
 
 import logging
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -36,7 +37,11 @@ from menhir.infrastructure.project_identity_binding import (
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["settle_project_identity"]
+__all__ = ["settle_project_identity", "ProjectIdentityPublicationFailed"]
+
+
+class ProjectIdentityPublicationFailed(RuntimeError):
+    """The binding committed but the identity file could not be written."""
 
 
 def _candidate_for(graph_adapter: Any, root_path: str) -> IdentityCandidate | None:
@@ -110,9 +115,10 @@ def settle_project_identity(
             bound_id = binding_for_root(graph_adapter.neo4j, str(root_path))
         except Exception:  # pragma: no cover - an aid, never a gate
             logger.warning("binding lookup failed for %s", root_path, exc_info=True)
-        if bound_id:
-            ensure_ignore_rule(root_path)
-            mint_identity(root_path, project_id=bound_id, display_name=display_name)
+        # Publication is deliberately NOT done here. It happens once, at the tail, after the
+        # binding is confirmed -- doing it here as well meant this branch published the file and
+        # the tail then tried to publish it again, and `mint_identity` is O_EXCL, so the second
+        # attempt raised FileExistsError on the ordinary self-healing path.
 
     resolution = resolve_identity(
         root_path=str(root_path),
@@ -126,30 +132,55 @@ def settle_project_identity(
         return None, resolution
 
     project_id = resolution.project_id
-    adopting = identity_action == IdentityAction.ADOPT.value
+    # BOTH actions transfer. `adopt` re-points an existing identity at this directory; `new`
+    # abandons the one this directory holds. Treating only adopt as a transfer left `new` minting
+    # a fresh id while the old binding still claimed the root -- two active bindings for one
+    # directory, which is the erosion the root constraint exists to stop.
+    transferring = identity_action in (
+        IdentityAction.ADOPT.value,
+        IdentityAction.NEW.value,
+    )
 
     if project_id is None or identity_action == IdentityAction.NEW.value:
-        # action=new: mint. An explicit `new` replaces any existing file -- that is the escape
-        # hatch after a mistaken adopt, and without it the operator has no way back.
-        ensure_ignore_rule(root_path)
-        if existing is not None:
-            Path(existing.path).unlink()
-        project_id = mint_identity(root_path, display_name=display_name).project_id
-    elif adopting and (existing is None or existing.project_id != project_id):
-        # action=adopt: write the adopted id into this checkout so the next scan resolves without
-        # a decision. Replaces a file naming a different id, which is the point of adopting.
-        ensure_ignore_rule(root_path)
-        if existing is not None:
-            Path(existing.path).unlink()
-        project_id = mint_identity(
-            root_path, project_id=project_id, display_name=display_name
-        ).project_id
+        project_id = str(uuid.uuid4())
 
-    # Compare-and-set LAST, so a conflicted identity is refused before any structure is written.
-    # `rebind` on adopt: the recovery cases -- a moved repo, a new machine, a fresh clone -- are
-    # exactly the ones where the recorded root does NOT match, so treating adopt as a collision
-    # made the repair path break the project it was repairing.
+    # THE GRAPH FIRST, THE FILE SECOND. Publishing first meant a refused binding left the checkout
+    # holding an id the graph had rejected -- and on the `new` path the previous file was already
+    # unlinked, so a failed transfer destroyed the only local record of the id whose silo the
+    # project owns. Bind first and a refusal costs nothing: the file on disk is still the truth it
+    # was before the call.
     bind_project_identity(
-        graph_adapter.neo4j, project_id=project_id, root_path=str(root_path), rebind=adopting
+        graph_adapter.neo4j,
+        project_id=project_id,
+        root_path=str(root_path),
+        rebind=transferring,
     )
+
+    # Publication can still fail after the binding committed, and there is no ordering that
+    # removes that -- two stores cannot be written atomically. What makes it recoverable is that
+    # the graph, not the file, is authoritative for (host, root): the next scan finds no file,
+    # `binding_for_root` returns the bound id, and the file is re-published. A scan that instead
+    # finds a STALE file naming the superseded id is refused rather than silently re-pointed, so
+    # the failure surfaces instead of resurrecting the abandoned identity.
+    if existing is None or existing.project_id != project_id:
+        _publish_identity_file(
+            root_path, project_id=project_id, display_name=display_name, existing=existing
+        )
     return project_id, resolution
+
+
+def _publish_identity_file(
+    root_path: str, *, project_id: str, display_name: str, existing: Any
+) -> None:
+    ensure_ignore_rule(root_path)
+    if existing is not None:
+        Path(existing.path).unlink()
+    try:
+        mint_identity(root_path, project_id=project_id, display_name=display_name)
+    except Exception as exc:
+        raise ProjectIdentityPublicationFailed(
+            f"{project_id} is now bound to {root_path} in the graph, but the identity file could "
+            f"not be written ({exc}). Nothing is lost: re-scan this directory and the binding "
+            f"will re-publish it. Until then this checkout resolves its identity from the graph "
+            f"on every scan."
+        ) from exc

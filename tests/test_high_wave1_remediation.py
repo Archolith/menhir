@@ -494,8 +494,43 @@ def test_cf103_rescan_refuses_a_root_outside_the_allowed_ingest_roots(monkeypatc
     # to refuse a fork. That is a new collaborator, not a new assertion: everything this test
     # checks about CF-103's containment is unchanged below. `None` means "no project has claimed
     # this name", which is the state that lets the operator-tier case proceed exactly as before.
+    # CF-257 also gave the rescan its own identity settlement: it produces its own scan, so it
+    # carries no project_id from the request that scheduled it, and the choke point refuses an
+    # id-less write. `neo4j` reports this root as already bound, which is the post-backfill state
+    # and keeps this test about CF-103's containment. Both assertions below are unchanged.
     ops.built = SimpleNamespace(
-        graph_adapter=SimpleNamespace(get_project_root_path=lambda name: None)
+        graph_adapter=SimpleNamespace(
+            get_project_root_path=lambda name: None,
+            neo4j=SimpleNamespace(
+                execute=lambda cypher, params=None: (
+                    # `p.project_id <> $project_id` is in the statement and has to be honoured:
+                    # the same read backs the lookup (no exclusion) and the rival scan (excludes
+                    # the id being bound), so ignoring it makes a project its own rival.
+                    [
+                        r
+                        for r in [
+                            {
+                                "id": "bound-id",
+                                "root": str(outside.resolve()),
+                                "root_key": None,
+                            }
+                        ]
+                        if r["id"] != (params or {}).get("project_id")
+                    ]
+                    if "RETURN p.project_id AS id, " in cypher
+                    else [
+                        {
+                            "bound_root": (params or {}).get("root_path"),
+                            "state": "bound",
+                            "bound_host": (params or {}).get("host"),
+                            "root_key": (params or {}).get("root_key"),
+                        }
+                    ]
+                    if "MERGE (p:ProjectIdentity" in cypher
+                    else []
+                )
+            ),
+        )
     )
     asyncio.run(
         ops._background_symbol_rescan(str(outside), "proj", "s", "u", tier="agent")

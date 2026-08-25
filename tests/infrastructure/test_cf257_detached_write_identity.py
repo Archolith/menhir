@@ -255,3 +255,139 @@ def test_measurement_failure_never_breaks_the_request(monkeypatch):
         "menhir.infrastructure.telemetry.recorders.record_mcp_event", _boom
     )
     rs.record_deprecated_operation_call("write_project_structure", admitted=False)  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# The compatibility writer validates identity; it never settles one
+# ---------------------------------------------------------------------------
+
+def _compat_ops(monkeypatch, *, bound_id, root):
+    """A data-ops mixin whose graph reports `bound_id` as the binding for `root`, or none."""
+    from menhir.core.backend_runtime_data_ops import RuntimeProviderDataOpsMixin
+    import menhir.core.backend_runtime_data_ops as mod
+    from menhir.core import ingest_guard
+
+    monkeypatch.setattr(ingest_guard, "allowed_ingest_roots", lambda: [root.parent])
+    monkeypatch.setattr(mod, "get_request_tier", lambda: "operator")
+    monkeypatch.setattr(
+        "menhir.infrastructure.project_identity_binding._host", lambda: "h1"
+    )
+
+    written: list[object] = []
+
+    class _Neo4j:
+        def execute(self, cypher, params=None):
+            if "RETURN p.project_id AS id" in cypher and bound_id:
+                return [{"id": bound_id, "root": str(root), "root_key": None}]
+            return []
+
+    instance = RuntimeProviderDataOpsMixin()
+
+    async def _off_loop(fn, *a, **kw):
+        return fn(*a, **kw)
+
+    instance._off_loop = _off_loop
+    instance.built = SimpleNamespace(
+        graph_adapter=SimpleNamespace(
+            get_project_root_path=lambda name: None,
+            write_project_structure=lambda scan, s, u: written.append(scan) or {},
+            neo4j=_Neo4j(),
+        )
+    )
+    return instance, written
+
+
+def _payload(root, **extra):
+    base = {
+        "name": "proj",
+        "root_path": str(root),
+        "directories": [], "files": [], "dependencies": [], "endpoints": [],
+        "imports": [], "test_edges": [], "cross_project_refs": [],
+        "symbols": [], "call_edges": [], "scan_fingerprint": "fp",
+    }
+    base.update(extra)
+    return base
+
+
+@pytest.mark.unit
+def test_an_unbound_directory_is_refused_rather_than_given_an_identity(monkeypatch, tmp_path):
+    """THE BYPASS. This endpoint used to call `settle_project_identity` on the payload's
+    `root_path`, so a caller-supplied path string could MINT an identity -- or resolve to an
+    existing project's id and write a caller-authored payload, stale prune included, into its
+    silo. Identity here is read from the graph or the request is refused."""
+    from menhir.domain.project_identity import ProjectIdentityRefused
+
+    root = tmp_path / "proj"
+    root.mkdir()
+    ops_, written = _compat_ops(monkeypatch, bound_id=None, root=root)
+
+    with pytest.raises(ProjectIdentityRefused, match="no active project binding"):
+        asyncio.run(
+            ops_.write_project_structure(_payload(root), session_id="s", user_id="u")
+        )
+    assert written == [], "a refused request must not reach the writer"
+
+
+@pytest.mark.unit
+def test_a_supplied_id_that_contradicts_the_binding_is_refused(monkeypatch, tmp_path):
+    """Non-null was the whole of the old check. A populated field is not a fact about the sender."""
+    from menhir.domain.project_identity import ProjectIdentityRefused
+
+    root = tmp_path / "proj"
+    root.mkdir()
+    ops_, written = _compat_ops(monkeypatch, bound_id="real-id", root=root)
+
+    with pytest.raises(ProjectIdentityRefused, match="bound to 'real-id'"):
+        asyncio.run(
+            ops_.write_project_structure(
+                _payload(root, project_id="forged-id"), session_id="s", user_id="u"
+            )
+        )
+    assert written == []
+
+
+@pytest.mark.unit
+def test_a_correctly_bound_id_still_writes_under_the_authoritative_identity(monkeypatch, tmp_path):
+    """The bridge stays usable for its one legitimate caller, so the observation window measures
+    real use rather than an endpoint that was quietly broken before it was measured."""
+    root = tmp_path / "proj"
+    root.mkdir()
+    ops_, written = _compat_ops(monkeypatch, bound_id="real-id", root=root)
+
+    asyncio.run(
+        ops_.write_project_structure(
+            _payload(root, project_id="real-id"), session_id="s", user_id="u"
+        )
+    )
+    assert [s.project_id for s in written] == ["real-id"]
+
+
+@pytest.mark.unit
+def test_an_absent_id_resolves_from_the_binding_not_from_the_payload(monkeypatch, tmp_path):
+    """An older client sends no id. It is filled from server-side state keyed on (host, root) --
+    never from anything the caller said about which project this is."""
+    root = tmp_path / "proj"
+    root.mkdir()
+    ops_, written = _compat_ops(monkeypatch, bound_id="real-id", root=root)
+
+    asyncio.run(ops_.write_project_structure(_payload(root), session_id="s", user_id="u"))
+    assert [s.project_id for s in written] == ["real-id"]
+
+
+# ---------------------------------------------------------------------------
+# Transfer authorization fails closed
+# ---------------------------------------------------------------------------
+
+@pytest.mark.unit
+@pytest.mark.parametrize("tier", ["", None, "readonly", "agent"])
+def test_an_identity_transfer_is_refused_for_every_non_operator_tier(ops, monkeypatch, tier):
+    """`tier and tier != OPERATOR` let an UNBOUND tier straight through, and `get_request_tier()`
+    returns "" whenever auth is not configured -- so the gate was open on exactly the deployments
+    least able to notice. Presence of the tier is now part of the check."""
+    import menhir.core.backend_runtime_data_ops as mod
+    from menhir.domain.project_identity import ProjectIdentityRefused
+
+    monkeypatch.setattr(mod, "get_request_tier", lambda: tier)
+    with pytest.raises(ProjectIdentityRefused, match="requires operator tier"):
+        asyncio.run(_run_and_drain(ops, identity_action="new"))
+    assert ops.written == []

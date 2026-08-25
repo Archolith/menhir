@@ -576,7 +576,15 @@ class RuntimeProviderDataOpsMixin:
         # different directory, and new abandons the id a checkout currently holds. Left at agent
         # tier, any caller could submit an arbitrary adopt_project_id and rebind a project it has
         # no relationship to. Scanning stays agent; changing which project a directory IS does not.
-        if identity_action and tier and tier != OPERATOR_TIER:
+        #
+        # FAIL CLOSED. `tier and tier != OPERATOR_TIER` let an UNBOUND tier through, and
+        # `get_request_tier()` returns "" whenever no auth is configured or the ContextVar was
+        # never set for this call -- so the gate was open on exactly the deployments least able
+        # to notice. An identity transfer is not a scan; it requires the tier to be present AND
+        # to be operator. This deliberately diverges from the `force_identity` override, which
+        # still permits an unbound tier for local development: that override widens what one
+        # directory may write, while this changes which project a directory IS.
+        if identity_action and tier != OPERATOR_TIER:
             raise ProjectIdentityRefused(
                 f"identity_action={identity_action!r} transfers a project identity and requires "
                 f"{OPERATOR_TIER} tier; this request is {tier!r}. Scanning does not require it."
@@ -716,7 +724,10 @@ class RuntimeProviderDataOpsMixin:
         import asyncio as _asyncio
 
         from menhir.core.ingest_guard import ensure_ingest_path_allowed
-        from menhir.domain.project_identity import ensure_scan_root_owns_identity
+        from menhir.domain.project_identity import (
+            ProjectIdentityRefused,
+            ensure_scan_root_owns_identity,
+        )
         from menhir.infrastructure.repo_topology import classify_root
 
         scan_obj = _project_scan_from_dict(scan)
@@ -737,21 +748,43 @@ class RuntimeProviderDataOpsMixin:
         # rather than silently true -- while the recorded-root refusal, which is what catches a
         # fork, still applies with full force.
         identity_tier = get_request_tier()
-        # CF-257. An older client's payload carries no project_id -- that is what makes it an older
-        # client. Settling it here from the payload's root_path keeps the deprecated bridge WORKING
-        # while the observation window measures whether anything still uses it. Dropping the id at
-        # the transport boundary and then rejecting id-less scans broke the endpoint outright,
-        # which is not a deprecation: it removes the thing before the measurement that justifies
-        # removing it.
-        if not getattr(scan_obj, "project_id", None) and scan_obj.root_path:
-            from menhir.services.project_identity_service import settle_project_identity
-            settled, _resolution = await _asyncio.to_thread(
-                settle_project_identity,
-                self.built.graph_adapter,
-                root_path=scan_obj.root_path,
-                display_name=scan_obj.name,
+        # CF-257. Identity here is VALIDATED against the graph, never SETTLED from the payload.
+        #
+        # Settling was the bypass. `settle_project_identity` mints and binds, so calling it with a
+        # caller-supplied `root_path` let this endpoint CREATE an identity for any path string --
+        # or, worse, resolve to an existing project's id and write a caller-authored payload into
+        # its silo, complete with the per-project stale prune. A non-null `project_id` proved only
+        # that the field was populated, which is not a fact about the sender.
+        #
+        # What can be established here is narrow but real: whether THIS host has an active binding
+        # for the claimed directory. That is server-side state keyed on (host, normalized root),
+        # not anything the caller sends. It holds only when the sender is on the same machine as
+        # the server -- which is the in-process MCP case, the one legitimate remaining use -- and
+        # refuses everything else, as the review requires. Refusals are still recorded, so the
+        # observation window continues to measure the endpoint while it is closed to misuse.
+        from menhir.infrastructure.project_identity_binding import binding_for_root
+
+        supplied_id = getattr(scan_obj, "project_id", None)
+        bound_id = None
+        if scan_obj.root_path:
+            bound_id = await _asyncio.to_thread(
+                binding_for_root, self.built.graph_adapter.neo4j, scan_obj.root_path
             )
-            scan_obj.project_id = settled
+        if not bound_id:
+            raise ProjectIdentityRefused(
+                f"write_project_structure cannot establish an identity for "
+                f"{scan_obj.root_path!r}: no active project binding exists for that directory on "
+                f"this host. This endpoint judges a payload by a path the caller supplied, so an "
+                f"identity it cannot verify server-side is refused rather than invented. Use "
+                f"scan_and_write_project, which scans the directory it writes."
+            )
+        if supplied_id and supplied_id != bound_id:
+            raise ProjectIdentityRefused(
+                f"write_project_structure was given project_id={supplied_id!r} for "
+                f"{scan_obj.root_path!r}, which is bound to {bound_id!r} on this host. A supplied "
+                f"identity must match the authoritative binding for the directory it claims."
+            )
+        scan_obj.project_id = bound_id
         ensure_scan_root_owns_identity(
             topology=await _asyncio.to_thread(classify_root, scan_obj.root_path),
             project_name=scan_obj.name,
@@ -831,8 +864,31 @@ class RuntimeProviderDataOpsMixin:
         except ProjectIdentityRefused as exc:
             _log.warning("Background symbol rescan refused: project=%s error=%s", name, exc)
             return
+        # CF-257. This writer produces its OWN scan, so it carries no identity from the request
+        # that scheduled it -- and the choke point refuses an id-less scan, which would have made
+        # every symbol rescan a silent failure. It settles with no action: this path may resolve
+        # an identity that already exists, never transfer one, because it runs detached from any
+        # caller that could hold operator authority.
+        from menhir.services.project_identity_service import settle_project_identity
+        try:
+            rescan_id, resolution = await _asyncio.to_thread(
+                settle_project_identity,
+                self.built.graph_adapter,
+                root_path=root,
+                display_name=name,
+            )
+        except Exception as exc:
+            _log.warning("Background symbol rescan identity failed: project=%s error=%s", name, exc)
+            return
+        if rescan_id is None:
+            _log.warning(
+                "Background symbol rescan skipped: project=%s needs an identity decision (%s)",
+                name, resolution.reason,
+            )
+            return
         try:
             fresh_scan = await _asyncio.to_thread(_PS().scan, root, name)
+            fresh_scan.project_id = rescan_id
             await _asyncio.to_thread(
                 self.built.graph_adapter.write_project_structure,
                 fresh_scan,

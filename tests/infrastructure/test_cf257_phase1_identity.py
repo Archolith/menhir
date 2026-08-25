@@ -144,37 +144,14 @@ def test_an_unwritable_location_reports_rather_than_half_minting(tmp_path, monke
 # The binding
 # ---------------------------------------------------------------------------
 
-class _FakeNeo4j:
-    """Models :ProjectIdentity closely enough to exercise the compare-and-set."""
-
-    def __init__(self):
-        self.rows: dict[str, dict] = {}
-
-    def execute(self, cypher, params=None):
-        params = params or {}
-        pid = params.get("project_id")
-        if "MERGE (p:ProjectIdentity" in cypher:
-            row = self.rows.setdefault(
-                pid, {"canonical_root_path": params["root_path"], "state": "bound"}
-            )
-            return [{"bound_root": row["canonical_root_path"], "state": row["state"]}]
-        if "SET p.state = 'conflicted'" in cypher:
-            self.rows[pid]["state"] = "conflicted"
-            return []
-        if "SET p.state = 'bound'" in cypher:
-            self.rows[pid] = {
-                "canonical_root_path": params["root_path"], "state": "bound"
-            }
-            return []
-        if "RETURN p.canonical_root_path AS root" in cypher:
-            row = self.rows.get(pid)
-            return [{"root": row["canonical_root_path"], "state": row["state"]}] if row else []
-        raise AssertionError(f"unexpected statement: {cypher[:70]}")
-
+# The binding protocol is exercised against `fake_identity_graph` (tests/infrastructure/
+# conftest.py), which enforces the `(bound_host, root_key)` uniqueness constraint rather than
+# merely storing rows. The authority for the real constraint semantics is
+# `test_cf257_identity_binding_online.py`.
 
 @pytest.fixture
-def neo4j():
-    return _FakeNeo4j()
+def neo4j(fake_identity_graph):
+    return fake_identity_graph
 
 
 @pytest.mark.unit
