@@ -22,6 +22,7 @@ from menhir.api.oauth_as_register import router as oauth_as_register_router
 from menhir.api.oauth_authorize import router as oauth_authorize_router
 from menhir.api.oauth_client_store import configure_client_store
 from menhir.api.oauth_keys import configure_signing_key
+from menhir.api.oauth_refresh_store import configure_refresh_store
 from menhir.api.oauth_metadata import router as oauth_metadata_router
 from menhir.api.oauth_token import router as oauth_token_router
 from menhir.api.request_context import RequestContextMiddleware
@@ -48,16 +49,20 @@ def build_server_prereqs(settings: MemorySettings) -> dict[str, Any]:
     oauth_client_store = None
     auth_code_store = None
     signing_key = None
+    refresh_token_store = None
     if settings.oauth_as_enabled:
         oauth_client_store = configure_client_store(settings)
         auth_code_store = configure_auth_code_store(settings)
         signing_key = configure_signing_key(settings)
+        if settings.oauth_as_refresh_tokens_enabled:
+            refresh_token_store = configure_refresh_store(settings)
     return {
         "oauth_config": oauth_config,
         "client_token_store": client_token_store,
         "oauth_client_store": oauth_client_store,
         "auth_code_store": auth_code_store,
         "signing_key": signing_key,
+        "oauth_refresh_store": refresh_token_store,
     }
 
 

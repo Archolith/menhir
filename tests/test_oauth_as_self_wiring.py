@@ -122,3 +122,67 @@ def test_as_enabled_does_not_overwrite_partial_explicit_config():
     assert config.issuer == "https://custom-issuer.example.com/"
     assert config.jwks_uri == f"{_BASE}/.well-known/jwks.json"
     assert config.authorization_servers == (_BASE,)
+
+
+# ---------------------------------------------------------------------------
+# Phase 6: the refresh-token store is wired only when AS + refresh are enabled.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _reset_refresh_store_singleton():
+    import menhir.api.oauth_refresh_store as module
+
+    module._refresh_store_singleton = None
+    yield
+    module._refresh_store_singleton = None
+
+
+def _as_settings(tmp_path, **overrides):
+    from menhir.config import MemorySettings
+
+    defaults = dict(
+        oauth_as_enabled=True,
+        oauth_public_base_url="http://127.0.0.1:8100",
+        api_key="test-key",
+        oauth_as_dir=str(tmp_path),
+    )
+    defaults.update(overrides)
+    return MemorySettings(**defaults)
+
+
+def test_refresh_store_configured_only_when_enabled(tmp_path):
+    from menhir.api.server_support import build_server_prereqs
+    from menhir.api.oauth_refresh_store import get_refresh_store
+
+    prereqs = build_server_prereqs(
+        _as_settings(tmp_path, oauth_as_refresh_tokens_enabled=True)
+    )
+    assert prereqs["oauth_refresh_store"] is not None
+    assert get_refresh_store() is prereqs["oauth_refresh_store"]
+
+
+def test_refresh_store_none_when_grant_disabled(tmp_path):
+    from menhir.api.server_support import build_server_prereqs
+
+    prereqs = build_server_prereqs(
+        _as_settings(tmp_path, oauth_as_refresh_tokens_enabled=False)
+    )
+    assert prereqs["oauth_refresh_store"] is None
+
+
+def test_disabled_app_state_is_none(monkeypatch):
+    from menhir.api.server import create_app
+    from menhir.config import MemorySettings
+
+    for name in (
+        "MENHIR_OAUTH_AS_ENABLED",
+        "MENHIR_OAUTH_AS_REFRESH_TOKENS_ENABLED",
+        "MENHIR_OAUTH_ENABLED",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    app = create_app(settings=MemorySettings())
+    inner = app.app.app  # RequestContextMiddleware -> BearerAuthMiddleware -> FastAPI
+
+    assert inner.state.oauth_refresh_store is None

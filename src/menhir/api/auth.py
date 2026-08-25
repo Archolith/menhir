@@ -17,10 +17,12 @@ from menhir.config.oauth import OAuthConfig
 from menhir.config.settings import is_loopback_host
 from menhir.mcp.service_access import (
     bind_request_auth_mode,
+    bind_request_oauth_context,
     bind_request_session,
     bind_request_tier,
     require_trusted_client_identity,
     reset_request_auth_mode,
+    reset_request_oauth_context,
     reset_request_session,
     reset_request_tier,
 )
@@ -714,12 +716,17 @@ class BearerAuthMiddleware:
             trust_identity_headers=False,
         )
         auth_mode_token = bind_request_auth_mode("oauth")
+        oauth_context_token = bind_request_oauth_context(
+            self._oauth_config,
+            principal.scopes,
+        )
         session_token = bind_request_session(user_id, session_id, client_id=client_id, client_name=client_name)
         tier_token = bind_request_tier(principal.tier)
         try:
             await self.app(scope, receive, send)
         finally:
             reset_request_session(session_token)
+            reset_request_oauth_context(oauth_context_token)
             reset_request_auth_mode(auth_mode_token)
             reset_request_tier(tier_token)
 

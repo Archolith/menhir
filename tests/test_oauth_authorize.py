@@ -307,3 +307,88 @@ def test_post_expired_consent_token_400(monkeypatch):
     form["decision"] = "approve"
     resp = c.post("/oauth/authorize", data=form)
     assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# RFC 9207: every trusted redirect carries exact iss + preserved state
+# ---------------------------------------------------------------------------
+
+_EXACT_ISS = "https://memory.example.com"
+
+
+def test_unsupported_response_type_redirect_has_exact_iss_and_state():
+    _, challenge = _pkce()
+    cid = _register_client()
+    params = _valid_get_params(cid, challenge=challenge)
+    params["response_type"] = "token"
+    resp = _client().get("/oauth/authorize", params=params)
+    assert resp.status_code == 302
+    q = _location_query(resp)
+    assert q["iss"] == [_EXACT_ISS]
+    assert q["state"] == ["xyz-state"]
+    assert q["error"] == ["unsupported_response_type"]
+
+
+def test_pkce_error_redirect_has_exact_iss_and_state():
+    _, challenge = _pkce()
+    cid = _register_client()
+    params = _valid_get_params(cid, challenge=challenge)
+    params["code_challenge_method"] = "plain"
+    resp = _client().get("/oauth/authorize", params=params)
+    assert resp.status_code == 302
+    q = _location_query(resp)
+    assert q["iss"] == [_EXACT_ISS]
+    assert q["state"] == ["xyz-state"]
+    assert q["error"] == ["invalid_request"]
+
+
+def test_invalid_scope_redirect_has_exact_iss_and_state():
+    _, challenge = _pkce()
+    cid = _register_client(scopes=("menhir:read",))
+    params = _valid_get_params(cid, challenge=challenge, scope="menhir:admin")
+    resp = _client().get("/oauth/authorize", params=params)
+    assert resp.status_code == 302
+    q = _location_query(resp)
+    assert q["iss"] == [_EXACT_ISS]
+    assert q["state"] == ["xyz-state"]
+    assert q["error"] == ["invalid_scope"]
+
+
+def test_deny_redirect_has_exact_iss_and_state():
+    _, challenge = _pkce()
+    cid = _register_client()
+    c = _client()
+    form = _consent_form(c, cid, challenge=challenge)
+    form["admin_secret"] = "s3cret"
+    form["decision"] = "deny"
+    resp = c.post("/oauth/authorize", data=form)
+    assert resp.status_code == 302
+    q = _location_query(resp)
+    assert q["iss"] == [_EXACT_ISS]
+    assert q["state"] == ["xyz-state"]
+    assert q["error"] == ["access_denied"]
+
+
+def test_success_redirect_has_exact_iss_and_state():
+    _, challenge = _pkce()
+    cid = _register_client()
+    c = _client()
+    form = _consent_form(c, cid, challenge=challenge)
+    form["admin_secret"] = "s3cret"
+    form["decision"] = "approve"
+    resp = c.post("/oauth/authorize", data=form)
+    assert resp.status_code == 302
+    q = _location_query(resp)
+    assert q["iss"] == [_EXACT_ISS]
+    assert q["state"] == ["xyz-state"]
+    assert q["code"][0]
+
+
+def test_untrusted_target_still_direct_400_no_iss():
+    _, challenge = _pkce()
+    cid = _register_client()
+    params = _valid_get_params(cid, challenge=challenge)
+    params["redirect_uri"] = "https://evil.example.com/cb"
+    resp = _client().get("/oauth/authorize", params=params)
+    assert resp.status_code == 400
+    assert "location" not in resp.headers

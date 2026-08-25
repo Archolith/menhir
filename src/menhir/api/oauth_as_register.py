@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import logging
 import time
-from urllib.parse import urlparse
 
+from archolith_oauth import valid_redirect_uri
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
@@ -19,8 +19,7 @@ from menhir.api.oauth_as_metadata import _as_enabled
 from menhir.api.oauth_client_store import OAuthClient, get_client_store, new_client_id
 from menhir.api.oauth_rate_limit import FixedWindowLimiter, build_register_limiter, client_ip
 from menhir.config import MemorySettings
-from menhir.config.oauth import _get_setting, build_oauth_config
-from menhir.config.settings import is_loopback_host
+from menhir.config.oauth import _as_bool, _get_setting, build_oauth_config
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -44,18 +43,30 @@ _register_limiter = FixedWindowLimiter(max_per_window=20, window_s=600)
 
 
 def _redirect_uri_ok(uri: object) -> bool:
-    """True only for an https URI, or an http URI whose host is loopback."""
-    if not isinstance(uri, str) or not uri:
-        return False
-    try:
-        parsed = urlparse(uri)
-    except Exception:
-        return False
-    if parsed.scheme == "https":
-        return bool(parsed.hostname)
-    if parsed.scheme == "http":
-        return is_loopback_host((parsed.hostname or "").strip().lower())
-    return False
+    """Apply the same strict redirect-URI rules as shared DCR and CIMD."""
+    return isinstance(uri, str) and valid_redirect_uri(uri)
+
+
+def refresh_tokens_enabled(settings: object) -> bool:
+    """True iff the AS issues refresh tokens; controls DCR grant acceptance and
+    advertisement truthfully (AS-005)."""
+    return _as_bool(
+        _get_setting(
+            settings,
+            "oauth_as_refresh_tokens_enabled",
+            "MENHIR_OAUTH_AS_REFRESH_TOKENS_ENABLED",
+            False,
+        )
+    )
+
+
+def as_scope_surface(settings: object) -> tuple[str, ...]:
+    """The full configured AS scope surface; includes offline_access only when
+    refresh tokens are enabled."""
+    scopes = tuple(build_oauth_config(settings).scopes_supported)
+    if refresh_tokens_enabled(settings) and "offline_access" not in scopes:
+        scopes = scopes + ("offline_access",)
+    return scopes
 
 
 def _error(error: str, description: str) -> JSONResponse:
@@ -144,6 +155,13 @@ async def register_client(request: Request) -> JSONResponse:
         not isinstance(grant_types, list) or not set(grant_types) <= _SUPPORTED_GRANT_TYPES
     ):
         return _error("invalid_client_metadata", "Unsupported grant_types")
+    refresh_enabled = refresh_tokens_enabled(settings)
+    if not refresh_enabled and grant_types and "refresh_token" in grant_types:
+        # Truthful DCR: never accept a grant the AS will not honor (AS-005).
+        return _error(
+            "invalid_client_metadata",
+            "refresh_token grant is not enabled on this authorization server",
+        )
 
     response_types = body.get("response_types")
     if response_types is not None and (
@@ -151,7 +169,7 @@ async def register_client(request: Request) -> JSONResponse:
     ):
         return _error("invalid_client_metadata", "Unsupported response_types")
 
-    supported = tuple(build_oauth_config(settings).scopes_supported)
+    supported = as_scope_surface(settings)
     requested_raw = body.get("scope")
     if requested_raw is None:
         granted = list(supported)
@@ -186,10 +204,9 @@ async def register_client(request: Request) -> JSONResponse:
             "client_id_issued_at": now,
             "redirect_uris": list(redirect_uris),
             "token_endpoint_auth_method": "none",
-            # Only authorization_code is implemented at /oauth/token; do NOT advertise
-            # refresh_token until it is (AS-005). The request-side _SUPPORTED_GRANT_TYPES
-            # stays tolerant of a refresh_token in the registration body (harmless).
-            "grant_types": ["authorization_code"],
+            # Advertise grant types truthfully: refresh_token only when the AS
+            # actually issues refresh tokens (AS-005).
+            "grant_types": ["authorization_code"] + (["refresh_token"] if refresh_enabled else []),
             "response_types": ["code"],
             "client_name": client_name,
             "scope": " ".join(granted),

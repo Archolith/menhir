@@ -28,6 +28,7 @@ import secrets
 import threading
 import time
 from hashlib import sha256
+from typing import Any
 from urllib.parse import urlencode, urlsplit, urlunsplit, parse_qsl
 
 from fastapi import APIRouter, HTTPException, Request
@@ -35,10 +36,27 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 
 from menhir.api.auth_code_store import get_auth_code_store
 from menhir.api.oauth_as_metadata import _as_enabled
-from menhir.api.oauth_client_store import OAuthClient, get_client_store
+from menhir.api.oauth_client_store import (
+    OAuthClient,
+    cimd_fetched_at,
+    get_client_store,
+    upsert_cimd_client,
+)
 from menhir.api.oauth_rate_limit import FixedWindowLimiter, build_approve_limiter, client_ip
 from menhir.config import MemorySettings, build_oauth_config
 from menhir.config.oauth import _get_setting
+
+try:  # Shared SSRF-safe CIMD resolver (commit cfb61934+).
+    from archolith_oauth.cimd import (
+        resolve_client_metadata_document as _shared_cimd_resolver,
+    )
+except ImportError:
+    try:
+        from archolith_oauth import (
+            resolve_client_metadata_document as _shared_cimd_resolver,
+        )
+    except ImportError:  # pragma: no cover - dependency pin not yet bumped
+        _shared_cimd_resolver = None
 
 router = APIRouter()
 
@@ -73,6 +91,14 @@ _SIGNED_FIELDS = (
 
 # Per-process integrity-token secret; overridable for tests / determinism.
 _PROCESS_CONSENT_SECRET = secrets.token_bytes(32)
+
+# Injectable CIMD document resolver (tests inject fakes; production falls back to
+# the shared SSRF-guarded resolver). Signature: async (url) -> dict.
+_cimd_resolver: Any | None = None
+
+# Default bounded CIMD snapshot freshness: 24h.
+_CIMD_DEFAULT_MAX_AGE_S = 86400
+_MAX_CIMD_CLIENT_NAME_LEN = 255
 
 # AS-004: throttle failed/approve POSTs per IP so a single consent token cannot be used to
 # brute-force the admin secret at speed.
@@ -261,8 +287,21 @@ def _redirect(redirect_uri: str, params: dict[str, str]) -> RedirectResponse:
     return RedirectResponse(target, status_code=302)
 
 
-def _error_redirect(redirect_uri: str, error: str, description: str, state: str) -> RedirectResponse:
-    params = {"error": error, "error_description": description}
+def _as_issuer(settings: object) -> str:
+    """Exact AS issuer (RFC 9207): must byte-match the advertised metadata issuer."""
+    return str(
+        _get_setting(settings, "oauth_public_base_url", "MENHIR_PUBLIC_BASE_URL", "")
+    ).strip().rstrip("/")
+
+
+def _error_redirect(
+    redirect_uri: str,
+    error: str,
+    description: str,
+    state: str,
+    settings: object,
+) -> RedirectResponse:
+    params = {"iss": _as_issuer(settings), "error": error, "error_description": description}
     if state:
         params["state"] = state
     return _redirect(redirect_uri, params)
@@ -292,14 +331,125 @@ class _RedirectError(Exception):
         self.description = description
 
 
-def _resolve_client_and_redirect(
-    client_id: str, redirect_uri: str
+def _is_https_url(value: str) -> bool:
+    """True only for a well-formed HTTPS URL with a host (CIMD identifier shape)."""
+    try:
+        parts = urlsplit(value)
+    except Exception:
+        return False
+    return parts.scheme == "https" and bool(parts.hostname)
+
+
+def _stale_client_max_age_s(settings: object) -> int:
+    """Bounded CIMD snapshot freshness (default 24h, shared with DCR reaping)."""
+    return int(
+        _get_setting(
+            settings,
+            "oauth_as_stale_client_max_age_s",
+            "MENHIR_OAUTH_AS_STALE_CLIENT_MAX_AGE_S",
+            _CIMD_DEFAULT_MAX_AGE_S,
+        )
+    )
+
+
+def refresh_tokens_enabled(settings: object) -> bool:
+    """True iff the AS issues refresh tokens (drives offline_access availability)."""
+    from menhir.api.oauth_as_register import refresh_tokens_enabled as _flag
+
+    return _flag(settings)
+
+
+def _as_scopes_for_clients(settings: object) -> tuple[str, ...]:
+    """Full configured AS scope surface for single-owner-profile CIMD clients;
+    authorize still validates the requested subset. Includes offline_access only
+    when refresh tokens are enabled."""
+    from menhir.api.oauth_as_register import as_scope_surface
+
+    return as_scope_surface(settings)
+
+
+def _client_from_cimd_document(
+    client_id: str, doc: Any, settings: object
+) -> OAuthClient:
+    """Convert resolver-validated metadata into an OAuthClient. Fails closed on
+    any identity/shape/auth-method deviation."""
+    from menhir.api.oauth_as_register import _redirect_uri_ok
+
+    if not isinstance(doc, dict):
+        raise ValueError("Client metadata document must be a JSON object")
+    # Exact identity: the document's client_id must byte-match the URL used.
+    if str(doc.get("client_id", "")) != client_id:
+        raise ValueError("Metadata document client_id does not match the requesting identifier")
+    redirect_uris_raw = doc.get("redirect_uris")
+    if (
+        not isinstance(redirect_uris_raw, list)
+        or not redirect_uris_raw
+        or not all(isinstance(u, str) and u and _redirect_uri_ok(u) for u in redirect_uris_raw)
+    ):
+        raise ValueError("Metadata document redirect_uris are invalid")
+    auth_method = doc.get("token_endpoint_auth_method", "none")
+    if auth_method != "none":
+        raise ValueError("Only public clients (token_endpoint_auth_method 'none') are supported")
+    client_name = str(doc.get("client_name", "")).strip()[:_MAX_CIMD_CLIENT_NAME_LEN]
+    return OAuthClient(
+        client_id=client_id,
+        client_name=client_name,
+        redirect_uris=tuple(str(u) for u in redirect_uris_raw),
+        scopes=_as_scopes_for_clients(settings),
+        client_secret_hash="",
+        token_endpoint_auth_method="none",
+        created_at=time.time(),
+    )
+
+
+async def resolve_cimd_client(client_id: str, settings: object) -> OAuthClient:
+    """Resolve an HTTPS URL client_id via CIMD with durable bounded-freshness caching.
+
+    A fresh cached snapshot is used without network; stale or missing snapshots
+    trigger revalidation through the shared SSRF-safe resolver and are durably
+    upserted under the exact URL client_id. Revalidation failure fails closed.
+    Token/code exchange may still use the durable OAuthClient row after restart.
+    """
+    store = get_client_store()
+    now = time.time()
+    cached = store.get(client_id)
+    fetched_at = cimd_fetched_at(client_id)
+    max_age = _stale_client_max_age_s(settings)
+    if (
+        cached is not None
+        and fetched_at is not None
+        and max_age > 0
+        and (now - fetched_at) <= max_age
+    ):
+        if cached.token_endpoint_auth_method != "none":
+            raise ValueError("Cached client metadata is not a public client")
+        return cached
+
+    resolver = _cimd_resolver or _shared_cimd_resolver
+    if resolver is None:
+        raise ValueError("CIMD resolution is unavailable on this installation")
+    try:
+        doc = await resolver(client_id)
+    except Exception as exc:
+        raise ValueError(f"CIMD document could not be retrieved or validated ({exc})") from exc
+    client = _client_from_cimd_document(client_id, doc, settings)
+    upsert_cimd_client(client, fetched_at=now)
+    return client
+
+
+async def _resolve_client_and_redirect(
+    client_id: str, redirect_uri: str, settings: object
 ) -> OAuthClient:
     """Return the client iff it exists and *redirect_uri* exactly matches a registered
-    URI. Raises HTTPException-like signalling via ValueError for untrusted targets."""
+    URI. Ordinary persisted (DCR) client IDs resolve from the store; HTTPS URL
+    client_ids resolve via the SSRF-safe CIMD path. Raises HTTPException-like
+    signalling via ValueError for untrusted targets."""
     if not client_id:
         raise ValueError("Missing client_id")
-    client = get_client_store().get(client_id)
+    if _is_https_url(client_id):
+        client = await resolve_cimd_client(client_id, settings)
+    else:
+        client = get_client_store().get(client_id)
     if client is None:
         raise ValueError("Unknown client_id")
     if not redirect_uri or redirect_uri not in client.redirect_uris:
@@ -544,7 +694,7 @@ def _issue_code_redirect(
         resource=bound_resource,
         subject=subject,
     )
-    params = {"code": code}
+    params = {"code": code, "iss": _as_issuer(settings)}
     if state:
         params["state"] = state
     return _redirect(redirect_uri, params)
@@ -568,7 +718,7 @@ async def authorize_get(request: Request):
 
     # Untrusted-target validation FIRST — never redirect on these.
     try:
-        client = _resolve_client_and_redirect(client_id, redirect_uri)
+        client = await _resolve_client_and_redirect(client_id, redirect_uri, settings)
     except ValueError as exc:
         return _bad_request(str(exc))
 
@@ -581,7 +731,7 @@ async def authorize_get(request: Request):
         )
         scope = _resolve_scope(q.get("scope", ""), client)
     except _RedirectError as exc:
-        return _error_redirect(redirect_uri, exc.error, exc.description, state)
+        return _error_redirect(redirect_uri, exc.error, exc.description, state, settings)
 
     # One-click (Phase 8): a valid consent-session cookie skips the page and issues a code
     # directly. Validation above always runs first, so a stale cookie cannot bypass the
@@ -647,8 +797,12 @@ async def authorize_post(request: Request):
         return _bad_request("Consent request has already been used; restart the authorization.")
 
     # 2. Re-validate untrusted target from scratch (client could have changed).
+    # This runs strictly after the signed consent envelope is verified, so no
+    # network (CIMD revalidation) happens for unauthenticated garbage.
     try:
-        client = _resolve_client_and_redirect(submitted["client_id"], redirect_uri)
+        client = await _resolve_client_and_redirect(
+            submitted["client_id"], redirect_uri, settings
+        )
     except ValueError as exc:
         return _bad_request(str(exc))
 
@@ -661,11 +815,13 @@ async def authorize_post(request: Request):
         )
         scope = _resolve_scope(submitted["scope"], client)
     except _RedirectError as exc:
-        return _error_redirect(redirect_uri, exc.error, exc.description, state)
+        return _error_redirect(redirect_uri, exc.error, exc.description, state, settings)
 
     # 4. Denial is safe and needs no secret.
     if decision != "approve":
-        return _error_redirect(redirect_uri, "access_denied", "The request was denied", state)
+        return _error_redirect(
+            redirect_uri, "access_denied", "The request was denied", state, settings
+        )
 
     # 4b. Brute-force throttle (AS-004): rate-limit approve attempts per IP before the
     # secret is ever evaluated, so an attacker cannot rapidly guess the admin secret.

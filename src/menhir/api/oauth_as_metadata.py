@@ -11,6 +11,8 @@ from menhir.config.oauth import _as_bool, _get_setting, build_oauth_config
 
 router = APIRouter()
 
+_REFRESH_TTL_DEFAULT_S = 30 * 24 * 60 * 60
+
 
 def _as_enabled(settings: object) -> bool:
     return _as_bool(
@@ -32,6 +34,14 @@ def build_authorization_server_config(settings: object) -> AuthorizationServerCo
         default_scopes=config.scopes_supported,
         access_token_ttl_s=int(getattr(settings, "oauth_as_access_ttl_s", 3600)),
         authorization_code_ttl_s=int(getattr(settings, "oauth_as_code_ttl_s", 120)),
+        issue_refresh_tokens=_as_bool(
+            getattr(settings, "oauth_as_refresh_tokens_enabled", False)
+        ),
+        refresh_token_ttl_s=int(
+            getattr(settings, "oauth_as_refresh_ttl_s", _REFRESH_TTL_DEFAULT_S)
+        ),
+        authorization_response_iss_parameter_supported=True,
+        client_id_metadata_document_supported=True,
     )
 
 

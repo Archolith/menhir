@@ -10,7 +10,13 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from menhir.api import auth_code_store, jose_provider, oauth_client_store, oauth_keys
+from menhir.api import (
+    auth_code_store,
+    jose_provider,
+    oauth_client_store,
+    oauth_keys,
+    oauth_refresh_store,
+)
 from menhir.api.auth_code_store import get_auth_code_store
 from menhir.api.oauth_client_store import OAuthClient, get_client_store, new_client_id
 from menhir.api.oauth_keys import get_signing_key, public_jwks
@@ -20,6 +26,12 @@ pytestmark = pytest.mark.unit
 
 _BASE = "https://memory.example.com"
 _ENABLED = SimpleNamespace(oauth_as_enabled=True, oauth_public_base_url=_BASE)
+_ENABLED_REFRESH = SimpleNamespace(
+    oauth_as_enabled=True,
+    oauth_public_base_url=_BASE,
+    oauth_as_refresh_tokens_enabled=True,
+    oauth_as_refresh_ttl_s=2592000,
+)
 _DISABLED = SimpleNamespace(oauth_as_enabled=False)
 _CB = "https://app.example.com/cb"
 _SCOPE = "menhir:read menhir:write menhir:admin"
@@ -35,10 +47,12 @@ def _isolate(tmp_path, monkeypatch):
     monkeypatch.setattr(oauth_client_store, "_client_store_singleton", None, raising=False)
     monkeypatch.setattr(auth_code_store, "_auth_code_store_singleton", None, raising=False)
     monkeypatch.setattr(oauth_keys, "_SIGNING_KEY", None, raising=False)
+    monkeypatch.setattr(oauth_refresh_store, "_refresh_store_singleton", None, raising=False)
     yield
     monkeypatch.setattr(oauth_client_store, "_client_store_singleton", None, raising=False)
     monkeypatch.setattr(auth_code_store, "_auth_code_store_singleton", None, raising=False)
     monkeypatch.setattr(oauth_keys, "_SIGNING_KEY", None, raising=False)
+    monkeypatch.setattr(oauth_refresh_store, "_refresh_store_singleton", None, raising=False)
 
 
 def _pkce() -> tuple[str, str]:
@@ -82,6 +96,11 @@ def _seed_code(cid: str, challenge: str, *, redirect_uri: str = _CB, scope: str 
 def _client(settings=_ENABLED) -> TestClient:
     app = FastAPI()
     app.state.settings = settings
+    app.state.oauth_refresh_store = (
+        oauth_refresh_store.configure_refresh_store(settings)
+        if getattr(settings, "oauth_as_refresh_tokens_enabled", False)
+        else None
+    )
     app.include_router(oauth_token_router)
     return TestClient(app)
 
@@ -95,6 +114,34 @@ def _token_form(code: str, cid: str, verifier: str, *, redirect_uri: str = _CB) 
         "code_verifier": verifier,
         "resource": _RESOURCE,
     }
+
+
+def _issue_initial_refresh() -> tuple[TestClient, str, dict[str, object]]:
+    verifier, challenge = _pkce()
+    cid = _register_client()
+    code = _seed_code(cid, challenge, scope=f"{_SCOPE} offline_access")
+    client = _client(_ENABLED_REFRESH)
+    response = client.post("/oauth/token", data=_token_form(code, cid, verifier))
+    assert response.status_code == 200
+    return client, cid, response.json()
+
+
+def _refresh_form(
+    token: str,
+    cid: str,
+    *,
+    resource: str = _RESOURCE,
+    scope: str | None = None,
+) -> dict[str, str]:
+    form = {
+        "grant_type": "refresh_token",
+        "refresh_token": token,
+        "client_id": cid,
+        "resource": resource,
+    }
+    if scope is not None:
+        form["scope"] = scope
+    return form
 
 
 # ---------------------------------------------------------------------------
@@ -196,3 +243,115 @@ def test_wrong_redirect_uri_invalid_grant():
     )
     assert resp.status_code == 400
     assert resp.json()["error"] == "invalid_grant"
+
+
+def test_refresh_disabled_rejects_refresh_grant_with_no_store_headers():
+    response = _client().post(
+        "/oauth/token",
+        data=_refresh_form("not-a-token", "client-a"),
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "unsupported_grant_type"
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["pragma"] == "no-cache"
+
+
+def test_offline_access_code_exchange_returns_refresh_token():
+    _client_instance, _cid, body = _issue_initial_refresh()
+
+    assert body["refresh_token"]
+    assert set(str(body["scope"]).split()) == {
+        "menhir:read",
+        "menhir:write",
+        "menhir:admin",
+        "offline_access",
+    }
+
+
+def test_refresh_rotates_once_and_replay_revokes_family():
+    client, cid, initial = _issue_initial_refresh()
+    rotated = client.post(
+        "/oauth/token",
+        data=_refresh_form(str(initial["refresh_token"]), cid),
+    )
+
+    assert rotated.status_code == 200
+    assert rotated.headers["cache-control"] == "no-store"
+    assert rotated.headers["pragma"] == "no-cache"
+    replacement = rotated.json()["refresh_token"]
+    assert replacement != initial["refresh_token"]
+
+    replay = client.post(
+        "/oauth/token",
+        data=_refresh_form(str(initial["refresh_token"]), cid),
+    )
+    assert replay.status_code == 400
+    assert replay.json()["error"] == "invalid_grant"
+
+    revoked_replacement = client.post(
+        "/oauth/token",
+        data=_refresh_form(str(replacement), cid),
+    )
+    assert revoked_replacement.status_code == 400
+    assert revoked_replacement.json()["error"] == "invalid_grant"
+
+
+def test_refresh_scope_narrowing_and_expansion_failure():
+    client, cid, initial = _issue_initial_refresh()
+    expanded = client.post(
+        "/oauth/token",
+        data=_refresh_form(
+            str(initial["refresh_token"]),
+            cid,
+            scope=f"{_SCOPE} offline_access menhir:future",
+        ),
+    )
+    assert expanded.status_code == 400
+    assert expanded.json()["error"] == "invalid_scope"
+
+    narrowed = client.post(
+        "/oauth/token",
+        data=_refresh_form(
+            str(initial["refresh_token"]),
+            cid,
+            scope="menhir:read offline_access",
+        ),
+    )
+    assert narrowed.status_code == 200
+    assert set(narrowed.json()["scope"].split()) == {
+        "menhir:read",
+        "offline_access",
+    }
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"client_id": "wrong-client"},
+        {"resource": "https://memory.example.com/wrong"},
+    ],
+)
+def test_refresh_rejects_wrong_client_or_resource(overrides):
+    client, cid, initial = _issue_initial_refresh()
+    form = _refresh_form(str(initial["refresh_token"]), cid)
+    form.update(overrides)
+
+    response = client.post("/oauth/token", data=form)
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "invalid_grant"
+
+
+def test_refresh_survives_store_reconstruction():
+    _client_instance, cid, initial = _issue_initial_refresh()
+    oauth_refresh_store._refresh_store_singleton = None
+    reconstructed_client = _client(_ENABLED_REFRESH)
+
+    response = reconstructed_client.post(
+        "/oauth/token",
+        data=_refresh_form(str(initial["refresh_token"]), cid),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["refresh_token"]

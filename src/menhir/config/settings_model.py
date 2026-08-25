@@ -477,6 +477,11 @@ class MemorySettings:
     oauth_as_approve_window_s: int = 300
     oauth_as_max_clients: int = 1000
     oauth_as_stale_client_max_age_s: int = 86400
+    # Refresh-token grant for the embedded AS. OFF by default: enabling it adds
+    # offline-access tokens to the token endpoint, so it is an explicit operator choice.
+    # TTL bounds refresh-token lifetime in seconds (default 30 days); must be > 0.
+    oauth_as_refresh_tokens_enabled: bool = False
+    oauth_as_refresh_ttl_s: int = 2592000
     trusted_proxy: bool = False
     trusted_proxy_peers: tuple[str, ...] = ("127.0.0.1", "::1")
 
@@ -524,6 +529,7 @@ class MemorySettings:
             "oauth_as_approve_rate": self.oauth_as_approve_rate,
             "oauth_as_approve_window_s": self.oauth_as_approve_window_s,
             "oauth_as_max_clients": self.oauth_as_max_clients,
+            "oauth_as_refresh_ttl_s": self.oauth_as_refresh_ttl_s,
         }
         for name, value in positive_oauth_numbers.items():
             if value <= 0:
@@ -901,6 +907,17 @@ class MemorySettings:
                     default=str(cls.oauth_as_stale_client_max_age_s),
                 ),
                 env_var="MENHIR_OAUTH_AS_STALE_CLIENT_MAX_AGE_S",
+            ),
+            oauth_as_refresh_tokens_enabled=parse_bool_env(_getenv(
+                "MENHIR_OAUTH_AS_REFRESH_TOKENS_ENABLED",
+                default=str(cls.oauth_as_refresh_tokens_enabled),
+            )),
+            oauth_as_refresh_ttl_s=_parse_int(
+                _getenv(
+                    "MENHIR_OAUTH_AS_REFRESH_TTL_S",
+                    default=str(cls.oauth_as_refresh_ttl_s),
+                ),
+                env_var="MENHIR_OAUTH_AS_REFRESH_TTL_S",
             ),
             trusted_proxy=parse_bool_env(
                 _getenv("MENHIR_TRUSTED_PROXY", default=str(cls.trusted_proxy))

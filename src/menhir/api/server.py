@@ -49,6 +49,7 @@ def create_app(*, settings: MemorySettings | None = None) -> FastAPI:
     app.state.oauth_client_store = prereqs["oauth_client_store"]
     app.state.auth_code_store = prereqs["auth_code_store"]
     app.state.oauth_signing_key = prereqs["signing_key"]
+    app.state.oauth_refresh_store = prereqs["oauth_refresh_store"]
 
     register_exception_handlers(app)
     configure_cors(app, settings)
