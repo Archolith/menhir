@@ -12,7 +12,7 @@ from typing import Any
 import pytest
 from fastmcp import Client, FastMCP
 
-from menhir.mcp.contracts import BaseTool, validate_tool_metadata
+from menhir.mcp.contracts import BaseTool, _tier_allows, validate_tool_metadata
 from menhir.mcp.tools import ALL_TOOLS, register_all_tools
 
 
@@ -101,6 +101,14 @@ class TestValidateToolMetadataRefusals:
             validate_tool_metadata([_make_tool_cls(required_tier=tier, oauth_scopes=wrong_scopes)])
         # And the coherent declaration passes.
         validate_tool_metadata([_make_tool_cls(required_tier=tier, oauth_scopes=expected_scopes)])
+
+    def test_unknown_required_tier_is_refused_and_fails_closed(self) -> None:
+        with pytest.raises(RuntimeError, match="required_tier"):
+            validate_tool_metadata(
+                [_make_tool_cls(required_tier="operatr", oauth_scopes=("menhir:admin",))]
+            )
+        assert _tier_allows("operator", "operatr") is False
+        assert _tier_allows("mystery", "readonly") is False
 
     def test_all_problems_aggregated_across_tools(self) -> None:
         missing_title = _make_tool_cls(name="tool_a")

@@ -209,7 +209,9 @@ _TIER_RANK: dict[str, int] = {"readonly": 0, "agent": 1, "operator": 2}
 
 def _tier_allows(current: str, required: str) -> bool:
     """Return True when *current* tier satisfies the *required* tier."""
-    return _TIER_RANK.get(current, -1) >= _TIER_RANK.get(required, 0)
+    if current not in _TIER_RANK or required not in _TIER_RANK:
+        return False
+    return _TIER_RANK[current] >= _TIER_RANK[required]
 
 
 def _try_log_query_auth_usage(tool_name: str) -> None:
@@ -485,7 +487,12 @@ def validate_tool_metadata(tool_classes: "list[type] | tuple[type, ...]") -> Non
 
         required_tier = getattr(tool_cls, "required_tier", None)
         expected_scopes = _TIER_OAUTH_SCOPES.get(required_tier)
-        if expected_scopes is not None and tuple(scopes) != expected_scopes:
+        if expected_scopes is None:
+            invalid_fields.append(
+                f"{name}.required_tier={required_tier!r} (must be one of "
+                f"{sorted(_TIER_OAUTH_SCOPES)})"
+            )
+        elif tuple(scopes) != expected_scopes:
             scope_mismatches.append(
                 f"{name}: required_tier={required_tier!r} requires oauth_scopes="
                 f"{list(expected_scopes)} but declares {list(scopes)}"
