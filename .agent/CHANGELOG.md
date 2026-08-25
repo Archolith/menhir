@@ -15,6 +15,13 @@
 - Add focused discovery, CIMD/DCR, refresh persistence/rotation, metadata census, challenge, and
   authorization-invariant coverage. The public HTTPS/Inspector and real ChatGPT restart-refresh
   acceptance gates remain external and the implementation plan remains open.
+- Harden the post-review authorization invariants: protocol-only `offline_access` is rejected from
+  permission configuration, tier scopes must remain inside the advertised permission surface, and
+  unknown MCP tiers now fail startup and runtime authorization closed.
+- Revalidate persisted client, authorization-code, and refresh-family scopes against current AS
+  policy before issuing credentials; refresh policy refusal is atomic and does not consume the
+  presented token. Public AS URLs reject credentials/query/fragment, and CIMD failures no longer
+  reflect resolver diagnostics to unauthenticated callers.
 
 ## 2026-08-24 - CF-257 phase 0: a scan root must own the project identity it writes under
 
