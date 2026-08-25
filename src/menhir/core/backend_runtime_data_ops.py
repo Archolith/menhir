@@ -568,7 +568,20 @@ class RuntimeProviderDataOpsMixin:
         # undecidable identity is not worth a multi-minute walk, and the decision cannot depend on
         # anything the scan produces. `project_id` is stamped alongside the name -- the MERGE key
         # is still the name until phase 3, so this records the identity without yet relying on it.
+        from menhir.domain.project_identity import OPERATOR_TIER, ProjectIdentityRefused
         from menhir.services.project_identity_service import settle_project_identity
+
+        # `scan_and_write_project` is agent tier by design -- scanning is ordinary work. But
+        # `adopt` and `new` TRANSFER an identity: adopt re-points an existing project's id at a
+        # different directory, and new abandons the id a checkout currently holds. Left at agent
+        # tier, any caller could submit an arbitrary adopt_project_id and rebind a project it has
+        # no relationship to. Scanning stays agent; changing which project a directory IS does not.
+        if identity_action and tier and tier != OPERATOR_TIER:
+            raise ProjectIdentityRefused(
+                f"identity_action={identity_action!r} transfers a project identity and requires "
+                f"{OPERATOR_TIER} tier; this request is {tier!r}. Scanning does not require it."
+            )
+
         project_id, resolution = await asyncio.to_thread(
             settle_project_identity,
             self.built.graph_adapter,
@@ -724,6 +737,21 @@ class RuntimeProviderDataOpsMixin:
         # rather than silently true -- while the recorded-root refusal, which is what catches a
         # fork, still applies with full force.
         identity_tier = get_request_tier()
+        # CF-257. An older client's payload carries no project_id -- that is what makes it an older
+        # client. Settling it here from the payload's root_path keeps the deprecated bridge WORKING
+        # while the observation window measures whether anything still uses it. Dropping the id at
+        # the transport boundary and then rejecting id-less scans broke the endpoint outright,
+        # which is not a deprecation: it removes the thing before the measurement that justifies
+        # removing it.
+        if not getattr(scan_obj, "project_id", None) and scan_obj.root_path:
+            from menhir.services.project_identity_service import settle_project_identity
+            settled, _resolution = await _asyncio.to_thread(
+                settle_project_identity,
+                self.built.graph_adapter,
+                root_path=scan_obj.root_path,
+                display_name=scan_obj.name,
+            )
+            scan_obj.project_id = settled
         ensure_scan_root_owns_identity(
             topology=await _asyncio.to_thread(classify_root, scan_obj.root_path),
             project_name=scan_obj.name,

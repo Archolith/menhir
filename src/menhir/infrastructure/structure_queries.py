@@ -1743,6 +1743,7 @@ class StructureGraphWriter:
                 n.created_at = row.now,
                 n.last_accessed = row.now
             ON MATCH SET
+                n.structure_project_id = coalesce(row.structure_project_id, n.structure_project_id),
                 n.content = row.content,
                 n.summary = coalesce(n.summary, ''),
                 n.last_accessed = row.now,
@@ -1786,6 +1787,7 @@ class StructureGraphWriter:
                 n.created_at = row.now,
                 n.last_accessed = row.now
             ON MATCH SET
+                n.structure_project_id = coalesce(row.structure_project_id, n.structure_project_id),
                 n.content = row.content,
                 n.summary = coalesce(n.summary, ''),
                 n.last_accessed = row.now,

@@ -116,15 +116,37 @@ def bind_project_identity(
             # as a collision made the recovery path conflict with the thing it was recovering, and
             # then marked the identity unusable for the original too, so a repair broke a working
             # project. A rebind is deliberate and is recorded.
+            # Retire every OTHER binding that still names this root. Without this a rebind left
+            # the old id ALSO pointing here, so two identities claimed one directory and a later
+            # file loss resolved to whichever the lookup happened to return first --
+            # nondeterministic identity, which is worse than the collision this all replaced.
+            for row in neo4j.execute(
+                """
+                MATCH (o:ProjectIdentity)
+                WHERE o.project_id <> $project_id AND coalesce(o.state,'bound') = 'bound'
+                RETURN o.project_id AS id, o.canonical_root_path AS root
+                """,
+                {"project_id": project_id},
+            ):
+                if row.get("root") and _norm(str(row["root"])) == _norm(root_path):
+                    neo4j.execute(
+                        """
+                        MATCH (o:ProjectIdentity {project_id: $old})
+                        SET o.state = 'superseded', o.superseded_by = $new,
+                            o.superseded_at = datetime()
+                        """,
+                        {"old": str(row["id"]), "new": project_id},
+                    )
             neo4j.execute(
                 """
                 MATCH (p:ProjectIdentity {project_id: $project_id})
                 SET p.previous_root_path = p.canonical_root_path,
                     p.canonical_root_path = $root_path,
                     p.state = 'bound',
-                    p.rebound_at = datetime()
+                    p.rebound_at = datetime(),
+                    p.bound_host = $host
                 """,
-                {"project_id": project_id, "root_path": root_path},
+                {"project_id": project_id, "root_path": root_path, "host": _host()},
             )
             return BindingState(
                 project_id=project_id, canonical_root_path=root_path, state="bound"
@@ -162,7 +184,7 @@ def binding_for_root(neo4j: Any, root_path: str) -> str | None:
         """
         MATCH (p:ProjectIdentity)
         WHERE coalesce(p.state, 'bound') = 'bound'
-          AND coalesce(p.bound_host, $host) = $host
+          AND p.bound_host = $host
         RETURN p.project_id AS id, p.canonical_root_path AS root
         """,
         {"host": _host()},

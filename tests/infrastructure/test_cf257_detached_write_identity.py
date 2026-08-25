@@ -50,7 +50,11 @@ def ops(monkeypatch, tmp_path):
     from menhir.core import ingest_guard
     monkeypatch.setattr(ingest_guard, "allowed_ingest_roots", lambda: [tmp_path])
     monkeypatch.setattr(mod, "build_project_narrative", lambda scan: "narrative")
-    monkeypatch.setattr(mod, "get_request_tier", lambda: "agent")
+    # Operator tier because `_run_and_drain` supplies identity_action="new", and identity
+    # TRANSFER is operator-gated -- an agent submitting an arbitrary adopt_project_id could
+    # otherwise rebind a project it has no relationship to. These tests are about the
+    # detached write, not about tiering; the tier rules have their own tests.
+    monkeypatch.setattr(mod, "get_request_tier", lambda: "operator")
     monkeypatch.setattr(
         mod, "_push_background_error", lambda session_id, msg: errors.append(msg)
     )

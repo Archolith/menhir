@@ -115,6 +115,10 @@ def _project_scan_from_dict(payload: dict[str, Any]) -> ProjectScanResult:
             for item in payload.get("cross_project_refs", []) or []
         ],
         scan_fingerprint=str(payload.get("scan_fingerprint") or ""),
+        # CF-257. Without this the id is dropped at the transport boundary and the shared write
+        # guard rejects every call -- which broke the deprecated endpoint outright instead of
+        # gating it, removing the observation window before it had measured anything.
+        project_id=(str(payload["project_id"]) if payload.get("project_id") else None),
         # Coverage counts must survive this boundary or `partial_index` is silently lost on
         # the remote path and consumers fall back to reporting absence as fact.
         files_discovered=int(payload.get("files_discovered") or 0),

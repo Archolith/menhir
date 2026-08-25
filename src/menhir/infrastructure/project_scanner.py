@@ -105,6 +105,11 @@ class ProjectScanResult:
     endpoints: list[EndpointEntry] = field(default_factory=list)
     cross_project_refs: list[CrossProjectRef] = field(default_factory=list)
     scan_fingerprint: str = ""
+    #: CF-257. The identity this scan writes under, settled before the write and carried here so
+    #: every writer under `write_project` stamps it without threading a parameter through four
+    #: batch helpers. Declared rather than attached dynamically so it survives `asdict` across the
+    #: transport boundary -- dropping it there broke the deprecated compat writer entirely.
+    project_id: str | None = None
     symbols: list[SymbolEntry] = field(default_factory=list)
     truncated_symbol_files: list[str] = field(default_factory=list)
     call_edges: list[CallEdge] = field(default_factory=list)
