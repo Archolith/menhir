@@ -485,6 +485,10 @@ class MemorySettings:
     # omits the conventional offline_access scope. OFF by default.
     oauth_as_refresh_without_offline_access_enabled: bool = False
     oauth_as_refresh_ttl_s: int = 2592000
+    # Exact refresh retries inside this short window receive the already-issued response instead
+    # of triggering family-wide replay revocation. This covers a response lost at the public
+    # proxy boundary and concurrent calls by one public client. Zero preserves strict rotation.
+    oauth_as_refresh_retry_grace_s: float = 0.0
     trusted_proxy: bool = False
     trusted_proxy_peers: tuple[str, ...] = ("127.0.0.1", "::1")
 
@@ -543,6 +547,11 @@ class MemorySettings:
             raise ValueError(
                 "oauth_as_stale_client_max_age_s must be >= 0, "
                 f"got {self.oauth_as_stale_client_max_age_s}"
+            )
+        if not 0 <= self.oauth_as_refresh_retry_grace_s <= 60:
+            raise ValueError(
+                "oauth_as_refresh_retry_grace_s must be between 0 and 60 seconds, "
+                f"got {self.oauth_as_refresh_retry_grace_s}"
             )
         if not self.oauth_allowed_algorithms or any(
             algorithm.lower() == "none" for algorithm in self.oauth_allowed_algorithms
@@ -941,6 +950,13 @@ class MemorySettings:
                     default=str(cls.oauth_as_refresh_ttl_s),
                 ),
                 env_var="MENHIR_OAUTH_AS_REFRESH_TTL_S",
+            ),
+            oauth_as_refresh_retry_grace_s=_parse_float(
+                _getenv(
+                    "MENHIR_OAUTH_AS_REFRESH_RETRY_GRACE_S",
+                    default=str(cls.oauth_as_refresh_retry_grace_s),
+                ),
+                env_var="MENHIR_OAUTH_AS_REFRESH_RETRY_GRACE_S",
             ),
             trusted_proxy=parse_bool_env(
                 _getenv("MENHIR_TRUSTED_PROXY", default=str(cls.trusted_proxy))

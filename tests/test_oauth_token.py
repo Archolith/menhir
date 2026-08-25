@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import base64
+import concurrent.futures
 import hashlib
+import threading
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -17,6 +20,7 @@ from menhir.api import (
     oauth_keys,
     oauth_refresh_store,
 )
+from menhir.api import oauth_token as oauth_token_module
 from menhir.api.auth_code_store import get_auth_code_store
 from menhir.api.oauth_client_store import OAuthClient, get_client_store, new_client_id
 from menhir.api.oauth_keys import get_signing_key, public_jwks
@@ -31,6 +35,13 @@ _ENABLED_REFRESH = SimpleNamespace(
     oauth_public_base_url=_BASE,
     oauth_as_refresh_tokens_enabled=True,
     oauth_as_refresh_ttl_s=2592000,
+)
+_ENABLED_REFRESH_GRACE = SimpleNamespace(
+    oauth_as_enabled=True,
+    oauth_public_base_url=_BASE,
+    oauth_as_refresh_tokens_enabled=True,
+    oauth_as_refresh_ttl_s=2592000,
+    oauth_as_refresh_retry_grace_s=30.0,
 )
 _ENABLED_DISCRETIONARY_REFRESH = SimpleNamespace(
     oauth_as_enabled=True,
@@ -55,11 +66,13 @@ def _isolate(tmp_path, monkeypatch):
     monkeypatch.setattr(auth_code_store, "_auth_code_store_singleton", None, raising=False)
     monkeypatch.setattr(oauth_keys, "_SIGNING_KEY", None, raising=False)
     monkeypatch.setattr(oauth_refresh_store, "_refresh_store_singleton", None, raising=False)
+    oauth_token_module._clear_refresh_retry_cache()
     yield
     monkeypatch.setattr(oauth_client_store, "_client_store_singleton", None, raising=False)
     monkeypatch.setattr(auth_code_store, "_auth_code_store_singleton", None, raising=False)
     monkeypatch.setattr(oauth_keys, "_SIGNING_KEY", None, raising=False)
     monkeypatch.setattr(oauth_refresh_store, "_refresh_store_singleton", None, raising=False)
+    oauth_token_module._clear_refresh_retry_cache()
 
 
 def _pkce() -> tuple[str, str]:
@@ -128,6 +141,18 @@ def _issue_initial_refresh() -> tuple[TestClient, str, dict[str, object]]:
     cid = _register_client()
     code = _seed_code(cid, challenge, scope=f"{_SCOPE} offline_access")
     client = _client(_ENABLED_REFRESH)
+    response = client.post("/oauth/token", data=_token_form(code, cid, verifier))
+    assert response.status_code == 200
+    return client, cid, response.json()
+
+
+def _issue_initial_refresh_with_settings(
+    settings: object,
+) -> tuple[TestClient, str, dict[str, object]]:
+    verifier, challenge = _pkce()
+    cid = _register_client()
+    code = _seed_code(cid, challenge, scope=f"{_SCOPE} offline_access")
+    client = _client(settings)
     response = client.post("/oauth/token", data=_token_form(code, cid, verifier))
     assert response.status_code == 200
     return client, cid, response.json()
@@ -340,6 +365,271 @@ def test_refresh_rotates_once_and_replay_revokes_family():
     )
     assert revoked_replacement.status_code == 400
     assert revoked_replacement.json()["error"] == "invalid_grant"
+
+
+def test_exact_refresh_retry_inside_grace_replays_the_committed_response():
+    client, cid, initial = _issue_initial_refresh_with_settings(_ENABLED_REFRESH_GRACE)
+    form = _refresh_form(str(initial["refresh_token"]), cid)
+
+    first = client.post("/oauth/token", data=form)
+    retry = client.post("/oauth/token", data=form)
+
+    assert first.status_code == 200
+    assert retry.status_code == 200
+    assert retry.json() == first.json()
+
+    # The shared replacement remains valid; the retry did not trip family revocation.
+    replacement = client.post(
+        "/oauth/token",
+        data=_refresh_form(str(first.json()["refresh_token"]), cid),
+    )
+    assert replacement.status_code == 200
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"client_id": "wrong-client"},
+        {"resource": "https://memory.example.com/wrong"},
+        {"scope": "menhir:read offline_access"},
+    ],
+)
+def test_refresh_retry_grace_is_bound_to_exact_client_resource_and_scope(overrides):
+    client, cid, initial = _issue_initial_refresh_with_settings(_ENABLED_REFRESH_GRACE)
+    token = str(initial["refresh_token"])
+    first = client.post("/oauth/token", data=_refresh_form(token, cid))
+    assert first.status_code == 200
+
+    mismatched = _refresh_form(token, cid)
+    mismatched.update(overrides)
+    response = client.post("/oauth/token", data=mismatched)
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "invalid_grant"
+
+
+def test_refresh_retry_grace_distinguishes_omitted_and_empty_scope():
+    client, cid, initial = _issue_initial_refresh_with_settings(_ENABLED_REFRESH_GRACE)
+    token = str(initial["refresh_token"])
+    first = client.post("/oauth/token", data=_refresh_form(token, cid))
+    assert first.status_code == 200
+
+    explicit_empty = client.post(
+        "/oauth/token",
+        data=_refresh_form(token, cid, scope=""),
+    )
+
+    assert explicit_empty.status_code == 400
+    assert explicit_empty.json()["error"] == "invalid_grant"
+
+
+def test_refresh_retry_after_expiry_revokes_replacement_family():
+    client, cid, initial = _issue_initial_refresh_with_settings(_ENABLED_REFRESH_GRACE)
+    token = str(initial["refresh_token"])
+    first = client.post("/oauth/token", data=_refresh_form(token, cid))
+    assert first.status_code == 200
+
+    with oauth_token_module._refresh_retry_lock:
+        key = next(iter(oauth_token_module._refresh_retry_cache))
+        entry = oauth_token_module._refresh_retry_cache[key]
+        oauth_token_module._refresh_retry_cache[key] = (
+            oauth_token_module._RefreshRetryEntry(
+                expires_at=0.0,
+                response=entry.response,
+                client_id=entry.client_id,
+                successor_digest=entry.successor_digest,
+            )
+        )
+
+    replay = client.post("/oauth/token", data=_refresh_form(token, cid))
+    assert replay.status_code == 400
+    assert replay.json()["error"] == "invalid_grant"
+
+    replacement = client.post(
+        "/oauth/token",
+        data=_refresh_form(str(first.json()["refresh_token"]), cid),
+    )
+    assert replacement.status_code == 400
+    assert replacement.json()["error"] == "invalid_grant"
+
+
+def test_refresh_retry_cache_does_not_retain_presented_token_and_expires_promptly():
+    settings = SimpleNamespace(**vars(_ENABLED_REFRESH_GRACE))
+    settings.oauth_as_refresh_retry_grace_s = 0.02
+    client, cid, initial = _issue_initial_refresh_with_settings(settings)
+    presented_token = str(initial["refresh_token"])
+
+    response = client.post(
+        "/oauth/token",
+        data=_refresh_form(presented_token, cid),
+    )
+    assert response.status_code == 200
+    assert presented_token not in repr(oauth_token_module._refresh_retry_cache)
+
+    deadline = time.monotonic() + 1.0
+    while oauth_token_module._refresh_retry_cache and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert not oauth_token_module._refresh_retry_cache
+
+
+def test_refresh_retry_cache_capacity_preserves_replay_validation(monkeypatch):
+    monkeypatch.setattr(oauth_token_module, "_REFRESH_RETRY_CACHE_MAX_ENTRIES", 1)
+    first_client, first_cid, first_initial = _issue_initial_refresh_with_settings(
+        _ENABLED_REFRESH_GRACE
+    )
+    first = first_client.post(
+        "/oauth/token",
+        data=_refresh_form(str(first_initial["refresh_token"]), first_cid),
+    )
+    assert first.status_code == 200
+
+    second_client, second_cid, second_initial = _issue_initial_refresh_with_settings(
+        _ENABLED_REFRESH_GRACE
+    )
+    second = second_client.post(
+        "/oauth/token",
+        data=_refresh_form(str(second_initial["refresh_token"]), second_cid),
+    )
+    assert second.status_code == 200
+    assert len(oauth_token_module._refresh_retry_cache) == 1
+
+    wrong_context = second_client.post(
+        "/oauth/token",
+        data=_refresh_form(
+            str(second_initial["refresh_token"]),
+            second_cid,
+            resource="https://memory.example.com/wrong",
+        ),
+    )
+    assert wrong_context.status_code == 400
+    assert wrong_context.json()["error"] == "invalid_grant"
+
+    replay = first_client.post(
+        "/oauth/token",
+        data=_refresh_form(str(first_initial["refresh_token"]), first_cid),
+    )
+    assert replay.status_code == 400
+    assert replay.json()["error"] == "invalid_grant"
+
+    revoked = first_client.post(
+        "/oauth/token",
+        data=_refresh_form(str(first.json()["refresh_token"]), first_cid),
+    )
+    assert revoked.status_code == 400
+    assert revoked.json()["error"] == "invalid_grant"
+
+
+def test_refresh_retry_cache_capacity_evicts_without_blocking_fresh_rotation(monkeypatch):
+    monkeypatch.setattr(oauth_token_module, "_REFRESH_RETRY_CACHE_MAX_ENTRIES", 1)
+    first_client, first_cid, first_initial = _issue_initial_refresh_with_settings(
+        _ENABLED_REFRESH_GRACE
+    )
+    first = first_client.post(
+        "/oauth/token",
+        data=_refresh_form(str(first_initial["refresh_token"]), first_cid),
+    )
+    assert first.status_code == 200
+
+    second_client, second_cid, second_initial = _issue_initial_refresh_with_settings(
+        _ENABLED_REFRESH_GRACE
+    )
+    second = second_client.post(
+        "/oauth/token",
+        data=_refresh_form(str(second_initial["refresh_token"]), second_cid),
+    )
+
+    assert second.status_code == 200
+    assert len(oauth_token_module._refresh_retry_cache) == 1
+
+
+def test_successful_successor_rotation_prunes_predecessor_cache_entry():
+    client, cid, initial = _issue_initial_refresh_with_settings(_ENABLED_REFRESH_GRACE)
+    first = client.post(
+        "/oauth/token",
+        data=_refresh_form(str(initial["refresh_token"]), cid),
+    )
+    assert first.status_code == 200
+    assert len(oauth_token_module._refresh_retry_cache) == 1
+
+    second = client.post(
+        "/oauth/token",
+        data=_refresh_form(str(first.json()["refresh_token"]), cid),
+    )
+
+    assert second.status_code == 200
+    assert len(oauth_token_module._refresh_retry_cache) == 1
+
+
+def test_refresh_retry_grace_starts_after_slow_rotation(monkeypatch):
+    settings = SimpleNamespace(oauth_as_refresh_retry_grace_s=0.1)
+    rotation_finished = 0.0
+
+    def slow_exchange_refresh_token(**_kwargs):
+        nonlocal rotation_finished
+        time.sleep(0.05)
+        rotation_finished = time.monotonic()
+        return SimpleNamespace(refresh_token="replacement-token")
+
+    monkeypatch.setattr(
+        oauth_token_module,
+        "exchange_refresh_token",
+        slow_exchange_refresh_token,
+    )
+
+    oauth_token_module._exchange_refresh_with_retry_grace(
+        settings=settings,
+        refresh_store=object(),
+        client_store=object(),
+        issuer=object(),
+        refresh_token="presented-token",
+        client_id="client-a",
+        resource=_RESOURCE,
+        scope=None,
+        allowed_scopes=("menhir:read",),
+    )
+
+    entry = next(iter(oauth_token_module._refresh_retry_cache.values()))
+    assert entry.expires_at >= rotation_finished + 0.09
+
+
+def test_simultaneous_exact_refresh_retries_rotate_once(monkeypatch):
+    settings = SimpleNamespace(oauth_as_refresh_retry_grace_s=30.0)
+    barrier = threading.Barrier(2)
+    calls = 0
+    calls_lock = threading.Lock()
+    response = object()
+
+    def fake_exchange_refresh_token(**_kwargs):
+        nonlocal calls
+        with calls_lock:
+            calls += 1
+        return response
+
+    monkeypatch.setattr(
+        oauth_token_module,
+        "exchange_refresh_token",
+        fake_exchange_refresh_token,
+    )
+
+    def exchange():
+        barrier.wait()
+        return oauth_token_module._exchange_refresh_with_retry_grace(
+            settings=settings,
+            refresh_store=object(),
+            client_store=object(),
+            issuer=object(),
+            refresh_token="presented-token",
+            client_id="client-a",
+            resource=_RESOURCE,
+            scope=None,
+            allowed_scopes=("menhir:read",),
+        )
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(lambda _index: exchange(), range(2)))
+
+    assert results == [response, response]
+    assert calls == 1
 
 
 def test_refresh_scope_narrowing_and_expansion_failure():

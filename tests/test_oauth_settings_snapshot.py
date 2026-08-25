@@ -190,6 +190,7 @@ def test_refresh_grant_defaults_off_with_thirty_day_ttl():
     assert settings.oauth_as_refresh_tokens_enabled is False
     assert settings.oauth_as_refresh_without_offline_access_enabled is False
     assert settings.oauth_as_refresh_ttl_s == 2592000
+    assert settings.oauth_as_refresh_retry_grace_s == 0.0
 
 
 def test_refresh_grant_settings_parse_from_env(monkeypatch):
@@ -199,17 +200,25 @@ def test_refresh_grant_settings_parse_from_env(monkeypatch):
         "true",
     )
     monkeypatch.setenv("MENHIR_OAUTH_AS_REFRESH_TTL_S", "86400")
+    monkeypatch.setenv("MENHIR_OAUTH_AS_REFRESH_RETRY_GRACE_S", "30")
 
     settings = MemorySettings.from_env()
 
     assert settings.oauth_as_refresh_tokens_enabled is True
     assert settings.oauth_as_refresh_without_offline_access_enabled is True
     assert settings.oauth_as_refresh_ttl_s == 86400
+    assert settings.oauth_as_refresh_retry_grace_s == 30.0
 
 
 def test_non_positive_refresh_ttl_is_rejected():
     with pytest.raises(ValueError, match="oauth_as_refresh_ttl_s"):
         MemorySettings(oauth_as_refresh_ttl_s=0)
+
+
+@pytest.mark.parametrize("grace_s", [-0.1, 60.1])
+def test_refresh_retry_grace_is_tightly_bounded(grace_s):
+    with pytest.raises(ValueError, match="oauth_as_refresh_retry_grace_s"):
+        MemorySettings(oauth_as_refresh_retry_grace_s=grace_s)
 
 
 def test_offline_access_never_grants_a_menhir_tier():
