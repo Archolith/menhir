@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-08-25 - Close CF-257 project-identity rollout gaps
+
+- Make both `ProjectIdentity` uniqueness constraints part of phase-one readiness so an upgraded
+  installation cannot skip their idempotent DDL merely because every legacy index is online.
+- Add an explicit upgrade regression for the production-shaped case where the id constraint exists
+  but `project_identity_root_unique` does not.
+- Thread the settled project id into symbol batches. A fenced production watcher cycle exposed that
+  symbols were the final structural sub-writer still creating NULL-id rows; the batch census test
+  now covers directories, files, dependencies, endpoints, and symbols together.
+- Classify the 12 pathless `directory` rows found by the broad production census as semantic
+  memories carrying a legacy stray role; the fenced rollout removes that role rather than inventing
+  project identities for semantic data.
+
 ## 2026-08-25 - Prove live ChatGPT OAuth compatibility
 
 - Complete a real ChatGPT developer-mode connection through a disposable public HTTPS tunnel to
