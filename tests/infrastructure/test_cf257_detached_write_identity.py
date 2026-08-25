@@ -276,9 +276,48 @@ def _compat_ops(monkeypatch, *, bound_id, root):
     written: list[object] = []
 
     class _Neo4j:
+        """Reports `bound_id` as the binding for `root`, and models the re-bind that follows.
+
+        The compat path now re-binds the id it read, because that is what yields the claim
+        generation the write boundary validates -- so the fake has to answer the bind, not just
+        the lookup.
+        """
+
+        def __init__(self):
+            self.node = (
+                {
+                    "canonical_root_path": str(root),
+                    "state": "bound",
+                    "bound_host": "h1",
+                    "root_key": None,
+                    "claim_generation": 0,
+                }
+                if bound_id
+                else None
+            )
+
         def execute(self, cypher, params=None):
+            params = params or {}
             if "RETURN p.project_id AS id" in cypher and bound_id:
-                return [{"id": bound_id, "root": str(root), "root_key": None}]
+                # `p.project_id <> $project_id` excludes the id being bound, so the rival scan
+                # sees nothing while the plain lookup sees the binding.
+                if params.get("project_id") == bound_id:
+                    return []
+                return [{"id": bound_id, "root": str(root), "root_key": self.node["root_key"]}]
+            if "MERGE (p:ProjectIdentity" in cypher and self.node:
+                return [
+                    {
+                        "bound_root": self.node["canonical_root_path"],
+                        "state": self.node["state"],
+                        "bound_host": self.node["bound_host"],
+                        "root_key": self.node["root_key"],
+                        "claim_generation": self.node["claim_generation"],
+                    }
+                ]
+            if "SET p.bound_host = $host, p.root_key = $root_key" in cypher and self.node:
+                self.node["bound_host"] = params["host"]
+                self.node["root_key"] = params["root_key"]
+                return []
             return []
 
     instance = RuntimeProviderDataOpsMixin()

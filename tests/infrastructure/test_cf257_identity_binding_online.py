@@ -29,9 +29,20 @@ from menhir.infrastructure.project_identity_binding import (
     IdentityRootContested,
     bind_project_identity,
     binding_for_root,
+    root_key_for,
+)
+from menhir.infrastructure.structure_write_fence import (
+    IdentityClaim,
+    StaleIdentityClaim,
+    admit_structure_writer,
+    release_structure_writer,
 )
 
 pytestmark = [pytest.mark.online]
+
+#: Iterations for the admission/transfer race. High enough that the rarer ordering is observed
+#: on this instance (measured ~1 in 100), because a lost lock only shows up on that side.
+_RACE_ITERATIONS = 150
 
 
 class _Repo:
@@ -275,3 +286,352 @@ def test_a_vacated_root_keeps_no_binding(repo, pid, on_host):
     assert _active_for(repo, host, new_root) == [moved]
     assert _active_for(repo, host, old_root) == [], "the vacated root still claims a binding"
     assert binding_for_root(repo, old_root) is None
+
+
+# ---------------------------------------------------------------------------
+# The stale-claim race, against the real lock
+# ---------------------------------------------------------------------------
+
+def _claim_for(binding, root, host):
+    return IdentityClaim(
+        project_id=binding.project_id,
+        root_key=root_key_for(root),
+        generation=binding.claim_generation,
+        host=host,
+    )
+
+
+@pytest.mark.online
+def test_a_writer_admitted_and_a_transfer_committed_are_mutually_exclusive(repo, pid, on_host):
+    """The fourth-pass counterexample, run against the real lock rather than a model.
+
+    The previous concurrency test stopped at "one binding remains" and never resumed a stale scan
+    through the writer, so it permitted exactly the sequence the review reproduced. This one races
+    ADMISSION against TRANSFER and asserts they can never both succeed -- which is what makes the
+    write boundary a gate rather than a check.
+
+    The mechanism is a write to the identity (`SET p.last_admission_probe`) taken BEFORE the claim
+    is read. Neo4j is read-committed and `MERGE` on an existing node takes no write lock, so
+    without that probe the claim is validated against a value a concurrent transfer can already
+    have replaced. Restoring the un-probed order makes this test fail.
+    """
+    host = f"cf257-host-{uuid.uuid4().hex[:6]}"
+    seen: set[str] = set()
+    violations: list[dict] = []
+
+    # REPEATED, because a lost lock is a probabilistic failure and one attempt is not a test of
+    # it. Measured on this instance, the two orderings split roughly 99:1, so a single run
+    # observes the rare side almost never -- removing the probe passes a one-shot version of this
+    # test every time. The loop also records which orderings were actually seen, so a run that
+    # silently stopped racing (both sides serialising the same way every time) is visible rather
+    # than being reported as a pass.
+    for i in range(_RACE_ITERATIONS):
+        root = f"/srv/{uuid.uuid4().hex[:8]}"
+        x, y = pid(f"x{i}"), pid(f"y{i}")
+        on_host(host)
+        binding = bind_project_identity(repo, project_id=x, root_path=root)
+        claim = _claim_for(binding, root, host)
+
+        outcomes: dict[str, str] = {}
+        gate = threading.Barrier(2)
+        handles: list = []
+
+        def admit():
+            try:
+                gate.wait(timeout=10)
+                handles.append(admit_structure_writer(repo, label="proj", claim=claim))
+                outcomes["admit"] = "committed"
+            except Exception as exc:  # noqa: BLE001 - the class is the assertion
+                outcomes["admit"] = type(exc).__name__
+
+        def transfer():
+            try:
+                gate.wait(timeout=10)
+                bind_project_identity(repo, project_id=y, root_path=root, rebind=True)
+                outcomes["transfer"] = "committed"
+            except Exception as exc:  # noqa: BLE001
+                outcomes["transfer"] = type(exc).__name__
+
+        threads = [threading.Thread(target=admit), threading.Thread(target=transfer)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=30)
+        for h in handles:
+            release_structure_writer(repo, h)
+
+        seen.add(f"{outcomes.get('admit')}/{outcomes.get('transfer')}")
+        if outcomes.get("admit") == "committed" and outcomes.get("transfer") == "committed":
+            violations.append(dict(outcomes, root=root))
+        assert "committed" in outcomes.values(), f"both sides failed at {i}: {outcomes}"
+
+    assert not violations, (
+        f"{len(violations)}/{_RACE_ITERATIONS} races admitted a writer under an identity that "
+        f"was being superseded in the same instant: {violations[:3]}. The scan that writer holds "
+        "describes a directory that has changed hands."
+    )
+    assert len(seen) > 1, (
+        f"every one of {_RACE_ITERATIONS} races resolved the same way ({seen}) -- the threads are "
+        "not actually interleaving, so this test is not exercising the race it claims to."
+    )
+
+
+@pytest.mark.online
+def test_a_superseded_claim_is_refused_by_the_real_statement(repo, pid, on_host):
+    """Sequential form of the same thing, so a failure distinguishes the gate from the lock."""
+    host = f"cf257-host-{uuid.uuid4().hex[:6]}"
+    root = f"/srv/{uuid.uuid4().hex[:8]}"
+    x, y = pid("x"), pid("y")
+    on_host(host)
+    stale = _claim_for(bind_project_identity(repo, project_id=x, root_path=root), root, host)
+    bind_project_identity(repo, project_id=y, root_path=root, rebind=True)
+
+    with pytest.raises(StaleIdentityClaim):
+        admit_structure_writer(repo, label="proj", claim=stale)
+
+
+@pytest.mark.online
+def test_a_transfer_is_refused_while_a_real_writer_is_registered(repo, pid, on_host):
+    host = f"cf257-host-{uuid.uuid4().hex[:6]}"
+    root = f"/srv/{uuid.uuid4().hex[:8]}"
+    x, y = pid("x"), pid("y")
+    on_host(host)
+    binding = bind_project_identity(repo, project_id=x, root_path=root)
+    handle = admit_structure_writer(repo, label="proj", claim=_claim_for(binding, root, host))
+    try:
+        with pytest.raises(IdentityRootContested, match="structure writer is registered"):
+            bind_project_identity(repo, project_id=y, root_path=root, rebind=True)
+        assert _active_for(repo, host, root) == [x], "the incumbent was disturbed by a refusal"
+    finally:
+        release_structure_writer(repo, handle)
+
+    bind_project_identity(repo, project_id=y, root_path=root, rebind=True)
+    assert _active_for(repo, host, root) == [y]
+
+
+@pytest.mark.online
+def test_a_transfer_bumps_the_generation_so_earlier_scans_cannot_write(repo, pid, on_host):
+    host = f"cf257-host-{uuid.uuid4().hex[:6]}"
+    root = f"/srv/{uuid.uuid4().hex[:8]}"
+    x, y = pid("x"), pid("y")
+    on_host(host)
+    first = bind_project_identity(repo, project_id=x, root_path=root)
+    bind_project_identity(repo, project_id=y, root_path=root, rebind=True)
+    back = bind_project_identity(repo, project_id=x, root_path=root, rebind=True)
+
+    assert back.claim_generation > first.claim_generation
+    with pytest.raises(StaleIdentityClaim):
+        admit_structure_writer(repo, label="proj", claim=_claim_for(first, root, host))
+    handle = admit_structure_writer(repo, label="proj", claim=_claim_for(back, root, host))
+    release_structure_writer(repo, handle)
+
+
+@pytest.mark.online
+def test_a_claim_naming_another_directory_is_refused_by_the_real_statement(repo, pid, on_host):
+    """The claim must authorise the directory the scan describes.
+
+    Without this the admission would accept any live identity regardless of which directory the
+    payload is for -- which is the original CF-257 collision arriving through the write boundary
+    instead of the MERGE key.
+    """
+    host = f"cf257-host-{uuid.uuid4().hex[:6]}"
+    root = f"/srv/{uuid.uuid4().hex[:8]}"
+    other = f"/srv/{uuid.uuid4().hex[:8]}"
+    x = pid("x")
+    on_host(host)
+    binding = bind_project_identity(repo, project_id=x, root_path=root)
+
+    with pytest.raises(StaleIdentityClaim):
+        admit_structure_writer(repo, label="proj", claim=_claim_for(binding, other, host))
+
+
+@pytest.mark.online
+def test_a_claim_from_another_host_is_refused_by_the_real_statement(repo, pid, on_host):
+    host = f"cf257-host-{uuid.uuid4().hex[:6]}"
+    root = f"/srv/{uuid.uuid4().hex[:8]}"
+    x = pid("x")
+    on_host(host)
+    binding = bind_project_identity(repo, project_id=x, root_path=root)
+    foreign = IdentityClaim(
+        project_id=x,
+        root_key=root_key_for(root),
+        generation=binding.claim_generation,
+        host=f"cf257-elsewhere-{uuid.uuid4().hex[:6]}",
+    )
+    with pytest.raises(StaleIdentityClaim):
+        admit_structure_writer(repo, label="proj", claim=foreign)
+
+
+@pytest.mark.online
+def test_a_refused_transfer_leaves_the_writer_slot_and_the_incumbent_intact(repo, pid, on_host):
+    """A refusal must be inert. If it retired the incumbent before discovering the writer, the
+    directory would be left ownerless and the next scan would mint a third identity into it."""
+    host = f"cf257-host-{uuid.uuid4().hex[:6]}"
+    root = f"/srv/{uuid.uuid4().hex[:8]}"
+    x, y = pid("x"), pid("y")
+    on_host(host)
+    binding = bind_project_identity(repo, project_id=x, root_path=root)
+    handle = admit_structure_writer(repo, label="proj", claim=_claim_for(binding, root, host))
+    try:
+        with pytest.raises(IdentityRootContested):
+            bind_project_identity(repo, project_id=y, root_path=root, rebind=True)
+
+        row = repo.execute(
+            "MATCH (p:ProjectIdentity {project_id:$id}) RETURN coalesce(p.state,'bound') AS state,"
+            " p.root_key AS rk, coalesce(p.claim_generation,0) AS gen",
+            {"id": x},
+        )[0]
+        assert row["state"] == "bound"
+        assert row["rk"] == root_key_for(root)
+        assert row["gen"] == binding.claim_generation, "a refused transfer bumped the generation"
+        assert not repo.execute(
+            "MATCH (p:ProjectIdentity {project_id:$id}) RETURN p", {"id": y}
+        ), "the refused transfer created its target"
+        # The writer it refused for is still admitted and can still finish.
+        assert repo.execute(
+            "MATCH (p:ProjectIdentity {project_id:$id}) RETURN size(coalesce(p.active_writers,[])) AS n",
+            {"id": x},
+        )[0]["n"] == 1
+    finally:
+        release_structure_writer(repo, handle)
+
+
+@pytest.mark.online
+def test_a_conflicted_identity_admits_no_writer(repo, pid, on_host):
+    """`state = 'bound'` is a gate in its own right.
+
+    Superseding nulls `root_key`, so a superseded identity is already refused by the directory
+    check -- but CONFLICTING does not: a conflicted identity keeps its host and its key, and only
+    the state records that the system can no longer tell which directory it belongs to. Without
+    this test, deleting the state predicate passes everything.
+    """
+    host = f"cf257-host-{uuid.uuid4().hex[:6]}"
+    root = f"/srv/{uuid.uuid4().hex[:8]}"
+    x = pid("x")
+    on_host(host)
+    binding = bind_project_identity(repo, project_id=x, root_path=root)
+    repo.execute(
+        "MATCH (p:ProjectIdentity {project_id:$id}) SET p.state = 'conflicted'", {"id": x}
+    )
+
+    with pytest.raises(StaleIdentityClaim):
+        admit_structure_writer(repo, label="proj", claim=_claim_for(binding, root, host))
+
+
+@pytest.mark.online
+def test_admission_reads_the_claim_under_a_lock_a_transfer_must_wait_for(repo, pid, on_host):
+    """The lock, proven deterministically instead of by racing.
+
+    The race test above cannot reliably provoke this: the gap between reading the claim and
+    registering the writer is microseconds, so removing the lock still passes 150 randomised
+    attempts. This test holds the transfer's write open in an uncommitted transaction and then
+    calls the real admission, which makes the ordering exact:
+
+    * WITH the probe, admission takes the identity's write lock as its FIRST action, so it blocks
+      until the transfer commits and only then reads the claim -- seeing the superseded value, and
+      refusing.
+    * WITHOUT it, admission reads the claim first. Read-committed means it sees the pre-transfer
+      value, judges the claim valid, and blocks only at its own write -- so it is admitted under
+      an identity that was superseded while it waited.
+
+    That is the difference between a check and a gate, and it is the whole reason
+    `SET p.last_admission_probe` exists.
+    """
+    import os
+    import time
+
+    from neo4j import GraphDatabase
+
+    host = f"cf257-host-{uuid.uuid4().hex[:6]}"
+    root = f"/srv/{uuid.uuid4().hex[:8]}"
+    x, y = pid("x"), pid("y")
+    on_host(host)
+    binding = bind_project_identity(repo, project_id=x, root_path=root)
+    claim = _claim_for(binding, root, host)
+
+    driver = GraphDatabase.driver(
+        os.getenv("MENHIR_TEST_NEO4J_URI", "bolt://localhost:7688"),
+        auth=(
+            os.getenv("MENHIR_TEST_NEO4J_USER", "neo4j"),
+            os.getenv("MENHIR_TEST_NEO4J_PASSWORD", "testpassword"),
+        ),
+    )
+    result: dict = {}
+
+    def admit_later():
+        time.sleep(0.3)  # let the held transaction take the lock first
+        try:
+            handle = admit_structure_writer(repo, label="proj", claim=claim)
+            result["outcome"] = "admitted"
+            release_structure_writer(repo, handle)
+        except StaleIdentityClaim:
+            result["outcome"] = "refused"
+        except Exception as exc:  # noqa: BLE001
+            result["outcome"] = type(exc).__name__
+
+    try:
+        with driver.session() as session:
+            tx = session.begin_transaction()
+            # The transfer's supersede, held open. Same shape as `_transfer`: lock, then mutate.
+            tx.run(
+                "MATCH (p:ProjectIdentity {project_id:$id}) "
+                "SET p.last_transfer_probe = timestamp() "
+                "SET p.root_key = null, p.state = 'superseded', p.superseded_by = $new",
+                {"id": x, "new": y},
+            ).consume()
+
+            worker = threading.Thread(target=admit_later)
+            worker.start()
+            time.sleep(1.0)
+            assert "outcome" not in result, (
+                "admission completed while a transfer held the identity's write lock -- it did "
+                "not take the lock before reading the claim"
+            )
+            tx.commit()
+            worker.join(timeout=30)
+    finally:
+        driver.close()
+
+    assert result.get("outcome") == "refused", (
+        f"admission returned {result.get('outcome')!r} for an identity superseded while it "
+        "waited; the claim was read before the lock was held"
+    )
+
+
+@pytest.mark.online
+def test_release_clears_both_slots_in_the_real_statement(repo, pid, on_host):
+    """Release removes the writer from the identity AND the fence, or it is a slow outage.
+
+    A slot left on the identity blocks every future transfer of that directory; one left on the
+    fence blocks the migration drain. Neither fails loudly -- they just make a later operation
+    hang on a writer that finished long ago -- so this is asserted from the graph rather than
+    from the absence of an exception. It has to run online: the offline fake implements release
+    itself, so it cannot tell whether the Cypher does.
+    """
+    host = f"cf257-host-{uuid.uuid4().hex[:6]}"
+    root = f"/srv/{uuid.uuid4().hex[:8]}"
+    x, y = pid("x"), pid("y")
+    on_host(host)
+    binding = bind_project_identity(repo, project_id=x, root_path=root)
+    handle = admit_structure_writer(repo, label="proj", claim=_claim_for(binding, root, host))
+
+    def slots():
+        identity = repo.execute(
+            "MATCH (p:ProjectIdentity {project_id:$id}) "
+            "RETURN size(coalesce(p.active_writers,[])) AS n",
+            {"id": x},
+        )[0]["n"]
+        fence = repo.execute(
+            "MATCH (f:StructureWriteFence {id:'singleton'}) "
+            "RETURN size([w IN coalesce(f.writers,[]) WHERE w STARTS WITH $p]) AS n",
+            {"p": handle.writer_id + "|"},
+        )[0]["n"]
+        return identity, fence
+
+    assert slots() == (1, 1), "admission did not register on both"
+    release_structure_writer(repo, handle)
+    assert slots() == (0, 0), "release left a slot behind"
+
+    # And the proof that it matters: the transfer this writer was blocking now succeeds.
+    bind_project_identity(repo, project_id=y, root_path=root, rebind=True)
+    assert _active_for(repo, host, root) == [y]

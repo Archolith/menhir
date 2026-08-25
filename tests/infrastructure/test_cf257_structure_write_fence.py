@@ -19,6 +19,7 @@ import pytest
 from menhir.infrastructure.structure_write_fence import (
     STALE_WRITER_SECONDS,
     FenceHandle,
+    IdentityClaim,
     StructureWritesFrozen,
     admit_structure_writer,
     fence_status,
@@ -27,13 +28,27 @@ from menhir.infrastructure.structure_write_fence import (
     release_structure_writer,
 )
 
+#: Admission now validates an identity claim in the same statement that registers the writer, so
+#: every call here has to present one. These tests are about the ADMISSION PROTOCOL, so the claim
+#: is always the valid one the fake is seeded with; the claim's own failure modes are pinned in
+#: `test_cf257_stale_claim.py`.
+CLAIM = IdentityClaim(project_id="pid-1", root_key="/srv/proj", generation=3, host="h1")
+
+
+def _admit(neo4j, label="proj", claim=CLAIM):
+    return admit_structure_writer(neo4j, label=label, claim=claim)
+
 
 class _FakeNeo4j:
-    """Models the fence node closely enough to exercise the protocol.
+    """Models the fence node and the identity it authorises against.
 
     Deliberately executes the guard as ONE step, mirroring the single Cypher statement: if the
     fake let a caller observe `frozen` and register separately, it would be a friendlier model
     than reality and would hide the very race the statement exists to close.
+
+    The identity is modelled too, because admission now validates a claim in that same statement.
+    Splitting them in the fake would reintroduce, in the model, exactly the two-step check the
+    real statement was rewritten to avoid.
     """
 
     def __init__(self):
@@ -41,6 +56,15 @@ class _FakeNeo4j:
         self.reason = None
         self.writers: list[str] = []
         self.statements: list[str] = []
+        self.identities: dict[str, dict] = {
+            CLAIM.project_id: {
+                "state": "bound",
+                "bound_host": CLAIM.host,
+                "root_key": CLAIM.root_key,
+                "claim_generation": CLAIM.generation,
+                "active_writers": [],
+            }
+        }
 
     def execute(self, cypher, params=None):
         params = params or {}
@@ -51,13 +75,29 @@ class _FakeNeo4j:
         if "SET f.frozen = false, f.reason = null" in cypher:
             self.frozen, self.reason = False, None
             return []
-        if "f.writers = coalesce(f.writers, []) + [$entry]" in cypher:
+        if "SET p.last_admission_probe" in cypher:
+            node = self.identities.get(params.get("project_id"))
+            if node is None:
+                return []
+            if (
+                node.get("state", "bound") != "bound"
+                or node.get("bound_host") != params.get("host")
+                or node.get("root_key") != params.get("root_key")
+                or int(node.get("claim_generation") or 0) != int(params.get("generation"))
+            ):
+                return []                      # claim gate filtered the row out
             if self.frozen:
-                return []                      # WHERE filtered the row out; SET never ran
+                return []                      # frozen gate filtered the row out
+            node.setdefault("active_writers", []).append(params["entry"])
             self.writers.append(params["entry"])
             return [{"active": len(self.writers)}]
         if "WHERE NOT w STARTS WITH $prefix" in cypher:
-            self.writers = [w for w in self.writers if not w.startswith(params["prefix"])]
+            prefix = params["prefix"]
+            self.writers = [w for w in self.writers if not w.startswith(prefix)]
+            for node in self.identities.values():
+                node["active_writers"] = [
+                    w for w in node.get("active_writers", []) if not w.startswith(prefix)
+                ]
             return []
         if "RETURN coalesce(f.frozen, false) AS frozen" in cypher:
             return [{"frozen": self.frozen, "reason": self.reason, "writers": list(self.writers)}]
@@ -71,15 +111,15 @@ def neo4j():
 
 @pytest.mark.unit
 def test_a_writer_is_admitted_and_counted_when_the_fence_is_down(neo4j):
-    handle = admit_structure_writer(neo4j, label="proj")
+    handle = _admit(neo4j, label="proj")
     assert isinstance(handle, FenceHandle)
     assert len(fence_status(neo4j)["active"]) == 1
 
 
 @pytest.mark.unit
 def test_releasing_removes_exactly_one_writer(neo4j):
-    a = admit_structure_writer(neo4j, label="a")
-    admit_structure_writer(neo4j, label="b")
+    a = _admit(neo4j, label="a")
+    _admit(neo4j, label="b")
     release_structure_writer(neo4j, a)
     active = fence_status(neo4j)["active"]
     assert len(active) == 1 and active[0]["label"] == "b"
@@ -89,7 +129,7 @@ def test_releasing_removes_exactly_one_writer(neo4j):
 def test_a_raised_fence_refuses_new_writers(neo4j):
     raise_fence(neo4j, reason="CF-257 phase 2a")
     with pytest.raises(StructureWritesFrozen, match="phase 2a"):
-        admit_structure_writer(neo4j)
+        _admit(neo4j)
 
 
 @pytest.mark.unit
@@ -102,7 +142,7 @@ def test_a_refused_writer_is_never_counted(neo4j):
     """
     raise_fence(neo4j, reason="migration")
     with pytest.raises(StructureWritesFrozen):
-        admit_structure_writer(neo4j)
+        _admit(neo4j)
     status = fence_status(neo4j)
     assert status["active"] == [] and status["stale"] == []
 
@@ -114,7 +154,7 @@ def test_writers_admitted_before_the_fence_remain_counted(neo4j):
     `write_project_structure` is offloaded to a thread, so a writer already inside it keeps going.
     A fence that reported zero here would let the migration start mid-write.
     """
-    admit_structure_writer(neo4j, label="in-flight")
+    _admit(neo4j, label="in-flight")
     raise_fence(neo4j, reason="migration")
     assert len(fence_status(neo4j)["active"]) == 1
     assert fence_status(neo4j)["frozen"] is True
@@ -124,7 +164,7 @@ def test_writers_admitted_before_the_fence_remain_counted(neo4j):
 def test_lowering_the_fence_admits_writers_again(neo4j):
     raise_fence(neo4j, reason="migration")
     lower_fence(neo4j)
-    admit_structure_writer(neo4j)  # must not raise
+    _admit(neo4j)  # must not raise
     assert fence_status(neo4j)["frozen"] is False
 
 
@@ -158,7 +198,7 @@ def test_release_never_raises_into_the_caller(neo4j, monkeypatch):
     into a reported failure."""
     def _boom(*a, **k):
         raise RuntimeError("neo4j gone")
-    handle = admit_structure_writer(neo4j)
+    handle = _admit(neo4j)
     monkeypatch.setattr(neo4j, "execute", _boom)
     release_structure_writer(neo4j, handle)  # must not raise
 

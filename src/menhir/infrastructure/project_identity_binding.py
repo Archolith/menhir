@@ -109,6 +109,12 @@ class BindingState:
     project_id: str
     canonical_root_path: str
     state: str  # "bound" | "conflicted" | "superseded"
+    #: Bumped every time this identity CLAIMS a directory. A scan settles under one generation and
+    #: must still hold it when it writes; see :class:`~menhir.infrastructure.structure_write_fence.
+    #: IdentityClaim`. Without it, transferring a root away and back would let a scan settled
+    #: before the round trip write as though nothing had happened -- the state and root checks both
+    #: pass, and only the generation records that the directory changed hands in between.
+    claim_generation: int = 0
 
 
 def _norm(path: str) -> str:
@@ -210,9 +216,11 @@ def bind_project_identity(
                             p.state = 'bound',
                             p.bound_at = datetime(),
                             p.bound_host = $host,
-                            p.root_key = $root_key
+                            p.root_key = $root_key,
+                            p.claim_generation = 1
             RETURN p.canonical_root_path AS bound_root, coalesce(p.state, 'bound') AS state,
-                   p.bound_host AS bound_host, p.root_key AS root_key
+                   p.bound_host AS bound_host, p.root_key AS root_key,
+                   coalesce(p.claim_generation, 0) AS claim_generation
             """,
             {
                 "project_id": project_id,
@@ -309,7 +317,16 @@ def bind_project_identity(
                 f"directory. Re-run the scan; if it persists, an operator must choose."
             ) from exc
 
-    return BindingState(project_id=project_id, canonical_root_path=root_path, state="bound")
+    # The generation is deliberately NOT touched on this path. An ordinary re-scan re-binds the
+    # same identity to the same directory; bumping there would invalidate a concurrent writer of
+    # the SAME identity that had done nothing wrong. Stamping a legacy row leaves it absent, which
+    # reads as 0 -- stable, so a scan that settled at 0 can still write at 0.
+    return BindingState(
+        project_id=project_id,
+        canonical_root_path=root_path,
+        state="bound",
+        claim_generation=int(rows[0].get("claim_generation") or 0),
+    )
 
 
 def _transfer(
@@ -323,11 +340,23 @@ def _transfer(
     executions of this statement do not both commit -- the loser fails on lock contention or the
     root constraint, and exactly one active binding remains.
 
-    What this does NOT prevent: two operators issuing transfers for the same directory in quick
-    succession serialise, and the later one wins. Both were authorised, so that is last-writer-wins
-    among authorised callers, not a bypass -- but a transfer that has already returned success can
-    still be superseded a moment later, and structure written under the first id in that window
-    belongs to a now-retired identity. Recorded rather than claimed away.
+    **A transfer is refused while any registered structure writer could be writing this root.**
+    An earlier version recorded that window as an accepted assumption -- "last-writer-wins among
+    authorised callers" -- which was true of the BINDINGS and false of the data. Transfer X
+    succeeds, transfer Y supersedes X, and X's already-settled scan then writes minutes later
+    under a superseded identity, carrying the per-project stale prune into a silo that directory
+    no longer owns. Last-writer-wins for a pointer does not make a delayed write through the old
+    pointer safe.
+
+    So the writer registry is consulted IN THIS STATEMENT, contending on the same
+    `:StructureWriteFence` singleton that admission locks, and an entry that cannot be proven
+    irrelevant blocks. Two operators may still transfer in sequence; what they cannot do is
+    transfer out from under a writer that is already admitted, and a writer whose claim was
+    superseded before it was admitted is refused there.
+
+    The remaining ordering is genuinely benign: two transfers with no writer in flight serialise
+    and the later wins, and any scan settled under the earlier one is refused at admission by its
+    claim generation rather than by this check.
     """
     conflicted = neo4j.execute(
         """
@@ -348,17 +377,28 @@ def _transfer(
     # that appears after this read does not slip through: it holds the same (host, root_key), the
     # constraint rejects the claim, and the whole statement -- retirement included -- rolls back.
     rival_ids = _active_rivals(neo4j, project_id=project_id, root_key=root_key, host=host)
+    from menhir.infrastructure.structure_write_fence import writers_holding_identities
+
+    # Every identity whose writers this transfer could invalidate: the incumbents losing the
+    # directory, AND the target -- which may be mid-write against the root it is leaving.
+    lock_ids = sorted({*rival_ids, project_id})
     try:
-        neo4j.execute(
+        rows = neo4j.execute(
             """
-            OPTIONAL MATCH (o:ProjectIdentity)
-            WHERE o.project_id IN $rival_ids
-            SET o.previous_root_key = o.root_key
-            SET o.root_key = null,
-                o.state = 'superseded',
-                o.superseded_by = $project_id,
-                o.superseded_at = datetime()
-            WITH count(o) AS retired
+            MATCH (n:ProjectIdentity) WHERE n.project_id IN $lock_ids
+            SET n.last_transfer_probe = timestamp()
+            WITH collect(n) AS locked
+            WITH locked,
+                 reduce(c = 0, x IN locked | c + size(coalesce(x.active_writers, []))) AS held,
+                 [x IN locked WHERE x.project_id IN $rival_ids] AS rivals
+            WHERE held = 0
+            FOREACH (o IN rivals |
+                SET o.previous_root_key = o.root_key,
+                    o.root_key = null,
+                    o.state = 'superseded',
+                    o.superseded_by = $project_id,
+                    o.superseded_at = datetime())
+            WITH size(rivals) AS retired
             MERGE (p:ProjectIdentity {project_id: $project_id})
               ON CREATE SET p.bound_at = datetime()
             SET p.previous_root_path = p.canonical_root_path,
@@ -366,8 +406,9 @@ def _transfer(
                 p.state = 'bound',
                 p.bound_host = $host,
                 p.root_key = $root_key,
-                p.rebound_at = datetime()
-            RETURN retired
+                p.rebound_at = datetime(),
+                p.claim_generation = coalesce(p.claim_generation, 0) + 1
+            RETURN retired, p.claim_generation AS claim_generation
             """,
             {
                 "project_id": project_id,
@@ -375,6 +416,7 @@ def _transfer(
                 "host": host,
                 "root_key": root_key,
                 "rival_ids": rival_ids,
+                "lock_ids": lock_ids,
             },
         )
     except Exception as exc:
@@ -385,7 +427,33 @@ def _transfer(
             f"{project_id}. Nothing was changed. Re-issue the transfer."
         ) from exc
 
-    return BindingState(project_id=project_id, canonical_root_path=root_path, state="bound")
+    if not rows:
+        # `WHERE held = 0` filtered the row out, so nothing after it ran: no retirement, no claim.
+        # Only `last_transfer_probe` was written, and that is an inert timestamp -- the price of
+        # taking the lock before reading the value the decision depends on.
+        blockers = writers_holding_identities(neo4j, lock_ids)
+        detail = (
+            ", ".join(
+                f"{b['id']} on {b['identity']} ({b['label'] or 'unlabelled'}, {b['age_s']}s)"
+                for b in blockers
+            )
+            or "a writer that was released between the refusal and this diagnostic"
+        )
+        raise IdentityRootContested(
+            f"Refusing to transfer {root_path} on {host!r} to {project_id}: a structure writer is "
+            f"registered against an identity this transfer would invalidate, and could be "
+            f"mid-write. Nothing was changed. Blocking writers: {detail}. Wait for it to finish "
+            f"and re-issue. An entry that persists is an abandoned slot from a killed process -- "
+            f"clear it deliberately after confirming the process is gone; an old timestamp is not "
+            f"proof that a process stopped writing."
+        )
+
+    return BindingState(
+        project_id=project_id,
+        canonical_root_path=root_path,
+        state="bound",
+        claim_generation=int(rows[0].get("claim_generation") or 0),
+    )
 
 
 def binding_for_root(neo4j: Any, root_path: str) -> str | None:

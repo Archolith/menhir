@@ -33,6 +33,8 @@ class FakeIdentityGraph:
     def __init__(self) -> None:
         self.nodes: dict[str, dict] = {}
         self.unrecognised: list[str] = []
+        self.fence_writers: list[str] = []
+        self.frozen = False
 
     # -- constraint ---------------------------------------------------------
     def _check_root_constraint(self) -> None:
@@ -68,6 +70,11 @@ class FakeIdentityGraph:
         if text.startswith("CREATE CONSTRAINT"):
             return []
 
+        if text.startswith("MATCH (p:Entity {structure_role: 'project'})"):
+            # The candidate lookup. An aid to a human decision, never a gate -- these tests seed
+            # the binding directly, so there is no candidate to offer.
+            return []
+
         if text.startswith("MERGE (p:ProjectIdentity {project_id: $project_id}) ON CREATE SET"):
             before = self._snapshot()
             node = self.nodes.get(pid)
@@ -77,6 +84,7 @@ class FakeIdentityGraph:
                     "state": "bound",
                     "bound_host": params["host"],
                     "root_key": params["root_key"],
+                    "claim_generation": 1,
                 }
                 self._commit(before)
             return [
@@ -85,6 +93,7 @@ class FakeIdentityGraph:
                     "state": node.get("state", "bound"),
                     "bound_host": node.get("bound_host"),
                     "root_key": node.get("root_key"),
+                    "claim_generation": int(node.get("claim_generation") or 0),
                 }
             ]
 
@@ -122,8 +131,19 @@ class FakeIdentityGraph:
             self._commit(before)
             return []
 
-        if text.startswith("OPTIONAL MATCH (o:ProjectIdentity)"):
+        if text.startswith("MATCH (n:ProjectIdentity) WHERE n.project_id IN $lock_ids"):
+            # The transfer. Modelled with the same TWO gates the statement has, in the same order:
+            # a writer registered against any locked identity blocks everything downstream, and
+            # only then does retirement or claiming happen. A fake that skipped the writer gate
+            # would pass every stale-transfer test while the property was absent.
             before = self._snapshot()
+            lock_ids = params.get("lock_ids") or []
+            held = sum(
+                len(self.nodes.get(i, {}).get("active_writers") or []) for i in lock_ids
+            )
+            if held:
+                # `WHERE held = 0` filtered the row out: nothing after it ran.
+                return []
             for rival in params.get("rival_ids") or []:
                 node = self.nodes.get(rival)
                 if node is None:
@@ -138,8 +158,54 @@ class FakeIdentityGraph:
             node["state"] = "bound"
             node["bound_host"] = params["host"]
             node["root_key"] = params["root_key"]
+            node["claim_generation"] = int(node.get("claim_generation") or 0) + 1
             self._commit(before)
-            return [{"retired": len(params.get("rival_ids") or [])}]
+            return [
+                {
+                    "retired": len(params.get("rival_ids") or []),
+                    "claim_generation": node["claim_generation"],
+                }
+            ]
+
+        if text.startswith("MATCH (p:ProjectIdentity {project_id: $project_id}) SET p.last_admission_probe"):
+            # Writer admission: the claim gate and the registration, one step (see the fence fake).
+            node = self.nodes.get(params.get("project_id"))
+            if node is None:
+                return []
+            if (
+                node.get("state", "bound") != "bound"
+                or node.get("bound_host") != params.get("host")
+                or node.get("root_key") != params.get("root_key")
+                or int(node.get("claim_generation") or 0) != int(params.get("generation"))
+                or self.frozen
+            ):
+                return []
+            node.setdefault("active_writers", []).append(params["entry"])
+            self.fence_writers.append(params["entry"])
+            return [{"active": len(self.fence_writers)}]
+
+        if "WHERE NOT w STARTS WITH $prefix" in text:
+            prefix = params["prefix"]
+            self.fence_writers = [
+                w for w in self.fence_writers if not w.startswith(prefix)
+            ]
+            for node in self.nodes.values():
+                node["active_writers"] = [
+                    w for w in node.get("active_writers", []) if not w.startswith(prefix)
+                ]
+            return []
+
+        if "RETURN coalesce(f.frozen, false) AS frozen" in text:
+            return [
+                {"frozen": self.frozen, "reason": None, "writers": list(self.fence_writers)}
+            ]
+
+        if text.startswith("MATCH (p:ProjectIdentity) WHERE p.project_id IN $ids"):
+            return [
+                {"id": i, "writers": list(self.nodes.get(i, {}).get("active_writers") or [])}
+                for i in (params.get("ids") or [])
+                if i in self.nodes
+            ]
 
         if "WHERE coalesce(p.state, 'bound') = 'conflicted' RETURN p.project_id AS id" in text:
             node = self.nodes.get(pid)

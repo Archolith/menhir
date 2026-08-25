@@ -590,7 +590,7 @@ class RuntimeProviderDataOpsMixin:
                 f"{OPERATOR_TIER} tier; this request is {tier!r}. Scanning does not require it."
             )
 
-        project_id, resolution = await asyncio.to_thread(
+        claim, resolution = await asyncio.to_thread(
             settle_project_identity,
             self.built.graph_adapter,
             root_path=path,
@@ -598,7 +598,7 @@ class RuntimeProviderDataOpsMixin:
             identity_action=identity_action,
             adopt_project_id=adopt_project_id,
         )
-        if project_id is None:
+        if claim is None:
             # A typed result, not an exception: the callers are one-shot MCP and HTTP requests
             # with no interactive channel, and the watcher is unattended. Returning the payload
             # lets each decide -- retry with an action, or skip and report.
@@ -608,7 +608,8 @@ class RuntimeProviderDataOpsMixin:
         scan = await asyncio.to_thread(scanner.scan, path, project_name)
         # Carried on the scan so every writer under `write_project` stamps it without a second
         # parameter threaded through four batch helpers.
-        scan.project_id = project_id
+        scan.project_id = claim.project_id
+        scan.identity_generation = claim.generation
 
         if not force:
             stored_fp = await self._off_loop(
@@ -784,7 +785,21 @@ class RuntimeProviderDataOpsMixin:
                 f"{scan_obj.root_path!r}, which is bound to {bound_id!r} on this host. A supplied "
                 f"identity must match the authoritative binding for the directory it claims."
             )
+        # Re-bind the id we just read. Idempotent for an already-correct binding, and it is what
+        # yields the CLAIM GENERATION this write must present -- the same rule every other writer
+        # crosses, rather than a second way of establishing identity. It also stamps `root_key` on
+        # a binding written before that property existed, which is what lets the write boundary
+        # match on it at all.
+        from menhir.infrastructure.project_identity_binding import bind_project_identity
+
+        binding = await _asyncio.to_thread(
+            bind_project_identity,
+            self.built.graph_adapter.neo4j,
+            project_id=bound_id,
+            root_path=scan_obj.root_path,
+        )
         scan_obj.project_id = bound_id
+        scan_obj.identity_generation = binding.claim_generation
         ensure_scan_root_owns_identity(
             topology=await _asyncio.to_thread(classify_root, scan_obj.root_path),
             project_name=scan_obj.name,
@@ -871,7 +886,7 @@ class RuntimeProviderDataOpsMixin:
         # caller that could hold operator authority.
         from menhir.services.project_identity_service import settle_project_identity
         try:
-            rescan_id, resolution = await _asyncio.to_thread(
+            rescan_claim, resolution = await _asyncio.to_thread(
                 settle_project_identity,
                 self.built.graph_adapter,
                 root_path=root,
@@ -880,7 +895,7 @@ class RuntimeProviderDataOpsMixin:
         except Exception as exc:
             _log.warning("Background symbol rescan identity failed: project=%s error=%s", name, exc)
             return
-        if rescan_id is None:
+        if rescan_claim is None:
             _log.warning(
                 "Background symbol rescan skipped: project=%s needs an identity decision (%s)",
                 name, resolution.reason,
@@ -888,7 +903,8 @@ class RuntimeProviderDataOpsMixin:
             return
         try:
             fresh_scan = await _asyncio.to_thread(_PS().scan, root, name)
-            fresh_scan.project_id = rescan_id
+            fresh_scan.project_id = rescan_claim.project_id
+            fresh_scan.identity_generation = rescan_claim.generation
             await _asyncio.to_thread(
                 self.built.graph_adapter.write_project_structure,
                 fresh_scan,

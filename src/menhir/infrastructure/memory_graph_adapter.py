@@ -1149,8 +1149,9 @@ class MemoryGraphAdapter:
         unattended watcher all arrive through this one method. Guarding the callers instead would
         mean four places to keep in step, and the next writer added would silently miss it.
         """
+        from menhir.infrastructure.project_identity_binding import binding_host, root_key_for
         from menhir.infrastructure.structure_write_fence import (
-            admit_structure_writer, release_structure_writer,
+            IdentityClaim, admit_structure_writer, release_structure_writer,
         )
 
         # CF-257. The identity invariant belongs HERE, beside the fence, for the same reason the
@@ -1160,6 +1161,14 @@ class MemoryGraphAdapter:
         # invariant eroded silently from zero to 1,816 nodes with both constraints live and no
         # error anywhere. Refusing at the choke point is what makes "every structure node carries
         # an id" a property of the system rather than of one call path.
+        #
+        # **A populated id is not an authorisation.** This check used to be exactly
+        # `if not scan.project_id`, and that admits the stale-transfer race: X settles, Y
+        # supersedes X, X's scan finishes minutes later and writes under an identity that no
+        # longer owns the directory -- carrying the per-project stale prune into another
+        # project's silo. So the id travels as a CLAIM (identity, directory, generation) and is
+        # re-validated inside `admit_structure_writer`, in the same statement that registers the
+        # writer and under a lock a concurrent transfer must wait for.
         if not getattr(scan, "project_id", None):
             raise ValueError(
                 f"Refusing to write structure for {getattr(scan, 'name', '<unknown>')!r} with no "
@@ -1169,8 +1178,17 @@ class MemoryGraphAdapter:
                 "without failing."
             )
 
+        # The directory comes from the SCAN, not from the claim. The claim must authorise the
+        # directory this payload actually describes, so a settlement that bound some other root
+        # fails here rather than being taken on trust.
+        claim = IdentityClaim(
+            project_id=str(scan.project_id),
+            root_key=root_key_for(str(getattr(scan, "root_path", "") or "")),
+            generation=int(getattr(scan, "identity_generation", 0) or 0),
+            host=binding_host(),
+        )
         handle = admit_structure_writer(
-            self.neo4j, label=str(getattr(scan, "name", "") or "")
+            self.neo4j, label=str(getattr(scan, "name", "") or ""), claim=claim
         )
         try:
             return self._structure.write_project(scan, session_id, user_id)

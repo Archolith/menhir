@@ -325,9 +325,10 @@ def test_a_lost_identity_file_is_republished_from_the_binding(
         "root_key": root_key_for(str(tmp_path)),
     }
 
-    settled, resolution = _settle(tmp_path, g)
+    claim, resolution = _settle(tmp_path, g)
 
-    assert settled == "bound-id"
+    assert claim.project_id == "bound-id"
+    assert claim.root_key == root_key_for(str(tmp_path))
     assert resolution.resolved
     assert read_identity(tmp_path).project_id == "bound-id"
 
@@ -353,7 +354,8 @@ def test_settling_with_action_new_supersedes_the_binding_that_held_the_directory
         "root_key": root_key_for(str(tmp_path)),
     }
 
-    minted, _ = _settle(tmp_path, g, identity_action="new")
+    claim, _ = _settle(tmp_path, g, identity_action="new")
+    minted = claim.project_id
 
     assert minted and minted != "previous"
     assert _active(g, host="h1", root=str(tmp_path)) == [minted]
@@ -381,8 +383,8 @@ def test_settling_with_action_adopt_supersedes_the_binding_that_held_the_directo
         "root_key": root_key_for("/somewhere/else"),
     }
 
-    settled, _ = _settle(tmp_path, g, identity_action="adopt", adopt_project_id="adopted")
+    claim, _ = _settle(tmp_path, g, identity_action="adopt", adopt_project_id="adopted")
 
-    assert settled == "adopted"
+    assert claim.project_id == "adopted"
     assert _active(g, host="h1", root=str(tmp_path)) == ["adopted"]
     assert g.nodes["previous"]["state"] == "superseded"

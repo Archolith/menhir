@@ -33,11 +33,14 @@ from menhir.domain.project_identity_resolution import (
 from menhir.infrastructure.project_identity_binding import (
     bind_project_identity,
     binding_for_root,
+    binding_host,
+    root_key_for,
 )
+from menhir.infrastructure.structure_write_fence import IdentityClaim
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["settle_project_identity", "ProjectIdentityPublicationFailed"]
+__all__ = ["settle_project_identity", "ProjectIdentityPublicationFailed", "IdentityClaim"]
 
 
 class ProjectIdentityPublicationFailed(RuntimeError):
@@ -90,8 +93,14 @@ def settle_project_identity(
     display_name: str,
     identity_action: str | None = None,
     adopt_project_id: str | None = None,
-) -> tuple[str | None, IdentityResolution]:
-    """Return ``(project_id, resolution)``; ``project_id`` is None when a decision is needed.
+) -> tuple[IdentityClaim | None, IdentityResolution]:
+    """Return ``(claim, resolution)``; the claim is None when a decision is needed.
+
+    A CLAIM, not just an id. The id alone was what every writer checked, and an id is still
+    populated after the identity behind it has been superseded -- so a scan settled minutes ago
+    could write into a directory that had since changed hands. The claim carries the generation
+    and the directory the binding was for, and the write boundary re-validates all three under a
+    lock.
 
     Order matters. The file is read FIRST, so the common path -- an established checkout -- costs
     one stat and never touches the graph. A malformed file refuses here rather than falling
@@ -149,7 +158,7 @@ def settle_project_identity(
     # unlinked, so a failed transfer destroyed the only local record of the id whose silo the
     # project owns. Bind first and a refusal costs nothing: the file on disk is still the truth it
     # was before the call.
-    bind_project_identity(
+    binding = bind_project_identity(
         graph_adapter.neo4j,
         project_id=project_id,
         root_path=str(root_path),
@@ -166,7 +175,15 @@ def settle_project_identity(
         _publish_identity_file(
             root_path, project_id=project_id, display_name=display_name, existing=existing
         )
-    return project_id, resolution
+    return (
+        IdentityClaim(
+            project_id=project_id,
+            root_key=root_key_for(str(root_path)),
+            generation=binding.claim_generation,
+            host=binding_host(),
+        ),
+        resolution,
+    )
 
 
 def _publish_identity_file(
