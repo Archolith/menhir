@@ -340,6 +340,7 @@ class StructureGraphWriter:
             scan.symbols,
             scan.truncated_symbol_files,
             scan.name,
+            project_id=getattr(scan, "project_id", None),
             session_id=session_id,
             user_id=user_id,
             now=now,
@@ -1566,6 +1567,7 @@ class StructureGraphWriter:
         truncated_files: list[str],
         project_name: str,
         *,
+        project_id: str | None,
         session_id: str,
         user_id: str,
         now: str,
@@ -1631,6 +1633,7 @@ class StructureGraphWriter:
             {
                 "uuid": str(uuid4()),
                 "structure_project": project_name,
+                "structure_project_id": project_id,
                 "structure_path": _symbol_path(sym),
                 "structure_role": "symbol",
                 "name": sym.name,

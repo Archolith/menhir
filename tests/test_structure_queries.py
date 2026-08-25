@@ -5,8 +5,6 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import MagicMock
 
-import pytest
-
 from menhir.infrastructure.project_scanner import (
     CrossProjectRef,
     DirEntry,
@@ -14,6 +12,7 @@ from menhir.infrastructure.project_scanner import (
     FileEntry,
     ImportEdge,
     ProjectScanResult,
+    SymbolEntry,
     TestEdge,
 )
 from menhir.infrastructure.structure_queries import StructureGraphWriter
@@ -152,6 +151,45 @@ class TestStructureGraphWriter:
         ]
         assert len(ep_calls) == 1
         assert ep_calls[0][1]["rows"][0]["name"] == "GET /health"
+
+    def test_every_structural_batch_row_carries_the_settled_project_id(self):
+        """The symbol sub-writer once escaped the shared claim with a NULL id on every row."""
+        neo4j = RecordingNeo4j()
+        writer = StructureGraphWriter(neo4j=neo4j)
+        scan = _make_scan(
+            project_id="project-id-1",
+            symbols=[
+                SymbolEntry(
+                    file_path="src/service.py",
+                    name="serve",
+                    kind="function",
+                    line_no=10,
+                    signature="def serve()",
+                    docstring="",
+                    parent="",
+                )
+            ],
+        )
+
+        writer.write_project(scan, session_id="s1", user_id="u1")
+
+        batches = [
+            params["rows"]
+            for _, params in neo4j.calls
+            if params.get("rows")
+            and any(row.get("structure_role") is not None for row in params["rows"])
+        ]
+        assert batches
+        assert {
+            row["structure_role"]
+            for rows in batches
+            for row in rows
+        } >= {"directory", "entrypoint", "dependency", "endpoint", "symbol"}
+        assert all(
+            row.get("structure_project_id") == "project-id-1"
+            for rows in batches
+            for row in rows
+        )
 
     def test_contains_edges(self):
         neo4j = RecordingNeo4j()
