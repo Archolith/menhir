@@ -179,6 +179,27 @@ def test_the_operator_override_still_reaches_the_detached_write(ops, monkeypatch
 
 
 @pytest.mark.unit
+def test_an_empty_tier_cannot_force_a_colliding_root_at_the_runtime_boundary(ops, monkeypatch):
+    """The server boundary must not treat an unconfigured request tier as operator authority.
+
+    ``identity_action`` is deliberately omitted so this cannot pass through the separate transfer
+    gate. The refusal must come from the force-identity guard before scanning or writing.
+    """
+    import menhir.core.backend_runtime_data_ops as mod
+    from menhir.domain.project_identity import ProjectIdentityRefused
+
+    monkeypatch.setattr(mod, "get_request_tier", lambda: "")
+    ops.adapter.get_project_root_path = lambda name: "C:/somewhere/else/proj"
+
+    with pytest.raises(ProjectIdentityRefused, match="identity override requires operator tier"):
+        asyncio.run(
+            _run_and_drain(ops, force_identity=True, identity_action=None)
+        )
+
+    assert ops.written == []
+
+
+@pytest.mark.unit
 def test_the_raw_structure_writer_requires_operator_tier():
     """`write_project_structure` accepts a payload the caller produced AND the `root_path` used to
     judge it, so the server classifies a path string rather than the directory that produced the

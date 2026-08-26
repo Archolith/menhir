@@ -613,10 +613,9 @@ class RuntimeProviderDataOpsMixin:
         # FAIL CLOSED. `tier and tier != OPERATOR_TIER` let an UNBOUND tier through, and
         # `get_request_tier()` returns "" whenever no auth is configured or the ContextVar was
         # never set for this call -- so the gate was open on exactly the deployments least able
-        # to notice. An identity transfer is not a scan; it requires the tier to be present AND
-        # to be operator. This deliberately diverges from the `force_identity` override, which
-        # still permits an unbound tier for local development: that override widens what one
-        # directory may write, while this changes which project a directory IS.
+        # to notice. Identity transfer and `force_identity` both cross an identity boundary, so
+        # both require the tier to be present AND to be operator. Ordinary scans remain available
+        # without either override.
         if identity_action and tier != OPERATOR_TIER:
             raise ProjectIdentityRefused(
                 f"identity_action={identity_action!r} transfers a project identity and requires "

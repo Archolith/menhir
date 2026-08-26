@@ -114,8 +114,8 @@ def ensure_scan_root_owns_identity(
         project_name: The identity the scan intends to write under.
         recorded_root_path: ``root_path`` already stored for that project, or None if the project
             is unknown to the graph.
-        tier: The caller's request tier. ``None`` means no auth is configured (local dev), which
-            the rest of the auth model treats as unrestricted.
+        tier: The caller's request tier. ``None`` or an empty value means no authenticated tier
+            was established; neither value can authorize the identity-boundary override.
         force: The caller passed the explicit override.
         allow_unobservable_root: Accept a root that is not present on this host. Set ONLY by the
             compatibility write path, where a remote client scanned on its own machine and
@@ -142,7 +142,7 @@ def ensure_scan_root_owns_identity(
             "checkout or scan the repository it points at."
         )
 
-    may_force = bool(force) and (not tier or tier == OPERATOR_TIER)
+    may_force = bool(force) and tier == OPERATOR_TIER
 
     # Checked BEFORE the refusals it would have suppressed. Ordering it after them meant an
     # agent-tier caller who passed the override got the generic refusal, whose remedy is "pass the

@@ -267,11 +267,12 @@ def test_an_agent_tier_override_is_refused(tmp_path):
 
 
 @pytest.mark.unit
-def test_an_unconfigured_tier_may_override(tmp_path):
-    """`None` tier means no API keys are configured (local dev); the auth model treats that as
-    unrestricted everywhere else, and this guard must not be the one place it does not."""
+@pytest.mark.parametrize("tier", [None, ""])
+def test_an_unconfigured_tier_cannot_override(tmp_path, tier):
+    """Absent authentication is not operator authority at an identity boundary."""
     root, _ = _worktree(tmp_path)
-    _guard(classify_root(root), recorded=None, tier=None, force=True)
+    with pytest.raises(ProjectIdentityRefused, match="requires operator tier"):
+        _guard(classify_root(root), recorded=None, tier=tier, force=True)
 
 
 @pytest.mark.unit

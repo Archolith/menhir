@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import typer
 
 from menhir.cli.artifacts import artifacts_app
@@ -12,6 +14,9 @@ from menhir.infrastructure.logging_config import (
     build_logging_config,
     configure_logging,
 )
+
+if TYPE_CHECKING:
+    import logging
 
 app = typer.Typer(
     name="menhir",
@@ -98,12 +103,21 @@ def ingest_wiki(
     project: str | None = typer.Option(
         None, help="Project label (default: parent dir name)"
     ),
+    identity_action: str | None = typer.Option(
+        None,
+        "--identity-action",
+        help="Resolve a project identity decision with 'adopt' or 'new'.",
+    ),
+    adopt_project_id: str | None = typer.Option(
+        None,
+        "--adopt-project-id",
+        help="Existing project ID to use with --identity-action adopt.",
+    ),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="List files without ingesting"
     ),
 ) -> None:
     """Ingest compiled sage-wiki articles into the memory graph."""
-    import os
     from pathlib import Path
 
     configure_logging()
@@ -163,28 +177,46 @@ def ingest_wiki(
         base_url = f"http://{settings.api_host}:{settings.api_port}"
         backend = BackendClient(base_url, settings=settings)
         ingested = 0
+        unresolved: list[tuple[str, dict[str, object]]] = []
         errors = 0
         try:
             for file_path, doc_type in files_to_ingest:
                 try:
-                    await backend.ingest_document(
+                    result = await backend.ingest_document(
                         file_path,
                         project=project_name,
                         session_id="cli",
                         user_id="cli",
                         document_type=doc_type,
+                        identity_action=identity_action,
+                        adopt_project_id=adopt_project_id,
                     )
-                    ingested += 1
+                    if result.get("entity_written") is True:
+                        ingested += 1
+                    elif result.get("status") == "needs_decision":
+                        unresolved.append((file_path, result))
+                    else:
+                        errors += 1
                 except Exception:
                     errors += 1
         finally:
             await backend.aclose()
-        return ingested, errors
+        return ingested, unresolved, errors
 
-    ingested, errors = asyncio.run(run_ingest())
+    ingested, unresolved, errors = asyncio.run(run_ingest())
+    if unresolved:
+        import json
+
+        typer.echo(f"Identity decision required for {len(unresolved)} document(s):")
+        for file_path, decision in unresolved:
+            typer.echo(f"  {file_path}")
+            typer.echo(json.dumps(decision, indent=2, sort_keys=True))
     typer.echo(
-        f"Ingested {ingested} documents ({errors} errors) for project '{project_name}'."
+        f"Ingested {ingested} documents ({len(unresolved)} unresolved, {errors} errors) "
+        f"for project '{project_name}'."
     )
+    if unresolved or errors:
+        raise typer.Exit(1)
 
 
 @app.command("erasure-backfill")
@@ -547,7 +579,7 @@ def _ensure_neo4j(container: str, logger: "logging.Logger") -> None:  # type: ig
 
     def _running() -> bool:
         r = subprocess.run(
-            ["docker", "inspect", f"--format={{{{.State.Status}}}}", container],
+            ["docker", "inspect", "--format={{.State.Status}}", container],
             capture_output=True,
             text=True,
         )
