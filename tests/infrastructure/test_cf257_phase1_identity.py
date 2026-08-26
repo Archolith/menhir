@@ -50,9 +50,10 @@ def _hold_publication_lock(root: str, entered, release) -> None:
             raise TimeoutError("publication-lock test was never released")
 
 
-def _enter_publication_lock(root: str, entered) -> None:
+def _enter_publication_lock(root: str, attempting, entered) -> None:
     from menhir.domain.project_id_file import identity_publication_lock
 
+    attempting.set()
     with identity_publication_lock(root):
         entered.set()
 
@@ -181,6 +182,7 @@ def test_publication_lock_serializes_separate_processes(tmp_path):
     context = multiprocessing.get_context("spawn")
     first_entered = context.Event()
     release_first = context.Event()
+    second_attempting = context.Event()
     second_entered = context.Event()
     first = context.Process(
         target=_hold_publication_lock,
@@ -188,13 +190,14 @@ def test_publication_lock_serializes_separate_processes(tmp_path):
     )
     second = context.Process(
         target=_enter_publication_lock,
-        args=(str(tmp_path), second_entered),
+        args=(str(tmp_path), second_attempting, second_entered),
     )
 
     first.start()
     try:
         assert first_entered.wait(5), "first process never acquired the publication lock"
         second.start()
+        assert second_attempting.wait(5), "second process never attempted the publication lock"
         assert not second_entered.wait(0.5), "second process bypassed the publication lock"
         release_first.set()
         assert second_entered.wait(5), "second process did not acquire after release"
