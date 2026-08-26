@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import ast
 import pathlib
+import shutil
 
 import pytest
 
@@ -491,7 +492,16 @@ def test_stale_file_is_repaired_after_one_unlink_failure(
 
     claim, resolution = _settle(tmp_path, graph)
 
-    assert attempts == 2, "the ordinary retry did not exercise failed-first/second-success"
+    assert claim is None and resolution.reason == "identity_file_mismatch_publication_pending"
+    assert [candidate.project_id for candidate in resolution.candidates] == ["authoritative-id"]
+    assert attempts == 1, "an unattended retry tried to replace this checkout's identity file"
+    claim, resolution = _settle(
+        tmp_path,
+        graph,
+        identity_action="adopt",
+        adopt_project_id="authoritative-id",
+    )
+    assert attempts == 2, "the explicit retry did not exercise failed-first/second-success"
     assert claim.project_id == "authoritative-id" and resolution.resolved
     assert '"project_id": "authoritative-id"' in identity_path(tmp_path).read_text(
         encoding="utf-8"
@@ -529,8 +539,15 @@ def test_persistent_unlink_failure_remains_explicit_and_keeps_recovery_marker(
             identity_action="adopt",
             adopt_project_id="authoritative-id",
         )
+    claim, resolution = _settle(tmp_path, graph)
+    assert claim is None and resolution.reason == "identity_file_mismatch_publication_pending"
     with pytest.raises(ProjectIdentityPublicationFailed, match="could not be written"):
-        _settle(tmp_path, graph)
+        _settle(
+            tmp_path,
+            graph,
+            identity_action="adopt",
+            adopt_project_id="authoritative-id",
+        )
 
     assert graph.nodes["authoritative-id"]["publication_pending"] is True
     assert '"project_id": "old-id"' in identity_path(tmp_path).read_text(encoding="utf-8")
@@ -612,8 +629,8 @@ def test_a_missing_identity_file_never_silently_adopts_the_path_binding(
     """A replacement checkout can occupy the same host/path as the old one.
 
     The graph binding is therefore a candidate for an operator decision, not proof that the
-    missing file belonged to this checkout. Automatic recovery requires a current publication
-    marker, tested separately below.
+    missing file belonged to this checkout. A publication marker is decision evidence, not proof
+    of which checkout currently occupies the path.
     """
     from menhir.domain.project_identity_resolution import ResolutionStatus
 
@@ -637,7 +654,7 @@ def test_a_missing_identity_file_never_silently_adopts_the_path_binding(
 
 
 @pytest.mark.unit
-def test_a_missing_file_recovers_only_from_a_current_publication_marker(
+def test_a_missing_file_with_a_publication_marker_still_requires_explicit_adopt(
     fake_identity_graph, monkeypatch, tmp_path
 ):
     from menhir.domain.project_id_file import mint_identity as real_mint_identity
@@ -671,10 +688,29 @@ def test_a_missing_file_recovers_only_from_a_current_publication_marker(
     assert len(pending) == 1
     assert not (tmp_path / ".agent" / "project-id").exists()
 
+    # Compose the dangerous events: the publisher failed, then an unrelated checkout replaced the
+    # directory at the same host/path before the unattended watcher retried.
+    shutil.rmtree(tmp_path)
+    tmp_path.mkdir()
+    (tmp_path / "replacement.txt").write_text("different checkout", encoding="utf-8")
+
     claim, resolution = _settle(tmp_path, graph)
 
-    assert claim.project_id == pending[0]
-    assert resolution.resolved
+    assert claim is None
+    assert resolution.reason == "identity_file_missing_publication_pending"
+    assert [candidate.project_id for candidate in resolution.candidates] == pending
+    assert attempts == 1
+    assert not (tmp_path / ".agent" / "project-id").exists()
+    assert (tmp_path / "replacement.txt").read_text(encoding="utf-8") == "different checkout"
+
+    claim, resolution = _settle(
+        tmp_path,
+        graph,
+        identity_action="adopt",
+        adopt_project_id=pending[0],
+    )
+
+    assert claim.project_id == pending[0] and resolution.resolved
     assert attempts == 2
     assert "publication_pending" not in graph.nodes[pending[0]]
     assert (tmp_path / ".agent" / "project-id").exists()

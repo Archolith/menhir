@@ -216,7 +216,19 @@ def test_graph_committed_publication_recovers_after_transient_unlink_failure(
         display_name="proj",
     )
 
-    assert attempts == 2, "the ordinary retry did not replace the stale file"
+    assert claim is None and resolution.reason == "identity_file_mismatch_publication_pending"
+    assert [candidate.project_id for candidate in resolution.candidates] == [new]
+    assert attempts == 1, "an unattended retry replaced the checkout's identity file"
+
+    claim, resolution = settle_project_identity(
+        adapter,
+        root_path=root,
+        display_name="proj",
+        identity_action="adopt",
+        adopt_project_id=new,
+    )
+
+    assert attempts == 2, "the explicit retry did not replace the stale file"
     assert claim.project_id == new and resolution.resolved
     assert read_identity(tmp_path).project_id == new
     cleared = repo.execute(
@@ -235,8 +247,8 @@ def test_missing_file_with_same_path_binding_still_requires_operator_decision(
     """A replacement checkout can occupy an old checkout's exact host/path.
 
     The binding and matching project entity make the old id a useful candidate, but neither is
-    proof that the new filesystem contents own it. Only a current publication marker can repair
-    a file automatically.
+    proof that the new filesystem contents own it. A publication marker is exposed as decision
+    evidence and cannot repair a missing file automatically.
     """
     from types import SimpleNamespace
 
