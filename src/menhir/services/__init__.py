@@ -6,6 +6,7 @@ from .ingest_service import IngestService
 from .lifecycle_service import LifecycleService
 from .maintenance_scheduler import MaintenanceScheduler
 from .projection_coverage_service import ProjectionCoverageService
+from .realization_coverage_service import RealizationCoverageService
 from .recall_service import RecallService
 from .scheduler_lease import SchedulerLeaseStore
 from .scoring_service import ScoringService
@@ -19,5 +20,6 @@ __all__ = [
     "LifecycleService",
     "MaintenanceScheduler",
     "ProjectionCoverageService",
+    "RealizationCoverageService",
     "SchedulerLeaseStore",
 ]
