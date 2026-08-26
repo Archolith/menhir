@@ -17,8 +17,6 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-logger = logging.getLogger(__name__)
-
 from menhir.infrastructure.episode_repository import (
     EpisodeRepository,
     PolicyStampResult,
@@ -29,10 +27,13 @@ from menhir.infrastructure.consolidation_queries import ConsolidationRepository
 from menhir.infrastructure.correlation_queries import CorrelationRepository
 from menhir.infrastructure.neo4j import Neo4jRepository
 from menhir.infrastructure.schema import (
+    PHASE_ONE_REQUIRED_CONSTRAINTS,
     PHASE_ONE_REQUIRED_INDEXES,
     SCALAR_STATE_REQUIRED_INDEXES,
     get_phase1_bootstrap_queries,
 )
+
+logger = logging.getLogger(__name__)
 
 # Re-export so existing callers importing from this module still work.
 __all__ = [
@@ -115,7 +116,36 @@ class MemoryGraphAdapter:
             params={"names": list(PHASE_ONE_REQUIRED_INDEXES)},
         )
         online = {str(name) for name in (rows[0].get("names", []) if rows else [])}
-        return all(name in online for name in PHASE_ONE_REQUIRED_INDEXES)
+        if not all(name in online for name in PHASE_ONE_REQUIRED_INDEXES):
+            return False
+
+        required_constraints = {
+            name: (constraint_type, entity_type, labels, properties)
+            for name, constraint_type, entity_type, labels, properties
+            in PHASE_ONE_REQUIRED_CONSTRAINTS
+        }
+        constraint_rows = self.neo4j.execute(
+            """
+            SHOW CONSTRAINTS
+            YIELD name, type, entityType, labelsOrTypes, properties
+            WHERE name IN $names
+            RETURN name, type, entityType, labelsOrTypes, properties
+            """,
+            params={"names": list(required_constraints)},
+        )
+        actual_constraints = {
+            str(row.get("name") or ""): (
+                str(row.get("type") or ""),
+                str(row.get("entityType") or ""),
+                tuple(str(value) for value in (row.get("labelsOrTypes") or [])),
+                tuple(str(value) for value in (row.get("properties") or [])),
+            )
+            for row in constraint_rows
+        }
+        return all(
+            actual_constraints.get(name) == expected
+            for name, expected in required_constraints.items()
+        )
 
     def scalar_state_schema_ready(self) -> bool:
         """Return True when the ScalarStateView typed-assertion DDL is online. Feature-scoped: a

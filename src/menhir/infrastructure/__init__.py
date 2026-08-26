@@ -6,7 +6,13 @@ from .llm import LLMAdapter
 from .memory_graph_adapter import MemoryGraphAdapter, PhaseOneSchemaResult, PolicyStampResult
 from .neo4j import Neo4jRepository
 from .providers import ProviderConfig, ProviderKind, build_chat_backend
-from .schema import EDGE_LABELS, MEMORY_NODE_LABELS, PHASE_ONE_REQUIRED_INDEXES, get_phase1_bootstrap_queries
+from .schema import (
+    EDGE_LABELS,
+    MEMORY_NODE_LABELS,
+    PHASE_ONE_REQUIRED_CONSTRAINTS,
+    PHASE_ONE_REQUIRED_INDEXES,
+    get_phase1_bootstrap_queries,
+)
 
 __all__ = [
     "CircuitBreaker",
@@ -23,5 +29,6 @@ __all__ = [
     "MEMORY_NODE_LABELS",
     "EDGE_LABELS",
     "PHASE_ONE_REQUIRED_INDEXES",
+    "PHASE_ONE_REQUIRED_CONSTRAINTS",
     "get_phase1_bootstrap_queries",
 ]

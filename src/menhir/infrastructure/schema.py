@@ -91,6 +91,33 @@ PHASE_ONE_REQUIRED_INDEXES = (
     "structure_project_path_unique",
 )
 
+# Name, constraint type, entity type, labels/types, ordered properties. Index names alone are not
+# sufficient readiness evidence: Neo4j permits an ordinary RANGE index to use the prospective
+# constraint name, and SHOW INDEXES would then make startup skip the uniqueness DDL.
+PHASE_ONE_REQUIRED_CONSTRAINTS = (
+    (
+        "project_identity_id_unique",
+        "UNIQUENESS",
+        "NODE",
+        ("ProjectIdentity",),
+        ("project_id",),
+    ),
+    (
+        "project_identity_root_unique",
+        "UNIQUENESS",
+        "NODE",
+        ("ProjectIdentity",),
+        ("bound_host", "root_key"),
+    ),
+    (
+        "structure_project_path_unique",
+        "UNIQUENESS",
+        "NODE",
+        ("Entity",),
+        ("structure_project_id", "structure_path"),
+    ),
+)
+
 
 def _node_index_queries() -> list[str]:
     queries: list[str] = []
