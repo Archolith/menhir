@@ -325,6 +325,15 @@ def test_windows_paths_still_compare_case_and_separator_insensitively():
 
 
 @pytest.mark.unit
+def test_posix_leading_and_trailing_whitespace_are_identity_bearing():
+    from menhir.domain.project_identity import normalize_project_root_path
+
+    assert normalize_project_root_path("/srv/proj ") != normalize_project_root_path("/srv/proj")
+    assert normalize_project_root_path(" /srv/proj") != normalize_project_root_path("/srv/proj")
+    assert normalize_project_root_path(" ") == " "
+
+
+@pytest.mark.unit
 def test_phase_zero_same_path_uses_the_shared_root_normalizer(monkeypatch):
     """The guard and binding keys must not grow independent path-flavor rules again."""
     from menhir.domain import project_identity

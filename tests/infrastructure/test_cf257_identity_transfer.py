@@ -27,6 +27,7 @@ import pathlib
 import pytest
 
 from menhir.infrastructure.project_identity_binding import (
+    IdentityBindingConflict,
     IdentityRootContested,
     bind_project_identity,
     binding_for_root,
@@ -62,6 +63,8 @@ def test_root_keys_respect_the_spelled_path_flavor():
     assert root_key_for("/") == "/"
     assert root_key_for(r"C:\srv\App\\") == root_key_for("c:/srv/app")
     assert root_key_for(r"\\Server\Share\App\\") == root_key_for("//server/share/app")
+    assert root_key_for("/srv/app ") != root_key_for("/srv/app")
+    assert root_key_for(" /srv/app") != root_key_for("/srv/app")
 
 
 # ---------------------------------------------------------------------------
@@ -106,6 +109,20 @@ def test_the_same_path_on_another_host_is_untouched(fake_identity_graph, monkeyp
     assert _active(g, host="h1", root="/srv/app") == ["new-here"]
     assert _active(g, host="h2", root="/srv/app") == ["there"], "another host was superseded"
     assert g.nodes["there"]["state"] == "bound"
+
+
+@pytest.mark.unit
+def test_the_same_id_and_root_text_from_another_host_is_a_copy_conflict(
+    fake_identity_graph, monkeypatch
+):
+    g = fake_identity_graph
+    _bind(g, "copied-id", "/srv/app", host="h1", monkeypatch=monkeypatch)
+
+    with pytest.raises(IdentityBindingConflict, match="host 'h1'"):
+        _bind(g, "copied-id", "/srv/app", host="h2", monkeypatch=monkeypatch)
+
+    assert g.nodes["copied-id"]["state"] == "conflicted"
+    assert g.nodes["copied-id"]["bound_host"] == "h1", "the copied id rewrote its owner host"
 
 
 @pytest.mark.unit
@@ -419,3 +436,149 @@ def test_settling_with_action_adopt_supersedes_the_binding_that_held_the_directo
     assert claim.project_id == "adopted"
     assert _active(g, host="h1", root=str(tmp_path)) == ["adopted"]
     assert g.nodes["previous"]["state"] == "superseded"
+
+
+@pytest.mark.unit
+def test_operator_adopt_reaches_conflict_resolution_through_the_service(
+    fake_identity_graph, monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        "menhir.infrastructure.project_identity_binding._host", lambda: "h1"
+    )
+    g = fake_identity_graph
+    g.nodes["adopted"] = {
+        "canonical_root_path": "/somewhere/else",
+        "state": "conflicted",
+        "bound_host": "h1",
+        "root_key": root_key_for("/somewhere/else"),
+        "conflicting_root_path": str(tmp_path),
+    }
+
+    claim, _ = _settle(
+        tmp_path,
+        g,
+        identity_action="adopt",
+        adopt_project_id="adopted",
+    )
+
+    assert claim.project_id == "adopted"
+    assert _active(g, host="h1", root=str(tmp_path)) == ["adopted"]
+
+
+@pytest.mark.unit
+def test_established_checkout_without_an_action_does_not_take_publication_lock(
+    fake_identity_graph, monkeypatch, tmp_path
+):
+    from menhir.domain.project_id_file import ensure_ignore_rule, mint_identity
+    from menhir.services import project_identity_service as service
+
+    monkeypatch.setattr(
+        "menhir.infrastructure.project_identity_binding._host", lambda: "h1"
+    )
+    ensure_ignore_rule(tmp_path)
+    mint_identity(tmp_path, project_id="established", display_name="proj")
+    fake_identity_graph.nodes["established"] = {
+        "canonical_root_path": str(tmp_path),
+        "state": "bound",
+        "bound_host": "h1",
+        "root_key": root_key_for(str(tmp_path)),
+    }
+
+    def unexpected_lock(_root):
+        raise AssertionError("ordinary established checkout took the publication lock")
+
+    monkeypatch.setattr(service, "identity_publication_lock", unexpected_lock)
+    claim, _ = _settle(tmp_path, fake_identity_graph)
+    assert claim.project_id == "established"
+
+
+@pytest.mark.unit
+def test_two_explicit_actions_serialize_graph_transfer_and_file_publication(
+    fake_identity_graph, monkeypatch, tmp_path
+):
+    """Without the publication lock, B publishes before paused A and A leaves a stale file."""
+    import threading
+    from contextlib import contextmanager
+    from types import SimpleNamespace
+
+    from menhir.domain.project_id_file import ensure_ignore_rule, mint_identity, read_identity
+    from menhir.services import project_identity_service as service
+
+    monkeypatch.setattr(
+        "menhir.infrastructure.project_identity_binding._host", lambda: "h1"
+    )
+    ensure_ignore_rule(tmp_path)
+    mint_identity(tmp_path, project_id="old-id", display_name="proj")
+
+    g = fake_identity_graph
+    g.nodes["old-id"] = {
+        "canonical_root_path": str(tmp_path),
+        "state": "bound",
+        "bound_host": "h1",
+        "root_key": root_key_for(str(tmp_path)),
+    }
+    for project_id, root in (("adopt-a", "/elsewhere/a"), ("adopt-b", "/elsewhere/b")):
+        g.nodes[project_id] = {
+            "canonical_root_path": root,
+            "state": "bound",
+            "bound_host": "h1",
+            "root_key": root_key_for(root),
+        }
+
+    real_lock = service.identity_publication_lock
+    real_publish = service._publish_identity_file
+    first_publishing = threading.Event()
+    second_attempted = threading.Event()
+    second_published = threading.Event()
+
+    @contextmanager
+    def observed_lock(root):
+        if threading.current_thread().name == "identity-b":
+            second_attempted.set()
+        with real_lock(root):
+            yield
+
+    def observed_publish(root, *, project_id, display_name, existing):
+        if threading.current_thread().name == "identity-a":
+            first_publishing.set()
+            assert second_attempted.wait(2), "the second action never reached the root lock"
+            # If the lock is absent, B can finish here; A then publishes stale state last.
+            second_published.wait(0.25)
+        real_publish(
+            root,
+            project_id=project_id,
+            display_name=display_name,
+            existing=existing,
+        )
+        if threading.current_thread().name == "identity-b":
+            second_published.set()
+
+    monkeypatch.setattr(service, "identity_publication_lock", observed_lock)
+    monkeypatch.setattr(service, "_publish_identity_file", observed_publish)
+
+    errors = []
+
+    def settle(project_id):
+        try:
+            service.settle_project_identity(
+                SimpleNamespace(neo4j=g),
+                root_path=str(tmp_path),
+                display_name="proj",
+                identity_action="adopt",
+                adopt_project_id=project_id,
+            )
+        except Exception as exc:
+            errors.append(exc)
+
+    first = threading.Thread(target=settle, args=("adopt-a",), name="identity-a")
+    second = threading.Thread(target=settle, args=("adopt-b",), name="identity-b")
+    first.start()
+    assert first_publishing.wait(2), "the first action never reached publication"
+    second.start()
+    first.join(5)
+    second.join(5)
+
+    assert not first.is_alive() and not second.is_alive()
+    assert not errors
+    assert _active(g, host="h1", root=str(tmp_path)) == ["adopt-b"]
+    assert read_identity(tmp_path).project_id == "adopt-b"

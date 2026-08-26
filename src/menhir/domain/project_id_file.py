@@ -27,9 +27,13 @@ from __future__ import annotations
 
 import json
 import os
+import threading
+import time
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Iterator
 
 __all__ = [
     "ProjectIdFile",
@@ -43,6 +47,7 @@ __all__ = [
     "read_identity",
     "mint_identity",
     "ensure_ignore_rule",
+    "identity_publication_lock",
 ]
 
 IDENTITY_DIR = ".agent"
@@ -51,6 +56,10 @@ SCHEMA_VERSION = 1
 
 #: What is written into the repo's own `.agent/.gitignore`.
 _IGNORE_LINE = "project-id"
+
+_PUBLICATION_LOCKS: dict[str, threading.Lock] = {}
+_PUBLICATION_LOCKS_GUARD = threading.Lock()
+_PUBLICATION_LOCK_STATE = threading.local()
 
 
 class ProjectIdFileError(RuntimeError):
@@ -92,6 +101,13 @@ def ensure_ignore_rule(root: str | Path) -> bool:
     because `.agent/.gitignore` is the repo's, not menhir's -- this one already carries
     ``test_tmp/``, ``mcp_telemetry.db`` and ``*.log`` here.
     """
+    lock_key = _publication_lock_key(root)
+    if lock_key in getattr(_PUBLICATION_LOCK_STATE, "roots", ()):
+        # The lock context established the rule before taking its Windows byte-range lock. Trying
+        # to read the first locked byte again through a second handle raises PermissionError on
+        # Windows, even in this process, so the held lock is also proof of this precondition.
+        return False
+
     gi = _gitignore_path(root)
     gi.parent.mkdir(parents=True, exist_ok=True)
     existing = ""
@@ -102,15 +118,22 @@ def ensure_ignore_rule(root: str | Path) -> bool:
             if stripped == _IGNORE_LINE or stripped == f"/{_IGNORE_LINE}":
                 return False
     prefix = "" if (not existing or existing.endswith("\n")) else "\n"
-    gi.write_text(
-        f"{existing}{prefix}# menhir project identity (CF-257): per-checkout, never committed\n"
-        f"{_IGNORE_LINE}\n",
-        encoding="utf-8",
+    addition = (
+        f"{prefix}# menhir project identity (CF-257): per-checkout, never committed\n"
+        f"{_IGNORE_LINE}\n"
     )
+    # Append rather than read-rewrite. Two bootstrapping processes may both append the harmless
+    # rule, but neither can truncate repository-owned entries while creating the stable lock file.
+    fd = os.open(gi, os.O_CREAT | os.O_APPEND | os.O_WRONLY, 0o666)
+    with os.fdopen(fd, "a", encoding="utf-8") as file_handle:
+        file_handle.write(addition)
+        file_handle.flush()
     return True
 
 
 def is_ignore_rule_present(root: str | Path) -> bool:
+    if _publication_lock_key(root) in getattr(_PUBLICATION_LOCK_STATE, "roots", ()):
+        return True
     gi = _gitignore_path(root)
     if not gi.exists():
         return False
@@ -118,6 +141,91 @@ def is_ignore_rule_present(root: str | Path) -> bool:
         if line.strip() in (_IGNORE_LINE, f"/{_IGNORE_LINE}"):
             return True
     return False
+
+
+def _publication_lock_key(root: str | Path) -> str:
+    return os.path.normcase(os.path.abspath(os.fspath(Path(root))))
+
+
+def _publication_thread_lock(root: str | Path) -> threading.Lock:
+    key = _publication_lock_key(root)
+    with _PUBLICATION_LOCKS_GUARD:
+        return _PUBLICATION_LOCKS.setdefault(key, threading.Lock())
+
+
+def _lock_identity_file(file_handle) -> None:
+    file_handle.seek(0)
+    if os.name == "nt":
+        import msvcrt
+
+        while True:
+            try:
+                msvcrt.locking(file_handle.fileno(), msvcrt.LK_NBLCK, 1)
+                break
+            except OSError:
+                time.sleep(0.05)
+    else:
+        import fcntl
+
+        fcntl.flock(file_handle.fileno(), fcntl.LOCK_EX)
+
+
+def _unlock_identity_file(file_handle) -> None:
+    file_handle.seek(0)
+    if os.name == "nt":
+        import msvcrt
+
+        msvcrt.locking(file_handle.fileno(), msvcrt.LK_UNLCK, 1)
+    else:
+        import fcntl
+
+        fcntl.flock(file_handle.fileno(), fcntl.LOCK_UN)
+
+
+def _wait_for_identity_file_unlock(root: str | Path) -> None:
+    """Wait for another Windows process's publication lock, then release our probe."""
+    lock_path = _gitignore_path(root)
+    with lock_path.open("r+b") as file_handle:
+        _lock_identity_file(file_handle)
+        _unlock_identity_file(file_handle)
+
+
+@contextmanager
+def identity_publication_lock(root: str | Path) -> Iterator[None]:
+    """Serialize graph binding and identity-file publication for one root.
+
+    The process-local lock covers threads. The advisory lock covers other local processes and is
+    held on ``.agent/.gitignore`` because that is a stable, already-required file: using a new
+    lock file would add another repository artifact and would not survive identity-file unlinking.
+    The ignore rule is established before opening and locking that file.
+    """
+    root_path = Path(root)
+    thread_lock = _publication_thread_lock(root_path)
+    with thread_lock:
+        while True:
+            try:
+                ensure_ignore_rule(root_path)
+                break
+            except PermissionError:
+                # Windows byte-range locks also block a second process from reading the locked
+                # byte. Wait for that publisher, then verify the rule before taking our own lock.
+                if os.name != "nt" or not _gitignore_path(root_path).exists():
+                    raise
+                _wait_for_identity_file_unlock(root_path)
+        lock_path = _gitignore_path(root_path)
+        with lock_path.open("r+b") as file_handle:
+            _lock_identity_file(file_handle)
+            lock_key = _publication_lock_key(root_path)
+            held_roots = getattr(_PUBLICATION_LOCK_STATE, "roots", None)
+            if held_roots is None:
+                held_roots = set()
+                _PUBLICATION_LOCK_STATE.roots = held_roots
+            held_roots.add(lock_key)
+            try:
+                yield
+            finally:
+                held_roots.discard(lock_key)
+                _unlock_identity_file(file_handle)
 
 
 def read_identity(root: str | Path) -> ProjectIdFile | None:

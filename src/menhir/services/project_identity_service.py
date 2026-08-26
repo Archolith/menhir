@@ -20,6 +20,7 @@ from typing import Any
 from menhir.domain.project_id_file import (
     MalformedIdentityFile,
     ensure_ignore_rule,
+    identity_publication_lock,
     mint_identity,
     read_identity,
 )
@@ -107,10 +108,53 @@ def settle_project_identity(
     through to the candidate branch, because "unreadable" must not be treated as "absent": that
     would re-mint over a file that may hold the only record of an id.
     """
+    if identity_action is not None:
+        with identity_publication_lock(root_path):
+            return _settle_project_identity_locked(
+                graph_adapter,
+                root_path=root_path,
+                display_name=display_name,
+                identity_action=identity_action,
+                adopt_project_id=adopt_project_id,
+                existing=read_identity(root_path),
+            )
+
     try:
         existing = read_identity(root_path)
     except MalformedIdentityFile:
         raise
+
+    if existing is None:
+        with identity_publication_lock(root_path):
+            return _settle_project_identity_locked(
+                graph_adapter,
+                root_path=root_path,
+                display_name=display_name,
+                identity_action=identity_action,
+                adopt_project_id=adopt_project_id,
+                existing=read_identity(root_path),
+            )
+
+    return _settle_project_identity_locked(
+        graph_adapter,
+        root_path=root_path,
+        display_name=display_name,
+        identity_action=identity_action,
+        adopt_project_id=adopt_project_id,
+        existing=existing,
+    )
+
+
+def _settle_project_identity_locked(
+    graph_adapter: Any,
+    *,
+    root_path: str,
+    display_name: str,
+    identity_action: str | None,
+    adopt_project_id: str | None,
+    existing: Any,
+) -> tuple[IdentityClaim | None, IdentityResolution]:
+    """Settle after the caller has re-read any mutable identity-file state."""
 
     # A binding that already names THIS directory on THIS host is not an open question -- it is
     # this checkout, recorded server-side. Treating it as a decision meant every one of the 60
@@ -163,6 +207,7 @@ def settle_project_identity(
         project_id=project_id,
         root_path=str(root_path),
         rebind=transferring,
+        resolve_conflict=identity_action == IdentityAction.ADOPT.value,
     )
 
     # Publication can still fail after the binding committed, and there is no ordering that

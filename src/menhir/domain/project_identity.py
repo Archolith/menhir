@@ -52,10 +52,9 @@ class ProjectIdentityRefused(ValueError):
 
 def _looks_like_windows_path(value: str) -> bool:
     """True for a drive-letter or UNC path, which are case-insensitive in practice."""
-    stripped = value.strip()
-    if stripped.startswith("\\\\") or stripped.startswith("//"):
+    if value.startswith("\\\\") or value.startswith("//"):
         return True
-    return len(stripped) >= 2 and stripped[1] == ":" and stripped[0].isalpha()
+    return len(value) >= 2 and value[1] == ":" and value[0].isalpha()
 
 
 def normalize_project_root_path(value: str) -> str:
@@ -68,8 +67,8 @@ def normalize_project_root_path(value: str) -> str:
     false allow, which is the direction that loses data. A false refusal merely annoys someone; a
     false allow prunes a project's files.
     """
-    raw = value.strip()
-    if not raw:
+    raw = value
+    if raw == "":
         return ""
     if _looks_like_windows_path(raw):
         return PureWindowsPath(raw.replace("/", "\\")).as_posix().casefold()

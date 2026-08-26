@@ -27,9 +27,11 @@ import pytest
 
 from menhir.infrastructure.project_identity_binding import (
     PROJECT_IDENTITY_CONSTRAINTS,
+    IdentityBindingConflict,
     IdentityRootContested,
     bind_project_identity,
     binding_for_root,
+    clear_conflict,
     root_key_for,
 )
 from menhir.infrastructure.structure_write_fence import (
@@ -161,6 +163,28 @@ def test_the_same_path_on_another_host_is_never_superseded(repo, pid, on_host):
 
     assert _active_for(repo, h1, root) == [replacement]
     assert _active_for(repo, h2, root) == [there], "another host's binding was superseded"
+
+
+@pytest.mark.online
+def test_the_same_id_and_root_text_from_another_host_is_marked_conflicted(
+    repo, pid, on_host
+):
+    root = f"/srv/{uuid.uuid4().hex[:8]}"
+    h1, h2 = f"cf257-h1-{uuid.uuid4().hex[:6]}", f"cf257-h2-{uuid.uuid4().hex[:6]}"
+    copied = pid("copied")
+
+    on_host(h1)
+    bind_project_identity(repo, project_id=copied, root_path=root)
+    on_host(h2)
+    with pytest.raises(IdentityBindingConflict):
+        bind_project_identity(repo, project_id=copied, root_path=root)
+
+    row = repo.execute(
+        "MATCH (p:ProjectIdentity {project_id:$id}) RETURN p.state AS state, "
+        "p.bound_host AS host, p.conflicting_bound_host AS conflicting_host",
+        {"id": copied},
+    )[0]
+    assert row == {"state": "conflicted", "host": h1, "conflicting_host": h2}
 
 
 @pytest.mark.online
@@ -517,6 +541,63 @@ def test_a_conflicted_identity_admits_no_writer(repo, pid, on_host):
 
     with pytest.raises(StaleIdentityClaim):
         admit_structure_writer(repo, label="proj", claim=_claim_for(binding, root, host))
+
+
+@pytest.mark.online
+def test_conflict_adoption_clears_and_claims_in_one_transfer(repo, pid, on_host):
+    host = f"cf257-host-{uuid.uuid4().hex[:6]}"
+    keep = f"/srv/{uuid.uuid4().hex[:8]}"
+    copy = f"/srv/{uuid.uuid4().hex[:8]}"
+    project_id = pid("resolve")
+    on_host(host)
+
+    bind_project_identity(repo, project_id=project_id, root_path=keep)
+    with pytest.raises(IdentityBindingConflict):
+        bind_project_identity(repo, project_id=project_id, root_path=copy)
+
+    clear_conflict(repo, project_id=project_id, keep_root_path=keep)
+
+    row = repo.execute(
+        "MATCH (p:ProjectIdentity {project_id:$id}) RETURN p.state AS state, "
+        "p.canonical_root_path AS root, p.root_key AS root_key, "
+        "p.conflicting_root_path AS conflicting_root, "
+        "p.conflicting_bound_host AS conflicting_host, p.conflicted_at AS conflicted_at",
+        {"id": project_id},
+    )[0]
+    assert row["state"] == "bound"
+    assert row["root"] == keep and row["root_key"] == root_key_for(keep)
+    assert row["conflicting_root"] is None
+    assert row["conflicting_host"] is None
+    assert row["conflicted_at"] is None
+
+
+@pytest.mark.online
+def test_failed_conflict_resolution_keeps_the_real_node_conflicted(repo, pid, on_host):
+    host = f"cf257-host-{uuid.uuid4().hex[:6]}"
+    keep = f"/srv/{uuid.uuid4().hex[:8]}"
+    copy = f"/srv/{uuid.uuid4().hex[:8]}"
+    project_id = pid("failed-resolve")
+    on_host(host)
+
+    bind_project_identity(repo, project_id=project_id, root_path=keep)
+    with pytest.raises(IdentityBindingConflict):
+        bind_project_identity(repo, project_id=project_id, root_path=copy)
+    repo.execute(
+        "MATCH (p:ProjectIdentity {project_id:$id}) SET p.active_writers = ['test-writer']",
+        {"id": project_id},
+    )
+
+    with pytest.raises(IdentityRootContested, match="Nothing was changed"):
+        clear_conflict(repo, project_id=project_id, keep_root_path=keep)
+
+    row = repo.execute(
+        "MATCH (p:ProjectIdentity {project_id:$id}) RETURN p.state AS state, "
+        "p.conflicting_root_path AS conflicting_root, p.conflicted_at AS conflicted_at",
+        {"id": project_id},
+    )[0]
+    assert row["state"] == "conflicted"
+    assert row["conflicting_root"] == copy
+    assert row["conflicted_at"] is not None
 
 
 @pytest.mark.online

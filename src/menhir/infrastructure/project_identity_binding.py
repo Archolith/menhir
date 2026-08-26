@@ -181,7 +181,12 @@ def _active_rivals(
 
 
 def bind_project_identity(
-    neo4j: Any, *, project_id: str, root_path: str, rebind: bool = False
+    neo4j: Any,
+    *,
+    project_id: str,
+    root_path: str,
+    rebind: bool = False,
+    resolve_conflict: bool = False,
 ) -> BindingState:
     """Bind *project_id* to *root_path* on this host, or raise.
 
@@ -191,14 +196,21 @@ def bind_project_identity(
 
     Both `adopt` and `new` are transfers. `new` was previously not one, so minting a fresh id for
     a directory left the old identity still claiming it -- two active bindings for one root, and
-    the erosion this constraint exists to stop.
+    the erosion this constraint exists to stop. ``resolve_conflict`` is narrower than ``rebind``:
+    only operator adoption and :func:`clear_conflict` set it, authorizing the transfer statement
+    itself to clear conflict evidence while claiming the named root.
     """
     host = _host()
     root_key = root_key_for(root_path)
 
     if rebind:
         return _transfer(
-            neo4j, project_id=project_id, root_path=root_path, root_key=root_key, host=host
+            neo4j,
+            project_id=project_id,
+            root_path=root_path,
+            root_key=root_key,
+            host=host,
+            resolve_conflict=resolve_conflict,
         )
 
     # A brand-new id stamps `root_key` on create, so the root constraint is the FIRST thing that
@@ -259,22 +271,28 @@ def bind_project_identity(
             f"it back explicitly with an operator-tier identity_action."
         )
 
-    if root_key_for(bound_root) != root_key:
+    host_conflict = bool(bound_host) and bound_host != host
+    root_conflict = root_key_for(bound_root) != root_key
+    if host_conflict or root_conflict:
         # Disable it for the incumbent too -- see the module docstring.
         neo4j.execute(
             """
             MATCH (p:ProjectIdentity {project_id: $project_id})
             SET p.state = 'conflicted',
                 p.conflicting_root_path = $root_path,
+                p.conflicting_bound_host = $host,
                 p.conflicted_at = datetime()
             """,
-            {"project_id": project_id, "root_path": root_path},
+            {"project_id": project_id, "root_path": root_path, "host": host},
+        )
+        difference = (
+            f"host {bound_host!r}" if host_conflict else f"root {bound_root}"
         )
         raise IdentityBindingConflict(
-            f"Project id {project_id} is bound to {bound_root} but was presented from "
-            f"{root_path}. Both are now refused: an id in two directories re-creates exactly the "
-            "collision this identity scheme removes, and letting the incumbent continue would "
-            "hide it. Give one of them a fresh identity."
+            f"Project id {project_id} is bound to {difference} but was presented from host "
+            f"{host!r}, root {root_path}. Both are now refused: an id in two checkouts re-creates "
+            "exactly the collision this identity scheme removes, and letting the incumbent "
+            "continue would hide it. Give one of them a fresh identity."
         )
 
     rivals = _active_rivals(neo4j, project_id=project_id, root_key=root_key, host=host)
@@ -286,7 +304,7 @@ def bind_project_identity(
             f"identity_action, or remove the stale identity file from this checkout."
         )
 
-    if bound_host != host or stamped_key != root_key:
+    if not bound_host or stamped_key != root_key:
         # A binding written before the root constraint existed, or one whose recorded path was
         # normalised differently. Stamping it is what brings it UNDER the constraint; until then
         # it is invisible to the very rule that protects it.
@@ -328,7 +346,13 @@ def bind_project_identity(
 
 
 def _transfer(
-    neo4j: Any, *, project_id: str, root_path: str, root_key: str, host: str
+    neo4j: Any,
+    *,
+    project_id: str,
+    root_path: str,
+    root_key: str,
+    host: str,
+    resolve_conflict: bool = False,
 ) -> BindingState:
     """Retire every other active claim on this (host, root) and claim it, in ONE statement.
 
@@ -364,7 +388,7 @@ def _transfer(
         """,
         {"project_id": project_id},
     )
-    if conflicted:
+    if conflicted and not resolve_conflict:
         raise IdentityBindingConflict(
             f"Project id {project_id} is marked CONFLICTED and cannot be transferred until an "
             f"operator resolves it by naming the root to keep."
@@ -388,8 +412,10 @@ def _transfer(
             WITH collect(n) AS locked
             WITH locked,
                  reduce(c = 0, x IN locked | c + size(coalesce(x.active_writers, []))) AS held,
-                 [x IN locked WHERE x.project_id IN $rival_ids] AS rivals
-            WHERE held = 0
+                 [x IN locked WHERE x.project_id IN $rival_ids] AS rivals,
+                 any(x IN locked WHERE x.project_id = $project_id
+                     AND coalesce(x.state, 'bound') = 'conflicted') AS target_conflicted
+            WHERE held = 0 AND ($resolve_conflict OR NOT target_conflicted)
             FOREACH (o IN rivals |
                 SET o.previous_root_key = o.root_key,
                     o.root_key = null,
@@ -405,7 +431,12 @@ def _transfer(
                 p.bound_host = $host,
                 p.root_key = $root_key,
                 p.rebound_at = datetime(),
-                p.claim_generation = coalesce(p.claim_generation, 0) + 1
+                p.claim_generation = coalesce(p.claim_generation, 0) + 1,
+                p.conflicting_root_path = CASE WHEN $resolve_conflict
+                                              THEN null ELSE p.conflicting_root_path END,
+                p.conflicting_bound_host = CASE WHEN $resolve_conflict
+                                               THEN null ELSE p.conflicting_bound_host END,
+                p.conflicted_at = CASE WHEN $resolve_conflict THEN null ELSE p.conflicted_at END
             RETURN retired, p.claim_generation AS claim_generation
             """,
             {
@@ -415,6 +446,7 @@ def _transfer(
                 "root_key": root_key,
                 "rival_ids": rival_ids,
                 "lock_ids": lock_ids,
+                "resolve_conflict": resolve_conflict,
             },
         )
     except Exception as exc:
@@ -426,6 +458,19 @@ def _transfer(
         ) from exc
 
     if not rows:
+        conflicted_now = neo4j.execute(
+            """
+            MATCH (p:ProjectIdentity {project_id: $project_id})
+            WHERE coalesce(p.state, 'bound') = 'conflicted'
+            RETURN p.project_id AS id
+            """,
+            {"project_id": project_id},
+        )
+        if conflicted_now and not resolve_conflict:
+            raise IdentityBindingConflict(
+                f"Project id {project_id} is marked CONFLICTED and cannot be transferred until "
+                f"an operator resolves it by naming the root to keep."
+            )
         # `WHERE held = 0` filtered the row out, so nothing after it ran: no retirement, no claim.
         # Only `last_transfer_probe` was written, and that is an inert timestamp -- the price of
         # taking the lock before reading the value the decision depends on.
@@ -512,20 +557,11 @@ def clear_conflict(neo4j: Any, *, project_id: str, keep_root_path: str) -> Bindi
     transfer, and doing it with a bare SET would reintroduce the second active binding.
     """
     host = _host()
-    neo4j.execute(
-        """
-        MATCH (p:ProjectIdentity {project_id: $project_id})
-        SET p.state = 'bound',
-            p.conflicting_root_path = null,
-            p.conflicted_at = null,
-            p.bound_at = datetime()
-        """,
-        {"project_id": project_id},
-    )
     return _transfer(
         neo4j,
         project_id=project_id,
         root_path=keep_root_path,
         root_key=root_key_for(keep_root_path),
         host=host,
+        resolve_conflict=True,
     )
