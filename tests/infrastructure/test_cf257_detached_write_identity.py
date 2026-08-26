@@ -62,6 +62,8 @@ def ops(monkeypatch, tmp_path):
     class _Neo4j:
         """Enough of the graph for identity settling: no candidate, binding always accepted."""
         def execute(self, cypher, params=None):
+            if "REMOVE p.publication_pending" in cypher:
+                return [{"id": (params or {}).get("expected_project_id")}]
             if "MERGE (p:ProjectIdentity" in cypher:
                 return [{"bound_root": (params or {}).get("root_path"), "state": "bound"}]
             return []

@@ -229,6 +229,45 @@ def test_graph_committed_publication_recovers_after_transient_unlink_failure(
 
 
 @pytest.mark.online
+def test_missing_file_with_same_path_binding_still_requires_operator_decision(
+    repo, pid, on_host, tmp_path
+):
+    """A replacement checkout can occupy an old checkout's exact host/path.
+
+    The binding and matching project entity make the old id a useful candidate, but neither is
+    proof that the new filesystem contents own it. Only a current publication marker can repair
+    a file automatically.
+    """
+    from types import SimpleNamespace
+
+    from menhir.domain.project_identity_resolution import ResolutionStatus
+    from menhir.services.project_identity_service import settle_project_identity
+
+    project_id = pid("same-path-replacement")
+    root = str(tmp_path)
+    on_host(f"cf257-host-{uuid.uuid4().hex[:6]}")
+    bind_project_identity(repo, project_id=project_id, root_path=root)
+    repo.execute(
+        "CREATE (:Entity {uuid:$uuid, structure_role:'project', structure_project:'old-project', "
+        "structure_project_id:$id, structure_path:'.', root_path:$root})",
+        {"uuid": str(uuid.uuid4()), "id": project_id, "root": root},
+    )
+    try:
+        claim, resolution = settle_project_identity(
+            SimpleNamespace(neo4j=repo),
+            root_path=root,
+            display_name="replacement-project",
+        )
+
+        assert claim is None
+        assert resolution.status is ResolutionStatus.NEEDS_DECISION
+        assert [candidate.project_id for candidate in resolution.candidates] == [project_id]
+        assert not (tmp_path / ".agent").exists()
+    finally:
+        repo.execute("MATCH (n:Entity {structure_project_id:$id}) DETACH DELETE n", {"id": project_id})
+
+
+@pytest.mark.online
 def test_the_same_path_on_another_host_is_never_superseded(repo, pid, on_host):
     """Host scoping in the CYPHER. The offline fake cannot see this predicate at all."""
     root = f"/srv/{uuid.uuid4().hex[:8]}"

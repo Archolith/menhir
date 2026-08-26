@@ -606,12 +606,16 @@ def test_a_refused_binding_leaves_the_existing_identity_file_intact(
 
 
 @pytest.mark.unit
-def test_a_lost_identity_file_is_republished_from_the_binding(
+def test_a_missing_identity_file_never_silently_adopts_the_path_binding(
     fake_identity_graph, monkeypatch, tmp_path
 ):
-    """The recovery path for a publication that failed after the binding committed: the graph is
-    authoritative for (host, root), so the next scan re-publishes rather than needing a decision."""
-    from menhir.domain.project_id_file import read_identity
+    """A replacement checkout can occupy the same host/path as the old one.
+
+    The graph binding is therefore a candidate for an operator decision, not proof that the
+    missing file belonged to this checkout. Automatic recovery requires a current publication
+    marker, tested separately below.
+    """
+    from menhir.domain.project_identity_resolution import ResolutionStatus
 
     monkeypatch.setattr(
         "menhir.infrastructure.project_identity_binding._host", lambda: "h1"
@@ -626,10 +630,54 @@ def test_a_lost_identity_file_is_republished_from_the_binding(
 
     claim, resolution = _settle(tmp_path, g)
 
-    assert claim.project_id == "bound-id"
-    assert claim.root_key == root_key_for(str(tmp_path))
+    assert claim is None
+    assert resolution.status is ResolutionStatus.NEEDS_DECISION
+    assert not (tmp_path / ".agent").exists()
+    assert _active(g, host="h1", root=str(tmp_path)) == ["bound-id"]
+
+
+@pytest.mark.unit
+def test_a_missing_file_recovers_only_from_a_current_publication_marker(
+    fake_identity_graph, monkeypatch, tmp_path
+):
+    from menhir.domain.project_id_file import mint_identity as real_mint_identity
+    from menhir.services.project_identity_service import ProjectIdentityPublicationFailed
+
+    monkeypatch.setattr(
+        "menhir.infrastructure.project_identity_binding._host", lambda: "h1"
+    )
+    graph = _PublicationAwareGraph(fake_identity_graph)
+    attempts = 0
+
+    def fail_first_mint(*args, **kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise PermissionError("transient create failure")
+        return real_mint_identity(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "menhir.services.project_identity_service.mint_identity", fail_first_mint
+    )
+
+    with pytest.raises(ProjectIdentityPublicationFailed, match="could not be written"):
+        _settle(tmp_path, graph, identity_action="new")
+
+    pending = [
+        project_id
+        for project_id, node in graph.nodes.items()
+        if node.get("publication_pending") is True
+    ]
+    assert len(pending) == 1
+    assert not (tmp_path / ".agent" / "project-id").exists()
+
+    claim, resolution = _settle(tmp_path, graph)
+
+    assert claim.project_id == pending[0]
     assert resolution.resolved
-    assert read_identity(tmp_path).project_id == "bound-id"
+    assert attempts == 2
+    assert "publication_pending" not in graph.nodes[pending[0]]
+    assert (tmp_path / ".agent" / "project-id").exists()
 
 
 @pytest.mark.unit
