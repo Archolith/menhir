@@ -210,6 +210,25 @@ def test_releasing_clears_the_slot_on_both_the_identity_and_the_fence(graph):
 
 
 @pytest.mark.unit
+def test_release_locks_the_exact_identity_before_the_fence(graph):
+    """Pin the deadlock-avoiding lock order and the handle-to-identity binding offline."""
+    x = bind_project_identity(graph, project_id="id-x", root_path=ROOT)
+    handle = admit_structure_writer(graph, label="proj", claim=_claim(x))
+
+    release_structure_writer(graph, handle)
+
+    statement, params = graph.executed[-1]
+    identity_match = "MATCH (p:ProjectIdentity {project_id: $project_id})"
+    identity_write = "SET p.active_writers"
+    fence_match = "MATCH (f:StructureWriteFence {id: $fence_id})"
+    fence_write = "SET f.writers"
+    assert statement.index(identity_match) < statement.index(identity_write)
+    assert statement.index(identity_write) < statement.index(fence_match)
+    assert statement.index(fence_match) < statement.index(fence_write)
+    assert params["project_id"] == handle.project_id == x.project_id
+
+
+@pytest.mark.unit
 def test_a_writer_must_present_a_claim_at_all(graph):
     with pytest.raises(StaleIdentityClaim, match="must present an identity claim"):
         admit_structure_writer(graph, label="proj")

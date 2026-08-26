@@ -20,6 +20,7 @@ if that resolves to production.
 from __future__ import annotations
 
 import threading
+import time
 import uuid
 
 import pytest
@@ -538,7 +539,6 @@ def test_admission_reads_the_claim_under_a_lock_a_transfer_must_wait_for(repo, p
     `SET p.last_admission_probe` exists.
     """
     import os
-    import time
 
     from neo4j import GraphDatabase
 
@@ -635,3 +635,101 @@ def test_release_clears_both_slots_in_the_real_statement(repo, pid, on_host):
     # And the proof that it matters: the transfer this writer was blocking now succeeds.
     bind_project_identity(repo, project_id=y, root_path=root, rebind=True)
     assert _active_for(repo, host, root) == [y]
+
+
+@pytest.mark.online
+def test_release_and_admission_share_identity_then_fence_lock_order(repo, pid, on_host):
+    """Queue release behind the fence, then admission behind release's identity lock.
+
+    Admission's identity-then-fence order is authoritative. With the old reverse-order release,
+    dropping the external fence lock gives release the fence while admission holds the identity,
+    making each operation wait for the other. Neo4j must kill one as a deadlock victim, and a
+    best-effort release can then return with its old slot stranded. Matching and writing the exact
+    identity first makes the queue linear instead: release finishes, then admission finishes.
+    """
+    host = f"cf257-host-{uuid.uuid4().hex[:6]}"
+    root = f"/srv/{uuid.uuid4().hex[:8]}"
+    x = pid("x")
+    on_host(host)
+    binding = bind_project_identity(repo, project_id=x, root_path=root)
+    claim = _claim_for(binding, root, host)
+    first = admit_structure_writer(repo, label="first", claim=claim)
+    admitted = [first]
+    outcomes: dict[str, object] = {}
+    release_called = threading.Event()
+    admission_called = threading.Event()
+    workers: list[threading.Thread] = []
+
+    def release_while_fence_is_held():
+        release_called.set()
+        release_structure_writer(repo, first)
+        outcomes["release"] = "returned"
+
+    def admit_behind_release():
+        admission_called.set()
+        try:
+            handle = admit_structure_writer(repo, label="second", claim=claim)
+            admitted.append(handle)
+            outcomes["admission"] = handle
+        except Exception as exc:  # noqa: BLE001 - the exception class is the assertion
+            outcomes["admission"] = exc
+
+    session = None
+    tx = None
+    try:
+        session = repo._driver.session()
+        tx = session.begin_transaction()
+        tx.run(
+            "MATCH (f:StructureWriteFence {id:'singleton'}) "
+            "SET f.cf257_release_lock_probe = timestamp()"
+        ).consume()
+
+        release_worker = threading.Thread(target=release_while_fence_is_held, daemon=True)
+        workers.append(release_worker)
+        release_worker.start()
+        assert release_called.wait(timeout=5), "release worker did not start"
+        time.sleep(0.5)
+        assert release_worker.is_alive(), "release was not queued behind the held fence lock"
+
+        admission_worker = threading.Thread(target=admit_behind_release, daemon=True)
+        workers.append(admission_worker)
+        admission_worker.start()
+        assert admission_called.wait(timeout=5), "admission worker did not start"
+        time.sleep(0.5)
+        assert admission_worker.is_alive(), "admission did not queue behind release"
+
+        tx.commit()
+        tx = None
+        for worker in workers:
+            worker.join(timeout=30)
+
+        assert all(not worker.is_alive() for worker in workers), "a worker did not finish"
+        assert outcomes.get("release") == "returned"
+        second = outcomes.get("admission")
+        assert not isinstance(second, Exception), (
+            f"admission became a deadlock victim: {type(second).__name__}: {second}"
+        )
+        assert second is not None, "admission finished without returning a handle"
+
+        release_structure_writer(repo, second)
+        slots = repo.execute(
+            "MATCH (p:ProjectIdentity {project_id:$id}) "
+            "MATCH (f:StructureWriteFence {id:'singleton'}) "
+            "RETURN size(coalesce(p.active_writers,[])) AS identity, "
+            "size(coalesce(f.writers,[])) AS fence",
+            {"id": x},
+        )[0]
+        assert slots == {"identity": 0, "fence": 0}, "release stranded a writer slot"
+    finally:
+        if tx is not None:
+            tx.rollback()
+        if session is not None:
+            session.close()
+        for worker in workers:
+            worker.join(timeout=30)
+        for handle in reversed(admitted):
+            release_structure_writer(repo, handle)
+        repo.execute(
+            "MATCH (f:StructureWriteFence {id:'singleton'}) "
+            "REMOVE f.cf257_release_lock_probe"
+        )

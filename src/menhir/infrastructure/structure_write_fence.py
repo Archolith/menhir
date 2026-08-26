@@ -76,6 +76,7 @@ class FenceHandle:
     """Proof that a writer was admitted, and the token it must release with."""
 
     writer_id: str
+    project_id: str
 
 
 @dataclass(frozen=True)
@@ -127,8 +128,8 @@ def admit_structure_writer(
     invalidate until it commits. Everything after it is under that lock.
 
     Ordering is deliberate: this locks the identity and then the fence; `_transfer` locks
-    identities only. Nothing takes them in the opposite order, so the two cannot deadlock against
-    each other.
+    identities only, and release uses the same identity-then-fence order. The paths therefore
+    cannot deadlock by taking those locks in reverse order.
 
     A refused admission leaves only the probe -- an inert timestamp. Both registrations happen in
     one `SET` after every gate, so there is no state in which a writer holds one slot and not the
@@ -173,7 +174,7 @@ def admit_structure_writer(
         },
     )
     if rows:
-        return FenceHandle(writer_id=writer_id)
+        return FenceHandle(writer_id=writer_id, project_id=claim.project_id)
 
     # Both refusals return zero rows, so the reason is established afterwards -- on the failure
     # path only, where an extra read costs nothing and a wrong diagnosis costs an hour.
@@ -227,22 +228,26 @@ def release_structure_writer(neo4j: Any, handle: FenceHandle | None) -> None:
 
     Both, in one statement. A writer left on the identity's list blocks every future transfer of
     that directory, and one left on the fence's list blocks the migration drain -- so releasing
-    half is a slow outage in whichever half was missed.
+    half is a slow outage in whichever half was missed. The identity is matched exactly from the
+    admission handle and written first, preserving admission's identity-then-fence lock order.
     """
     if handle is None:
         return
     try:
         neo4j.execute(
             """
-            MATCH (f:StructureWriteFence {id: $fence_id})
-            SET f.writers = [w IN coalesce(f.writers, []) WHERE NOT w STARTS WITH $prefix]
-            WITH f
-            MATCH (p:ProjectIdentity)
-            WHERE any(w IN coalesce(p.active_writers, []) WHERE w STARTS WITH $prefix)
+            MATCH (p:ProjectIdentity {project_id: $project_id})
             SET p.active_writers =
                 [w IN coalesce(p.active_writers, []) WHERE NOT w STARTS WITH $prefix]
+            WITH p
+            MATCH (f:StructureWriteFence {id: $fence_id})
+            SET f.writers = [w IN coalesce(f.writers, []) WHERE NOT w STARTS WITH $prefix]
             """,
-            {"fence_id": _FENCE_ID, "prefix": f"{handle.writer_id}|"},
+            {
+                "fence_id": _FENCE_ID,
+                "prefix": f"{handle.writer_id}|",
+                "project_id": handle.project_id,
+            },
         )
     except Exception:  # pragma: no cover - releasing must not mask the caller's outcome
         logger.warning("Failed to release structure-write slot %s", handle.writer_id, exc_info=True)

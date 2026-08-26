@@ -33,6 +33,7 @@ class FakeIdentityGraph:
     def __init__(self) -> None:
         self.nodes: dict[str, dict] = {}
         self.unrecognised: list[str] = []
+        self.executed: list[tuple[str, dict]] = []
         self.fence_writers: list[str] = []
         self.frozen = False
 
@@ -65,6 +66,7 @@ class FakeIdentityGraph:
     def execute(self, cypher, params=None, **_kw):
         params = params or {}
         text = re.sub(r"\s+", " ", cypher).strip()
+        self.executed.append((text, dict(params)))
         pid = params.get("project_id")
 
         if text.startswith("CREATE CONSTRAINT"):
@@ -184,15 +186,19 @@ class FakeIdentityGraph:
             self.fence_writers.append(params["entry"])
             return [{"active": len(self.fence_writers)}]
 
-        if "WHERE NOT w STARTS WITH $prefix" in text:
+        if text.startswith(
+            "MATCH (p:ProjectIdentity {project_id: $project_id}) SET p.active_writers"
+        ):
             prefix = params["prefix"]
+            node = self.nodes.get(pid)
+            if node is None:
+                return []
+            node["active_writers"] = [
+                w for w in node.get("active_writers", []) if not w.startswith(prefix)
+            ]
             self.fence_writers = [
                 w for w in self.fence_writers if not w.startswith(prefix)
             ]
-            for node in self.nodes.values():
-                node["active_writers"] = [
-                    w for w in node.get("active_writers", []) if not w.startswith(prefix)
-                ]
             return []
 
         if "RETURN coalesce(f.frozen, false) AS frozen" in text:
