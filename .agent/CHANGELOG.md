@@ -12,6 +12,15 @@
 - Classify the 12 pathless `directory` rows found by the broad production census as semantic
   memories carrying a legacy stray role; the fenced rollout removes that role rather than inventing
   project identities for semantic data.
+- Share one path-flavor-aware root normalizer between the Phase 0 guard and binding keys. POSIX
+  roots preserve case and literal backslashes; Windows drive and UNC spellings remain
+  case/separator insensitive.
+- Make writer release lock the exact `ProjectIdentity` before `StructureWriteFence`, matching
+  admission's lock order. A deterministic real-Neo4j interleaving fails with the former reversed
+  order and passes without a deadlock victim or stranded writer slot after the fix.
+- Put `structure_project_path_unique` in phase-one bootstrap and readiness beside both identity
+  constraints, so a rebuilt or upgraded graph cannot report ready without every Phase 3
+  prerequisite.
 
 ## 2026-08-25 - Prove live ChatGPT OAuth compatibility
 
