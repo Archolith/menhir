@@ -471,6 +471,7 @@ def test_cf103_symbol_rescan_path_is_guarded_at_both_sites() -> None:
 def test_cf103_rescan_refuses_a_root_outside_the_allowed_ingest_roots(monkeypatch, tmp_path) -> None:
     from menhir.core import ingest_guard
     from menhir.core.backend_runtime_data_ops import RuntimeProviderDataOpsMixin
+    from menhir.domain.project_id_file import ensure_ignore_rule, mint_identity
 
     allowed = tmp_path / "allowed"
     allowed.mkdir()
@@ -496,8 +497,8 @@ def test_cf103_rescan_refuses_a_root_outside_the_allowed_ingest_roots(monkeypatc
     # this name", which is the state that lets the operator-tier case proceed exactly as before.
     # CF-257 also gave the rescan its own identity settlement: it produces its own scan, so it
     # carries no project_id from the request that scheduled it, and the choke point refuses an
-    # id-less write. `neo4j` reports this root as already bound, which is the post-backfill state
-    # and keeps this test about CF-103's containment. Both assertions below are unchanged.
+    # id-less write. The operator branch publishes the matching checkout identity below, keeping
+    # this test about CF-103's containment. Both assertions below are unchanged.
     ops.built = SimpleNamespace(
         graph_adapter=SimpleNamespace(
             get_project_root_path=lambda name: None,
@@ -537,6 +538,10 @@ def test_cf103_rescan_refuses_a_root_outside_the_allowed_ingest_roots(monkeypatc
     )
     assert scanned == []
 
+    # The detached rescan may continue an established checkout, but it may not infer ownership
+    # from a host/path binding when the per-checkout identity file is absent.
+    ensure_ignore_rule(outside)
+    mint_identity(outside, project_id="bound-id", display_name="proj")
     asyncio.run(
         ops._background_symbol_rescan(str(outside), "proj", "s", "u", tier="operator")
     )
