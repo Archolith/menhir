@@ -228,6 +228,8 @@ class BackendClientOpsMixin:
         session_id: str,
         user_id: str,
         document_type: str = "generic",
+        identity_action: str | None = None,
+        adopt_project_id: str | None = None,
     ) -> dict[str, Any]:
         return await self._request(
             "ingest_document",
@@ -237,6 +239,8 @@ class BackendClientOpsMixin:
                 "session_id": session_id,
                 "user_id": user_id,
                 "document_type": document_type,
+                "identity_action": identity_action,
+                "adopt_project_id": adopt_project_id,
             },
         )
 

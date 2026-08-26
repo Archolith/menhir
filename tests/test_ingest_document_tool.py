@@ -99,6 +99,60 @@ def test_ingest_passes_project_and_session(tmp_path) -> None:
     assert call_kwargs.kwargs["user_id"] == "user-1"
 
 
+@pytest.mark.unit
+def test_ingest_forwards_identity_decision_fields(tmp_path) -> None:
+    doc = tmp_path / "readme.txt"
+    doc.write_text("hello", encoding="utf-8")
+
+    backend = MagicMock()
+    backend.ingest_document = AsyncMock(return_value={
+        "entity_written": True,
+        "structure_project": "proj",
+        "structure_path": str(doc.resolve()),
+        "content_length": 5,
+        "narrative": "hello",
+    })
+    backend.queue_episode = AsyncMock(return_value={"episode_id": "ep-1"})
+
+    tool = _make_tool(backend)
+    with patch("menhir.mcp.tools.ingest.ingest_document.get_mcp_session", return_value=_mock_session()):
+        asyncio.run(
+            tool.endpoint(
+                path=str(doc), project="proj", identity_action="adopt",
+                adopt_project_id="project-id-1",
+            )
+        )
+
+    kwargs = backend.ingest_document.call_args.kwargs
+    assert kwargs["identity_action"] == "adopt"
+    assert kwargs["adopt_project_id"] == "project-id-1"
+
+
+@pytest.mark.unit
+def test_needs_decision_is_rendered_without_episode_queue_eligibility(tmp_path) -> None:
+    doc = tmp_path / "ambiguous.md"
+    doc.write_text("must not become narrative", encoding="utf-8")
+
+    decision = {
+        "status": "needs_decision",
+        "decision_type": "project_identity",
+        "actions": ["adopt", "new"],
+        "candidates": [{"project_id": "existing-id", "display_name": "proj"}],
+    }
+    backend = MagicMock()
+    backend.ingest_document = AsyncMock(return_value=decision)
+    backend.queue_episode = AsyncMock()
+
+    tool = _make_tool(backend)
+    with patch("menhir.mcp.tools.ingest.ingest_document.get_mcp_session", return_value=_mock_session()):
+        result = asyncio.run(tool.endpoint(path=str(doc), project="proj"))
+
+    assert '"status": "needs_decision"' in result
+    assert '"decision_type": "project_identity"' in result
+    assert '"project_id": "existing-id"' in result
+    backend.queue_episode.assert_not_awaited()
+
+
 # ---------------------------------------------------------------------------
 # Empty file
 # ---------------------------------------------------------------------------

@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
+
+import pytest
 
 from menhir.infrastructure.project_scanner import (
     CrossProjectRef,
@@ -153,7 +156,7 @@ class TestStructureGraphWriter:
         assert ep_calls[0][1]["rows"][0]["name"] == "GET /health"
 
     def test_every_structural_batch_row_carries_the_settled_project_id(self):
-        """The symbol sub-writer once escaped the shared claim with a NULL id on every row."""
+        """Every entity-writing shape carries an id, including non-row MERGEs."""
         neo4j = RecordingNeo4j()
         writer = StructureGraphWriter(neo4j=neo4j)
         scan = _make_scan(
@@ -169,6 +172,7 @@ class TestStructureGraphWriter:
                     parent="",
                 )
             ],
+            nested_repos=[SimpleNamespace(name="nested-proj", rel_path="nested")],
         )
 
         writer.write_project(scan, session_id="s1", user_id="u1")
@@ -189,6 +193,31 @@ class TestStructureGraphWriter:
             row.get("structure_project_id") == "project-id-1"
             for rows in batches
             for row in rows
+        )
+
+        singleton_merges = [
+            (query, params)
+            for query, params in neo4j.calls
+            if params.get("sp") == "test-project" and params.get("spath") == "."
+        ]
+        assert len(singleton_merges) == 1
+        assert singleton_merges[0][1]["spid"] == "project-id-1"
+
+        inferred_target_merges = [
+            (query, params)
+            for query, params in neo4j.calls
+            if params.get("target_project_id")
+        ]
+        assert {params["target_name"] for _, params in inferred_target_merges} == {
+            "other-proj", "nested-proj",
+        }
+        assert len({
+            params["target_project_id"] for _, params in inferred_target_merges
+        }) == 2
+        assert all(
+            "coalesce(target.structure_project_id, $target_project_id)" in query
+            and "target.identity_source = coalesce(target.identity_source, 'inferred')" in query
+            for query, _ in inferred_target_merges
         )
 
     def test_contains_edges(self):
@@ -294,7 +323,35 @@ class TestStructureGraphWriter:
 
         calls_calls = [(q, p) for q, p in neo4j.calls if "CALLS" in q]
         assert len(calls_calls) == 1
-        assert calls_calls[0][1]["target_name"] == "other-proj"
+        query, params = calls_calls[0]
+        assert params["target_name"] == "other-proj"
+        assert params["target_project_id"]
+        assert "target.structure_project_id = $target_project_id" in query
+        assert "target.identity_source = 'inferred'" in query
+        assert "coalesce(target.structure_project_id, $target_project_id)" in query
+
+    def test_contains_repo_target_merge_stamps_an_inferred_identity(self):
+        neo4j = RecordingNeo4j()
+        writer = StructureGraphWriter(neo4j=neo4j)
+        scan = _make_scan(
+            cross_project_refs=[],
+            nested_repos=[SimpleNamespace(name="nested-proj", rel_path="packages/nested")],
+        )
+
+        writer.write_project(scan, session_id="s1", user_id="u1")
+
+        repo_calls = [
+            (q, p)
+            for q, p in neo4j.calls
+            if "CONTAINS_REPO" in q and p.get("target_project_id")
+        ]
+        assert len(repo_calls) == 1
+        query, params = repo_calls[0]
+        assert params["target_name"] == "nested-proj"
+        assert params["target_project_id"]
+        assert "target.structure_project_id = $target_project_id" in query
+        assert "target.identity_source = 'inferred'" in query
+        assert "coalesce(target.structure_project_id, $target_project_id)" in query
 
     def test_empty_scan(self):
         neo4j = RecordingNeo4j()
@@ -337,6 +394,19 @@ class TestStructureGraphWriter:
 
 
 class TestWriteDocument:
+    def test_write_document_refuses_an_absent_project_id(self):
+        neo4j = RecordingNeo4j()
+        writer = StructureGraphWriter(neo4j=neo4j)
+
+        with pytest.raises(ValueError, match="no structure_project_id"):
+            writer.write_document(
+                "/abs/path/to/DESIGN.md", "content", project="proj",
+                structure_path="/abs/path/to/DESIGN.md", structure_project_id="",
+                session_id="s1", user_id="u1",
+            )
+
+        assert neo4j.calls == []
+
     def test_write_document_issues_merge(self):
         """write_document should issue a MERGE with structure_role='document'."""
         neo4j = RecordingNeo4j()
@@ -347,6 +417,7 @@ class TestWriteDocument:
             "# Design doc content",
             project="cth.mcp.memory",
             structure_path="/abs/path/to/DESIGN.md",
+            structure_project_id="project-id-1",
             session_id="s1",
             user_id="u1",
         )
@@ -357,6 +428,8 @@ class TestWriteDocument:
         assert params["sp"] == "cth.mcp.memory"
         assert params["spath"] == "/abs/path/to/DESIGN.md"
         assert params["role"] == "document"
+        assert params["spid"] == "project-id-1"
+        assert params["props"]["structure_project_id"] == "project-id-1"
 
     def test_write_document_stores_root_path(self):
         """Extra dict must include root_path pointing to the original file."""
@@ -368,6 +441,7 @@ class TestWriteDocument:
             "content",
             project="cth.mcp.memory",
             structure_path="/abs/path/to/DESIGN.md",
+            structure_project_id="project-id-1",
             session_id="s1",
             user_id="u1",
         )
@@ -387,6 +461,7 @@ class TestWriteDocument:
             "content",
             project="myproj",
             structure_path="/some/dir/README.md",
+            structure_project_id="project-id-1",
             session_id="s1",
             user_id="u1",
         )
@@ -402,11 +477,13 @@ class TestWriteDocument:
         writer.write_document(
             "/proj/docs/README.md", "docs content",
             project="myproj", structure_path="/proj/docs/README.md",
+            structure_project_id="project-id-1",
             session_id="s1", user_id="u1",
         )
         writer.write_document(
             "/proj/api/README.md", "api content",
             project="myproj", structure_path="/proj/api/README.md",
+            structure_project_id="project-id-1",
             session_id="s1", user_id="u1",
         )
 

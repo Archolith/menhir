@@ -1232,19 +1232,54 @@ class MemoryGraphAdapter:
         *,
         project: str,
         structure_path: str,
+        project_id: str,
+        identity_generation: int,
+        identity_root: str,
         session_id: str,
         user_id: str,
         document_type: str = "generic",
     ) -> None:
-        self._structure.write_document(
-            file_path,
-            content,
-            project=project,
-            structure_path=structure_path,
-            session_id=session_id,
-            user_id=user_id,
-            document_type=document_type,
+        """Write one document under the same durable identity fence as a project scan."""
+        from menhir.infrastructure.project_identity_binding import binding_host, root_key_for
+        from menhir.infrastructure.structure_write_fence import (
+            IdentityClaim, admit_structure_writer, release_structure_writer,
         )
+
+        if not project_id:
+            raise ValueError(
+                f"Refusing to write document structure for {project!r} with no "
+                "structure_project_id. Callers must settle identity first."
+            )
+        if not identity_root:
+            raise ValueError(
+                f"Refusing to write document structure for {project!r} with no identity root."
+            )
+        if identity_generation is None:
+            raise ValueError(
+                f"Refusing to write document structure for {project!r} with no identity "
+                "generation."
+            )
+
+        claim = IdentityClaim(
+            project_id=str(project_id),
+            root_key=root_key_for(str(identity_root)),
+            generation=int(identity_generation),
+            host=binding_host(),
+        )
+        handle = admit_structure_writer(self.neo4j, label=project, claim=claim)
+        try:
+            self._structure.write_document(
+                file_path,
+                content,
+                project=project,
+                structure_path=structure_path,
+                structure_project_id=str(project_id),
+                session_id=session_id,
+                user_id=user_id,
+                document_type=document_type,
+            )
+        finally:
+            release_structure_writer(self.neo4j, handle)
 
     def get_scan_fingerprint(self, project_name: str) -> str | None:
         return self._structure.get_scan_fingerprint(project_name)

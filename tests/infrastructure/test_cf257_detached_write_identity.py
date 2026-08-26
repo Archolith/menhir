@@ -430,3 +430,185 @@ def test_an_identity_transfer_is_refused_for_every_non_operator_tier(ops, monkey
     with pytest.raises(ProjectIdentityRefused, match="requires operator tier"):
         asyncio.run(_run_and_drain(ops, identity_action="new"))
     assert ops.written == []
+
+
+# ---------------------------------------------------------------------------
+# Document writers settle first and cross the durable fence
+# ---------------------------------------------------------------------------
+
+def _document_ops(monkeypatch, tmp_path, *, recorded_root, claim, resolution):
+    from menhir.core import ingest_guard
+    from menhir.core.backend_runtime_data_ops import RuntimeProviderDataOpsMixin
+    import menhir.core.backend_runtime_data_ops as mod
+    import menhir.services.project_identity_service as identity_service
+
+    monkeypatch.setattr(ingest_guard, "allowed_ingest_roots", lambda: [tmp_path])
+    monkeypatch.setattr(mod, "get_request_tier", lambda: "operator")
+
+    settled: list[dict] = []
+    written: list[dict] = []
+
+    def _settle(adapter, **kwargs):
+        settled.append(kwargs)
+        return claim, resolution
+
+    monkeypatch.setattr(identity_service, "settle_project_identity", _settle)
+
+    class _Adapter:
+        neo4j = object()
+
+        def get_project_root_path(self, project):
+            return recorded_root
+
+        def write_document(self, file_path, content, **kwargs):
+            written.append({"file_path": file_path, "content": content, **kwargs})
+
+    instance = RuntimeProviderDataOpsMixin()
+
+    async def _off_loop(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    instance._off_loop = _off_loop
+    instance.built = SimpleNamespace(graph_adapter=_Adapter())
+    return SimpleNamespace(ops=instance, settled=settled, written=written)
+
+
+@pytest.mark.unit
+def test_document_needs_decision_has_zero_structural_calls(monkeypatch, tmp_path):
+    doc = tmp_path / "ambiguous.md"
+    doc.write_text("must not be written", encoding="utf-8")
+    decision = {
+        "status": "needs_decision",
+        "decision_type": "project_identity",
+        "actions": ["adopt", "new"],
+    }
+    resolution = SimpleNamespace(as_dict=lambda: decision)
+    bundle = _document_ops(
+        monkeypatch, tmp_path, recorded_root=None, claim=None, resolution=resolution
+    )
+
+    result = asyncio.run(
+        bundle.ops.ingest_document(
+            str(doc), project="proj", session_id="s", user_id="u"
+        )
+    )
+
+    assert result == decision
+    assert bundle.written == []
+    assert bundle.settled == [{
+        "root_path": str(tmp_path.resolve()),
+        "display_name": "proj",
+        "identity_action": None,
+        "adopt_project_id": None,
+    }]
+
+
+@pytest.mark.unit
+def test_document_runtime_uses_recorded_root_and_forwards_claim(monkeypatch, tmp_path):
+    doc = tmp_path / "settled.md"
+    doc.write_text("settled content", encoding="utf-8")
+    recorded_root = str(tmp_path / "recorded-project-root")
+    claim = SimpleNamespace(project_id="project-id-1", generation=7)
+    bundle = _document_ops(
+        monkeypatch, tmp_path, recorded_root=recorded_root, claim=claim, resolution=None
+    )
+
+    result = asyncio.run(
+        bundle.ops.ingest_document(
+            str(doc), project="proj", session_id="s", user_id="u",
+            document_type="reference_article",
+        )
+    )
+
+    assert bundle.settled[0]["root_path"] == recorded_root
+    assert len(bundle.written) == 1
+    write = bundle.written[0]
+    assert write["project_id"] == "project-id-1"
+    assert write["identity_generation"] == 7
+    assert write["identity_root"] == recorded_root
+    assert result["entity_written"] is True
+    assert result["narrative"].endswith("settled content")
+
+
+def _bare_memory_adapter(writer):
+    from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
+
+    adapter = object.__new__(MemoryGraphAdapter)
+    adapter.neo4j = object()
+    adapter._structure = SimpleNamespace(write_document=writer)
+    return adapter
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("project_id", "identity_root", "identity_generation", "message"),
+    [
+        ("", "C:/repo", 1, "no structure_project_id"),
+        ("project-id-1", "", 1, "no identity root"),
+        ("project-id-1", "C:/repo", None, "no identity generation"),
+    ],
+)
+def test_document_adapter_refuses_absent_claim_context(
+    project_id, identity_root, identity_generation, message
+):
+    written: list[object] = []
+    adapter = _bare_memory_adapter(lambda *args, **kwargs: written.append((args, kwargs)))
+
+    with pytest.raises(ValueError, match=message):
+        adapter.write_document(
+            "C:/repo/doc.md", "content", project="proj",
+            structure_path="C:/repo/doc.md", project_id=project_id,
+            identity_generation=identity_generation, identity_root=identity_root,
+            session_id="s", user_id="u",
+        )
+
+    assert written == []
+
+
+@pytest.mark.unit
+def test_document_adapter_releases_fence_when_writer_fails(monkeypatch):
+    import menhir.infrastructure.project_identity_binding as binding
+    import menhir.infrastructure.structure_write_fence as fence
+
+    events: list[object] = []
+
+    def _claim(**kwargs):
+        events.append(("claim", kwargs))
+        return SimpleNamespace(**kwargs)
+
+    def _admit(neo4j, *, label, claim):
+        events.append(("admit", label, claim))
+        return "document-handle"
+
+    def _release(neo4j, handle):
+        events.append(("release", handle))
+
+    def _write(*args, **kwargs):
+        events.append(("write", kwargs))
+        raise RuntimeError("writer failed")
+
+    monkeypatch.setattr(binding, "binding_host", lambda: "host-1")
+    monkeypatch.setattr(binding, "root_key_for", lambda root: f"key:{root}")
+    monkeypatch.setattr(fence, "IdentityClaim", _claim)
+    monkeypatch.setattr(fence, "admit_structure_writer", _admit)
+    monkeypatch.setattr(fence, "release_structure_writer", _release)
+    adapter = _bare_memory_adapter(_write)
+
+    with pytest.raises(RuntimeError, match="writer failed"):
+        adapter.write_document(
+            "C:/repo/doc.md", "content", project="proj",
+            structure_path="C:/repo/doc.md", project_id="project-id-1",
+            identity_generation=9, identity_root="C:/repo",
+            session_id="s", user_id="u", document_type="reference_article",
+        )
+
+    assert events[0] == ("claim", {
+        "project_id": "project-id-1",
+        "root_key": "key:C:/repo",
+        "generation": 9,
+        "host": "host-1",
+    })
+    assert events[1][0:2] == ("admit", "proj")
+    assert events[2][0] == "write"
+    assert events[2][1]["structure_project_id"] == "project-id-1"
+    assert events[3] == ("release", "document-handle")

@@ -372,6 +372,7 @@ class StructureGraphWriter:
         *,
         project: str,
         structure_path: str,
+        structure_project_id: str,
         session_id: str,
         user_id: str,
         document_type: str = "generic",
@@ -383,15 +384,22 @@ class StructureGraphWriter:
             content: File content excerpt (truncated to 2000 chars by caller).
             project: structure_project label (project name or parent dir).
             structure_path: Logical path for MERGE key (e.g. relative path or 'doc:<name>').
+            structure_project_id: Settled durable identity stamped on the document.
             session_id: Session context.
             user_id: User context.
             document_type: Type of document (generic, wiki_article, reference_article).
                 Used for filtering documents in recall/queries.
         """
+        if not structure_project_id:
+            raise ValueError(
+                f"Refusing to write document structure for {project!r} with no "
+                "structure_project_id."
+            )
         now = datetime.now(timezone.utc).isoformat()
         name = Path(file_path).name
         self._merge_entity(
             structure_project=project,
+            structure_project_id=structure_project_id,
             structure_path=structure_path,
             structure_role="document",
             name=name,
@@ -1868,6 +1876,8 @@ class StructureGraphWriter:
             MERGE (target:Entity {structure_project: $target_name, structure_path: '.', structure_role: 'project'})
             ON CREATE SET
                 target.uuid = $uuid,
+                target.structure_project_id = $target_project_id,
+                target.identity_source = 'inferred',
                 target.name = $target_name,
                 target.content = $target_name,
                 target.type = 'SEMANTIC',
@@ -1880,6 +1890,9 @@ class StructureGraphWriter:
                 target.user_id = $user_id,
                 target.created_at = $now,
                 target.last_accessed = $now
+            ON MATCH SET
+                target.structure_project_id = coalesce(target.structure_project_id, $target_project_id),
+                target.identity_source = coalesce(target.identity_source, 'inferred')
             WITH target
             MATCH (source:Entity {structure_project: $source_name, structure_path: '.', structure_role: 'project'})
             MERGE (source)-[r:CALLS]->(target)
@@ -1890,6 +1903,7 @@ class StructureGraphWriter:
                 "source_name": source_project,
                 "target_name": ref.target_project,
                 "uuid": str(uuid4()),
+                "target_project_id": str(uuid4()),
                 "session_id": session_id,
                 "user_id": user_id,
                 "now": now,
@@ -1924,6 +1938,8 @@ class StructureGraphWriter:
             MERGE (target:Entity {structure_project: $target_name, structure_path: '.', structure_role: 'project'})
             ON CREATE SET
                 target.uuid = $uuid,
+                target.structure_project_id = $target_project_id,
+                target.identity_source = 'inferred',
                 target.name = $target_name,
                 target.content = $target_name,
                 target.type = 'SEMANTIC',
@@ -1936,6 +1952,9 @@ class StructureGraphWriter:
                 target.user_id = $user_id,
                 target.created_at = $now,
                 target.last_accessed = $now
+            ON MATCH SET
+                target.structure_project_id = coalesce(target.structure_project_id, $target_project_id),
+                target.identity_source = coalesce(target.identity_source, 'inferred')
             WITH target
             MATCH (source:Entity {structure_project: $source_name, structure_path: '.', structure_role: 'project'})
             MERGE (source)-[r:CONTAINS_REPO]->(target)
@@ -1947,6 +1966,7 @@ class StructureGraphWriter:
                 "target_name": nested.name,
                 "rel_path": nested.rel_path,
                 "uuid": str(uuid4()),
+                "target_project_id": str(uuid4()),
                 "session_id": session_id,
                 "user_id": user_id,
                 "now": now,
