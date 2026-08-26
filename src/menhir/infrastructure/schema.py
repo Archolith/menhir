@@ -83,11 +83,12 @@ PHASE_ONE_REQUIRED_INDEXES = (
     "metric_source_idx",
     "metric_receipt_op_idx",
     # CF-257: SHOW INDEXES also reports the backing RANGE indexes for uniqueness
-    # constraints under the constraint names. Keep both identity constraints in the
+    # constraints under the constraint names. Keep all three constraints in the
     # readiness set, otherwise an upgraded installation with every legacy index online
-    # skips bootstrap_phase_one() and never executes the new root-identity DDL.
+    # skips bootstrap_phase_one() and never executes the new identity/structure DDL.
     "project_identity_id_unique",
     "project_identity_root_unique",
+    "structure_project_path_unique",
 )
 
 
@@ -499,20 +500,25 @@ def _edge_defaults_queries() -> list[str]:
 
 
 def _project_identity_index_queries() -> list[str]:
-    """Constraints backing :ProjectIdentity (CF-257).
+    """Constraints backing project and structural identity (CF-257).
 
     In the phase-1 bootstrap rather than only in the migration script: a constraint that only a
     one-off migration creates is one a fresh deployment does not have, and the whole point of the
     root constraint is that it is the enforcement rather than the Python check in front of it.
 
-    Both are safe to create over existing data. `project_id` was already unique. The composite is
-    not enforced for a node with NULL in either property (verified, Neo4j 5.26.21), and bindings
-    written before this change carry no `root_key`, so creating it cannot fail on legacy rows --
-    they come under it when the next bind stamps them.
+    All three are safe to create over accepted live data. `project_id` was already unique. Neo4j
+    does not enforce a composite constraint for a node with NULL in either property (verified,
+    Neo4j 5.26.21), so legacy bindings without `root_key` and legacy :Entity nodes without
+    `structure_project_id` remain outside their composites. Live structure acceptance refuses an
+    id-less scan and revalidates its identity claim before writing, so every accepted structural
+    node enters the :Entity composite under its current authorised project identity.
     """
     from menhir.infrastructure.project_identity_binding import PROJECT_IDENTITY_CONSTRAINTS
 
-    return list(PROJECT_IDENTITY_CONSTRAINTS)
+    return list(PROJECT_IDENTITY_CONSTRAINTS) + [
+        "CREATE CONSTRAINT structure_project_path_unique IF NOT EXISTS "
+        "FOR (n:Entity) REQUIRE (n.structure_project_id, n.structure_path) IS UNIQUE"
+    ]
 
 
 def get_phase1_bootstrap_queries() -> list[str]:

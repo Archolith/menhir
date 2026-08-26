@@ -121,9 +121,40 @@ def test_adapter_phase_one_schema_not_ready_when_identity_root_constraint_missin
 
 
 @pytest.mark.unit
-def test_project_identity_constraints_are_part_of_phase_one_readiness() -> None:
-    query_blob = "\n".join(get_phase1_bootstrap_queries())
+def test_adapter_phase_one_schema_not_ready_when_structure_constraint_missing() -> None:
+    """An upgrade must bootstrap when only the structural composite is absent."""
+    names = [
+        name for name in PHASE_ONE_REQUIRED_INDEXES
+        if name != "structure_project_path_unique"
+    ]
+    repo = _StubIndexRepo(names)
+    adapter = MemoryGraphAdapter(neo4j=repo)
 
-    for name in ("project_identity_id_unique", "project_identity_root_unique"):
+    assert "project_identity_id_unique" in names
+    assert "project_identity_root_unique" in names
+    assert len(names) == len(PHASE_ONE_REQUIRED_INDEXES) - 1
+    assert adapter.phase_one_schema_ready() is False
+
+
+@pytest.mark.unit
+def test_cf257_constraints_are_part_of_phase_one_readiness() -> None:
+    query_blob = "\n".join(get_phase1_bootstrap_queries())
+    constraint_names = (
+        "project_identity_id_unique",
+        "project_identity_root_unique",
+        "structure_project_path_unique",
+    )
+
+    for name in constraint_names:
         assert name in PHASE_ONE_REQUIRED_INDEXES
         assert f"CREATE CONSTRAINT {name} IF NOT EXISTS" in query_blob
+
+
+@pytest.mark.unit
+def test_phase_one_emits_exact_structure_project_path_constraint() -> None:
+    expected = (
+        "CREATE CONSTRAINT structure_project_path_unique IF NOT EXISTS "
+        "FOR (n:Entity) REQUIRE (n.structure_project_id, n.structure_path) IS UNIQUE"
+    )
+
+    assert get_phase1_bootstrap_queries().count(expected) == 1
