@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026-08-25 - Close CF-257 seventh-pass identity gaps
+
+- Make phase-one readiness verify the exact Neo4j uniqueness-constraint type, entity kind, label,
+  and property tuple. An ordinary ONLINE range index using a constraint's name can no longer make
+  an unenforced graph report ready.
+- Route document ingest through project-identity settlement and the durable writer fence before
+  any structural or narrative side effect. Expose typed adopt/new retry fields and return a
+  `needs_decision` result without writing an entity or queueing an episode.
+- Stamp inferred cross-project `CALLS` and `CONTAINS_REPO` targets with durable generated project
+  ids, including legacy NULL repair on match, so singleton MERGEs cannot escape the structure
+  identity constraint or the broad production census.
+- Treat the same project id presented from another host as a copy conflict, preserve literal POSIX
+  leading/trailing whitespace, and resolve conflicted identities in the same graph transaction as
+  the named-root transfer. A failed resolution leaves the conflict intact.
+- Serialize explicit identity transfer and file publication per root across both threads and
+  processes, while retaining the lock-free established-checkout path. The advisory-lock mutation
+  initially exposed a vacuous process-start timing test; the corrected child-attempt handshake now
+  catches removal of the OS lock deterministically.
+- Deploy under the durable writer fence, restart both production services, and verify exact schema
+  shapes plus disposable document, inferred-target, host-copy, conflict-resolution, and POSIX-path
+  canaries. The post-rollout census remains clean: 60/60 bindings constrained, 43,372 structure
+  nodes with zero NULL ids, zero duplicate active roots or structure keys, and zero canary residue.
+
 ## 2026-08-25 - Close CF-257 project-identity rollout gaps
 
 - Make both `ProjectIdentity` uniqueness constraints part of phase-one readiness so an upgraded
