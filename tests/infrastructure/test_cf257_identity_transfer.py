@@ -53,6 +53,17 @@ def _active(graph, *, host, root):
     )
 
 
+@pytest.mark.unit
+def test_root_keys_respect_the_spelled_path_flavor():
+    assert root_key_for("/srv/Foo") != root_key_for("/srv/foo")
+    assert root_key_for("/srv/Foo/") == root_key_for("/srv/Foo")
+    assert root_key_for(r"/srv/a\b") != root_key_for("/srv/a/b")
+    assert root_key_for("") == ""
+    assert root_key_for("/") == "/"
+    assert root_key_for(r"C:\srv\App\\") == root_key_for("c:/srv/app")
+    assert root_key_for(r"\\Server\Share\App\\") == root_key_for("//server/share/app")
+
+
 # ---------------------------------------------------------------------------
 # One active binding per (host, root)
 # ---------------------------------------------------------------------------
@@ -156,6 +167,26 @@ def test_an_unstamped_rival_on_this_host_is_still_detected(fake_identity_graph, 
     }
     with pytest.raises(IdentityRootContested, match="legacy"):
         _bind(g, "newcomer", "C:/srv/app", host="h1", monkeypatch=monkeypatch)
+
+
+@pytest.mark.unit
+def test_unstamped_posix_roots_preserve_case(fake_identity_graph, monkeypatch):
+    """Legacy canonical-root fallbacks obey the same case rules as newly stamped root keys."""
+    g = fake_identity_graph
+    g.nodes["legacy"] = {
+        "canonical_root_path": "/srv/Foo",
+        "state": "bound",
+        "bound_host": "h1",
+        "root_key": None,
+    }
+    monkeypatch.setattr(
+        "menhir.infrastructure.project_identity_binding._host", lambda: "h1"
+    )
+
+    assert binding_for_root(g, "/srv/Foo/") == "legacy"
+    assert binding_for_root(g, "/srv/foo") is None
+    _bind(g, "lowercase", "/srv/foo", host="h1", monkeypatch=monkeypatch)
+    assert _active(g, host="h1", root="/srv/foo") == ["lowercase"]
 
 
 @pytest.mark.unit

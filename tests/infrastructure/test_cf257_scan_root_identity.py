@@ -325,6 +325,23 @@ def test_windows_paths_still_compare_case_and_separator_insensitively():
 
 
 @pytest.mark.unit
+def test_phase_zero_same_path_uses_the_shared_root_normalizer(monkeypatch):
+    """The guard and binding keys must not grow independent path-flavor rules again."""
+    from menhir.domain import project_identity
+
+    calls = []
+    monkeypatch.setattr(project_identity.os.path, "exists", lambda _value: False)
+    monkeypatch.setattr(
+        project_identity,
+        "normalize_project_root_path",
+        lambda value: calls.append(value) or "shared-key",
+    )
+
+    assert project_identity._same_path("left-root", "right-root")
+    assert calls == ["left-root", "right-root"]
+
+
+@pytest.mark.unit
 def test_two_spellings_of_one_real_directory_are_the_same_path(tmp_path):
     """`samefile` answers 'the same directory', not 'the same spelling', when both exist."""
     from menhir.domain.project_identity import _same_path

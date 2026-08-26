@@ -36,6 +36,7 @@ from menhir.infrastructure.repo_topology import RootKind, RootTopology
 __all__ = [
     "ProjectIdentityRefused",
     "OPERATOR_TIER",
+    "normalize_project_root_path",
     "ensure_scan_root_owns_identity",
 ]
 
@@ -57,19 +58,26 @@ def _looks_like_windows_path(value: str) -> bool:
     return len(stripped) >= 2 and stripped[1] == ":" and stripped[0].isalpha()
 
 
-def _normalized(value: str) -> str:
-    """Canonical spelling for comparison, respecting the path flavor's case rules.
+def normalize_project_root_path(value: str) -> str:
+    """Return the root key for *value*, respecting the path flavor's case rules.
 
-    Separator- and trailing-slash-insensitive for both flavors. **Case is folded only for Windows
-    paths.** Folding it for POSIX was a defect: ``/srv/Foo`` and ``/srv/foo`` are different
-    directories on Linux, and treating them as equal makes the guard ADMIT the second under the
-    first's identity -- a false allow, which is the direction that loses data. A false refusal
-    merely annoys someone; a false allow prunes a project's files.
+    Trailing separators are normalized for both flavors. Windows accepts either separator and is
+    case-insensitive. POSIX preserves both case and literal backslashes: ``/srv/Foo`` and
+    ``/srv/foo`` are different directories on Linux, and so are ``/srv/a\\b`` and ``/srv/a/b``.
+    Treating either pair as equal makes the guard ADMIT the second under the first's identity -- a
+    false allow, which is the direction that loses data. A false refusal merely annoys someone; a
+    false allow prunes a project's files.
     """
-    raw = value.strip().rstrip("/\\")
+    raw = value.strip()
+    if not raw:
+        return ""
     if _looks_like_windows_path(raw):
         return PureWindowsPath(raw.replace("/", "\\")).as_posix().casefold()
-    return PurePosixPath(raw.replace("\\", "/")).as_posix()
+    return PurePosixPath(raw).as_posix()
+
+
+# Compatibility for existing private imports. New callers should use the named shared helper.
+_normalized = normalize_project_root_path
 
 
 def _same_path(left: str | None, right: str | None) -> bool:
@@ -88,7 +96,7 @@ def _same_path(left: str | None, right: str | None) -> bool:
             return os.path.samefile(left, right)
     except OSError:
         pass  # unreadable or cross-device; fall through to the textual comparison
-    return _normalized(left) == _normalized(right)
+    return normalize_project_root_path(left) == normalize_project_root_path(right)
 
 
 def ensure_scan_root_owns_identity(

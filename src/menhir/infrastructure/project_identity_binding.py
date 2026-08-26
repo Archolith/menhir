@@ -54,6 +54,8 @@ import socket
 from dataclasses import dataclass
 from typing import Any
 
+from menhir.domain.project_identity import normalize_project_root_path
+
 
 def _host() -> str:
     try:
@@ -117,13 +119,9 @@ class BindingState:
     claim_generation: int = 0
 
 
-def _norm(path: str) -> str:
-    return str(path).replace("\\", "/").rstrip("/").casefold()
-
-
 def root_key_for(root_path: str) -> str:
     """The normalized directory key a binding claims. Also the second half of the root constraint."""
-    return _norm(root_path)
+    return normalize_project_root_path(root_path)
 
 
 def binding_host() -> str:
@@ -176,7 +174,7 @@ def _active_rivals(
     for row in rows:
         claimed = str(row.get("root_key") or "")
         if not claimed and row.get("root"):
-            claimed = _norm(str(row["root"]))
+            claimed = root_key_for(str(row["root"]))
         if claimed and claimed == root_key:
             rivals.append(str(row.get("id")))
     return rivals
@@ -261,7 +259,7 @@ def bind_project_identity(
             f"it back explicitly with an operator-tier identity_action."
         )
 
-    if _norm(bound_root) != root_key:
+    if root_key_for(bound_root) != root_key:
         # Disable it for the incumbent too -- see the module docstring.
         neo4j.execute(
             """
@@ -480,7 +478,7 @@ def binding_for_root(neo4j: Any, root_path: str) -> str | None:
     for row in rows:
         claimed = str(row.get("root_key") or "")
         if not claimed and row.get("root"):
-            claimed = _norm(str(row["root"]))
+            claimed = root_key_for(str(row["root"]))
         if claimed and claimed == target:
             return str(row["id"])
     return None
