@@ -68,12 +68,15 @@ __all__ = [
     "IdentityBindingConflict",
     "IdentityRootContested",
     "BindingState",
+    "PendingIdentityPublication",
     "PROJECT_IDENTITY_CONSTRAINT",
     "PROJECT_IDENTITY_ROOT_CONSTRAINT",
     "PROJECT_IDENTITY_CONSTRAINTS",
     "ensure_binding_constraint",
     "bind_project_identity",
     "binding_for_root",
+    "pending_identity_publication_for_root",
+    "clear_identity_publication_pending",
     "read_binding",
     "clear_conflict",
     "root_key_for",
@@ -117,6 +120,15 @@ class BindingState:
     #: before the round trip write as though nothing had happened -- the state and root checks both
     #: pass, and only the generation records that the directory changed hands in between.
     claim_generation: int = 0
+
+
+@dataclass(frozen=True)
+class PendingIdentityPublication:
+    """A graph-committed binding whose checkout file still needs publication."""
+
+    project_id: str
+    canonical_root_path: str
+    claim_generation: int
 
 
 def root_key_for(root_path: str) -> str:
@@ -187,6 +199,7 @@ def bind_project_identity(
     root_path: str,
     rebind: bool = False,
     resolve_conflict: bool = False,
+    publication_pending: bool = False,
 ) -> BindingState:
     """Bind *project_id* to *root_path* on this host, or raise.
 
@@ -211,6 +224,7 @@ def bind_project_identity(
             root_key=root_key,
             host=host,
             resolve_conflict=resolve_conflict,
+            publication_pending=publication_pending,
         )
 
     # A brand-new id stamps `root_key` on create, so the root constraint is the FIRST thing that
@@ -228,6 +242,12 @@ def bind_project_identity(
                             p.bound_host = $host,
                             p.root_key = $root_key,
                             p.claim_generation = 1
+            FOREACH (_ IN CASE WHEN $publication_pending THEN [1] ELSE [] END |
+                SET p.publication_pending = true,
+                    p.publication_pending_host = $host,
+                    p.publication_pending_root_key = $root_key,
+                    p.publication_pending_generation = coalesce(p.claim_generation, 0),
+                    p.publication_pending_at = datetime())
             RETURN p.canonical_root_path AS bound_root, coalesce(p.state, 'bound') AS state,
                    p.bound_host AS bound_host, p.root_key AS root_key,
                    coalesce(p.claim_generation, 0) AS claim_generation
@@ -237,6 +257,7 @@ def bind_project_identity(
                 "root_path": root_path,
                 "host": host,
                 "root_key": root_key,
+                "publication_pending": publication_pending,
             },
         )
     except Exception as exc:
@@ -353,6 +374,7 @@ def _transfer(
     root_key: str,
     host: str,
     resolve_conflict: bool = False,
+    publication_pending: bool = False,
 ) -> BindingState:
     """Retire every other active claim on this (host, root) and claim it, in ONE statement.
 
@@ -421,22 +443,36 @@ def _transfer(
                     o.root_key = null,
                     o.state = 'superseded',
                     o.superseded_by = $project_id,
-                    o.superseded_at = datetime())
+                    o.superseded_at = datetime(),
+                    o.publication_pending = null,
+                    o.publication_pending_host = null,
+                    o.publication_pending_root_key = null,
+                    o.publication_pending_generation = null,
+                    o.publication_pending_at = null)
             WITH size(rivals) AS retired
             MERGE (p:ProjectIdentity {project_id: $project_id})
               ON CREATE SET p.bound_at = datetime()
+            WITH retired, p, coalesce(p.claim_generation, 0) + 1 AS next_generation
             SET p.previous_root_path = p.canonical_root_path,
                 p.canonical_root_path = $root_path,
                 p.state = 'bound',
                 p.bound_host = $host,
                 p.root_key = $root_key,
                 p.rebound_at = datetime(),
-                p.claim_generation = coalesce(p.claim_generation, 0) + 1,
+                p.claim_generation = next_generation,
                 p.conflicting_root_path = CASE WHEN $resolve_conflict
                                               THEN null ELSE p.conflicting_root_path END,
                 p.conflicting_bound_host = CASE WHEN $resolve_conflict
                                                THEN null ELSE p.conflicting_bound_host END,
-                p.conflicted_at = CASE WHEN $resolve_conflict THEN null ELSE p.conflicted_at END
+                p.conflicted_at = CASE WHEN $resolve_conflict THEN null ELSE p.conflicted_at END,
+                p.publication_pending = CASE WHEN $publication_pending THEN true ELSE null END,
+                p.publication_pending_host = CASE WHEN $publication_pending THEN $host ELSE null END,
+                p.publication_pending_root_key = CASE WHEN $publication_pending
+                                                      THEN $root_key ELSE null END,
+                p.publication_pending_generation = CASE WHEN $publication_pending
+                                                        THEN next_generation ELSE null END,
+                p.publication_pending_at = CASE WHEN $publication_pending
+                                                THEN datetime() ELSE null END
             RETURN retired, p.claim_generation AS claim_generation
             """,
             {
@@ -447,6 +483,7 @@ def _transfer(
                 "rival_ids": rival_ids,
                 "lock_ids": lock_ids,
                 "resolve_conflict": resolve_conflict,
+                "publication_pending": publication_pending,
             },
         )
     except Exception as exc:
@@ -527,6 +564,87 @@ def binding_for_root(neo4j: Any, root_path: str) -> str | None:
         if claimed and claimed == target:
             return str(row["id"])
     return None
+
+
+def pending_identity_publication_for_root(
+    neo4j: Any, root_path: str
+) -> PendingIdentityPublication | None:
+    """Return the current root's durable publication repair authorization, if any.
+
+    Every marker field must still agree with the active binding. That makes the marker a narrow
+    capability to replace this root's file with this id at this generation, rather than a generic
+    permission to overwrite a stale or copied identity file.
+    """
+    host = _host()
+    root_key = root_key_for(root_path)
+    rows = neo4j.execute(
+        """
+        MATCH (p:ProjectIdentity)
+        WHERE coalesce(p.state, 'bound') = 'bound'
+          AND p.bound_host = $host
+          AND p.root_key = $root_key
+          AND p.publication_pending = true
+          AND p.publication_pending_host = $host
+          AND p.publication_pending_root_key = $root_key
+          AND p.publication_pending_generation = coalesce(p.claim_generation, 0)
+        RETURN p.project_id AS id, p.canonical_root_path AS root,
+               coalesce(p.claim_generation, 0) AS claim_generation,
+               p.publication_pending AS publication_pending
+        """,
+        {"host": host, "root_key": root_key},
+    )
+    for row in rows:
+        # The explicit check also keeps the strict offline fake honest: it deliberately ignores
+        # predicates it cannot model and omits this field rather than manufacturing authority.
+        if row.get("publication_pending") is True and row.get("id"):
+            return PendingIdentityPublication(
+                project_id=str(row["id"]),
+                canonical_root_path=str(row.get("root") or root_path),
+                claim_generation=int(row.get("claim_generation") or 0),
+            )
+    return None
+
+
+def clear_identity_publication_pending(
+    neo4j: Any,
+    *,
+    project_id: str,
+    root_path: str,
+    claim_generation: int,
+) -> None:
+    """Clear only the marker proven current for this id, root, host, and generation."""
+    host = _host()
+    root_key = root_key_for(root_path)
+    rows = neo4j.execute(
+        """
+        MATCH (p:ProjectIdentity)
+        WHERE coalesce(p.state, 'bound') = 'bound'
+          AND p.bound_host = $host
+          AND p.root_key = $root_key
+          AND p.project_id = $expected_project_id
+          AND coalesce(p.claim_generation, 0) = $claim_generation
+          AND p.publication_pending = true
+          AND p.publication_pending_host = $host
+          AND p.publication_pending_root_key = $root_key
+          AND p.publication_pending_generation = $claim_generation
+        REMOVE p.publication_pending, p.publication_pending_host,
+               p.publication_pending_root_key, p.publication_pending_generation,
+               p.publication_pending_at
+        RETURN p.project_id AS id
+        """,
+        {
+            "host": host,
+            "root_key": root_key,
+            "expected_project_id": project_id,
+            "claim_generation": claim_generation,
+        },
+    )
+    if not any(str(row.get("id") or "") == project_id for row in rows):
+        raise IdentityBindingConflict(
+            f"Could not clear publication recovery for {project_id} at {root_path}: the active "
+            "binding or generation changed before publication completed. The marker was left "
+            "intact; re-scan to reconcile the current authoritative binding."
+        )
 
 
 def read_binding(neo4j: Any, project_id: str) -> BindingState | None:

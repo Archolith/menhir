@@ -148,6 +148,87 @@ def test_a_transfer_leaves_exactly_one_active_binding(repo, pid, on_host):
 
 
 @pytest.mark.online
+def test_graph_committed_publication_recovers_after_transient_unlink_failure(
+    repo, pid, on_host, monkeypatch, tmp_path
+):
+    """The real statement must persist the repair authority in the transfer transaction."""
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    from menhir.domain.project_id_file import (
+        ensure_ignore_rule,
+        identity_path,
+        mint_identity,
+        read_identity,
+    )
+    from menhir.services.project_identity_service import (
+        ProjectIdentityPublicationFailed,
+        settle_project_identity,
+    )
+
+    host = f"cf257-host-{uuid.uuid4().hex[:6]}"
+    old, new = pid("publication-old"), pid("publication-new")
+    root = str(tmp_path)
+    on_host(host)
+    ensure_ignore_rule(tmp_path)
+    mint_identity(tmp_path, project_id=old, display_name="proj")
+    bind_project_identity(repo, project_id=old, root_path=root)
+
+    real_unlink = Path.unlink
+    attempts = 0
+
+    def fail_once(path, *args, **kwargs):
+        nonlocal attempts
+        if path == identity_path(tmp_path):
+            attempts += 1
+            if attempts == 1:
+                raise PermissionError("transient external lock")
+        return real_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", fail_once)
+    adapter = SimpleNamespace(neo4j=repo)
+
+    with pytest.raises(ProjectIdentityPublicationFailed, match="could not be written"):
+        settle_project_identity(
+            adapter,
+            root_path=root,
+            display_name="proj",
+            identity_action="adopt",
+            adopt_project_id=new,
+        )
+
+    pending = repo.execute(
+        "MATCH (p:ProjectIdentity {project_id:$id}) RETURN p.state AS state, "
+        "p.publication_pending AS pending, p.publication_pending_host AS host, "
+        "p.publication_pending_root_key AS root_key, "
+        "p.publication_pending_generation AS pending_generation, "
+        "p.claim_generation AS claim_generation",
+        {"id": new},
+    )[0]
+    assert pending["state"] == "bound" and pending["pending"] is True
+    assert pending["host"] == host and pending["root_key"] == root_key_for(root)
+    assert pending["pending_generation"] == pending["claim_generation"]
+    assert read_identity(tmp_path).project_id == old, "the failed unlink removed the old file"
+
+    claim, resolution = settle_project_identity(
+        adapter,
+        root_path=root,
+        display_name="proj",
+    )
+
+    assert attempts == 2, "the ordinary retry did not replace the stale file"
+    assert claim.project_id == new and resolution.resolved
+    assert read_identity(tmp_path).project_id == new
+    cleared = repo.execute(
+        "MATCH (p:ProjectIdentity {project_id:$id}) RETURN "
+        "p.publication_pending AS pending, "
+        "p.publication_pending_generation AS pending_generation",
+        {"id": new},
+    )[0]
+    assert cleared["pending"] is None and cleared["pending_generation"] is None
+
+
+@pytest.mark.online
 def test_the_same_path_on_another_host_is_never_superseded(repo, pid, on_host):
     """Host scoping in the CYPHER. The offline fake cannot see this predicate at all."""
     root = f"/srv/{uuid.uuid4().hex[:8]}"

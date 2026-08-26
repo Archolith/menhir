@@ -324,6 +324,257 @@ def _settle(tmp_path, graph, **kw):
     )
 
 
+class _PublicationAwareGraph:
+    """Add exact publication-marker behavior around the strict shared identity fake."""
+
+    def __init__(self, inner):
+        self.inner = inner
+        self.nodes = inner.nodes
+
+    def execute(self, cypher, params=None, **kwargs):
+        params = params or {}
+        text = " ".join(cypher.split())
+        if "REMOVE p.publication_pending" in text:
+            node = self.nodes.get(params.get("expected_project_id"))
+            if not node or not self._marker_matches(node, params):
+                return []
+            for key in (
+                "publication_pending",
+                "publication_pending_host",
+                "publication_pending_root_key",
+                "publication_pending_generation",
+                "publication_pending_at",
+            ):
+                node.pop(key, None)
+            return [{"id": params["expected_project_id"]}]
+        if text.startswith("MATCH (p:ProjectIdentity) WHERE") and (
+            "p.publication_pending = true" in text
+        ):
+            rows = []
+            for project_id, node in self.nodes.items():
+                if self._marker_matches(node, params):
+                    rows.append(
+                        {
+                            "id": project_id,
+                            "root": node.get("canonical_root_path"),
+                            "claim_generation": node.get("claim_generation", 0),
+                            "publication_pending": True,
+                        }
+                    )
+            return rows
+
+        rows = self.inner.execute(cypher, params, **kwargs)
+        if rows and params.get("publication_pending"):
+            node = self.nodes[params["project_id"]]
+            node.update(
+                publication_pending=True,
+                publication_pending_host=params["host"],
+                publication_pending_root_key=params["root_key"],
+                publication_pending_generation=node.get("claim_generation", 0),
+                publication_pending_at="test",
+            )
+        return rows
+
+    @staticmethod
+    def _marker_matches(node, params):
+        expected_id = params.get("expected_project_id")
+        generation = params.get("claim_generation")
+        return (
+            node.get("state", "bound") == "bound"
+            and node.get("bound_host") == params.get("host")
+            and node.get("root_key") == params.get("root_key")
+            and node.get("publication_pending") is True
+            and node.get("publication_pending_host") == params.get("host")
+            and node.get("publication_pending_root_key") == params.get("root_key")
+            and node.get("publication_pending_generation")
+            == node.get("claim_generation", 0)
+            and (
+                generation is None
+                or node.get("publication_pending_generation") == generation
+            )
+            and (expected_id is None or node.get("project_id", expected_id) == expected_id)
+        )
+
+
+@pytest.mark.unit
+def test_a_missing_file_decision_has_zero_filesystem_side_effects(
+    fake_identity_graph, tmp_path
+):
+    from menhir.domain.project_identity_resolution import ResolutionStatus
+
+    claim, resolution = _settle(tmp_path, fake_identity_graph)
+
+    assert claim is None
+    assert resolution.status is ResolutionStatus.NEEDS_DECISION
+    assert not (tmp_path / ".agent").exists()
+    assert not (tmp_path / ".agent" / ".gitignore").exists()
+    assert not (tmp_path / ".agent" / "project-id").exists()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("requested", "recorded", "matches"),
+    [
+        ("/srv/Foo", "/srv/foo", False),
+        (r"/srv/a\b", "/srv/a/b", False),
+        ("/srv/app ", "/srv/app", False),
+        (" /srv/app", "/srv/app", False),
+        (r"C:\Repos\App", "c:/repos/app/", True),
+        (r"\\Server\Share\App", "//server/share/app/", True),
+    ],
+)
+def test_candidate_matching_uses_the_authoritative_path_flavor(
+    requested, recorded, matches
+):
+    from types import SimpleNamespace
+
+    from menhir.services.project_identity_service import _candidate_for
+
+    class CandidateGraph:
+        def execute(self, _cypher, params=None):
+            assert params == {}, "candidate matching must happen with the shared Python root key"
+            return [
+                {
+                    "id": "candidate-id",
+                    "name": "candidate",
+                    "root": recorded,
+                    "last_scan": "2026-08-25T00:00:00Z",
+                    "entities": 12,
+                }
+            ]
+
+    candidate = _candidate_for(SimpleNamespace(neo4j=CandidateGraph()), requested)
+    assert (candidate is not None) is matches
+
+
+@pytest.mark.unit
+def test_stale_file_is_repaired_after_one_unlink_failure(
+    fake_identity_graph, monkeypatch, tmp_path
+):
+    from menhir.domain.project_id_file import ensure_ignore_rule, identity_path, mint_identity
+    from menhir.services.project_identity_service import ProjectIdentityPublicationFailed
+
+    monkeypatch.setattr(
+        "menhir.infrastructure.project_identity_binding._host", lambda: "h1"
+    )
+    ensure_ignore_rule(tmp_path)
+    mint_identity(tmp_path, project_id="old-id", display_name="proj")
+    graph = _PublicationAwareGraph(fake_identity_graph)
+    bind_project_identity(graph, project_id="old-id", root_path=str(tmp_path))
+
+    real_unlink = pathlib.Path.unlink
+    attempts = 0
+
+    def fail_once(path, *args, **kwargs):
+        nonlocal attempts
+        if path == identity_path(tmp_path):
+            attempts += 1
+            if attempts == 1:
+                raise PermissionError("transient lock")
+        return real_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(pathlib.Path, "unlink", fail_once)
+
+    with pytest.raises(ProjectIdentityPublicationFailed, match="could not be written"):
+        _settle(
+            tmp_path,
+            graph,
+            identity_action="adopt",
+            adopt_project_id="authoritative-id",
+        )
+
+    marker = graph.nodes["authoritative-id"]
+    assert marker["publication_pending"] is True
+    assert marker["publication_pending_root_key"] == root_key_for(str(tmp_path))
+    assert identity_path(tmp_path).exists()
+    assert identity_path(tmp_path).read_text(encoding="utf-8").find("old-id") >= 0
+
+    claim, resolution = _settle(tmp_path, graph)
+
+    assert attempts == 2, "the ordinary retry did not exercise failed-first/second-success"
+    assert claim.project_id == "authoritative-id" and resolution.resolved
+    assert '"project_id": "authoritative-id"' in identity_path(tmp_path).read_text(
+        encoding="utf-8"
+    )
+    assert "publication_pending" not in graph.nodes["authoritative-id"]
+
+
+@pytest.mark.unit
+def test_persistent_unlink_failure_remains_explicit_and_keeps_recovery_marker(
+    fake_identity_graph, monkeypatch, tmp_path
+):
+    from menhir.domain.project_id_file import ensure_ignore_rule, identity_path, mint_identity
+    from menhir.services.project_identity_service import ProjectIdentityPublicationFailed
+
+    monkeypatch.setattr(
+        "menhir.infrastructure.project_identity_binding._host", lambda: "h1"
+    )
+    ensure_ignore_rule(tmp_path)
+    mint_identity(tmp_path, project_id="old-id", display_name="proj")
+    graph = _PublicationAwareGraph(fake_identity_graph)
+    bind_project_identity(graph, project_id="old-id", root_path=str(tmp_path))
+
+    real_unlink = pathlib.Path.unlink
+
+    def always_fail(path, *args, **kwargs):
+        if path == identity_path(tmp_path):
+            raise PermissionError("still locked")
+        return real_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(pathlib.Path, "unlink", always_fail)
+    with pytest.raises(ProjectIdentityPublicationFailed):
+        _settle(
+            tmp_path,
+            graph,
+            identity_action="adopt",
+            adopt_project_id="authoritative-id",
+        )
+    with pytest.raises(ProjectIdentityPublicationFailed, match="could not be written"):
+        _settle(tmp_path, graph)
+
+    assert graph.nodes["authoritative-id"]["publication_pending"] is True
+    assert '"project_id": "old-id"' in identity_path(tmp_path).read_text(encoding="utf-8")
+
+
+@pytest.mark.unit
+def test_stale_publication_marker_cannot_authorize_a_newer_claim_generation(
+    fake_identity_graph, monkeypatch, tmp_path
+):
+    from menhir.domain.project_id_file import ensure_ignore_rule, identity_path, mint_identity
+    from menhir.infrastructure.project_identity_binding import IdentityBindingConflict
+    from menhir.services.project_identity_service import ProjectIdentityPublicationFailed
+
+    monkeypatch.setattr(
+        "menhir.infrastructure.project_identity_binding._host", lambda: "h1"
+    )
+    ensure_ignore_rule(tmp_path)
+    mint_identity(tmp_path, project_id="old-id", display_name="proj")
+    graph = _PublicationAwareGraph(fake_identity_graph)
+    bind_project_identity(graph, project_id="old-id", root_path=str(tmp_path))
+    monkeypatch.setattr(
+        pathlib.Path,
+        "unlink",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(PermissionError("locked")),
+    )
+
+    with pytest.raises(ProjectIdentityPublicationFailed):
+        _settle(
+            tmp_path,
+            graph,
+            identity_action="adopt",
+            adopt_project_id="authoritative-id",
+        )
+
+    marker = graph.nodes["authoritative-id"]
+    marker["claim_generation"] += 1
+    with pytest.raises(IdentityBindingConflict):
+        _settle(tmp_path, graph)
+
+    assert marker["publication_pending"] is True
+    assert marker["publication_pending_generation"] != marker["claim_generation"]
+    assert '"project_id": "old-id"' in identity_path(tmp_path).read_text(encoding="utf-8")
+
+
 @pytest.mark.unit
 def test_a_refused_binding_leaves_the_existing_identity_file_intact(
     fake_identity_graph, monkeypatch, tmp_path

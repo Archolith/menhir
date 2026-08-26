@@ -35,6 +35,8 @@ from menhir.infrastructure.project_identity_binding import (
     bind_project_identity,
     binding_for_root,
     binding_host,
+    clear_identity_publication_pending,
+    pending_identity_publication_for_root,
     root_key_for,
 )
 from menhir.infrastructure.structure_write_fence import IdentityClaim
@@ -61,7 +63,6 @@ def _candidate_for(graph_adapter: Any, root_path: str) -> IdentityCandidate | No
             """
             MATCH (p:Entity {structure_role: 'project'})
             WHERE p.root_path IS NOT NULL
-              AND toLower(replace(p.root_path, '\\\\', '/')) = toLower(replace($root, '\\\\', '/'))
               AND p.structure_project_id IS NOT NULL
             OPTIONAL MATCH (n:Entity {structure_project_id: p.structure_project_id})
             RETURN p.structure_project_id AS id,
@@ -70,14 +71,24 @@ def _candidate_for(graph_adapter: Any, root_path: str) -> IdentityCandidate | No
                    toString(p.last_accessed) AS last_scan,
                    count(n) AS entities
             """,
-            {"root": str(root_path).rstrip("/\\")},
+            {},
         )
     except Exception:  # pragma: no cover - a candidate is an aid, never a gate
         logger.warning("identity candidate lookup failed for %s", root_path, exc_info=True)
         return None
-    if not rows or not rows[0].get("id"):
+    target_root_key = root_key_for(root_path)
+    row = next(
+        (
+            candidate
+            for candidate in rows
+            if candidate.get("id")
+            and candidate.get("root") is not None
+            and root_key_for(str(candidate["root"])) == target_root_key
+        ),
+        None,
+    )
+    if row is None:
         return None
-    row = rows[0]
     return IdentityCandidate(
         project_id=str(row["id"]),
         display_name=str(row.get("name") or Path(root_path).name),
@@ -125,6 +136,38 @@ def settle_project_identity(
         raise
 
     if existing is None:
+        # A decision is a read-only outcome. Resolve it before taking the publication lock,
+        # because that lock's stable cross-process lock file is `.agent/.gitignore` and creating
+        # it would mutate the checkout before the caller has chosen adopt or new.
+        bound_id = None
+        try:
+            bound_id = binding_for_root(graph_adapter.neo4j, str(root_path))
+        except Exception:  # pragma: no cover - an aid, never a gate
+            logger.warning("binding lookup failed for %s", root_path, exc_info=True)
+        preflight = resolve_identity(
+            root_path=str(root_path),
+            existing_file_id=bound_id,
+            candidate=_candidate_for(graph_adapter, root_path),
+            action=None,
+            adopt_project_id=None,
+        )
+        if preflight.status is ResolutionStatus.NEEDS_DECISION:
+            return None, preflight
+        with identity_publication_lock(root_path):
+            return _settle_project_identity_locked(
+                graph_adapter,
+                root_path=root_path,
+                display_name=display_name,
+                identity_action=identity_action,
+                adopt_project_id=adopt_project_id,
+                existing=read_identity(root_path),
+            )
+
+    # A stale file is replaceable only when the current graph binding carries the durable marker
+    # created by the graph-first transfer. Take the publication lock before re-reading either
+    # side; the ordinary healthy checkout still takes no lock. Missing-file decisions returned
+    # above never reach this marker read or the lock that creates `.agent/.gitignore`.
+    if pending_identity_publication_for_root(graph_adapter.neo4j, str(root_path)) is not None:
         with identity_publication_lock(root_path):
             return _settle_project_identity_locked(
                 graph_adapter,
@@ -155,6 +198,40 @@ def _settle_project_identity_locked(
     existing: Any,
 ) -> tuple[IdentityClaim | None, IdentityResolution]:
     """Settle after the caller has re-read any mutable identity-file state."""
+
+    if identity_action is None:
+        pending = pending_identity_publication_for_root(graph_adapter.neo4j, str(root_path))
+        if pending is not None:
+            # A pending marker is graph authority to replace exactly this root's stale file with
+            # exactly this id at this claim generation. Without it, a copied/stale file is still
+            # refused by the ordinary binding path below.
+            if existing is None or existing.project_id != pending.project_id:
+                _publish_identity_file(
+                    root_path,
+                    project_id=pending.project_id,
+                    display_name=display_name,
+                    existing=existing,
+                )
+            _clear_publication_marker(
+                graph_adapter.neo4j,
+                project_id=pending.project_id,
+                root_path=str(root_path),
+                claim_generation=pending.claim_generation,
+            )
+            resolution = resolve_identity(
+                root_path=str(root_path),
+                existing_file_id=pending.project_id,
+                candidate=None,
+            )
+            return (
+                IdentityClaim(
+                    project_id=pending.project_id,
+                    root_key=root_key_for(str(root_path)),
+                    generation=pending.claim_generation,
+                    host=binding_host(),
+                ),
+                resolution,
+            )
 
     # A binding that already names THIS directory on THIS host is not an open question -- it is
     # this checkout, recorded server-side. Treating it as a decision meant every one of the 60
@@ -202,24 +279,36 @@ def _settle_project_identity_locked(
     # unlinked, so a failed transfer destroyed the only local record of the id whose silo the
     # project owns. Bind first and a refusal costs nothing: the file on disk is still the truth it
     # was before the call.
+    needs_publication = existing is None or existing.project_id != project_id
+    needs_stale_replacement = existing is not None and existing.project_id != project_id
     binding = bind_project_identity(
         graph_adapter.neo4j,
         project_id=project_id,
         root_path=str(root_path),
         rebind=transferring,
         resolve_conflict=identity_action == IdentityAction.ADOPT.value,
+        # A missing file already has an unambiguous recovery path through binding_for_root. The
+        # durable marker is required only when publication must replace a stale file: without it,
+        # an ordinary retry cannot distinguish this committed transfer from a copied identity.
+        publication_pending=needs_stale_replacement,
     )
 
     # Publication can still fail after the binding committed, and there is no ordering that
-    # removes that -- two stores cannot be written atomically. What makes it recoverable is that
-    # the graph, not the file, is authoritative for (host, root): the next scan finds no file,
-    # `binding_for_root` returns the bound id, and the file is re-published. A scan that instead
-    # finds a STALE file naming the superseded id is refused rather than silently re-pointed, so
-    # the failure surfaces instead of resurrecting the abandoned identity.
-    if existing is None or existing.project_id != project_id:
+    # removes that -- two stores cannot be written atomically. The graph transaction therefore
+    # records a root/host/generation-scoped repair marker before publication. A later ordinary
+    # scan may replace a stale file only while that exact marker is current; copied or otherwise
+    # stale files without it still go through the refusing binding path.
+    if needs_publication:
         _publish_identity_file(
             root_path, project_id=project_id, display_name=display_name, existing=existing
         )
+        if needs_stale_replacement:
+            _clear_publication_marker(
+                graph_adapter.neo4j,
+                project_id=project_id,
+                root_path=str(root_path),
+                claim_generation=binding.claim_generation,
+            )
     return (
         IdentityClaim(
             project_id=project_id,
@@ -234,15 +323,33 @@ def _settle_project_identity_locked(
 def _publish_identity_file(
     root_path: str, *, project_id: str, display_name: str, existing: Any
 ) -> None:
-    ensure_ignore_rule(root_path)
-    if existing is not None:
-        Path(existing.path).unlink()
     try:
+        ensure_ignore_rule(root_path)
+        if existing is not None:
+            Path(existing.path).unlink()
         mint_identity(root_path, project_id=project_id, display_name=display_name)
     except Exception as exc:
         raise ProjectIdentityPublicationFailed(
             f"{project_id} is now bound to {root_path} in the graph, but the identity file could "
-            f"not be written ({exc}). Nothing is lost: re-scan this directory and the binding "
-            f"will re-publish it. Until then this checkout resolves its identity from the graph "
-            f"on every scan."
+            f"not be written ({exc}). The graph retained a publication-recovery marker; re-scan "
+            f"this directory to retry the exact authoritative id. Persistent filesystem failures "
+            f"remain explicit and do not clear that marker."
+        ) from exc
+
+
+def _clear_publication_marker(
+    neo4j: Any, *, project_id: str, root_path: str, claim_generation: int
+) -> None:
+    try:
+        clear_identity_publication_pending(
+            neo4j,
+            project_id=project_id,
+            root_path=root_path,
+            claim_generation=claim_generation,
+        )
+    except Exception as exc:
+        raise ProjectIdentityPublicationFailed(
+            f"The identity file for {project_id} at {root_path} was published, but its durable "
+            f"recovery marker could not be cleared ({exc}). Re-scan this directory: the current "
+            "file will be verified and the marker cleared without replacing another identity."
         ) from exc
