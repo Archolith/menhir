@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from menhir.infrastructure import structure_queries as structure_queries_module
 from menhir.infrastructure.project_scanner import (
     CrossProjectRef,
     DirEntry,
@@ -25,13 +26,16 @@ from menhir.infrastructure.structure_queries import StructureGraphWriter
 # Stub Neo4j
 # ---------------------------------------------------------------------------
 
+
 class RecordingNeo4j:
     """Records all Cypher calls for assertion."""
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, Any]]] = []
 
-    def execute(self, query: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    def execute(
+        self, query: str, params: dict[str, Any] | None = None
+    ) -> list[dict[str, Any]]:
         self.calls.append((query, params or {}))
         # For count-returning queries, return a plausible result
         if "count(r)" in query:
@@ -39,6 +43,10 @@ class RecordingNeo4j:
         if "scan_fingerprint" in query and "RETURN" in query:
             return [{"fp": None}]
         return []
+
+
+def _compact_cypher(query: str) -> str:
+    return " ".join(query.split())
 
 
 def _make_scan(**overrides: Any) -> ProjectScanResult:
@@ -55,9 +63,21 @@ def _make_scan(**overrides: Any) -> ProjectScanResult:
         ],
         dependencies=["requests", "pydantic"],
         imports=[ImportEdge(source_path="src/service.py", target_path="src/main.py")],
-        test_edges=[TestEdge(test_path="tests/test_service.py", source_path="src/service.py")],
-        endpoints=[EndpointEntry(name="GET /health", file_path="src/main.py", kind="http_route")],
-        cross_project_refs=[CrossProjectRef(target_project="other-proj", mechanism="http", evidence="port 8080 in .env")],
+        test_edges=[
+            TestEdge(test_path="tests/test_service.py", source_path="src/service.py")
+        ],
+        endpoints=[
+            EndpointEntry(
+                name="GET /health", file_path="src/main.py", kind="http_route"
+            )
+        ],
+        cross_project_refs=[
+            CrossProjectRef(
+                target_project="other-proj",
+                mechanism="http",
+                evidence="port 8080 in .env",
+            )
+        ],
         scan_fingerprint="abc123",
     )
     defaults.update(overrides)
@@ -67,6 +87,7 @@ def _make_scan(**overrides: Any) -> ProjectScanResult:
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 class TestStructureGraphWriter:
     def test_write_returns_counts(self):
@@ -102,8 +123,11 @@ class TestStructureGraphWriter:
 
         # Find the UNWIND query for directories
         dir_calls = [
-            (q, p) for q, p in neo4j.calls
-            if "UNWIND" in q and "rows" in p and p["rows"]
+            (q, p)
+            for q, p in neo4j.calls
+            if "UNWIND" in q
+            and "rows" in p
+            and p["rows"]
             and any(r.get("structure_role") == "directory" for r in p["rows"])
         ]
         assert len(dir_calls) == 1
@@ -117,9 +141,15 @@ class TestStructureGraphWriter:
         writer.write_project(scan, session_id="s1", user_id="u1")
 
         file_calls = [
-            (q, p) for q, p in neo4j.calls
-            if "UNWIND" in q and "rows" in p and p["rows"]
-            and any(r.get("structure_role") in ("entrypoint", "file", "test") for r in p["rows"])
+            (q, p)
+            for q, p in neo4j.calls
+            if "UNWIND" in q
+            and "rows" in p
+            and p["rows"]
+            and any(
+                r.get("structure_role") in ("entrypoint", "file", "test")
+                for r in p["rows"]
+            )
         ]
         assert len(file_calls) == 1
         assert len(file_calls[0][1]["rows"]) == 3
@@ -132,8 +162,11 @@ class TestStructureGraphWriter:
         writer.write_project(scan, session_id="s1", user_id="u1")
 
         dep_calls = [
-            (q, p) for q, p in neo4j.calls
-            if "UNWIND" in q and "rows" in p and p["rows"]
+            (q, p)
+            for q, p in neo4j.calls
+            if "UNWIND" in q
+            and "rows" in p
+            and p["rows"]
             and any(r.get("structure_role") == "dependency" for r in p["rows"])
         ]
         assert len(dep_calls) == 1
@@ -148,8 +181,11 @@ class TestStructureGraphWriter:
         writer.write_project(scan, session_id="s1", user_id="u1")
 
         ep_calls = [
-            (q, p) for q, p in neo4j.calls
-            if "UNWIND" in q and "rows" in p and p["rows"]
+            (q, p)
+            for q, p in neo4j.calls
+            if "UNWIND" in q
+            and "rows" in p
+            and p["rows"]
             and any(r.get("structure_role") == "endpoint" for r in p["rows"])
         ]
         assert len(ep_calls) == 1
@@ -184,11 +220,13 @@ class TestStructureGraphWriter:
             and any(row.get("structure_role") is not None for row in params["rows"])
         ]
         assert batches
-        assert {
-            row["structure_role"]
-            for rows in batches
-            for row in rows
-        } >= {"directory", "entrypoint", "dependency", "endpoint", "symbol"}
+        assert {row["structure_role"] for rows in batches for row in rows} >= {
+            "directory",
+            "entrypoint",
+            "dependency",
+            "endpoint",
+            "symbol",
+        }
         assert all(
             row.get("structure_project_id") == "project-id-1"
             for rows in batches
@@ -209,14 +247,22 @@ class TestStructureGraphWriter:
             if params.get("target_project_id")
         ]
         assert {params["target_name"] for _, params in inferred_target_merges} == {
-            "other-proj", "nested-proj",
+            "other-proj",
+            "nested-proj",
         }
-        assert len({
-            params["target_project_id"] for _, params in inferred_target_merges
-        }) == 2
+        assert (
+            len({params["target_project_id"] for _, params in inferred_target_merges})
+            == 2
+        )
         assert all(
-            "coalesce(target.structure_project_id, $target_project_id)" in query
-            and "target.identity_source = coalesce(target.identity_source, 'inferred')" in query
+            "MERGE (target:Entity { structure_project_id: $target_project_id, "
+            "structure_path: '.' })"
+            in _compact_cypher(query)
+            and "MERGE (target:Entity {structure_project: $target_name" not in query
+            and "coalesce( target.structure_project_id, $target_project_id )"
+            in _compact_cypher(query)
+            and "target.identity_source = coalesce(target.identity_source, 'inferred')"
+            in query
             for query, _ in inferred_target_merges
         )
 
@@ -228,8 +274,7 @@ class TestStructureGraphWriter:
         writer.write_project(scan, session_id="s1", user_id="u1")
 
         contains_calls = [
-            (q, p) for q, p in neo4j.calls
-            if "CONTAINS" in q and "edges" in p
+            (q, p) for q, p in neo4j.calls if "CONTAINS" in q and "edges" in p
         ]
         assert len(contains_calls) == 1
         edges = contains_calls[0][1]["edges"]
@@ -243,7 +288,9 @@ class TestStructureGraphWriter:
 
         writer.write_project(scan, session_id="s1", user_id="u1")
 
-        dep_calls = [(q, p) for q, p in neo4j.calls if "DEPENDS_ON" in q and "edges" in p]
+        dep_calls = [
+            (q, p) for q, p in neo4j.calls if "DEPENDS_ON" in q and "edges" in p
+        ]
         assert len(dep_calls) == 1
         assert len(dep_calls[0][1]["edges"]) == 2
 
@@ -265,7 +312,9 @@ class TestStructureGraphWriter:
 
         writer.write_project(scan, session_id="s1", user_id="u1")
 
-        import_calls = [(q, p) for q, p in neo4j.calls if "IMPORTS" in q and "edges" in p]
+        import_calls = [
+            (q, p) for q, p in neo4j.calls if "IMPORTS" in q and "edges" in p
+        ]
         assert len(import_calls) == 1
         assert import_calls[0][1]["edges"][0]["source_path"] == "src/service.py"
 
@@ -276,13 +325,17 @@ class TestStructureGraphWriter:
 
         writer.write_project(scan, session_id="s1", user_id="u1")
 
-        exposes_calls = [(q, p) for q, p in neo4j.calls if "EXPOSES" in q and "edges" in p]
+        exposes_calls = [
+            (q, p) for q, p in neo4j.calls if "EXPOSES" in q and "edges" in p
+        ]
         assert len(exposes_calls) == 1
         assert exposes_calls[0][1]["edges"][0]["target_path"] == "endpoint:GET /health"
 
     def test_query_linked_memories_orders_by_aggregated_last_accessed(self):
         class _QueryNeo4j(RecordingNeo4j):
-            def execute(self, query: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+            def execute(
+                self, query: str, params: dict[str, Any] | None = None
+            ) -> list[dict[str, Any]]:
                 self.calls.append((query, params or {}))
                 return [
                     {
@@ -325,17 +378,24 @@ class TestStructureGraphWriter:
         assert len(calls_calls) == 1
         query, params = calls_calls[0]
         assert params["target_name"] == "other-proj"
-        assert params["target_project_id"]
-        assert "target.structure_project_id = $target_project_id" in query
+        assert params["target_project_id"] == "fbe4174e-b2c8-5263-a189-55cd0e965389"
+        compact = _compact_cypher(query)
+        assert (
+            "MERGE (target:Entity { structure_project_id: $target_project_id, "
+            "structure_path: '.' })" in compact
+        )
+        assert "MERGE (target:Entity {structure_project: $target_name" not in query
         assert "target.identity_source = 'inferred'" in query
-        assert "coalesce(target.structure_project_id, $target_project_id)" in query
+        assert "coalesce( target.structure_project_id, $target_project_id )" in compact
 
     def test_contains_repo_target_merge_stamps_an_inferred_identity(self):
         neo4j = RecordingNeo4j()
         writer = StructureGraphWriter(neo4j=neo4j)
         scan = _make_scan(
             cross_project_refs=[],
-            nested_repos=[SimpleNamespace(name="nested-proj", rel_path="packages/nested")],
+            nested_repos=[
+                SimpleNamespace(name="nested-proj", rel_path="packages/nested")
+            ],
         )
 
         writer.write_project(scan, session_id="s1", user_id="u1")
@@ -348,17 +408,62 @@ class TestStructureGraphWriter:
         assert len(repo_calls) == 1
         query, params = repo_calls[0]
         assert params["target_name"] == "nested-proj"
-        assert params["target_project_id"]
-        assert "target.structure_project_id = $target_project_id" in query
+        assert params["target_project_id"] == "4a6a8cb0-24e8-5b45-b875-93551a898cf9"
+        compact = _compact_cypher(query)
+        assert (
+            "MERGE (target:Entity { structure_project_id: $target_project_id, "
+            "structure_path: '.' })" in compact
+        )
+        assert "MERGE (target:Entity {structure_project: $target_name" not in query
         assert "target.identity_source = 'inferred'" in query
-        assert "coalesce(target.structure_project_id, $target_project_id)" in query
+        assert "coalesce( target.structure_project_id, $target_project_id )" in compact
+
+    def test_both_inferred_writers_share_one_stable_name_scoped_allocator(self):
+        neo4j = RecordingNeo4j()
+        writer = StructureGraphWriter(neo4j=neo4j)
+        scan = _make_scan(
+            cross_project_refs=[
+                CrossProjectRef(
+                    target_project="shared-target",
+                    mechanism="http",
+                    evidence="shared endpoint",
+                )
+            ],
+            nested_repos=[
+                SimpleNamespace(name="shared-target", rel_path="packages/shared")
+            ],
+        )
+
+        writer.write_project(scan, session_id="s1", user_id="u1")
+
+        inferred = [
+            (query, params)
+            for query, params in neo4j.calls
+            if params.get("target_name") == "shared-target"
+        ]
+        assert len(inferred) == 2
+        expected = structure_queries_module._inferred_project_id("shared-target")
+        assert expected == "93d5a12d-9e49-5582-83e8-02611b262a92"
+        assert [params["target_project_id"] for _, params in inferred] == [
+            expected,
+            expected,
+        ]
+        assert all(
+            "MERGE (target:Entity { structure_project_id: $target_project_id, "
+            "structure_path: '.' })" in _compact_cypher(query)
+            for query, _ in inferred
+        )
 
     def test_empty_scan(self):
         neo4j = RecordingNeo4j()
         writer = StructureGraphWriter(neo4j=neo4j)
         scan = _make_scan(
-            directories=[], files=[], dependencies=[],
-            imports=[], test_edges=[], endpoints=[],
+            directories=[],
+            files=[],
+            dependencies=[],
+            imports=[],
+            test_edges=[],
+            endpoints=[],
             cross_project_refs=[],
         )
 
@@ -400,9 +505,13 @@ class TestWriteDocument:
 
         with pytest.raises(ValueError, match="no structure_project_id"):
             writer.write_document(
-                "/abs/path/to/DESIGN.md", "content", project="proj",
-                structure_path="/abs/path/to/DESIGN.md", structure_project_id="",
-                session_id="s1", user_id="u1",
+                "/abs/path/to/DESIGN.md",
+                "content",
+                project="proj",
+                structure_path="/abs/path/to/DESIGN.md",
+                structure_project_id="",
+                session_id="s1",
+                user_id="u1",
             )
 
         assert neo4j.calls == []
@@ -475,16 +584,22 @@ class TestWriteDocument:
         writer = StructureGraphWriter(neo4j=neo4j)
 
         writer.write_document(
-            "/proj/docs/README.md", "docs content",
-            project="myproj", structure_path="/proj/docs/README.md",
+            "/proj/docs/README.md",
+            "docs content",
+            project="myproj",
+            structure_path="/proj/docs/README.md",
             structure_project_id="project-id-1",
-            session_id="s1", user_id="u1",
+            session_id="s1",
+            user_id="u1",
         )
         writer.write_document(
-            "/proj/api/README.md", "api content",
-            project="myproj", structure_path="/proj/api/README.md",
+            "/proj/api/README.md",
+            "api content",
+            project="myproj",
+            structure_path="/proj/api/README.md",
             structure_project_id="project-id-1",
-            session_id="s1", user_id="u1",
+            session_id="s1",
+            user_id="u1",
         )
 
         merge_calls = [(q, p) for q, p in neo4j.calls if "MERGE" in q]
@@ -512,7 +627,9 @@ class TestQueryDocuments:
 
         writer.query_documents("cth.mcp.memory", path_filter="/some/dir")
 
-        match_calls = [(q, p) for q, p in neo4j.calls if "document" in q and "$prefix" in q]
+        match_calls = [
+            (q, p) for q, p in neo4j.calls if "document" in q and "$prefix" in q
+        ]
         assert len(match_calls) == 1
         assert match_calls[0][1]["prefix"] == "/some/dir"
 
@@ -520,7 +637,9 @@ class TestQueryDocuments:
 class TestIncrementalDiffAndHeat:
     """Tests for per-file mtime incremental diff and heat tracking."""
 
-    def _calls_matching(self, neo4j: RecordingNeo4j, fragment: str) -> list[tuple[str, dict]]:
+    def _calls_matching(
+        self, neo4j: RecordingNeo4j, fragment: str
+    ) -> list[tuple[str, dict]]:
         return [(q, p) for q, p in neo4j.calls if fragment in q]
 
     def test_first_scan_no_heat_increment(self):
@@ -531,7 +650,9 @@ class TestIncrementalDiffAndHeat:
 
         heat_calls = self._calls_matching(neo4j, "hot_count")
         # ON CREATE SET includes hot_count = 0, but no standalone increment query
-        increment_calls = [c for c in heat_calls if "coalesce(n.hot_count, 0) + 1" in c[0]]
+        increment_calls = [
+            c for c in heat_calls if "coalesce(n.hot_count, 0) + 1" in c[0]
+        ]
         assert increment_calls == [], "First scan must not increment hot_count"
 
     def test_incremental_scan_increments_heat_for_changed_files(self):
@@ -539,26 +660,31 @@ class TestIncrementalDiffAndHeat:
         neo4j = MagicMock()
         # src/main.py mtime differs (100 → 999); src/service.py unchanged (200 → 200)
         neo4j.execute.side_effect = lambda query, params=None: (
-            [{"path": "src/main.py", "mtime": 100.0}, {"path": "src/service.py", "mtime": 200.0}]
+            [
+                {"path": "src/main.py", "mtime": 100.0},
+                {"path": "src/service.py", "mtime": 200.0},
+            ]
             if "file_mtime IS NOT NULL" in query
-            else [{"cnt": 1}] if "count(r)" in query
+            else [{"cnt": 1}]
+            if "count(r)" in query
             else []
         )
 
         writer = StructureGraphWriter(neo4j=neo4j)
         scan = _make_scan(
             files=[
-                FileEntry(rel_path="src/main.py", role="entrypoint", file_mtime=999.0),  # changed
-                FileEntry(rel_path="src/service.py", role="file", file_mtime=200.0),      # unchanged
+                FileEntry(
+                    rel_path="src/main.py", role="entrypoint", file_mtime=999.0
+                ),  # changed
+                FileEntry(
+                    rel_path="src/service.py", role="file", file_mtime=200.0
+                ),  # unchanged
             ]
         )
         writer.write_project(scan, session_id="s1", user_id="u1")
 
         # Find the _increment_heat Cypher call (contains "+ 1")
-        heat_calls = [
-            c for c in neo4j.execute.call_args_list
-            if "+ 1" in c.args[0]
-        ]
+        heat_calls = [c for c in neo4j.execute.call_args_list if "+ 1" in c.args[0]]
         assert len(heat_calls) == 1
         paths = heat_calls[0].args[1]["paths"]
         assert "src/main.py" in paths
@@ -569,9 +695,13 @@ class TestIncrementalDiffAndHeat:
         neo4j = MagicMock()
         # Return identical mtimes for all files
         neo4j.execute.side_effect = lambda query, params=None: (
-            [{"path": "src/main.py", "mtime": 100.0}, {"path": "src/service.py", "mtime": 200.0}]
+            [
+                {"path": "src/main.py", "mtime": 100.0},
+                {"path": "src/service.py", "mtime": 200.0},
+            ]
             if "file_mtime IS NOT NULL" in query
-            else [{"cnt": 1}] if "count(r)" in query
+            else [{"cnt": 1}]
+            if "count(r)" in query
             else []
         )
 
@@ -585,17 +715,30 @@ class TestIncrementalDiffAndHeat:
         writer.write_project(scan, session_id="s1", user_id="u1")
 
         heat_increment_calls = [
-            c for c in neo4j.execute.call_args_list
+            c
+            for c in neo4j.execute.call_args_list
             if "hot_count" in str(c) and "+ 1" in str(c)
         ]
-        assert heat_increment_calls == [], "No changes → hot_count must not be incremented"
+        assert heat_increment_calls == [], (
+            "No changes → hot_count must not be incremented"
+        )
 
     def test_query_files_includes_hot_count_when_nonzero(self):
         """query_files returns hot_count key only when value > 0."""
         neo4j = MagicMock()
         neo4j.execute.return_value = [
-            {"path": "src/hot.py", "role": "file", "description": "hot file", "hot_count": 5},
-            {"path": "src/cold.py", "role": "file", "description": "cold file", "hot_count": 0},
+            {
+                "path": "src/hot.py",
+                "role": "file",
+                "description": "hot file",
+                "hot_count": 5,
+            },
+            {
+                "path": "src/cold.py",
+                "role": "file",
+                "description": "cold file",
+                "hot_count": 0,
+            },
         ]
         writer = StructureGraphWriter(neo4j=neo4j)
         result = writer.query_files("proj")
@@ -621,7 +764,9 @@ class TestIncrementalDiffAndHeat:
         writer = StructureGraphWriter(neo4j=neo4j)
         writer.write_project(_make_scan(), session_id="s1", user_id="u1")
 
-        batch_queries = [q for q, _ in neo4j.calls if "UNWIND $rows" in q and "hot_count" in q]
+        batch_queries = [
+            q for q, _ in neo4j.calls if "UNWIND $rows" in q and "hot_count" in q
+        ]
         assert batch_queries, "File batch MERGE must initialize hot_count"
         assert "hot_count = 0" in batch_queries[0]
 
@@ -629,6 +774,7 @@ class TestIncrementalDiffAndHeat:
 # ---------------------------------------------------------------------------
 # Caller path normalization
 # ---------------------------------------------------------------------------
+
 
 def test_normalize_structure_path_matches_stored_spelling():
     """Stored paths are forward-slashed and repo-relative; callers pass input verbatim.
@@ -656,6 +802,7 @@ def test_normalize_structure_path_matches_stored_spelling():
 # had no pruning path at all, so they accumulated forever. The archolith umbrella kept 7,103
 # directory entities and 102 endpoints after dropping from 1,977 indexed files to 8.
 # ---------------------------------------------------------------------------
+
 
 class TestStalePruning:
     def _writer(self):
@@ -754,14 +901,15 @@ class TestTruncatedScanNeverPrunesFiles:
             files=[FileEntry(rel_path="a.py", role="file", description="")],
             files_discovered=100,
             files_eligible=100,
-            files_indexed=1,          # cap bound hard
+            files_indexed=1,  # cap bound hard
         )
         assert scan.partial_index is True
 
         writer.write_project(scan, session_id="s", user_id="u")
 
         prunes = [
-            q for q, _ in neo.calls
+            q
+            for q, _ in neo.calls
             if "structure_role IN $roles" in q and "DETACH DELETE" in q
         ]
         assert prunes == [], "a truncated scan must never prune files"
@@ -781,7 +929,8 @@ class TestTruncatedScanNeverPrunesFiles:
         writer.write_project(scan, session_id="s", user_id="u")
 
         prunes = [
-            q for q, _ in neo.calls
+            q
+            for q, _ in neo.calls
             if "structure_role IN $roles" in q and "DETACH DELETE" in q
         ]
         assert len(prunes) == 1
@@ -806,7 +955,9 @@ class TestTruncatedScanNeverPrunesFiles:
             for q, params in neo.calls
             if "structure_role: $role" in q and "DETACH DELETE" in q
         ]
-        assert role_prunes == [], "a truncated scan must not prune endpoints or dependencies"
+        assert role_prunes == [], (
+            "a truncated scan must not prune endpoints or dependencies"
+        )
 
     def test_complete_scan_prunes_endpoints_and_dependencies(self):
         from menhir.infrastructure.project_scanner import FileEntry
@@ -845,9 +996,13 @@ class TestTruncatedScanNeverPrunesFiles:
         writer.write_project(scan, session_id="s", user_id="u")
 
         prunes = [
-            (q, params) for q, params in neo.calls if "[r:CONTAINS_REPO]" in q and "DELETE r" in q
+            (q, params)
+            for q, params in neo.calls
+            if "[r:CONTAINS_REPO]" in q and "DELETE r" in q
         ]
         assert len(prunes) == 1
         q, params = prunes[0]
         assert params["keep"] == ["sub-a"]
-        assert "DETACH DELETE" not in q, "must delete the edge only, never the child project"
+        assert "DETACH DELETE" not in q, (
+            "must delete the edge only, never the child project"
+        )

@@ -11,10 +11,12 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4, uuid5
 
 from menhir.domain.namespace import namespace_to_group_ids
-from menhir.domain.todo_location import DEFAULT_TODO_NAMESPACE as _DEFAULT_TODO_NAMESPACE
+from menhir.domain.todo_location import (
+    DEFAULT_TODO_NAMESPACE as _DEFAULT_TODO_NAMESPACE,
+)
 from menhir.domain.truth.kinds import SOURCE_CONFIDENCE_AGENT
 from menhir.domain.utils import source_confidence_for, symbol_structure_path
 from menhir.infrastructure.neo4j import Neo4jRepository
@@ -35,6 +37,7 @@ def _normalize_structure_path(path: str) -> str:
         p = p[2:]
     return p.lstrip("/").rstrip("/")
 
+
 #: The source label every node written by the project scanner carries.
 STRUCTURE_SOURCE = "project-scan"
 
@@ -42,6 +45,67 @@ STRUCTURE_SOURCE = "project-scan"
 #: how it silently drifted from `source_confidence_for` -- both were right in isolation and disagreed
 #: with each other for 48,781 production entities. Deriving it means the two cannot part again.
 STRUCTURE_SOURCE_CONFIDENCE = source_confidence_for(STRUCTURE_SOURCE)
+
+# Frozen namespace for project identities that exist only because another project's scan named
+# them. These ids are placeholders until the project is scanned directly and its settled identity
+# overwrites the inferred one. A namespace constant (rather than NAMESPACE_URL at each call site)
+# makes the allocation contract explicit and prevents the CALLS and CONTAINS_REPO writers from
+# drifting into independent identity spaces.
+_INFERRED_PROJECT_ID_NAMESPACE = UUID("b872ff47-dd11-5845-9702-6e0eef2730fd")
+
+
+def _inferred_project_id(project_name: str) -> str:
+    """Return the stable placeholder identity shared by every inferred-project writer."""
+    return str(uuid5(_INFERRED_PROJECT_ID_NAMESPACE, project_name))
+
+
+# Both inferred edge writers splice in this exact prefix. New targets MERGE on the live composite
+# uniqueness constraint, so concurrent writers all contend for one (project_id, path) key. The
+# legacy lookup is a compatibility bridge: once a direct scan has replaced the placeholder id with
+# the settled id, later inferred edges must reuse that row rather than recreate the placeholder.
+_INFERRED_PROJECT_TARGET_CYPHER = """
+            OPTIONAL MATCH (legacy:Entity {
+                structure_project: $target_name,
+                structure_path: '.',
+                structure_role: 'project'
+            })
+            WITH head(collect(legacy)) AS existing
+            CALL {
+                WITH existing
+                WITH existing WHERE existing IS NOT NULL
+                RETURN existing AS target
+                UNION
+                WITH existing
+                WITH existing WHERE existing IS NULL
+                MERGE (target:Entity {
+                    structure_project_id: $target_project_id,
+                    structure_path: '.'
+                })
+                ON CREATE SET
+                    target.uuid = $uuid,
+                    target.identity_source = 'inferred',
+                    target.content = $target_name,
+                    target.type = 'SEMANTIC',
+                    target.scope = 'PERSISTENT',
+                    target.source = 'project-scan',
+                    target.source_confidence = $sc_inferred,
+                    target.user_flagged = false,
+                    target.group_id = '',
+                    target.session_id = $session_id,
+                    target.user_id = $user_id,
+                    target.created_at = $now,
+                    target.last_accessed = $now
+                RETURN target
+            }
+            SET target.structure_project = $target_name,
+                target.structure_role = 'project',
+                target.name = $target_name,
+                target.structure_project_id = coalesce(
+                    target.structure_project_id, $target_project_id
+                ),
+                target.identity_source = coalesce(target.identity_source, 'inferred')
+            WITH target
+"""
 
 _ENTITY_DEFAULTS: dict[str, Any] = {
     "type": "SEMANTIC",
@@ -155,7 +219,9 @@ class StructureGraphWriter:
         )
         if stale_dirs:
             logger.info(
-                "Pruned %d stale directory entities for project=%s", stale_dirs, scan.name
+                "Pruned %d stale directory entities for project=%s",
+                stale_dirs,
+                scan.name,
             )
 
         # 3. File entities (batched) — includes file, entrypoint, config, test roles
@@ -199,14 +265,18 @@ class StructureGraphWriter:
             )
             if stale_files:
                 logger.info(
-                    "Pruned %d stale file entities for project=%s", stale_files, scan.name
+                    "Pruned %d stale file entities for project=%s",
+                    stale_files,
+                    scan.name,
                 )
         elif scan.files:
             logger.warning(
                 "Skipping stale-file pruning for project=%s: scan truncated "
                 "(%d/%d eligible indexed), so absence from this scan is not evidence the "
                 "file is gone.",
-                scan.name, scan.files_indexed, scan.files_eligible,
+                scan.name,
+                scan.files_indexed,
+                scan.files_eligible,
             )
 
         # 4. Dependency entities (batched)
@@ -237,7 +307,9 @@ class StructureGraphWriter:
             )
             if stale_deps:
                 logger.info(
-                    "Pruned %d stale dependency entities for project=%s", stale_deps, scan.name
+                    "Pruned %d stale dependency entities for project=%s",
+                    stale_deps,
+                    scan.name,
                 )
 
         # 5. Endpoint entities (batched)
@@ -273,7 +345,9 @@ class StructureGraphWriter:
             )
             if stale_eps:
                 logger.info(
-                    "Pruned %d stale endpoint entities for project=%s", stale_eps, scan.name
+                    "Pruned %d stale endpoint entities for project=%s",
+                    stale_eps,
+                    scan.name,
                 )
 
         # 6. CONTAINS edges: project→dir, dir→subdir, dir→file
@@ -331,7 +405,9 @@ class StructureGraphWriter:
             )
             if stale_repos:
                 logger.info(
-                    "Pruned %d stale CONTAINS_REPO edges for project=%s", stale_repos, scan.name
+                    "Pruned %d stale CONTAINS_REPO edges for project=%s",
+                    stale_repos,
+                    scan.name,
                 )
 
         # 12. Symbols: delete stale + write new (DETACH DELETE also removes stale CALLS edges)
@@ -466,7 +542,11 @@ class StructureGraphWriter:
             {"proj": project, "paths": list(variants)},
         )
         # Map hits back to the caller's spelling so the caller can compare against its input.
-        return {variants[str(r["path"])] for r in rows if str(r.get("path") or "") in variants}
+        return {
+            variants[str(r["path"])]
+            for r in rows
+            if str(r.get("path") or "") in variants
+        }
 
     def get_scan_fingerprint(self, project_name: str) -> str | None:
         """Read stored fingerprint for a project entity."""
@@ -604,7 +684,9 @@ class StructureGraphWriter:
         )
         return int(rows[0].get("deleted", 0)) if rows else 0
 
-    def _delete_stale_directories(self, project_name: str, keep_paths: list[str]) -> int:
+    def _delete_stale_directories(
+        self, project_name: str, keep_paths: list[str]
+    ) -> int:
         """Delete directory entities no longer present in the scan.
 
         File entities are pruned via `_delete_file_entities` off the stored-mtime diff, but
@@ -1271,7 +1353,7 @@ class StructureGraphWriter:
         matched_project = row["matched_project"]
         uuids: set[str] = {str(file_uuid)}
         for key in ("import_uuids", "importer_uuids", "tester_uuids"):
-            for uuid in (row.get(key) or []):
+            for uuid in row.get(key) or []:
                 if uuid:
                     uuids.add(str(uuid))
         return matched_project, sorted(uuids)
@@ -1872,28 +1954,8 @@ class StructureGraphWriter:
         Creates the target project entity if it doesn't exist yet.
         """
         self.neo4j.execute(
-            """
-            MERGE (target:Entity {structure_project: $target_name, structure_path: '.', structure_role: 'project'})
-            ON CREATE SET
-                target.uuid = $uuid,
-                target.structure_project_id = $target_project_id,
-                target.identity_source = 'inferred',
-                target.name = $target_name,
-                target.content = $target_name,
-                target.type = 'SEMANTIC',
-                target.scope = 'PERSISTENT',
-                target.source = 'project-scan',
-                target.source_confidence = $sc_inferred,
-                target.user_flagged = false,
-                target.group_id = '',
-                target.session_id = $session_id,
-                target.user_id = $user_id,
-                target.created_at = $now,
-                target.last_accessed = $now
-            ON MATCH SET
-                target.structure_project_id = coalesce(target.structure_project_id, $target_project_id),
-                target.identity_source = coalesce(target.identity_source, 'inferred')
-            WITH target
+            _INFERRED_PROJECT_TARGET_CYPHER
+            + """
             MATCH (source:Entity {structure_project: $source_name, structure_path: '.', structure_role: 'project'})
             MERGE (source)-[r:CALLS]->(target)
             ON CREATE SET r.source = 'project-scan', r.mechanism = $mechanism, r.evidence = $evidence, r.created_at = datetime()
@@ -1903,7 +1965,7 @@ class StructureGraphWriter:
                 "source_name": source_project,
                 "target_name": ref.target_project,
                 "uuid": str(uuid4()),
-                "target_project_id": str(uuid4()),
+                "target_project_id": _inferred_project_id(ref.target_project),
                 "session_id": session_id,
                 "user_id": user_id,
                 "now": now,
@@ -1934,28 +1996,8 @@ class StructureGraphWriter:
         detail when scanned directly.
         """
         self.neo4j.execute(
-            """
-            MERGE (target:Entity {structure_project: $target_name, structure_path: '.', structure_role: 'project'})
-            ON CREATE SET
-                target.uuid = $uuid,
-                target.structure_project_id = $target_project_id,
-                target.identity_source = 'inferred',
-                target.name = $target_name,
-                target.content = $target_name,
-                target.type = 'SEMANTIC',
-                target.scope = 'PERSISTENT',
-                target.source = 'project-scan',
-                target.source_confidence = $sc_inferred,
-                target.user_flagged = false,
-                target.group_id = '',
-                target.session_id = $session_id,
-                target.user_id = $user_id,
-                target.created_at = $now,
-                target.last_accessed = $now
-            ON MATCH SET
-                target.structure_project_id = coalesce(target.structure_project_id, $target_project_id),
-                target.identity_source = coalesce(target.identity_source, 'inferred')
-            WITH target
+            _INFERRED_PROJECT_TARGET_CYPHER
+            + """
             MATCH (source:Entity {structure_project: $source_name, structure_path: '.', structure_role: 'project'})
             MERGE (source)-[r:CONTAINS_REPO]->(target)
             ON CREATE SET r.source = 'project-scan', r.rel_path = $rel_path, r.created_at = datetime()
@@ -1966,7 +2008,7 @@ class StructureGraphWriter:
                 "target_name": nested.name,
                 "rel_path": nested.rel_path,
                 "uuid": str(uuid4()),
-                "target_project_id": str(uuid4()),
+                "target_project_id": _inferred_project_id(nested.name),
                 "session_id": session_id,
                 "user_id": user_id,
                 "now": now,
