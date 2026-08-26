@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-08-25 - Close CF-257 eighth-pass identity gaps
+
+- Require exact operator authority for `force_identity`; an absent or empty request tier can no
+  longer cross an identity boundary. Expose adopt/new retry fields on `ingest-wiki`, report typed
+  `needs_decision` candidates, and count only confirmed entity writes as ingested.
+- Make both inferred-project writers share a frozen UUID5 allocator and `MERGE` on the constrained
+  `(structure_project_id, structure_path)` key. Concurrent `CALLS` and `CONTAINS_REPO` writers now
+  converge on one target, while a directly scanned target retains its settled identity.
+- Re-read exact phase-one schema readiness after bootstrap and refuse writer startup when
+  `IF NOT EXISTS` silently no-ops against a same-named, wrong-shaped schema object.
+- Return missing-file `needs_decision` before creating the publication lock file, compare candidate
+  roots with the shared path-flavor-aware key, and persist a host/root/generation-scoped graph
+  marker with graph-first transfers. A retry may repair an interrupted identity-file publication
+  only while that exact marker remains current.
+- Verify 8,158 offline tests and 25 focused real-Neo4j tests. The complete online lane retained only
+  its three previously documented failures and passed 309 tests. Deploy under the durable writer
+  fence; restart both production services; verify all health/readiness endpoints at 200, exact
+  schema readiness, 60/60 constrained bindings, 43,372/43,372 structure ids, zero duplicate keys
+  or roots, zero pending publication markers, and a clean post-fence watcher cycle.
+
 ## 2026-08-25 - Close CF-257 seventh-pass identity gaps
 
 - Make phase-one readiness verify the exact Neo4j uniqueness-constraint type, entity kind, label,
