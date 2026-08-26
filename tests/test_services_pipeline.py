@@ -1690,9 +1690,9 @@ async def test_prepare_memory_runtime_refuses_successful_but_wrong_shaped_schema
     adapter.sync_edge_counts = lambda: _sync_call_increment(adapter)
     built = BuildArtifacts(
         settings=MemorySettings.from_env(),
-        capabilities=None,
+        capabilities=SimpleNamespace(graphiti_ready=False),
         neo4j=object(),
-        graphiti_client=SimpleNamespace(build_indices_and_constraints=None),
+        graphiti_client=None,
         llm=object(),
         graph_adapter=adapter,
         ingest_service=object(),
