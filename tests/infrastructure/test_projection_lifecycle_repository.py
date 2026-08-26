@@ -633,10 +633,18 @@ class _RawResult:
 class _RawTx:
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, Any]]] = []
+        self.committed = False
+        self.rolled_back = False
 
     def run(self, query: str, **params: Any) -> _RawResult:
         self.calls.append((query, params))
         return _RawResult()
+
+    def commit(self) -> None:
+        self.committed = True
+
+    def rollback(self) -> None:
+        self.rolled_back = True
 
 
 class _Session:
@@ -649,8 +657,8 @@ class _Session:
     def __exit__(self, *_args: Any) -> None:
         return None
 
-    def execute_write(self, callback):
-        return callback(self.raw_tx)
+    def begin_transaction(self) -> _RawTx:
+        return self.raw_tx
 
 
 class _Driver:
@@ -681,6 +689,8 @@ def test_execute_write_exposes_repository_compatible_transaction_adapter() -> No
     assert driver.session_obj.raw_tx.calls == [
         ("RETURN $value AS ok", {"value": 1})
     ]
+    assert driver.session_obj.raw_tx.committed is True
+    assert driver.session_obj.raw_tx.rolled_back is False
 
 
 @pytest.mark.online
