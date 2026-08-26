@@ -1589,6 +1589,7 @@ async def test_worker_does_not_finalize_after_force_release(
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_prepare_memory_runtime_initializes_graphiti_then_schema() -> None:
+    readiness = iter([False, True])
     built = BuildArtifacts(
         settings=MemorySettings.from_env(),
         capabilities=None,
@@ -1600,7 +1601,7 @@ async def test_prepare_memory_runtime_initializes_graphiti_then_schema() -> None
         llm=object(),
         graph_adapter=SimpleNamespace(
             calls=[],
-            phase_one_schema_ready=lambda: False,
+            phase_one_schema_ready=lambda: next(readiness),
             bootstrap_phase_one=None,
             sync_edge_counts=None,
         ),
@@ -1628,7 +1629,7 @@ async def test_prepare_memory_runtime_initializes_graphiti_then_schema() -> None
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_prepare_memory_runtime_marks_partial_schema_failures() -> None:
+async def test_prepare_memory_runtime_refuses_partial_schema_failures() -> None:
     graphiti_stub = SimpleNamespace(
         calls=0,
         forces=[],
@@ -1663,21 +1664,55 @@ async def test_prepare_memory_runtime_marks_partial_schema_failures() -> None:
 
     built.graph_adapter.sync_edge_counts = lambda: _sync_call_increment(built.graph_adapter)
 
-    result = await prepare_memory_runtime(built)
+    with pytest.raises(RuntimeError, match="remains absent or wrong-shaped") as exc_info:
+        await prepare_memory_runtime(built)
 
     assert graphiti_stub.calls == 1
     assert graphiti_stub.forces == [False]
-    assert result["graphiti"] == "ok"
-    assert result["schema"]["status"] == "partial"
-    assert result["schema"]["queries_executed"] == 3
-    assert result["schema"]["failures"] == ["query failed"]
-    assert result["edge_count_sync"] == 1
-    assert built.graph_adapter.sync_calls == 1
+    assert "query failed" in str(exc_info.value)
+    assert built.graph_adapter.sync_calls == 0
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_prepare_memory_runtime_refuses_successful_but_wrong_shaped_schema() -> None:
+    readiness = iter([False, False])
+    adapter = SimpleNamespace(
+        sync_calls=0,
+        phase_one_schema_ready=lambda: next(readiness),
+        bootstrap_phase_one=lambda: type(
+            "StubSchemaResult",
+            (),
+            {"success": True, "queries_executed": 1, "failures": []},
+        )(),
+        sync_edge_counts=None,
+    )
+    adapter.sync_edge_counts = lambda: _sync_call_increment(adapter)
+    built = BuildArtifacts(
+        settings=MemorySettings.from_env(),
+        capabilities=None,
+        neo4j=object(),
+        graphiti_client=SimpleNamespace(build_indices_and_constraints=None),
+        llm=object(),
+        graph_adapter=adapter,
+        ingest_service=object(),
+        recall_service=object(),
+        scoring_service=object(),
+        lifecycle_service=object(),
+        context_builder=object(),
+        candidate_service=object(),
+    )
+
+    with pytest.raises(RuntimeError, match="remains absent or wrong-shaped"):
+        await prepare_memory_runtime(built)
+
+    assert adapter.sync_calls == 0
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_prepare_memory_runtime_forwards_force_graphiti_flag() -> None:
+    readiness = iter([False, True])
     graphiti_stub = SimpleNamespace(
         calls=0,
         forces=[],
@@ -1694,7 +1729,7 @@ async def test_prepare_memory_runtime_forwards_force_graphiti_flag() -> None:
         llm=object(),
         graph_adapter=SimpleNamespace(
             sync_calls=0,
-            phase_one_schema_ready=lambda: False,
+            phase_one_schema_ready=lambda: next(readiness),
             bootstrap_phase_one=lambda: type(
                 "StubSchemaResult",
                 (),

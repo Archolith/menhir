@@ -288,8 +288,20 @@ async def prepare_memory_runtime(
     else:
         # These adapter calls are synchronous and can block the event loop on startup.
         bootstrap_result = await asyncio.to_thread(artifacts.graph_adapter.bootstrap_phase_one)
+        # Bootstrap success means only that every DDL statement returned without raising. It is
+        # not proof that the required schema exists: Neo4j's IF NOT EXISTS can no-op when a
+        # same-named ordinary index or wrong-shaped constraint occupies the name. Re-read the
+        # exact semantic contract after the repair attempt and fail before any writer starts.
+        schema_ready = await asyncio.to_thread(artifacts.graph_adapter.phase_one_schema_ready)
+        if not schema_ready:
+            failure_detail = "; ".join(str(item) for item in bootstrap_result.failures)
+            suffix = f" Bootstrap failures: {failure_detail}" if failure_detail else ""
+            raise RuntimeError(
+                "Phase-one schema remains absent or wrong-shaped after bootstrap; refusing "
+                f"writer startup.{suffix}"
+            )
         schema = {
-            "status": "ok" if bootstrap_result.success else "partial",
+            "status": "ok",
             "queries_executed": bootstrap_result.queries_executed,
             "failures": bootstrap_result.failures,
             "skipped": False,
