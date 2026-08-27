@@ -9,12 +9,17 @@ import json
 from collections.abc import Callable, Sequence
 from urllib.parse import parse_qs, urlencode
 
+from menhir.api.client_policy import ClientPolicyAuthority
 from menhir.api.client_token_store import ClientTokenStore
 from menhir.api.errors import error_payload, request_id_for_scope
 from menhir.api.oauth import OAuthAuthenticationError, OAuthTokenVerifier
 from menhir.config.auth_mode import AuthMode, auth_mode_from
 from menhir.config.oauth import OAuthConfig
 from menhir.config.settings import is_loopback_host
+from menhir.core.request_context import (
+    bind_request_tool_allowlist,
+    reset_request_tool_allowlist,
+)
 from menhir.mcp.service_access import (
     bind_request_auth_mode,
     bind_request_oauth_context,
@@ -151,6 +156,8 @@ class BearerAuthMiddleware:
         client_token_store: ClientTokenStore | None = None,
         loopback_bound: bool = True,
         auth_mode: AuthMode | None = None,
+        force_readonly: bool = False,
+        client_policy: ClientPolicyAuthority | None = None,
     ) -> None:
         self.app = app
         self._operator_key = operator_key or api_key  # backwards compat: api_key -> operator
@@ -167,6 +174,8 @@ class BearerAuthMiddleware:
         # every request appear to originate from loopback.
         self._loopback_admin_ok = loopback_bound
         self.api_key = self._operator_key
+        self._force_readonly = bool(force_readonly)
+        self._client_policy = client_policy
         # Single gate: the effective auth mode. The server passes the
         # settings-resolved mode (SSOT); when constructed directly (tests) we
         # derive it from the same signals via the one precedence function, so
@@ -249,6 +258,10 @@ class BearerAuthMiddleware:
         if self._token_matches(token, self._readonly_key):
             return "readonly"
         return None
+
+    def _effective_tier(self, tier: str) -> str:
+        """Clamp authenticated authority while the candidate fence is active."""
+        return "readonly" if self._force_readonly else tier
 
     @staticmethod
     def _request_session_headers(
@@ -496,7 +509,7 @@ class BearerAuthMiddleware:
             )
             auth_mode_token = bind_request_auth_mode("query" if used_query_api_key else "header")
             session_token = bind_request_session(user_id, session_id, client_id=client_id, client_name=client_name)
-            tier_token = bind_request_tier(tier)
+            tier_token = bind_request_tier(self._effective_tier(tier))
             try:
                 # CF-32 at the TRANSPORT boundary, not per-tool. Under static-key auth the
                 # caller supplies `client_name`, and both the namespace pin and the tool
@@ -610,7 +623,7 @@ class BearerAuthMiddleware:
             session_token = bind_request_session(
                 admin_cid, admin_cid, client_id=admin_cid, client_name=admin_name
             )
-            tier_token = bind_request_tier("operator")
+            tier_token = bind_request_tier(self._effective_tier("operator"))
             auth_mode_token = bind_request_auth_mode("admin")
             try:
                 await self.app(scope, receive, send)
@@ -664,7 +677,7 @@ class BearerAuthMiddleware:
         )
         auth_mode_token = bind_request_auth_mode("query" if used_query else "client_token")
         session_token = bind_request_session(user_id, session_id, client_id=client_id, client_name=client_name)
-        tier_token = bind_request_tier(record.tier)
+        tier_token = bind_request_tier(self._effective_tier(record.tier))
         try:
             await self.app(scope, receive, send)
         finally:
@@ -705,6 +718,24 @@ class BearerAuthMiddleware:
             await self._send_oauth_error(scope, send, exc)
             return
 
+        policy = None
+        if self._client_policy is not None:
+            try:
+                policy = self._client_policy.require_client(
+                    client_id=principal.client_id,
+                    scopes=principal.scopes,
+                    tier=principal.tier,
+                )
+            except PermissionError as exc:
+                await self._send_auth_error(
+                    scope,
+                    send,
+                    status_code=403,
+                    detail=str(exc),
+                    code="client_policy_denied",
+                )
+                return
+
         user_id, session_id, client_id, client_name = self._request_session_headers(
             headers,
             path=scope.get("path", ""),
@@ -712,7 +743,9 @@ class BearerAuthMiddleware:
             qs=qs,
             default_user_id=principal.subject,
             default_client_id=principal.client_id,
-            default_client_name=principal.client_name,
+            default_client_name=(
+                policy.label if policy is not None else principal.client_name
+            ),
             trust_identity_headers=False,
         )
         auth_mode_token = bind_request_auth_mode("oauth")
@@ -721,10 +754,17 @@ class BearerAuthMiddleware:
             principal.scopes,
         )
         session_token = bind_request_session(user_id, session_id, client_id=client_id, client_name=client_name)
-        tier_token = bind_request_tier(principal.tier)
+        tier_token = bind_request_tier(self._effective_tier(principal.tier))
+        tool_policy_token = (
+            bind_request_tool_allowlist(policy.allowed_tools)
+            if policy is not None
+            else None
+        )
         try:
             await self.app(scope, receive, send)
         finally:
+            if tool_policy_token is not None:
+                reset_request_tool_allowlist(tool_policy_token)
             reset_request_session(session_token)
             reset_request_oauth_context(oauth_context_token)
             reset_request_auth_mode(auth_mode_token)

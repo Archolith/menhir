@@ -5,8 +5,8 @@ from __future__ import annotations
 import base64
 import concurrent.futures
 import hashlib
-import threading
-import time
+import json
+import sqlite3
 from types import SimpleNamespace
 
 import pytest
@@ -20,8 +20,8 @@ from menhir.api import (
     oauth_keys,
     oauth_refresh_store,
 )
-from menhir.api import oauth_token as oauth_token_module
 from menhir.api.auth_code_store import get_auth_code_store
+from menhir.api.client_policy import ClientPolicy, ClientPolicyAuthority
 from menhir.api.oauth_client_store import OAuthClient, get_client_store, new_client_id
 from menhir.api.oauth_keys import get_signing_key, public_jwks
 from menhir.api.oauth_token import router as oauth_token_router
@@ -40,6 +40,14 @@ _ENABLED_REFRESH_GRACE = SimpleNamespace(
     oauth_as_enabled=True,
     oauth_public_base_url=_BASE,
     oauth_as_refresh_tokens_enabled=True,
+    oauth_as_refresh_ttl_s=2592000,
+    oauth_as_refresh_retry_grace_s=30.0,
+)
+_ENABLED_POLICY_REFRESH_GRACE = SimpleNamespace(
+    oauth_as_enabled=True,
+    oauth_public_base_url=_BASE,
+    oauth_as_refresh_tokens_enabled=True,
+    oauth_as_refresh_without_offline_access_enabled=True,
     oauth_as_refresh_ttl_s=2592000,
     oauth_as_refresh_retry_grace_s=30.0,
 )
@@ -62,17 +70,34 @@ _RESOURCE = f"{_BASE}/mcp-http"
 @pytest.fixture(autouse=True)
 def _isolate(tmp_path, monkeypatch):
     monkeypatch.setenv("MENHIR_OAUTH_AS_DIR", str(tmp_path))
+    keyring_path = tmp_path / "refresh-retry-keyring.json"
+    keyring_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "current_key_id": "test-key",
+                "keys": {
+                    "test-key": base64.urlsafe_b64encode(b"k" * 32)
+                    .rstrip(b"=")
+                    .decode("ascii")
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    _ENABLED_REFRESH_GRACE.oauth_refresh_retry_keyring_path = str(keyring_path)
+    _ENABLED_POLICY_REFRESH_GRACE.oauth_refresh_retry_keyring_path = str(keyring_path)
     monkeypatch.setattr(oauth_client_store, "_client_store_singleton", None, raising=False)
     monkeypatch.setattr(auth_code_store, "_auth_code_store_singleton", None, raising=False)
     monkeypatch.setattr(oauth_keys, "_SIGNING_KEY", None, raising=False)
     monkeypatch.setattr(oauth_refresh_store, "_refresh_store_singleton", None, raising=False)
-    oauth_token_module._clear_refresh_retry_cache()
+    monkeypatch.setattr(oauth_refresh_store, "_refresh_keyring_singleton", None, raising=False)
     yield
     monkeypatch.setattr(oauth_client_store, "_client_store_singleton", None, raising=False)
     monkeypatch.setattr(auth_code_store, "_auth_code_store_singleton", None, raising=False)
     monkeypatch.setattr(oauth_keys, "_SIGNING_KEY", None, raising=False)
     monkeypatch.setattr(oauth_refresh_store, "_refresh_store_singleton", None, raising=False)
-    oauth_token_module._clear_refresh_retry_cache()
+    monkeypatch.setattr(oauth_refresh_store, "_refresh_keyring_singleton", None, raising=False)
 
 
 def _pkce() -> tuple[str, str]:
@@ -113,9 +138,33 @@ def _seed_code(cid: str, challenge: str, *, redirect_uri: str = _CB, scope: str 
     )
 
 
-def _client(settings=_ENABLED) -> TestClient:
+def _policy(client_id: str) -> ClientPolicyAuthority:
+    return ClientPolicyAuthority(
+        version=1,
+        digest="test",
+        clients={
+            client_id: ClientPolicy(
+                client_id=client_id,
+                label="chatgpt-chat",
+                scopes=frozenset({"menhir:read", "menhir:write"}),
+                maximum_tier="agent",
+                namespace="",
+                allowed_tools=frozenset({"recall_memories"}),
+                denied_tools=frozenset({"add_memory"}),
+            )
+        },
+    )
+
+
+def _client(
+    settings=_ENABLED,
+    *,
+    policy: ClientPolicyAuthority | None = None,
+) -> TestClient:
     app = FastAPI()
     app.state.settings = settings
+    if policy is not None:
+        app.state.client_policy = policy
     app.state.oauth_refresh_store = (
         oauth_refresh_store.configure_refresh_store(settings)
         if getattr(settings, "oauth_as_refresh_tokens_enabled", False)
@@ -174,6 +223,25 @@ def test_explicit_policy_issues_refresh_when_offline_access_is_omitted():
     assert body["scope"] == _SCOPE
 
 
+def test_production_policy_denial_does_not_consume_authorization_code():
+    verifier, challenge = _pkce()
+    cid = _register_client()
+    code = _seed_code(cid, challenge)
+
+    denied = _client(policy=_policy("different-client")).post(
+        "/oauth/token",
+        data=_token_form(code, cid, verifier),
+    )
+    accepted = _client().post(
+        "/oauth/token",
+        data=_token_form(code, cid, verifier),
+    )
+
+    assert denied.status_code == 400
+    assert denied.json()["error"] == "unauthorized_client"
+    assert accepted.status_code == 200
+
+
 def _refresh_form(
     token: str,
     cid: str,
@@ -190,6 +258,43 @@ def _refresh_form(
     if scope is not None:
         form["scope"] = scope
     return form
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        '{"version":1,"version":1,"current_key_id":"a","keys":{"a":"AA"}}',
+        json.dumps(
+            {
+                "version": 1,
+                "current_key_id": "a",
+                "keys": {"a": base64.urlsafe_b64encode(b"k" * 32).decode("ascii")},
+            }
+        ),
+        json.dumps(
+            {
+                "version": 1,
+                "current_key_id": "a",
+                "keys": {"a": "not+base64url"},
+            }
+        ),
+        json.dumps(
+            {
+                "version": 1,
+                "current_key_id": "a",
+                "keys": {"a": base64.urlsafe_b64encode(b"short").rstrip(b"=").decode()},
+            }
+        ),
+    ],
+)
+def test_refresh_retry_keyring_rejects_ambiguous_or_invalid_material(
+    tmp_path, payload: str
+):
+    path = tmp_path / "bad-keyring.json"
+    path.write_text(payload, encoding="utf-8")
+
+    with pytest.raises(ValueError):
+        oauth_refresh_store._load_retry_keyring(str(path))
 
 
 # ---------------------------------------------------------------------------
@@ -224,7 +329,7 @@ def test_unknown_code_invalid_grant():
     assert resp.json()["error"] == "invalid_grant"
 
 
-def test_wrong_verifier_fails_pkce_and_burns_code():
+def test_wrong_verifier_fails_pkce_without_burning_code():
     _, challenge = _pkce()
     cid = _register_client()
     code = _seed_code(cid, challenge)
@@ -232,10 +337,12 @@ def test_wrong_verifier_fails_pkce_and_burns_code():
     resp = c.post("/oauth/token", data=_token_form(code, cid, "b" * 64))
     assert resp.status_code == 400
     assert resp.json()["error"] == "invalid_grant"
-    # Code was burned by redeem even though PKCE failed: a correct retry also fails.
+    # PKCE refusal is pre-mutation, so a corrected retry consumes the code once.
     resp2 = c.post("/oauth/token", data=_token_form(code, cid, "a" * 64))
-    assert resp2.status_code == 400
-    assert resp2.json()["error"] == "invalid_grant"
+    assert resp2.status_code == 200
+    resp3 = c.post("/oauth/token", data=_token_form(code, cid, "a" * 64))
+    assert resp3.status_code == 400
+    assert resp3.json()["error"] == "invalid_grant"
 
 
 def test_happy_path_returns_bearer_token():
@@ -267,7 +374,82 @@ def test_minted_jwt_verifies_through_seam():
     assert claims["scope"] == _SCOPE
     assert claims["client_id"] == cid
     assert claims["client_name"] == "Test App"
+    assert "tier" not in claims
     assert claims["exp"] > claims["iat"]
+
+
+def test_policy_maximum_tier_is_forwarded_on_code_and_refresh_exchanges():
+    verifier, challenge = _pkce()
+    cid = _register_client()
+    policy = _policy(cid)
+    code = _seed_code(cid, challenge, scope="menhir:read menhir:write")
+    client = _client(_ENABLED_DISCRETIONARY_REFRESH, policy=policy)
+
+    code_response = client.post(
+        "/oauth/token",
+        data=_token_form(code, cid, verifier),
+    )
+    assert code_response.status_code == 200
+
+    refresh_response = client.post(
+        "/oauth/token",
+        data=_refresh_form(str(code_response.json()["refresh_token"]), cid),
+    )
+    assert refresh_response.status_code == 200
+
+    keyset = jose_provider.parse_jwks(public_jwks(get_signing_key()))
+    code_claims = jose_provider.verify_jwt(
+        code_response.json()["access_token"], keyset, ["RS256"], 60
+    )
+    refresh_claims = jose_provider.verify_jwt(
+        refresh_response.json()["access_token"], keyset, ["RS256"], 60
+    )
+    assert code_claims["tier"] == "agent"
+    assert refresh_claims["tier"] == "agent"
+
+
+def test_policy_maximum_tier_is_forwarded_on_durable_refresh_exchange():
+    verifier, challenge = _pkce()
+    cid = _register_client()
+    policy = _policy(cid)
+    code = _seed_code(cid, challenge, scope="menhir:read menhir:write")
+    client = _client(_ENABLED_POLICY_REFRESH_GRACE, policy=policy)
+    initial = client.post(
+        "/oauth/token",
+        data=_token_form(code, cid, verifier),
+    )
+    assert initial.status_code == 200
+
+    refreshed = client.post(
+        "/oauth/token",
+        data=_refresh_form(str(initial.json()["refresh_token"]), cid),
+    )
+    assert refreshed.status_code == 200
+
+    keyset = jose_provider.parse_jwks(public_jwks(get_signing_key()))
+    claims = jose_provider.verify_jwt(
+        refreshed.json()["access_token"], keyset, ["RS256"], 60
+    )
+    assert claims["tier"] == "agent"
+
+
+def test_no_policy_omits_tier_on_code_and_refresh_exchanges():
+    client, cid, initial = _issue_initial_refresh()
+    refreshed = client.post(
+        "/oauth/token",
+        data=_refresh_form(str(initial["refresh_token"]), cid),
+    )
+    assert refreshed.status_code == 200
+
+    keyset = jose_provider.parse_jwks(public_jwks(get_signing_key()))
+    initial_claims = jose_provider.verify_jwt(
+        str(initial["access_token"]), keyset, ["RS256"], 60
+    )
+    refresh_claims = jose_provider.verify_jwt(
+        refreshed.json()["access_token"], keyset, ["RS256"], 60
+    )
+    assert "tier" not in initial_claims
+    assert "tier" not in refresh_claims
 
 
 def test_code_is_single_use():
@@ -429,17 +611,8 @@ def test_refresh_retry_after_expiry_revokes_replacement_family():
     first = client.post("/oauth/token", data=_refresh_form(token, cid))
     assert first.status_code == 200
 
-    with oauth_token_module._refresh_retry_lock:
-        key = next(iter(oauth_token_module._refresh_retry_cache))
-        entry = oauth_token_module._refresh_retry_cache[key]
-        oauth_token_module._refresh_retry_cache[key] = (
-            oauth_token_module._RefreshRetryEntry(
-                expires_at=0.0,
-                response=entry.response,
-                client_id=entry.client_id,
-                successor_digest=entry.successor_digest,
-            )
-        )
+    with sqlite3.connect(oauth_refresh_store.get_refresh_store().db_path) as conn:
+        conn.execute("UPDATE oauth_refresh_receipts SET expires_at = 0")
 
     replay = client.post("/oauth/token", data=_refresh_form(token, cid))
     assert replay.status_code == 400
@@ -453,10 +626,8 @@ def test_refresh_retry_after_expiry_revokes_replacement_family():
     assert replacement.json()["error"] == "invalid_grant"
 
 
-def test_refresh_retry_cache_does_not_retain_presented_token_and_expires_promptly():
-    settings = SimpleNamespace(**vars(_ENABLED_REFRESH_GRACE))
-    settings.oauth_as_refresh_retry_grace_s = 0.02
-    client, cid, initial = _issue_initial_refresh_with_settings(settings)
+def test_durable_refresh_receipt_contains_no_plaintext_tokens():
+    client, cid, initial = _issue_initial_refresh_with_settings(_ENABLED_REFRESH_GRACE)
     presented_token = str(initial["refresh_token"])
 
     response = client.post(
@@ -464,172 +635,43 @@ def test_refresh_retry_cache_does_not_retain_presented_token_and_expires_promptl
         data=_refresh_form(presented_token, cid),
     )
     assert response.status_code == 200
-    assert presented_token not in repr(oauth_token_module._refresh_retry_cache)
-
-    deadline = time.monotonic() + 1.0
-    while oauth_token_module._refresh_retry_cache and time.monotonic() < deadline:
-        time.sleep(0.01)
-    assert not oauth_token_module._refresh_retry_cache
+    raw_db = oauth_refresh_store.get_refresh_store().db_path.read_bytes()
+    assert presented_token.encode("utf-8") not in raw_db
+    assert str(response.json()["refresh_token"]).encode("utf-8") not in raw_db
 
 
-def test_refresh_retry_cache_capacity_preserves_replay_validation(monkeypatch):
-    monkeypatch.setattr(oauth_token_module, "_REFRESH_RETRY_CACHE_MAX_ENTRIES", 1)
-    first_client, first_cid, first_initial = _issue_initial_refresh_with_settings(
-        _ENABLED_REFRESH_GRACE
-    )
-    first = first_client.post(
-        "/oauth/token",
-        data=_refresh_form(str(first_initial["refresh_token"]), first_cid),
-    )
-    assert first.status_code == 200
-
-    second_client, second_cid, second_initial = _issue_initial_refresh_with_settings(
-        _ENABLED_REFRESH_GRACE
-    )
-    second = second_client.post(
-        "/oauth/token",
-        data=_refresh_form(str(second_initial["refresh_token"]), second_cid),
-    )
-    assert second.status_code == 200
-    assert len(oauth_token_module._refresh_retry_cache) == 1
-
-    wrong_context = second_client.post(
-        "/oauth/token",
-        data=_refresh_form(
-            str(second_initial["refresh_token"]),
-            second_cid,
-            resource="https://memory.example.com/wrong",
-        ),
-    )
-    assert wrong_context.status_code == 400
-    assert wrong_context.json()["error"] == "invalid_grant"
-
-    replay = first_client.post(
-        "/oauth/token",
-        data=_refresh_form(str(first_initial["refresh_token"]), first_cid),
-    )
-    assert replay.status_code == 400
-    assert replay.json()["error"] == "invalid_grant"
-
-    revoked = first_client.post(
-        "/oauth/token",
-        data=_refresh_form(str(first.json()["refresh_token"]), first_cid),
-    )
-    assert revoked.status_code == 400
-    assert revoked.json()["error"] == "invalid_grant"
-
-
-def test_refresh_retry_cache_capacity_evicts_without_blocking_fresh_rotation(monkeypatch):
-    monkeypatch.setattr(oauth_token_module, "_REFRESH_RETRY_CACHE_MAX_ENTRIES", 1)
-    first_client, first_cid, first_initial = _issue_initial_refresh_with_settings(
-        _ENABLED_REFRESH_GRACE
-    )
-    first = first_client.post(
-        "/oauth/token",
-        data=_refresh_form(str(first_initial["refresh_token"]), first_cid),
-    )
-    assert first.status_code == 200
-
-    second_client, second_cid, second_initial = _issue_initial_refresh_with_settings(
-        _ENABLED_REFRESH_GRACE
-    )
-    second = second_client.post(
-        "/oauth/token",
-        data=_refresh_form(str(second_initial["refresh_token"]), second_cid),
-    )
-
-    assert second.status_code == 200
-    assert len(oauth_token_module._refresh_retry_cache) == 1
-
-
-def test_successful_successor_rotation_prunes_predecessor_cache_entry():
+def test_exact_refresh_retry_survives_process_store_recreation():
     client, cid, initial = _issue_initial_refresh_with_settings(_ENABLED_REFRESH_GRACE)
+    form = _refresh_form(str(initial["refresh_token"]), cid)
     first = client.post(
         "/oauth/token",
-        data=_refresh_form(str(initial["refresh_token"]), cid),
+        data=form,
     )
     assert first.status_code == 200
-    assert len(oauth_token_module._refresh_retry_cache) == 1
+    oauth_refresh_store._refresh_store_singleton = None
+    oauth_refresh_store._refresh_keyring_singleton = None
+    restarted = _client(_ENABLED_REFRESH_GRACE)
 
-    second = client.post(
-        "/oauth/token",
-        data=_refresh_form(str(first.json()["refresh_token"]), cid),
+    retry = restarted.post("/oauth/token", data=form)
+    assert retry.status_code == 200
+    assert retry.json() == first.json()
+
+
+def test_simultaneous_exact_refresh_retries_converge_on_one_response():
+    first_client, cid, initial = _issue_initial_refresh_with_settings(
+        _ENABLED_REFRESH_GRACE
     )
+    second_client = _client(_ENABLED_REFRESH_GRACE)
+    form = _refresh_form(str(initial["refresh_token"]), cid)
 
-    assert second.status_code == 200
-    assert len(oauth_token_module._refresh_retry_cache) == 1
-
-
-def test_refresh_retry_grace_starts_after_slow_rotation(monkeypatch):
-    settings = SimpleNamespace(oauth_as_refresh_retry_grace_s=0.1)
-    rotation_finished = 0.0
-
-    def slow_exchange_refresh_token(**_kwargs):
-        nonlocal rotation_finished
-        time.sleep(0.05)
-        rotation_finished = time.monotonic()
-        return SimpleNamespace(refresh_token="replacement-token")
-
-    monkeypatch.setattr(
-        oauth_token_module,
-        "exchange_refresh_token",
-        slow_exchange_refresh_token,
-    )
-
-    oauth_token_module._exchange_refresh_with_retry_grace(
-        settings=settings,
-        refresh_store=object(),
-        client_store=object(),
-        issuer=object(),
-        refresh_token="presented-token",
-        client_id="client-a",
-        resource=_RESOURCE,
-        scope=None,
-        allowed_scopes=("menhir:read",),
-    )
-
-    entry = next(iter(oauth_token_module._refresh_retry_cache.values()))
-    assert entry.expires_at >= rotation_finished + 0.09
-
-
-def test_simultaneous_exact_refresh_retries_rotate_once(monkeypatch):
-    settings = SimpleNamespace(oauth_as_refresh_retry_grace_s=30.0)
-    barrier = threading.Barrier(2)
-    calls = 0
-    calls_lock = threading.Lock()
-    response = object()
-
-    def fake_exchange_refresh_token(**_kwargs):
-        nonlocal calls
-        with calls_lock:
-            calls += 1
-        return response
-
-    monkeypatch.setattr(
-        oauth_token_module,
-        "exchange_refresh_token",
-        fake_exchange_refresh_token,
-    )
-
-    def exchange():
-        barrier.wait()
-        return oauth_token_module._exchange_refresh_with_retry_grace(
-            settings=settings,
-            refresh_store=object(),
-            client_store=object(),
-            issuer=object(),
-            refresh_token="presented-token",
-            client_id="client-a",
-            resource=_RESOURCE,
-            scope=None,
-            allowed_scopes=("menhir:read",),
-        )
+    def exchange(client: TestClient):
+        return client.post("/oauth/token", data=form)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-        results = list(executor.map(lambda _index: exchange(), range(2)))
+        responses = list(executor.map(exchange, (first_client, second_client)))
 
-    assert results == [response, response]
-    assert calls == 1
+    assert [response.status_code for response in responses] == [200, 200]
+    assert responses[0].json() == responses[1].json()
 
 
 def test_refresh_scope_narrowing_and_expansion_failure():

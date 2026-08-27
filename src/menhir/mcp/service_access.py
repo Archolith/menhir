@@ -20,15 +20,16 @@ from menhir.core.backend_impl import BackendClient, RuntimeProvider
 from menhir.core.backend_protocol import MemoryBackend
 from menhir.core.tenancy import pinned_namespace as core_pinned_namespace
 from menhir.core.request_context import (
-    bind_request_auth_mode,
+    bind_request_auth_mode,  # noqa: F401 - compatibility re-export
     bind_request_session as _bind_request_session_context,
     bind_request_tier,
     get_request_auth_mode,
     get_request_session,
-    get_request_tier,
-    reset_request_auth_mode,
-    reset_request_session,
-    reset_request_tier,
+    get_request_tier,  # noqa: F401 - compatibility re-export
+    get_request_tool_allowlist,
+    reset_request_auth_mode,  # noqa: F401 - compatibility re-export
+    reset_request_session,  # noqa: F401 - compatibility re-export
+    reset_request_tier,  # noqa: F401 - compatibility re-export
 )
 from menhir.domain.session import MemorySession, new_session
 
@@ -429,6 +430,10 @@ def get_client_tool_allowlist(settings: MemorySettings | None = None) -> frozens
     configured entry) means "no restriction" -- the caller keeps the full,
     tier-filtered catalog, so default behavior is unchanged.
     """
+
+    policy_allowlist = get_request_tool_allowlist()
+    if policy_allowlist is not None:
+        return policy_allowlist
 
     session = get_request_session()
     if session is None:

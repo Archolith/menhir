@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
@@ -431,8 +432,19 @@ class MemorySettings:
 
     # HTTP process snapshot
     startup_scope: str = "full"
+    # Production selects the public route surface. Candidate-readonly is the
+    # mutation-fenced pre-cutover proof target.
+    runtime_mode: str = "production"
+    client_policy_path: str = ""
+    client_policy_digest: str = ""
     cors_origins: tuple[str, ...] = ()
     instance_id: str = ""
+    release_id: str = ""
+    source_fence_key_id: str = ""
+    source_fence_token: str = field(default="", repr=False)
+    # Source-only Ed25519 private key. This path is configured only on the old
+    # authority and is deliberately absent from target Compose/backup state.
+    source_fence_private_key_path: str = ""
     explorer_enabled: bool = True
     privacy_redact: bool = False
 
@@ -466,6 +478,8 @@ class MemorySettings:
     oauth_clock_skew_s: int = 60
     oauth_allowed_algorithms: tuple[str, ...] = ("RS256",)
     oauth_as_dir: str = ""
+    oauth_signing_key_path: str = ""
+    oauth_refresh_retry_keyring_path: str = ""
     oauth_as_code_ttl_s: float = 120.0
     oauth_as_access_ttl_s: int = 3600
     oauth_as_consent_secret: str = field(default="", repr=False)
@@ -522,8 +536,16 @@ class MemorySettings:
                 "personal_memory_scalar_threshold must be > 0 and <= 1, "
                 f"got {self.personal_memory_scalar_threshold}"
             )
-        if self.startup_scope not in {"full", "auth-only", "http-only", "no-backend"}:
+        if self.startup_scope not in {
+            "full", "production", "auth-only", "http-only", "no-backend"
+        }:
             raise ValueError(f"startup_scope is invalid: {self.startup_scope!r}")
+        if self.runtime_mode not in {"production", "candidate-readonly"}:
+            raise ValueError(f"runtime_mode is invalid: {self.runtime_mode!r}")
+        if self.runtime_mode == "candidate-readonly" and self.startup_scope != "production":
+            raise ValueError(
+                "runtime_mode='candidate-readonly' requires startup_scope='production'"
+            )
         positive_oauth_numbers = {
             "oauth_jwks_cache_ttl_s": self.oauth_jwks_cache_ttl_s,
             "oauth_http_timeout_s": self.oauth_http_timeout_s,
@@ -588,6 +610,55 @@ class MemorySettings:
                 raise ValueError(
                     "oauth_public_base_url must use HTTPS for the embedded authorization "
                     "server (loopback HTTP is allowed for local development)"
+                )
+        if self.startup_scope == "production":
+            expected_base = self.oauth_public_base_url.strip().rstrip("/")
+            expected_resource = f"{expected_base}/mcp-http"
+            expected_jwks = f"{expected_base}/.well-known/jwks.json"
+            if not self.oauth_enabled or not self.oauth_as_enabled:
+                raise ValueError(
+                    "production startup requires both OAuth resource-server and "
+                    "authorization-server support"
+                )
+            if not expected_base.startswith("https://"):
+                raise ValueError("production OAuth authority must use an HTTPS origin")
+            if self.oauth_resource != expected_resource:
+                raise ValueError(
+                    "production OAuth resource must exactly match the public /mcp-http URL"
+                )
+            if self.oauth_issuer != expected_base:
+                raise ValueError(
+                    "production OAuth issuer must exactly match the public origin"
+                )
+            if self.oauth_jwks_uri != expected_jwks:
+                raise ValueError(
+                    "production OAuth JWKS URI must exactly match the public origin"
+                )
+            if not self.privacy_redact:
+                raise ValueError("production startup requires privacy redaction")
+            if not self.client_policy_path:
+                raise ValueError("production startup requires an immutable client policy")
+            if not self.oauth_signing_key_path:
+                raise ValueError(
+                    "production startup requires an explicit OAuth signing key path"
+                )
+            if not Path(self.oauth_signing_key_path).is_absolute():
+                raise ValueError("production OAuth signing key path must be absolute")
+            if self.oauth_as_refresh_retry_grace_s > 0:
+                if not self.oauth_refresh_retry_keyring_path:
+                    raise ValueError(
+                        "production durable refresh retry requires an explicit keyring path"
+                    )
+                if not Path(self.oauth_refresh_retry_keyring_path).is_absolute():
+                    raise ValueError(
+                        "production refresh retry keyring path must be absolute"
+                    )
+            if (
+                len(self.client_policy_digest) != 64
+                or any(ch not in "0123456789abcdef" for ch in self.client_policy_digest)
+            ):
+                raise ValueError(
+                    "production client policy digest must be a lowercase SHA-256 digest"
                 )
         # Single source of truth: resolve the auth mode and enforce bind safety
         # through one path (assert_bind_safe -> resolve_auth_mode). Local import
@@ -840,8 +911,26 @@ class MemorySettings:
                 if part.strip()
             ),
             startup_scope=_getenv("MENHIR_STARTUP_SCOPE", default=cls.startup_scope).strip().lower(),
+            runtime_mode=_getenv("MENHIR_RUNTIME_MODE", default=cls.runtime_mode).strip().lower(),
+            client_policy_path=_getenv(
+                "MENHIR_CLIENT_POLICY_PATH", default=cls.client_policy_path
+            ).strip(),
+            client_policy_digest=_getenv(
+                "MENHIR_CLIENT_POLICY_DIGEST", default=cls.client_policy_digest
+            ).strip().lower(),
             cors_origins=parse_csv_env(_getenv("MENHIR_CORS_ORIGINS", default="")),
             instance_id=_getenv("MENHIR_INSTANCE_ID", default=cls.instance_id).strip(),
+            release_id=_getenv("MENHIR_RELEASE_ID", default=cls.release_id).strip(),
+            source_fence_key_id=_getenv(
+                "MENHIR_SOURCE_FENCE_KEY_ID", default=cls.source_fence_key_id
+            ).strip(),
+            source_fence_token=_getenv(
+                "MENHIR_SOURCE_FENCE_TOKEN", default=cls.source_fence_token
+            ),
+            source_fence_private_key_path=_getenv(
+                "MENHIR_SOURCE_FENCE_PRIVATE_KEY_PATH",
+                default=cls.source_fence_private_key_path,
+            ).strip(),
             explorer_enabled=parse_bool_env(_getenv("MENHIR_EXPLORER_ENABLED", default=str(cls.explorer_enabled))),
             privacy_redact=parse_bool_env(_getenv("MENHIR_PRIVACY_REDACT", default=str(cls.privacy_redact))),
             saga_reconcile_startup_mode=_getenv(
@@ -890,6 +979,14 @@ class MemorySettings:
                 _getenv("MENHIR_OAUTH_ALLOWED_ALGORITHMS", default=",".join(cls.oauth_allowed_algorithms))
             ),
             oauth_as_dir=_getenv("MENHIR_OAUTH_AS_DIR", default=cls.oauth_as_dir).strip(),
+            oauth_signing_key_path=_getenv(
+                "MENHIR_OAUTH_SIGNING_KEY_PATH",
+                default=cls.oauth_signing_key_path,
+            ).strip(),
+            oauth_refresh_retry_keyring_path=_getenv(
+                "MENHIR_OAUTH_REFRESH_RETRY_KEYRING_PATH",
+                default=cls.oauth_refresh_retry_keyring_path,
+            ).strip(),
             oauth_as_code_ttl_s=_parse_float(
                 _getenv("MENHIR_OAUTH_AS_CODE_TTL_S", default=str(cls.oauth_as_code_ttl_s)),
                 env_var="MENHIR_OAUTH_AS_CODE_TTL_S",

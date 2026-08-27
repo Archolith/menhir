@@ -2,3 +2,5 @@ test_tmp/
 mcp_telemetry.db
 mcp_telemetry.db-*
 *.log
+# menhir project identity (CF-257): per-checkout, never committed
+project-id

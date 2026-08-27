@@ -45,6 +45,10 @@ backups/
 *.jsonl.gz
 .agent/mcp_telemetry.db
 .agent/mcp_telemetry.db-*
+.agent/mcp_telemetry_oauth_gateway.db
+.agent/mcp_telemetry_oauth_gateway.db-*
+.agent/oauth-as-production-gateway/
+.agent/oauth-gateway-launch.ps1
 .agent/test_tmp/
 .agent/tmp/
 .agent/*.stdout.log

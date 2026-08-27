@@ -158,6 +158,7 @@ def build_memory_services(
     settings: MemorySettings | None = None,
     *,
     capabilities: RuntimeCapabilities | None = None,
+    read_only: bool = False,
 ) -> BuildArtifacts:
     """Build collaborators for the v1 memory pipeline."""
     settings = settings or MemorySettings.from_env()
@@ -233,6 +234,7 @@ def build_memory_services(
         scalar_view_authority_enabled=settings.personal_memory_scalar_view_authority_enabled,
         scalar_history_enabled=settings.personal_memory_scalar_history_enabled,
         event_history_authority_enabled=settings.personal_memory_event_history_authority_enabled,
+        read_only=read_only,
     )
     context_builder = ContextBuilderService(
         recall_service=recall_service,

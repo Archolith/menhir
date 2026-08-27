@@ -29,14 +29,19 @@ import secrets
 import threading
 import time
 from hashlib import sha256
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode, urlsplit, urlunsplit, parse_qsl
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from archolith_oauth import resolve_client_metadata_document as _shared_cimd_resolver
+from archolith_oauth import (
+    consent_request_digest,
+    resolve_client_metadata_document as _shared_cimd_resolver,
+)
 
 from menhir.api.auth_code_store import get_auth_code_store
+from menhir.api.client_policy import ClientPolicy, ClientPolicyAuthority
 from menhir.api.oauth_as_metadata import _as_enabled
 from menhir.api.oauth_client_store import (
     OAuthClient,
@@ -99,14 +104,6 @@ _MAX_CIMD_CLIENT_NAME_LEN = 255
 # brute-force the admin secret at speed.
 _approve_limiter = FixedWindowLimiter(max_per_window=10, window_s=300)
 
-# AS-004: a consent token is single-use. Each token carries a random ``jti``; once an
-# approve POST redeems it, the jti is recorded here (with an expiry) and any replay of the
-# same token is rejected. Guarded by a lock and pruned on access so it cannot grow without
-# bound. Bounded lifetime == the consent TTL, so entries self-expire.
-_spent_consent_jtis: dict[str, float] = {}
-_spent_consent_lock = threading.Lock()
-
-
 # ---------------------------------------------------------------------------
 # Settings helpers
 # ---------------------------------------------------------------------------
@@ -114,6 +111,28 @@ _spent_consent_lock = threading.Lock()
 
 def _settings_for(request: Request) -> object:
     return getattr(request.app.state, "settings", None) or MemorySettings.from_env()
+
+
+def _production_client_policy(
+    request: Request,
+    *,
+    client_id: str,
+    scopes: frozenset[str] | None = None,
+) -> ClientPolicy | None:
+    """Resolve the production policy before an OAuth authority mutation.
+
+    Non-production/dev applications do not install a policy authority and retain
+    their existing OAuth behavior. A production application always installs one.
+    """
+
+    authority = getattr(request.app.state, "client_policy", None)
+    if authority is None:
+        return None
+    if not isinstance(authority, ClientPolicyAuthority):
+        raise PermissionError("Production client policy authority is invalid")
+    if scopes is None:
+        return authority.policy_for_client_id(client_id)
+    return authority.require_authorization(client_id=client_id, scopes=scopes)
 
 
 def _operator_key(settings: object) -> str:
@@ -140,8 +159,18 @@ def _persistent_consent_secret(settings: object | None = None) -> bytes:
         try:
             from menhir.infrastructure.paths import oauth_as_db_path
 
+            configured_path = (
+                str(getattr(settings, "oauth_signing_key_path", "")).strip()
+                if settings
+                else ""
+            )
             configured_dir = str(getattr(settings, "oauth_as_dir", "")) if settings else ""
-            key_bytes = (oauth_as_db_path(configured_dir) / "oauth_signing_key.json").read_bytes()
+            key_path = (
+                Path(configured_path)
+                if configured_path
+                else oauth_as_db_path(configured_dir) / "oauth_signing_key.json"
+            )
+            key_bytes = key_path.read_bytes()
         except Exception:
             return _PROCESS_CONSENT_SECRET
         _PERSISTENT_CONSENT_SECRET = sha256(b"menhir-as-consent-v1\0" + key_bytes).digest()
@@ -252,19 +281,45 @@ def _consent_jti(token: str) -> str | None:
     return str(jti) if jti else None
 
 
-def _consume_consent_jti(jti: str, settings: object | None = None) -> bool:
-    """Atomically record *jti* as spent. Return True if it was fresh (redeem allowed),
-    False if already spent (replay). Expired entries are pruned on access."""
-    now = time.time()
-    ttl = _consent_ttl_s(settings)
-    with _spent_consent_lock:
-        if _spent_consent_jtis:
-            for stale in [k for k, exp in _spent_consent_jtis.items() if exp <= now]:
-                del _spent_consent_jtis[stale]
-        if jti in _spent_consent_jtis:
-            return False
-        _spent_consent_jtis[jti] = now + ttl
-        return True
+def _consent_request_digest(fields: dict[str, str]) -> str:
+    return consent_request_digest(
+        client_id=fields.get("client_id", ""),
+        redirect_uri=fields.get("redirect_uri", ""),
+        scope=fields.get("scope", ""),
+        code_challenge=fields.get("code_challenge", ""),
+        code_challenge_method=fields.get("code_challenge_method", ""),
+        resource=fields.get("resource", ""),
+        subject=_ADMIN_SUBJECT,
+        state=fields.get("state", ""),
+    )
+
+
+class _ConsentCapacityError(RuntimeError):
+    """The bounded durable consent table cannot admit another live request."""
+
+
+def _register_consent_jti(
+    token: str,
+    fields: dict[str, str],
+    settings: object | None,
+) -> None:
+    payload = json.loads(_b64url_decode(token.split(".", 1)[0]))
+    jti = str(payload["jti"])
+    expires_at = float(payload["iat"]) + _consent_ttl_s(settings)
+    if not get_auth_code_store().register_consent_nonce(
+        jti=jti,
+        client_id=fields.get("client_id", ""),
+        expires_at=expires_at,
+        request_digest=_consent_request_digest(fields),
+    ):
+        raise _ConsentCapacityError("durable consent request capacity is exhausted")
+
+
+def _consume_registered_consent_jti(jti: str, fields: dict[str, str]) -> bool:
+    return get_auth_code_store().consume_consent_nonce(
+        jti=jti,
+        request_digest=_consent_request_digest(fields),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -507,6 +562,7 @@ def _render_consent(
     settings: object | None = None,
 ) -> str:
     consent_token = _sign_consent(fields, settings)
+    _register_consent_jti(consent_token, fields, settings)
     scopes = fields.get("scope", "")
     error_html = (
         '<p style="color:#b00">{}</p>'.format(html.escape(error)) if error else ""
@@ -677,6 +733,7 @@ def _issue_code_redirect(
     state: str,
     subject: str,
     settings: object,
+    consent_jti: str | None = None,
 ) -> RedirectResponse:
     """Issue a single-use code and 302 back to *redirect_uri* (shared by one-click GET
     and POST approve).
@@ -692,15 +749,33 @@ def _issue_code_redirect(
             status_code=500,
             detail="MENHIR_OAUTH_RESOURCE or MENHIR_PUBLIC_BASE_URL is required",
         )
-    code = get_auth_code_store().issue(
-        client_id=client_id,
-        redirect_uri=redirect_uri,
-        scope=scope,
-        code_challenge=code_challenge,
-        code_challenge_method="S256",
-        resource=bound_resource,
-        subject=subject,
-    )
+    code_store = get_auth_code_store()
+    if consent_jti is None:
+        code = code_store.issue(
+            client_id=client_id,
+            redirect_uri=redirect_uri,
+            scope=scope,
+            code_challenge=code_challenge,
+            code_challenge_method="S256",
+            resource=bound_resource,
+            subject=subject,
+        )
+    else:
+        code = code_store.issue_with_consent_nonce(
+            jti=consent_jti,
+            state=state,
+            client_id=client_id,
+            redirect_uri=redirect_uri,
+            scope=scope,
+            code_challenge=code_challenge,
+            code_challenge_method="S256",
+            resource=bound_resource,
+            subject=subject,
+        )
+        if code is None:
+            raise PermissionError(
+                "Consent request has already been used, expired, changed, or is missing"
+            )
     params = {"code": code, "iss": _as_issuer(settings)}
     if state:
         params["state"] = state
@@ -723,6 +798,11 @@ async def authorize_get(request: Request):
     redirect_uri = q.get("redirect_uri", "")
     state = q.get("state", "")
 
+    try:
+        _production_client_policy(request, client_id=client_id)
+    except PermissionError as exc:
+        return _bad_request(str(exc))
+
     # Untrusted-target validation FIRST — never redirect on these.
     try:
         client = await _resolve_client_and_redirect(client_id, redirect_uri, settings)
@@ -737,6 +817,19 @@ async def authorize_get(request: Request):
             q.get("code_challenge_method", ""),
         )
         scope = _resolve_scope(q.get("scope", ""), client, settings)
+        _production_client_policy(
+            request,
+            client_id=client_id,
+            scopes=frozenset(scope.split()),
+        )
+    except PermissionError as exc:
+        return _error_redirect(
+            redirect_uri,
+            "unauthorized_client",
+            str(exc),
+            state,
+            settings,
+        )
     except _RedirectError as exc:
         return _error_redirect(redirect_uri, exc.error, exc.description, state, settings)
 
@@ -767,14 +860,18 @@ async def authorize_get(request: Request):
         "scope": scope,
         "code_challenge": q.get("code_challenge", ""),
         "code_challenge_method": q.get("code_challenge_method", ""),
-        "resource": q.get("resource", ""),
+        "resource": q.get("resource", "") or build_oauth_config(settings).resource,
         "state": state,
     }
-    return HTMLResponse(
-        content=_render_consent(fields, client, settings=settings),
-        status_code=200,
-        headers=_CONSENT_HEADERS,
-    )
+    try:
+        content = _render_consent(fields, client, settings=settings)
+    except _ConsentCapacityError:
+        return HTMLResponse(
+            content="Consent service is temporarily busy; retry the authorization shortly.",
+            status_code=429,
+            headers={**_CONSENT_HEADERS, "Retry-After": "5"},
+        )
+    return HTMLResponse(content=content, status_code=200, headers=_CONSENT_HEADERS)
 
 
 @router.post("/oauth/authorize", include_in_schema=False)
@@ -796,12 +893,20 @@ async def authorize_post(request: Request):
     if not _verify_consent(consent_token, submitted, settings):
         return _bad_request("Consent request is invalid or has expired; restart the authorization.")
 
-    # 1b. Single-use (AS-004): burn the consent token's jti now, before evaluating the
-    # secret. A replayed token is rejected, and the failure pages below issue no replacement
-    # token (CF-10), so each admin-secret attempt costs one fresh authorization GET.
     jti = _consent_jti(consent_token)
-    if jti is None or not _consume_consent_jti(jti, settings):
-        return _bad_request("Consent request has already been used; restart the authorization.")
+    if jti is None:
+        return _bad_request("Consent request is missing its durable nonce; restart the authorization.")
+
+    try:
+        _production_client_policy(
+            request,
+            client_id=submitted["client_id"],
+            scopes=frozenset(submitted["scope"].split()),
+        )
+    except PermissionError as exc:
+        if not _consume_registered_consent_jti(jti, submitted):
+            return _bad_request("Consent request has already been used; restart the authorization.")
+        return _bad_request(str(exc))
 
     # 2. Re-validate untrusted target from scratch (client could have changed).
     # This runs strictly after the signed consent envelope is verified, so no
@@ -811,6 +916,8 @@ async def authorize_post(request: Request):
             submitted["client_id"], redirect_uri, settings
         )
     except ValueError as exc:
+        if not _consume_registered_consent_jti(jti, submitted):
+            return _bad_request("Consent request has already been used; restart the authorization.")
         return _bad_request(str(exc))
 
     # 3. Re-validate protocol params (302 back to the proven redirect_uri).
@@ -822,10 +929,14 @@ async def authorize_post(request: Request):
         )
         scope = _resolve_scope(submitted["scope"], client, settings)
     except _RedirectError as exc:
+        if not _consume_registered_consent_jti(jti, submitted):
+            return _bad_request("Consent request has already been used; restart the authorization.")
         return _error_redirect(redirect_uri, exc.error, exc.description, state, settings)
 
     # 4. Denial is safe and needs no secret.
     if decision != "approve":
+        if not _consume_registered_consent_jti(jti, submitted):
+            return _bad_request("Consent request has already been used; restart the authorization.")
         return _error_redirect(
             redirect_uri, "access_denied", "The request was denied", state, settings
         )
@@ -833,6 +944,8 @@ async def authorize_post(request: Request):
     # 4b. Brute-force throttle (AS-004): rate-limit approve attempts per IP before the
     # secret is ever evaluated, so an attacker cannot rapidly guess the admin secret.
     if not _approve_limiter.allow(client_ip(request, settings)):
+        if not _consume_registered_consent_jti(jti, submitted):
+            return _bad_request("Consent request has already been used; restart the authorization.")
         return HTMLResponse(
             content=_render_consent_retry(
                 submitted,
@@ -846,11 +959,15 @@ async def authorize_post(request: Request):
     # 5. Admin gate: an unconfigured operator key can never approve.
     operator_key = _operator_key(settings)
     if not operator_key:
+        if not _consume_registered_consent_jti(jti, submitted):
+            return _bad_request("Consent request has already been used; restart the authorization.")
         raise HTTPException(
             status_code=403,
             detail="No admin secret is configured (set MENHIR_OPERATOR_KEY) — cannot approve.",
         )
     if not hmac.compare_digest(admin_secret.encode("utf-8"), operator_key.encode("utf-8")):
+        if not _consume_registered_consent_jti(jti, submitted):
+            return _bad_request("Consent request has already been used; restart the authorization.")
         return HTMLResponse(
             content=_render_consent_retry(
                 submitted, client, error="Invalid admin secret."
@@ -867,15 +984,19 @@ async def authorize_post(request: Request):
     prior_clients = prior[1] if prior else ()
     approved_clients = tuple(sorted(set(prior_clients) | {submitted["client_id"]}))
 
-    response = _issue_code_redirect(
-        client_id=submitted["client_id"],
-        redirect_uri=redirect_uri,
-        scope=scope,
-        code_challenge=submitted["code_challenge"],
-        resource=submitted["resource"],
-        state=state,
-        subject=_ADMIN_SUBJECT,
-        settings=settings,
-    )
+    try:
+        response = _issue_code_redirect(
+            client_id=submitted["client_id"],
+            redirect_uri=redirect_uri,
+            scope=scope,
+            code_challenge=submitted["code_challenge"],
+            resource=submitted["resource"],
+            state=state,
+            subject=_ADMIN_SUBJECT,
+            settings=settings,
+            consent_jti=jti,
+        )
+    except PermissionError as exc:
+        return _bad_request(str(exc))
     _set_session_cookie(response, settings, approved_clients)
     return response

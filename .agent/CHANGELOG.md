@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-08-27 - Add full Contabo production release path
+
+- Added the immutable four-repository release authority, offline wheelhouse and
+  reviewed OAuth source binding, full production Compose/runtime surface, and
+  exact client-policy enforcement with tier-bound access tokens.
+- Added encrypted retained-generation backups, sacrificial WORM verification,
+  replay-safe restore authority, candidate acceptance, promotion, rollback,
+  external evidence aggregation, and a scoped source-fence producer.
+- Added canonical collision-safe Neo4j authority hashing and release-bound
+  integration with the transactional shared-Caddy and VPS operations layers.
+- Verified the complete local suite and resolved every blocker from the frozen
+  11-finding Sol xhigh review; live deployment and secret operations remain
+  separate operator-controlled gates.
+
 ## 2026-08-25 - Close CF-257 eighth-pass identity gaps
 
 - Require exact operator authority for `force_identity`; an absent or empty request tier can no
@@ -64,6 +78,28 @@
 - Put `structure_project_path_unique` in phase-one bootstrap and readiness beside both identity
   constraints, so a rebuilt or upgraded graph cannot report ready without every Phase 3
   prerequisite.
+
+## 2026-08-25 - Plan the full Contabo production migration
+
+- Replace the split edge/private-worker design after Pokémon image cleanup freed Contabo capacity.
+  The target now runs OAuth, MCP, full Menhir runtime/enrichment, and Neo4j on Contabo while exposing
+  only Caddy and isolating Neo4j on a Docker-internal network.
+- Define immutable-client `chatgpt-chat` policy, durable refresh retries, exact-version offline Neo4j
+  dump/check/load rehearsal, OAuth/graph single-writer fencing, encrypted off-host backups,
+  route/network minimization, cutover, reverse-state rollback, observability, and real ChatGPT E2E
+  acceptance gates.
+- Add a production host-security gate: recoverable key-only SSH, Docker-aware IPv4/IPv6 firewalling,
+  Cloudflare-only mTLS origin ingress, non-root least-privilege containers, immutable image evidence,
+  separated backup authority, off-host detection, and clean-host compromise recovery.
+- Close the initial eight plan-level Sol blockers, then ground continued fresh Sol reviews in the
+  actual Menhir, `yawn.deploy`, and `yawn.vps` repositories. Add the resulting external-network and
+  Caddy-only transaction contract, whole-host capacity gate, immutable dependency/release authority,
+  exact state/writer manifest, atomic OAuth package boundary, capability-scoped VPS operations,
+  host-wide lock, prune containment, backup/restore job semantics, and four-repository file/test map.
+- After the final remediation, two consecutive fresh Sol reviewers independently audited the fixed
+  plan against current Menhir, `yawn.deploy`, and `yawn.vps` code and returned `VERDICT: NO BLOCKERS`.
+- Index the plan as active execution authority. No runtime, VPS, DNS, tunnel, or OAuth state was
+  changed while authoring the plan.
 
 ## 2026-08-25 - Prove live ChatGPT OAuth compatibility
 

@@ -17,7 +17,11 @@ from fastapi.responses import JSONResponse
 
 from menhir.api.oauth_as_metadata import _as_enabled
 from menhir.api.oauth_client_store import OAuthClient, get_client_store, new_client_id
-from menhir.api.oauth_rate_limit import FixedWindowLimiter, build_register_limiter, client_ip
+from menhir.api.oauth_rate_limit import (  # noqa: F401 - test reset seam
+    FixedWindowLimiter,
+    build_register_limiter,
+    client_ip,
+)
 from menhir.config import MemorySettings
 from menhir.config.oauth import _as_bool, _get_setting, build_oauth_config
 
@@ -74,58 +78,74 @@ def _error(error: str, description: str) -> JSONResponse:
     return JSONResponse(status_code=400, content={"error": error, "error_description": description})
 
 
+def _production_existing_registration(
+    request: Request,
+    *,
+    redirect_uris: list[str],
+    requested_scope: object,
+    refresh_enabled: bool,
+) -> JSONResponse | None:
+    """Return the one restored policy client without mutating OAuth authority.
+
+    Production DCR is an idempotent compatibility surface for the already
+    accepted ChatGPT registration. It never reaps, counts, inserts, or updates
+    rows. A missing or drifted restored client therefore fails closed instead
+    of manufacturing a new identity.
+    """
+
+    authority = getattr(request.app.state, "client_policy", None)
+    if authority is None:
+        return None
+
+    if requested_scope is not None and not isinstance(requested_scope, str):
+        return _error("invalid_client_metadata", "scope must be a space-delimited string")
+    requested_scopes = (
+        None
+        if requested_scope is None
+        else frozenset(value for value in requested_scope.split() if value)
+    )
+    matches: list[tuple[object, OAuthClient]] = []
+    store = get_client_store()
+    for policy in authority.clients.values():
+        stored = store.get(policy.client_id)
+        if stored is None:
+            continue
+        if (
+            tuple(redirect_uris) == tuple(stored.redirect_uris)
+            and stored.token_endpoint_auth_method == "none"
+            and frozenset(stored.scopes) == policy.scopes
+            and (requested_scopes is None or requested_scopes == policy.scopes)
+        ):
+            matches.append((policy, stored))
+
+    if len(matches) != 1:
+        return _error(
+            "invalid_client_metadata",
+            "Production registration is restricted to the restored immutable client",
+        )
+
+    policy, stored = matches[0]
+    return JSONResponse(
+        status_code=201,
+        content={
+            "client_id": stored.client_id,
+            "client_id_issued_at": int(stored.created_at),
+            "redirect_uris": list(stored.redirect_uris),
+            "token_endpoint_auth_method": "none",
+            "grant_types": ["authorization_code"]
+            + (["refresh_token"] if refresh_enabled else []),
+            "response_types": ["code"],
+            "client_name": stored.client_name or policy.label,
+            "scope": " ".join(sorted(policy.scopes)),
+        },
+    )
+
+
 @router.post("/oauth/register", include_in_schema=False)
 async def register_client(request: Request) -> JSONResponse:
     settings = getattr(request.app.state, "settings", None) or MemorySettings.from_env()
     if not _as_enabled(settings):
         raise HTTPException(status_code=404, detail="OAuth dynamic client registration is not enabled")
-
-    if not _register_limiter.allow(client_ip(request, settings)):
-        return JSONResponse(
-            status_code=429,
-            content={
-                "error": "temporarily_unavailable",
-                "error_description": "Registration rate limit exceeded",
-            },
-        )
-    # Opportunistically reap never-exchanged stale registrations so a slow
-    # table-fill attack self-heals before it can reach the cap (AS-002).
-    max_age = int(
-        _get_setting(
-            settings,
-            "oauth_as_stale_client_max_age_s",
-            "MENHIR_OAUTH_AS_STALE_CLIENT_MAX_AGE_S",
-            86400,
-        )
-    )
-    if max_age > 0:
-        get_client_store().reap_stale(max_age)
-    cap = int(
-        _get_setting(
-            settings,
-            "oauth_as_max_clients",
-            "MENHIR_OAUTH_AS_MAX_CLIENTS",
-            1000,
-        )
-    )
-    current = get_client_store().count()
-    if current >= cap:
-        return JSONResponse(
-            status_code=429,
-            content={
-                "error": "temporarily_unavailable",
-                "error_description": "Client registration limit reached",
-            },
-        )
-    if current >= int(cap * _NEARING_CAP_FRACTION):
-        logger.warning(
-            "OAuth DCR client table nearing capacity: %d/%d registered clients "
-            "(>= %d%% of MENHIR_OAUTH_AS_MAX_CLIENTS). New registrations will be "
-            "refused at the cap; investigate for a registration-flood (AS-002).",
-            current,
-            cap,
-            int(_NEARING_CAP_FRACTION * 100),
-        )
 
     try:
         body = await request.json()
@@ -182,6 +202,64 @@ async def register_client(request: Request) -> JSONResponse:
     if not isinstance(client_name_raw, str):
         return _error("invalid_client_metadata", "client_name must be a string")
     client_name = client_name_raw.strip()[:_MAX_CLIENT_NAME_LEN]
+
+    if not _register_limiter.allow(client_ip(request, settings)):
+        return JSONResponse(
+            status_code=429,
+            content={
+                "error": "temporarily_unavailable",
+                "error_description": "Registration rate limit exceeded",
+            },
+        )
+
+    production_response = _production_existing_registration(
+        request,
+        redirect_uris=redirect_uris,
+        requested_scope=requested_raw,
+        refresh_enabled=refresh_enabled,
+    )
+    if production_response is not None:
+        return production_response
+
+    # Opportunistically reap never-exchanged stale registrations only on the
+    # non-production open-DCR surface. Production idempotency above performs
+    # no authority writes, including cleanup writes.
+    max_age = int(
+        _get_setting(
+            settings,
+            "oauth_as_stale_client_max_age_s",
+            "MENHIR_OAUTH_AS_STALE_CLIENT_MAX_AGE_S",
+            86400,
+        )
+    )
+    if max_age > 0:
+        get_client_store().reap_stale(max_age)
+    cap = int(
+        _get_setting(
+            settings,
+            "oauth_as_max_clients",
+            "MENHIR_OAUTH_AS_MAX_CLIENTS",
+            1000,
+        )
+    )
+    current = get_client_store().count()
+    if current >= cap:
+        return JSONResponse(
+            status_code=429,
+            content={
+                "error": "temporarily_unavailable",
+                "error_description": "Client registration limit reached",
+            },
+        )
+    if current >= int(cap * _NEARING_CAP_FRACTION):
+        logger.warning(
+            "OAuth DCR client table nearing capacity: %d/%d registered clients "
+            "(>= %d%% of MENHIR_OAUTH_AS_MAX_CLIENTS). New registrations will be "
+            "refused at the cap; investigate for a registration-flood (AS-002).",
+            current,
+            cap,
+            int(_NEARING_CAP_FRACTION * 100),
+        )
 
     now = int(time.time())
     client_id = new_client_id()

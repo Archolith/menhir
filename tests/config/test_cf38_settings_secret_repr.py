@@ -12,7 +12,7 @@ import pytest
 
 from menhir.config import MemorySettings
 
-#: The eleven secret-bearing fields that must never appear in a repr.
+#: The twelve secret-bearing fields that must never appear in a repr.
 SECRET_FIELDS: frozenset[str] = frozenset(
     {
         "neo4j_password",
@@ -24,6 +24,7 @@ SECRET_FIELDS: frozenset[str] = frozenset(
         "agent_key",
         "readonly_key",
         "oauth_as_consent_secret",
+        "source_fence_token",
         "langfuse_public_key",
         "langfuse_secret_key",
     }
@@ -40,6 +41,7 @@ CANARIES: dict[str, str] = {
     "agent_key": "CANARY_AGENT_KEY",
     "readonly_key": "CANARY_READONLY_KEY",
     "oauth_as_consent_secret": "CANARY_OAUTH_AS_CONSENT_SECRET",
+    "source_fence_token": "CANARY_SOURCE_FENCE_TOKEN",
     "langfuse_public_key": "CANARY_LANGFUSE_PUBLIC_KEY",
     "langfuse_secret_key": "CANARY_LANGFUSE_SECRET_KEY",
 }
@@ -54,8 +56,8 @@ def _build_settings() -> MemorySettings:
 
 
 @pytest.mark.unit
-def test_eleven_secret_fields_have_repr_false() -> None:
-    """The repr-hidden field set is EXACTLY the eleven secrets (drift guard)."""
+def test_twelve_secret_fields_have_repr_false() -> None:
+    """The repr-hidden field set is EXACTLY the twelve secrets (drift guard)."""
     hidden = {f.name for f in fields(MemorySettings) if f.repr is False}
     assert hidden == SECRET_FIELDS
 

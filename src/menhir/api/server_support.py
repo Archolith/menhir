@@ -15,16 +15,24 @@ from fastapi.responses import JSONResponse
 from menhir.api import oauth_as_register, oauth_authorize
 from menhir.api.auth import BearerAuthMiddleware
 from menhir.api.auth_code_store import configure_auth_code_store
+from menhir.api.client_policy import load_client_policy
 from menhir.api.client_token_store import configure_client_token_store
 from menhir.api.errors import error_response, request_id_for_request
 from menhir.api.oauth_as_metadata import router as oauth_as_metadata_router
 from menhir.api.oauth_as_register import router as oauth_as_register_router
 from menhir.api.oauth_authorize import router as oauth_authorize_router
 from menhir.api.oauth_client_store import configure_client_store
-from menhir.api.oauth_keys import configure_signing_key
+from menhir.api.oauth_keys import (
+    configure_signing_key,
+    configure_signing_key_readonly,
+)
 from menhir.api.oauth_refresh_store import configure_refresh_store
 from menhir.api.oauth_metadata import router as oauth_metadata_router
 from menhir.api.oauth_token import router as oauth_token_router
+from menhir.api.production_routes import (
+    candidate_mutation_unavailable,
+    router as production_health_router,
+)
 from menhir.api.request_context import RequestContextMiddleware
 from menhir.api.routes import router as api_router
 from menhir.config import MemorySettings, build_oauth_config, resolve_auth_mode
@@ -40,22 +48,46 @@ logger = logging.getLogger(__name__)
 BACKENDLESS_SCOPES = frozenset({"auth-only", "http-only", "no-backend"})
 
 
-def build_server_prereqs(settings: MemorySettings) -> dict[str, Any]:
+def build_server_prereqs(
+    settings: MemorySettings,
+    *,
+    tool_catalog: frozenset[str] | None = None,
+) -> dict[str, Any]:
     """Construct auth/OAuth/client-token collaborators from the settings snapshot."""
     oauth_config = build_oauth_config(settings)
-    client_token_store = configure_client_token_store(settings)
+    candidate_readonly = (
+        settings.startup_scope == "production"
+        and settings.runtime_mode == "candidate-readonly"
+    )
+    client_token_store = (
+        None if candidate_readonly else configure_client_token_store(settings)
+    )
     oauth_as_register._register_limiter = oauth_as_register.build_register_limiter(settings)
     oauth_authorize._approve_limiter = oauth_authorize.build_approve_limiter(settings)
     oauth_client_store = None
     auth_code_store = None
     signing_key = None
     refresh_token_store = None
+    client_policy = None
     if settings.oauth_as_enabled:
-        oauth_client_store = configure_client_store(settings)
-        auth_code_store = configure_auth_code_store(settings)
-        signing_key = configure_signing_key(settings)
-        if settings.oauth_as_refresh_tokens_enabled:
-            refresh_token_store = configure_refresh_store(settings)
+        signing_key = (
+            configure_signing_key_readonly(settings)
+            if candidate_readonly
+            else configure_signing_key(settings)
+        )
+        if not candidate_readonly:
+            oauth_client_store = configure_client_store(settings)
+            auth_code_store = configure_auth_code_store(settings)
+            if settings.oauth_as_refresh_tokens_enabled:
+                refresh_token_store = configure_refresh_store(settings)
+    if settings.startup_scope == "production" and settings.oauth_enabled:
+        if not tool_catalog:
+            raise ValueError("production startup requires the canonical MCP tool catalog")
+        client_policy = load_client_policy(
+            settings.client_policy_path,
+            settings.client_policy_digest,
+            tool_catalog=tool_catalog,
+        )
     return {
         "oauth_config": oauth_config,
         "client_token_store": client_token_store,
@@ -63,6 +95,7 @@ def build_server_prereqs(settings: MemorySettings) -> dict[str, Any]:
         "auth_code_store": auth_code_store,
         "signing_key": signing_key,
         "oauth_refresh_store": refresh_token_store,
+        "client_policy": client_policy,
     }
 
 
@@ -88,7 +121,15 @@ def build_runtime_lifespan(
                 yield
             return
         logger.info("Starting menhir remote API server...")
-        ctx: RuntimeContext = await start_runtime(settings)
+        candidate_readonly = (
+            startup_scope == "production"
+            and settings.runtime_mode == "candidate-readonly"
+        )
+        app.state.mutation_fence_active = False
+        ctx: RuntimeContext = await start_runtime(
+            settings,
+            candidate_readonly=candidate_readonly,
+        )
         app.state.runtime_ctx = ctx
         app.state.repo = ctx.built.neo4j
         graph_adapter = MemoryGraphAdapter(neo4j=app.state.repo)
@@ -102,6 +143,7 @@ def build_runtime_lifespan(
             graph_adapter=graph_adapter,
             lifecycle_service=lifecycle_service,
         )
+        app.state.mutation_fence_active = candidate_readonly
         logger.info("Runtime ready — session=%s", ctx.session.session_id)
         async with mcp_http_instance.session_manager.run():
             try:
@@ -234,21 +276,47 @@ def mount_server_routes(
     mcp_http_app: Any,
 ) -> None:
     """Mount REST/OAuth/explorer/MCP routes onto the FastAPI app."""
+    production_surface = startup_scope == "production"
+    candidate_readonly = production_surface and settings.runtime_mode == "candidate-readonly"
+
     app.include_router(oauth_metadata_router)
     app.include_router(oauth_as_metadata_router)
-    app.include_router(oauth_as_register_router)
-    app.include_router(oauth_authorize_router)
-    app.include_router(oauth_token_router)
-    app.include_router(api_router)
+    if candidate_readonly:
+        for path, methods in (
+            ("/oauth/authorize", ["GET", "POST"]),
+            ("/oauth/register", ["POST"]),
+            ("/oauth/token", ["POST"]),
+        ):
+            app.add_api_route(
+                path,
+                candidate_mutation_unavailable,
+                methods=methods,
+                include_in_schema=False,
+            )
+    else:
+        app.include_router(oauth_as_register_router)
+        app.include_router(oauth_authorize_router)
+        app.include_router(oauth_token_router)
 
-    if settings.explorer_enabled and startup_scope not in BACKENDLESS_SCOPES:
+    if production_surface:
+        app.include_router(production_health_router)
+    else:
+        app.include_router(api_router)
+
+    if (
+        not production_surface
+        and settings.explorer_enabled
+        and startup_scope not in BACKENDLESS_SCOPES
+    ):
         mount_explorer(app)
 
-    from menhir.api.mcp_remote import create_mcp_sse_app
     from starlette.routing import Route as StarletteRoute
 
-    mcp_sse = create_mcp_sse_app()
-    app.mount("/mcp", mcp_sse)
+    if not production_surface:
+        from menhir.api.mcp_remote import create_mcp_sse_app
+
+        mcp_sse = create_mcp_sse_app()
+        app.mount("/mcp", mcp_sse)
     streamable_handler = mcp_http_app.routes[0].app
     app.routes.insert(0, StarletteRoute("/mcp-http", endpoint=streamable_handler))
 
@@ -260,6 +328,7 @@ def wrap_server_middlewares(
     settings: MemorySettings,
     oauth_config: Any,
     client_token_store: Any,
+    client_policy: Any = None,
 ) -> Any:
     """Wrap the FastAPI app with auth + request-context middleware."""
     app = BearerAuthMiddleware(  # type: ignore[assignment]
@@ -272,6 +341,11 @@ def wrap_server_middlewares(
         client_token_store=client_token_store,
         loopback_bound=is_loopback_host(settings.api_host),
         auth_mode=resolve_auth_mode(settings),
+        force_readonly=(
+            settings.startup_scope == "production"
+            and settings.runtime_mode == "candidate-readonly"
+        ),
+        client_policy=client_policy,
     )
     app = RequestContextMiddleware(app)  # type: ignore[assignment]
     return app

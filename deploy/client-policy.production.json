@@ -1,0 +1,73 @@
+{
+  "version": 1,
+  "canonical_digest": "5eedd69823717f24bfbcd4670095503a105e9f91cb9be9cd8ac9db69a31193c8",
+  "clients": {
+    "69c2cd871b488ff4": {
+      "label": "chatgpt-chat",
+      "scopes": [
+        "menhir:read",
+        "menhir:write"
+      ],
+      "maximum_tier": "agent",
+      "namespace": "",
+      "allowed_tools": [
+        "add_memory",
+        "add_memory_and_track",
+        "build_context",
+        "get_client_context",
+        "get_enrichment_status",
+        "get_memory_stats",
+        "read_flagged_memories",
+        "recall_context_memories",
+        "recall_memories",
+        "watch_enrichment"
+      ],
+      "denied_tools": [
+        "add_candidate",
+        "add_todo",
+        "audit_artifact_corpus",
+        "close_memory",
+        "close_stale_todos",
+        "close_todo",
+        "delete_memory",
+        "delete_namespace",
+        "flag_memory",
+        "force_reenrich",
+        "force_release_enrichment_lease",
+        "force_scheduler_takeover",
+        "get_artifact",
+        "get_artifact_relationships",
+        "get_episode_trace",
+        "get_provenance",
+        "get_todo",
+        "ingest_document",
+        "ingest_project",
+        "link_artifacts",
+        "list_artifact_questions",
+        "list_artifacts",
+        "list_clients",
+        "list_conflicts",
+        "list_enrichment_queue",
+        "list_todos",
+        "mint_client",
+        "pause_scheduler",
+        "promote_memory",
+        "query_structure",
+        "rate_recall",
+        "recover_orphans",
+        "relocate_artifact_source",
+        "repair_stale_enrichment",
+        "requeue_conflicts_for_llm_review",
+        "resolve_conflict",
+        "resume_scheduler",
+        "revoke_client",
+        "run_llm_conflict_review",
+        "scan_for_conflicts",
+        "supersede_artifact",
+        "transition_artifact",
+        "unflag_memory",
+        "view_entropy"
+      ]
+    }
+  }
+}
