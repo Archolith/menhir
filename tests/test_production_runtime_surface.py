@@ -235,6 +235,7 @@ def _production_settings(**overrides: object) -> MemorySettings:
         "privacy_redact": True,
         "oauth_enabled": True,
         "oauth_as_enabled": True,
+        "oauth_as_refresh_tokens_enabled": True,
         "oauth_public_base_url": "https://memory.example.test",
         "oauth_resource": "https://memory.example.test/mcp-http",
         "oauth_audiences": ("https://memory.example.test/mcp-http",),
@@ -244,7 +245,7 @@ def _production_settings(**overrides: object) -> MemorySettings:
         "oauth_signing_key_path": str(
             Path(__file__).resolve().parent / "oauth-signing-key.test.json"
         ),
-        "client_policy_digest": "ce93658e5fe22e0b9a78575268455e4d42529c27bca008fa64322ee609788a6b",
+        "client_policy_digest": "6c4b55de5d4208f4dc61fccf66edec2edd63cbaa209fd8f40cb2d2d0795d3402",
         "api_key": "test-api-key",
     }
     values.update(overrides)
@@ -316,7 +317,7 @@ def test_production_client_policy_is_digest_bound_and_tracks_clients() -> None:
     path = (
         Path(__file__).resolve().parents[1] / "deploy" / "client-policy.production.json"
     )
-    digest = "ce93658e5fe22e0b9a78575268455e4d42529c27bca008fa64322ee609788a6b"
+    digest = "6c4b55de5d4208f4dc61fccf66edec2edd63cbaa209fd8f40cb2d2d0795d3402"
 
     from menhir.mcp.tools import ALL_TOOLS
 
@@ -342,7 +343,7 @@ def test_production_client_policy_is_digest_bound_and_tracks_clients() -> None:
 
     claude_web = authority.require_client(
         client_id="6cf6322fa828bb72",
-        scopes=frozenset({"menhir:read", "menhir:write"}),
+        scopes=frozenset({"menhir:read", "menhir:write", "offline_access"}),
         tier="agent",
     )
     assert claude_web.label == "claude-web"
@@ -350,8 +351,18 @@ def test_production_client_policy_is_digest_bound_and_tracks_clients() -> None:
     assert claude_web.registration.redirect_uris == (
         "https://claude.ai/api/mcp/auth_callback",
     )
+    assert claude_web.registration.protocol_scopes == frozenset({"offline_access"})
     assert claude_web.allowed_tools == policy.allowed_tools
     assert claude_web.denied_tools == policy.denied_tools
+
+    with pytest.raises(PermissionError, match="scopes do not match"):
+        authority.require_client(
+            client_id="6cf6322fa828bb72",
+            scopes=frozenset(
+                {"menhir:read", "menhir:write", "offline_access", "openid"}
+            ),
+            tier="agent",
+        )
 
     bridge_ids = {
         client_id: client_policy
@@ -478,6 +489,19 @@ def test_client_policy_loads_static_public_web_registration(tmp_path: Path) -> N
     )
 
 
+def test_client_policy_rejects_protocol_scope_as_permission(tmp_path: Path) -> None:
+    source = (
+        Path(__file__).resolve().parents[1] / "deploy" / "client-policy.production.json"
+    )
+    payload = json.loads(source.read_text(encoding="utf-8"))
+    payload["clients"]["6cf6322fa828bb72"]["scopes"].append("offline_access")
+    policy_path = tmp_path / "protocol-scope-policy.json"
+    digest = _write_policy_with_digest(policy_path, payload)
+
+    with pytest.raises(ValueError, match="incomplete or duplicate"):
+        load_client_policy(str(policy_path), digest)
+
+
 @pytest.mark.parametrize(
     "registration",
     [
@@ -494,6 +518,11 @@ def test_client_policy_loads_static_public_web_registration(tmp_path: Path) -> N
             "client_name": "Claude web",
             "redirect_uris": ["https://claude.example/callback"],
             "unreviewed": True,
+        },
+        {
+            "client_name": "Claude web",
+            "redirect_uris": ["https://claude.example/callback"],
+            "protocol_scopes": ["openid"],
         },
     ],
 )

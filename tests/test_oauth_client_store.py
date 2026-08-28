@@ -154,7 +154,12 @@ def _policy_authority(*policies: ClientPolicy) -> ClientPolicyAuthority:
     )
 
 
-def _static_policy(client_id: str, redirect_uri: str) -> ClientPolicy:
+def _static_policy(
+    client_id: str,
+    redirect_uri: str,
+    *,
+    protocol_scopes: frozenset[str] = frozenset(),
+) -> ClientPolicy:
     return ClientPolicy(
         client_id=client_id,
         label=f"web-{client_id}",
@@ -166,6 +171,7 @@ def _static_policy(client_id: str, redirect_uri: str) -> ClientPolicy:
         registration=OAuthClientRegistration(
             client_name=f"Web {client_id}",
             redirect_uris=(redirect_uri,),
+            protocol_scopes=protocol_scopes,
         ),
     )
 
@@ -185,6 +191,71 @@ def test_reconcile_policy_clients_seeds_distinct_web_identities(tmp_path):
     )
     assert store.get("claude-web").redirect_uris == ("https://claude.example/callback",)
     assert store.get("chatgpt-web").created_at == 123.0
+
+
+def test_reconcile_policy_clients_seeds_refresh_protocol_scope(tmp_path):
+    store = OAuthClientStore(tmp_path / "as.db")
+    policy = _static_policy(
+        "claude-web",
+        "https://claude.example/callback",
+        protocol_scopes=frozenset({"offline_access"}),
+    )
+
+    reconcile_policy_clients(
+        _policy_authority(policy),
+        store,
+        enabled_protocol_scopes=frozenset({"offline_access"}),
+        now=123.0,
+    )
+
+    assert frozenset(store.get("claude-web").scopes) == {
+        "menhir:read",
+        "menhir:write",
+        "offline_access",
+    }
+
+
+def test_reconcile_policy_clients_expands_exact_legacy_scope_atomically(tmp_path):
+    store = OAuthClientStore(tmp_path / "as.db")
+    legacy_policy = _static_policy(
+        "claude-web", "https://claude.example/callback"
+    )
+    policy = _static_policy(
+        "claude-web",
+        "https://claude.example/callback",
+        protocol_scopes=frozenset({"offline_access"}),
+    )
+    reconcile_policy_clients(_policy_authority(legacy_policy), store, now=123.0)
+    store.mark_exchanged("claude-web", now=456.0)
+
+    assert reconcile_policy_clients(
+        _policy_authority(policy),
+        store,
+        enabled_protocol_scopes=frozenset({"offline_access"}),
+        now=999.0,
+    ) == ()
+    stored = store.get("claude-web")
+    assert frozenset(stored.scopes) == {
+        "menhir:read",
+        "menhir:write",
+        "offline_access",
+    }
+    assert stored.created_at == 123.0
+    assert stored.last_exchanged == 456.0
+
+
+def test_reconcile_policy_clients_refuses_disabled_protocol_scope(tmp_path):
+    store = OAuthClientStore(tmp_path / "as.db")
+    policy = _static_policy(
+        "claude-web",
+        "https://claude.example/callback",
+        protocol_scopes=frozenset({"offline_access"}),
+    )
+
+    with pytest.raises(ValueError, match="disabled protocol scope"):
+        reconcile_policy_clients(_policy_authority(policy), store)
+
+    assert store.get("claude-web") is None
 
 
 def test_reconcile_policy_clients_is_idempotent_and_preserves_usage(tmp_path):

@@ -21,7 +21,11 @@ from menhir.api import (
     oauth_refresh_store,
 )
 from menhir.api.auth_code_store import get_auth_code_store
-from menhir.api.client_policy import ClientPolicy, ClientPolicyAuthority
+from menhir.api.client_policy import (
+    ClientPolicy,
+    ClientPolicyAuthority,
+    OAuthClientRegistration,
+)
 from menhir.api.oauth_client_store import OAuthClient, get_client_store, new_client_id
 from menhir.api.oauth_keys import get_signing_key, public_jwks
 from menhir.api.oauth_token import router as oauth_token_router
@@ -138,7 +142,11 @@ def _seed_code(cid: str, challenge: str, *, redirect_uri: str = _CB, scope: str 
     )
 
 
-def _policy(client_id: str) -> ClientPolicyAuthority:
+def _policy(
+    client_id: str,
+    *,
+    protocol_scopes: frozenset[str] = frozenset(),
+) -> ClientPolicyAuthority:
     return ClientPolicyAuthority(
         version=1,
         digest="test",
@@ -151,6 +159,15 @@ def _policy(client_id: str) -> ClientPolicyAuthority:
                 namespace="",
                 allowed_tools=frozenset({"recall_memories"}),
                 denied_tools=frozenset({"add_memory"}),
+                registration=(
+                    OAuthClientRegistration(
+                        client_name="Test App",
+                        redirect_uris=(_CB,),
+                        protocol_scopes=protocol_scopes,
+                    )
+                    if protocol_scopes
+                    else None
+                ),
             )
         },
     )
@@ -221,6 +238,33 @@ def test_explicit_policy_issues_refresh_when_offline_access_is_omitted():
     body = response.json()
     assert body["refresh_token"]
     assert body["scope"] == _SCOPE
+
+
+def test_production_policy_accepts_offline_access_for_refresh_exchange():
+    verifier, challenge = _pkce()
+    cid = _register_client()
+    code = _seed_code(
+        cid,
+        challenge,
+        scope="menhir:read menhir:write offline_access",
+    )
+
+    response = _client(
+        _ENABLED_REFRESH,
+        policy=_policy(cid, protocol_scopes=frozenset({"offline_access"})),
+    ).post(
+        "/oauth/token",
+        data=_token_form(code, cid, verifier),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["refresh_token"]
+    assert set(body["scope"].split()) == {
+        "menhir:read",
+        "menhir:write",
+        "offline_access",
+    }
 
 
 def test_production_policy_denial_does_not_consume_authorization_code():

@@ -96,7 +96,15 @@ def build_server_prereqs(
             tool_catalog=tool_catalog,
         )
         if not candidate_readonly and oauth_client_store is not None:
-            reconcile_policy_clients(client_policy, oauth_client_store)
+            reconcile_policy_clients(
+                client_policy,
+                oauth_client_store,
+                enabled_protocol_scopes=(
+                    frozenset({"offline_access"})
+                    if settings.oauth_as_refresh_tokens_enabled
+                    else frozenset()
+                ),
+            )
     return {
         "oauth_config": oauth_config,
         "client_token_store": client_token_store,

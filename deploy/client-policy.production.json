@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "canonical_digest": "ce93658e5fe22e0b9a78575268455e4d42529c27bca008fa64322ee609788a6b",
+  "canonical_digest": "6c4b55de5d4208f4dc61fccf66edec2edd63cbaa209fd8f40cb2d2d0795d3402",
   "clients": {
     "69c2cd871b488ff4": {
       "label": "chatgpt-chat",
@@ -80,6 +80,9 @@
       "label": "claude-web",
       "registration": {
         "client_name": "Claude web",
+        "protocol_scopes": [
+          "offline_access"
+        ],
         "redirect_uris": [
           "https://claude.ai/api/mcp/auth_callback"
         ],

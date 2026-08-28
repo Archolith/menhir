@@ -20,6 +20,9 @@ client secret and must never share a client ID, token cache, or audit label.
 - In Claude.ai, add `https://memory.ctharvey.me/mcp-http` as a custom connector,
   open Advanced settings, enter client ID `6cf6322fa828bb72`, and leave the
   client-secret field empty.
+- Claude requests `offline_access`. Menhir treats it strictly as a refresh-token
+  protocol capability: it is added to the static OAuth registration when refresh
+  is enabled, but it never appears in or expands the client's permission policy.
 - Complete authorization flows one at a time. Enter the Menhir operator key on
   the consent page when prompted; the hosted connector receives OAuth tokens,
   not the operator key.
