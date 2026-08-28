@@ -6,6 +6,8 @@
   Agent Smith registration keep their existing exact scope contracts.
 - Startup atomically upgrades the exact legacy Claude registration and refuses unknown or
   disabled protocol scopes before the service accepts traffic.
+- Consent pages allow only the validated callback origin through CSP `form-action`, so
+  Chromium can follow the authorization POST redirect instead of stranding issued codes.
 
 ## 2026-08-19 - fix: HIGH remediation wave 5 (explorer authorization, domain correctness)
 

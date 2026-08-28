@@ -161,6 +161,22 @@ def test_disabled_returns_404_get_and_post():
     assert c.post("/oauth/authorize", data={}).status_code == 404
 
 
+def test_consent_csp_allows_only_the_validated_callback_origin():
+    client_id = _register_client(scopes=("menhir:read", "menhir:write"))
+    _, challenge = _pkce()
+
+    response = _client().get(
+        "/oauth/authorize",
+        params=_valid_get_params(client_id, challenge=challenge),
+    )
+
+    assert response.status_code == 200
+    csp = response.headers["content-security-policy"]
+    assert "form-action 'self' https://app.example.com;" in csp
+    assert _CB not in csp
+    assert "frame-ancestors 'none'" in csp
+
+
 def test_consent_capacity_refusal_is_bounded_429(tmp_path, monkeypatch):
     client_id = _register_client(scopes=("menhir:read",))
     monkeypatch.setattr(
