@@ -243,7 +243,7 @@ def _production_settings(**overrides: object) -> MemorySettings:
         "oauth_signing_key_path": str(
             Path(__file__).resolve().parent / "oauth-signing-key.test.json"
         ),
-        "client_policy_digest": "266a36b55afee53220cceef821eecb23b470f4dc29f69709a2b08ae4c6481bee",
+        "client_policy_digest": "4fdd29b9ef3ceec7ca617c8f3ccda29d29c0ab89608bf5cf18230689fcb87725",
         "api_key": "test-api-key",
     }
     values.update(overrides)
@@ -315,7 +315,7 @@ def test_production_client_policy_is_digest_bound_and_tracks_clients() -> None:
     path = (
         Path(__file__).resolve().parents[1] / "deploy" / "client-policy.production.json"
     )
-    digest = "266a36b55afee53220cceef821eecb23b470f4dc29f69709a2b08ae4c6481bee"
+    digest = "4fdd29b9ef3ceec7ca617c8f3ccda29d29c0ab89608bf5cf18230689fcb87725"
 
     from menhir.mcp.tools import ALL_TOOLS
 
@@ -334,6 +334,23 @@ def test_production_client_policy_is_digest_bound_and_tracks_clients() -> None:
     assert policy.maximum_tier == "agent"
     assert "add_memory" in policy.allowed_tools
     assert "recall_memories" in policy.allowed_tools
+    assert policy.registration is not None
+    assert policy.registration.redirect_uris == (
+        "https://chatgpt.com/connector_platform_oauth_redirect",
+    )
+
+    claude_web = authority.require_client(
+        client_id="6cf6322fa828bb72",
+        scopes=frozenset({"menhir:read", "menhir:write"}),
+        tier="agent",
+    )
+    assert claude_web.label == "claude-web"
+    assert claude_web.registration is not None
+    assert claude_web.registration.redirect_uris == (
+        "https://claude.ai/api/mcp/auth_callback",
+    )
+    assert claude_web.allowed_tools == policy.allowed_tools
+    assert claude_web.denied_tools == policy.denied_tools
 
     bridge_ids = {
         client_id: client_policy
