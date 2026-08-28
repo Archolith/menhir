@@ -1,11 +1,11 @@
 {
   "version": 1,
-  "canonical_digest": "4fdd29b9ef3ceec7ca617c8f3ccda29d29c0ab89608bf5cf18230689fcb87725",
+  "canonical_digest": "ce93658e5fe22e0b9a78575268455e4d42529c27bca008fa64322ee609788a6b",
   "clients": {
     "69c2cd871b488ff4": {
       "label": "chatgpt-chat",
       "registration": {
-        "client_name": "ChatGPT",
+        "client_name": "chatgpt-chat",
         "redirect_uris": [
           "https://chatgpt.com/connector_platform_oauth_redirect"
         ],

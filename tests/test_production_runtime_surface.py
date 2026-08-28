@@ -45,6 +45,7 @@ def test_production_surface_omits_general_api_explorer_and_sse(tmp_path: Path) -
     app = _inner_app(
         _production_settings(
             explorer_enabled=True,
+            oauth_as_dir=str(tmp_path / "oauth"),
             oauth_signing_key_path=str(tmp_path / "oauth-signing-key.test.json"),
         )
     )
@@ -243,7 +244,7 @@ def _production_settings(**overrides: object) -> MemorySettings:
         "oauth_signing_key_path": str(
             Path(__file__).resolve().parent / "oauth-signing-key.test.json"
         ),
-        "client_policy_digest": "4fdd29b9ef3ceec7ca617c8f3ccda29d29c0ab89608bf5cf18230689fcb87725",
+        "client_policy_digest": "ce93658e5fe22e0b9a78575268455e4d42529c27bca008fa64322ee609788a6b",
         "api_key": "test-api-key",
     }
     values.update(overrides)
@@ -315,7 +316,7 @@ def test_production_client_policy_is_digest_bound_and_tracks_clients() -> None:
     path = (
         Path(__file__).resolve().parents[1] / "deploy" / "client-policy.production.json"
     )
-    digest = "4fdd29b9ef3ceec7ca617c8f3ccda29d29c0ab89608bf5cf18230689fcb87725"
+    digest = "ce93658e5fe22e0b9a78575268455e4d42529c27bca008fa64322ee609788a6b"
 
     from menhir.mcp.tools import ALL_TOOLS
 
@@ -460,7 +461,7 @@ def test_client_policy_loads_static_public_web_registration(tmp_path: Path) -> N
     payload = json.loads(source.read_text(encoding="utf-8"))
     client_id = "69c2cd871b488ff4"
     payload["clients"][client_id]["registration"] = {
-        "client_name": "ChatGPT",
+        "client_name": "chatgpt-chat",
         "redirect_uris": ["https://chatgpt.com/connector_platform_oauth_redirect"],
         "token_endpoint_auth_method": "none",
     }
@@ -471,7 +472,7 @@ def test_client_policy_loads_static_public_web_registration(tmp_path: Path) -> N
 
     registration = authority.clients[client_id].registration
     assert registration is not None
-    assert registration.client_name == "ChatGPT"
+    assert registration.client_name == "chatgpt-chat"
     assert registration.redirect_uris == (
         "https://chatgpt.com/connector_platform_oauth_redirect",
     )
