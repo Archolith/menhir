@@ -879,7 +879,7 @@ class RuntimeProviderDataOpsMixin:
         from menhir.infrastructure.project_scanner import ProjectScanner as _PS
 
         _log = _logging.getLogger(__name__)
-        if not root or not _os.path.isdir(root):
+        if not root or not await _asyncio.to_thread(_os.path.isdir, root):
             return
         # Re-checked here rather than trusted from the scheduling site: this coroutine is a
         # detached task and the tier it must be judged against is the one passed in, never a

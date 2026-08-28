@@ -134,7 +134,7 @@ async def track_mcp_call(
     payload: Any,
     runner: Callable[[], Awaitable[T]],
     store: McpTelemetryStore = telemetry_store,
-    timeout: int = DEFAULT_MCP_TIMEOUT,
+    timeout: int = DEFAULT_MCP_TIMEOUT,  # noqa: ASYNC109 -- public tool contract
     error_mapper: Callable[[str], T] | None = None,
     effective_payload: Callable[[], Any | None] | None = None,
 ) -> T:

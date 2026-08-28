@@ -8,7 +8,10 @@ cosine similarity but are not genuine contradictions, they should be linked
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from menhir.domain.merge_eligibility import MergeEligibility
 
 from menhir.domain import merge_delta as md
 from menhir.infrastructure.cypher import non_derived_view_cypher

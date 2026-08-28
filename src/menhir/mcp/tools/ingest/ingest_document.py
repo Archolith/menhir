@@ -79,7 +79,7 @@ class IngestDocumentTool(BaseTextTool):
         namespace: str = "", identity_action: str | None = None,
         adopt_project_id: str | None = None,
     ) -> str:
-        if not os.path.isfile(path):
+        if not await asyncio.to_thread(os.path.isfile, path):
             return f"Error: not a file: {path}"
 
         backend = self.get_backend()

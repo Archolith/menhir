@@ -819,7 +819,9 @@ class GraphitiClient:
             logger.debug("Could not count existing indices: %s", exc)
             return -1
 
-    async def build_indices_and_constraints(self, *, force: bool = False, timeout: int = 15) -> None:
+    async def build_indices_and_constraints(
+        self, *, force: bool = False, timeout: int = 15  # noqa: ASYNC109 -- bounds wait_for
+    ) -> None:
         """Initialize Graphiti storage prerequisites once per client instance.
 
         Graphiti's Neo4j driver constructor schedules build_indices_and_constraints()

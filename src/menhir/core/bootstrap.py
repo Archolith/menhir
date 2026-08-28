@@ -32,7 +32,9 @@ class UnavailableGraphitiClient:
     def _raise(self) -> RuntimeError:
         raise RuntimeError(self.reason)
 
-    async def build_indices_and_constraints(self, *, force: bool = False, timeout: int = 15) -> None:
+    async def build_indices_and_constraints(
+        self, *, force: bool = False, timeout: int = 15  # noqa: ASYNC109 -- client API
+    ) -> None:
         self._raise()
 
     async def add_episode(self, **kwargs: Any) -> Any:

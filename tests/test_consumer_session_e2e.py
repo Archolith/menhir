@@ -257,6 +257,7 @@ def _ingest_project(stack, root: Path, project: str, session_id: str) -> dict[st
         stack.graph_adapter,
         root_path=str(root),
         display_name=project,
+        identity_action="new",
     )
     assert claim is not None, resolution.as_dict()
     scan = ProjectScanner().scan(str(root), project)

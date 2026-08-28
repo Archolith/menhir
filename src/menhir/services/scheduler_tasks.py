@@ -772,7 +772,7 @@ async def refresh_structure_graphs(
     for proj in projects:
         name = proj.get("name", "")
         root_path = proj.get("root_path", "")
-        if not root_path or not os.path.isdir(root_path):
+        if not root_path or not await asyncio.to_thread(os.path.isdir, root_path):
             errors += 1
             details.append({"project": name, "status": "path_missing"})
             continue

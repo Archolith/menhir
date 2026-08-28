@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import asyncio
 import hmac
 import json
 import re
@@ -120,7 +121,7 @@ async def source_fence_probe(request: Request) -> JSONResponse:
     }
     payload = json.dumps(claims, sort_keys=True, separators=(",", ":"))
     try:
-        key_bytes = Path(private_key_path).read_bytes()
+        key_bytes = await asyncio.to_thread(Path(private_key_path).read_bytes)
         private_key = serialization.load_pem_private_key(key_bytes, password=None)
         if not isinstance(private_key, Ed25519PrivateKey):
             raise ValueError("source-fence key is not Ed25519")

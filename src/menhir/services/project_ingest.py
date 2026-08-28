@@ -12,6 +12,11 @@ if TYPE_CHECKING:
     from menhir.infrastructure.project_scanner import ProjectScanResult
 
 
+def _default_project_name(path: str) -> str:
+    """Derive a project name in synchronous code so path probing stays off the event loop."""
+    return os.path.basename(os.path.normpath(path))
+
+
 class ProjectIngestBackend(Protocol):
     """Backend capabilities required by the project-ingest application workflow."""
 
@@ -155,8 +160,8 @@ async def execute_project_ingest(
     omitting the argument sent a pinned caller's project narrative to the default group.
     """
 
-    project_name = name or os.path.basename(os.path.normpath(path))
-    if not os.path.isdir(path):
+    project_name = name or await asyncio.to_thread(_default_project_name, path)
+    if not await asyncio.to_thread(os.path.isdir, path):
         return ProjectIngestOutcome(
             project_name=project_name,
             error=f"not a directory: {path}",
