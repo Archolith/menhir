@@ -1,9 +1,16 @@
 {
   "version": 1,
-  "canonical_digest": "a9d8f74e6c16bd259039b66e7512a0d3377c5f5676298511d242a96587bd283a",
+  "canonical_digest": "266a36b55afee53220cceef821eecb23b470f4dc29f69709a2b08ae4c6481bee",
   "clients": {
     "69c2cd871b488ff4": {
       "label": "chatgpt-chat",
+      "registration": {
+        "client_name": "ChatGPT",
+        "redirect_uris": [
+          "https://chatgpt.com/connector_platform_oauth_redirect"
+        ],
+        "token_endpoint_auth_method": "none"
+      },
       "scopes": [
         "menhir:read",
         "menhir:write"

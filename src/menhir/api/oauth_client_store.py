@@ -7,8 +7,12 @@ import secrets
 import sqlite3
 import threading
 import time
+from typing import TYPE_CHECKING
 
 from archolith_oauth import OAuthClient, OAuthClientStore, hash_secret
+
+if TYPE_CHECKING:
+    from menhir.api.client_policy import ClientPolicyAuthority
 
 
 def new_client_id() -> str:
@@ -148,6 +152,92 @@ def configure_client_store(settings: object) -> OAuthClientStore:
     return _client_store_singleton
 
 
+def reconcile_policy_clients(
+    authority: "ClientPolicyAuthority",
+    store: OAuthClientStore,
+    *,
+    now: float | None = None,
+) -> tuple[str, ...]:
+    """Seed policy-owned public clients atomically and reject stored drift.
+
+    Registrations are optional because CIMD clients resolve from their metadata
+    documents. A static web client, however, must be reproducible from the same
+    digest-bound artifact that grants its authority. Existing rows are never
+    overwritten; any mismatch aborts the whole transaction before a partial
+    policy reconciliation can commit.
+    """
+
+    created_at = time.time() if now is None else float(now)
+    registrations = tuple(
+        policy
+        for policy in authority.clients.values()
+        if policy.registration is not None
+    )
+    if not registrations:
+        return ()
+
+    inserted: list[str] = []
+    with _cimd_write_lock:
+        conn = sqlite3.connect(str(store.db_path))
+        conn.row_factory = sqlite3.Row
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            for policy in registrations:
+                registration = policy.registration
+                assert registration is not None
+                row = conn.execute(
+                    """SELECT client_name, redirect_uris, scopes,
+                              client_secret_hash, token_endpoint_auth_method
+                       FROM oauth_clients WHERE client_id = ?""",
+                    (policy.client_id,),
+                ).fetchone()
+                if row is not None:
+                    try:
+                        stored_redirect_uris = tuple(json.loads(row["redirect_uris"]))
+                        stored_scopes = frozenset(json.loads(row["scopes"]))
+                    except Exception as exc:
+                        raise ValueError(
+                            "policy-owned OAuth client metadata is malformed"
+                        ) from exc
+                    if (
+                        row["client_name"] != registration.client_name
+                        or stored_redirect_uris != registration.redirect_uris
+                        or stored_scopes != policy.scopes
+                        or row["client_secret_hash"] != ""
+                        or row["token_endpoint_auth_method"]
+                        != registration.token_endpoint_auth_method
+                    ):
+                        raise ValueError(
+                            "policy-owned OAuth client metadata does not match "
+                            f"the configured authority: {policy.label}"
+                        )
+                    continue
+
+                conn.execute(
+                    """INSERT INTO oauth_clients
+                       (client_id, client_name, redirect_uris, scopes,
+                        client_secret_hash, created_at,
+                        token_endpoint_auth_method, last_exchanged)
+                       VALUES (?, ?, ?, ?, '', ?, ?, NULL)""",
+                    (
+                        policy.client_id,
+                        registration.client_name,
+                        json.dumps(list(registration.redirect_uris)),
+                        json.dumps(sorted(policy.scopes)),
+                        created_at,
+                        registration.token_endpoint_auth_method,
+                    ),
+                )
+                inserted.append(policy.client_id)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+    return tuple(inserted)
+
+
 def get_client_store() -> OAuthClientStore:
     """Return the shared embedded-AS registered-client store."""
     global _client_store_singleton
@@ -183,6 +273,7 @@ __all__ = [
     "hash_secret",
     "new_client_id",
     "record_cimd_fetch",
+    "reconcile_policy_clients",
     "upsert_cimd_client",
     "upsert_client",
 ]

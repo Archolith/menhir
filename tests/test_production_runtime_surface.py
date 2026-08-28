@@ -64,7 +64,9 @@ def test_production_surface_omits_general_api_explorer_and_sse(tmp_path: Path) -
 @pytest.mark.asyncio
 async def test_readyz_does_not_expose_source_identity_publicly() -> None:
     state = SimpleNamespace(
-        settings=SimpleNamespace(runtime_mode="production", instance_id="source-prod-a"),
+        settings=SimpleNamespace(
+            runtime_mode="production", instance_id="source-prod-a"
+        ),
         runtime_ctx=SimpleNamespace(
             capabilities=SimpleNamespace(neo4j_ready=True, enrichment_ready=True),
             scheduler=object(),
@@ -73,23 +75,28 @@ async def test_readyz_does_not_expose_source_identity_publicly() -> None:
     )
     response = await readyz(SimpleNamespace(app=SimpleNamespace(state=state)))
     assert response.status_code == 200
-    assert b'instance_id' not in response.body
+    assert b"instance_id" not in response.body
 
 
 @pytest.mark.asyncio
-async def test_source_fence_probe_requires_token_and_returns_source_signature(tmp_path) -> None:
+async def test_source_fence_probe_requires_token_and_returns_source_signature(
+    tmp_path,
+) -> None:
     import base64
     from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
     token = "t" * 48
     challenge = "c" * 32
     key = Ed25519PrivateKey.generate()
     key_path = tmp_path / "source-fence.pem"
-    key_path.write_bytes(key.private_bytes(
-        serialization.Encoding.PEM,
-        serialization.PrivateFormat.PKCS8,
-        serialization.NoEncryption(),
-    ))
+    key_path.write_bytes(
+        key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+    )
     settings = SimpleNamespace(
         runtime_mode="candidate-readonly",
         instance_id="source-prod-a",
@@ -128,9 +135,7 @@ def test_candidate_surface_replaces_oauth_mutations_with_maintenance_routes(
         "configure_signing_key_readonly",
         lambda settings: object(),
     )
-    app = _inner_app(
-        _production_settings(runtime_mode="candidate-readonly")
-    )
+    app = _inner_app(_production_settings(runtime_mode="candidate-readonly"))
 
     candidate_routes = {
         (str(getattr(route, "path", "")), frozenset(getattr(route, "methods", set())))
@@ -187,11 +192,15 @@ def test_candidate_prereqs_do_not_open_mutating_oauth_stores(monkeypatch) -> Non
             oauth_public_base_url="https://memory.example.test",
             oauth_resource="https://memory.example.test/mcp-http",
             oauth_issuer="https://memory.example.test",
-                oauth_jwks_uri="https://memory.example.test/.well-known/jwks.json",
-                oauth_as_refresh_tokens_enabled=True,
-                privacy_redact=True,
-                client_policy_path=str(Path(__file__).resolve().parent / "client-policy.test.json"),
-                oauth_signing_key_path=str(Path(__file__).resolve().parent / "oauth-signing-key.test.json"),
+            oauth_jwks_uri="https://memory.example.test/.well-known/jwks.json",
+            oauth_as_refresh_tokens_enabled=True,
+            privacy_redact=True,
+            client_policy_path=str(
+                Path(__file__).resolve().parent / "client-policy.test.json"
+            ),
+            oauth_signing_key_path=str(
+                Path(__file__).resolve().parent / "oauth-signing-key.test.json"
+            ),
             client_policy_digest="a" * 64,
         ),
         tool_catalog=frozenset({"recall_memories"}),
@@ -216,7 +225,9 @@ def test_candidate_mode_requires_production_surface() -> None:
 
 
 def _production_settings(**overrides: object) -> MemorySettings:
-    policy_path = Path(__file__).resolve().parents[1] / "deploy" / "client-policy.production.json"
+    policy_path = (
+        Path(__file__).resolve().parents[1] / "deploy" / "client-policy.production.json"
+    )
     values: dict[str, object] = {
         "startup_scope": "production",
         "runtime_mode": "production",
@@ -232,7 +243,7 @@ def _production_settings(**overrides: object) -> MemorySettings:
         "oauth_signing_key_path": str(
             Path(__file__).resolve().parent / "oauth-signing-key.test.json"
         ),
-        "client_policy_digest": "a9d8f74e6c16bd259039b66e7512a0d3377c5f5676298511d242a96587bd283a",
+        "client_policy_digest": "266a36b55afee53220cceef821eecb23b470f4dc29f69709a2b08ae4c6481bee",
         "api_key": "test-api-key",
     }
     values.update(overrides)
@@ -304,7 +315,7 @@ def test_production_client_policy_is_digest_bound_and_tracks_clients() -> None:
     path = (
         Path(__file__).resolve().parents[1] / "deploy" / "client-policy.production.json"
     )
-    digest = "a9d8f74e6c16bd259039b66e7512a0d3377c5f5676298511d242a96587bd283a"
+    digest = "266a36b55afee53220cceef821eecb23b470f4dc29f69709a2b08ae4c6481bee"
 
     from menhir.mcp.tools import ALL_TOOLS
 
@@ -335,8 +346,12 @@ def test_production_client_policy_is_digest_bound_and_tracks_clients() -> None:
     assert len({entry.label for entry in bridge_ids.values()}) == 13
     assert {entry.consent_group for entry in bridge_ids.values()} == {"agent-smith"}
     assert len(authority.consent_group_clients(next(iter(bridge_ids)))) == 13
-    assert all(entry.allowed_tools == policy.allowed_tools for entry in bridge_ids.values())
-    assert all(entry.denied_tools == policy.denied_tools for entry in bridge_ids.values())
+    assert all(
+        entry.allowed_tools == policy.allowed_tools for entry in bridge_ids.values()
+    )
+    assert all(
+        entry.denied_tools == policy.denied_tools for entry in bridge_ids.values()
+    )
     assert (
         "https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json"
         not in authority.clients
@@ -368,19 +383,18 @@ def test_candidate_compose_uses_exact_restored_production_authorities() -> None:
         encoding="utf-8"
     )
 
+    assert "source: ${MENHIR_STATE_ROOT:-/srv/menhir/production/state}/oauth" in compose
     assert (
-        "source: ${MENHIR_STATE_ROOT:-/srv/menhir/production/state}/oauth"
-        in compose
+        "source: ${MENHIR_PROD_ROOT:-/srv/menhir/production}/state/oauth" not in compose
     )
-    assert "source: ${MENHIR_PROD_ROOT:-/srv/menhir/production}/state/oauth" not in compose
-    assert (
-        'MENHIR_OAUTH_AS_REFRESH_WITHOUT_OFFLINE_ACCESS_ENABLED: "true"'
-        in compose
-    )
+    assert 'MENHIR_OAUTH_AS_REFRESH_WITHOUT_OFFLINE_ACCESS_ENABLED: "true"' in compose
     assert 'MENHIR_STATE_ROOT="${MENHIR_ROOT}/state"' in release_lib
     assert 'MENHIR_PROD_SECRETS_DIR="${MENHIR_ROOT}/secrets"' in release_lib
     assert 'MENHIR_PROD_POLICY_DIR="${MENHIR_ROOT}/policy"' in release_lib
-    assert 'MENHIR_TELEMETRY_ROOT="${candidate_root}/probe-output/telemetry"' in release_lib
+    assert (
+        'MENHIR_TELEMETRY_ROOT="${candidate_root}/probe-output/telemetry"'
+        in release_lib
+    )
     assert '"oauth=${MENHIR_ROOT}/state/oauth"' in release_lib
     assert '"telemetry=${MENHIR_ROOT}/state/telemetry"' in release_lib
     assert 'python3 "$(authority_digest_tool)" local-set' in release_lib
@@ -409,8 +423,81 @@ def test_client_policy_rejects_duplicate_json_keys(tmp_path: Path) -> None:
         load_client_policy(str(policy_path), "a" * 64)
 
 
+def _write_policy_with_digest(path: Path, payload: dict[str, object]) -> str:
+    canonical = dict(payload)
+    canonical.pop("canonical_digest", None)
+    digest = hashlib.sha256(
+        json.dumps(
+            canonical, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+        ).encode("ascii")
+    ).hexdigest()
+    payload["canonical_digest"] = digest
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return digest
+
+
+def test_client_policy_loads_static_public_web_registration(tmp_path: Path) -> None:
+    source = (
+        Path(__file__).resolve().parents[1] / "deploy" / "client-policy.production.json"
+    )
+    payload = json.loads(source.read_text(encoding="utf-8"))
+    client_id = "69c2cd871b488ff4"
+    payload["clients"][client_id]["registration"] = {
+        "client_name": "ChatGPT",
+        "redirect_uris": ["https://chatgpt.com/connector_platform_oauth_redirect"],
+        "token_endpoint_auth_method": "none",
+    }
+    policy_path = tmp_path / "static-web-policy.json"
+    digest = _write_policy_with_digest(policy_path, payload)
+
+    authority = load_client_policy(str(policy_path), digest)
+
+    registration = authority.clients[client_id].registration
+    assert registration is not None
+    assert registration.client_name == "ChatGPT"
+    assert registration.redirect_uris == (
+        "https://chatgpt.com/connector_platform_oauth_redirect",
+    )
+
+
+@pytest.mark.parametrize(
+    "registration",
+    [
+        {
+            "client_name": "Claude web",
+            "redirect_uris": ["http://claude.example/callback"],
+        },
+        {
+            "client_name": "Claude web",
+            "redirect_uris": ["https://claude.example/callback"],
+            "token_endpoint_auth_method": "client_secret_post",
+        },
+        {
+            "client_name": "Claude web",
+            "redirect_uris": ["https://claude.example/callback"],
+            "unreviewed": True,
+        },
+    ],
+)
+def test_client_policy_rejects_unsafe_web_registration(
+    tmp_path: Path, registration: dict[str, object]
+) -> None:
+    source = (
+        Path(__file__).resolve().parents[1] / "deploy" / "client-policy.production.json"
+    )
+    payload = json.loads(source.read_text(encoding="utf-8"))
+    payload["clients"]["69c2cd871b488ff4"]["registration"] = registration
+    policy_path = tmp_path / "unsafe-web-policy.json"
+    digest = _write_policy_with_digest(policy_path, payload)
+
+    with pytest.raises(ValueError, match="registration"):
+        load_client_policy(str(policy_path), digest)
+
+
 def test_consent_group_rejects_mixed_authority(tmp_path: Path) -> None:
-    source = Path(__file__).resolve().parents[1] / "deploy" / "client-policy.production.json"
+    source = (
+        Path(__file__).resolve().parents[1] / "deploy" / "client-policy.production.json"
+    )
     payload = json.loads(source.read_text(encoding="utf-8"))
     grouped = [
         value
