@@ -7,6 +7,9 @@
   port for independent consent, token storage, and revocation.
 - Publish the per-client CIMD roster through the existing allowlisted metadata
   endpoint and return 404 for the retired unqualified shared identity.
+- Bind those separate identities into one digest-controlled consent group, so
+  the operator secret is entered once per short authorization session while
+  every application still receives its own token and audit identity.
 - Keep each identity on the same least-privilege read/write tool partition and
   bind the complete roster to a new production policy digest.
 

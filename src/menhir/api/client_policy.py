@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -30,6 +31,7 @@ class ClientPolicy:
     namespace: str
     allowed_tools: frozenset[str]
     denied_tools: frozenset[str]
+    consent_group: str = ""
 
 
 @dataclass(frozen=True)
@@ -37,6 +39,24 @@ class ClientPolicyAuthority:
     version: int
     digest: str
     clients: dict[str, ClientPolicy]
+
+    def consent_group_clients(self, client_id: str) -> tuple[str, ...]:
+        """Return the exact policy-bound suite approved with *client_id*.
+
+        Empty groups remain client-scoped. Group membership is only sourced
+        from this digest-bound authority, never from dynamic registrations.
+        """
+
+        policy = self.policy_for_client_id(client_id)
+        if not policy.consent_group:
+            return (client_id,)
+        return tuple(
+            sorted(
+                candidate.client_id
+                for candidate in self.clients.values()
+                if candidate.consent_group == policy.consent_group
+            )
+        )
 
     def policy_for_client_id(self, client_id: str) -> ClientPolicy:
         """Resolve an immutable client identity or fail closed."""
@@ -135,6 +155,12 @@ def load_client_policy(
         namespace = str(raw.get("namespace", ""))
         allowed_tools = frozenset(str(value) for value in raw.get("allowed_tools", ()))
         denied_tools = frozenset(str(value) for value in raw.get("denied_tools", ()))
+        consent_group_raw = raw.get("consent_group", "")
+        consent_group = (
+            consent_group_raw.strip().lower()
+            if isinstance(consent_group_raw, str)
+            else ""
+        )
         if (
             not label
             or label in labels
@@ -144,6 +170,14 @@ def load_client_policy(
             or not denied_tools
             or bool(allowed_tools & denied_tools)
             or any(not value for value in scopes | allowed_tools | denied_tools)
+            or (
+                "consent_group" in raw
+                and (
+                    not consent_group
+                    or re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", consent_group)
+                    is None
+                )
+            )
         ):
             raise ValueError(
                 "production client policy has an incomplete or duplicate entry"
@@ -157,7 +191,25 @@ def load_client_policy(
             namespace=namespace,
             allowed_tools=allowed_tools,
             denied_tools=denied_tools,
+            consent_group=consent_group,
         )
+
+    consent_group_authority: dict[str, tuple[object, ...]] = {}
+    for policy in clients.values():
+        if not policy.consent_group:
+            continue
+        signature = (
+            policy.scopes,
+            policy.maximum_tier,
+            policy.namespace,
+            policy.allowed_tools,
+            policy.denied_tools,
+        )
+        existing = consent_group_authority.setdefault(policy.consent_group, signature)
+        if existing != signature:
+            raise ValueError(
+                "production consent-group clients must have identical authority"
+            )
 
     if tool_catalog is not None:
         for policy in clients.values():

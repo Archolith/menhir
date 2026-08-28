@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -231,7 +232,7 @@ def _production_settings(**overrides: object) -> MemorySettings:
         "oauth_signing_key_path": str(
             Path(__file__).resolve().parent / "oauth-signing-key.test.json"
         ),
-        "client_policy_digest": "788bf6955d4cf525c35e89a27e774645ecde387077d155e430817b7011af01b7",
+        "client_policy_digest": "a9d8f74e6c16bd259039b66e7512a0d3377c5f5676298511d242a96587bd283a",
         "api_key": "test-api-key",
     }
     values.update(overrides)
@@ -303,7 +304,7 @@ def test_production_client_policy_is_digest_bound_and_tracks_clients() -> None:
     path = (
         Path(__file__).resolve().parents[1] / "deploy" / "client-policy.production.json"
     )
-    digest = "788bf6955d4cf525c35e89a27e774645ecde387077d155e430817b7011af01b7"
+    digest = "a9d8f74e6c16bd259039b66e7512a0d3377c5f5676298511d242a96587bd283a"
 
     from menhir.mcp.tools import ALL_TOOLS
 
@@ -332,6 +333,8 @@ def test_production_client_policy_is_digest_bound_and_tracks_clients() -> None:
     }
     assert len(bridge_ids) == 13
     assert len({entry.label for entry in bridge_ids.values()}) == 13
+    assert {entry.consent_group for entry in bridge_ids.values()} == {"agent-smith"}
+    assert len(authority.consent_group_clients(next(iter(bridge_ids)))) == 13
     assert all(entry.allowed_tools == policy.allowed_tools for entry in bridge_ids.values())
     assert all(entry.denied_tools == policy.denied_tools for entry in bridge_ids.values())
     assert (
@@ -404,3 +407,27 @@ def test_client_policy_rejects_duplicate_json_keys(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="duplicate JSON key"):
         load_client_policy(str(policy_path), "a" * 64)
+
+
+def test_consent_group_rejects_mixed_authority(tmp_path: Path) -> None:
+    source = Path(__file__).resolve().parents[1] / "deploy" / "client-policy.production.json"
+    payload = json.loads(source.read_text(encoding="utf-8"))
+    grouped = [
+        value
+        for value in payload["clients"].values()
+        if value.get("consent_group") == "agent-smith"
+    ]
+    grouped[0]["scopes"] = ["menhir:read"]
+    canonical = dict(payload)
+    canonical.pop("canonical_digest", None)
+    digest = hashlib.sha256(
+        json.dumps(
+            canonical, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+        ).encode("ascii")
+    ).hexdigest()
+    payload["canonical_digest"] = digest
+    policy_path = tmp_path / "mixed-group-policy.json"
+    policy_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="identical authority"):
+        load_client_policy(str(policy_path), digest)

@@ -14,7 +14,7 @@ from archolith_oauth import AuthorizationCodeStore
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from menhir.api import auth_code_store, oauth_client_store
+from menhir.api import auth_code_store, oauth_authorize, oauth_client_store
 from menhir.api.auth_code_store import get_auth_code_store
 from menhir.api.client_policy import ClientPolicy, ClientPolicyAuthority
 from menhir.api.oauth_authorize import router as oauth_authorize_router
@@ -377,6 +377,62 @@ def test_post_approve_issues_code_and_redirects():
     assert record is not None
     assert record.subject == "menhir-admin"
     assert record.code_challenge == challenge
+
+
+def test_production_consent_group_uses_one_secret_for_distinct_clients():
+    _, challenge = _pkce()
+    scopes = frozenset({"menhir:read", "menhir:write"})
+    cid_a = _register_client(scopes=tuple(scopes), client_name="Claude")
+    cid_b = _register_client(scopes=tuple(scopes), client_name="Codex")
+
+    def entry(client_id: str, label: str) -> ClientPolicy:
+        return ClientPolicy(
+            client_id=client_id,
+            label=label,
+            scopes=scopes,
+            maximum_tier="agent",
+            namespace="",
+            allowed_tools=frozenset({"recall_memories"}),
+            denied_tools=frozenset({"add_memory"}),
+            consent_group="agent-smith",
+        )
+
+    authority = ClientPolicyAuthority(
+        version=1,
+        digest="test",
+        clients={
+            cid_a: entry(cid_a, "agent-smith-claude"),
+            cid_b: entry(cid_b, "agent-smith-codex"),
+        },
+    )
+    client = _client(policy=authority)
+    first = client.get(
+        "/oauth/authorize",
+        params=_valid_get_params(
+            cid_a, challenge=challenge, scope="menhir:read menhir:write"
+        ),
+    )
+    form = _extract_hidden(first.text)
+    form["admin_secret"] = "s3cret"
+    form["decision"] = "approve"
+    approved = client.post("/oauth/authorize", data=form)
+    assert approved.status_code == 302
+    session_cookie = re.search(
+        r"menhir_as_session=([^;]+)", approved.headers["set-cookie"]
+    ).group(1)
+    verified = oauth_authorize._verify_session(session_cookie, _ENABLED)
+    assert verified is not None
+    assert set(verified[1]) == {cid_a, cid_b}
+
+    second = client.get(
+        "/oauth/authorize",
+        params=_valid_get_params(
+            cid_b, challenge=challenge, scope="menhir:read menhir:write"
+        ),
+        headers={"cookie": f"menhir_as_session={session_cookie}"},
+    )
+    assert second.status_code == 302
+    assert "code" in _location_query(second)
 
 
 def test_consent_approval_survives_authorization_store_recreation(monkeypatch):

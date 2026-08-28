@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "canonical_digest": "788bf6955d4cf525c35e89a27e774645ecde387077d155e430817b7011af01b7",
+  "canonical_digest": "a9d8f74e6c16bd259039b66e7512a0d3377c5f5676298511d242a96587bd283a",
   "clients": {
     "69c2cd871b488ff4": {
       "label": "chatgpt-chat",
@@ -134,7 +134,8 @@
         "transition_artifact",
         "unflag_memory",
         "view_entropy"
-      ]
+      ],
+      "consent_group": "agent-smith"
     },
     "https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client=codex": {
       "label": "agent-smith-codex",
@@ -201,7 +202,8 @@
         "transition_artifact",
         "unflag_memory",
         "view_entropy"
-      ]
+      ],
+      "consent_group": "agent-smith"
     },
     "https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client=gemini": {
       "label": "agent-smith-gemini",
@@ -268,7 +270,8 @@
         "transition_artifact",
         "unflag_memory",
         "view_entropy"
-      ]
+      ],
+      "consent_group": "agent-smith"
     },
     "https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client=antigravity-ide": {
       "label": "agent-smith-antigravity-ide",
@@ -335,7 +338,8 @@
         "transition_artifact",
         "unflag_memory",
         "view_entropy"
-      ]
+      ],
+      "consent_group": "agent-smith"
     },
     "https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client=gemini-config": {
       "label": "agent-smith-gemini-config",
@@ -402,7 +406,8 @@
         "transition_artifact",
         "unflag_memory",
         "view_entropy"
-      ]
+      ],
+      "consent_group": "agent-smith"
     },
     "https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client=opencode": {
       "label": "agent-smith-opencode",
@@ -469,7 +474,8 @@
         "transition_artifact",
         "unflag_memory",
         "view_entropy"
-      ]
+      ],
+      "consent_group": "agent-smith"
     },
     "https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client=qwen": {
       "label": "agent-smith-qwen",
@@ -536,7 +542,8 @@
         "transition_artifact",
         "unflag_memory",
         "view_entropy"
-      ]
+      ],
+      "consent_group": "agent-smith"
     },
     "https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client=goose": {
       "label": "agent-smith-goose",
@@ -603,7 +610,8 @@
         "transition_artifact",
         "unflag_memory",
         "view_entropy"
-      ]
+      ],
+      "consent_group": "agent-smith"
     },
     "https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client=reasonix": {
       "label": "agent-smith-reasonix",
@@ -670,7 +678,8 @@
         "transition_artifact",
         "unflag_memory",
         "view_entropy"
-      ]
+      ],
+      "consent_group": "agent-smith"
     },
     "https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client=zcode": {
       "label": "agent-smith-zcode",
@@ -737,7 +746,8 @@
         "transition_artifact",
         "unflag_memory",
         "view_entropy"
-      ]
+      ],
+      "consent_group": "agent-smith"
     },
     "https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client=cline": {
       "label": "agent-smith-cline",
@@ -804,7 +814,8 @@
         "transition_artifact",
         "unflag_memory",
         "view_entropy"
-      ]
+      ],
+      "consent_group": "agent-smith"
     },
     "https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client=wsl-claude": {
       "label": "agent-smith-wsl-claude",
@@ -871,7 +882,8 @@
         "transition_artifact",
         "unflag_memory",
         "view_entropy"
-      ]
+      ],
+      "consent_group": "agent-smith"
     },
     "https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client=wsl-opencode": {
       "label": "agent-smith-wsl-opencode",
@@ -938,7 +950,8 @@
         "transition_artifact",
         "unflag_memory",
         "view_entropy"
-      ]
+      ],
+      "consent_group": "agent-smith"
     }
   }
 }
