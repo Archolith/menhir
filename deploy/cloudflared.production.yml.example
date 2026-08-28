@@ -1,0 +1,16 @@
+# Replace this placeholder with the UUID from `cloudflared tunnel create`.
+tunnel: <TUNNEL_UUID>
+credentials-file: /etc/cloudflared/credentials.json
+
+# This allowlist is the public security boundary when cloudflared connects
+# directly to Menhir. Keep it aligned with the memory.ctharvey.me Caddy vhost.
+ingress:
+  - hostname: memory.ctharvey.me
+    path: ^/(?:mcp-http(?:/.*)?|oauth/(?:authorize|token|register)|\.well-known/(?:jwks\.json|oauth-authorization-server(?:/.*)?|oauth-protected-resource(?:/.*)?)|livez|readyz)$
+    service: http://menhir-prod-app:8099
+    originRequest:
+      connectTimeout: 10s
+      noHappyEyeballs: false
+  - hostname: memory.ctharvey.me
+    service: http_status:404
+  - service: http_status:404
