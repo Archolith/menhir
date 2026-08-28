@@ -504,6 +504,7 @@ def _text_of(result: Any) -> str:
 
 @pytest.mark.online
 @pytest.mark.asyncio
+@pytest.mark.timeout(180)
 async def test_an_ordinary_working_session(stack, tmp_path) -> None:
     """One believable session, driven through real surfaces, asserted at the far end."""
     from menhir.core import prepare_memory_runtime
