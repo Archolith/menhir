@@ -117,7 +117,9 @@ services:
     healthcheck:
       test: ["CMD-SHELL", "auth=$$(cat /run/secrets/neo4j_auth) && export NEO4J_USERNAME=$${auth%%/*} NEO4J_PASSWORD=$${auth#*/} && /var/lib/neo4j/bin/cypher-shell -a bolt://localhost:7687 'RETURN 1' >/dev/null 2>&1 || exit 1"]
       interval: 10s
-      timeout: 5s
+      # cypher-shell starts a JVM; on the production VPS cold probes can take
+      # longer than five seconds even when Bolt is immediately responsive.
+      timeout: 15s
       retries: 12
       start_period: 60s
 

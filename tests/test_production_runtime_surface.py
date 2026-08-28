@@ -370,6 +370,7 @@ def test_production_compose_uses_compose_v5_compatible_pid_limits() -> None:
     assert "pids_limit:" not in compose
     assert "          pids: 1024" in compose
     assert "          pids: 256" in compose
+    assert "      timeout: 15s" in compose
 
 
 def test_client_policy_rejects_duplicate_json_keys(tmp_path: Path) -> None:
