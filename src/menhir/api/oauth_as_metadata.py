@@ -12,6 +12,7 @@ from menhir.config.oauth import _as_bool, _get_setting, build_oauth_config
 router = APIRouter()
 
 _REFRESH_TTL_DEFAULT_S = 30 * 24 * 60 * 60
+_AGENT_SMITH_CALLBACK_PORT = 43680
 
 
 def _as_enabled(settings: object) -> bool:
@@ -67,8 +68,50 @@ async def oauth_authorization_server_metadata(
     return JSONResponse(authorization_server_metadata(config))
 
 
+@router.get(
+    "/oauth/client-metadata/agent-smith.json",
+    include_in_schema=False,
+)
+async def agent_smith_client_metadata(request: Request) -> JSONResponse:
+    """Publish Agent Smith's stable public-client identity for MCP OAuth.
+
+    This document contains no credential or grant. Production authorization
+    remains controlled by the immutable client policy and operator consent.
+    """
+
+    settings = getattr(request.app.state, "settings", None) or MemorySettings.from_env()
+    if not _as_enabled(settings):
+        raise HTTPException(
+            status_code=404,
+            detail="OAuth authorization-server metadata is not enabled",
+        )
+    try:
+        config = build_authorization_server_config(settings)
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    client_id = f"{config.issuer}/oauth/client-metadata/agent-smith.json"
+    as_metadata = authorization_server_metadata(config)
+    return JSONResponse(
+        {
+            "client_id": client_id,
+            "client_name": "Agent Smith harnesses",
+            "redirect_uris": [
+                f"http://127.0.0.1:{_AGENT_SMITH_CALLBACK_PORT}/oauth/callback",
+                f"http://localhost:{_AGENT_SMITH_CALLBACK_PORT}/oauth/callback",
+            ],
+            "grant_types": as_metadata["grant_types_supported"],
+            "response_types": ["code"],
+            "token_endpoint_auth_method": "none",
+            "token_endpoint_auth_methods_supported": ["none"],
+            "scope": " ".join(as_metadata["scopes_supported"]),
+        }
+    )
+
+
 __all__ = [
     "_as_enabled",
+    "agent_smith_client_metadata",
     "build_authorization_server_config",
     "oauth_authorization_server_metadata",
     "router",

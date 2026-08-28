@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-08-27 - Authorize Agent Smith OAuth bridge
+
+- Publish a stable CIMD document for Agent Smith's pinned `mcp-remote` bridge,
+  with fixed Windows and WSL loopback callbacks and no embedded credential.
+- Add the bridge identity to the digest-bound production client policy with the
+  existing agent tool partition and refresh-token scope.
+- Preserve the existing ChatGPT client unchanged and cover the metadata and
+  complete policy census with focused production tests.
+
 ## 2026-08-27 - Add full Contabo production release path
 
 - Added the immutable four-repository release authority, offline wheelhouse and

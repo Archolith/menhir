@@ -231,7 +231,7 @@ def _production_settings(**overrides: object) -> MemorySettings:
         "oauth_signing_key_path": str(
             Path(__file__).resolve().parent / "oauth-signing-key.test.json"
         ),
-        "client_policy_digest": "5eedd69823717f24bfbcd4670095503a105e9f91cb9be9cd8ac9db69a31193c8",
+        "client_policy_digest": "07d0c90e06c4147369145631651c524ca4d907d047c2aa1366df2edbe7fc8903",
         "api_key": "test-api-key",
     }
     values.update(overrides)
@@ -299,11 +299,11 @@ async def test_candidate_recall_forces_access_updates_off(monkeypatch) -> None:
     assert observed["update_access"] is False
 
 
-def test_production_client_policy_is_digest_bound_and_tracks_chatgpt() -> None:
+def test_production_client_policy_is_digest_bound_and_tracks_clients() -> None:
     path = (
         Path(__file__).resolve().parents[1] / "deploy" / "client-policy.production.json"
     )
-    digest = "5eedd69823717f24bfbcd4670095503a105e9f91cb9be9cd8ac9db69a31193c8"
+    digest = "07d0c90e06c4147369145631651c524ca4d907d047c2aa1366df2edbe7fc8903"
 
     from menhir.mcp.tools import ALL_TOOLS
 
@@ -322,6 +322,19 @@ def test_production_client_policy_is_digest_bound_and_tracks_chatgpt() -> None:
     assert policy.maximum_tier == "agent"
     assert "add_memory" in policy.allowed_tools
     assert "recall_memories" in policy.allowed_tools
+
+    bridge = authority.require_client(
+        client_id=(
+            "https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json"
+        ),
+        scopes=frozenset(
+            {"menhir:read", "menhir:write", "offline_access"}
+        ),
+        tier="agent",
+    )
+    assert bridge.label == "agent-smith-harnesses"
+    assert bridge.allowed_tools == policy.allowed_tools
+    assert bridge.denied_tools == policy.denied_tools
 
 
 def test_candidate_compose_uses_exact_restored_production_authorities() -> None:
