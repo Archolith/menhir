@@ -433,7 +433,6 @@ class TestRecallFileContext:
             scoring_service=None,
         )
 
-        import asyncio
         result = asyncio.run(service._resolve_file_context("src/foo.py", "proj"))
         assert "file-linked-uuid-1" in result
 
@@ -496,7 +495,6 @@ class TestRecallFileContext:
             scoring_service=None,
         )
 
-        import asyncio
         result = asyncio.run(service._resolve_file_context("src/foo.py"))
         assert result == ["linked-1"]
 
@@ -537,6 +535,5 @@ class TestRecallFileContext:
             scoring_service=None,
         )
 
-        import asyncio
         result = asyncio.run(service._resolve_file_context("nonexistent.py"))
         assert result == []

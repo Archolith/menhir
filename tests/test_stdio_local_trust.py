@@ -21,7 +21,7 @@ def test_bind_stdio_local_trust_binds_operator():
     transport, and this test is specifically about the UNBOUND baseline the helper exists to
     replace -- so it has to establish that baseline itself rather than inherit one.
     """
-    from menhir.core.request_context import bind_request_tier, reset_request_tier
+    from menhir.core.request_context import bind_request_tier
 
     cleared = bind_request_tier("")
     try:

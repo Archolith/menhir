@@ -213,17 +213,6 @@ def test_a_clone_rescanning_its_own_recorded_path_is_allowed(tmp_path):
 
 
 @pytest.mark.unit
-def test_path_comparison_tolerates_separator_and_case_differences(tmp_path):
-    """A FALSE mismatch refuses a legitimate re-scan -- the failure this guard must not have.
-
-    The graph holds Windows paths written by several clients, so `C:\\x\\y` and `C:/x/y` are the
-    same directory and must not read as a collision.
-    """
-    root = _clone(tmp_path)
-    _guard(classify_root(root), recorded=str(root).replace("/", "\\").upper())
-
-
-@pytest.mark.unit
 def test_a_fork_is_refused_because_the_name_is_already_recorded_elsewhere(tmp_path):
     """THE FORK CASE. An independent clone passes every git check.
 

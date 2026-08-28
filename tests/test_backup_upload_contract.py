@@ -575,6 +575,7 @@ HEAD_SCENARIOS = [
 @pytest.mark.parametrize("scenario,signature", HEAD_SCENARIOS)
 def test_upload_head_failures_retain_plaintext(harness: Harness, scenario: str, signature: str):
     gen_dir = harness.build_generation()
+    harness.seed_local_archive()
     before = _generation_tree_hash(gen_dir)
 
     result = harness.run(gen_dir, scenario=scenario)
@@ -587,6 +588,7 @@ def test_upload_head_failures_retain_plaintext(harness: Harness, scenario: str, 
 
 def test_upload_readback_mismatch_retains_plaintext(harness: Harness):
     gen_dir = harness.build_generation()
+    harness.seed_local_archive()
     before = _generation_tree_hash(gen_dir)
 
     result = harness.run(gen_dir, scenario="readback_mismatch")
@@ -599,6 +601,7 @@ def test_upload_readback_mismatch_retains_plaintext(harness: Harness):
 
 def test_upload_delete_not_denied_retains_plaintext(harness: Harness):
     gen_dir = harness.build_generation()
+    harness.seed_local_archive()
     before = _generation_tree_hash(gen_dir)
 
     result = harness.run(gen_dir, scenario="delete_not_denied")
@@ -611,6 +614,7 @@ def test_upload_delete_not_denied_retains_plaintext(harness: Harness):
 
 def test_upload_requires_explicit_probe_delete_denial(harness: Harness):
     gen_dir = harness.build_generation()
+    harness.seed_local_archive()
     before = _generation_tree_hash(gen_dir)
 
     result = harness.run(gen_dir, scenario="delete_indeterminate")

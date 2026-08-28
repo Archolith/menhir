@@ -40,9 +40,12 @@ def _route_paths(app) -> set[str]:
     }
 
 
-def test_production_surface_omits_general_api_explorer_and_sse() -> None:
+def test_production_surface_omits_general_api_explorer_and_sse(tmp_path: Path) -> None:
     app = _inner_app(
-        _production_settings(explorer_enabled=True)
+        _production_settings(
+            explorer_enabled=True,
+            oauth_signing_key_path=str(tmp_path / "oauth-signing-key.test.json"),
+        )
     )
 
     paths = _route_paths(app)
@@ -186,8 +189,8 @@ def test_candidate_prereqs_do_not_open_mutating_oauth_stores(monkeypatch) -> Non
                 oauth_jwks_uri="https://memory.example.test/.well-known/jwks.json",
                 oauth_as_refresh_tokens_enabled=True,
                 privacy_redact=True,
-                client_policy_path="C:/fixed/client-policy.json",
-                oauth_signing_key_path="C:/fixed/oauth-signing-key.json",
+                client_policy_path=str(Path(__file__).resolve().parent / "client-policy.test.json"),
+                oauth_signing_key_path=str(Path(__file__).resolve().parent / "oauth-signing-key.test.json"),
             client_policy_digest="a" * 64,
         ),
         tool_catalog=frozenset({"recall_memories"}),
@@ -225,7 +228,9 @@ def _production_settings(**overrides: object) -> MemorySettings:
         "oauth_issuer": "https://memory.example.test",
         "oauth_jwks_uri": "https://memory.example.test/.well-known/jwks.json",
         "client_policy_path": str(policy_path),
-        "oauth_signing_key_path": "C:/fixed/oauth-signing-key.json",
+        "oauth_signing_key_path": str(
+            Path(__file__).resolve().parent / "oauth-signing-key.test.json"
+        ),
         "client_policy_digest": "5eedd69823717f24bfbcd4670095503a105e9f91cb9be9cd8ac9db69a31193c8",
         "api_key": "test-api-key",
     }

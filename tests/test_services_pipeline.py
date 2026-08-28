@@ -1911,9 +1911,6 @@ async def test_maintenance_scheduler_start_stop_is_idempotent() -> None:
         def get_max_enrichment_attempts(self) -> int:
             return 3
 
-        def get_max_enrichment_attempts(self) -> int:
-            return 3
-
     class FakeGraphAdapter:
         def fetch_memory_overview(self, namespace=None) -> dict[str, object]:
             return {"pending_count": 0, "enriching_count": 0, "failed_count": 0}
@@ -3018,7 +3015,6 @@ async def test_auto_resolve_conflicts_skips_when_no_lifecycle_service(monkeypatc
 @pytest.mark.unit
 def test_lifecycle_service_auto_resolve_stale_conflicts_resolves_old_groups() -> None:
     from datetime import datetime, timedelta, timezone
-    from menhir.services.lifecycle_service import LifecycleService
 
     resolved_groups: list[str] = []
     stale_created = (datetime.now(timezone.utc) - timedelta(days=20)).isoformat()

@@ -251,8 +251,17 @@ def _write_project(root: Path) -> None:
 
 def _ingest_project(stack, root: Path, project: str, session_id: str) -> dict[str, int]:
     from menhir.infrastructure.project_scanner import ProjectScanner
+    from menhir.services.project_identity_service import settle_project_identity
 
+    claim, resolution = settle_project_identity(
+        stack.graph_adapter,
+        root_path=str(root),
+        display_name=project,
+    )
+    assert claim is not None, resolution.as_dict()
     scan = ProjectScanner().scan(str(root), project)
+    scan.project_id = claim.project_id
+    scan.identity_generation = claim.generation
     return stack.graph_adapter.write_project_structure(scan, session_id, "dev")
 
 
