@@ -231,7 +231,7 @@ def _production_settings(**overrides: object) -> MemorySettings:
         "oauth_signing_key_path": str(
             Path(__file__).resolve().parent / "oauth-signing-key.test.json"
         ),
-        "client_policy_digest": "eb6bc3ca7ea40648dc0278ad43bbb534bb37bb22374aa7f959a18dd739308ae2",
+        "client_policy_digest": "788bf6955d4cf525c35e89a27e774645ecde387077d155e430817b7011af01b7",
         "api_key": "test-api-key",
     }
     values.update(overrides)
@@ -303,7 +303,7 @@ def test_production_client_policy_is_digest_bound_and_tracks_clients() -> None:
     path = (
         Path(__file__).resolve().parents[1] / "deploy" / "client-policy.production.json"
     )
-    digest = "eb6bc3ca7ea40648dc0278ad43bbb534bb37bb22374aa7f959a18dd739308ae2"
+    digest = "788bf6955d4cf525c35e89a27e774645ecde387077d155e430817b7011af01b7"
 
     from menhir.mcp.tools import ALL_TOOLS
 
@@ -323,16 +323,21 @@ def test_production_client_policy_is_digest_bound_and_tracks_clients() -> None:
     assert "add_memory" in policy.allowed_tools
     assert "recall_memories" in policy.allowed_tools
 
-    bridge = authority.require_client(
-        client_id=(
-            "https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json"
-        ),
-        scopes=frozenset({"menhir:read", "menhir:write"}),
-        tier="agent",
+    bridge_ids = {
+        client_id: client_policy
+        for client_id, client_policy in authority.clients.items()
+        if client_id.startswith(
+            "https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client="
+        )
+    }
+    assert len(bridge_ids) == 13
+    assert len({entry.label for entry in bridge_ids.values()}) == 13
+    assert all(entry.allowed_tools == policy.allowed_tools for entry in bridge_ids.values())
+    assert all(entry.denied_tools == policy.denied_tools for entry in bridge_ids.values())
+    assert (
+        "https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json"
+        not in authority.clients
     )
-    assert bridge.label == "agent-smith-harnesses"
-    assert bridge.allowed_tools == policy.allowed_tools
-    assert bridge.denied_tools == policy.denied_tools
 
 
 def test_cloudflared_example_exposes_agent_smith_metadata_before_deny_rules() -> None:

@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-08-28 - Isolate Agent Smith OAuth clients by harness
+
+- Replace the shared Agent Smith OAuth identity with thirteen policy-bound
+  client identities, each carrying a unique audit label and loopback callback
+  port for independent consent, token storage, and revocation.
+- Publish the per-client CIMD roster through the existing allowlisted metadata
+  endpoint and return 404 for the retired unqualified shared identity.
+- Keep each identity on the same least-privilege read/write tool partition and
+  bind the complete roster to a new production policy digest.
+
 ## 2026-08-28 - Keep Agent Smith OAuth sessions durable
 
 - Enable the explicit production authorization-server seam that issues a refresh

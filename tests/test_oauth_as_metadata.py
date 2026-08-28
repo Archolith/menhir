@@ -170,18 +170,56 @@ def test_agent_smith_client_metadata_is_stable_public_client():
         oauth_admin_scopes=(),
     )
 
-    response = _client(settings).get("/oauth/client-metadata/agent-smith.json")
+    response = _client(settings).get(
+        "/oauth/client-metadata/agent-smith.json?client=claude"
+    )
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("application/json")
     payload = response.json()
     assert payload["client_id"] == (
-        "https://memory.example.com/oauth/client-metadata/agent-smith.json"
+        "https://memory.example.com/oauth/client-metadata/agent-smith.json?client=claude"
     )
+    assert payload["client_name"] == "Agent Smith - Claude"
     assert payload["token_endpoint_auth_methods_supported"] == ["none"]
     assert payload["redirect_uris"] == [
-        "http://127.0.0.1:43680/oauth/callback",
-        "http://localhost:43680/oauth/callback",
+        "http://127.0.0.1:43681/oauth/callback",
+        "http://localhost:43681/oauth/callback",
     ]
     assert payload["grant_types"] == ["authorization_code", "refresh_token"]
     assert payload["scope"] == "menhir:read menhir:write offline_access"
+
+
+def test_agent_smith_clients_have_distinct_ids_labels_and_ports():
+    from menhir.api.oauth_as_metadata import _AGENT_SMITH_CLIENTS
+
+    settings = SimpleNamespace(
+        oauth_as_enabled=True,
+        oauth_public_base_url="https://memory.example.com",
+        oauth_as_refresh_tokens_enabled=True,
+        oauth_scopes_supported=("menhir:read", "menhir:write"),
+        oauth_admin_scopes=(),
+    )
+    client = _client(settings)
+    payloads = [
+        client.get(
+            f"/oauth/client-metadata/agent-smith.json?client={client_key}"
+        ).json()
+        for client_key in _AGENT_SMITH_CLIENTS
+    ]
+
+    assert len(payloads) == 13
+    assert len({payload["client_id"] for payload in payloads}) == 13
+    assert len({payload["client_name"] for payload in payloads}) == 13
+    assert len({payload["redirect_uris"][0] for payload in payloads}) == 13
+
+
+def test_retired_shared_agent_smith_client_is_not_published():
+    settings = SimpleNamespace(
+        oauth_as_enabled=True,
+        oauth_public_base_url="https://memory.example.com",
+    )
+
+    response = _client(settings).get("/oauth/client-metadata/agent-smith.json")
+
+    assert response.status_code == 404
