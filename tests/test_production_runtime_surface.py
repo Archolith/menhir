@@ -360,6 +360,18 @@ def test_candidate_compose_uses_exact_restored_production_authorities() -> None:
     assert "toString(" not in release_lib
 
 
+def test_production_compose_uses_compose_v5_compatible_pid_limits() -> None:
+    compose = (
+        Path(__file__).resolve().parents[1]
+        / "deploy"
+        / "docker-compose.production.yml"
+    ).read_text(encoding="utf-8")
+
+    assert "pids_limit:" not in compose
+    assert "          pids: 1024" in compose
+    assert "          pids: 256" in compose
+
+
 def test_client_policy_rejects_duplicate_json_keys(tmp_path: Path) -> None:
     policy_path = tmp_path / "duplicate-policy.json"
     policy_path.write_text(

@@ -85,7 +85,6 @@ services:
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
-    pids_limit: 1024
     ulimits:
       nofile: { soft: 65536, hard: 65536 }
     environment:
@@ -111,6 +110,7 @@ services:
         limits:
           cpus: "2"
           memory: 4g
+          pids: 1024
     logging:
       driver: json-file
       options: { max-size: "10m", max-file: "3" }
@@ -141,7 +141,6 @@ services:
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
-    pids_limit: 256
     ulimits:
       nofile: { soft: 65536, hard: 65536 }
     environment:
@@ -228,6 +227,7 @@ services:
         limits:
           cpus: "1"
           memory: 2g
+          pids: 256
     logging:
       driver: json-file
       options: { max-size: "10m", max-file: "3" }
