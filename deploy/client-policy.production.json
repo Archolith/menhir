@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "canonical_digest": "07d0c90e06c4147369145631651c524ca4d907d047c2aa1366df2edbe7fc8903",
+  "canonical_digest": "eb6bc3ca7ea40648dc0278ad43bbb534bb37bb22374aa7f959a18dd739308ae2",
   "clients": {
     "69c2cd871b488ff4": {
       "label": "chatgpt-chat",
@@ -73,8 +73,7 @@
       "label": "agent-smith-harnesses",
       "scopes": [
         "menhir:read",
-        "menhir:write",
-        "offline_access"
+        "menhir:write"
       ],
       "maximum_tier": "agent",
       "namespace": "",

@@ -231,7 +231,7 @@ def _production_settings(**overrides: object) -> MemorySettings:
         "oauth_signing_key_path": str(
             Path(__file__).resolve().parent / "oauth-signing-key.test.json"
         ),
-        "client_policy_digest": "07d0c90e06c4147369145631651c524ca4d907d047c2aa1366df2edbe7fc8903",
+        "client_policy_digest": "eb6bc3ca7ea40648dc0278ad43bbb534bb37bb22374aa7f959a18dd739308ae2",
         "api_key": "test-api-key",
     }
     values.update(overrides)
@@ -303,7 +303,7 @@ def test_production_client_policy_is_digest_bound_and_tracks_clients() -> None:
     path = (
         Path(__file__).resolve().parents[1] / "deploy" / "client-policy.production.json"
     )
-    digest = "07d0c90e06c4147369145631651c524ca4d907d047c2aa1366df2edbe7fc8903"
+    digest = "eb6bc3ca7ea40648dc0278ad43bbb534bb37bb22374aa7f959a18dd739308ae2"
 
     from menhir.mcp.tools import ALL_TOOLS
 
@@ -327,9 +327,7 @@ def test_production_client_policy_is_digest_bound_and_tracks_clients() -> None:
         client_id=(
             "https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json"
         ),
-        scopes=frozenset(
-            {"menhir:read", "menhir:write", "offline_access"}
-        ),
+        scopes=frozenset({"menhir:read", "menhir:write"}),
         tier="agent",
     )
     assert bridge.label == "agent-smith-harnesses"
