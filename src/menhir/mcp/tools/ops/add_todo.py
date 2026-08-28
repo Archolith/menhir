@@ -47,6 +47,11 @@ async def add_todo(
 class AddTodoTool(BaseTextTool):
     name = "add_todo"
     scope = ToolScope.NAMESPACED
+    title = "Add TODO"
+    oauth_scopes = ("menhir:write",)
+    read_only_hint = False
+    destructive_hint = False
+    open_world_hint = False
     description = "Create a persistent TODO item that survives across sessions."
 
     async def endpoint(

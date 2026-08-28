@@ -40,6 +40,11 @@ class ListConflictsTool(BaseJsonTool):
     # was never the right declaration for it.
     scope = ToolScope.NAMESPACED
     required_tier = "readonly"
+    title = "List Conflicts"
+    oauth_scopes = ("menhir:read",)
+    read_only_hint = True
+    destructive_hint = False
+    open_world_hint = False
     description = "List conflict groups detected by contradiction checks."
 
     async def endpoint(

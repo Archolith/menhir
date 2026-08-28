@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "authorities": [
+    {"backup_path": "neo4j", "capture": "neo4j-offline-dump-all-databases", "restore": "neo4j-admin-load-and-check", "source": "state/neo4j/data", "writers": ["neo4j"]},
+    {"backup_path": "state/oauth", "capture": "sqlite-backup-all-databases", "restore": "sqlite-integrity-and-copy", "source": "state/oauth", "writers": ["menhir"]},
+    {"backup_path": "state/telemetry", "capture": "sqlite-backup-all-databases", "restore": "sqlite-integrity-and-copy", "source": "state/telemetry", "writers": ["menhir"]},
+    {"backup_path": "secrets", "capture": "exact-tree-copy", "restore": "exact-tree-copy-and-permission-map", "source": "secrets", "writers": []},
+    {"backup_path": "policy", "capture": "exact-tree-copy", "restore": "exact-tree-copy", "source": "policy", "writers": []},
+    {"backup_path": "config/release.json", "capture": "exact-file-copy", "restore": "release-authority-validation", "source": "release/release.json", "writers": []}
+  ],
+  "excluded": [
+    {"path": "state/neo4j/logs", "reason": "operational logs are non-authoritative and independently rotated"}
+  ]
+}

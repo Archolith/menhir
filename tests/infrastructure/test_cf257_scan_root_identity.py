@@ -213,17 +213,6 @@ def test_a_clone_rescanning_its_own_recorded_path_is_allowed(tmp_path):
 
 
 @pytest.mark.unit
-def test_path_comparison_tolerates_separator_and_case_differences(tmp_path):
-    """A FALSE mismatch refuses a legitimate re-scan -- the failure this guard must not have.
-
-    The graph holds Windows paths written by several clients, so `C:\\x\\y` and `C:/x/y` are the
-    same directory and must not read as a collision.
-    """
-    root = _clone(tmp_path)
-    _guard(classify_root(root), recorded=str(root).replace("/", "\\").upper())
-
-
-@pytest.mark.unit
 def test_a_fork_is_refused_because_the_name_is_already_recorded_elsewhere(tmp_path):
     """THE FORK CASE. An independent clone passes every git check.
 
@@ -267,11 +256,12 @@ def test_an_agent_tier_override_is_refused(tmp_path):
 
 
 @pytest.mark.unit
-def test_an_unconfigured_tier_may_override(tmp_path):
-    """`None` tier means no API keys are configured (local dev); the auth model treats that as
-    unrestricted everywhere else, and this guard must not be the one place it does not."""
+@pytest.mark.parametrize("tier", [None, ""])
+def test_an_unconfigured_tier_cannot_override(tmp_path, tier):
+    """Absent authentication is not operator authority at an identity boundary."""
     root, _ = _worktree(tmp_path)
-    _guard(classify_root(root), recorded=None, tier=None, force=True)
+    with pytest.raises(ProjectIdentityRefused, match="requires operator tier"):
+        _guard(classify_root(root), recorded=None, tier=tier, force=True)
 
 
 @pytest.mark.unit
@@ -322,6 +312,32 @@ def test_windows_paths_still_compare_case_and_separator_insensitively():
     from menhir.domain.project_identity import _same_path
     assert _same_path(r"C:\Users\thron\proj", "c:/users/thron/proj")
     assert _same_path(r"C:\Users\thron\proj\\", "C:/Users/thron/proj")
+
+
+@pytest.mark.unit
+def test_posix_leading_and_trailing_whitespace_are_identity_bearing():
+    from menhir.domain.project_identity import normalize_project_root_path
+
+    assert normalize_project_root_path("/srv/proj ") != normalize_project_root_path("/srv/proj")
+    assert normalize_project_root_path(" /srv/proj") != normalize_project_root_path("/srv/proj")
+    assert normalize_project_root_path(" ") == " "
+
+
+@pytest.mark.unit
+def test_phase_zero_same_path_uses_the_shared_root_normalizer(monkeypatch):
+    """The guard and binding keys must not grow independent path-flavor rules again."""
+    from menhir.domain import project_identity
+
+    calls = []
+    monkeypatch.setattr(project_identity.os.path, "exists", lambda _value: False)
+    monkeypatch.setattr(
+        project_identity,
+        "normalize_project_root_path",
+        lambda value: calls.append(value) or "shared-key",
+    )
+
+    assert project_identity._same_path("left-root", "right-root")
+    assert calls == ["left-root", "right-root"]
 
 
 @pytest.mark.unit

@@ -35,6 +35,11 @@ class ListEnrichmentQueueTool(BaseTextTool):
     scope = ToolScope.NAMESPACED
     required_tier = "readonly"
     description = "List episodic enrichment queue rows with stale-state hints."
+    title = "List Enrichment Queue"
+    oauth_scopes = ("menhir:read",)
+    read_only_hint = True
+    destructive_hint = False
+    open_world_hint = False
 
     async def endpoint(
         self, state: str = "active", limit: int = 25, namespace: str = ""

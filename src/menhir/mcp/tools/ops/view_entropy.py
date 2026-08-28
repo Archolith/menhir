@@ -38,6 +38,11 @@ class ViewEntropyTool(BaseJsonTool):
     scope = ToolScope.NAMESPACED
     required_tier = "readonly"
     description = "D0 view-reachability probe: rank + footprint of each current View's self-recall."
+    title = "View Entropy Probe"
+    oauth_scopes = ("menhir:read",)
+    read_only_hint = True
+    destructive_hint = False
+    open_world_hint = False
 
     async def endpoint(
         self,

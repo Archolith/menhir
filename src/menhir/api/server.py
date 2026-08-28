@@ -9,7 +9,10 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 
 import menhir
-from menhir.api.mcp_remote import create_mcp_streamable_http_app
+from menhir.api.mcp_remote import (
+    create_mcp_streamable_http_app,
+    production_tool_catalog,
+)
 from menhir.config import MemorySettings
 from menhir.infrastructure.logging_config import build_logging_config, configure_logging
 
@@ -29,15 +32,19 @@ def create_app(*, settings: MemorySettings | None = None) -> FastAPI:
     """Build the combined FastAPI application."""
     settings = settings or MemorySettings.from_env()
     startup_scope = settings.startup_scope
-    prereqs = build_server_prereqs(settings)
+    production_surface = startup_scope == "production"
     mcp_http_app, mcp_http_instance = create_mcp_streamable_http_app()
+    prereqs = build_server_prereqs(
+        settings,
+        tool_catalog=production_tool_catalog() if production_surface else None,
+    )
 
     app = FastAPI(
         title="menhir",
         description="Long-term graph memory for AI agents — REST + MCP remote.",
         version=menhir.__version__,
-        docs_url="/api/docs",
-        openapi_url="/api/openapi.json",
+        docs_url=None if production_surface else "/api/docs",
+        openapi_url=None if production_surface else "/api/openapi.json",
         lifespan=build_runtime_lifespan(
             settings=settings,
             startup_scope=startup_scope,
@@ -49,6 +56,9 @@ def create_app(*, settings: MemorySettings | None = None) -> FastAPI:
     app.state.oauth_client_store = prereqs["oauth_client_store"]
     app.state.auth_code_store = prereqs["auth_code_store"]
     app.state.oauth_signing_key = prereqs["signing_key"]
+    app.state.oauth_refresh_store = prereqs["oauth_refresh_store"]
+    app.state.client_policy = prereqs["client_policy"]
+    app.state.mutation_fence_active = False
 
     register_exception_handlers(app)
     configure_cors(app, settings)
@@ -64,6 +74,7 @@ def create_app(*, settings: MemorySettings | None = None) -> FastAPI:
         settings=settings,
         oauth_config=prereqs["oauth_config"],
         client_token_store=prereqs["client_token_store"],
+        client_policy=prereqs["client_policy"],
     )
     return wrapped  # type: ignore[return-value]
 

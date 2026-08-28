@@ -1675,14 +1675,13 @@ def stub_graphiti_client() -> StubGraphitiClient:
 
 @pytest.fixture(autouse=True)
 def _reset_oauth_as_rate_limits():
-    """Reset the embedded OAuth AS in-process rate limiters and single-use consent-token
-    state before every test.
+    """Reset the embedded OAuth AS in-process rate limiters before every test.
 
-    The limiters (`_register_limiter`, `_approve_limiter`) and the spent-jti set are
-    module-level singletons, so their counters would otherwise accumulate across the whole
-    test process (TestClient's peer host is a constant key) and spuriously trip 429s in
-    unrelated tests. Rebuilding them per test isolates each test without altering any
-    individual test's assertions.
+    The limiters (`_register_limiter`, `_approve_limiter`) are module-level
+    singletons, so their counters would otherwise accumulate across the whole
+    test process (TestClient's peer host is a constant key) and spuriously trip
+    429s in unrelated tests. Consent replay state is durable SQLite state owned
+    by each test's isolated authorization-code store.
     """
     try:
         from menhir.api import oauth_as_register, oauth_authorize
@@ -1692,7 +1691,6 @@ def _reset_oauth_as_rate_limits():
 
     oauth_as_register._register_limiter = oauth_as_register.build_register_limiter()
     oauth_authorize._approve_limiter = oauth_authorize.build_approve_limiter()
-    oauth_authorize._spent_consent_jtis.clear()
     yield
 
 

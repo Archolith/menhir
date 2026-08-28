@@ -65,6 +65,11 @@ class AddCandidateTool(BaseTextTool):
     name = "add_candidate"
     scope = ToolScope.NAMESPACED
     description = "Stage a low-trust memory/friction candidate for human review (not recalled until approved)."
+    title = "Add Candidate"
+    oauth_scopes = ("menhir:write",)
+    read_only_hint = False
+    destructive_hint = False
+    open_world_hint = False
 
     async def endpoint(
         self,

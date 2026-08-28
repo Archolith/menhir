@@ -36,6 +36,7 @@ from menhir.infrastructure.repo_topology import RootKind, RootTopology
 __all__ = [
     "ProjectIdentityRefused",
     "OPERATOR_TIER",
+    "normalize_project_root_path",
     "ensure_scan_root_owns_identity",
 ]
 
@@ -51,25 +52,31 @@ class ProjectIdentityRefused(ValueError):
 
 def _looks_like_windows_path(value: str) -> bool:
     """True for a drive-letter or UNC path, which are case-insensitive in practice."""
-    stripped = value.strip()
-    if stripped.startswith("\\\\") or stripped.startswith("//"):
+    if value.startswith("\\\\") or value.startswith("//"):
         return True
-    return len(stripped) >= 2 and stripped[1] == ":" and stripped[0].isalpha()
+    return len(value) >= 2 and value[1] == ":" and value[0].isalpha()
 
 
-def _normalized(value: str) -> str:
-    """Canonical spelling for comparison, respecting the path flavor's case rules.
+def normalize_project_root_path(value: str) -> str:
+    """Return the root key for *value*, respecting the path flavor's case rules.
 
-    Separator- and trailing-slash-insensitive for both flavors. **Case is folded only for Windows
-    paths.** Folding it for POSIX was a defect: ``/srv/Foo`` and ``/srv/foo`` are different
-    directories on Linux, and treating them as equal makes the guard ADMIT the second under the
-    first's identity -- a false allow, which is the direction that loses data. A false refusal
-    merely annoys someone; a false allow prunes a project's files.
+    Trailing separators are normalized for both flavors. Windows accepts either separator and is
+    case-insensitive. POSIX preserves both case and literal backslashes: ``/srv/Foo`` and
+    ``/srv/foo`` are different directories on Linux, and so are ``/srv/a\\b`` and ``/srv/a/b``.
+    Treating either pair as equal makes the guard ADMIT the second under the first's identity -- a
+    false allow, which is the direction that loses data. A false refusal merely annoys someone; a
+    false allow prunes a project's files.
     """
-    raw = value.strip().rstrip("/\\")
+    raw = value
+    if raw == "":
+        return ""
     if _looks_like_windows_path(raw):
         return PureWindowsPath(raw.replace("/", "\\")).as_posix().casefold()
-    return PurePosixPath(raw.replace("\\", "/")).as_posix()
+    return PurePosixPath(raw).as_posix()
+
+
+# Compatibility for existing private imports. New callers should use the named shared helper.
+_normalized = normalize_project_root_path
 
 
 def _same_path(left: str | None, right: str | None) -> bool:
@@ -88,7 +95,7 @@ def _same_path(left: str | None, right: str | None) -> bool:
             return os.path.samefile(left, right)
     except OSError:
         pass  # unreadable or cross-device; fall through to the textual comparison
-    return _normalized(left) == _normalized(right)
+    return normalize_project_root_path(left) == normalize_project_root_path(right)
 
 
 def ensure_scan_root_owns_identity(
@@ -107,8 +114,8 @@ def ensure_scan_root_owns_identity(
         project_name: The identity the scan intends to write under.
         recorded_root_path: ``root_path`` already stored for that project, or None if the project
             is unknown to the graph.
-        tier: The caller's request tier. ``None`` means no auth is configured (local dev), which
-            the rest of the auth model treats as unrestricted.
+        tier: The caller's request tier. ``None`` or an empty value means no authenticated tier
+            was established; neither value can authorize the identity-boundary override.
         force: The caller passed the explicit override.
         allow_unobservable_root: Accept a root that is not present on this host. Set ONLY by the
             compatibility write path, where a remote client scanned on its own machine and
@@ -135,7 +142,7 @@ def ensure_scan_root_owns_identity(
             "checkout or scan the repository it points at."
         )
 
-    may_force = bool(force) and (not tier or tier == OPERATOR_TIER)
+    may_force = bool(force) and tier == OPERATOR_TIER
 
     # Checked BEFORE the refusals it would have suppressed. Ordering it after them meant an
     # agent-tier caller who passed the override got the generic refusal, whose remedy is "pass the

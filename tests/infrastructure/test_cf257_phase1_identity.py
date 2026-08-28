@@ -11,8 +11,8 @@ Three separable guarantees:
 from __future__ import annotations
 
 import json
+import multiprocessing
 import os
-from pathlib import Path
 
 import pytest
 
@@ -34,10 +34,28 @@ from menhir.domain.project_identity_resolution import (
 )
 from menhir.infrastructure.project_identity_binding import (
     IdentityBindingConflict,
+    IdentityRootContested,
     bind_project_identity,
     clear_conflict,
     read_binding,
 )
+
+
+def _hold_publication_lock(root: str, entered, release) -> None:
+    from menhir.domain.project_id_file import identity_publication_lock
+
+    with identity_publication_lock(root):
+        entered.set()
+        if not release.wait(10):
+            raise TimeoutError("publication-lock test was never released")
+
+
+def _enter_publication_lock(root: str, attempting, entered) -> None:
+    from menhir.domain.project_id_file import identity_publication_lock
+
+    attempting.set()
+    with identity_publication_lock(root):
+        entered.set()
 
 
 # ---------------------------------------------------------------------------
@@ -140,41 +158,75 @@ def test_an_unwritable_location_reports_rather_than_half_minting(tmp_path, monke
         mint_identity(tmp_path)
 
 
+@pytest.mark.unit
+def test_publication_can_recheck_ignore_rule_while_holding_the_windows_lock(tmp_path):
+    from menhir.domain.project_id_file import identity_publication_lock
+    from menhir.services.project_identity_service import _publish_identity_file
+
+    with identity_publication_lock(tmp_path):
+        assert ensure_ignore_rule(tmp_path) is False
+        _publish_identity_file(
+            str(tmp_path),
+            project_id="locked-publication",
+            display_name="proj",
+            existing=None,
+        )
+
+    assert read_identity(tmp_path).project_id == "locked-publication"
+
+
+@pytest.mark.unit
+def test_publication_lock_serializes_separate_processes(tmp_path):
+    """The thread mutex alone cannot prevent a delayed process from publishing stale state."""
+    ensure_ignore_rule(tmp_path)
+    context = multiprocessing.get_context("spawn")
+    first_entered = context.Event()
+    release_first = context.Event()
+    second_attempting = context.Event()
+    second_entered = context.Event()
+    first = context.Process(
+        target=_hold_publication_lock,
+        args=(str(tmp_path), first_entered, release_first),
+    )
+    second = context.Process(
+        target=_enter_publication_lock,
+        args=(str(tmp_path), second_attempting, second_entered),
+    )
+
+    first.start()
+    try:
+        assert first_entered.wait(5), "first process never acquired the publication lock"
+        second.start()
+        assert second_attempting.wait(5), "second process never attempted the publication lock"
+        assert not second_entered.wait(0.5), "second process bypassed the publication lock"
+        release_first.set()
+        assert second_entered.wait(5), "second process did not acquire after release"
+    finally:
+        release_first.set()
+        first.join(5)
+        if second.pid is not None:
+            second.join(5)
+        if first.is_alive():
+            first.terminate()
+        if second.pid is not None and second.is_alive():
+            second.terminate()
+
+    assert first.exitcode == 0
+    assert second.exitcode == 0
+
+
 # ---------------------------------------------------------------------------
 # The binding
 # ---------------------------------------------------------------------------
 
-class _FakeNeo4j:
-    """Models :ProjectIdentity closely enough to exercise the compare-and-set."""
-
-    def __init__(self):
-        self.rows: dict[str, dict] = {}
-
-    def execute(self, cypher, params=None):
-        params = params or {}
-        pid = params.get("project_id")
-        if "MERGE (p:ProjectIdentity" in cypher:
-            row = self.rows.setdefault(
-                pid, {"canonical_root_path": params["root_path"], "state": "bound"}
-            )
-            return [{"bound_root": row["canonical_root_path"], "state": row["state"]}]
-        if "SET p.state = 'conflicted'" in cypher:
-            self.rows[pid]["state"] = "conflicted"
-            return []
-        if "SET p.state = 'bound'" in cypher:
-            self.rows[pid] = {
-                "canonical_root_path": params["root_path"], "state": "bound"
-            }
-            return []
-        if "RETURN p.canonical_root_path AS root" in cypher:
-            row = self.rows.get(pid)
-            return [{"root": row["canonical_root_path"], "state": row["state"]}] if row else []
-        raise AssertionError(f"unexpected statement: {cypher[:70]}")
-
+# The binding protocol is exercised against `fake_identity_graph` (tests/infrastructure/
+# conftest.py), which enforces the `(bound_host, root_key)` uniqueness constraint rather than
+# merely storing rows. The authority for the real constraint semantics is
+# `test_cf257_identity_binding_online.py`.
 
 @pytest.fixture
-def neo4j():
-    return _FakeNeo4j()
+def neo4j(fake_identity_graph):
+    return fake_identity_graph
 
 
 @pytest.mark.unit
@@ -223,6 +275,52 @@ def test_an_operator_resolves_a_conflict_by_naming_the_root_to_keep(neo4j):
     assert bind_project_identity(
         neo4j, project_id="id-1", root_path="C:/repos/proj"
     ).state == "bound"
+
+
+@pytest.mark.unit
+def test_an_ordinary_transfer_cannot_clear_a_conflict(neo4j):
+    bind_project_identity(neo4j, project_id="id-1", root_path="C:/repos/proj")
+    with pytest.raises(IdentityBindingConflict):
+        bind_project_identity(neo4j, project_id="id-1", root_path="C:/copies/proj")
+
+    with pytest.raises(IdentityBindingConflict, match="CONFLICTED"):
+        bind_project_identity(
+            neo4j,
+            project_id="id-1",
+            root_path="C:/repos/proj",
+            rebind=True,
+        )
+    assert read_binding(neo4j, "id-1").state == "conflicted"
+
+
+@pytest.mark.unit
+def test_operator_adopt_can_atomically_claim_the_kept_conflicted_root(neo4j):
+    bind_project_identity(neo4j, project_id="id-1", root_path="C:/repos/proj")
+    with pytest.raises(IdentityBindingConflict):
+        bind_project_identity(neo4j, project_id="id-1", root_path="C:/copies/proj")
+
+    state = bind_project_identity(
+        neo4j,
+        project_id="id-1",
+        root_path="C:/repos/proj",
+        rebind=True,
+        resolve_conflict=True,
+    )
+    assert state.state == "bound"
+    assert read_binding(neo4j, "id-1").state == "bound"
+
+
+@pytest.mark.unit
+def test_a_failed_conflict_resolution_leaves_the_identity_conflicted(neo4j):
+    bind_project_identity(neo4j, project_id="id-1", root_path="C:/repos/proj")
+    with pytest.raises(IdentityBindingConflict):
+        bind_project_identity(neo4j, project_id="id-1", root_path="C:/copies/proj")
+    neo4j.nodes["id-1"]["active_writers"] = ["writer"]
+
+    with pytest.raises(IdentityRootContested, match="Nothing was changed"):
+        clear_conflict(neo4j, project_id="id-1", keep_root_path="C:/repos/proj")
+
+    assert read_binding(neo4j, "id-1").state == "conflicted"
 
 
 # ---------------------------------------------------------------------------

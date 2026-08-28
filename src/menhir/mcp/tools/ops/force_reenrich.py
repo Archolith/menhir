@@ -48,6 +48,11 @@ class ForceReenrichTool(BaseTextTool):
     # and the uuid it addresses is checked against that pin at load (CF-33 step 4).
     scope = ToolScope.NAMESPACED
     required_tier = "operator"
+    title = "Force Re-enrich Episode"
+    oauth_scopes = ("menhir:admin",)
+    read_only_hint = False
+    destructive_hint = False
+    open_world_hint = True
     description = "Force a failed episode back into enrichment."
 
     def timeout_for(

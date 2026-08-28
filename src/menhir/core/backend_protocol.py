@@ -231,6 +231,8 @@ class MemoryBackend(Protocol):
         session_id: str,
         user_id: str,
         document_type: str = "generic",
+        identity_action: str | None = None,
+        adopt_project_id: str | None = None,
     ) -> dict[str, Any]:
         """Read a file and ingest it as a document entity + narrative episode.
 

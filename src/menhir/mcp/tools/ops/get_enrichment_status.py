@@ -49,6 +49,11 @@ class GetEnrichmentStatusTool(BaseTextTool):
     # and the uuid it addresses is checked against that pin at load (CF-33 step 4).
     scope = ToolScope.NAMESPACED
     required_tier = "readonly"
+    title = "Get Enrichment Status"
+    oauth_scopes = ("menhir:read",)
+    read_only_hint = True
+    destructive_hint = False
+    open_world_hint = False
     description = "Inspect one episode's enrichment status."
 
     def timeout_for(

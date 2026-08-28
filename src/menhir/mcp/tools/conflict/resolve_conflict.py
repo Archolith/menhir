@@ -53,6 +53,12 @@ class ResolveConflictTool(BaseJsonTool):
     # NAMESPACED once the group lookup is scoped (CF-33 step 4).
     scope = ToolScope.NAMESPACED
     required_tier = "operator"
+    title = "Resolve Conflict"
+    oauth_scopes = ("menhir:admin",)
+    # Resolves the group and may remove member memory nodes (replace/discard_new).
+    read_only_hint = False
+    destructive_hint = True
+    open_world_hint = False
     description = "Resolve one conflict group using keep/replace/discard actions."
 
     async def endpoint(

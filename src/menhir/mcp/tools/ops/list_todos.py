@@ -26,6 +26,11 @@ class ListTodosTool(BaseTextTool):
     scope = ToolScope.NAMESPACED
     required_tier = "readonly"
     description = "List persistent TODO items filtered by status."
+    title = "List TODOs"
+    oauth_scopes = ("menhir:read",)
+    read_only_hint = True
+    destructive_hint = False
+    open_world_hint = False
 
     async def endpoint(self, status: str = "open", limit: int = 25, namespace: str = "") -> str:
         backend = self.get_backend()

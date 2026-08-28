@@ -57,6 +57,11 @@ class IngestProjectTool(BaseTextTool):
     # queued episode is tenant memory and was landing in the default group regardless of the
     # caller's pin (CF-220's escape in a fourth tool).
     scope = ToolScope.NAMESPACED
+    title = "Ingest Project"
+    oauth_scopes = ("menhir:write",)
+    read_only_hint = False
+    destructive_hint = False
+    open_world_hint = True
     description = "Scan a project directory and ingest its structure into the memory graph."
 
     def timeout_for(

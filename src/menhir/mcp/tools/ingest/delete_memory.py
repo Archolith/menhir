@@ -24,6 +24,11 @@ class DeleteMemoryTool(BaseTextTool):
     name = "delete_memory"
     scope = ToolScope.NAMESPACED
     required_tier = "operator"
+    title = "Delete Memory"
+    oauth_scopes = ("menhir:admin",)
+    read_only_hint = False
+    destructive_hint = True
+    open_world_hint = False
     description = "Delete a specific memory node and all its relationships."
 
     async def endpoint(self, node_uuid: str, namespace: str = "") -> str:

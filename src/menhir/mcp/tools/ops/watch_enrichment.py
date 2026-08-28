@@ -42,6 +42,11 @@ class WatchEnrichmentTool(BaseTextTool):
     scope = ToolScope.NAMESPACED
     required_tier = "readonly"
     description = "Follow one enrichment live and return observed deltas."
+    title = "Watch Enrichment"
+    oauth_scopes = ("menhir:read",)
+    read_only_hint = True
+    destructive_hint = False
+    open_world_hint = False
 
     def timeout_for(
         self,

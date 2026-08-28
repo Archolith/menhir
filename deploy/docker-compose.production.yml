@@ -1,0 +1,250 @@
+# Menhir PRODUCTION deployment contract (Compose project "menhir-prod").
+#
+# Two services only: menhir (the app) and neo4j (the graph). The reverse proxy
+# (caddy/traefik) lives OUTSIDE this project on an external network named exactly
+# "menhir-proxy"; menhir joins it under the alias "menhir-prod-app" so the proxy
+# reaches it at menhir-prod-app:8099. Nothing here publishes a host port - the
+# proxy is the only ingress. Do not invent additional services for candidate
+# mode; the same menhir + neo4j services are re-parameterized below.
+#
+# Image references are immutable, digest-pinned, and REQUIRED (refused when
+# absent). No source build, no live apt/PyPI/git resolution on the VPS.
+#
+# Credentials never appear here, in host environment requirements, or in
+# `docker compose config`. Secrets are fixed-path read-only bind mounts under
+# /srv/menhir/production/secrets (one file per secret). Menhir maps them to env
+# in its image entrypoint; Neo4j reads its Compose secret through
+# NEO4J_AUTH_FILE.
+#
+# Production settings contract (MENHIR_STARTUP_SCOPE=production) requires, and
+# this file sets exactly:
+#   * OAuth resource-server AND authorization-server on, HTTPS origin
+#   * resource/issuer/JWKS/audience derived exactly from MENHIR_PUBLIC_BASE_URL
+#     (default authority origin https://memory.ctharvey.me)
+#   * privacy redaction on
+#   * immutable client policy (path + SHA-256 digest) mounted read-only
+#   * read/write scopes with the admin scope ABSENT
+#   * refresh-token grant + bounded exact-retry grace + consent secret
+#   * non-empty trusted proxy peer policy
+#
+# State layout (narrowly scoped, all under /srv/menhir/...):
+#   MENHIR_PROD_ROOT   = /srv/menhir/production        (authoritative)
+#     state/oauth/     embedded OAuth AS SQLite stores
+#     secrets/neo4j/   neo4j-auth (Neo4j server auth)
+#     secrets/menhir/  neo4j-password (app connection) plus provider,
+#                      operator/static keys (read-only bind -> /run/secrets)
+#     secrets/oauth/   oauth_signing_key.json, retry-response-keyring.json,
+#                      oauth-consent-secret (read-only bind)
+#     policy/          immutable client policy (read-only bind)
+#   MENHIR_STATE_ROOT  = ${MENHIR_PROD_ROOT}/state     (active writable state)
+#     neo4j/{data,logs}/  Neo4j data and logs
+#     telemetry/       MCP telemetry database
+#
+# Two runtime modes via MENHIR_RUNTIME_MODE:
+#   production          MENHIR_STATE_ROOT points at the authoritative state;
+#                       OAuth authority is mounted read-write.
+#   candidate-readonly  MENHIR_STATE_ROOT points at the exact already-restored
+#                       production authority that promotion will reuse. OAuth
+#                       is mounted read-only and the app raises its mutation
+#                       fence. Only disposable probe telemetry is redirected to
+#                       an isolated candidate directory. Neo4j semantic digests
+#                       cover graph data, schema, and system authority.
+#
+# Production up:
+#   export MENHIR_IMAGE=<registry>/menhir:<tag>@sha256:<digest>
+#   export NEO4J_IMAGE=neo4j:5-community@sha256:<digest>
+#   export MENHIR_RUNTIME_MODE=production
+#   export MENHIR_PUBLIC_BASE_URL=https://memory.ctharvey.me
+#   export MENHIR_CLIENT_POLICY_DIGEST=<64-hex-sha256>
+#   export LLM_CHAT_PROVIDER=openai GRAPHITI_LLM_PROVIDER=openai
+#   export GRAPHITI_EMBED_PROVIDER=openai
+#   docker compose -f deploy/docker-compose.production.yml up -d
+#
+# See deploy/PRODUCTION.md for exact candidate-mode env/mount commands.
+
+name: ${MENHIR_COMPOSE_PROJECT:-menhir-prod}
+
+services:
+  neo4j:
+    image: "${NEO4J_IMAGE:?NEO4J_IMAGE (digest-pinned neo4j image) is required}"
+    container_name: ${MENHIR_NEO4J_CONTAINER:-menhir-prod-neo4j}
+    restart: unless-stopped
+    networks:
+      internal:
+    # Neo4j's documented UID. The official image reads NEO4J_AUTH_FILE from a
+    # Compose secret, so it does not need a root shim or credential in argv/env.
+    user: "7474:7474"
+    # The official entrypoint materializes environment-backed settings in its
+    # image-layer conf directory. Keep the container overlay writable and bind
+    # only /data and /logs; no host port is published and all capabilities are
+    # still dropped. A read-only rootfs must not be enabled without a tested
+    # derived image that provides a writable, pre-seeded conf mount.
+    tmpfs:
+      - /tmp
+      - /run
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 1024
+    ulimits:
+      nofile: { soft: 65536, hard: 65536 }
+    environment:
+      # No plugin download: the internal network has no egress and menhir's
+      # Cypher does not require APOC, so NEO4J_PLUGINS is intentionally unset.
+      # Memory budget: ~1 GiB heap + ~1.5 GiB page cache (within the 1-2 GiB
+      # target), plus off-heap/OS overhead bounded by the 4 GiB container limit.
+      NEO4J_server_memory_heap_initial__size: 512m
+      NEO4J_server_memory_heap_max__size: 1024m
+      NEO4J_server_memory_pagecache_size: 1536m
+      NEO4J_AUTH_FILE: /run/secrets/neo4j_auth
+    secrets:
+      - neo4j_auth
+    volumes:
+      - type: bind
+        source: ${MENHIR_STATE_ROOT:-/srv/menhir/production/state}/neo4j/data
+        target: /data
+      - type: bind
+        source: ${MENHIR_STATE_ROOT:-/srv/menhir/production/state}/neo4j/logs
+        target: /logs
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 4g
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+    healthcheck:
+      test: ["CMD-SHELL", "auth=$$(cat /run/secrets/neo4j_auth) && export NEO4J_USERNAME=$${auth%%/*} NEO4J_PASSWORD=$${auth#*/} && /var/lib/neo4j/bin/cypher-shell -a bolt://localhost:7687 'RETURN 1' >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+  menhir:
+    image: "${MENHIR_IMAGE:?MENHIR_IMAGE (digest-pinned menhir image) is required}"
+    container_name: ${MENHIR_APP_CONTAINER:-menhir-prod-app}
+    restart: unless-stopped
+    depends_on:
+      neo4j:
+        condition: service_healthy
+    networks:
+      internal:
+      menhir-proxy:
+        ipv4_address: ${MENHIR_PROXY_IPV4:-172.30.0.3}
+        aliases:
+          - ${MENHIR_PROXY_ALIAS:-menhir-prod-app}
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    ulimits:
+      nofile: { soft: 65536, hard: 65536 }
+    environment:
+      MENHIR_STARTUP_SCOPE: production
+      MENHIR_RUNTIME_MODE: "${MENHIR_RUNTIME_MODE:?MENHIR_RUNTIME_MODE (production|candidate-readonly) is required}"
+      MENHIR_INSTANCE_ID: "${MENHIR_INSTANCE_ID:?MENHIR_INSTANCE_ID is required}"
+      MENHIR_RELEASE_ID: "${MENHIR_RELEASE_ID:?MENHIR_RELEASE_ID is required}"
+      MENHIR_SOURCE_FENCE_KEY_ID: "${MENHIR_SOURCE_FENCE_KEY_ID:?MENHIR_SOURCE_FENCE_KEY_ID is required}"
+      MENHIR_ALLOW_SYSTEM_PYTHON: "1"
+      MENHIR_API_HOST: 0.0.0.0
+      MENHIR_API_PORT: "8099"
+      MENHIR_SECRETS_DIR: /run/secrets/menhir
+      # --- OAuth resource server + embedded authorization server ---
+      MENHIR_OAUTH_ENABLED: "true"
+      MENHIR_OAUTH_AS_ENABLED: "true"
+      MENHIR_PUBLIC_BASE_URL: "${MENHIR_PUBLIC_BASE_URL:?MENHIR_PUBLIC_BASE_URL (https origin) is required}"
+      MENHIR_OAUTH_RESOURCE: "${MENHIR_PUBLIC_BASE_URL:?...}/mcp-http"
+      MENHIR_OAUTH_ISSUER: "${MENHIR_PUBLIC_BASE_URL:?...}"
+      MENHIR_OAUTH_JWKS_URI: "${MENHIR_PUBLIC_BASE_URL:?...}/.well-known/jwks.json"
+      MENHIR_OAUTH_AUDIENCE: "${MENHIR_PUBLIC_BASE_URL:?...}/mcp-http"
+      # Read/write scopes; admin scope is ABSENT (empty) as required by policy.
+      MENHIR_OAUTH_SCOPES_SUPPORTED: "menhir:read,menhir:write"
+      MENHIR_OAUTH_READ_SCOPES: "menhir:read"
+      MENHIR_OAUTH_WRITE_SCOPES: "menhir:write"
+      MENHIR_OAUTH_ADMIN_SCOPES: ""
+      MENHIR_OAUTH_AS_DIR: /srv/menhir/production/state/oauth
+      MENHIR_OAUTH_SIGNING_KEY_PATH: /run/secrets/oauth/oauth_signing_key.json
+      MENHIR_OAUTH_REFRESH_RETRY_KEYRING_PATH: /run/secrets/oauth/retry-response-keyring.json
+      # Refresh-token grant + bounded exact-retry grace. The consent HMAC secret
+      # and the signing key come from the mounted secret/OAuth paths (entrypoint),
+      # never from this file.
+      MENHIR_OAUTH_AS_REFRESH_TOKENS_ENABLED: "true"
+      MENHIR_OAUTH_AS_REFRESH_TTL_S: "2592000"
+      MENHIR_OAUTH_AS_REFRESH_RETRY_GRACE_S: "5"
+      # --- Production hardening flags ---
+      MENHIR_PRIVACY_REDACT: "true"
+      MENHIR_CLIENT_POLICY_PATH: /srv/menhir/production/policy/client-policy.json
+      MENHIR_CLIENT_POLICY_DIGEST: "${MENHIR_CLIENT_POLICY_DIGEST:?MENHIR_CLIENT_POLICY_DIGEST (64-char sha256) is required}"
+      # --- Reverse proxy / trusted peers ---
+      MENHIR_TRUSTED_PROXY: "1"
+      MENHIR_TRUSTED_PROXY_PEERS: "172.30.0.2"
+      # --- Backend + telemetry (telemetry path is constant in-container; its
+      # host source is MENHIR_STATE_ROOT, isolated in candidate mode) ---
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: neo4j
+      NEO4J_DATABASE: neo4j
+      MENHIR_MCP_TELEMETRY_DB: /srv/menhir/state/telemetry/mcp_telemetry.db
+      # --- Provider selection + models. API keys come from secret files via the
+      # image entrypoint, never from this file. ---
+      LLM_CHAT_PROVIDER: "${LLM_CHAT_PROVIDER:?LLM_CHAT_PROVIDER is required}"
+      GRAPHITI_LLM_PROVIDER: "${GRAPHITI_LLM_PROVIDER:?GRAPHITI_LLM_PROVIDER is required}"
+      GRAPHITI_EMBED_PROVIDER: "${GRAPHITI_EMBED_PROVIDER:?GRAPHITI_EMBED_PROVIDER is required}"
+      OPENAI_CHAT_MODEL: "${OPENAI_CHAT_MODEL:-gpt-4.1-nano}"
+      OPENAI_EMBED_MODEL: "${OPENAI_EMBED_MODEL:-text-embedding-3-small}"
+    volumes:
+      # Secrets: fixed-path, read-only, always.
+      - type: bind
+        source: ${MENHIR_PROD_SECRETS_DIR:-/srv/menhir/production/secrets}/menhir
+        target: /run/secrets/menhir
+        read_only: true
+      - type: bind
+        source: ${MENHIR_PROD_SECRETS_DIR:-/srv/menhir/production/secrets}/oauth
+        target: /run/secrets/oauth
+        read_only: true
+      # Immutable client policy: read-only, always.
+      - type: bind
+        source: ${MENHIR_PROD_POLICY_DIR:-/srv/menhir/production/policy}
+        target: /srv/menhir/production/policy
+        read_only: true
+      # OAuth authority (SQLite stores): read-write in production, read-only in
+      # candidate.
+      - type: bind
+        source: ${MENHIR_STATE_ROOT:-/srv/menhir/production/state}/oauth
+        target: /srv/menhir/production/state/oauth
+        read_only: ${MENHIR_AUTHORITIES_READ_ONLY:-false}
+      # Telemetry / candidate disposable evidence: always writable. Candidate
+      # launch overrides MENHIR_TELEMETRY_ROOT to an isolated probe directory;
+      # production uses the authoritative telemetry path below.
+      - type: bind
+        source: ${MENHIR_TELEMETRY_ROOT:-/srv/menhir/production/state/telemetry}
+        target: /srv/menhir/state/telemetry
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 2g
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8099/livez', timeout=4)\" || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+networks:
+  internal:
+    internal: true
+  menhir-proxy:
+    external: true
+    name: menhir-proxy
+
+secrets:
+  neo4j_auth:
+    file: ${MENHIR_PROD_SECRETS_DIR:-/srv/menhir/production/secrets}/neo4j/neo4j-auth

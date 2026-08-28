@@ -31,6 +31,13 @@ class RunLLMReviewTool(BaseJsonTool):
     # clear as false_positive), and selected its work set with no tenancy predicate.
     scope = ToolScope.NAMESPACED
     required_tier = "operator"
+    title = "Run LLM Conflict Review"
+    oauth_scopes = ("menhir:admin",)
+    # Mutates conflict state (promote to unresolved, or clear as false_positive).
+    read_only_hint = False
+    destructive_hint = False
+    # Sends conflict pairs to the configured external LLM for confirmation.
+    open_world_hint = True
     description = "Run LLM contradiction confirmation on pending conflicts."
 
     async def endpoint(self, limit: int = 20, namespace: str = "") -> str:

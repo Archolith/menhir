@@ -30,10 +30,9 @@ class _StubGraphAdapter:
         """CF-257. The watcher now settles identity before writing, so it needs a graph handle.
 
         Returns a binding for whatever root it is asked about, which models the state after the
-        phase 2b backfill: every known project is already bound to its directory, so a re-scan is
-        an unambiguous continuation rather than a decision. That is the behaviour these tests are
-        about -- a watcher that stopped refreshing until an operator answered would be a
-        regression, not a safeguard.
+        phase 2b backfill. Tests that reach the write path also publish the matching per-checkout
+        identity file: the watcher may continue that established claim, but a host/path binding
+        alone is no longer authority to adopt it.
         """
         projects = self._projects
 
@@ -41,11 +40,24 @@ class _StubGraphAdapter:
             @staticmethod
             def execute(cypher, params=None):
                 if "MATCH (p:ProjectIdentity)" in cypher and "RETURN p.project_id AS id, " in cypher:
-                    return [{"id": f"id-{p['name']}", "root": p.get("root_path", "")}
-                            for p in projects]
+                    # `p.project_id <> $project_id` is part of this statement and MUST be honoured:
+                    # the same read backs both `binding_for_root` (no exclusion) and the rival
+                    # scan (excludes the id being bound). A stub that ignored it reported the
+                    # project as its own rival, and every watcher re-scan was refused as contested.
+                    exclude = (params or {}).get("project_id")
+                    rows = [
+                        {
+                            "id": f"id-{p['name']}",
+                            "root": p.get("root_path", ""),
+                            "root_key": None,
+                        }
+                        for p in projects
+                    ]
+                    return [r for r in rows if r["id"] != exclude]
                 if "MERGE (p:ProjectIdentity" in cypher:
                     return [{"bound_root": (params or {}).get("root_path"), "state": "bound",
-                             "bound_host": (params or {}).get("host")}]
+                             "bound_host": (params or {}).get("host"),
+                             "root_key": (params or {}).get("root_key")}]
                 return []
 
         return _Neo4j()
@@ -156,11 +168,14 @@ class TestRefreshStructureGraphs:
         assert len(adapter._write_calls) == 0
 
     async def test_changed_fingerprint_rescans(self, tmp_path):
+        from menhir.domain.project_id_file import ensure_ignore_rule, mint_identity
         from menhir.services.scheduler_tasks import refresh_structure_graphs
 
         project_dir = tmp_path / "my-proj"
         project_dir.mkdir()
         (project_dir / "main.py").write_text("print('hello')")
+        ensure_ignore_rule(project_dir)
+        mint_identity(project_dir, project_id="id-my-proj", display_name="my-proj")
 
         adapter = _StubGraphAdapter(
             _projects=[{"name": "my-proj", "root_path": str(project_dir)}],
@@ -215,11 +230,14 @@ class TestRefreshStructureGraphs:
 
     async def test_first_ingest_no_stored_fingerprint(self, tmp_path):
         """When no fingerprint is stored (first scan), project should be scanned."""
+        from menhir.domain.project_id_file import ensure_ignore_rule, mint_identity
         from menhir.services.scheduler_tasks import refresh_structure_graphs
 
         project_dir = tmp_path / "new-proj"
         project_dir.mkdir()
         (project_dir / "app.py").write_text("pass")
+        ensure_ignore_rule(project_dir)
+        mint_identity(project_dir, project_id="id-new-proj", display_name="new-proj")
 
         adapter = _StubGraphAdapter(
             _projects=[{"name": "new-proj", "root_path": str(project_dir)}],

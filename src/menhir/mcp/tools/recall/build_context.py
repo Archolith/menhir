@@ -72,6 +72,11 @@ class BuildContextTool(BaseTextTool):
     name = "build_context"
     scope = ToolScope.NAMESPACED
     required_tier = "readonly"
+    title = "Build Context"
+    oauth_scopes = ("menhir:read",)
+    read_only_hint = True
+    destructive_hint = False
+    open_world_hint = False
     description = "Build a token-budget-limited context string."
 
     async def endpoint(

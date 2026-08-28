@@ -23,6 +23,11 @@ class GetArtifactTool(BaseTextTool):
     name = "get_artifact"
     scope = ToolScope.NAMESPACED
     required_tier = "readonly"
+    title = "Get Work Artifact"
+    oauth_scopes = ("menhir:read",)
+    read_only_hint = True
+    destructive_hint = False
+    open_world_hint = False
     description = "Read one work artifact (plan, review, investigation, report, handoff) in full."
 
     async def endpoint(self, artifact_uuid: str, namespace: str = "") -> str:

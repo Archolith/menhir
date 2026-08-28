@@ -25,11 +25,11 @@ from menhir.services import MaintenanceScheduler
 
 from .runtime_support import (
     RuntimeContext,
-    RuntimeState,
+    RuntimeState,  # noqa: F401 - MCP lifecycle compatibility re-export
     _annotate_runtime_failures,
-    _has_recent_flagged_bootstrap_read,
+    _has_recent_flagged_bootstrap_read,  # noqa: F401 - lifecycle compatibility re-export
     _init_lock,
-    _remember_flagged_bootstrap_read,
+    _remember_flagged_bootstrap_read,  # noqa: F401 - lifecycle compatibility re-export
     _state,
     _uses_scheduler_managed_graphiti,
 )
@@ -674,6 +674,8 @@ def _shutdown_runtime_sync() -> None:
 
 async def _initialize_services(
     settings: MemorySettings | None = None,
+    *,
+    candidate_readonly: bool = False,
 ) -> tuple[object, object]:
     # Before anything else. A process that already refused write admission may not rebuild the
     # services that admit writers -- not on a retry, not through a second entry point, not after a
@@ -686,12 +688,13 @@ async def _initialize_services(
         )
 
     settings = settings or MemorySettings.from_env()
-    enable_llm_usage_telemetry()
+    if not candidate_readonly:
+        enable_llm_usage_telemetry()
 
     # Start the scheduler BEFORE preflight so it can bring up the LLM/embedder
     # endpoints that preflight will check. Without this, preflight sees the LLM
     # as down → enrichment_ready=False → scheduler never starts → deadlock.
-    uses_scheduler = _uses_scheduler_managed_graphiti(settings)
+    uses_scheduler = False if candidate_readonly else _uses_scheduler_managed_graphiti(settings)
     if uses_scheduler:
         record_lifecycle_event(component="runtime_init", event="ensure_scheduler_running", state="started")
         logger.info("[init 0/6] Ensuring scheduler process is running...")
@@ -740,18 +743,33 @@ async def _initialize_services(
 
     record_lifecycle_event(component="runtime_init", event="build_memory_services", state="started")
     logger.info("[init 1/5] Building memory services...")
-    built = build_memory_services(settings, capabilities=capabilities)
+    built = build_memory_services(
+        settings,
+        capabilities=capabilities,
+        read_only=candidate_readonly,
+    )
     record_lifecycle_event(component="runtime_init", event="build_memory_services", state="completed")
 
-    if uses_scheduler and capabilities.enrichment_ready:
+    if uses_scheduler and capabilities.enrichment_ready and not candidate_readonly:
         record_lifecycle_event(component="runtime_init", event="register_scheduler_task_source", state="started")
         await register_scheduler_task_source()
         record_lifecycle_event(component="runtime_init", event="register_scheduler_task_source", state="completed")
 
-    record_lifecycle_event(component="runtime_init", event="prepare_memory_runtime", state="started")
-    logger.info("[init 3/6] Preparing memory runtime (Graphiti indices + schema)...")
-    await prepare_memory_runtime(built)
-    record_lifecycle_event(component="runtime_init", event="prepare_memory_runtime", state="completed")
+    if candidate_readonly:
+        from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
+
+        graph_adapter = MemoryGraphAdapter(neo4j=built.neo4j)
+        schema_ready = await asyncio.to_thread(graph_adapter.phase_one_schema_ready)
+        if not schema_ready:
+            raise RuntimeError(
+                "candidate-readonly requires the production graph schema to be present; "
+                "schema creation is fenced"
+            )
+    else:
+        record_lifecycle_event(component="runtime_init", event="prepare_memory_runtime", state="started")
+        logger.info("[init 3/6] Preparing memory runtime (Graphiti indices + schema)...")
+        await prepare_memory_runtime(built)
+        record_lifecycle_event(component="runtime_init", event="prepare_memory_runtime", state="completed")
 
     record_lifecycle_event(component="runtime_init", event="new_session", state="started")
     logger.info("[init 4/6] Creating session...")
@@ -773,32 +791,40 @@ async def _initialize_services(
     #
     # For observation the consequence is only an inaccurate report. For CF-20c it is a hard ordering
     # requirement: the gate and any recovery must close before workers exist to race them.
-    await _run_startup_saga_observe(built, settings)
+    if not candidate_readonly:
+        await _run_startup_saga_observe(built, settings)
 
-    record_lifecycle_event(component="runtime_init", event="resume_pending_episodes", state="started")
-    logger.info("[init 5/6] Resuming pending episodes...")
-    orphan_result = None
-    try:
-        await asyncio.wait_for(built.ingest_service.resume_pending_episodes(), timeout=INIT_TIMEOUT)
-        record_lifecycle_event(component="runtime_init", event="resume_pending_episodes", state="completed")
-    except asyncio.TimeoutError:
-        logger.warning("resume_pending_episodes timed out after %ds — continuing (scheduler will retry)", INIT_TIMEOUT)
-        record_lifecycle_event(
-            component="runtime_init",
-            event="resume_pending_episodes",
-            state="timeout_skipped",
-            details={"timeout_s": INIT_TIMEOUT},
-        )
-    except Exception:
-        logger.warning("resume_pending_episodes failed during init — continuing", exc_info=True)
-        record_lifecycle_event(
-            component="runtime_init",
-            event="resume_pending_episodes",
-            state="error_skipped",
-        )
+    if not candidate_readonly:
+        record_lifecycle_event(component="runtime_init", event="resume_pending_episodes", state="started")
+        logger.info("[init 5/6] Resuming pending episodes...")
+        try:
+            await asyncio.wait_for(built.ingest_service.resume_pending_episodes(), timeout=INIT_TIMEOUT)
+            record_lifecycle_event(component="runtime_init", event="resume_pending_episodes", state="completed")
+        except asyncio.TimeoutError:
+            logger.warning("resume_pending_episodes timed out after %ds — continuing (scheduler will retry)", INIT_TIMEOUT)
+            record_lifecycle_event(
+                component="runtime_init",
+                event="resume_pending_episodes",
+                state="timeout_skipped",
+                details={"timeout_s": INIT_TIMEOUT},
+            )
+        except Exception:
+            logger.warning("resume_pending_episodes failed during init — continuing", exc_info=True)
+            record_lifecycle_event(
+                component="runtime_init",
+                event="resume_pending_episodes",
+                state="error_skipped",
+            )
 
     _state.built = built
     _state.session = session
+    if candidate_readonly:
+        logger.info(
+            "[init done] session=%s, candidate-readonly mutation fence active; "
+            "schema, scheduler, enrichment resume, saga recovery, and orphan recovery disabled",
+            session.session_id,
+        )
+        return built, session
     if settings.benchmark_mode:
         # Benchmark isolation: no scheduler (consolidation/decay/structure) and no
         # orphan recovery, so the store is never mutated mid-measurement.
@@ -826,7 +852,11 @@ async def _initialize_services(
     return built, session
 
 
-async def _get_services(settings: MemorySettings | None = None) -> tuple[object, object]:
+async def _get_services(
+    settings: MemorySettings | None = None,
+    *,
+    candidate_readonly: bool = False,
+) -> tuple[object, object]:
     if _state.built is not None and _state.session is not None:
         return _state.built, _state.session
 
@@ -835,7 +865,9 @@ async def _get_services(settings: MemorySettings | None = None) -> tuple[object,
             return _state.built, _state.session
         init_task = _state.init_task
         if init_task is None or not isinstance(init_task, asyncio.Task) or init_task.done():
-            init_task = asyncio.create_task(_initialize_services(settings))
+            init_task = asyncio.create_task(
+                _initialize_services(settings, candidate_readonly=candidate_readonly)
+            )
             _state.init_task = init_task
 
     try:
@@ -948,8 +980,14 @@ async def mcp_lifespan(_app: object) -> AsyncIterator[dict[str, object]]:
         await _shutdown_runtime()
 
 
-async def start_runtime(settings: MemorySettings | None = None) -> RuntimeContext:
-    built, session = await _get_services(settings)
+async def start_runtime(
+    settings: MemorySettings | None = None,
+    *,
+    candidate_readonly: bool = False,
+) -> RuntimeContext:
+    built, session = await _get_services(
+        settings, candidate_readonly=candidate_readonly
+    )
     return RuntimeContext(
         built=built,
         session=session,

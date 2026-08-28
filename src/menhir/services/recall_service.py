@@ -101,6 +101,9 @@ class RecallService(RecallSupportMixin):
     #: namespace) surfaces a leading/advisory event-history authority layer. Default OFF -> today's
     #: behavior (no event authority and no event-assertion repository read).
     event_history_authority_enabled: bool = False
+    #: Candidate-readonly instances must not reinforce retrieval by touching graph
+    #: access timestamps, edge weights, or lifecycle state.
+    read_only: bool = False
     _rehydration_tasks: set[asyncio.Task[None]] = field(default_factory=set)
     _change_log_provider: ChangeLogProvider = field(default_factory=CachedGitChangeLog)
 
@@ -141,6 +144,6 @@ class RecallService(RecallSupportMixin):
             include_invalidated=include_invalidated,
             tuning=tuning,
             trace=trace,
-            update_access=update_access,
+            update_access=update_access and not self.read_only,
         )
         return await apply_event_history_authority_layer(self, result, query, namespace)

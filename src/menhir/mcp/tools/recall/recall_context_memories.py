@@ -52,6 +52,11 @@ class RecallContextMemoriesTool(BaseJsonTool):
     name = "recall_context_memories"
     scope = ToolScope.NAMESPACED
     required_tier = "readonly"
+    title = "Recall Context Memories"
+    oauth_scopes = ("menhir:read",)
+    read_only_hint = True
+    destructive_hint = False
+    open_world_hint = False
     description = "Read non-flagged startup context memories."
 
     async def endpoint(

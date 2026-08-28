@@ -197,10 +197,11 @@ jobs:
       # online tests that cannot cope with that, so a new *_live.py file is picked up here
       # AUTOMATICALLY instead of being silently missed by a hand-maintained list.
       #
-      # Only two things carry `needs_llm`, and only because they cannot skip themselves:
+      # Three things carry `needs_llm`, and only because they cannot skip themselves:
       # TestCompressContentLive (HANGS in chat-completion retry/backoff until pytest-timeout
-      # kills the run) and test_m0_retrieval_baseline (drives real graphiti search lanes). Every
-      # other LLM-dependent online test has a working skip-guard and skips cleanly here.
+      # kills the run), test_m0_retrieval_baseline (drives real graphiti search lanes), and the
+      # consumer-session E2E acceptance gate (requires real enrichment). Every other
+      # LLM-dependent online test has a working skip-guard and skips cleanly here.
       #
       # Verified locally against a stock neo4j:5-community: 127 passed, 20 skipped, 0 failed.
       - name: Run online tests (graph-backed)

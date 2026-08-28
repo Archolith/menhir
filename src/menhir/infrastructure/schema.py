@@ -82,6 +82,40 @@ PHASE_ONE_REQUIRED_INDEXES = (
     "metric_view_current_idx",
     "metric_source_idx",
     "metric_receipt_op_idx",
+    # CF-257: SHOW INDEXES also reports the backing RANGE indexes for uniqueness
+    # constraints under the constraint names. Keep all three constraints in the
+    # readiness set, otherwise an upgraded installation with every legacy index online
+    # skips bootstrap_phase_one() and never executes the new identity/structure DDL.
+    "project_identity_id_unique",
+    "project_identity_root_unique",
+    "structure_project_path_unique",
+)
+
+# Name, constraint type, entity type, labels/types, ordered properties. Index names alone are not
+# sufficient readiness evidence: Neo4j permits an ordinary RANGE index to use the prospective
+# constraint name, and SHOW INDEXES would then make startup skip the uniqueness DDL.
+PHASE_ONE_REQUIRED_CONSTRAINTS = (
+    (
+        "project_identity_id_unique",
+        "UNIQUENESS",
+        "NODE",
+        ("ProjectIdentity",),
+        ("project_id",),
+    ),
+    (
+        "project_identity_root_unique",
+        "UNIQUENESS",
+        "NODE",
+        ("ProjectIdentity",),
+        ("bound_host", "root_key"),
+    ),
+    (
+        "structure_project_path_unique",
+        "UNIQUENESS",
+        "NODE",
+        ("Entity",),
+        ("structure_project_id", "structure_path"),
+    ),
 )
 
 
@@ -492,10 +526,33 @@ def _edge_defaults_queries() -> list[str]:
     return queries
 
 
+def _project_identity_index_queries() -> list[str]:
+    """Constraints backing project and structural identity (CF-257).
+
+    In the phase-1 bootstrap rather than only in the migration script: a constraint that only a
+    one-off migration creates is one a fresh deployment does not have, and the whole point of the
+    root constraint is that it is the enforcement rather than the Python check in front of it.
+
+    All three are safe to create over accepted live data. `project_id` was already unique. Neo4j
+    does not enforce a composite constraint for a node with NULL in either property (verified,
+    Neo4j 5.26.21), so legacy bindings without `root_key` and legacy :Entity nodes without
+    `structure_project_id` remain outside their composites. Live structure acceptance refuses an
+    id-less scan and revalidates its identity claim before writing, so every accepted structural
+    node enters the :Entity composite under its current authorised project identity.
+    """
+    from menhir.infrastructure.project_identity_binding import PROJECT_IDENTITY_CONSTRAINTS
+
+    return list(PROJECT_IDENTITY_CONSTRAINTS) + [
+        "CREATE CONSTRAINT structure_project_path_unique IF NOT EXISTS "
+        "FOR (n:Entity) REQUIRE (n.structure_project_id, n.structure_path) IS UNIQUE"
+    ]
+
+
 def get_phase1_bootstrap_queries() -> list[str]:
     """Return idempotent DDL and backfill queries for phase-1 memory shape."""
     return (
         [query.strip() for query in _node_index_queries()]
+        + [query.strip() for query in _project_identity_index_queries()]
         + [query.strip() for query in _artifact_index_queries()]
         + [query.strip() for query in _view_index_queries()]
         + [query.strip() for query in _metric_index_queries()]

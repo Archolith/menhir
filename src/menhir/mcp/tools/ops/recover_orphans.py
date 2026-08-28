@@ -33,6 +33,11 @@ class RecoverOrphansTool(BaseJsonTool):
     scope = ToolScope.GLOBAL
     required_tier = "operator"
     description = "Recover orphaned SESSION nodes from crashed sessions."
+    title = "Recover Orphaned Sessions"
+    oauth_scopes = ("menhir:admin",)
+    read_only_hint = False
+    destructive_hint = True
+    open_world_hint = False
 
     def timeout_for(self, max_age_hours: float = 4.0, dry_run: bool = False) -> int:
         return 900

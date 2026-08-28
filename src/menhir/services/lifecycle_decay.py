@@ -7,11 +7,8 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from time import perf_counter
-from typing import TYPE_CHECKING, Any, Awaitable, Callable
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
-
-# Optional async callback: (processed, total, current_node_name) -> None
-ProgressCallback = Callable[[int, int, str], Awaitable[None]]
 
 from menhir.domain.memory_types import get_policy
 from menhir.domain.models import FreshnessState, NodeScope

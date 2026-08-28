@@ -24,6 +24,11 @@ class ResumeSchedulerTool(BaseTextTool):
     scope = ToolScope.GLOBAL
     required_tier = "operator"
     description = "Restart the maintenance scheduler loop after a pause."
+    title = "Resume Scheduler"
+    oauth_scopes = ("menhir:admin",)
+    read_only_hint = False
+    destructive_hint = False
+    open_world_hint = False
 
     async def endpoint(self) -> str:
         backend = self.get_backend()

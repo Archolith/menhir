@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 
 from menhir.mcp.service_access import get_mcp_session
@@ -15,6 +16,8 @@ async def ingest_document(
     project: str | None = None,
     document_type: str = "generic",
     namespace: str = "",
+    identity_action: str | None = None,
+    adopt_project_id: str | None = None,
 ) -> str:
     """Ingest a document or markdown file into the memory graph.
 
@@ -34,12 +37,15 @@ async def ingest_document(
         namespace: Optional silo for the QUEUED EPISODE -- the recallable memory this
             produces. Empty = default/global behavior. Note this is unrelated to `project`,
             which labels the shared structure graph and is not a tenancy boundary.
+        identity_action: Optional typed identity decision action for a retry.
+        adopt_project_id: Existing durable identity selected by an adopt action.
 
     Returns:
         Summary of the entity written and episode queue status.
     """
     return await IngestDocumentTool().execute(
-        path=path, project=project, document_type=document_type, namespace=namespace
+        path=path, project=project, document_type=document_type, namespace=namespace,
+        identity_action=identity_action, adopt_project_id=adopt_project_id,
     )
 
 
@@ -52,11 +58,17 @@ class IngestDocumentTool(BaseTextTool):
     # makes. Omitting the argument sent it to the default group regardless of the caller's pin,
     # which is CF-220's escape in a third tool.
     scope = ToolScope.NAMESPACED
+    title = "Ingest Document"
+    oauth_scopes = ("menhir:write",)
+    read_only_hint = False
+    destructive_hint = False
+    open_world_hint = True
     description = "Ingest a doc/markdown/text file into the memory graph as a document entity + semantic episode."
 
     def timeout_for(
         self, path: str = "", project: str | None = None,
-        document_type: str = "generic", **_unused: object,
+        document_type: str = "generic", identity_action: str | None = None,
+        adopt_project_id: str | None = None, **_unused: object,
     ) -> int:
         # timeout_for is dispatched with the caller's raw kwargs, so it must
         # accept everything endpoint accepts (including namespace).
@@ -64,9 +76,10 @@ class IngestDocumentTool(BaseTextTool):
 
     async def endpoint(
         self, path: str, project: str | None = None, document_type: str = "generic",
-        namespace: str = "",
+        namespace: str = "", identity_action: str | None = None,
+        adopt_project_id: str | None = None,
     ) -> str:
-        if not os.path.isfile(path):
+        if not await asyncio.to_thread(os.path.isfile, path):
             return f"Error: not a file: {path}"
 
         backend = self.get_backend()
@@ -78,7 +91,12 @@ class IngestDocumentTool(BaseTextTool):
             session_id=session.session_id,
             user_id=session.user_id,
             document_type=document_type,
+            identity_action=identity_action,
+            adopt_project_id=adopt_project_id,
         )
+
+        if result.get("status") == "needs_decision":
+            return json.dumps(result, sort_keys=True)
 
         structure_project = result.get("structure_project", "")
         structure_path = result.get("structure_path", "")

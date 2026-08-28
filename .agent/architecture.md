@@ -88,7 +88,10 @@ Direction:
   - `config/oauth.py` owns `OAuthConfig` and its snapshot/legacy-environment builder
   - `config/auth_mode.py` owns the OAuth > client-token > static > none precedence decision
   - `api/oauth.py` retains token verification and compatibility exports, while config never imports API
-- embedded-AS process dependencies (registered-client/code stores, signing key, and rate limiters) are configured from that snapshot before routes serve traffic
+- embedded-AS process dependencies (registered-client/code/refresh-token stores, signing key, and rate limiters) are configured from that snapshot before routes serve traffic
+  - `api/oauth_refresh_store.py` owns the persistent, hashed, rotating refresh-token store; the grant remains default-off and is exposed through app state without request-time environment drift
+  - authorization responses implement RFC 9207 `iss`; URL-form client IDs use the shared SSRF-safe CIMD resolver and a bounded, durable client snapshot, while DCR remains the fallback
+  - protected-resource scopes remain Menhir permissions only; `offline_access` is authorization-server-only and never maps to a Menhir tier
 - degraded startup is now split cleanly:
   - `degraded_reads_only`: Neo4j + embedder up, Graphiti client built without an LLM client so recall/search still works while enrichment is disabled
   - `degraded_queue_only`: Neo4j only, episodes still persist but Graphiti-backed recall/enrichment are unavailable
@@ -97,6 +100,11 @@ Direction:
   `core/request_context.py` owns the transport-neutral caller session, auth-mode, and tier ContextVars;
   `core/reader_identity.py` owns reader-id normalization, and backend/runtime telemetry comes from
   `infrastructure.telemetry`; `core` therefore imports neither `menhir.mcp` nor the MCP framework
+- remote OAuth requests additionally bind their immutable OAuth configuration and verified scopes in
+  `mcp/service_access.py`; only an invocation-tier denial becomes an MCP `mcp/www_authenticate`
+  tool result, while tenancy, allowlist, argument, and domain refusals remain ordinary errors
+- all 54 MCP tools declare a title, reviewed safety annotations, and a minimum OAuth scope; startup
+  rejects an incomplete or tier-incoherent declaration before the catalog is served
 - `core/backend_protocol.py` + `core/backend_impl.py` now define the backend-first MCP contract
   - `RuntimeProvider` wraps in-process `BuildArtifacts` + telemetry into serializable backend operations
   - `BackendClient` maps the same protocol onto an internal-only HTTP transport at `/api/internal/backend/{operation}`

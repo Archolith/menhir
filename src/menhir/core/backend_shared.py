@@ -119,6 +119,11 @@ def _project_scan_from_dict(payload: dict[str, Any]) -> ProjectScanResult:
         # guard rejects every call -- which broke the deprecated endpoint outright instead of
         # gating it, removing the observation window before it had measured anything.
         project_id=(str(payload["project_id"]) if payload.get("project_id") else None),
+        identity_generation=(
+            int(payload["identity_generation"])
+            if payload.get("identity_generation") is not None
+            else None
+        ),
         # Coverage counts must survive this boundary or `partial_index` is silently lost on
         # the remote path and consumers fall back to reporting absence as fact.
         files_discovered=int(payload.get("files_discovered") or 0),

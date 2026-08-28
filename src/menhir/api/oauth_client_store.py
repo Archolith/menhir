@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import secrets
+import sqlite3
 import threading
+import time
 
 from archolith_oauth import OAuthClient, OAuthClientStore, hash_secret
 
@@ -15,6 +18,122 @@ def new_client_id() -> str:
 
 _client_store_singleton: OAuthClientStore | None = None
 _client_store_singleton_lock = threading.Lock()
+
+# Serializes CIMD snapshot upserts / freshness bookkeeping within this process.
+# Cross-process safety comes from SQLite BEGIN IMMEDIATE transactions.
+_cimd_write_lock = threading.Lock()
+
+
+def _upsert_client_row(conn: sqlite3.Connection, client: OAuthClient) -> None:
+    conn.execute(
+        """INSERT INTO oauth_clients
+           (client_id, client_name, redirect_uris, scopes, client_secret_hash,
+            created_at, token_endpoint_auth_method, last_exchanged)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(client_id) DO UPDATE SET
+             client_name=excluded.client_name,
+             redirect_uris=excluded.redirect_uris,
+             scopes=excluded.scopes,
+             client_secret_hash=excluded.client_secret_hash,
+             created_at=excluded.created_at,
+             token_endpoint_auth_method=excluded.token_endpoint_auth_method,
+             last_exchanged=COALESCE(oauth_clients.last_exchanged, excluded.last_exchanged)
+        """,
+        (
+            client.client_id,
+            client.client_name,
+            json.dumps(list(client.redirect_uris)),
+            json.dumps(list(client.scopes)),
+            client.client_secret_hash,
+            client.created_at,
+            client.token_endpoint_auth_method,
+            client.last_exchanged,
+        ),
+    )
+
+
+def upsert_client(client: OAuthClient) -> None:
+    """Durably insert-or-update a client row under its exact ``client_id``.
+
+    Used for CIMD snapshots keyed by the metadata URL, which must be refreshable
+    in place (the shared store's ``register`` is INSERT-only). An existing
+    ``last_exchanged`` marker is preserved so reaping semantics for exchanged
+    clients survive a snapshot refresh. Ordinary DCR clients are untouched.
+    """
+    with _cimd_write_lock:
+        conn = sqlite3.connect(str(get_client_store().db_path))
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            _upsert_client_row(conn, client)
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def upsert_cimd_client(client: OAuthClient, *, fetched_at: float) -> None:
+    """Atomically persist a validated CIMD snapshot and its freshness marker."""
+    with _cimd_write_lock:
+        conn = sqlite3.connect(str(get_client_store().db_path))
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS oauth_cimd_cache ("
+                "client_id TEXT PRIMARY KEY, fetched_at REAL NOT NULL)"
+            )
+            _upsert_client_row(conn, client)
+            conn.execute(
+                "INSERT INTO oauth_cimd_cache (client_id, fetched_at) VALUES (?, ?)"
+                " ON CONFLICT(client_id) DO UPDATE SET fetched_at=excluded.fetched_at",
+                (client.client_id, float(fetched_at)),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def _connect_cimd_cache() -> sqlite3.Connection:
+    store = get_client_store()
+    conn = sqlite3.connect(str(store.db_path))
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS oauth_cimd_cache ("
+        "client_id TEXT PRIMARY KEY, fetched_at REAL NOT NULL)"
+    )
+    return conn
+
+
+def record_cimd_fetch(client_id: str, *, now: float | None = None) -> None:
+    """Record the fetch time of a CIMD document snapshot for bounded freshness."""
+    ts = float(now) if now is not None else time.time()
+    with _cimd_write_lock:
+        conn = _connect_cimd_cache()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                "INSERT INTO oauth_cimd_cache (client_id, fetched_at) VALUES (?, ?)"
+                " ON CONFLICT(client_id) DO UPDATE SET fetched_at=excluded.fetched_at",
+                (client_id, ts),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def cimd_fetched_at(client_id: str) -> float | None:
+    """Return the recorded CIMD fetch time for *client_id*, or None."""
+    try:
+        conn = _connect_cimd_cache()
+    except Exception:
+        return None
+    try:
+        row = conn.execute(
+            "SELECT fetched_at FROM oauth_cimd_cache WHERE client_id = ?",
+            (client_id,),
+        ).fetchone()
+    except Exception:
+        return None
+    finally:
+        conn.close()
+    return float(row[0]) if row is not None else None
 
 
 def configure_client_store(settings: object) -> OAuthClientStore:
@@ -58,8 +177,12 @@ def get_client_store() -> OAuthClientStore:
 __all__ = [
     "OAuthClient",
     "OAuthClientStore",
+    "cimd_fetched_at",
     "configure_client_store",
     "get_client_store",
     "hash_secret",
     "new_client_id",
+    "record_cimd_fetch",
+    "upsert_cimd_client",
+    "upsert_client",
 ]

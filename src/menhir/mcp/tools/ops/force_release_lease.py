@@ -25,6 +25,11 @@ class ForceReleaseEnrichmentLeaseTool(BaseTextTool):
     # and the uuid it addresses is checked against that pin at load (CF-33 step 4).
     scope = ToolScope.NAMESPACED
     required_tier = "operator"
+    title = "Force Release Enrichment Lease"
+    oauth_scopes = ("menhir:admin",)
+    read_only_hint = False
+    destructive_hint = False
+    open_world_hint = False
     description = "Force-release one ENRICHING episode lease."
 
     async def endpoint(

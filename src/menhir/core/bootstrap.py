@@ -32,7 +32,9 @@ class UnavailableGraphitiClient:
     def _raise(self) -> RuntimeError:
         raise RuntimeError(self.reason)
 
-    async def build_indices_and_constraints(self, *, force: bool = False, timeout: int = 15) -> None:
+    async def build_indices_and_constraints(
+        self, *, force: bool = False, timeout: int = 15  # noqa: ASYNC109 -- client API
+    ) -> None:
         self._raise()
 
     async def add_episode(self, **kwargs: Any) -> Any:
@@ -158,6 +160,7 @@ def build_memory_services(
     settings: MemorySettings | None = None,
     *,
     capabilities: RuntimeCapabilities | None = None,
+    read_only: bool = False,
 ) -> BuildArtifacts:
     """Build collaborators for the v1 memory pipeline."""
     settings = settings or MemorySettings.from_env()
@@ -233,6 +236,7 @@ def build_memory_services(
         scalar_view_authority_enabled=settings.personal_memory_scalar_view_authority_enabled,
         scalar_history_enabled=settings.personal_memory_scalar_history_enabled,
         event_history_authority_enabled=settings.personal_memory_event_history_authority_enabled,
+        read_only=read_only,
     )
     context_builder = ContextBuilderService(
         recall_service=recall_service,
@@ -288,8 +292,20 @@ async def prepare_memory_runtime(
     else:
         # These adapter calls are synchronous and can block the event loop on startup.
         bootstrap_result = await asyncio.to_thread(artifacts.graph_adapter.bootstrap_phase_one)
+        # Bootstrap success means only that every DDL statement returned without raising. It is
+        # not proof that the required schema exists: Neo4j's IF NOT EXISTS can no-op when a
+        # same-named ordinary index or wrong-shaped constraint occupies the name. Re-read the
+        # exact semantic contract after the repair attempt and fail before any writer starts.
+        schema_ready = await asyncio.to_thread(artifacts.graph_adapter.phase_one_schema_ready)
+        if not schema_ready:
+            failure_detail = "; ".join(str(item) for item in bootstrap_result.failures)
+            suffix = f" Bootstrap failures: {failure_detail}" if failure_detail else ""
+            raise RuntimeError(
+                "Phase-one schema remains absent or wrong-shaped after bootstrap; refusing "
+                f"writer startup.{suffix}"
+            )
         schema = {
-            "status": "ok" if bootstrap_result.success else "partial",
+            "status": "ok",
             "queries_executed": bootstrap_result.queries_executed,
             "failures": bootstrap_result.failures,
             "skipped": False,

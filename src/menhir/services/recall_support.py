@@ -599,8 +599,6 @@ class RecallSupportMixin:
         error degrades to the input (ScoringService) order — never breaks recall. Returns
         ``(results, note)``.
         """
-        from dataclasses import replace
-
         from menhir.domain.oracle_combiner import LogSpaceOracleCombiner
         from menhir.domain.oracles import CandidateMemory, QueryContext
         from menhir.domain.diversity import diversify

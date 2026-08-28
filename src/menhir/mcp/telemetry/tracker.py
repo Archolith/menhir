@@ -10,6 +10,7 @@ from typing import Any, Awaitable, Callable, TypeVar, cast
 from menhir.infrastructure.telemetry.helpers import _safe_preview_of, _size_of, _utc_now_iso
 from menhir.infrastructure.telemetry.store import McpTelemetryStore, telemetry_store
 from menhir.core.request_context import get_request_session, get_request_tier
+from menhir.mcp.service_access import McpOAuthInvocationDenied
 
 #: Execution stage, so a failed row says WHERE it failed (CF-29).
 #:
@@ -133,7 +134,7 @@ async def track_mcp_call(
     payload: Any,
     runner: Callable[[], Awaitable[T]],
     store: McpTelemetryStore = telemetry_store,
-    timeout: int = DEFAULT_MCP_TIMEOUT,
+    timeout: int = DEFAULT_MCP_TIMEOUT,  # noqa: ASYNC109 -- public tool contract
     error_mapper: Callable[[str], T] | None = None,
     effective_payload: Callable[[], Any | None] | None = None,
 ) -> T:
@@ -269,6 +270,17 @@ async def track_mcp_call(
             )
         except sqlite3.Error:
             logger.exception("Failed to record error telemetry")
+        if isinstance(exc, McpOAuthInvocationDenied):
+            from mcp.types import CallToolResult, TextContent
+
+            return cast(
+                T,
+                CallToolResult(
+                    content=[TextContent(type="text", text=exc.description)],
+                    isError=True,
+                    _meta={"mcp/www_authenticate": exc.challenge},
+                ),
+            )
         if error_mapper is not None:
             return error_mapper(error_msg)
         return cast(T, f"Error: {error_msg}")

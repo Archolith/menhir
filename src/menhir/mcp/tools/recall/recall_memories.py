@@ -60,6 +60,11 @@ class RecallMemoriesTool(BaseJsonTool):
     name = "recall_memories"
     scope = ToolScope.NAMESPACED
     required_tier = "readonly"
+    title = "Recall Memories"
+    oauth_scopes = ("menhir:read",)
+    read_only_hint = True
+    destructive_hint = False
+    open_world_hint = False
     description = "Search memories by semantic similarity."
 
     async def endpoint(

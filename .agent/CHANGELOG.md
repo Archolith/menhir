@@ -1,5 +1,150 @@
 # Changelog
 
+## 2026-08-27 - Add full Contabo production release path
+
+- Added the immutable four-repository release authority, offline wheelhouse and
+  reviewed OAuth source binding, full production Compose/runtime surface, and
+  exact client-policy enforcement with tier-bound access tokens.
+- Added encrypted retained-generation backups, sacrificial WORM verification,
+  replay-safe restore authority, candidate acceptance, promotion, rollback,
+  external evidence aggregation, and a scoped source-fence producer.
+- Added canonical collision-safe Neo4j authority hashing and release-bound
+  integration with the transactional shared-Caddy and VPS operations layers.
+- Verified the complete local suite and resolved every blocker from the frozen
+  11-finding Sol xhigh review; live deployment and secret operations remain
+  separate operator-controlled gates.
+
+## 2026-08-25 - Close CF-257 eighth-pass identity gaps
+
+- Require exact operator authority for `force_identity`; an absent or empty request tier can no
+  longer cross an identity boundary. Expose adopt/new retry fields on `ingest-wiki`, report typed
+  `needs_decision` candidates, and count only confirmed entity writes as ingested.
+- Make both inferred-project writers share a frozen UUID5 allocator and `MERGE` on the constrained
+  `(structure_project_id, structure_path)` key. Concurrent `CALLS` and `CONTAINS_REPO` writers now
+  converge on one target, while a directly scanned target retains its settled identity.
+- Re-read exact phase-one schema readiness after bootstrap and refuse writer startup when
+  `IF NOT EXISTS` silently no-ops against a same-named, wrong-shaped schema object.
+- Return missing-file `needs_decision` before creating the publication lock file, compare candidate
+  roots with the shared path-flavor-aware key, and persist a host/root/generation-scoped graph
+  marker with graph-first transfers. A retry may repair an interrupted identity-file publication
+  only while that exact marker remains current.
+- Verify 8,158 offline tests and 25 focused real-Neo4j tests. The complete online lane retained only
+  its three previously documented failures and passed 309 tests. Deploy under the durable writer
+  fence; restart both production services; verify all health/readiness endpoints at 200, exact
+  schema readiness, 60/60 constrained bindings, 43,372/43,372 structure ids, zero duplicate keys
+  or roots, zero pending publication markers, and a clean post-fence watcher cycle.
+
+## 2026-08-25 - Close CF-257 seventh-pass identity gaps
+
+- Make phase-one readiness verify the exact Neo4j uniqueness-constraint type, entity kind, label,
+  and property tuple. An ordinary ONLINE range index using a constraint's name can no longer make
+  an unenforced graph report ready.
+- Route document ingest through project-identity settlement and the durable writer fence before
+  any structural or narrative side effect. Expose typed adopt/new retry fields and return a
+  `needs_decision` result without writing an entity or queueing an episode.
+- Stamp inferred cross-project `CALLS` and `CONTAINS_REPO` targets with durable generated project
+  ids, including legacy NULL repair on match, so singleton MERGEs cannot escape the structure
+  identity constraint or the broad production census.
+- Treat the same project id presented from another host as a copy conflict, preserve literal POSIX
+  leading/trailing whitespace, and resolve conflicted identities in the same graph transaction as
+  the named-root transfer. A failed resolution leaves the conflict intact.
+- Serialize explicit identity transfer and file publication per root across both threads and
+  processes, while retaining the lock-free established-checkout path. The advisory-lock mutation
+  initially exposed a vacuous process-start timing test; the corrected child-attempt handshake now
+  catches removal of the OS lock deterministically.
+- Deploy under the durable writer fence, restart both production services, and verify exact schema
+  shapes plus disposable document, inferred-target, host-copy, conflict-resolution, and POSIX-path
+  canaries. The post-rollout census remains clean: 60/60 bindings constrained, 43,372 structure
+  nodes with zero NULL ids, zero duplicate active roots or structure keys, and zero canary residue.
+
+## 2026-08-25 - Close CF-257 project-identity rollout gaps
+
+- Make both `ProjectIdentity` uniqueness constraints part of phase-one readiness so an upgraded
+  installation cannot skip their idempotent DDL merely because every legacy index is online.
+- Add an explicit upgrade regression for the production-shaped case where the id constraint exists
+  but `project_identity_root_unique` does not.
+- Thread the settled project id into symbol batches. A fenced production watcher cycle exposed that
+  symbols were the final structural sub-writer still creating NULL-id rows; the batch census test
+  now covers directories, files, dependencies, endpoints, and symbols together.
+- Classify the 12 pathless `directory` rows found by the broad production census as semantic
+  memories carrying a legacy stray role; the fenced rollout removes that role rather than inventing
+  project identities for semantic data.
+- Share one path-flavor-aware root normalizer between the Phase 0 guard and binding keys. POSIX
+  roots preserve case and literal backslashes; Windows drive and UNC spellings remain
+  case/separator insensitive.
+- Make writer release lock the exact `ProjectIdentity` before `StructureWriteFence`, matching
+  admission's lock order. A deterministic real-Neo4j interleaving fails with the former reversed
+  order and passes without a deadlock victim or stranded writer slot after the fix.
+- Put `structure_project_path_unique` in phase-one bootstrap and readiness beside both identity
+  constraints, so a rebuilt or upgraded graph cannot report ready without every Phase 3
+  prerequisite.
+
+## 2026-08-25 - Plan the full Contabo production migration
+
+- Replace the split edge/private-worker design after Pokémon image cleanup freed Contabo capacity.
+  The target now runs OAuth, MCP, full Menhir runtime/enrichment, and Neo4j on Contabo while exposing
+  only Caddy and isolating Neo4j on a Docker-internal network.
+- Define immutable-client `chatgpt-chat` policy, durable refresh retries, exact-version offline Neo4j
+  dump/check/load rehearsal, OAuth/graph single-writer fencing, encrypted off-host backups,
+  route/network minimization, cutover, reverse-state rollback, observability, and real ChatGPT E2E
+  acceptance gates.
+- Add a production host-security gate: recoverable key-only SSH, Docker-aware IPv4/IPv6 firewalling,
+  Cloudflare-only mTLS origin ingress, non-root least-privilege containers, immutable image evidence,
+  separated backup authority, off-host detection, and clean-host compromise recovery.
+- Close the initial eight plan-level Sol blockers, then ground continued fresh Sol reviews in the
+  actual Menhir, `yawn.deploy`, and `yawn.vps` repositories. Add the resulting external-network and
+  Caddy-only transaction contract, whole-host capacity gate, immutable dependency/release authority,
+  exact state/writer manifest, atomic OAuth package boundary, capability-scoped VPS operations,
+  host-wide lock, prune containment, backup/restore job semantics, and four-repository file/test map.
+- After the final remediation, two consecutive fresh Sol reviewers independently audited the fixed
+  plan against current Menhir, `yawn.deploy`, and `yawn.vps` code and returned `VERDICT: NO BLOCKERS`.
+- Index the plan as active execution authority. No runtime, VPS, DNS, tunnel, or OAuth state was
+  changed while authoring the plan.
+
+## 2026-08-25 - Prove live ChatGPT OAuth compatibility
+
+- Complete a real ChatGPT developer-mode connection through a disposable public HTTPS tunnel to
+  the canonical `/mcp-http` resource. ChatGPT used its CIMD URL, exact callback, PKCE S256, RFC 8707
+  resource binding, RFC 9207 `iss`, and all three Menhir permission scopes.
+- Match ChatGPT's current CIMD auth-method negotiation: its metadata prefers `private_key_jwt` but
+  explicitly offers `none`; Menhir now selects and durably records the mutually supported public
+  method while still rejecting clients that do not offer it.
+- Add a default-off authorization-server policy seam that can issue refresh tokens after owner
+  consent when a client omits `offline_access`. The disposable ChatGPT profile enables the seam;
+  the granted Menhir scope remains unchanged and `offline_access` remains protocol-only.
+- From ChatGPT, prove read-only, disposable write, and non-destructive operator calls. After the
+  120-second access token expired, restart Menhir while preserving OAuth and Neo4j state, then prove
+  an automatic refresh and a successful post-restart tool call without reconnecting or consenting.
+- Record non-secret rotation evidence after the live run: 10 refresh rows, 9 consumed rotations,
+  one live replacement, and zero revoked rows. No authorization codes, access tokens, refresh
+  tokens, PKCE verifiers, or consent secrets were recorded.
+- Add a safe public-test launcher with exact-origin validation, disposable Neo4j isolation,
+  restart-preserved state, explicit interpreter control, interactive restart/stop commands, and
+  surfaced process-termination and sensitive-store cleanup failures.
+
+## 2026-08-24 - Complete local ChatGPT OAuth and MCP compatibility wiring
+
+- Split protected-resource permission scopes from authorization-server `offline_access`, advertise
+  refresh support truthfully, and add exact RFC 9207 `iss` to trusted authorization redirects.
+- Accept SSRF-validated URL client IDs through CIMD with a bounded, durable SQLite snapshot while
+  retaining strict public-client DCR fallback and restart-safe client identity.
+- Add default-off persistent refresh-token configuration and wire authorization-code issuance,
+  single-use rotation, replay-family revocation, optional scope narrowing, and no-store responses.
+- Declare titles, reviewed safety annotations, and minimum OAuth scopes for all 54 MCP tools; startup
+  now refuses incomplete or tier-incoherent ChatGPT metadata.
+- Return `mcp/www_authenticate` only for verified OAuth tool-tier denials, preserving 401/403/503 HTTP
+  semantics and keeping tenancy, allowlist, argument, and domain refusals out of reauthorization UI.
+- Add focused discovery, CIMD/DCR, refresh persistence/rotation, metadata census, challenge, and
+  authorization-invariant coverage. The public HTTPS/Inspector and real ChatGPT restart-refresh
+  acceptance gates remain external and the implementation plan remains open.
+- Harden the post-review authorization invariants: protocol-only `offline_access` is rejected from
+  permission configuration, tier scopes must remain inside the advertised permission surface, and
+  unknown MCP tiers now fail startup and runtime authorization closed.
+- Revalidate persisted client, authorization-code, and refresh-family scopes against current AS
+  policy before issuing credentials; refresh policy refusal is atomic and does not consume the
+  presented token. Public AS URLs reject credentials/query/fragment, and CIMD failures no longer
+  reflect resolver diagnostics to unauthenticated callers.
+
 ## 2026-08-24 - CF-257 phase 0: a scan root must own the project identity it writes under
 
 - **Project identity is a directory basename**, so two directories sharing one are a single

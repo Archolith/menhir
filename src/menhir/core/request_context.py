@@ -18,6 +18,9 @@ _request_auth_mode: ContextVar[str] = ContextVar(
     "menhir_request_auth_mode", default="none"
 )
 _request_tier: ContextVar[str] = ContextVar("menhir_request_tier", default="")
+_request_tool_allowlist: ContextVar[frozenset[str] | None] = ContextVar(
+    "menhir_request_tool_allowlist", default=None
+)
 
 
 def bind_request_session(session: MemorySession) -> Token[MemorySession | None]:
@@ -72,3 +75,19 @@ def get_request_tier() -> str:
     """Return the bound authorization tier, or an empty string when unbound."""
 
     return _request_tier.get()
+
+
+def bind_request_tool_allowlist(
+    tools: frozenset[str],
+) -> Token[frozenset[str] | None]:
+    """Bind the immutable client-policy tool allowlist for one request."""
+    return _request_tool_allowlist.set(frozenset(tools))
+
+
+def reset_request_tool_allowlist(token: Token[frozenset[str] | None]) -> None:
+    _request_tool_allowlist.reset(token)
+
+
+def get_request_tool_allowlist() -> frozenset[str] | None:
+    """Return a policy allowlist, distinguishing unbound from deny-all."""
+    return _request_tool_allowlist.get()

@@ -51,6 +51,26 @@ def test_oauth_protected_resource_metadata_404_when_disabled():
     assert resp.status_code == 404
 
 
+def test_oauth_protected_resource_scopes_exclude_offline_access_even_with_refresh():
+    """offline_access is AS-only; it never appears in protected-resource metadata."""
+    settings = SimpleNamespace(
+        oauth_enabled=True,
+        oauth_public_base_url="https://memory.example.com",
+        oauth_authorization_servers=("https://auth.example.com",),
+        oauth_issuer="https://auth.example.com/",
+        oauth_jwks_uri="https://auth.example.com/.well-known/jwks.json",
+        oauth_as_refresh_tokens_enabled=True,
+    )
+    body = _client(settings).get("/.well-known/oauth-protected-resource").json()
+
+    assert "offline_access" not in body["scopes_supported"]
+    assert set(body["scopes_supported"]) == {
+        "menhir:read",
+        "menhir:write",
+        "menhir:admin",
+    }
+
+
 # ===================================================================
 # T8 — x-yawn-client-name trust in OAuth mode (S-004)
 # ===================================================================

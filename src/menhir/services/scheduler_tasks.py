@@ -772,7 +772,7 @@ async def refresh_structure_graphs(
     for proj in projects:
         name = proj.get("name", "")
         root_path = proj.get("root_path", "")
-        if not root_path or not os.path.isdir(root_path):
+        if not root_path or not await asyncio.to_thread(os.path.isdir, root_path):
             errors += 1
             details.append({"project": name, "status": "path_missing"})
             continue
@@ -814,7 +814,7 @@ async def refresh_structure_graphs(
         # why leaving it out produced 1,816 id-less nodes rather than a handful. It never mints:
         # an unattended job inventing an identity is the silent-mint failure this design refuses.
         try:
-            project_id, resolution = await asyncio.to_thread(
+            claim, resolution = await asyncio.to_thread(
                 settle_project_identity,
                 graph_adapter, root_path=root_path, display_name=name,
             )
@@ -822,7 +822,7 @@ async def refresh_structure_graphs(
             errors += 1
             details.append({"project": name, "status": f"identity_error: {exc}"})
             continue
-        if project_id is None:
+        if claim is None:
             skipped += 1
             details.append({
                 "project": name,
@@ -830,7 +830,8 @@ async def refresh_structure_graphs(
                 "reason": resolution.reason,
             })
             continue
-        scan.project_id = project_id
+        scan.project_id = claim.project_id
+        scan.identity_generation = claim.generation
 
         try:
             # write_project_structure MERGEs thousands of nodes/edges — a heavy synchronous Neo4j

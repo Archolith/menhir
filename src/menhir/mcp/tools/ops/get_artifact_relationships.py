@@ -31,6 +31,11 @@ class ArtifactRelationshipsTool(BaseTextTool):
     # not proof of ownership, so each one the caller names is checked against the pin.
     scope = ToolScope.NAMESPACED
     required_tier = "readonly"
+    title = "Get Artifact Relationships"
+    oauth_scopes = ("menhir:read",)
+    read_only_hint = True
+    destructive_hint = False
+    open_world_hint = False
     description = "Show an artifact's declared relationships, subjects, and referenced todos."
 
     async def endpoint(self, artifact_uuid: str, namespace: str = "") -> str:

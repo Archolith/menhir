@@ -39,6 +39,12 @@ class ScanConflictsTool(BaseJsonTool):
     # per-node namespace-scoped, so this bounds which nodes are scanned at all.
     scope = ToolScope.NAMESPACED
     required_tier = "operator"
+    title = "Scan For Conflicts"
+    oauth_scopes = ("menhir:admin",)
+    # The scan WRITES conflict_group_id onto tenant nodes, so it is not read-only.
+    read_only_hint = False
+    destructive_hint = False
+    open_world_hint = False
     description = "Scan persistent entity nodes for similarity-based conflicts."
 
     async def endpoint(

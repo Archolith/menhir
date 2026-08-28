@@ -10,17 +10,20 @@ from __future__ import annotations
 
 import logging
 import time
-from urllib.parse import urlparse
 
+from archolith_oauth import valid_redirect_uri
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from menhir.api.oauth_as_metadata import _as_enabled
 from menhir.api.oauth_client_store import OAuthClient, get_client_store, new_client_id
-from menhir.api.oauth_rate_limit import FixedWindowLimiter, build_register_limiter, client_ip
+from menhir.api.oauth_rate_limit import (  # noqa: F401 - test reset seam
+    FixedWindowLimiter,
+    build_register_limiter,
+    client_ip,
+)
 from menhir.config import MemorySettings
-from menhir.config.oauth import _get_setting, build_oauth_config
-from menhir.config.settings import is_loopback_host
+from menhir.config.oauth import _as_bool, _get_setting, build_oauth_config
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -44,18 +47,30 @@ _register_limiter = FixedWindowLimiter(max_per_window=20, window_s=600)
 
 
 def _redirect_uri_ok(uri: object) -> bool:
-    """True only for an https URI, or an http URI whose host is loopback."""
-    if not isinstance(uri, str) or not uri:
-        return False
-    try:
-        parsed = urlparse(uri)
-    except Exception:
-        return False
-    if parsed.scheme == "https":
-        return bool(parsed.hostname)
-    if parsed.scheme == "http":
-        return is_loopback_host((parsed.hostname or "").strip().lower())
-    return False
+    """Apply the same strict redirect-URI rules as shared DCR and CIMD."""
+    return isinstance(uri, str) and valid_redirect_uri(uri)
+
+
+def refresh_tokens_enabled(settings: object) -> bool:
+    """True iff the AS issues refresh tokens; controls DCR grant acceptance and
+    advertisement truthfully (AS-005)."""
+    return _as_bool(
+        _get_setting(
+            settings,
+            "oauth_as_refresh_tokens_enabled",
+            "MENHIR_OAUTH_AS_REFRESH_TOKENS_ENABLED",
+            False,
+        )
+    )
+
+
+def as_scope_surface(settings: object) -> tuple[str, ...]:
+    """The full configured AS scope surface; includes offline_access only when
+    refresh tokens are enabled."""
+    scopes = tuple(build_oauth_config(settings).scopes_supported)
+    if refresh_tokens_enabled(settings) and "offline_access" not in scopes:
+        scopes = scopes + ("offline_access",)
+    return scopes
 
 
 def _error(error: str, description: str) -> JSONResponse:
@@ -63,11 +78,130 @@ def _error(error: str, description: str) -> JSONResponse:
     return JSONResponse(status_code=400, content={"error": error, "error_description": description})
 
 
+def _production_existing_registration(
+    request: Request,
+    *,
+    redirect_uris: list[str],
+    requested_scope: object,
+    refresh_enabled: bool,
+) -> JSONResponse | None:
+    """Return the one restored policy client without mutating OAuth authority.
+
+    Production DCR is an idempotent compatibility surface for the already
+    accepted ChatGPT registration. It never reaps, counts, inserts, or updates
+    rows. A missing or drifted restored client therefore fails closed instead
+    of manufacturing a new identity.
+    """
+
+    authority = getattr(request.app.state, "client_policy", None)
+    if authority is None:
+        return None
+
+    if requested_scope is not None and not isinstance(requested_scope, str):
+        return _error("invalid_client_metadata", "scope must be a space-delimited string")
+    requested_scopes = (
+        None
+        if requested_scope is None
+        else frozenset(value for value in requested_scope.split() if value)
+    )
+    matches: list[tuple[object, OAuthClient]] = []
+    store = get_client_store()
+    for policy in authority.clients.values():
+        stored = store.get(policy.client_id)
+        if stored is None:
+            continue
+        if (
+            tuple(redirect_uris) == tuple(stored.redirect_uris)
+            and stored.token_endpoint_auth_method == "none"
+            and frozenset(stored.scopes) == policy.scopes
+            and (requested_scopes is None or requested_scopes == policy.scopes)
+        ):
+            matches.append((policy, stored))
+
+    if len(matches) != 1:
+        return _error(
+            "invalid_client_metadata",
+            "Production registration is restricted to the restored immutable client",
+        )
+
+    policy, stored = matches[0]
+    return JSONResponse(
+        status_code=201,
+        content={
+            "client_id": stored.client_id,
+            "client_id_issued_at": int(stored.created_at),
+            "redirect_uris": list(stored.redirect_uris),
+            "token_endpoint_auth_method": "none",
+            "grant_types": ["authorization_code"]
+            + (["refresh_token"] if refresh_enabled else []),
+            "response_types": ["code"],
+            "client_name": stored.client_name or policy.label,
+            "scope": " ".join(sorted(policy.scopes)),
+        },
+    )
+
+
 @router.post("/oauth/register", include_in_schema=False)
 async def register_client(request: Request) -> JSONResponse:
     settings = getattr(request.app.state, "settings", None) or MemorySettings.from_env()
     if not _as_enabled(settings):
         raise HTTPException(status_code=404, detail="OAuth dynamic client registration is not enabled")
+
+    try:
+        body = await request.json()
+    except Exception:
+        return _error("invalid_client_metadata", "Request body must be a JSON object")
+    if not isinstance(body, dict):
+        return _error("invalid_client_metadata", "Request body must be a JSON object")
+
+    redirect_uris = body.get("redirect_uris")
+    if not isinstance(redirect_uris, list) or not redirect_uris:
+        return _error("invalid_client_metadata", "redirect_uris is required and must be a non-empty array")
+    if len(redirect_uris) > _MAX_REDIRECT_URIS:
+        return _error("invalid_client_metadata", f"At most {_MAX_REDIRECT_URIS} redirect_uris are allowed")
+    for uri in redirect_uris:
+        if not _redirect_uri_ok(uri):
+            return _error("invalid_redirect_uri", "Each redirect_uri must be https or http to a loopback host")
+
+    auth_method = body.get("token_endpoint_auth_method", "none")
+    if auth_method != "none":
+        return _error(
+            "invalid_client_metadata",
+            "Only token_endpoint_auth_method 'none' (public client + PKCE) is supported",
+        )
+
+    grant_types = body.get("grant_types")
+    if grant_types is not None and (
+        not isinstance(grant_types, list) or not set(grant_types) <= _SUPPORTED_GRANT_TYPES
+    ):
+        return _error("invalid_client_metadata", "Unsupported grant_types")
+    refresh_enabled = refresh_tokens_enabled(settings)
+    if not refresh_enabled and grant_types and "refresh_token" in grant_types:
+        # Truthful DCR: never accept a grant the AS will not honor (AS-005).
+        return _error(
+            "invalid_client_metadata",
+            "refresh_token grant is not enabled on this authorization server",
+        )
+
+    response_types = body.get("response_types")
+    if response_types is not None and (
+        not isinstance(response_types, list) or not set(response_types) <= _SUPPORTED_RESPONSE_TYPES
+    ):
+        return _error("invalid_client_metadata", "Unsupported response_types")
+
+    supported = as_scope_surface(settings)
+    requested_raw = body.get("scope")
+    if requested_raw is None:
+        granted = list(supported)
+    elif isinstance(requested_raw, str):
+        granted = [s for s in requested_raw.split() if s in supported]
+    else:
+        return _error("invalid_client_metadata", "scope must be a space-delimited string")
+
+    client_name_raw = body.get("client_name", "")
+    if not isinstance(client_name_raw, str):
+        return _error("invalid_client_metadata", "client_name must be a string")
+    client_name = client_name_raw.strip()[:_MAX_CLIENT_NAME_LEN]
 
     if not _register_limiter.allow(client_ip(request, settings)):
         return JSONResponse(
@@ -77,8 +211,19 @@ async def register_client(request: Request) -> JSONResponse:
                 "error_description": "Registration rate limit exceeded",
             },
         )
-    # Opportunistically reap never-exchanged stale registrations so a slow
-    # table-fill attack self-heals before it can reach the cap (AS-002).
+
+    production_response = _production_existing_registration(
+        request,
+        redirect_uris=redirect_uris,
+        requested_scope=requested_raw,
+        refresh_enabled=refresh_enabled,
+    )
+    if production_response is not None:
+        return production_response
+
+    # Opportunistically reap never-exchanged stale registrations only on the
+    # non-production open-DCR surface. Production idempotency above performs
+    # no authority writes, including cleanup writes.
     max_age = int(
         _get_setting(
             settings,
@@ -116,55 +261,6 @@ async def register_client(request: Request) -> JSONResponse:
             int(_NEARING_CAP_FRACTION * 100),
         )
 
-    try:
-        body = await request.json()
-    except Exception:
-        return _error("invalid_client_metadata", "Request body must be a JSON object")
-    if not isinstance(body, dict):
-        return _error("invalid_client_metadata", "Request body must be a JSON object")
-
-    redirect_uris = body.get("redirect_uris")
-    if not isinstance(redirect_uris, list) or not redirect_uris:
-        return _error("invalid_client_metadata", "redirect_uris is required and must be a non-empty array")
-    if len(redirect_uris) > _MAX_REDIRECT_URIS:
-        return _error("invalid_client_metadata", f"At most {_MAX_REDIRECT_URIS} redirect_uris are allowed")
-    for uri in redirect_uris:
-        if not _redirect_uri_ok(uri):
-            return _error("invalid_redirect_uri", "Each redirect_uri must be https or http to a loopback host")
-
-    auth_method = body.get("token_endpoint_auth_method", "none")
-    if auth_method != "none":
-        return _error(
-            "invalid_client_metadata",
-            "Only token_endpoint_auth_method 'none' (public client + PKCE) is supported",
-        )
-
-    grant_types = body.get("grant_types")
-    if grant_types is not None and (
-        not isinstance(grant_types, list) or not set(grant_types) <= _SUPPORTED_GRANT_TYPES
-    ):
-        return _error("invalid_client_metadata", "Unsupported grant_types")
-
-    response_types = body.get("response_types")
-    if response_types is not None and (
-        not isinstance(response_types, list) or not set(response_types) <= _SUPPORTED_RESPONSE_TYPES
-    ):
-        return _error("invalid_client_metadata", "Unsupported response_types")
-
-    supported = tuple(build_oauth_config(settings).scopes_supported)
-    requested_raw = body.get("scope")
-    if requested_raw is None:
-        granted = list(supported)
-    elif isinstance(requested_raw, str):
-        granted = [s for s in requested_raw.split() if s in supported]
-    else:
-        return _error("invalid_client_metadata", "scope must be a space-delimited string")
-
-    client_name_raw = body.get("client_name", "")
-    if not isinstance(client_name_raw, str):
-        return _error("invalid_client_metadata", "client_name must be a string")
-    client_name = client_name_raw.strip()[:_MAX_CLIENT_NAME_LEN]
-
     now = int(time.time())
     client_id = new_client_id()
     get_client_store().register(
@@ -186,10 +282,9 @@ async def register_client(request: Request) -> JSONResponse:
             "client_id_issued_at": now,
             "redirect_uris": list(redirect_uris),
             "token_endpoint_auth_method": "none",
-            # Only authorization_code is implemented at /oauth/token; do NOT advertise
-            # refresh_token until it is (AS-005). The request-side _SUPPORTED_GRANT_TYPES
-            # stays tolerant of a refresh_token in the registration body (harmless).
-            "grant_types": ["authorization_code"],
+            # Advertise grant types truthfully: refresh_token only when the AS
+            # actually issues refresh tokens (AS-005).
+            "grant_types": ["authorization_code"] + (["refresh_token"] if refresh_enabled else []),
             "response_types": ["code"],
             "client_name": client_name,
             "scope": " ".join(granted),

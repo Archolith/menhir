@@ -64,6 +64,31 @@ def test_embedded_as_allows_loopback_http_for_local_development():
     assert settings.oauth_as_enabled is True
 
 
+@pytest.mark.parametrize(
+    "public_base_url",
+    [
+        "https://user:secret@memory.example.com",
+        "https://memory.example.com?tenant=secret",
+        "https://memory.example.com#oauth",
+    ],
+)
+def test_embedded_as_rejects_noncanonical_public_url_components(public_base_url):
+    with pytest.raises(ValueError, match="credentials|query string|fragment"):
+        MemorySettings(
+            oauth_as_enabled=True,
+            oauth_public_base_url=public_base_url,
+        )
+
+
+def test_embedded_as_canonicalizes_one_trailing_slash():
+    settings = MemorySettings(
+        oauth_as_enabled=True,
+        oauth_public_base_url="https://memory.example.com/",
+    )
+
+    assert settings.oauth_public_base_url == "https://memory.example.com"
+
+
 def test_untrusted_peer_cannot_supply_forwarded_rate_limit_identity():
     request = SimpleNamespace(
         client=SimpleNamespace(host="203.0.113.10"),
@@ -102,7 +127,10 @@ def test_emptying_admin_scopes_actually_revokes_admin():
 def test_a_non_empty_scope_override_is_still_honoured():
     """Positive control for the test above: without this, an implementation that returned ()
     for everything would pass the revocation test while being completely broken."""
-    settings = MemorySettings(oauth_admin_scopes=("custom:admin",))
+    settings = MemorySettings(
+        oauth_scopes_supported=("menhir:read", "menhir:write", "custom:admin"),
+        oauth_admin_scopes=("custom:admin",),
+    )
 
     assert build_oauth_config(settings).admin_scopes == ("custom:admin",)
 
@@ -121,6 +149,25 @@ def test_emptying_read_and_write_scopes_revokes_them_too():
     assert cfg.write_scopes == ()
 
 
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"oauth_scopes_supported": ("menhir:read", "offline_access")},
+        {"oauth_read_scopes": ("offline_access",)},
+        {"oauth_write_scopes": ("offline_access",)},
+        {"oauth_admin_scopes": ("offline_access",)},
+    ],
+)
+def test_offline_access_is_rejected_from_every_permission_setting(overrides):
+    with pytest.raises(ValueError, match="protocol-only"):
+        MemorySettings(**overrides)
+
+
+def test_tier_scopes_must_be_supported_permission_scopes():
+    with pytest.raises(ValueError, match="subset of oauth_scopes_supported"):
+        MemorySettings(oauth_admin_scopes=("retired:admin",))
+
+
 def test_revoked_admin_scope_denies_the_operator_tier():
     """Far-end assertion: config alone proves nothing, the tier mapping is what enforces."""
     from menhir.api.oauth import tier_from_scopes
@@ -130,3 +177,60 @@ def test_revoked_admin_scope_denies_the_operator_tier():
 
     revoked = build_oauth_config(MemorySettings(oauth_admin_scopes=()))
     assert tier_from_scopes({"menhir:admin"}, revoked) != "operator"
+
+
+# ---------------------------------------------------------------------------
+# Phase 6: refresh-token grant settings (default off, env parsing, TTL > 0).
+# ---------------------------------------------------------------------------
+
+
+def test_refresh_grant_defaults_off_with_thirty_day_ttl():
+    settings = MemorySettings()
+
+    assert settings.oauth_as_refresh_tokens_enabled is False
+    assert settings.oauth_as_refresh_without_offline_access_enabled is False
+    assert settings.oauth_as_refresh_ttl_s == 2592000
+    assert settings.oauth_as_refresh_retry_grace_s == 0.0
+
+
+def test_refresh_grant_settings_parse_from_env(monkeypatch):
+    monkeypatch.setenv("MENHIR_OAUTH_AS_REFRESH_TOKENS_ENABLED", "true")
+    monkeypatch.setenv(
+        "MENHIR_OAUTH_AS_REFRESH_WITHOUT_OFFLINE_ACCESS_ENABLED",
+        "true",
+    )
+    monkeypatch.setenv("MENHIR_OAUTH_AS_REFRESH_TTL_S", "86400")
+    monkeypatch.setenv("MENHIR_OAUTH_AS_REFRESH_RETRY_GRACE_S", "30")
+
+    settings = MemorySettings.from_env()
+
+    assert settings.oauth_as_refresh_tokens_enabled is True
+    assert settings.oauth_as_refresh_without_offline_access_enabled is True
+    assert settings.oauth_as_refresh_ttl_s == 86400
+    assert settings.oauth_as_refresh_retry_grace_s == 30.0
+
+
+def test_non_positive_refresh_ttl_is_rejected():
+    with pytest.raises(ValueError, match="oauth_as_refresh_ttl_s"):
+        MemorySettings(oauth_as_refresh_ttl_s=0)
+
+
+@pytest.mark.parametrize("grace_s", [-0.1, 60.1])
+def test_refresh_retry_grace_is_tightly_bounded(grace_s):
+    with pytest.raises(ValueError, match="oauth_as_refresh_retry_grace_s"):
+        MemorySettings(oauth_as_refresh_retry_grace_s=grace_s)
+
+
+def test_offline_access_never_grants_a_menhir_tier():
+    from menhir.api.oauth import tier_from_scopes
+    from menhir.config.oauth import build_oauth_config
+
+    config = build_oauth_config(MemorySettings())
+    assert tier_from_scopes({"offline_access"}, config) is None
+    assert (
+        tier_from_scopes(
+            {"menhir:read", "menhir:write", "menhir:admin", "offline_access"},
+            config,
+        )
+        == "operator"
+    )

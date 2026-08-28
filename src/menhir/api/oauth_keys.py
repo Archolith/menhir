@@ -9,6 +9,7 @@ from archolith_oauth import SigningKeyStore
 
 _SIGNING_KEY: object | None = None
 _SIGNING_KEY_STORE: SigningKeyStore | None = None
+_SIGNING_KEY_READ_ONLY = False
 
 
 def load_or_create_signing_key(key_path: Path):
@@ -24,20 +25,44 @@ def public_jwks(signing_key) -> dict[str, Any]:
     keyset instead would advertise a keyset that cannot verify the caller's tokens.
     """
     if _SIGNING_KEY_STORE is not None and signing_key is _SIGNING_KEY:
+        if _SIGNING_KEY_READ_ONLY:
+            return _SIGNING_KEY_STORE.public_jwks_existing()
         return _SIGNING_KEY_STORE.public_jwks_all()
     return SigningKeyStore.public_jwks(signing_key)
 
 
 def configure_signing_key(settings: object):
-    global _SIGNING_KEY, _SIGNING_KEY_STORE
+    global _SIGNING_KEY, _SIGNING_KEY_READ_ONLY, _SIGNING_KEY_STORE
     from menhir.infrastructure.paths import oauth_as_db_path
 
+    configured_path = str(getattr(settings, "oauth_signing_key_path", "")).strip()
     key_path = (
-        oauth_as_db_path(str(getattr(settings, "oauth_as_dir", "")))
+        Path(configured_path)
+        if configured_path
+        else oauth_as_db_path(str(getattr(settings, "oauth_as_dir", "")))
         / "oauth_signing_key.json"
     )
     _SIGNING_KEY_STORE = SigningKeyStore(key_path)
     _SIGNING_KEY = _SIGNING_KEY_STORE.load_or_create()
+    _SIGNING_KEY_READ_ONLY = False
+    return _SIGNING_KEY
+
+
+def configure_signing_key_readonly(settings: object):
+    """Load an existing signing key without mutating candidate state."""
+    global _SIGNING_KEY, _SIGNING_KEY_READ_ONLY, _SIGNING_KEY_STORE
+    from menhir.infrastructure.paths import oauth_as_db_path
+
+    configured_path = str(getattr(settings, "oauth_signing_key_path", "")).strip()
+    key_path = (
+        Path(configured_path)
+        if configured_path
+        else oauth_as_db_path(str(getattr(settings, "oauth_as_dir", "")))
+        / "oauth_signing_key.json"
+    )
+    _SIGNING_KEY_STORE = SigningKeyStore(key_path)
+    _SIGNING_KEY = _SIGNING_KEY_STORE.load_existing()
+    _SIGNING_KEY_READ_ONLY = True
     return _SIGNING_KEY
 
 
@@ -73,6 +98,7 @@ def get_signing_key_store() -> SigningKeyStore:
 
 __all__ = [
     "configure_signing_key",
+    "configure_signing_key_readonly",
     "get_signing_key",
     "get_signing_key_store",
     "load_or_create_signing_key",

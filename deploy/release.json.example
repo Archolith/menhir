@@ -1,0 +1,106 @@
+{
+  "schema": 1,
+  "release_id": "menhir-prod-0.2.0-<seq>",
+  "repos": {
+    "menhir": "<40-lowercase-hex>",
+    "archolith_oauth": "<40-lowercase-hex>",
+    "yawn_deploy": "<40-lowercase-hex>",
+    "yawn_vps": "<40-lowercase-hex>"
+  },
+  "repo_remotes": {
+    "menhir": "https://github.com/Archolith/menhir.git",
+    "archolith_oauth": "https://github.com/Archolith/archolith_oauth.git",
+    "yawn_deploy": "https://github.com/ctharvey/yawn.deploy.git",
+    "yawn_vps": "https://github.com/ctharvey/yawn.vps.git"
+  },
+  "oauth_wheel_sha256": "<64-lowercase-hex>",
+  "oauth_wheel_source": {
+    "repository": "archolith_oauth",
+    "commit": "<same-as-repos.archolith_oauth>",
+    "source_tree_sha256": "<canonical-reviewed-package-tree-sha256>",
+    "wheel_sha256": "<same-as-oauth_wheel_sha256>"
+  },
+  "images": {
+    "menhir": "sha256:<64-lowercase-hex>",
+    "neo4j": "sha256:<64-lowercase-hex>",
+    "caddy": "sha256:<64-lowercase-hex>",
+    "base": "sha256:<64-lowercase-hex>"
+  },
+  "wheel_manifest_sha256": "<64-lowercase-hex>",
+  "dockerfile_wheel_manifest_sha256": "<64-lowercase-hex>",
+  "sbom_sha256": "<64-lowercase-hex>",
+  "scan_evidence_sha256": "<64-lowercase-hex>",
+  "provenance_sha256": "<64-lowercase-hex>",
+  "rendered": {
+    "menhir_compose_sha256": "<64-lowercase-hex>",
+    "yawn_compose_sha256": "<64-lowercase-hex>",
+    "caddy_sha256": "<64-lowercase-hex>",
+    "registry_sha256": "<64-lowercase-hex>",
+    "policy_sha256": "<64-lowercase-hex>",
+    "yawn_env_sha256": "<64-lowercase-hex>",
+    "production_env_sha256": "<64-lowercase-hex>",
+    "operations_policy_sha256": "<64-lowercase-hex>",
+    "oauth_public_key_sha256": "<64-lowercase-hex>"
+  },
+  "network": {
+    "project": "menhir-prod",
+    "external_network": "menhir-proxy",
+    "alias": "menhir-prod-app",
+    "peers": ["<reverse-proxy-ipv4>"]
+  },
+  "rollback_anchors": {
+    "initial_release": true,
+    "prior_release_id": "<prior-release-id-or-empty>",
+    "prior_release_sha256": "<prior-release-file-sha256-or-empty>",
+    "prior_images": {
+      "menhir": "sha256:<64-lowercase-hex>",
+      "neo4j": "sha256:<64-lowercase-hex>",
+      "caddy": "sha256:<64-lowercase-hex>"
+    },
+    "prior_route_sha256": "<64-lowercase-hex>",
+    "initial_host_state_sha256": "<64-lowercase-hex-for-initial-release-or-empty>"
+  },
+  "secret_version_ids": {
+    "neo4j-auth": "<version-id-no-value>",
+    "neo4j-password": "<version-id-no-value>",
+    "oauth-signing-key": "<version-id-no-value>",
+    "oauth-retry-keyring": "<version-id-no-value>",
+    "oauth-consent-secret": "<version-id-no-value>",
+    "operator-key": "<version-id-no-value>",
+    "client-policy": "<version-id-no-value>",
+    "provider-key": "<version-id-no-value>",
+    "source-fence-token": "<version-id-no-value>"
+  },
+  "artifacts": {
+    "/srv/menhir/production/bin/worker": {
+      "kind": "git",
+      "sha256": "<64-lowercase-hex>",
+      "repository": "yawn_vps",
+      "commit": "<same-commit-as-repos.yawn_vps>",
+      "path": "ops/menhir/bin/worker",
+      "blob_oid": "<git-blob-object-id>"
+    },
+    "/srv/menhir/production/release/production.env": {
+      "kind": "rendered",
+      "sha256": "<same-digest-as-rendered.production_env_sha256>",
+      "rendered_key": "production_env_sha256"
+    },
+    "/etc/yawn-vps/menhir-oauth-policy.json": {
+      "kind": "rendered",
+      "sha256": "<same-digest-as-rendered.operations_policy_sha256>",
+      "rendered_key": "operations_policy_sha256"
+    },
+    "/etc/yawn-vps/menhir-oauth-public.pem": {
+      "kind": "rendered",
+      "sha256": "<same-digest-as-rendered.oauth_public_key_sha256>",
+      "rendered_key": "oauth_public_key_sha256"
+    }
+  },
+  "source_fence_key_id": "<source-only-ed25519-key-version-id>",
+  "source_fence_public_key": "<43-char-unpadded-base64url-ed25519-public-key>",
+  "source_fence_tls_ca_sha256": "<64-lowercase-hex>",
+  "external_evidence_public_keys": {
+    "worker-a": "<43-char-unpadded-base64url-ed25519-public-key>",
+    "worker-b": "<43-char-unpadded-base64url-ed25519-public-key>"
+  }
+}

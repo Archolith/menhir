@@ -110,6 +110,9 @@ class ProjectScanResult:
     #: batch helpers. Declared rather than attached dynamically so it survives `asdict` across the
     #: transport boundary -- dropping it there broke the deprecated compat writer entirely.
     project_id: str | None = None
+    #: The claim generation the identity was settled under (CF-257). Carried on the scan so the
+    #: write boundary can prove the binding has not changed hands since; an id alone cannot.
+    identity_generation: int | None = None
     symbols: list[SymbolEntry] = field(default_factory=list)
     truncated_symbol_files: list[str] = field(default_factory=list)
     call_edges: list[CallEdge] = field(default_factory=list)

@@ -19,6 +19,11 @@ class MintClientTool(BaseTextTool):
     scope = ToolScope.GLOBAL
     required_tier = "operator"
     description = "mint a new per-client token; returns the raw token ONCE."
+    title = "Mint Client Token"
+    oauth_scopes = ("menhir:admin",)
+    read_only_hint = False
+    destructive_hint = False
+    open_world_hint = False
 
     async def endpoint(self, client_name: str, tier: str = "readonly") -> str:
         from menhir.api.client_token_store import get_client_token_store

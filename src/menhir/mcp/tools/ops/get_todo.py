@@ -24,6 +24,11 @@ class GetTodoTool(BaseTextTool):
     name = "get_todo"
     scope = ToolScope.NAMESPACED
     required_tier = "readonly"
+    title = "Get TODO"
+    oauth_scopes = ("menhir:read",)
+    read_only_hint = True
+    destructive_hint = False
+    open_world_hint = False
     description = "Read one TODO in full, including content that list_todos truncates."
 
     async def endpoint(self, uuid: str, namespace: str = "") -> str:

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import threading
-from typing import Any
 import contextlib
 import logging
 from collections import deque

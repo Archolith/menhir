@@ -24,6 +24,11 @@ class CloseTodoTool(BaseTextTool):
     # NAMESPACED once the ownership guard exists (CF-33 step 4): a uuid is not proof of
     # ownership, so the object the caller names is checked against the pin at load.
     scope = ToolScope.NAMESPACED
+    title = "Close TODO"
+    oauth_scopes = ("menhir:write",)
+    read_only_hint = False
+    destructive_hint = False
+    open_world_hint = False
     description = "Mark a TODO item as closed."
 
     async def endpoint(self, uuid: str, namespace: str = "") -> str:

@@ -37,6 +37,13 @@ class ReadFlaggedMemoriesTool(BaseJsonTool):
     name = "read_flagged_memories"
     scope = ToolScope.NAMESPACED
     required_tier = "readonly"
+    title = "Read Flagged Memories"
+    oauth_scopes = ("menhir:read",)
+    # Not purely read-only: this endpoint records a durable bootstrap receipt
+    # (_remember_flagged_bootstrap_read) that gates recall_context_memories.
+    read_only_hint = False
+    destructive_hint = False
+    open_world_hint = False
     description = "Read flagged memories for startup bootstrap."
 
     async def endpoint(

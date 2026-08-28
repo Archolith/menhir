@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 import base64
+import concurrent.futures
 import hashlib
 import re
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
+from archolith_oauth import AuthorizationCodeStore
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from menhir.api import auth_code_store, oauth_client_store
 from menhir.api.auth_code_store import get_auth_code_store
+from menhir.api.client_policy import ClientPolicy, ClientPolicyAuthority
 from menhir.api.oauth_authorize import router as oauth_authorize_router
 from menhir.api.oauth_client_store import OAuthClient, get_client_store, new_client_id
 
@@ -76,9 +79,33 @@ def _register_client(
     return client_id
 
 
-def _client(settings=_ENABLED) -> TestClient:
+def _policy(client_id: str, *, scopes: frozenset[str]) -> ClientPolicyAuthority:
+    return ClientPolicyAuthority(
+        version=1,
+        digest="test",
+        clients={
+            client_id: ClientPolicy(
+                client_id=client_id,
+                label="chatgpt-chat",
+                scopes=scopes,
+                maximum_tier="agent",
+                namespace="",
+                allowed_tools=frozenset({"recall_memories"}),
+                denied_tools=frozenset({"add_memory"}),
+            )
+        },
+    )
+
+
+def _client(
+    settings=_ENABLED,
+    *,
+    policy: ClientPolicyAuthority | None = None,
+) -> TestClient:
     app = FastAPI()
     app.state.settings = settings
+    if policy is not None:
+        app.state.client_policy = policy
     app.include_router(oauth_authorize_router)
     return TestClient(app, follow_redirects=False)
 
@@ -116,6 +143,44 @@ def test_disabled_returns_404_get_and_post():
     assert c.post("/oauth/authorize", data={}).status_code == 404
 
 
+def test_consent_capacity_refusal_is_bounded_429(tmp_path, monkeypatch):
+    client_id = _register_client(scopes=("menhir:read",))
+    monkeypatch.setattr(
+        auth_code_store,
+        "_auth_code_store_singleton",
+        AuthorizationCodeStore(
+            tmp_path / "menhir_oauth_as.db",
+            consent_global_limit=1,
+            consent_per_client_limit=1,
+        ),
+    )
+    _, challenge = _pkce()
+    client = _client()
+
+    first = client.get(
+        "/oauth/authorize",
+        params=_valid_get_params(
+            client_id,
+            challenge=challenge,
+            state="first",
+            scope="menhir:read",
+        ),
+    )
+    second = client.get(
+        "/oauth/authorize",
+        params=_valid_get_params(
+            client_id,
+            challenge=challenge,
+            state="second",
+            scope="menhir:read",
+        ),
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 429
+    assert second.headers["retry-after"] == "5"
+
+
 # ---------------------------------------------------------------------------
 # GET validation
 # ---------------------------------------------------------------------------
@@ -126,6 +191,41 @@ def test_get_unknown_client_id_returns_400_no_redirect():
     resp = _client().get("/oauth/authorize", params=_valid_get_params("nonexistent", challenge=challenge))
     assert resp.status_code == 400
     assert "location" not in resp.headers
+
+
+def test_production_policy_rejects_unlisted_client_before_authorization():
+    _, challenge = _pkce()
+    cid = _register_client(scopes=("menhir:read", "menhir:write"))
+    authority = _policy("different-client", scopes=frozenset({"menhir:read"}))
+
+    resp = _client(policy=authority).get(
+        "/oauth/authorize",
+        params=_valid_get_params(
+            cid,
+            challenge=challenge,
+            scope="menhir:read menhir:write",
+        ),
+    )
+
+    assert resp.status_code == 400
+    assert "location" not in resp.headers
+
+
+def test_production_policy_rejects_scope_narrowing():
+    _, challenge = _pkce()
+    cid = _register_client(scopes=("menhir:read", "menhir:write"))
+    authority = _policy(
+        cid,
+        scopes=frozenset({"menhir:read", "menhir:write"}),
+    )
+
+    resp = _client(policy=authority).get(
+        "/oauth/authorize",
+        params=_valid_get_params(cid, challenge=challenge, scope="menhir:read"),
+    )
+
+    assert resp.status_code == 302
+    assert _location_query(resp)["error"] == ["unauthorized_client"]
 
 
 def test_get_redirect_uri_mismatch_returns_400():
@@ -179,6 +279,59 @@ def test_get_scope_exceeds_grant_redirects_invalid_scope():
     assert _location_query(resp)["error"] == ["invalid_scope"]
 
 
+def test_persisted_client_cannot_request_scope_removed_from_current_policy():
+    _, challenge = _pkce()
+    cid = _register_client(scopes=("menhir:read", "menhir:admin", "offline_access"))
+    settings = SimpleNamespace(
+        oauth_as_enabled=True,
+        oauth_public_base_url="https://memory.example.com",
+        oauth_scopes_supported=("menhir:read",),
+        oauth_write_scopes=(),
+        oauth_admin_scopes=(),
+        oauth_as_refresh_tokens_enabled=False,
+        operator_key="s3cret",
+    )
+    c = _client(settings)
+
+    stale = c.get(
+        "/oauth/authorize",
+        params=_valid_get_params(cid, challenge=challenge, scope="menhir:admin"),
+    )
+    assert stale.status_code == 302
+    assert _location_query(stale)["error"] == ["invalid_scope"]
+
+    current = c.get(
+        "/oauth/authorize",
+        params=_valid_get_params(cid, challenge=challenge),
+    )
+    assert current.status_code == 200
+    assert _extract_hidden(current.text)["scope"] == "menhir:read"
+
+
+def test_scope_removed_after_consent_get_is_rechecked_before_approval():
+    _, challenge = _pkce()
+    cid = _register_client(scopes=("menhir:read", "menhir:admin"))
+    settings = SimpleNamespace(
+        oauth_as_enabled=True,
+        oauth_public_base_url="https://memory.example.com",
+        oauth_scopes_supported=("menhir:read", "menhir:admin"),
+        oauth_write_scopes=(),
+        oauth_as_refresh_tokens_enabled=False,
+        operator_key="s3cret",
+    )
+    c = _client(settings)
+    form = _consent_form(c, cid, challenge=challenge)
+    settings.oauth_scopes_supported = ("menhir:read",)
+    settings.oauth_admin_scopes = ()
+    form["admin_secret"] = "s3cret"
+    form["decision"] = "approve"
+
+    response = c.post("/oauth/authorize", data=form)
+
+    assert response.status_code == 302
+    assert _location_query(response)["error"] == ["invalid_scope"]
+
+
 def test_get_valid_renders_consent_with_token():
     _, challenge = _pkce()
     cid = _register_client()
@@ -224,6 +377,42 @@ def test_post_approve_issues_code_and_redirects():
     assert record is not None
     assert record.subject == "menhir-admin"
     assert record.code_challenge == challenge
+
+
+def test_consent_approval_survives_authorization_store_recreation(monkeypatch):
+    _, challenge = _pkce()
+    cid = _register_client()
+    first_process = _client()
+    form = _consent_form(first_process, cid, challenge=challenge)
+    form["admin_secret"] = "s3cret"
+    form["decision"] = "approve"
+
+    monkeypatch.setattr(auth_code_store, "_auth_code_store_singleton", None)
+    restarted_process = _client()
+    response = restarted_process.post("/oauth/authorize", data=form)
+
+    assert response.status_code == 302
+    assert "code" in _location_query(response)
+
+
+def test_simultaneous_consent_approval_issues_exactly_one_code():
+    _, challenge = _pkce()
+    cid = _register_client()
+    first_process = _client()
+    second_process = _client()
+    form = _consent_form(first_process, cid, challenge=challenge)
+    form["admin_secret"] = "s3cret"
+    form["decision"] = "approve"
+
+    def approve(client: TestClient):
+        return client.post("/oauth/authorize", data=form)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        responses = list(executor.map(approve, (first_process, second_process)))
+
+    assert sorted(response.status_code for response in responses) == [302, 400]
+    success = next(response for response in responses if response.status_code == 302)
+    assert "code" in _location_query(success)
 
 
 def test_post_wrong_secret_401_no_code():
@@ -300,10 +489,95 @@ def test_post_tampered_field_400():
 def test_post_expired_consent_token_400(monkeypatch):
     _, challenge = _pkce()
     cid = _register_client()
+    c = _client()
+    form = _consent_form(c, cid, challenge=challenge)
     monkeypatch.setenv("MENHIR_OAUTH_AS_CONSENT_TTL_S", "-1")
+    form["admin_secret"] = "s3cret"
+    form["decision"] = "approve"
+    resp = c.post("/oauth/authorize", data=form)
+    assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# RFC 9207: every trusted redirect carries exact iss + preserved state
+# ---------------------------------------------------------------------------
+
+_EXACT_ISS = "https://memory.example.com"
+
+
+def test_unsupported_response_type_redirect_has_exact_iss_and_state():
+    _, challenge = _pkce()
+    cid = _register_client()
+    params = _valid_get_params(cid, challenge=challenge)
+    params["response_type"] = "token"
+    resp = _client().get("/oauth/authorize", params=params)
+    assert resp.status_code == 302
+    q = _location_query(resp)
+    assert q["iss"] == [_EXACT_ISS]
+    assert q["state"] == ["xyz-state"]
+    assert q["error"] == ["unsupported_response_type"]
+
+
+def test_pkce_error_redirect_has_exact_iss_and_state():
+    _, challenge = _pkce()
+    cid = _register_client()
+    params = _valid_get_params(cid, challenge=challenge)
+    params["code_challenge_method"] = "plain"
+    resp = _client().get("/oauth/authorize", params=params)
+    assert resp.status_code == 302
+    q = _location_query(resp)
+    assert q["iss"] == [_EXACT_ISS]
+    assert q["state"] == ["xyz-state"]
+    assert q["error"] == ["invalid_request"]
+
+
+def test_invalid_scope_redirect_has_exact_iss_and_state():
+    _, challenge = _pkce()
+    cid = _register_client(scopes=("menhir:read",))
+    params = _valid_get_params(cid, challenge=challenge, scope="menhir:admin")
+    resp = _client().get("/oauth/authorize", params=params)
+    assert resp.status_code == 302
+    q = _location_query(resp)
+    assert q["iss"] == [_EXACT_ISS]
+    assert q["state"] == ["xyz-state"]
+    assert q["error"] == ["invalid_scope"]
+
+
+def test_deny_redirect_has_exact_iss_and_state():
+    _, challenge = _pkce()
+    cid = _register_client()
+    c = _client()
+    form = _consent_form(c, cid, challenge=challenge)
+    form["admin_secret"] = "s3cret"
+    form["decision"] = "deny"
+    resp = c.post("/oauth/authorize", data=form)
+    assert resp.status_code == 302
+    q = _location_query(resp)
+    assert q["iss"] == [_EXACT_ISS]
+    assert q["state"] == ["xyz-state"]
+    assert q["error"] == ["access_denied"]
+
+
+def test_success_redirect_has_exact_iss_and_state():
+    _, challenge = _pkce()
+    cid = _register_client()
     c = _client()
     form = _consent_form(c, cid, challenge=challenge)
     form["admin_secret"] = "s3cret"
     form["decision"] = "approve"
     resp = c.post("/oauth/authorize", data=form)
+    assert resp.status_code == 302
+    q = _location_query(resp)
+    assert q["iss"] == [_EXACT_ISS]
+    assert q["state"] == ["xyz-state"]
+    assert q["code"][0]
+
+
+def test_untrusted_target_still_direct_400_no_iss():
+    _, challenge = _pkce()
+    cid = _register_client()
+    params = _valid_get_params(cid, challenge=challenge)
+    params["redirect_uri"] = "https://evil.example.com/cb"
+    resp = _client().get("/oauth/authorize", params=params)
     assert resp.status_code == 400
+    assert "location" not in resp.headers

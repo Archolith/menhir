@@ -47,6 +47,11 @@ class GetMemoryStatsTool(BaseTextTool):
     # saying which is which, is how a reader draws a false ratio between them.
     scope = ToolScope.NAMESPACED
     required_tier = "readonly"
+    title = "Get Memory Stats"
+    oauth_scopes = ("menhir:read",)
+    read_only_hint = True
+    destructive_hint = False
+    open_world_hint = False
     description = "Return operational health summary."
 
     async def endpoint(self, since_hours: int = 24, namespace: str = "") -> str:

@@ -29,6 +29,11 @@ class FlagMemoryTool(BaseTextTool):
     name = "flag_memory"
     scope = ToolScope.NAMESPACED
     description = "Flag a memory node for permanent retention."
+    title = "Flag Memory"
+    oauth_scopes = ("menhir:write",)
+    read_only_hint = False
+    destructive_hint = False
+    open_world_hint = False
 
     async def endpoint(
         self, node_uuid: str, bootstrap_scope: str = "", namespace: str = ""

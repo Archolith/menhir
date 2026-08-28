@@ -39,6 +39,14 @@ CLI (foreground; Ctrl-C to stop, auto-teardown)::
 
     python scripts/dev/test_server.py --shape client-token --port 8099
 
+For a disposable ChatGPT OAuth acceptance server behind a secure tunnel::
+
+    python scripts/dev/test_server.py --shape oauth-as --backend neo4j \
+        --public-base-url https://example-tunnel.example \
+        --oauth-refresh --oauth-access-ttl 120 --interactive-control
+
+The OAuth consent key for this throwaway shape is the fixed ``test-operator-key``.
+
 Programmatic (used by scripts/smoke/auth_shapes_smoke.py)::
 
     from scripts.dev.test_server import launch, TEST_KEYS
@@ -50,7 +58,8 @@ Safety
 - Refuses ``--port 8090`` (the real server).
 - Never reads the repo ``.env``; the subprocess env is built from scratch.
 - Neo4j points at a dead port by default (``--backend none``) so no real graph
-  is touched; pass ``--backend throwaway`` to use the bench docker Neo4j.
+  is touched; pass ``--backend neo4j`` to use a disposable Docker Neo4j.
+- A public test profile refuses inherited ``MENHIR_TEST_NEO4J_URI`` reuse.
 """
 
 from __future__ import annotations
@@ -70,6 +79,8 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable, TextIO
+from urllib.parse import urlsplit
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FORBIDDEN_PORTS = {8090}  # the real server — never bind or probe it here
@@ -119,6 +130,12 @@ class RunningServer:
     neo4j_uri: str = ""
     neo4j_user: str = ""
     neo4j_password: str = ""
+    command: tuple[str, ...] = ()
+    env: dict[str, str] = field(default_factory=dict, repr=False)
+    log_file: TextIO | None = field(default=None, repr=False)
+    creationflags: int = 0
+    preexec_fn: Callable[[], None] | None = field(default=None, repr=False)
+    health_timeout_s: float = 30.0
 
     def tail_log(self, n: int = 40) -> str:
         if not self.log_path or not self.log_path.exists():
@@ -126,14 +143,69 @@ class RunningServer:
         lines = self.log_path.read_text(encoding="utf-8", errors="replace").splitlines()
         return "\n".join(lines[-n:])
 
+    def restart(self) -> dict:
+        """Restart only Menhir, preserving its stores and throwaway Neo4j."""
+        if not self.command or self.log_file is None:
+            raise RuntimeError("server restart state is unavailable")
+        _terminate(self.proc)
+        self.log_file.flush()
+        self.proc = subprocess.Popen(  # noqa: S603
+            list(self.command),
+            cwd=str(self.workdir),
+            env=self.env,
+            stdout=self.log_file,
+            stderr=subprocess.STDOUT,
+            creationflags=self.creationflags,
+            preexec_fn=self.preexec_fn,
+        )
+        return _wait_for_health(
+            self.base_url,
+            self.health_timeout_s,
+            self.proc,
+            expect_instance_id=self.instance_id,
+        )
+
+
+def _remove_workdir(path: Path) -> None:
+    """Remove sensitive throwaway state and surface any cleanup failure."""
+    shutil.rmtree(path)
+
+
+def _validated_public_origin(value: str) -> str:
+    """Return a canonical HTTPS origin suitable for a public OAuth test."""
+    raw = value.strip()
+    try:
+        parts = urlsplit(raw)
+        _ = parts.port
+    except ValueError as exc:
+        raise ValueError("--public-base-url must be a valid HTTPS origin") from exc
+    if (
+        parts.scheme.lower() != "https"
+        or not parts.hostname
+        or parts.username is not None
+        or parts.password is not None
+        or parts.path not in {"", "/"}
+        or parts.query
+        or parts.fragment
+    ):
+        raise ValueError(
+            "--public-base-url must be an HTTPS origin without credentials, path, query, or fragment"
+        )
+    return f"https://{parts.netloc}"
+
 
 def _shape_env(shape: str, *, port: int, host: str, workdir: Path, jwks_uri: str,
                backend: str, instance_id: str,
                neo4j: tuple[str, str, str] | None = None,
-               oauth: dict[str, str] | None = None) -> dict[str, str]:
+               oauth: dict[str, str] | None = None,
+               public_base_url: str | None = None,
+               oauth_refresh: bool = False,
+               oauth_access_ttl_s: int | None = None) -> dict[str, str]:
     """Build the *complete* environment for a shape from scratch (no repo leakage)."""
     if shape not in SHAPES:
         raise ValueError(f"unknown shape {shape!r}; choose from {SHAPES}")
+    if public_base_url is not None:
+        public_base_url = _validated_public_origin(public_base_url)
 
     # Minimal base: just enough for Python + uvicorn to run. No MENHIR_*/NEO4J_*/
     # OPENAI_* inherited from the caller's shell.
@@ -202,7 +274,7 @@ def _shape_env(shape: str, *, port: int, host: str, workdir: Path, jwks_uri: str
         env["MENHIR_CLIENT_TOKENS_ENABLED"] = "1"
     elif shape == "oauth":
         env["MENHIR_OAUTH_ENABLED"] = "true"
-        env["MENHIR_PUBLIC_BASE_URL"] = f"http://{host}:{port}"
+        env["MENHIR_PUBLIC_BASE_URL"] = public_base_url or f"http://{host}:{port}"
         # Defaults exercise the local dead-JWKS outage path. A real external IdP
         # (e.g. Auth0) is driven by passing `oauth={issuer,jwks_uri,audience,
         # authorization_servers}` to launch(); explicit values win over defaults.
@@ -223,7 +295,15 @@ def _shape_env(shape: str, *, port: int, host: str, workdir: Path, jwks_uri: str
     elif shape == "oauth-as":
         env["MENHIR_OAUTH_AS_ENABLED"] = "1"
         env["MENHIR_OAUTH_ENABLED"] = "true"
-        env["MENHIR_PUBLIC_BASE_URL"] = f"http://{host}:{port}"
+        env["MENHIR_PUBLIC_BASE_URL"] = public_base_url or f"http://{host}:{port}"
+        if oauth_refresh:
+            env["MENHIR_OAUTH_AS_REFRESH_TOKENS_ENABLED"] = "1"
+            env["MENHIR_OAUTH_AS_REFRESH_WITHOUT_OFFLINE_ACCESS_ENABLED"] = "1"
+        if oauth_access_ttl_s is not None:
+            env["MENHIR_OAUTH_AS_ACCESS_TTL_S"] = str(oauth_access_ttl_s)
+        # This is a deliberately public, fixed test credential for an isolated
+        # throwaway graph. It must never be used for a real Menhir deployment.
+        env["MENHIR_OPERATOR_KEY"] = TEST_KEYS["operator"]
     # no-auth: nothing extra (loopback + no keys)
 
     return env
@@ -238,7 +318,7 @@ class _Neo4jSidecar:
 
 
 @contextlib.contextmanager
-def _throwaway_neo4j(*, wait_s: float = 90.0):
+def _throwaway_neo4j(*, wait_s: float = 90.0, allow_external: bool = True):
     """Provide a throwaway Neo4j for backend-backed launches.
 
     Fast path: if ``MENHIR_TEST_NEO4J_URI`` is set, reuse that Neo4j (with
@@ -248,6 +328,11 @@ def _throwaway_neo4j(*, wait_s: float = 90.0):
     """
     ext = os.getenv("MENHIR_TEST_NEO4J_URI")
     if ext:
+        if not allow_external:
+            raise RuntimeError(
+                "public OAuth test profiles refuse MENHIR_TEST_NEO4J_URI reuse; "
+                "unset it so the launcher creates a disposable Docker Neo4j"
+            )
         yield _Neo4jSidecar(
             uri=ext,
             user=os.getenv("MENHIR_TEST_NEO4J_USER", "neo4j"),
@@ -344,6 +429,10 @@ def _wait_for_health(base_url: str, timeout_s: float, proc: subprocess.Popen,
 def launch(shape: str, *, port: int | None = None, host: str = "127.0.0.1",
            backend: str = "none", jwks_uri: str = DEAD_JWKS_URI,
            oauth: dict[str, str] | None = None,
+           public_base_url: str | None = None,
+           oauth_refresh: bool = False,
+           oauth_access_ttl_s: int | None = None,
+           python_executable: str | None = None,
            health_timeout_s: float = 30.0, quiet: bool = True):
     """Context manager that starts a shaped throwaway server and tears it down.
 
@@ -356,31 +445,46 @@ def launch(shape: str, *, port: int | None = None, host: str = "127.0.0.1",
         port = free_port()
     if port in FORBIDDEN_PORTS:
         raise ValueError(f"refusing to use port {port} (reserved for the real server)")
+    if public_base_url is not None:
+        public_base_url = _validated_public_origin(public_base_url)
 
     with contextlib.ExitStack() as stack:
         # Backend-backed launches bring up a throwaway Neo4j first (and a full
         # startup takes longer, so give health a bigger budget by default).
         neo4j: tuple[str, str, str] | None = None
         if backend == "neo4j":
-            sidecar = stack.enter_context(_throwaway_neo4j())
+            sidecar = stack.enter_context(
+                _throwaway_neo4j(allow_external=public_base_url is None)
+            )
             neo4j = (sidecar.uri, sidecar.user, sidecar.password)
             if health_timeout_s < 90.0:
                 health_timeout_s = 90.0
 
         workdir = Path(tempfile.mkdtemp(prefix=f"menhir-test-{shape}-{port}-"))
+        # Cleanup failures are material here: this directory contains OAuth
+        # signing keys and token stores, so never silently leave it behind.
+        stack.callback(_remove_workdir, workdir)
         log_path = workdir / "server.log"
         instance_id = f"smoke-{shape}-{secrets.token_hex(8)}"
         env = _shape_env(shape, port=port, host=host, workdir=workdir,
                          jwks_uri=jwks_uri, backend=backend, instance_id=instance_id,
-                         neo4j=neo4j, oauth=oauth)
+                         neo4j=neo4j, oauth=oauth,
+                         public_base_url=public_base_url,
+                         oauth_refresh=oauth_refresh,
+                         oauth_access_ttl_s=oauth_access_ttl_s)
         base_url = f"http://{host}:{port}"
 
-        py = REPO_ROOT / ".venv" / "Scripts" / "python.exe"
-        if not py.exists():
-            py = Path(sys.executable)
+        if python_executable:
+            py = Path(python_executable)
+            if not py.is_file():
+                raise FileNotFoundError(f"requested Python interpreter does not exist: {py}")
+        else:
+            py = REPO_ROOT / ".venv" / "Scripts" / "python.exe"
+            if not py.exists():
+                py = Path(sys.executable)
         cmd = [str(py), "-m", "menhir.cli", "serve", "--host", host, "--port", str(port)]
 
-        log_f = log_path.open("w", encoding="utf-8")
+        log_f = stack.enter_context(log_path.open("w", encoding="utf-8"))
         # New process group so we can signal the whole tree on teardown.
         creationflags = 0
         preexec = None
@@ -401,19 +505,17 @@ def launch(shape: str, *, port: int | None = None, host: str = "127.0.0.1",
                             instance_id=instance_id,
                             neo4j_uri=neo4j[0] if neo4j else "",
                             neo4j_user=neo4j[1] if neo4j else "",
-                            neo4j_password=neo4j[2] if neo4j else "")
-        try:
-            health = _wait_for_health(base_url, health_timeout_s, proc,
-                                      expect_instance_id=instance_id)
-            if not quiet:
-                print(f"[test_server] shape={shape} backend={backend} up at {base_url} "
-                      f"(startup_mode={health.get('startup_mode')})", file=sys.stderr)
-            yield srv
-        finally:
-            _terminate(proc)
-            with contextlib.suppress(Exception):
-                log_f.close()
-            shutil.rmtree(workdir, ignore_errors=True)
+                            neo4j_password=neo4j[2] if neo4j else "",
+                            command=tuple(cmd), env=env, log_file=log_f,
+                            creationflags=creationflags, preexec_fn=preexec,
+                            health_timeout_s=health_timeout_s)
+        stack.callback(lambda: _terminate(srv.proc))
+        health = _wait_for_health(base_url, health_timeout_s, proc,
+                                  expect_instance_id=instance_id)
+        if not quiet:
+            print(f"[test_server] shape={shape} backend={backend} up at {base_url} "
+                  f"(startup_mode={health.get('startup_mode')})", file=sys.stderr)
+        yield srv
 
 
 def _terminate(proc: subprocess.Popen) -> None:
@@ -429,8 +531,14 @@ def _terminate(proc: subprocess.Popen) -> None:
     except subprocess.TimeoutExpired:
         with contextlib.suppress(Exception):
             proc.kill()
-        with contextlib.suppress(Exception):
+        try:
             proc.wait(timeout=5)
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(
+                f"test server process {proc.pid} did not exit after termination and kill"
+            ) from exc
+    if proc.poll() is None:
+        raise RuntimeError(f"test server process {proc.pid} is still running after termination")
 
 
 def _cli(argv: list[str] | None = None) -> int:
@@ -440,23 +548,80 @@ def _cli(argv: list[str] | None = None) -> int:
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--backend", choices=("none", "neo4j"), default="none",
                     help="'none' = auth-only, no Neo4j (fast). 'neo4j' = full scope "
-                    "against a throwaway Neo4j (docker, or MENHIR_TEST_NEO4J_URI).")
+                    "against a throwaway Neo4j (public profiles refuse external reuse).")
     ap.add_argument("--jwks-uri", default=DEAD_JWKS_URI,
                     help="OAuth shape only. Default is a dead URI (exercises the 503 outage path).")
+    ap.add_argument(
+        "--public-base-url",
+        default=None,
+        help="Externally visible origin for OAuth metadata (for example, an HTTPS tunnel URL).",
+    )
+    ap.add_argument(
+        "--oauth-refresh",
+        action="store_true",
+        help="OAuth-AS shape only. Enable persistent refresh-token issuance and rotation.",
+    )
+    ap.add_argument(
+        "--oauth-access-ttl",
+        type=int,
+        default=None,
+        help="OAuth-AS shape only. Override access-token lifetime in seconds.",
+    )
+    ap.add_argument(
+        "--use-current-python",
+        action="store_true",
+        help="Launch Menhir with this interpreter (useful with uv run --isolated --frozen).",
+    )
+    ap.add_argument(
+        "--interactive-control",
+        action="store_true",
+        help="Accept 'restart' and 'stop' commands on stdin while preserving test state.",
+    )
     ap.add_argument("--health-timeout", type=float, default=30.0)
     args = ap.parse_args(argv)
 
+    if (args.oauth_refresh or args.oauth_access_ttl is not None) and args.shape != "oauth-as":
+        ap.error("--oauth-refresh and --oauth-access-ttl require --shape oauth-as")
+    if args.oauth_access_ttl is not None and args.oauth_access_ttl <= 0:
+        ap.error("--oauth-access-ttl must be positive")
+    if args.public_base_url and args.shape not in {"oauth", "oauth-as"}:
+        ap.error("--public-base-url requires an OAuth shape")
+
     with launch(args.shape, port=args.port, host=args.host, backend=args.backend,
-                jwks_uri=args.jwks_uri, health_timeout_s=args.health_timeout,
-                quiet=False) as srv:
+                jwks_uri=args.jwks_uri, public_base_url=args.public_base_url,
+                oauth_refresh=args.oauth_refresh,
+                oauth_access_ttl_s=args.oauth_access_ttl,
+                python_executable=sys.executable if args.use_current_python else None,
+                health_timeout_s=args.health_timeout, quiet=False) as srv:
         print(f"Menhir test server [{srv.shape}] running at {srv.base_url}")
         if srv.shape == "static":
             print(f"  keys: operator={TEST_KEYS['operator']} "
                   f"agent={TEST_KEYS['agent']} readonly={TEST_KEYS['readonly']}")
+        elif srv.shape == "oauth-as":
+            print(f"  throwaway OAuth consent key: {TEST_KEYS['operator']}")
         print("  Ctrl-C to stop (auto-teardown).")
         try:
-            while srv.proc.poll() is None:
-                time.sleep(0.5)
+            if args.interactive_control:
+                print("  Commands: restart (preserves OAuth/Neo4j state), stop")
+                while srv.proc.poll() is None:
+                    try:
+                        command = input().strip().lower()
+                    except EOFError:
+                        break
+                    if command == "restart":
+                        health = srv.restart()
+                        print(
+                            "[test_server] restarted; OAuth and Neo4j state preserved "
+                            f"(startup_mode={health.get('startup_mode')})",
+                            file=sys.stderr,
+                        )
+                    elif command in {"stop", "quit", "exit"}:
+                        break
+                    elif command:
+                        print("[test_server] commands: restart, stop", file=sys.stderr)
+            else:
+                while srv.proc.poll() is None:
+                    time.sleep(0.5)
         except KeyboardInterrupt:
             print("\n[test_server] stopping...", file=sys.stderr)
     return 0

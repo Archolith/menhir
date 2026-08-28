@@ -28,6 +28,11 @@ def _required_tier_by_name() -> dict[str, str]:
     }
 
 
+def production_tool_catalog() -> frozenset[str]:
+    """Return the canonical MCP tool names for immutable production policy validation."""
+    return frozenset(_required_tier_by_name())
+
+
 class TierFilteredFastMCP(FastMCP):
     """FastMCP whose advertised tool list is scoped to the caller's auth tier.
 

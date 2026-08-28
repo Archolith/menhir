@@ -49,6 +49,9 @@ def test_enabled_returns_exact_rfc8414_document():
         # archolith-oauth advertises the resource this AS issues tokens for, so a
         # client can confirm the AS/resource pairing before starting a flow.
         "protected_resources": ["https://memory.example.com/mcp-http"],
+        # RFC 9207 / CIMD capability flags (truthful advertisement).
+        "authorization_response_iss_parameter_supported": True,
+        "client_id_metadata_document_supported": True,
     }
 
 
@@ -106,3 +109,53 @@ def test_well_known_exempt_from_auth_while_api_requires_it():
 
     assert client.get(_WELL_KNOWN).status_code == 200
     assert client.get("/api/secret").status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Refresh discovery (Phase 2): offline_access is AS-only
+# ---------------------------------------------------------------------------
+
+
+def test_refresh_disabled_omits_offline_access_and_refresh_grant():
+    body = _client(
+        SimpleNamespace(
+            oauth_as_enabled=True,
+            oauth_public_base_url="https://memory.example.com",
+        )
+    ).get(_WELL_KNOWN).json()
+    assert "offline_access" not in body["scopes_supported"]
+    assert "refresh_token" not in body["grant_types_supported"]
+
+
+def test_refresh_enabled_adds_offline_access_and_refresh_grant():
+    settings = SimpleNamespace(
+        oauth_as_enabled=True,
+        oauth_public_base_url="https://memory.example.com",
+        oauth_as_refresh_tokens_enabled=True,
+        oauth_as_refresh_ttl_s=4321,
+    )
+    body = _client(settings).get(_WELL_KNOWN).json()
+    assert "offline_access" in body["scopes_supported"]
+    assert "menhir:admin" in body["scopes_supported"]
+    assert "refresh_token" in body["grant_types_supported"]
+
+
+def test_refresh_config_receives_issue_flag_and_ttl():
+    from menhir.api.oauth_as_metadata import build_authorization_server_config
+
+    enabled = SimpleNamespace(
+        oauth_as_enabled=True,
+        oauth_public_base_url="https://memory.example.com",
+        oauth_as_refresh_tokens_enabled=True,
+        oauth_as_refresh_ttl_s=4321,
+    )
+    config = build_authorization_server_config(enabled)
+    assert config.issue_refresh_tokens is True
+    assert config.refresh_token_ttl_s == 4321
+
+    disabled = SimpleNamespace(
+        oauth_as_enabled=True,
+        oauth_public_base_url="https://memory.example.com",
+    )
+    config = build_authorization_server_config(disabled)
+    assert config.issue_refresh_tokens is False
