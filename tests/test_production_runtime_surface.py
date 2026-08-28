@@ -365,6 +365,10 @@ def test_candidate_compose_uses_exact_restored_production_authorities() -> None:
         in compose
     )
     assert "source: ${MENHIR_PROD_ROOT:-/srv/menhir/production}/state/oauth" not in compose
+    assert (
+        'MENHIR_OAUTH_AS_REFRESH_WITHOUT_OFFLINE_ACCESS_ENABLED: "true"'
+        in compose
+    )
     assert 'MENHIR_STATE_ROOT="${MENHIR_ROOT}/state"' in release_lib
     assert 'MENHIR_PROD_SECRETS_DIR="${MENHIR_ROOT}/secrets"' in release_lib
     assert 'MENHIR_PROD_POLICY_DIR="${MENHIR_ROOT}/policy"' in release_lib

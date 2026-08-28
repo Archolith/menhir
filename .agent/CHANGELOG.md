@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-08-28 - Keep Agent Smith OAuth sessions durable
+
+- Enable the explicit production authorization-server seam that issues a refresh
+  token to the digest-bound Agent Smith client without adding protocol-only
+  `offline_access` to its exact resource permission scope.
+- Document and test the Compose invariant so a future production render cannot
+  silently fall back to one-hour access-token-only browser sessions.
+
 ## 2026-08-27 - Authorize Agent Smith OAuth bridge
 
 - Publish a stable CIMD document for Agent Smith's pinned `mcp-remote` bridge,
