@@ -335,6 +335,21 @@ def test_production_client_policy_is_digest_bound_and_tracks_clients() -> None:
     assert bridge.denied_tools == policy.denied_tools
 
 
+def test_cloudflared_example_exposes_agent_smith_metadata_before_deny_rules() -> None:
+    path = (
+        Path(__file__).resolve().parents[1]
+        / "deploy"
+        / "cloudflared-config.production.yml.example"
+    )
+    text = path.read_text(encoding="utf-8")
+
+    metadata_route = "client-metadata/agent-smith\\.json"
+    hostname_deny = "hostname: memory.example.com\n    service: http_status:404"
+    assert metadata_route in text
+    assert hostname_deny in text
+    assert text.index(metadata_route) < text.index(hostname_deny)
+
+
 def test_candidate_compose_uses_exact_restored_production_authorities() -> None:
     root = Path(__file__).resolve().parents[1]
     compose = (root / "deploy" / "docker-compose.production.yml").read_text(
