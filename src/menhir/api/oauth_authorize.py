@@ -469,6 +469,14 @@ async def resolve_cimd_client(client_id: str, settings: object) -> OAuthClient:
     upserted under the exact URL client_id. Revalidation failure fails closed.
     Token/code exchange may still use the durable OAuthClient row after restart.
     """
+    from menhir.api.oauth_as_metadata import agent_smith_client_document_for_id
+
+    local_document = agent_smith_client_document_for_id(client_id, settings)
+    if local_document is not None:
+        client = _client_from_cimd_document(client_id, local_document, settings)
+        upsert_cimd_client(client, fetched_at=time.time())
+        return client
+
     store = get_client_store()
     now = time.time()
     cached = store.get(client_id)

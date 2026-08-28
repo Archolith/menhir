@@ -10,6 +10,9 @@
 - Bind those separate identities into one digest-controlled consent group, so
   the operator secret is entered once per short authorization session while
   every application still receives its own token and audit identity.
+- Resolve the server-owned Agent Smith CIMD roster locally instead of
+  hairpinning through Cloudflare, so VPS egress filtering or an IP block cannot
+  break authorization for metadata published by the same Menhir process.
 - Keep each identity on the same least-privilege read/write tool partition and
   bind the complete roster to a new production policy digest.
 

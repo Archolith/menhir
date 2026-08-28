@@ -60,6 +60,43 @@ def build_authorization_server_config(settings: object) -> AuthorizationServerCo
     )
 
 
+def agent_smith_client_document_for_id(
+    client_id: str, settings: object
+) -> dict[str, object] | None:
+    """Build a locally authoritative Agent Smith CIMD document for *client_id*.
+
+    These identities are published by this same process and admitted only by
+    the digest-bound production policy. Resolving them locally avoids an
+    availability dependency on Cloudflare allowing the VPS to hairpin through
+    its own public hostname. Every other HTTPS client_id still uses the shared
+    SSRF-guarded outbound resolver.
+    """
+
+    config = build_authorization_server_config(settings)
+    prefix = f"{config.issuer}/oauth/client-metadata/agent-smith.json?client="
+    if not client_id.startswith(prefix):
+        return None
+    client_key = client_id[len(prefix) :]
+    profile = _AGENT_SMITH_CLIENTS.get(client_key)
+    if profile is None or client_id != f"{prefix}{client_key}":
+        return None
+    client_name, callback_port = profile
+    as_metadata = authorization_server_metadata(config)
+    return {
+        "client_id": client_id,
+        "client_name": client_name,
+        "redirect_uris": [
+            f"http://127.0.0.1:{callback_port}/oauth/callback",
+            f"http://localhost:{callback_port}/oauth/callback",
+        ],
+        "grant_types": as_metadata["grant_types_supported"],
+        "response_types": ["code"],
+        "token_endpoint_auth_method": "none",
+        "token_endpoint_auth_methods_supported": ["none"],
+        "scope": " ".join(as_metadata["scopes_supported"]),
+    }
+
+
 @router.get("/.well-known/oauth-authorization-server", include_in_schema=False)
 @router.get(
     "/.well-known/oauth-authorization-server/{_as_path:path}",
@@ -108,30 +145,18 @@ async def agent_smith_client_metadata(request: Request) -> JSONResponse:
     profile = _AGENT_SMITH_CLIENTS.get(client_key)
     if profile is None:
         raise HTTPException(status_code=404, detail="Unknown Agent Smith OAuth client")
-    client_name, callback_port = profile
     client_id = (
         f"{config.issuer}/oauth/client-metadata/agent-smith.json?client={client_key}"
     )
-    as_metadata = authorization_server_metadata(config)
-    return JSONResponse(
-        {
-            "client_id": client_id,
-            "client_name": client_name,
-            "redirect_uris": [
-                f"http://127.0.0.1:{callback_port}/oauth/callback",
-                f"http://localhost:{callback_port}/oauth/callback",
-            ],
-            "grant_types": as_metadata["grant_types_supported"],
-            "response_types": ["code"],
-            "token_endpoint_auth_method": "none",
-            "token_endpoint_auth_methods_supported": ["none"],
-            "scope": " ".join(as_metadata["scopes_supported"]),
-        }
-    )
+    document = agent_smith_client_document_for_id(client_id, settings)
+    if document is None:  # pragma: no cover - guarded by the profile lookup above
+        raise HTTPException(status_code=404, detail="Unknown Agent Smith OAuth client")
+    return JSONResponse(document)
 
 
 __all__ = [
     "_AGENT_SMITH_CLIENTS",
+    "agent_smith_client_document_for_id",
     "_as_enabled",
     "agent_smith_client_metadata",
     "build_authorization_server_config",

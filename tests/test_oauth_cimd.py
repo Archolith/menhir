@@ -82,6 +82,31 @@ def _install_resolver(monkeypatch, docs: dict[str, dict], calls: list[str] | Non
     return resolver
 
 
+def test_agent_smith_cimd_resolves_locally_without_public_hairpin(monkeypatch):
+    calls: list[str] = []
+    _install_resolver(monkeypatch, {}, calls)
+    _, challenge = _pkce()
+    client_id = (
+        "https://memory.example.com/oauth/client-metadata/agent-smith.json?client=codex"
+    )
+
+    response = _client().get(
+        "/oauth/authorize",
+        params=_get_params(
+            client_id,
+            challenge=challenge,
+            redirect_uri="http://127.0.0.1:43682/oauth/callback",
+        ),
+    )
+
+    assert response.status_code == 200
+    assert calls == []
+    stored = get_client_store().get(client_id)
+    assert stored is not None
+    assert stored.client_name == "Agent Smith - Codex"
+    assert stored.redirect_uris[0] == "http://127.0.0.1:43682/oauth/callback"
+
+
 def _pkce() -> tuple[str, str]:
     import base64
     import hashlib
