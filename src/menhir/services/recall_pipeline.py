@@ -88,6 +88,16 @@ from menhir.services.recall_policies import (
 from menhir.services.event_history_authority import event_authority_for_query
 from menhir.services.event_history_recall import classify_event_query
 
+
+def _projection_is_recall_eligible(view: dict[str, Any]) -> bool:
+    """Consume the repository's read-side eligibility decision without filtering inspection reads.
+
+    The decision is fail-closed for production and test doubles alike: only explicit ``True`` may
+    enter context. Missing, false, or malformed status is ineligible.
+    """
+    return view.get("recall_eligible") is True
+
+
 async def run_recall(
     service: Any,
     query: str,
@@ -572,13 +582,20 @@ async def run_recall(
             continue
         if scope == NodeScope.SESSION and not include_session:
             continue
-        # View(kind) supersession: a superseded View version (view_current is false) is stale
-        # state kept only for history/provenance. It must not compete with the current version
-        # in default recall. Only View nodes carry view_current; every normal memory has it
-        # unset (None) and passes through untouched. include_superseded surfaces them for
-        # historical/provenance/debug recall, where they are flagged is_superseded_view.
-        is_superseded_view = meta.get("view_current") is False
-        if is_superseded_view and not include_superseded:
+        # Materialized Views have a fail-closed context contract. Historical/debug inspection uses
+        # direct getters and operator listings; ``include_superseded`` must not turn ordinary recall
+        # into an inspection API. Missing lifecycle stamps, OPERATOR audience, retirement, or a
+        # receipt/MENTIONS mismatch therefore excludes the View unconditionally. Ordinary memories
+        # have ``is_view`` unset/false and pass through untouched.
+        is_view = bool(meta.get("is_view"))
+        is_superseded_view = is_view and meta.get("view_current") is not True
+        if is_view and (
+            meta.get("view_class") != "FACT"
+            or meta.get("view_audience") != "RECALL"
+            or meta.get("view_current") is not True
+            or bool(meta.get("retired"))
+            or not bool(meta.get("view_provenance_live"))
+        ):
             continue
         # scalar_history exclusion: when the feature flag is OFF, stored scalar_history
         # Entities must be excluded from generic recall — not merely omitted from the
@@ -1027,6 +1044,8 @@ async def run_recall(
                                              "valid_at": exp.valid_at, "user_foundation": e_founded})
                                 auth_added += 1
                     continue
+                if not _projection_is_recall_eligible(view):
+                    continue
                 vuuid = str(view.get("uuid") or "").strip()
                 if not vuuid:
                     continue
@@ -1155,7 +1174,7 @@ async def run_recall(
                         value_kind=vk, unit=un,
                         namespace=stamped_namespace(namespace),
                     )
-                    if _state_view:
+                    if _state_view and _projection_is_recall_eligible(_state_view):
                         continue  # scalar_state leads; history stays off
                 hv = await asyncio.to_thread(
                     service.graph_adapter.fetch_scalar_history,
@@ -1163,7 +1182,7 @@ async def run_recall(
                     value_kind=vk, unit=un,
                     namespace=stamped_namespace(namespace),
                 )
-                if not hv:
+                if not hv or not _projection_is_recall_eligible(hv):
                     continue
                 huuid = str(hv.get("uuid") or "").strip()
                 if not huuid or huuid in _sh_existing:

@@ -12,6 +12,8 @@ from enum import Enum
 from typing import Any
 from uuid import uuid4
 
+from menhir.domain.recall_visibility import default_recall_visibility_cypher
+
 try:  # neo4j is a hard runtime dep; guard the import so unit imports without the driver still load.
     from neo4j.exceptions import ConstraintError as _Neo4jConstraintError
 except Exception:  # pragma: no cover - driver always present in the running service
@@ -417,16 +419,30 @@ class ViewQueryRepositoryMixin:
     # ------------------------------------------------------------------ generic read
 
     def list_views(self, *, kind: str | None = None, namespace: str | None = None,
-                   limit: int = 100) -> list[dict[str, Any]]:
-        """All current Views (any kind, or one kind), most-recent first — the uniform reader that
-        treats every kind the same, proving there is one View shape underneath."""
+                   limit: int = 100, include_operator: bool = False) -> list[dict[str, Any]]:
+        """List current FACT Views, newest first.
+
+        The default is safe for recall/bootstrap/context consumers and therefore requires the shared
+        FACT/RECALL/current/live-provenance predicate. Operator tooling may opt in explicitly to list
+        stamped OPERATOR Views as well; direct getters remain the authoritative inspection surface.
+        """
         kind_filter = "AND n.view_kind = $kind" if kind is not None else ""
         ns_filter = "AND n.group_id = $ns" if namespace is not None else ""
+        visibility = (
+            "n.view_class = 'FACT' "
+            "AND n.view_audience IN ['RECALL', 'OPERATOR'] "
+            "AND coalesce(n.view_current, n.qs_current, false) "
+            "AND NOT coalesce(n.retired, false)"
+            if include_operator
+            else default_recall_visibility_cypher("n")
+        )
         rows = self.neo4j.execute(
-            f"MATCH (n:Entity {{is_view:true}}) WHERE coalesce(n.view_current, true) "
+            f"MATCH (n:Entity {{is_view:true}}) WHERE {visibility} "
             f"{kind_filter} {ns_filter} "
             "RETURN n.uuid AS uuid, n.view_kind AS kind, n.view_subject AS subject, "
             "n.view_value AS value, n.name AS name, n.group_id AS namespace, "
+            "n.view_class AS view_class, n.view_subtype AS view_subtype, "
+            "n.view_audience AS view_audience, "
             "toString(n.valid_at) AS valid_at ORDER BY n.valid_at DESC LIMIT $limit",
             {"kind": kind, "ns": (namespace or ""), "limit": int(limit)},
         )

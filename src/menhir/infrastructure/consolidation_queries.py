@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from menhir.domain.recall import adjacency_edge_pattern
-from menhir.infrastructure.cypher import Cypher
+from menhir.infrastructure.cypher import Cypher, non_derived_view_cypher
 from menhir.infrastructure.neo4j import SAGA_MUTATION_TIMEOUT_S, Neo4jRepository
 
 logger = logging.getLogger(__name__)
@@ -21,6 +21,23 @@ logger = logging.getLogger(__name__)
 # Bounded per run so the decay sweep can't stall indefinitely; the stable
 # ORDER BY means successive runs make forward progress.
 _DECAY_CANDIDATE_LIMIT = 500
+
+
+def automatic_lifecycle_protection_cypher(variable: str = "n") -> str:
+    """Exclude derived Views and evidence retained by a live FACT View.
+
+    FACT Views are ``:Entity`` nodes; their evidence-to-View ``MENTIONS`` relationship is the
+    authoritative automatic-retention signal.  Explicit erasure repositories intentionally do not
+    use this predicate: authorized erasure retires dependent Views before deleting their evidence.
+    """
+    return (
+        f"{non_derived_view_cypher(variable)} "
+        "AND NOT EXISTS { "
+        f"MATCH ({variable})-[:MENTIONS]->(retaining_view:Entity) "
+        "WHERE coalesce(retaining_view.is_view, false) "
+        "AND coalesce(retaining_view.view_current, retaining_view.qs_current, true) "
+        "AND NOT coalesce(retaining_view.retired, false) }"
+    )
 
 
 def _content_overlap_ratio(left: str | None, right: str | None) -> float:
@@ -190,6 +207,7 @@ class ConsolidationRepository:
             .where("n.scope = 'PERSISTENT'",
                    "n.freshness = $freshness",
                    "coalesce(n.user_flagged, false) = false",
+                   automatic_lifecycle_protection_cypher("n"),
                    "coalesce(n.last_accessed, n.created_at) < datetime() - duration({days: $min_days_since_accessed})",
                    "coalesce(toInteger(n.edge_count), 0) < $max_edge_count")
             .where_if(max_sharpness is not None, "n.sharpness IS NOT NULL AND toFloat(n.sharpness) < $max_sharpness")
@@ -226,7 +244,8 @@ class ConsolidationRepository:
 
         query = (Cypher()
             .match("(n:Entity {uuid: $node_uuid})")
-            .where("n.scope = 'PERSISTENT'", "n.freshness = 'ACTIVE'")
+            .where("n.scope = 'PERSISTENT'", "n.freshness = 'ACTIVE'",
+                   automatic_lifecycle_protection_cypher("n"))
             .set(("n.original_content = coalesce(n.original_content, n.content)",
                   "n.content = $compressed_summary",
                   "n.freshness = 'COMPRESSED'"))
@@ -268,7 +287,8 @@ class ConsolidationRepository:
 
         query = (Cypher()
             .match("(n:Entity {uuid: $node_uuid})")
-            .where("n.scope = 'PERSISTENT'", "n.freshness = 'COMPRESSED'")
+            .where("n.scope = 'PERSISTENT'", "n.freshness = 'COMPRESSED'",
+                   automatic_lifecycle_protection_cypher("n"))
             .set(set_lines)
             .return_raw("count(n) AS updated")
             .build())
@@ -282,9 +302,9 @@ class ConsolidationRepository:
         so cross-domain anchor links don't create spurious semantic bridges.
         """
 
-        rows = self.neo4j.execute(
-            """
+        query = """
             MATCH (n:Entity {uuid: $node_uuid})
+            WHERE __NON_DERIVED_VIEW__
             CALL {
                 WITH n
                 OPTIONAL MATCH (n)-[r]-(neighbor:Entity)
@@ -307,7 +327,9 @@ class ConsolidationRepository:
             WITH n, coalesce(edges_bridged, 0) AS edges_bridged
             DETACH DELETE n
             RETURN edges_bridged AS edges_bridged, 1 AS deleted
-            """,
+            """.replace("__NON_DERIVED_VIEW__", automatic_lifecycle_protection_cypher("n"))
+        rows = self.neo4j.execute(
+            query,
             params={"node_uuid": node_uuid},
         )
         if not rows:
@@ -323,7 +345,7 @@ class ConsolidationRepository:
 
         query = (Cypher()
             .match("(n:Entity)")
-            .where("n.uuid = $node_uuid")
+            .where("n.uuid = $node_uuid", automatic_lifecycle_protection_cypher("n"))
             .set("n.sharpness = $sharpness")
             .return_raw("count(n) AS updated")
             .build())
@@ -352,7 +374,7 @@ class ConsolidationRepository:
 
         query = (Cypher()
             .match("(n:Entity)")
-            .where("n.scope = 'SESSION'")
+            .where("n.scope = 'SESSION'", automatic_lifecycle_protection_cypher("n"))
             .where_if(session_id is not None, "n.session_id = $session_id")
             .where_if(max_age_hours > 0, "n.created_at < datetime() - duration({hours: $max_age_hours})")
             .return_raw("""n.uuid AS uuid,
@@ -401,7 +423,8 @@ class ConsolidationRepository:
             return 0
         query = (Cypher()
             .match("(n:Entity)")
-            .where("n.uuid IN $uuids", "n.scope = 'SESSION'")
+            .where("n.uuid IN $uuids", "n.scope = 'SESSION'",
+                   automatic_lifecycle_protection_cypher("n"))
             .set(("n.scope = 'PERSISTENT'",
                   "n.freshness = 'ACTIVE'",
                   "n.promoted_at = datetime()",
@@ -418,7 +441,8 @@ class ConsolidationRepository:
             return 0
         query = (Cypher()
             .match("(n:Entity)")
-            .where("n.uuid IN $uuids", "n.scope = 'SESSION'")
+            .where("n.uuid IN $uuids", "n.scope = 'SESSION'",
+                   automatic_lifecycle_protection_cypher("n"))
             .detach_delete("n")
             .return_raw("count(n) AS deleted")
             .build())
@@ -446,6 +470,7 @@ class ConsolidationRepository:
             f"""
             MATCH (n:Entity)
             WHERE n.uuid IN $uuids {scope_clause}
+              AND {automatic_lifecycle_protection_cypher("n")}
             WITH collect(n) AS doomed, collect(n.uuid) AS deleted_uuids
             FOREACH (d IN doomed | DETACH DELETE d)
             RETURN deleted_uuids
@@ -496,8 +521,12 @@ class ConsolidationRepository:
             """
             MATCH (n:Entity)
             WHERE n.uuid IN $uuids AND n.scope = 'SESSION' AND n.ttl_expires IS NULL
+              AND __AUTOMATIC_LIFECYCLE_PROTECTION__
             RETURN count(n) AS newly_demoted_count
-            """,
+            """.replace(
+                "__AUTOMATIC_LIFECYCLE_PROTECTION__",
+                automatic_lifecycle_protection_cypher("n"),
+            ),
             params={"uuids": node_uuids},
         )
         newly_demoted_count = int(pre_count_rows[0].get("newly_demoted_count", 0)) if pre_count_rows else 0
@@ -505,11 +534,12 @@ class ConsolidationRepository:
         # Apply coalesce: only set if not already set.
         query = (Cypher()
             .match("(n:Entity)")
-            .where("n.uuid IN $uuids", "n.scope = 'SESSION'")
+            .where("n.uuid IN $uuids", "n.scope = 'SESSION'",
+                   automatic_lifecycle_protection_cypher("n"))
             .set("n.ttl_expires = coalesce(n.ttl_expires, datetime() + duration({days: $days}))")
             .return_raw("count(n) AS updated")
             .build())
-        rows = self.neo4j.execute(query, params={"uuids": node_uuids, "days": ttl_days})
+        self.neo4j.execute(query, params={"uuids": node_uuids, "days": ttl_days})
         return newly_demoted_count
 
     def fetch_ttl_expired_session_uuids(
@@ -529,7 +559,8 @@ class ConsolidationRepository:
             .match("(n:Entity)")
             .where("n.scope = 'SESSION'",
                    "n.ttl_expires IS NOT NULL",
-                   "n.ttl_expires < datetime()")
+                   "n.ttl_expires < datetime()",
+                   automatic_lifecycle_protection_cypher("n"))
             .where_if(session_id is not None, "n.session_id = $session_id")
             .return_raw("""n.uuid AS uuid,
        n.name AS name,
@@ -562,9 +593,11 @@ class ConsolidationRepository:
         Returns (canonical_group_id, nodes_updated).
         """
         rows = self.neo4j.execute(
-            """
+            f"""
             MATCH (a:Entity), (b:Entity)
             WHERE a.uuid = $uuid_a AND b.uuid = $uuid_b
+              AND {automatic_lifecycle_protection_cypher("a")}
+              AND {automatic_lifecycle_protection_cypher("b")}
             WITH a, b,
               CASE
                 WHEN a.conflict_group_id IS NOT NULL THEN a.conflict_group_id
@@ -580,6 +613,7 @@ class ConsolidationRepository:
               END AS retired_group_id
             OPTIONAL MATCH (orphan:Entity)
             WHERE orphan.conflict_group_id = retired_group_id
+              AND {automatic_lifecycle_protection_cypher("orphan")}
             WITH a, b, canonical_group_id, collect(orphan) AS orphans
             SET a.conflict_group_id  = canonical_group_id,
                 a.conflict_status    = $initial_status,
@@ -609,9 +643,10 @@ class ConsolidationRepository:
     def set_conflict_group_status(self, group_id: str, status: str) -> int:
         """Update conflict_status for all members of a group. Returns nodes updated."""
         rows = self.neo4j.execute(
-            """
+            f"""
             MATCH (n:Entity)
             WHERE n.conflict_group_id = $group_id
+              AND {automatic_lifecycle_protection_cypher("n")}
             SET n.conflict_status = $status
             RETURN count(n) AS updated
             """,
@@ -639,16 +674,18 @@ class ConsolidationRepository:
         safe_limit = max(1, min(limit, 1000))
         ns = str(namespace).strip() if namespace is not None else ""
         rows = self.neo4j.execute(
-            """
+            f"""
             MATCH (n:Entity)
             WHERE n.conflict_group_id IS NOT NULL
               AND n.conflict_status = $from_status
               AND ($namespace IS NULL OR coalesce(n.namespace, 'default') = $namespace)
+              AND {automatic_lifecycle_protection_cypher("n")}
             WITH DISTINCT n.conflict_group_id AS gid
             LIMIT $limit
             MATCH (m:Entity)
             WHERE m.conflict_group_id = gid
               AND ($namespace IS NULL OR coalesce(m.namespace, 'default') = $namespace)
+              AND {automatic_lifecycle_protection_cypher("m")}
             SET m.conflict_status = 'pending_llm_review'
             RETURN count(DISTINCT gid) AS groups_requeued
             """,
@@ -714,6 +751,7 @@ class ConsolidationRepository:
             WHERE n.conflict_group_id IS NOT NULL
               AND ($status IS NULL OR n.conflict_status = $status)
               AND ($namespace IS NULL OR coalesce(n.namespace, 'default') = $namespace)
+              AND {automatic_lifecycle_protection_cypher("n")}
             WITH n.conflict_group_id AS group_id,
                  min(n.conflict_created_at) AS created_at,
                  collect({{
@@ -755,10 +793,10 @@ class ConsolidationRepository:
 
         Excludes ANCHORED_TO edges and structural neighbors from bridging.
         """
-        rows = self.neo4j.execute(
-            """
+        query = """
             MATCH (n:Entity {uuid: $node_uuid})
             WHERE n.freshness = 'GONE'
+              AND __AUTOMATIC_LIFECYCLE_PROTECTION__
             CALL {
                 WITH n
                 OPTIONAL MATCH (n)-[r]-(neighbor:Entity)
@@ -779,7 +817,12 @@ class ConsolidationRepository:
                 RETURN count(*) AS edges_bridged
             }
             RETURN coalesce(edges_bridged, 0) AS edges_bridged
-            """,
+            """.replace(
+                "__AUTOMATIC_LIFECYCLE_PROTECTION__",
+                automatic_lifecycle_protection_cypher("n"),
+            )
+        rows = self.neo4j.execute(
+            query,
             params={"node_uuid": node_uuid},
         )
         return int(rows[0].get("edges_bridged", 0)) if rows else 0
@@ -796,11 +839,11 @@ class ConsolidationRepository:
         if not node_uuids:
             return 0
 
-        rows = self.neo4j.execute(
-            """
+        query = """
             UNWIND $node_uuids AS node_uuid
             MATCH (n:Entity {uuid: node_uuid})
             WHERE n.freshness = 'GONE'
+              AND __AUTOMATIC_LIFECYCLE_PROTECTION__
             CALL {
                 WITH n, node_uuid
                 OPTIONAL MATCH (n)-[r]-(neighbor:Entity)
@@ -821,7 +864,12 @@ class ConsolidationRepository:
                 RETURN count(*) AS edges_bridged
             }
             RETURN sum(coalesce(edges_bridged, 0)) AS total_edges_bridged
-            """,
+            """.replace(
+                "__AUTOMATIC_LIFECYCLE_PROTECTION__",
+                automatic_lifecycle_protection_cypher("n"),
+            )
+        rows = self.neo4j.execute(
+            query,
             params={"node_uuids": node_uuids},
         )
         return int(rows[0].get("total_edges_bridged", 0)) if rows else 0
@@ -858,7 +906,8 @@ class ConsolidationRepository:
         prefetch_rows = self.neo4j.execute(
             (Cypher()
                 .match("(n:Entity)")
-                .where("n.conflict_group_id = $group_id")
+                .where("n.conflict_group_id = $group_id",
+                       automatic_lifecycle_protection_cypher("n"))
                 .return_raw("n.uuid AS uuid")
                 .build()),
             params={"group_id": conflict_group_id},
@@ -869,7 +918,8 @@ class ConsolidationRepository:
             rows = self.neo4j.execute(
                 (Cypher()
                     .match("(n:Entity)")
-                    .where("n.conflict_group_id = $group_id")
+                    .where("n.conflict_group_id = $group_id",
+                           automatic_lifecycle_protection_cypher("n"))
                     .set(("n.conflict_status = $resolution_status", "n.conflict_group_id = null"))
                     .return_raw("count(n) AS resolved")
                     .build()),
@@ -892,7 +942,8 @@ class ConsolidationRepository:
         members = self.neo4j.execute(
             (Cypher()
                 .match("(n:Entity)")
-                .where("n.conflict_group_id = $group_id")
+                .where("n.conflict_group_id = $group_id",
+                       automatic_lifecycle_protection_cypher("n"))
                 .return_raw("n.uuid AS uuid, n.scope AS scope, n.name AS name")
                 .build()),
             params={"group_id": conflict_group_id},
@@ -934,7 +985,7 @@ class ConsolidationRepository:
         keep_rows = self.neo4j.execute(
             (Cypher()
                 .match("(n:Entity)")
-                .where("n.uuid = $uuid")
+                .where("n.uuid = $uuid", automatic_lifecycle_protection_cypher("n"))
                 .return_raw("n.content AS content, n.original_content AS original_content")
                 .build()),
             params={"uuid": keep_uuid},
@@ -946,7 +997,7 @@ class ConsolidationRepository:
             remove_rows = self.neo4j.execute(
                 (Cypher()
                     .match("(n:Entity)")
-                    .where("n.uuid = $uuid")
+                    .where("n.uuid = $uuid", automatic_lifecycle_protection_cypher("n"))
                     .return_raw("n.content AS content")
                     .build()),
                 params={"uuid": target_uuid},
@@ -973,7 +1024,7 @@ class ConsolidationRepository:
                 self.neo4j.execute(
                     (Cypher()
                         .match("(n:Entity)")
-                        .where("n.uuid = $uuid")
+                        .where("n.uuid = $uuid", automatic_lifecycle_protection_cypher("n"))
                         .set(("n.content = $content",
                               "n.original_content = coalesce(n.original_content, $original)"))
                         .build()),
@@ -991,7 +1042,8 @@ class ConsolidationRepository:
         gone_rows = self.neo4j.execute(
             (Cypher()
                 .match("(n:Entity)")
-                .where("n.conflict_group_id = $group_id", "n.uuid IN $remove_uuids")
+                .where("n.conflict_group_id = $group_id", "n.uuid IN $remove_uuids",
+                       automatic_lifecycle_protection_cypher("n"))
                 .set(("n.freshness = 'GONE'",
                       "n.conflict_status = $resolution_status",
                       "n.conflict_group_id = null"))
@@ -1006,14 +1058,13 @@ class ConsolidationRepository:
         removed_uuids = []
         if gone_rows:
             removed_uuids = [str(uuid) for uuid in (gone_rows[0].get("removed_uuids") or []) if str(uuid)]
-        if not removed_uuids:
-            removed_uuids = remove_uuids
 
         # --- Step 2: resolve all remaining group members ---
         rows = self.neo4j.execute(
             (Cypher()
                 .match("(n:Entity)")
-                .where("n.conflict_group_id = $group_id")
+                .where("n.conflict_group_id = $group_id",
+                       automatic_lifecycle_protection_cypher("n"))
                 .set(("n.conflict_status = $resolution_status", "n.conflict_group_id = null"))
                 .return_raw("count(n) AS resolved")
                 .build()),
@@ -1025,7 +1076,7 @@ class ConsolidationRepository:
             self.neo4j.execute(
                 (Cypher()
                     .match("(n:Entity)")
-                    .where("n.uuid = $keep_uuid")
+                    .where("n.uuid = $keep_uuid", automatic_lifecycle_protection_cypher("n"))
                     .set(("n.sharpness = CASE"
                           " WHEN n.sharpness IS NULL THEN 0.0"
                           " WHEN toFloat(n.sharpness) - 0.1 < 0.0 THEN 0.0"
