@@ -354,7 +354,29 @@ def test_coordinator_both_when_history_enabled():
     assert result["history"]["written"] == 1
     assert len(sink.scalar_states) == 1
     assert len(sink.scalar_histories) == 1
+    assert sink.scalar_histories[0]["recallable"] is False
     assert result["complete"] is True
+
+
+@pytest.mark.unit
+def test_scalar_history_writer_signal_tracks_service_feature_flag():
+    """Only a service configured with scalar history recall enabled opts its writes into recall."""
+    rows = [
+        _assertion(assertion_id="a1", operation="absolute", value=37,
+                   valid_at="2026-07-01T00:00:00+00:00"),
+    ]
+    disabled_sink = FakeViewSink()
+    enabled_sink = FakeViewSink()
+
+    ScalarStateService(
+        FakeAssertionSource(rows), disabled_sink, scalar_history_enabled=False,
+    ).rebuild_scalar_history("ent-postcards", namespace="test")
+    ScalarStateService(
+        FakeAssertionSource(rows), enabled_sink, scalar_history_enabled=True,
+    ).rebuild_scalar_history("ent-postcards", namespace="test")
+
+    assert disabled_sink.scalar_histories[0]["recallable"] is False
+    assert enabled_sink.scalar_histories[0]["recallable"] is True
 
 
 @pytest.mark.unit

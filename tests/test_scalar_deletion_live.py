@@ -21,10 +21,14 @@ def _seed_scalar(repo, *, namespace: str) -> dict[str, str]:
     }
     repo.execute(
         """
+        MERGE (f:EvidenceNamespaceFence {namespace_key: $namespace})
+        ON CREATE SET f.generation = 0, f.created_at = datetime()
+        WITH f
         CREATE (s:Entity {uuid: $subject, name: 'my coins', group_id: $namespace,
                           test_tag: $namespace})
         CREATE (e:Episodic {uuid: $episode, name: 'episode', group_id: $namespace,
                             namespace: $namespace, processing_state: 'COMPLETED',
+                            evidence_finalized: true, evidence_generation: f.generation,
                             test_tag: $namespace})
         """,
         params={**ids, "namespace": namespace},

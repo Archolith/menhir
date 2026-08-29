@@ -30,6 +30,9 @@ Key points:
 - episode nodes exist for provenance and queueing, not just recall
 
 Detail notes:
+- the View-evidence rules below describe an unreleased local implementation; production activation
+  is blocked on coordinated schema/backfill/writer rollout and the missing runtime publication,
+  tombstone-key, and generic-repair services
 - the system is explicitly not a tree because a useful memory may sit under several conceptual branches at once
 - cycles are natural and should be handled by traversal limits and visited-set tracking, not forbidden in the structure
 - episodic anchors are first-class graph objects for provenance, but default recall should not treat them like durable knowledge nodes
@@ -144,6 +147,9 @@ Detail notes:
 - compression should preserve fallback access to richer content long enough to recover from bad summaries
 - contradiction handling should keep both versions until resolution instead of silently overwriting the older one
 - sharpness thresholds, prominence brakes, and rehydration rules together define when a memory is safe, compressible, or recoverable
+- materialized Views are governed by their fold/projection lifecycle, not ordinary memory decay; generic compression and deletion must exclude them
+- a current FACT View's `MENTIONS` links retain its `:Episodic`/`:TurnEvidence` contributors from automatic orphan cleanup; a durable contributor UUID without a live evidence node is an audit receipt, not recall authority
+- explicit erasure still wins: it retires dependent current Views, scrubs erased contributor UUIDs from retained versions, and resets projection watermarks atomically before deleting evidence
 
 ### `memory.policy.recall_usefulness`
 - source: `rate_recall` tool + `domain/self_reinforcement.py` (R8 rails)

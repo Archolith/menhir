@@ -84,6 +84,18 @@ class ViewClass(Enum):
     METRIC = "METRIC"
 
 
+class ViewAudience(Enum):
+    """Consumer audience for a materialized View.
+
+    ``RECALL`` Views may enter generic semantic recall once the remaining lifecycle gates pass.
+    ``OPERATOR`` Views remain addressable through explicit inspection surfaces but must never enter
+    agent context merely because they are stored as ``:Entity`` nodes.
+    """
+
+    RECALL = "RECALL"
+    OPERATOR = "OPERATOR"
+
+
 # Allowlisted enum -> Cypher label literal. Neo4j cannot bind a label as a query parameter, so
 # these queries interpolate the label -- but ONLY ever from this closed map, NEVER from a caller
 # string or free text. That is the plan's "closed label interface" (A1).
@@ -154,6 +166,46 @@ class ViewKind(ABC):
         """Map a fetched row (shaped by `read_fields`) to the kind's public dict."""
 
     # -- shared defaults; a kind overrides only if it differs ---------------------------------
+    def subtype(self, payload: dict[str, Any]) -> str:
+        """Return the payload-aware semantic subtype stored on the View.
+
+        Most kinds have one subtype and therefore use their kind name. Timeline overrides this
+        because legacy subject-only timelines and query-sufficient event lanes have different
+        audiences despite sharing the same storage kind.
+        """
+        return self.name
+
+    def audience(self, payload: dict[str, Any]) -> ViewAudience:
+        """Return the payload-aware consumer audience, failing closed by default."""
+        return ViewAudience.OPERATOR
+
+    def view_subtype(self, payload: dict[str, Any]) -> str:
+        """Named stamp accessor used by persistence writers."""
+        return self.subtype(payload)
+
+    def view_audience(self, payload: dict[str, Any]) -> ViewAudience:
+        """Named stamp accessor used by persistence writers."""
+        return self.audience(payload)
+
+    def view_stamps(
+        self, payload: dict[str, Any], *, view_class: ViewClass = ViewClass.FACT
+    ) -> dict[str, str]:
+        """Return the complete lifecycle classification stamped on one View version.
+
+        Metrics are operator-only regardless of the underlying kind. This keeps a metric counter
+        from inheriting the recall audience of a FACT counter while preserving one shared kind.
+        """
+        audience = (
+            ViewAudience.OPERATOR
+            if view_class is ViewClass.METRIC
+            else self.view_audience(payload)
+        )
+        return {
+            "view_class": view_class.value,
+            "view_subtype": self.view_subtype(payload),
+            "view_audience": audience.value,
+        }
+
     def episode_uuids(self, payload: dict[str, Any]) -> list[str]:
         return [str(u) for u in (payload.get("episode_uuids") or [])]
 
@@ -168,6 +220,9 @@ class CounterKind(ViewKind):
     lww_register = True  # a current-total register: newer valid_at wins (fold-algebra Law 1)
     read_fields = ("n.uuid AS uuid, n.view_subject AS subject, n.qs_counter AS counter, "
                    "n.view_value AS value, toString(n.valid_at) AS valid_at")
+
+    def audience(self, payload: dict[str, Any]) -> ViewAudience:
+        return ViewAudience.RECALL
 
     def key_discriminator(self, payload: dict[str, Any]) -> str:
         return str(payload["counter"])
@@ -219,6 +274,12 @@ class TimelineKind(ViewKind):
     read_fields = ("n.uuid AS uuid, n.view_subject AS subject, n.view_value AS count, "
                    "n.view_payload AS payload, n.view_predicate AS predicate, "
                    "n.view_domain AS domain, toString(n.valid_at) AS valid_at")
+
+    def subtype(self, payload: dict[str, Any]) -> str:
+        return "event_timeline" if _event_mode(payload) else "legacy_timeline"
+
+    def audience(self, payload: dict[str, Any]) -> ViewAudience:
+        return ViewAudience.RECALL if _event_mode(payload) else ViewAudience.OPERATOR
 
     def key_discriminator(self, payload: dict[str, Any]) -> str:
         if _event_mode(payload):
@@ -336,6 +397,16 @@ class AdmissionAuditKind(ViewKind):
             "valid_at": row.get("valid_at"),
         }
 
+    def episode_uuids(self, payload: dict[str, Any]) -> list[str]:
+        """Treat the grounding TurnEvidence UUID as lifecycle provenance.
+
+        Keeping ``turn_evidence_uuid`` as an audit property preserves direct operator inspection;
+        returning it here additionally places it in the durable contributor receipt and causes the
+        shared FACT writer to create the authoritative incoming ``MENTIONS`` relationship.
+        """
+        turn_evidence_uuid = str(payload.get("turn_evidence_uuid") or "").strip()
+        return [turn_evidence_uuid] if turn_evidence_uuid else []
+
 
 def _scalar_norm(value: Any) -> str:
     """Stable normalized string for a typed scalar value — the register content AND the signature
@@ -448,6 +519,9 @@ class ScalarStateKind(ViewKind):
     #: the typed ValueKinds a scalar_state slot may carry (fail-closed allowlist). Single-sourced
     #: from the domain's VALUE_KINDS — domain owns the allowlist; this class only consumes it.
     VALUE_KINDS = DOMAIN_VALUE_KINDS
+
+    def audience(self, payload: dict[str, Any]) -> ViewAudience:
+        return ViewAudience.RECALL
 
     @classmethod
     def _slot(cls, payload: dict[str, Any]) -> dict[str, str]:
@@ -566,6 +640,14 @@ class ScalarHistoryKind(ViewKind):
         "n.sh_first_valid_at AS first_valid_at, n.sh_last_valid_at AS last_valid_at, "
         "n.view_payload AS payload, toString(n.valid_at) AS valid_at"
     )
+
+    def audience(self, payload: dict[str, Any]) -> ViewAudience:
+        """History is operator-only unless the writer explicitly opts this payload into recall."""
+        return (
+            ViewAudience.RECALL
+            if payload.get("recallable") is True
+            else ViewAudience.OPERATOR
+        )
 
     @classmethod
     def _slot(cls, payload: dict[str, Any]) -> dict[str, str]:

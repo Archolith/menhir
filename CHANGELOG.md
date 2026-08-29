@@ -1,3 +1,20 @@
+## 2026-08-28 - unreleased: make View lifetime follow live evidence
+
+- This entry describes local source behavior only. Production activation still requires additive
+  schema execution, legacy evidence reconciliation, coordinated writer deployment, and observation;
+  Graphiti publication recovery, replay tombstones, and the generic repair dispatcher are not yet
+  runtime-enabled.
+
+- Current FACT Views now require every declared contributor to resolve to live `:Episodic` or
+  `:TurnEvidence` before the View can become current, and both evidence labels receive `MENTIONS`
+  retention links in the same write transaction.
+- Generic recent, flagged/bootstrap, scoped, typed, and scored recall now fail closed on candidate,
+  gone, retired, superseded, internal zero-provenance, and orphaned Views. Explicit UUID inspection
+  remains available for provenance and operator diagnosis.
+- Ordinary memory decay no longer compresses or deletes derived Views. Explicit evidence and
+  namespace erasure still wins, but atomically retires dependent current Views, scrubs erased UUIDs
+  from retained versions, and resets counter/scalar/event fold watermarks before evidence removal.
+
 ## 2026-08-19 - fix: HIGH remediation wave 5 (explorer authorization, domain correctness)
 
 - **Every explorer route now carries a tier floor.** The explorer's 36 routes mount into the same
