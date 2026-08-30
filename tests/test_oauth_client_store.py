@@ -9,6 +9,12 @@ from menhir.api.oauth_client_store import (
     OAuthClientStore,
     hash_secret,
     new_client_id,
+    reconcile_policy_clients,
+)
+from menhir.api.client_policy import (
+    ClientPolicy,
+    ClientPolicyAuthority,
+    OAuthClientRegistration,
 )
 
 pytestmark = pytest.mark.unit
@@ -77,9 +83,9 @@ def test_reap_stale_removes_only_never_exchanged_old_clients(tmp_path):
     client that has ever exchanged, nor a recent registration."""
     store = OAuthClientStore(tmp_path / "as.db")
     now = 1_000_000.0
-    store.register(_pub_client("old", now - 100_000))     # old, never exchanged -> reaped
-    store.register(_pub_client("fresh", now - 10))        # recent, never exchanged -> kept
-    store.register(_pub_client("used", now - 100_000))    # old but exchanged -> kept
+    store.register(_pub_client("old", now - 100_000))  # old, never exchanged -> reaped
+    store.register(_pub_client("fresh", now - 10))  # recent, never exchanged -> kept
+    store.register(_pub_client("used", now - 100_000))  # old but exchanged -> kept
     store.mark_exchanged("used", now=now - 50_000)
 
     reaped = store.reap_stale(max_age_s=86400, now=now)
@@ -138,3 +144,150 @@ def test_new_client_id_is_unique_hex():
     assert int(cid1, 16)
     assert int(cid2, 16)
     assert cid1 != cid2
+
+
+def _policy_authority(*policies: ClientPolicy) -> ClientPolicyAuthority:
+    return ClientPolicyAuthority(
+        version=1,
+        digest="a" * 64,
+        clients={policy.client_id: policy for policy in policies},
+    )
+
+
+def _static_policy(
+    client_id: str,
+    redirect_uri: str,
+    *,
+    protocol_scopes: frozenset[str] = frozenset(),
+) -> ClientPolicy:
+    return ClientPolicy(
+        client_id=client_id,
+        label=f"web-{client_id}",
+        scopes=frozenset({"menhir:read", "menhir:write"}),
+        maximum_tier="agent",
+        namespace="",
+        allowed_tools=frozenset({"recall_memories"}),
+        denied_tools=frozenset({"delete_memory"}),
+        registration=OAuthClientRegistration(
+            client_name=f"Web {client_id}",
+            redirect_uris=(redirect_uri,),
+            protocol_scopes=protocol_scopes,
+        ),
+    )
+
+
+def test_reconcile_policy_clients_seeds_distinct_web_identities(tmp_path):
+    store = OAuthClientStore(tmp_path / "as.db")
+    chatgpt = _static_policy("chatgpt-web", "https://chatgpt.example/callback")
+    claude = _static_policy("claude-web", "https://claude.example/callback")
+
+    inserted = reconcile_policy_clients(
+        _policy_authority(chatgpt, claude), store, now=123.0
+    )
+
+    assert inserted == ("chatgpt-web", "claude-web")
+    assert store.get("chatgpt-web").redirect_uris == (
+        "https://chatgpt.example/callback",
+    )
+    assert store.get("claude-web").redirect_uris == ("https://claude.example/callback",)
+    assert store.get("chatgpt-web").created_at == 123.0
+
+
+def test_reconcile_policy_clients_seeds_refresh_protocol_scope(tmp_path):
+    store = OAuthClientStore(tmp_path / "as.db")
+    policy = _static_policy(
+        "claude-web",
+        "https://claude.example/callback",
+        protocol_scopes=frozenset({"offline_access"}),
+    )
+
+    reconcile_policy_clients(
+        _policy_authority(policy),
+        store,
+        enabled_protocol_scopes=frozenset({"offline_access"}),
+        now=123.0,
+    )
+
+    assert frozenset(store.get("claude-web").scopes) == {
+        "menhir:read",
+        "menhir:write",
+        "offline_access",
+    }
+
+
+def test_reconcile_policy_clients_expands_exact_legacy_scope_atomically(tmp_path):
+    store = OAuthClientStore(tmp_path / "as.db")
+    legacy_policy = _static_policy(
+        "claude-web", "https://claude.example/callback"
+    )
+    policy = _static_policy(
+        "claude-web",
+        "https://claude.example/callback",
+        protocol_scopes=frozenset({"offline_access"}),
+    )
+    reconcile_policy_clients(_policy_authority(legacy_policy), store, now=123.0)
+    store.mark_exchanged("claude-web", now=456.0)
+
+    assert reconcile_policy_clients(
+        _policy_authority(policy),
+        store,
+        enabled_protocol_scopes=frozenset({"offline_access"}),
+        now=999.0,
+    ) == ()
+    stored = store.get("claude-web")
+    assert frozenset(stored.scopes) == {
+        "menhir:read",
+        "menhir:write",
+        "offline_access",
+    }
+    assert stored.created_at == 123.0
+    assert stored.last_exchanged == 456.0
+
+
+def test_reconcile_policy_clients_refuses_disabled_protocol_scope(tmp_path):
+    store = OAuthClientStore(tmp_path / "as.db")
+    policy = _static_policy(
+        "claude-web",
+        "https://claude.example/callback",
+        protocol_scopes=frozenset({"offline_access"}),
+    )
+
+    with pytest.raises(ValueError, match="disabled protocol scope"):
+        reconcile_policy_clients(_policy_authority(policy), store)
+
+    assert store.get("claude-web") is None
+
+
+def test_reconcile_policy_clients_is_idempotent_and_preserves_usage(tmp_path):
+    store = OAuthClientStore(tmp_path / "as.db")
+    policy = _static_policy("chatgpt-web", "https://chatgpt.example/callback")
+    authority = _policy_authority(policy)
+    reconcile_policy_clients(authority, store, now=123.0)
+    store.mark_exchanged("chatgpt-web", now=456.0)
+
+    assert reconcile_policy_clients(authority, store, now=999.0) == ()
+    stored = store.get("chatgpt-web")
+    assert stored.created_at == 123.0
+    assert stored.last_exchanged == 456.0
+
+
+def test_reconcile_policy_clients_rejects_drift_without_partial_writes(tmp_path):
+    store = OAuthClientStore(tmp_path / "as.db")
+    drifted = _static_policy("chatgpt-web", "https://wrong.example/callback")
+    store.register(
+        OAuthClient(
+            client_id="chatgpt-web",
+            client_name="Web chatgpt-web",
+            redirect_uris=("https://chatgpt.example/callback",),
+            scopes=("menhir:read", "menhir:write"),
+            client_secret_hash="",
+            created_at=1.0,
+            token_endpoint_auth_method="none",
+        )
+    )
+    claude = _static_policy("claude-web", "https://claude.example/callback")
+
+    with pytest.raises(ValueError, match="does not match"):
+        reconcile_policy_clients(_policy_authority(claude, drifted), store)
+
+    assert store.get("claude-web") is None

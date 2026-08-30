@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-08-28 - Bind hosted web clients to production OAuth policy
+
+- Add digest-bound static registration metadata so hosted web connectors are
+  reconstructed from production policy instead of manual OAuth-database edits.
+- Preserve ChatGPT's existing client ID and callback while adding a separate
+  `claude-web` public PKCE identity for Claude.ai.
+- Reconcile policy-owned clients atomically at production startup, preserve
+  prior exchange state, and fail closed on name, callback, scope, secret, or
+  token-auth drift.
+- Keep production DCR closed to unknown clients and reject ambiguous callback
+  matches so one web connector can never inherit another connector's identity.
+
 ## 2026-08-28 - Isolate Agent Smith OAuth clients by harness
 
 - Replace the shared Agent Smith OAuth identity with thirteen policy-bound

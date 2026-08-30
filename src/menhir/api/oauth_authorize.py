@@ -78,6 +78,30 @@ _CONSENT_HEADERS = {
     "Referrer-Policy": "no-referrer",
 }
 
+
+def _consent_headers_for_redirect(redirect_uri: str) -> dict[str, str]:
+    """Permit a validated callback origin through CSP's form redirect check.
+
+    Chromium applies ``form-action`` to redirects produced by a form POST. The
+    consent form posts to this server, then OAuth redirects to the client's
+    exact registered callback. Keeping ``'self'`` alone therefore strands the
+    issued code in the browser. Only the already-validated callback origin is
+    added; the signed request and POST handler still enforce the exact URI.
+    """
+
+    parts = urlsplit(redirect_uri)
+    if parts.scheme not in {"https", "http"} or not parts.netloc:
+        raise ValueError("redirect_uri has no CSP-safe origin")
+    origin = f"{parts.scheme}://{parts.netloc}"
+    if any(character.isspace() for character in origin) or ";" in origin:
+        raise ValueError("redirect_uri has no CSP-safe origin")
+    headers = dict(_CONSENT_HEADERS)
+    headers["Content-Security-Policy"] = (
+        f"default-src 'none'; form-action 'self' {origin}; "
+        "frame-ancestors 'none'; base-uri 'none'"
+    )
+    return headers
+
 # Fields signed into the integrity token, in a fixed order.
 _SIGNED_FIELDS = (
     "client_id",
@@ -879,7 +903,11 @@ async def authorize_get(request: Request):
             status_code=429,
             headers={**_CONSENT_HEADERS, "Retry-After": "5"},
         )
-    return HTMLResponse(content=content, status_code=200, headers=_CONSENT_HEADERS)
+    return HTMLResponse(
+        content=content,
+        status_code=200,
+        headers=_consent_headers_for_redirect(redirect_uri),
+    )
 
 
 @router.post("/oauth/authorize", include_in_schema=False)

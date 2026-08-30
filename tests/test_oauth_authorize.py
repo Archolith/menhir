@@ -16,7 +16,11 @@ from fastapi.testclient import TestClient
 
 from menhir.api import auth_code_store, oauth_authorize, oauth_client_store
 from menhir.api.auth_code_store import get_auth_code_store
-from menhir.api.client_policy import ClientPolicy, ClientPolicyAuthority
+from menhir.api.client_policy import (
+    ClientPolicy,
+    ClientPolicyAuthority,
+    OAuthClientRegistration,
+)
 from menhir.api.oauth_authorize import router as oauth_authorize_router
 from menhir.api.oauth_client_store import OAuthClient, get_client_store, new_client_id
 
@@ -79,7 +83,12 @@ def _register_client(
     return client_id
 
 
-def _policy(client_id: str, *, scopes: frozenset[str]) -> ClientPolicyAuthority:
+def _policy(
+    client_id: str,
+    *,
+    scopes: frozenset[str],
+    protocol_scopes: frozenset[str] = frozenset(),
+) -> ClientPolicyAuthority:
     return ClientPolicyAuthority(
         version=1,
         digest="test",
@@ -92,6 +101,15 @@ def _policy(client_id: str, *, scopes: frozenset[str]) -> ClientPolicyAuthority:
                 namespace="",
                 allowed_tools=frozenset({"recall_memories"}),
                 denied_tools=frozenset({"add_memory"}),
+                registration=(
+                    OAuthClientRegistration(
+                        client_name="Test App",
+                        redirect_uris=(_CB,),
+                        protocol_scopes=protocol_scopes,
+                    )
+                    if protocol_scopes
+                    else None
+                ),
             )
         },
     )
@@ -141,6 +159,22 @@ def test_disabled_returns_404_get_and_post():
     c = _client(_DISABLED)
     assert c.get("/oauth/authorize").status_code == 404
     assert c.post("/oauth/authorize", data={}).status_code == 404
+
+
+def test_consent_csp_allows_only_the_validated_callback_origin():
+    client_id = _register_client(scopes=("menhir:read", "menhir:write"))
+    _, challenge = _pkce()
+
+    response = _client().get(
+        "/oauth/authorize",
+        params=_valid_get_params(client_id, challenge=challenge),
+    )
+
+    assert response.status_code == 200
+    csp = response.headers["content-security-policy"]
+    assert "form-action 'self' https://app.example.com;" in csp
+    assert _CB not in csp
+    assert "frame-ancestors 'none'" in csp
 
 
 def test_consent_capacity_refusal_is_bounded_429(tmp_path, monkeypatch):
@@ -226,6 +260,40 @@ def test_production_policy_rejects_scope_narrowing():
 
     assert resp.status_code == 302
     assert _location_query(resp)["error"] == ["unauthorized_client"]
+
+
+def test_production_policy_accepts_protocol_only_offline_access():
+    _, challenge = _pkce()
+    cid = _register_client(
+        scopes=("menhir:read", "menhir:write", "offline_access")
+    )
+    authority = _policy(
+        cid,
+        scopes=frozenset({"menhir:read", "menhir:write"}),
+        protocol_scopes=frozenset({"offline_access"}),
+    )
+    settings = SimpleNamespace(
+        oauth_as_enabled=True,
+        oauth_public_base_url="https://memory.example.com",
+        oauth_as_refresh_tokens_enabled=True,
+        operator_key="s3cret",
+    )
+
+    response = _client(settings, policy=authority).get(
+        "/oauth/authorize",
+        params=_valid_get_params(
+            cid,
+            challenge=challenge,
+            scope="menhir:read menhir:write offline_access",
+        ),
+    )
+
+    assert response.status_code == 200
+    assert set(_extract_hidden(response.text)["scope"].split()) == {
+        "menhir:read",
+        "menhir:write",
+        "offline_access",
+    }
 
 
 def test_get_redirect_uri_mismatch_returns_400():

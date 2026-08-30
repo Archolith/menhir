@@ -5,6 +5,17 @@
 - Added regression coverage proving the retired client is neither published nor admitted by
   production policy while the remaining managed-client suite stays intact.
 
+## 2026-08-28 - fix: complete Claude web refresh authorization
+
+- OAuth protocol scopes are now separate from Menhir permission scopes, so
+  `offline_access` can request a refresh token without becoming a new access tier.
+- The dedicated Claude web registration alone declares `offline_access`; ChatGPT and every
+  Agent Smith registration keep their existing exact scope contracts.
+- Startup atomically upgrades the exact legacy Claude registration and refuses unknown or
+  disabled protocol scopes before the service accepts traffic.
+- Consent pages allow only the validated callback origin through CSP `form-action`, so
+  Chromium can follow the authorization POST redirect instead of stranding issued codes.
+
 ## 2026-08-19 - fix: HIGH remediation wave 5 (explorer authorization, domain correctness)
 
 - **Every explorer route now carries a tier floor.** The explorer's 36 routes mount into the same

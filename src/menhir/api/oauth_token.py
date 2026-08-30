@@ -177,7 +177,7 @@ async def token(request: Request) -> JSONResponse:
                 resource=resource,
                 allowed_scopes=authorization_config.effective_scopes_supported,
                 required_scopes=(
-                    None if client_policy is None else client_policy.scopes
+                    None if client_policy is None else client_policy.oauth_scopes
                 ),
                 issue_refresh_without_offline_access=bool(
                     getattr(
@@ -232,7 +232,7 @@ async def token(request: Request) -> JSONResponse:
                 scope=None if raw_scope is None else str(raw_scope),
                 allowed_scopes=authorization_config.effective_scopes_supported,
                 required_scopes=(
-                    None if client_policy is None else client_policy.scopes
+                    None if client_policy is None else client_policy.oauth_scopes
                 ),
                 tier=(
                     None if client_policy is None else client_policy.maximum_tier
