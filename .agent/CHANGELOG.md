@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-08-30 - Make same-host production releases one-command and resumable
+
+- Replace the impossible separate-source writer proof with a release- and
+  host-bound Docker census that captures, restart-disables, and retires the
+  exact legacy Menhir app and Neo4j containers only after a verified off-host
+  backup.
+- Add root-only backup decryption/staging and `release-run.sh`, which rebuilds
+  progress from receipts and live runtime evidence, reconciles interrupted
+  Caddy transactions, and rolls promotion forward after its durable mutation
+  boundary.
+- Pin candidate and replacement app/database images, modes, labels, and
+  authority mounts; archive completed prior mutation markers so later releases
+  remain repeatable without discarding forensic evidence.
+- Rewrite the live VPS and production playbooks around the single operator
+  action and retain mandatory release-bound security review evidence.
+
 ## 2026-08-28 - Bind hosted web clients to production OAuth policy
 
 - Add digest-bound static registration metadata so hosted web connectors are

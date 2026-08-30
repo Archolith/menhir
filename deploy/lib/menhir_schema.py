@@ -29,6 +29,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import posixpath
 import re
 import sys
 from datetime import datetime, timedelta, timezone
@@ -68,7 +69,6 @@ _REQUIRED_AUTHORITY = frozenset({
     "secrets/neo4j/neo4j-auth",
     "secrets/menhir/neo4j-password",
     "secrets/menhir/operator-key",
-    "secrets/menhir/source-fence-token",
     "secrets/oauth/oauth_signing_key.json",
     "secrets/oauth/retry-response-keyring.json",
     "secrets/oauth/oauth-consent-secret",
@@ -87,9 +87,7 @@ _RELEASE_TOP_KEYS = frozenset({
     "wheel_manifest_sha256", "dockerfile_wheel_manifest_sha256",
     "sbom_sha256", "scan_evidence_sha256", "provenance_sha256",
     "rendered", "network", "rollback_anchors", "secret_version_ids",
-    "artifacts", "repo_remotes", "source_fence_key_id",
-    "source_fence_public_key", "source_fence_tls_ca_sha256",
-    "external_evidence_public_keys",
+    "artifacts", "repo_remotes", "deployment",
 })
 _RELEASE_SECURITY_REVIEW_KEYS = frozenset({
     "schema", "kind", "review_id", "release_author", "reviewer",
@@ -118,6 +116,21 @@ _RELEASE_RENDERED = frozenset({
 _RELEASE_NETWORK = frozenset({
     "project", "external_network", "alias", "peers",
 })
+_RELEASE_DEPLOYMENT = frozenset({
+    "topology", "legacy_container", "production_container",
+    "candidate_container", "legacy_database_container",
+    "candidate_database_container", "compose_project", "compose_service",
+})
+_EXPECTED_DEPLOYMENT = {
+    "topology": "same-host-docker",
+    "legacy_container": "menhir-prod-app",
+    "production_container": "menhir-prod-app",
+    "candidate_container": "menhir-candidate-app",
+    "legacy_database_container": "menhir-prod-neo4j",
+    "candidate_database_container": "menhir-candidate-neo4j",
+    "compose_project": "menhir-prod",
+    "compose_service": "menhir",
+}
 _RELEASE_ROLLBACK = frozenset({
     "initial_release", "prior_release_id", "prior_release_sha256",
     "prior_images", "prior_route_sha256", "initial_host_state_sha256",
@@ -130,7 +143,6 @@ _RELEASE_SECRET_VERSIONS = frozenset({
     "neo4j-auth", "neo4j-password", "oauth-signing-key",
     "oauth-retry-keyring", "oauth-consent-secret", "operator-key",
     "client-policy", "provider-key",
-    "source-fence-token",
 })
 _RELEASE_GIT_ARTIFACT_ENTRY = frozenset({
     "kind", "sha256", "repository", "commit", "path", "blob_oid",
@@ -444,21 +456,10 @@ def validate_release(path: str) -> dict:
     for repo, expected in EXPECTED_REPO_REMOTES.items():
         if repo_remotes.get(repo) != expected:
             raise ValueError("repo_remotes.%s is not the canonical repository identity" % repo)
-    _require_key_id(release.get("source_fence_key_id"), "source_fence_key_id")
-    _decode_ed25519_public_key(
-        release.get("source_fence_public_key"), "source_fence_public_key"
-    )
-    _require_sha256(
-        release.get("source_fence_tls_ca_sha256"), "source_fence_tls_ca_sha256"
-    )
-    external_keys = release.get("external_evidence_public_keys")
-    if not isinstance(external_keys, dict) or len(external_keys) < 2:
-        raise ValueError("external_evidence_public_keys must contain at least two workers")
-    for worker_id, public_key in external_keys.items():
-        _require_key_id(worker_id, "external evidence worker id")
-        _decode_ed25519_public_key(
-            public_key, "external_evidence_public_keys.%s" % worker_id
-        )
+    deployment = release.get("deployment")
+    _require_exact_keys(deployment, _RELEASE_DEPLOYMENT, "deployment")
+    if deployment != _EXPECTED_DEPLOYMENT:
+        raise ValueError("deployment must be the reviewed same-host Docker topology")
 
     _require_sha256(release.get("oauth_wheel_sha256"), "oauth_wheel_sha256")
     wheel_source = release.get("oauth_wheel_source")
@@ -952,7 +953,7 @@ def validate_receipt(path: str, kind: str) -> dict:
             local_archives.get("current_archive_path"),
             "local_encrypted_archives.current_archive_path",
         )
-        if not os.path.isabs(current_archive_path):
+        if not posixpath.isabs(current_archive_path):
             raise ValueError("local_encrypted_archives.current_archive_path must be absolute")
         for index, archive in enumerate(archives):
             label = "local_encrypted_archives.archives[%d]" % index
@@ -962,7 +963,7 @@ def validate_receipt(path: str, kind: str) -> dict:
             if not _GENERATION_RE.match(archive_generation):
                 raise ValueError("%s.generation is invalid" % label)
             local_path = _require_str(archive.get("path"), "%s.path" % label)
-            if not os.path.isabs(local_path):
+            if not posixpath.isabs(local_path):
                 raise ValueError("%s.path must be absolute" % label)
             if not os.path.basename(local_path).startswith(archive_generation + "-") or \
                     not local_path.endswith(".tar.gz.age"):
@@ -1017,7 +1018,7 @@ def validate_receipt(path: str, kind: str) -> dict:
             "schema", "kind", "generation", "manifest_sha256", "release",
             "readyz", "oauth_discovery", "recall", "mutation_503",
             "tier_tool_identity", "authority_before_digest",
-            "authority_after_digest", "external_prerequisite_receipt",
+            "authority_after_digest", "same_host_writer_fence_sha256",
             "checked_utc",
         }), "candidate-accept receipt")
         for key in ("readyz", "oauth_discovery", "mutation_503",
@@ -1030,8 +1031,8 @@ def validate_receipt(path: str, kind: str) -> dict:
                         "authority_before_digest")
         _require_sha256(receipt.get("authority_after_digest"),
                         "authority_after_digest")
-        _require_str(receipt.get("external_prerequisite_receipt"),
-                     "external_prerequisite_receipt")
+        _require_sha256(receipt.get("same_host_writer_fence_sha256"),
+                        "same_host_writer_fence_sha256")
         _require_fresh(receipt.get("checked_utc"), "candidate-accept.checked_utc", 900)
 
     return receipt

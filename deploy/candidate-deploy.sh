@@ -19,13 +19,26 @@ validate_receipt_binding "${STATUS_DIR}/rehearsal-receipt.json" rehearsal "$gene
 marker="${BACKUP_ROOT}/candidate/${generation}/REHEARSAL-PASSED"
 [ "$(read_generation "$marker" "candidate rehearsal marker")" = "$generation" ] \
     || { echo "candidate rehearsal marker mismatch" >&2; exit 1; }
-[ "$(read_generation "${STATUS_DIR}/restored-generation" "restored production generation")" = "$generation" ] \
-    || { echo "candidate requires this exact generation to be restored into production authority" >&2; exit 1; }
+backup_receipt="$(backup_receipt_path)"
+validate_receipt_binding "$backup_receipt" backup-upload "$generation" \
+    "$manifest_sha" "$menhir_digest" "$neo4j_digest"
+same_host_fence="${STATUS_DIR}/same-host-writer-fence.json"
+require_root_file "$same_host_fence" "same-host writer-fence receipt"
 acquire_release_lock
-if docker inspect menhir-prod-app >/dev/null 2>&1; then
-    echo "production container exists; candidate deployment requires production to be stopped and removed" >&2
-    exit 1
+same_host_helper="${SCRIPT_DIR}/lib/same_host_fence.py"
+[ -f "$same_host_helper" ] || same_host_helper="${SCRIPT_DIR}/same_host_fence.py"
+census="$(mktemp)"
+trap 'rm -f "$census"' EXIT
+ids="$(docker ps -aq)"
+if [ -n "$ids" ]; then
+    # shellcheck disable=SC2086
+    docker inspect $ids > "$census"
+else
+    printf '[]\n' > "$census"
 fi
+python3 "$same_host_helper" verify "$RELEASE_JSON" "$same_host_fence" "$census" \
+    || { echo "candidate deployment refused: a legacy or competing app/database remains" >&2; exit 1; }
+rm -f "$census"; trap - EXIT
 candidate_down "$generation" >/dev/null 2>&1 || true
 candidate_neo4j_up "$generation"
 

@@ -57,7 +57,6 @@ REQUIRED_FILES = {
     "secrets/neo4j/neo4j-auth": b"neo4j/password",
     "secrets/menhir/neo4j-password": b"password",
     "secrets/menhir/operator-key": b"operator",
-    "secrets/menhir/source-fence-token": b"f" * 48,
     "secrets/menhir/openai-api-key": b"provider",
     "secrets/oauth/oauth_signing_key.json": b"{}",
     "secrets/oauth/retry-response-keyring.json": b"{}",
@@ -194,7 +193,6 @@ def _valid_release() -> dict:
             "operator-key": "v1",
             "client-policy": "v1",
             "provider-key": "v1",
-            "source-fence-token": "v1",
         },
         "artifacts": {
             "/srv/menhir/production/bin/worker": {
@@ -221,10 +219,16 @@ def _valid_release() -> dict:
                 "rendered_key": "production_env_sha256",
             },
         },
-        "source_fence_key_id": "source-fence-v1",
-        "source_fence_public_key": "A" * 43,
-        "source_fence_tls_ca_sha256": "0" * 64,
-        "external_evidence_public_keys": {"worker-a": "A" * 43, "worker-b": "A" * 43},
+        "deployment": {
+            "topology": "same-host-docker",
+            "legacy_container": "menhir-prod-app",
+            "production_container": "menhir-prod-app",
+            "candidate_container": "menhir-candidate-app",
+            "legacy_database_container": "menhir-prod-neo4j",
+            "candidate_database_container": "menhir-candidate-neo4j",
+            "compose_project": "menhir-prod",
+            "compose_service": "menhir",
+        },
     }
     release["security_review"] = {
         "schema": 1,
@@ -615,7 +619,7 @@ def test_candidate_accept_receipt_valid(tmp_path):
         "tier_tool_identity": "ok",
         "authority_before_digest": "1" * 64,
         "authority_after_digest": "1" * 64,
-        "external_prerequisite_receipt": "2" * 64,
+        "same_host_writer_fence_sha256": "2" * 64,
         "checked_utc": _now(),
     }
     path = _write_json(tmp_path, "receipt.json", receipt)
@@ -638,254 +642,60 @@ def test_receipt_kind_mismatch(tmp_path):
         _schema.validate_receipt(str(path), "backup-upload")
 
 
-def test_external_prerequisite_requires_true_attestations(tmp_path):
-    receipt = {
-        "schema": 1,
-        "kind": "external-prerequisite",
-        "release_id": "menhir-prod-0.2.0-1",
-        "release_manifest_sha256": "d" * 64,
-        "checked_utc": _now(),
-        "firewall": True,
-        "proxied_dns": True,
-        "full_strict": True,
-        "hostname_aop": True,
-        "external_scan": True,
-        "console_recovery": True,
-        "caddy_volume_permissions": False,
-    }
-    path = _write_json(tmp_path, "prerequisite.json", receipt)
-    with pytest.raises(ValueError, match="caddy_volume_permissions"):
-        _schema.validate_prerequisite(str(path))
-
-
-def test_external_evidence_workers_aggregate_signed_distinct_networks(tmp_path):
-    import base64
-    from cryptography.hazmat.primitives import serialization
-    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-
-    release = _valid_release()
-    private_keys = {}
-    public_keys = {}
-    for worker in ("worker-a", "worker-b"):
-        key = Ed25519PrivateKey.generate()
-        private_keys[worker] = key
-        public = key.public_key().public_bytes(
-            serialization.Encoding.Raw, serialization.PublicFormat.Raw
-        )
-        public_keys[worker] = base64.urlsafe_b64encode(public).rstrip(b"=").decode()
-    release["external_evidence_public_keys"] = public_keys
-    _refresh_security_review(release)
-    release_path = _write_json(tmp_path, "release.json", release)
-    checks_path = _write_json(
-        tmp_path,
-        "checks.json",
-        {
-            "firewall": True,
-            "proxied_dns": True,
-            "full_strict": True,
-            "hostname_aop": True,
-            "external_scan": True,
-            "console_recovery": True,
-            "caddy_volume_permissions": True,
-        },
-    )
-    observations = []
-    worker_script = REPO_ROOT / "deploy" / "external-evidence-worker.py"
-    for index, worker in enumerate(("worker-a", "worker-b"), start=1):
-        key_path = tmp_path / f"{worker}.pem"
-        key_path.write_bytes(
-            private_keys[worker].private_bytes(
-                serialization.Encoding.PEM,
-                serialization.PrivateFormat.PKCS8,
-                serialization.NoEncryption(),
-            )
-        )
-        result = subprocess.run(
-            [
-                sys.executable,
-                str(worker_script),
-                str(release_path),
-                str(key_path),
-                worker,
-                f"network-{index}",
-                "route-v1",
-                str(checks_path),
-            ],
-            cwd=REPO_ROOT / "deploy",
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        observations.append(_write_json(tmp_path, f"{worker}.json", json.loads(result.stdout)))
-
-    output = tmp_path / "external-prerequisite.json"
-    subprocess.run(
-        [
-            sys.executable,
-            str(REPO_ROOT / "deploy" / "external-evidence-aggregate.py"),
-            str(release_path),
-            "route-v1",
-            str(output),
-            *(str(path) for path in observations),
-        ],
-        cwd=REPO_ROOT / "deploy",
-        check=True,
-    )
-    receipt = _schema.validate_prerequisite_binding(str(output), str(release_path))
-    assert {item["network_id"] for item in receipt["observations"]} == {
-        "network-1",
-        "network-2",
-    }
-    if os.name != "nt":
-        assert output.stat().st_mode & 0o777 == 0o600
-
-    repeated = subprocess.run(
-        [
-            sys.executable,
-            str(REPO_ROOT / "deploy" / "external-evidence-aggregate.py"),
-            str(release_path),
-            "route-v1",
-            str(output),
-            *(str(path) for path in observations),
-        ],
-        cwd=REPO_ROOT / "deploy",
-        capture_output=True,
-        text=True,
-    )
-    assert repeated.returncode != 0
-    assert "already exists" in repeated.stderr
-
-
-def test_source_fence_requires_both_proofs(tmp_path):
-    receipt = {
-        "schema": 1,
-        "kind": "source-writer-fence",
-        "release_id": "menhir-prod-0.2.0-1",
-        "release_manifest_sha256": "d" * 64,
-        "checked_utc": _now(),
-        "expires_utc": (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat(),
-        "source_id": "local-menhir-chatgpt-chat",
-        "source_writer_stopped": True,
-        "source_mutation_probe_denied": False,
-        "source_service_disabled": True,
-        "source_firewall_persistent": True,
-        "signing_key_id": "source-fence-v1",
-        "signature": "A" * 86,
-    }
-    path = _write_json(tmp_path, "source-fence.json", receipt)
-    with pytest.raises(ValueError, match="source_mutation_probe_denied"):
-        _schema.validate_source_fence(str(path))
-
-
-def test_source_fence_rejects_expired_receipt(tmp_path):
-    receipt = {
-        "schema": 1,
-        "kind": "source-writer-fence",
-        "release_id": "menhir-prod-0.2.0-1",
-        "release_manifest_sha256": "d" * 64,
-        "checked_utc": _now(),
-        "expires_utc": (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat(),
-        "source_id": "local-menhir-chatgpt-chat",
-        "source_writer_stopped": True,
-        "source_mutation_probe_denied": True,
-        "source_service_disabled": True,
-        "source_firewall_persistent": True,
-        "signing_key_id": "source-fence-v1",
-        "signature": "A" * 86,
-    }
-    path = _write_json(tmp_path, "source-fence.json", receipt)
-    with pytest.raises(ValueError, match="expires"):
-        _schema.validate_source_fence(str(path))
-
-
-def test_source_fence_rejects_window_longer_than_ten_minutes(tmp_path):
-    receipt = {
-        "schema": 1,
-        "kind": "source-writer-fence",
-        "release_id": "menhir-prod-0.2.0-1",
-        "release_manifest_sha256": "d" * 64,
-        "checked_utc": _now(),
-        "expires_utc": (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat(),
-        "source_id": "local-menhir-chatgpt-chat",
-        "source_writer_stopped": True,
-        "source_mutation_probe_denied": True,
-        "source_service_disabled": True,
-        "source_firewall_persistent": True,
-        "signing_key_id": "source-fence-v1",
-        "signature": "A" * 86,
-    }
-    path = _write_json(tmp_path, "source-fence.json", receipt)
-    with pytest.raises(ValueError, match="no more than 10 minutes"):
-        _schema.validate_source_fence(str(path))
-
-
-def test_source_fence_ed25519_authenticates_release_bound_claims(tmp_path):
-    import base64
-    from cryptography.hazmat.primitives import serialization
-    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-    key = Ed25519PrivateKey.generate()
-    public = key.public_key().public_bytes(
-        serialization.Encoding.Raw, serialization.PublicFormat.Raw
-    )
-    release = _valid_release()
-    release["source_fence_public_key"] = base64.urlsafe_b64encode(public).rstrip(b"=").decode()
-    _refresh_security_review(release)
-    release_path = _write_json(tmp_path, "release.json", release)
-    receipt = {
-        "schema": 1,
-        "kind": "source-writer-fence",
-        "release_id": "menhir-prod-0.2.0-1",
-        "release_manifest_sha256": hashlib.sha256(release_path.read_bytes()).hexdigest(),
-        "checked_utc": _now(),
-        "expires_utc": (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat(),
-        "source_id": "local-menhir-chatgpt-chat",
-        "source_writer_stopped": True,
-        "source_mutation_probe_denied": True,
-        "source_service_disabled": True,
-        "source_firewall_persistent": True,
-        "signing_key_id": "source-fence-v1",
-        "signature": "A" * 86,
-    }
-    payload = _schema.source_fence_payload(receipt).encode()
-    receipt["signature"] = base64.urlsafe_b64encode(key.sign(payload)).rstrip(b"=").decode()
-    path = _write_json(tmp_path, "source-fence.json", receipt)
-    _schema.verify_source_fence(str(path), str(release_path))
-
-    receipt["release_id"] = "menhir-prod-0.2.0-2"
-    receipt["signature"] = base64.urlsafe_b64encode(
-        key.sign(_schema.source_fence_payload(receipt).encode())
-    ).rstrip(b"=").decode()
-    path = _write_json(tmp_path, "source-fence-wrong-release.json", receipt)
-    with pytest.raises(ValueError, match="release_id"):
-        _schema.verify_source_fence(str(path), str(release_path))
-
-    receipt["release_id"] = release["release_id"]
-    receipt["release_manifest_sha256"] = "0" * 64
-    receipt["signature"] = base64.urlsafe_b64encode(
-        key.sign(_schema.source_fence_payload(receipt).encode())
-    ).rstrip(b"=").decode()
-    path = _write_json(tmp_path, "source-fence-wrong-digest.json", receipt)
-    with pytest.raises(ValueError, match="release digest"):
-        _schema.verify_source_fence(str(path), str(release_path))
-
-    receipt["release_manifest_sha256"] = hashlib.sha256(
-        release_path.read_bytes()
-    ).hexdigest()
-    receipt["source_id"] = "tampered-source"
-    path = _write_json(tmp_path, "source-fence-tampered.json", receipt)
-    with pytest.raises(ValueError, match="signature"):
-        _schema.verify_source_fence(str(path), str(release_path))
-
-
-def test_promotion_binds_fence_receipt_to_live_source_identity():
+def test_promotion_revalidates_same_host_writer_census_under_lock():
     source = (Path(__file__).resolve().parents[1] / "deploy" / "promote.sh").read_text()
-    assert '"${source_probe_base}/internal/source-fence"' in source
-    assert 'X-Menhir-Fence-Challenge' in source
-    assert 'Ed25519PublicKey.from_public_bytes(public).verify' in source
-    assert 'verify-source-fence' in source
-    assert '[ "$live_identity" = "$SOURCE_FENCE_ID" ]' in source
-    assert 'curl -sS -o "$tmp" -w \'%{http_code}\' --max-time 15' in source
-    assert '[ "$code" != "503" ]' in source
+    assert "acquire_release_lock" in source
+    assert "same-host-writer-fence.json" in source
+    assert 'docker ps -aq' in source
+    assert 'verify_args=(verify "$RELEASE_JSON" "$same_host_fence" "$census")' in source
+    assert 'verify_args+=(--allow-production)' in source
+    assert source.count("verify_same_host_fence") >= 4
+
+
+def test_release_run_reconstructs_progress_instead_of_trusting_state():
+    source = (Path(__file__).resolve().parents[1] / "deploy" / "release-run.sh").read_text()
+    assert "release-run.json is observability, never authorization" in source
+    assert 'require_root_file "$state" "release-run state"' in source
+    assert '"${SCRIPT_DIR}/same-host-fence.sh"' in source
+    assert '"$caddy_release" reconcile' in source
+    assert 'same_host_fence.py" verify' in source
+    assert "--allow-production" in source
+    assert "current-generation" in source
+
+
+def test_candidate_deploy_census_fences_app_and_database_before_start():
+    source = (Path(__file__).resolve().parents[1] / "deploy" / "candidate-deploy.sh").read_text()
+    assert 'docker ps -aq' in source
+    assert 'same_host_helper" verify' in source
+    assert "legacy or competing app/database" in source
+
+
+def test_new_cutover_archives_only_completed_prior_mutation_marker():
+    source = (Path(__file__).resolve().parents[1] / "deploy" / "backup-generation.sh").read_text()
+    assert 'prior_mutation_generation="$(sed -n \'1p\' "$mutation_marker")"' in source
+    assert 'prior_current_generation="$(current_generation)"' in source
+    assert 'mutation-history/${prior_mutation_generation}.txt' in source
+    assert "prior mutation history conflicts" in source
+    assert "os.unlink(source)" in source
+
+
+def test_cutover_disables_legacy_restart_before_quiesce_and_backup():
+    source = (Path(__file__).resolve().parents[1] / "deploy" / "backup-generation.sh").read_text()
+    disable = 'docker update --restart=no "$legacy_app_id" "$legacy_database_id"'
+    quiesce = 'docker compose -f "${COMPOSE_FILE}" stop'
+    assert source.count(disable) == 1
+    assert source.index(disable) < source.index(quiesce)
+
+
+def test_release_binds_fixed_same_host_topology(tmp_path):
+    release = _valid_release()
+    path = _write_json(tmp_path, "release.json", release)
+    _schema.validate_release(str(path))
+    release["deployment"]["legacy_container"] = "attacker-selected"
+    _refresh_security_review(release)
+    path = _write_json(tmp_path, "bad-release.json", release)
+    with pytest.raises(ValueError, match="same-host Docker topology"):
+        _schema.validate_release(str(path))
 
 
 def test_backup_loads_and_checks_both_neo4j_dumps_before_acceptance():

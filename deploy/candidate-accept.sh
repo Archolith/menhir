@@ -6,10 +6,9 @@
 #   /readyz (mode-aware readiness + mutation fence), OAuth discovery,
 #   existing-token recall (when a token is supplied), bounded mutation 503s,
 #   tier/tool identity, authority before/after digests (no authoritative
-#   mutation), the source-writer fence, and a required external prerequisite
-#   receipt (Cloudflare/Caddy/firewall, produced by the external worker).
+#   mutation), and a same-host Docker writer-fence revalidation.
 #
-# Fail-closed: any probe failure or missing external receipt aborts and leaves
+# Fail-closed: any probe or local writer-fence failure aborts and leaves
 # no receipt. The receipt schema is validated by deploy/lib/menhir_schema.py;
 # promotion re-parses the exact fields and never reads mtime.
 set -euo pipefail
@@ -33,7 +32,6 @@ candidate_root="${BACKUP_ROOT}/candidate/${generation}"
 source_root="${BACKUP_ROOT}/decrypted/${generation}"
 manifest="${source_root}/MANIFEST.json"
 base_url="${MENHIR_CANDIDATE_BASE_URL:-${MENHIR_PUBLIC_BASE_URL}}"
-external_receipt="${MENHIR_EXTERNAL_RECEIPT:-${STATUS_DIR}/external-prerequisite.json}"
 recall_token="${MENHIR_RECALL_TOKEN:-}"
 if [ -z "$recall_token" ]; then
     token_file="${MENHIR_ACCEPTANCE_TOKEN_FILE:-${MENHIR_PROD_ROOT}/secrets/menhir/acceptance-token}"
@@ -58,16 +56,26 @@ python3 "$SCHEMA" validate-release "${MENHIR_PROD_ROOT}/release/release.json"
 
 [ "$(read_generation "${candidate_root}/REHEARSAL-PASSED" "rehearsal marker")" = "$generation" ] \
     || { echo "candidate rehearsal marker mismatch" >&2; exit 1; }
-[ "$(read_generation "${STATUS_DIR}/restored-generation" "restored production generation")" = "$generation" ] \
-    || { echo "candidate is not running the restored production generation" >&2; exit 1; }
+backup_receipt="$(backup_receipt_path)"
+validate_receipt_file "$backup_receipt" backup-upload
 
-# --- External prerequisite receipt (Cloudflare/Caddy/firewall) ---
-[ -n "$external_receipt" ] || { echo "MENHIR_EXTERNAL_RECEIPT is required" >&2; exit 1; }
-[ -f "$external_receipt" ] && [ ! -L "$external_receipt" ] \
-    || { echo "external prerequisite receipt must be a regular file" >&2; exit 1; }
-validate_external_prerequisite_binding "$external_receipt" \
-    || { echo "external prerequisite receipt failed validation or binding" >&2; exit 1; }
-external_sha256="$(sha256sum "$external_receipt" | cut -d' ' -f1)"
+# --- Same-host writer fence (exact legacy identity + current Docker census) ---
+same_host_fence="${STATUS_DIR}/same-host-writer-fence.json"
+same_host_helper="${HELPER_DIR}/same_host_fence.py"
+require_root_file "$same_host_fence" "same-host writer-fence receipt"
+census_tmp="$(mktemp)"
+cleanup_census() { rm -f "$census_tmp"; }
+trap cleanup_census EXIT
+container_ids="$(docker ps -aq)"
+if [ -n "$container_ids" ]; then
+    # shellcheck disable=SC2086
+    docker inspect $container_ids > "$census_tmp"
+else
+    printf '[]\n' > "$census_tmp"
+fi
+python3 "$same_host_helper" verify "$RELEASE_JSON" "$same_host_fence" "$census_tmp" \
+    || { echo "same-host writer fence is not closed: legacy or competing writer remains" >&2; exit 1; }
+same_host_fence_sha256="$(sha256sum "$same_host_fence" | cut -d' ' -f1)"
 
 # Acceptance baseline is authored by candidate-deploy after canonical rehearsal
 # state is restored and Neo4j is queryable, but before the Menhir app starts.
@@ -197,10 +205,10 @@ receipt="${STATUS_DIR}/candidate-accept-receipt.json"
 receipt_tmp="$(mktemp "${STATUS_DIR}/.accept.XXXXXXXX")"
 python3 - "$receipt_tmp" "$generation" "$manifest_sha256" "$release_id" \
     "$release_manifest_sha256" "$manifest_menhir_digest" "$manifest_neo4j_digest" \
-    "$external_sha256" "$authority_before" "$authority_after" "$recall" <<'PYEOF'
+    "$same_host_fence_sha256" "$authority_before" "$authority_after" "$recall" <<'PYEOF'
 import json, os, sys
 (path, generation, manifest_sha256, release_id, release_manifest_sha256,
- menhir_digest, neo4j_digest, external, before, after, recall) = sys.argv[1:12]
+ menhir_digest, neo4j_digest, same_host_fence, before, after, recall) = sys.argv[1:12]
 receipt = {
     "schema": 1,
     "kind": "candidate-accept",
@@ -219,7 +227,7 @@ receipt = {
     "tier_tool_identity": "ok",
     "authority_before_digest": before,
     "authority_after_digest": after,
-    "external_prerequisite_receipt": external,
+    "same_host_writer_fence_sha256": same_host_fence,
     "checked_utc": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
 }
 with open(path, "w", encoding="ascii") as f:
@@ -240,4 +248,6 @@ python3 "$SCHEMA" validate-receipt "$receipt" candidate-accept \
     || { echo "candidate acceptance receipt failed validation" >&2; exit 1; }
 
 write_generation_record "${STATUS_DIR}/candidate-accepted" "$generation"
+trap - EXIT
+cleanup_census
 printf 'candidate_accepted=%s\n' "$generation"

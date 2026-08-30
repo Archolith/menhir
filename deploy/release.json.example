@@ -69,8 +69,7 @@
     "oauth-consent-secret": "<version-id-no-value>",
     "operator-key": "<version-id-no-value>",
     "client-policy": "<version-id-no-value>",
-    "provider-key": "<version-id-no-value>",
-    "source-fence-token": "<version-id-no-value>"
+    "provider-key": "<version-id-no-value>"
   },
   "artifacts": {
     "/srv/menhir/production/bin/worker": {
@@ -123,11 +122,14 @@
     "report_sha256": "<64-lowercase-hex>",
     "review_artifact_sha256": "<64-lowercase-hex>"
   },
-  "source_fence_key_id": "<source-only-ed25519-key-version-id>",
-  "source_fence_public_key": "<43-char-unpadded-base64url-ed25519-public-key>",
-  "source_fence_tls_ca_sha256": "<64-lowercase-hex>",
-  "external_evidence_public_keys": {
-    "worker-a": "<43-char-unpadded-base64url-ed25519-public-key>",
-    "worker-b": "<43-char-unpadded-base64url-ed25519-public-key>"
+  "deployment": {
+    "topology": "same-host-docker",
+    "legacy_container": "menhir-prod-app",
+    "production_container": "menhir-prod-app",
+    "candidate_container": "menhir-candidate-app",
+    "legacy_database_container": "menhir-prod-neo4j",
+    "candidate_database_container": "menhir-candidate-neo4j",
+    "compose_project": "menhir-prod",
+    "compose_service": "menhir"
   }
 }

@@ -158,8 +158,6 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, dict]:
     prior_route.write_text('{"route":"legacy"}\n', encoding="ascii")
     initial_host = tmp_path / "initial-host.json"
     initial_host.write_text('{"host":"pre-menhir"}\n', encoding="ascii")
-    source_ca = tmp_path / "source-ca.pem"
-    source_ca.write_text("test-source-ca\n", encoding="ascii")
     secrets = {name: f"version-{name}" for name in MODULE.SECRET_VERSIONS}
     spec = {
         "schema": 1,
@@ -186,10 +184,6 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, dict]:
         },
         "secret_version_ids": secrets,
         "artifact_sources": artifact_sources,
-        "source_fence_key_id": "source-fence-v1",
-        "source_fence_public_key": "A" * 43,
-        "source_fence_tls_ca": str(source_ca.resolve()),
-        "external_evidence_public_keys": {"worker-a": "A" * 43, "worker-b": "A" * 43},
     }
     spec_path = tmp_path / "release-spec.json"
     spec_path.write_text(json.dumps(spec), encoding="utf-8")
