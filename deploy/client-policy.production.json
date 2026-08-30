@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "canonical_digest": "6c4b55de5d4208f4dc61fccf66edec2edd63cbaa209fd8f40cb2d2d0795d3402",
+  "canonical_digest": "0db111af8b6abcae715af0972a91c28b41a8eb2915c23631682867c3fc7ed06f",
   "clients": {
     "69c2cd871b488ff4": {
       "label": "chatgpt-chat",
@@ -631,74 +631,6 @@
     },
     "https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client=goose": {
       "label": "agent-smith-goose",
-      "scopes": [
-        "menhir:read",
-        "menhir:write"
-      ],
-      "maximum_tier": "agent",
-      "namespace": "",
-      "allowed_tools": [
-        "add_memory",
-        "add_memory_and_track",
-        "build_context",
-        "get_client_context",
-        "get_enrichment_status",
-        "get_memory_stats",
-        "read_flagged_memories",
-        "recall_context_memories",
-        "recall_memories",
-        "watch_enrichment"
-      ],
-      "denied_tools": [
-        "add_candidate",
-        "add_todo",
-        "audit_artifact_corpus",
-        "close_memory",
-        "close_stale_todos",
-        "close_todo",
-        "delete_memory",
-        "delete_namespace",
-        "flag_memory",
-        "force_reenrich",
-        "force_release_enrichment_lease",
-        "force_scheduler_takeover",
-        "get_artifact",
-        "get_artifact_relationships",
-        "get_episode_trace",
-        "get_provenance",
-        "get_todo",
-        "ingest_document",
-        "ingest_project",
-        "link_artifacts",
-        "list_artifact_questions",
-        "list_artifacts",
-        "list_clients",
-        "list_conflicts",
-        "list_enrichment_queue",
-        "list_todos",
-        "mint_client",
-        "pause_scheduler",
-        "promote_memory",
-        "query_structure",
-        "rate_recall",
-        "recover_orphans",
-        "relocate_artifact_source",
-        "repair_stale_enrichment",
-        "requeue_conflicts_for_llm_review",
-        "resolve_conflict",
-        "resume_scheduler",
-        "revoke_client",
-        "run_llm_conflict_review",
-        "scan_for_conflicts",
-        "supersede_artifact",
-        "transition_artifact",
-        "unflag_memory",
-        "view_entropy"
-      ],
-      "consent_group": "agent-smith"
-    },
-    "https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client=reasonix": {
-      "label": "agent-smith-reasonix",
       "scopes": [
         "menhir:read",
         "menhir:write"

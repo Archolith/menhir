@@ -1,3 +1,10 @@
+## 2026-08-29 - retire Reasonix OAuth authority
+
+- Removed the archived Reasonix client from Agent Smith's published OAuth metadata and
+  digest-bound production policy.
+- Added regression coverage proving the retired client is neither published nor admitted by
+  production policy while the remaining managed-client suite stays intact.
+
 ## 2026-08-28 - fix: complete Claude web refresh authorization
 
 - OAuth protocol scopes are now separate from Menhir permission scopes, so
