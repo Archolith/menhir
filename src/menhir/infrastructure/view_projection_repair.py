@@ -166,7 +166,6 @@ class ViewProjectionRepairRepository:
                 "limit": int(limit),
                 "lease_seconds": int(lease_seconds),
             },
-            safe_to_reexecute=True,
         )
         return [ViewProjectionRepairClaim.from_row(dict(row)) for row in rows]
 
@@ -223,7 +222,6 @@ class ViewProjectionRepairRepository:
             RETURN count(r) AS completed
             """,
             params=self._claim_params(claim),
-            safe_to_reexecute=True,
         )
         return bool(rows and int(rows[0].get("completed", 0) or 0) == 1)
 
@@ -273,7 +271,6 @@ class ViewProjectionRepairRepository:
                 "error": message,
                 "terminal": terminal,
             },
-            safe_to_reexecute=True,
         )
         return bool(rows and int(rows[0].get("updated", 0) or 0) == 1)
 

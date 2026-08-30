@@ -33,7 +33,11 @@ def live(test_neo4j_repo):
 
 def _entity_and_episode(repo, *, entity, episode):
     repo.execute("MERGE (n:Entity {uuid:$u}) SET n.name=$u", {"u": entity})
-    repo.execute("MERGE (e:Episodic {uuid:$u})", {"u": episode})
+    repo.execute(
+        "MERGE (e:Episodic {uuid:$u}) "
+        "SET e.evidence_finalized = true, e.evidence_generation = 0",
+        {"u": episode},
+    )
 
 
 def _obs(*, entity, episode, operation, value, stated_span, when):

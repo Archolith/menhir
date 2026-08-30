@@ -677,6 +677,8 @@ class TurnEvidenceRepository:
                               END,
                               rr.started_at = datetime()
             )
+            WITH f, doomed, scalar_assertions, event_assertions, scalar_heads, event_heads,
+                 stale_repairs, dependent_views, current_views, namespaces, view_repairs
             CALL {
                 WITH namespaces
                 UNWIND namespaces AS ns

@@ -289,7 +289,6 @@ class EvidencePublicationIntentRepository:
                 "dispatch_token": dispatch_token,
                 "now": now,
             },
-            safe_to_reexecute=True,
         )
         if len(rows) != 1:
             raise PublicationIntentError(
@@ -344,7 +343,6 @@ class EvidencePublicationIntentRepository:
                    i.lease_generation AS lease_generation
             """,
             params={"intent_key": publication_intent_key(episode_uuid)},
-            safe_to_reexecute=True,
         )
         return _intent_from_row(rows[0]) if len(rows) == 1 else None
 
@@ -580,7 +578,6 @@ class EvidencePublicationIntentRepository:
                 "now": _now(),
                 **tenant_scope_params(intent.namespace_key),
             },
-            safe_to_reexecute=True,
         )
         if len(rows) != 1:
             raise PublicationIntentError(
@@ -649,7 +646,6 @@ class EvidencePublicationIntentRepository:
                 "limit": safe_limit,
                 "now": now,
             },
-            safe_to_reexecute=True,
         )
         return [_intent_from_row(row) for row in rows]
 
@@ -674,7 +670,6 @@ class EvidencePublicationIntentRepository:
                 "reference_time": intent.reference_time,
                 **tenant_scope_params(intent.namespace_key),
             },
-            safe_to_reexecute=True,
         )
         values = rows[0].get("episode_uuids", []) if rows else []
         return tuple(sorted(str(value) for value in values if str(value)))
@@ -700,7 +695,6 @@ class EvidencePublicationIntentRepository:
                 "lease_generation": intent.lease_generation,
                 "now": _now(),
             },
-            safe_to_reexecute=True,
         )
         return bool(rows and int(rows[0].get("released") or 0) == 1)
 
@@ -754,7 +748,6 @@ class EvidencePublicationIntentRepository:
                 "intent_key": intent.intent_key,
                 **tenant_scope_params(intent.namespace_key),
             },
-            safe_to_reexecute=True,
         )
         if len(rows) != 1:
             return None

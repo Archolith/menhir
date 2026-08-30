@@ -42,7 +42,11 @@ def _mk_entities(repo, *uuids):
 
 
 def _mk_episode(repo, uuid):
-    repo.execute("MERGE (e:Episodic {uuid:$u})", {"u": uuid})
+    repo.execute(
+        "MERGE (e:Episodic {uuid:$u}) "
+        "SET e.evidence_finalized = true, e.evidence_generation = 0",
+        {"u": uuid},
+    )
 
 
 def _assertion(*, subject_uuid, episode_uuid, span_start, span_end, value=37,

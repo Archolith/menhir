@@ -30,8 +30,9 @@ def automatic_lifecycle_protection_cypher(variable: str = "n") -> str:
     authoritative automatic-retention signal.  Explicit erasure repositories intentionally do not
     use this predicate: authorized erasure retires dependent Views before deleting their evidence.
     """
+    non_derived = non_derived_view_cypher(variable)
     return (
-        f"{non_derived_view_cypher(variable)} "
+        f"{non_derived} "
         "AND NOT EXISTS { "
         f"MATCH ({variable})-[:MENTIONS]->(retaining_view:Entity) "
         "WHERE coalesce(retaining_view.is_view, false) "

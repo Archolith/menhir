@@ -480,7 +480,9 @@ class TestCypherChaining:
         assert "n.scope = 'SESSION'" in q
         assert "n.session_id = $session_id" in q
         assert "max_age_hours" not in q
-        assert q.count("WHERE") == 1
+        # RETURN projections now include provenance subqueries with their own WHERE clauses.
+        # Count only the builder's top-level session predicate.
+        assert q.splitlines().count("WHERE n.scope = 'SESSION'") == 1
         assert "RETURN" in q
         assert "ORDER BY" in q
         assert "LIMIT" in q
