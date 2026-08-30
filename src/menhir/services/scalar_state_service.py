@@ -414,6 +414,7 @@ class ScalarStateService:
                     omitted_entry_count=proj.omitted_entry_count,
                     first_valid_at=proj.first_valid_at, last_valid_at=proj.last_valid_at,
                     namespace=namespace, source=source, audit=audit,
+                    recallable=self._scalar_history_enabled,
                     episode_uuids=list(proj.episode_uuids),
                 )
 

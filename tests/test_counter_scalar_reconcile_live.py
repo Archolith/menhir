@@ -37,6 +37,11 @@ def _plant_absolute_assertion(repo, *, ns, subj, disp, attribute, value, episode
     real CREATE's load-bearing props (namespace, subject_uuid/display, slot, operation, value,
     episode_uuid, binding_pending=false) without driving the LLM perception pipeline."""
     repo.execute(
+        "MERGE (e:Episodic {uuid:$epi, namespace:$ns, group_id:$ns}) "
+        "SET e.evidence_finalized = true, e.evidence_generation = 0",
+        {"epi": episode, "ns": ns},
+    )
+    repo.execute(
         """
         CREATE (a:TypedAssertion {
             assertion_key: $ak, namespace: $ns, operation: 'absolute',
@@ -160,6 +165,11 @@ def test_other_namespace_counter_untouched(live_views, test_neo4j_repo):
     live_views.record_scalar_state(subject="me", subject_uuid=subj, value=37,
                                    valid_at="2026-07-02T00:00:00+00:00", namespace=ns_a, **slot)
     # a matching-looking counter but in ns B (no typed slot there)
+    test_neo4j_repo.execute(
+        "MERGE (e:Episodic {uuid:$epi, namespace:$ns, group_id:$ns}) "
+        "SET e.evidence_finalized = true, e.evidence_generation = 0",
+        {"epi": e1, "ns": ns_b},
+    )
     live_views.record_counter(subject="me", counter="rare coins", value=20, namespace=ns_b,
                               episode_uuids=[e1], valid_at="2026-07-01T00:00:00+00:00")
 

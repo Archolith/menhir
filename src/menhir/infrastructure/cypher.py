@@ -6,6 +6,8 @@ repository modules without pulling in a full OGM.
 
 from __future__ import annotations
 
+from menhir.domain.recall_visibility import view_live_provenance_cypher
+
 __all__ = [
     "Cypher",
     "MEMORY_RETURN_FIELDS",
@@ -321,6 +323,15 @@ ENTITY_METADATA_FIELDS = (
     # every normal memory. Recall uses it to keep stale Views from competing with current state.
     "n.view_current AS view_current",
     "n.view_kind AS view_kind",
+    "n.view_class AS view_class",
+    "n.view_subtype AS view_subtype",
+    "n.view_audience AS view_audience",
+    "coalesce(n.retired, false) AS retired",
+    "coalesce(n.is_view, false) AS is_view",
+    "n.episode_uuids AS episode_uuids",
+    "CASE WHEN NOT coalesce(n.is_view, false) THEN true "
+    f"ELSE {view_live_provenance_cypher('n')} "
+    "END AS view_provenance_live",
     # Structural graph role (directory/file/project) on project-scan nodes; unset (null) on
     # every semantic memory. Recall uses it to drop structural nodes that leak in via BM25 token
     # collisions, mirroring fetch_recent_memories' structural exclusion.

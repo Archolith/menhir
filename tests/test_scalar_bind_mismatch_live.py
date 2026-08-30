@@ -41,8 +41,13 @@ def _mk_entities(repo, *uuids):
         repo.execute("MERGE (n:Entity {uuid:$u}) SET n.name=$u", {"u": u})
 
 
-def _mk_episode(repo, uuid):
-    repo.execute("MERGE (e:Episodic {uuid:$u})", {"u": uuid})
+def _mk_episode(repo, uuid, namespace=None):
+    stamped_namespace = namespace or ""
+    repo.execute(
+        "MERGE (e:Episodic {uuid:$u, namespace:$ns, group_id:$ns}) "
+        "SET e.evidence_finalized = true, e.evidence_generation = 0",
+        {"u": uuid, "ns": stamped_namespace},
+    )
 
 
 def _assertion(*, subject_uuid, episode_uuid, span_start, span_end, value=37,
@@ -261,7 +266,7 @@ def test_global_repair_rebuilds_view_in_the_rows_namespace(test_neo4j_repo):
     ns = f"tenant-{uuidlib.uuid4().hex[:6]}"
     ep = f"ep-{uuidlib.uuid4().hex[:8]}"
     name = f"user-{uuidlib.uuid4().hex[:6]}"
-    _mk_episode(test_neo4j_repo, ep)
+    _mk_episode(test_neo4j_repo, ep, ns)
     advisory = TypedAssertion(
         subject_uuid="unbound:x", subject_display=name, attribute="wake", scope="",
         value_kind="clock_time", unit="", operation="absolute", value="07:30",
@@ -306,8 +311,8 @@ def test_orphan_repair_is_namespace_isolated(test_neo4j_repo):
     dead_shared, surv_a = f"dead-{tag}", f"survA-{tag}"
     ep_a, ep_b = f"epA-{tag}", f"epB-{tag}"
     ns_a, ns_b = f"tenant-a-{tag}", f"tenant-b-{tag}"
-    _mk_episode(test_neo4j_repo, ep_a)
-    _mk_episode(test_neo4j_repo, ep_b)
+    _mk_episode(test_neo4j_repo, ep_a, ns_a)
+    _mk_episode(test_neo4j_repo, ep_b, ns_b)
     test_neo4j_repo.execute("MERGE (n:Entity {uuid:$u})", {"u": surv_a})   # survivor exists
 
     def _assn(subject, ep, ns, span):
@@ -394,7 +399,7 @@ def test_two_worker_unmerge_repair_is_idempotent_under_concurrency(test_neo4j_re
     a_uuid, b_uuid, ep = f"A-{tag}", f"B-{tag}", f"ep-{tag}"
     ns, op1, u_op = f"tenant-{tag}", f"op1-{tag}", f"uop-{tag}"
     _mk_entities(test_neo4j_repo, a_uuid, b_uuid)
-    _mk_episode(test_neo4j_repo, ep)
+    _mk_episode(test_neo4j_repo, ep, ns)
 
     setup_repo = TypedAssertionRepository(test_neo4j_repo)
     a1 = TypedAssertion(
@@ -483,7 +488,7 @@ def test_two_worker_projection_pending_repair_writes_one_current_view(test_neo4j
     tag = uuidlib.uuid4().hex[:6]
     a_uuid, ep, ns = f"A-{tag}", f"ep-{tag}", f"tenant-{tag}"
     _mk_entities(test_neo4j_repo, a_uuid)
-    _mk_episode(test_neo4j_repo, ep)
+    _mk_episode(test_neo4j_repo, ep, ns)
 
     a1 = TypedAssertion(
         subject_uuid=a_uuid, subject_display=a_uuid, attribute="owned", scope="",

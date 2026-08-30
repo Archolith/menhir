@@ -392,6 +392,34 @@ def get_scalar_state_activation_queries() -> list[str]:
     ]
 
 
+def get_view_evidence_lifecycle_activation_queries() -> list[str]:
+    """Return optional DDL for the activation-gated View evidence lifecycle.
+
+    These constraints and indexes support the namespace serialization fence, durable publication
+    intents and tombstones, and leased projection repair queue.  They are deliberately separate
+    from :func:`get_phase1_bootstrap_queries`: activation must first validate and reconcile existing
+    evidence/View state before uniqueness becomes authoritative.
+    """
+    return [
+        "CREATE CONSTRAINT evidence_namespace_fence_namespace_unique IF NOT EXISTS "
+        "FOR (f:EvidenceNamespaceFence) REQUIRE f.namespace_key IS UNIQUE",
+        "CREATE CONSTRAINT evidence_publication_intent_key_unique IF NOT EXISTS "
+        "FOR (i:EvidencePublicationIntent) REQUIRE i.intent_key IS UNIQUE",
+        "CREATE INDEX evidence_publication_intent_status_idx IF NOT EXISTS "
+        "FOR (i:EvidencePublicationIntent) ON (i.status)",
+        "CREATE CONSTRAINT evidence_tombstone_key_unique IF NOT EXISTS "
+        "FOR (t:EvidenceTombstone) REQUIRE t.tombstone_key IS UNIQUE",
+        "CREATE INDEX evidence_tombstone_digest_idx IF NOT EXISTS "
+        "FOR (t:EvidenceTombstone) ON (t.digest)",
+        "CREATE INDEX evidence_tombstone_key_id_idx IF NOT EXISTS "
+        "FOR (t:EvidenceTombstone) ON (t.key_id)",
+        "CREATE CONSTRAINT view_projection_repair_key_unique IF NOT EXISTS "
+        "FOR (r:ViewProjectionRepair) REQUIRE r.repair_key IS UNIQUE",
+        "CREATE INDEX view_projection_repair_status_lease_idx IF NOT EXISTS "
+        "FOR (r:ViewProjectionRepair) ON (r.status, r.lease_expires_at)",
+    ]
+
+
 def _edge_index_queries() -> list[str]:
     queries: list[str] = []
     for edge_label in EDGE_LABELS:

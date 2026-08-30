@@ -74,7 +74,11 @@ def test_episodic_anchor_unchanged_no_founds(test_neo4j_repo):
     ent = f"ent-{uuidlib.uuid4().hex[:8]}"
     ep = f"ep-{uuidlib.uuid4().hex[:8]}"
     test_neo4j_repo.execute("MERGE (n:Entity {uuid:$u}) SET n.name=$u", {"u": ent})
-    test_neo4j_repo.execute("MERGE (e:Episodic {uuid:$u})", {"u": ep})
+    test_neo4j_repo.execute(
+        "MERGE (e:Episodic {uuid:$u, namespace:$ns, group_id:$ns}) "
+        "SET e.evidence_finalized = true, e.evidence_generation = 0",
+        {"u": ep, "ns": ns},
+    )
 
     rec = repo.record_assertion(
         _assertion(subject_uuid=ent, episode_uuid=ep, ns=ns, span="I own 20 rare coins"))
@@ -102,9 +106,13 @@ def test_scalar_history_preserves_turn_and_admitted_episode_provenance(test_neo4
     ep_legacy = f"ep-{uuidlib.uuid4().hex[:8]}"
     test_neo4j_repo.execute("MERGE (n:Entity {uuid:$u}) SET n.name=$u", {"u": ent})
     test_neo4j_repo.execute(
-        "MERGE (e:Episodic {uuid:$u, namespace:$ns})", {"u": ep_turn, "ns": ns})
+        "MERGE (e:Episodic {uuid:$u, namespace:$ns, group_id:$ns}) "
+        "SET e.evidence_finalized = true, e.evidence_generation = 0",
+        {"u": ep_turn, "ns": ns})
     test_neo4j_repo.execute(
-        "MERGE (e:Episodic {uuid:$u, namespace:$ns})", {"u": ep_legacy, "ns": ns})
+        "MERGE (e:Episodic {uuid:$u, namespace:$ns, group_id:$ns}) "
+        "SET e.evidence_finalized = true, e.evidence_generation = 0",
+        {"u": ep_legacy, "ns": ns})
     turn_id = te_repo.record_turn_evidence(
         text="I own 20 rare coins", role="user", declarant="user", namespace=ns,
         source_kind="claude_code_hook", session_id="history-provenance", prompt_id="history-1",
@@ -179,7 +187,7 @@ def test_exact_lme_postcard_history_replay_and_provenance(test_neo4j_repo):
     test_neo4j_repo.execute(
         "UNWIND $episodes AS episode "
         "CREATE (e:Episodic {uuid:episode, group_id:$namespace, namespace:$namespace, "
-        "test_tag:$namespace})",
+        "test_tag:$namespace, evidence_finalized:true, evidence_generation:0})",
         {"episodes": source_episodes, "namespace": namespace},
     )
 
@@ -339,7 +347,11 @@ def test_scalar_view_has_no_foundation_for_episodic(test_neo4j_repo):
     ent = f"ent-{uuidlib.uuid4().hex[:8]}"
     ep = f"ep-{uuidlib.uuid4().hex[:8]}"
     test_neo4j_repo.execute("MERGE (n:Entity {uuid:$u}) SET n.name=$u", {"u": ent})
-    test_neo4j_repo.execute("MERGE (e:Episodic {uuid:$u})", {"u": ep})
+    test_neo4j_repo.execute(
+        "MERGE (e:Episodic {uuid:$u, namespace:$ns, group_id:$ns}) "
+        "SET e.evidence_finalized = true, e.evidence_generation = 0",
+        {"u": ep, "ns": ns},
+    )
     repo.record_assertion(_assertion(subject_uuid=ent, episode_uuid=ep, ns=ns, span="I own 20 rare coins"))
 
     views, view = _rebuilt_view(test_neo4j_repo, ns=ns, ent=ent)
@@ -360,7 +372,11 @@ def test_current_expiries_and_expiry_user_foundation(test_neo4j_repo):
     ent = f"ent-{uuidlib.uuid4().hex[:8]}"
     ep = f"ep-{uuidlib.uuid4().hex[:8]}"
     test_neo4j_repo.execute("MERGE (n:Entity {uuid:$u}) SET n.name=$u", {"u": ent})
-    test_neo4j_repo.execute("MERGE (e:Episodic {uuid:$u})", {"u": ep})
+    test_neo4j_repo.execute(
+        "MERGE (e:Episodic {uuid:$u, namespace:$ns, group_id:$ns}) "
+        "SET e.evidence_finalized = true, e.evidence_generation = 0",
+        {"u": ep, "ns": ns},
+    )
     # older absolute (Episodic-grounded), then a NEWER user-declared expire (TurnEvidence-founded).
     repo.record_assertion(TypedAssertion(
         subject_uuid=ent, subject_display="user", attribute="owned", scope="", value_kind="count",

@@ -12,6 +12,8 @@ from enum import Enum
 from typing import Any
 from uuid import uuid4
 
+from menhir.domain.recall_visibility import default_recall_visibility_cypher
+
 try:  # neo4j is a hard runtime dep; guard the import so unit imports without the driver still load.
     from neo4j.exceptions import ConstraintError as _Neo4jConstraintError
 except Exception:  # pragma: no cover - driver always present in the running service
@@ -58,15 +60,27 @@ class ScalarViewRepositoryMixin:
     ) -> dict[str, Any] | None:
         """Current version for a (kind, key), parsed by the kind. Read projection lives in the
         kind (`read_fields`), so the value-slot definition is SSOT across write and read.
-        Label-scoped so a FACT read never returns a METRIC of the same key, and vice versa."""
+        Label-scoped so a FACT read never returns a METRIC of the same key, and vice versa.
+
+        Direct getters remain authoritative inspection surfaces: an ineligible row is returned, not
+        hidden. ``recall_eligible`` is an attached read-side decision for context callers; it is false
+        for OPERATOR, retired, unstamped, noncurrent, or provenance-invalid Views.
+        """
         kind = self.KINDS[kind_name]
         label = _label_for(view_class)
         rows = self.neo4j.execute(
             f"MATCH (n:{label} {{view_kind:$kind}}) WHERE n.view_key=$k AND coalesce(n.view_current, true) "
-            f"RETURN {kind.read_fields} LIMIT 1",
+            f"RETURN {kind.read_fields}, "
+            f"CASE WHEN {default_recall_visibility_cypher('n')} "
+            "THEN true ELSE false END AS recall_eligible LIMIT 1",
             {"k": key, "kind": kind_name},
         )
-        return kind.parse(dict(rows[0])) if rows else None
+        if not rows:
+            return None
+        row = dict(rows[0])
+        parsed = kind.parse(row)
+        parsed["recall_eligible"] = bool(row.get("recall_eligible"))
+        return parsed
 
     # ------------------------------------------------------------------ counter (QuantState) API
 
@@ -206,7 +220,11 @@ class ScalarViewRepositoryMixin:
         the recall injection uses this so the current View is present even when it did not win ranking
         (the G5 stale-counter failure). Returns uuid + folded `ss_value` + the retrieval-surface name +
         view_key, or None when the slot has no current View (abstained/expired -> current unknown, by
-        design). Scoped by namespace (C.4.4) so it never returns another tenant's View."""
+        design). Scoped by namespace (C.4.4) so it never returns another tenant's View.
+
+        The direct getter remains authoritative. Its result includes ``recall_eligible`` so the
+        recall pipeline can reject an ineligible projection without hiding it from inspection.
+        """
         ns_filter = "AND n.group_id = $ns" if namespace is not None else ""
         rows = self.neo4j.execute(
             f"""
@@ -216,7 +234,9 @@ class ScalarViewRepositoryMixin:
               AND coalesce(n.ss_scope, '') = $scope AND coalesce(n.ss_unit, '') = $unit
             RETURN n.uuid AS uuid, n.ss_value AS value, n.name AS name, n.view_key AS view_key,
                    n.ss_attribute AS attribute, n.view_subject_uuid AS subject_uuid,
-                   toString(n.valid_at) AS valid_at
+                   toString(n.valid_at) AS valid_at,
+                   CASE WHEN {default_recall_visibility_cypher("n")}
+                        THEN true ELSE false END AS recall_eligible
             LIMIT 1
             """,
             {"u": subject_uuid, "attr": attribute, "vk": value_kind,
@@ -404,11 +424,18 @@ class ScalarViewRepositoryMixin:
         namespace: str | None = None, source: str = "scalar-history",
         source_confidence: float = 0.6, episode_uuids: list[str] | None = None,
         name_embedding: list[float] | None = None, audit: dict[str, Any] | None = None,
+        recallable: bool = False,
     ) -> dict[str, Any]:
         """Upsert the current scalar_history View for an entity-anchored typed slot.
 
         Identity mirrors scalar_state: `subject_uuid`-anchored with the same slot hash.
-        Written authoritatively (replaces provenance on unchanged-signature path)."""
+        Written authoritatively (replaces provenance on unchanged-signature path).
+
+        ``recallable`` is deliberately explicit and fail-closed. The projection service passes its
+        ``scalar_history_enabled`` setting through this sink call; direct or older callers that omit
+        the signal therefore remain OPERATOR. Inferring recallability from source or payload shape
+        would silently defeat feature rollback.
+        """
         res = self.record(
             "scalar_history", subject=subject, subject_uuid=subject_uuid, namespace=namespace,
             source=source, source_confidence=source_confidence, name_embedding=name_embedding,
@@ -423,6 +450,7 @@ class ScalarViewRepositoryMixin:
                 if omitted_entry_count is None else omitted_entry_count
             ),
             first_valid_at=first_valid_at, last_valid_at=last_valid_at,
+            recallable=bool(recallable),
             episode_uuids=list(episode_uuids or []),
         )
         return res
@@ -431,7 +459,10 @@ class ScalarViewRepositoryMixin:
         self, *, subject_uuid: str, attribute: str, scope: str, value_kind: str, unit: str,
         namespace: str | None = None,
     ) -> dict[str, Any] | None:
-        """The CURRENT scalar_history View for one slot."""
+        """The CURRENT scalar_history View for one slot.
+
+        Direct inspection is unfiltered; context callers consume the attached ``recall_eligible``.
+        """
         kind = self.KINDS["scalar_history"]
         disc = kind.key_discriminator(
             {"attribute": attribute, "scope": scope, "value_kind": value_kind, "unit": unit})
@@ -467,13 +498,14 @@ class ScalarViewRepositoryMixin:
         depend on an observation hit or an already-ranked entity to discover eligible slots.
         """
         rows = self.neo4j.execute(
-            """
-            MATCH (n:Entity {view_kind:'scalar_history'})
+            f"""
+            MATCH (n:Entity {{view_kind:'scalar_history'}})
             WHERE coalesce(n.view_current, true)
               // group_id is the tenancy property, and the empty string is the DEFAULT
               // silo's group id -- so it must not be coalesced to the NAME 'default'.
               // Matches the convention of the sibling list_scalar_history_views above.
               AND n.group_id = $namespace
+              AND {default_recall_visibility_cypher("n")}
             RETURN n.uuid AS uuid, n.view_subject AS subject,
                    n.view_subject_uuid AS subject_uuid,
                    n.ss_attribute AS attribute, n.ss_scope AS scope,
