@@ -245,7 +245,7 @@ def _production_settings(**overrides: object) -> MemorySettings:
         "oauth_signing_key_path": str(
             Path(__file__).resolve().parent / "oauth-signing-key.test.json"
         ),
-        "client_policy_digest": "e7194d982a42f2ab8bc63dc1fe14a616d1eafc62f6e0b04f20343e07c6923c8e",
+        "client_policy_digest": "4e16b8b3de88c9d20aa5f766d6be82cfa8fcb41ff5644c6d3841bea6937be953",
         "api_key": "test-api-key",
     }
     values.update(overrides)
@@ -317,7 +317,7 @@ def test_production_client_policy_is_digest_bound_and_tracks_clients() -> None:
     path = (
         Path(__file__).resolve().parents[1] / "deploy" / "client-policy.production.json"
     )
-    digest = "e7194d982a42f2ab8bc63dc1fe14a616d1eafc62f6e0b04f20343e07c6923c8e"
+    digest = "4e16b8b3de88c9d20aa5f766d6be82cfa8fcb41ff5644c6d3841bea6937be953"
 
     from menhir.mcp.tools import ALL_TOOLS
 
@@ -337,8 +337,6 @@ def test_production_client_policy_is_digest_bound_and_tracks_clients() -> None:
     web_denied_tools = frozenset(
         {
             "delete_namespace",
-            "ingest_document",
-            "ingest_project",
             "mint_client",
             "revoke_client",
         }
@@ -347,6 +345,8 @@ def test_production_client_policy_is_digest_bound_and_tracks_clients() -> None:
     assert policy.allowed_tools == web_allowed_tools
     assert policy.denied_tools == web_denied_tools
     assert "list_todos" in policy.allowed_tools
+    assert "ingest_document" in policy.allowed_tools
+    assert "ingest_project" in policy.allowed_tools
     assert "resolve_conflict" in policy.allowed_tools
     assert "pause_scheduler" in policy.allowed_tools
     assert policy.registration is not None

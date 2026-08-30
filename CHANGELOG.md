@@ -1,3 +1,9 @@
+## 2026-08-29 - allow hosted operators to ingest documents and projects
+
+- Added `ingest_document` and `ingest_project` to the exact ChatGPT and Claude operator policies.
+  Hosted operators now receive 51 of 54 MCP tools; only `delete_namespace`, `mint_client`, and
+  `revoke_client` remain denied.
+
 ## 2026-08-29 - promote hosted web clients to operator authority
 
 - Promoted the separate ChatGPT and Claude OAuth clients to exact operator-tier grants with
