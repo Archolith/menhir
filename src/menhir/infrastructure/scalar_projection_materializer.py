@@ -10,6 +10,7 @@ import logging
 from datetime import datetime
 from typing import Any
 
+from menhir.domain.namespace import tenant_scope_cypher, tenant_scope_params
 from menhir.domain.projection import (
     ProjectionAbstention,
     ProjectionMaterialization,
@@ -19,7 +20,9 @@ from menhir.domain.projection_lifecycle import (
     ProjectionLifecycleCorruptionError,
     ProjectionWorkToken,
 )
-from menhir.infrastructure.realization_coverage_repository import ScalarStateProjectionHashSource
+from menhir.infrastructure.realization_coverage_repository import (
+    ScalarStateProjectionHashSource,
+)
 from menhir.infrastructure.typed_assertion_repository import TypedAssertionRepository
 from menhir.infrastructure.view_repository import ViewRepository
 from menhir.services.scalar_projection_definition import (
@@ -48,13 +51,13 @@ def _require_scalar_target(token: ProjectionWorkToken) -> None:
 def _current_view_keys(tx: Any, token: ProjectionWorkToken) -> tuple[str, ...]:
     attribute, scope, value_kind, unit = token.target.key
     rows = tx.execute(
-        """
-        MATCH (n:Entity {view_kind:'scalar_state', view_subject_uuid:$subject_uuid,
-                         ss_attribute:$attribute, ss_kind:$value_kind})
+        f"""
+        MATCH (n:Entity {{view_kind:'scalar_state', view_subject_uuid:$subject_uuid,
+                         ss_attribute:$attribute, ss_kind:$value_kind}})
         WHERE coalesce(n.view_current, true)
           AND coalesce(n.ss_scope, '') = $scope
           AND coalesce(n.ss_unit, '') = $unit
-          AND ((n.group_id IS NULL AND $namespace IS NULL) OR n.group_id = $namespace)
+          AND {tenant_scope_cypher("n")}
         RETURN n.view_key AS view_key
         """,
         {
@@ -63,7 +66,7 @@ def _current_view_keys(tx: Any, token: ProjectionWorkToken) -> tuple[str, ...]:
             "scope": scope,
             "value_kind": value_kind,
             "unit": unit,
-            "namespace": token.target.namespace,
+            **tenant_scope_params(token.target.namespace),
         },
     )
     keys = tuple(str(row.get("view_key") or "") for row in rows)

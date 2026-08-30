@@ -8,7 +8,9 @@ from menhir.domain.projection_lifecycle import (
     ProjectionWorkToken,
 )
 from menhir.domain.scalar_state_fold import fold_assertions
-from menhir.infrastructure.scalar_projection_materializer import ScalarStateProjectionMaterializer
+from menhir.infrastructure.scalar_projection_materializer import (
+    ScalarStateProjectionMaterializer,
+)
 from menhir.services.scalar_projection_definition import (
     SCALAR_STATE_PROJECTION,
     scalar_projection_target,
@@ -56,9 +58,11 @@ class _Tx:
         self.current = current
         self.hashes = list(hashes)
         self.writes: list[dict[str, object]] = []
+        self.reads: list[tuple[str, dict[str, object]]] = []
 
     def execute(self, query: str, params=None):
         if "RETURN n.view_key AS view_key" in query:
+            self.reads.append((query, dict(params or {})))
             return [{"view_key": "view-key"}] if self.current else []
         raise AssertionError(f"unexpected direct transaction query: {query}")
 
@@ -127,6 +131,8 @@ def test_materializer_mutates_only_token_slot(monkeypatch: pytest.MonkeyPatch):
     assert len(tx.writes) == 1
     assert tx.writes[0]["attribute"] == "owned"
     assert tx.writes[0]["value"] == 10
+    assert tx.reads[-1][1]["tenant_namespaces"] == ["default", ""]
+    assert "coalesce(n.namespace, n.group_id, '') IN $tenant_namespaces" in tx.reads[-1][0]
 
 
 @pytest.mark.unit

@@ -462,6 +462,26 @@ def test_materializable_only_excludes_binding_pending():
 
 
 @pytest.mark.unit
+def test_materializable_default_namespace_matches_legacy_aliases_and_hydrates_canonical_name():
+    fake = FakeNeo4j(default=[{
+        "assertion_id": "a1",
+        "namespace": "",
+        "value": "10",
+        "value_json": "10",
+    }])
+
+    rows = TypedAssertionRepository(fake).materializable_assertions_for_entity(
+        "ent-x", namespace="default"
+    )
+
+    query, params = fake.executed[-1]
+    assert "tenant_namespaces" in query
+    assert params["tenant_namespaces"] == ["default", ""]
+    assert "a.namespace AS namespace" in query
+    assert rows[0]["namespace"] == "default"
+
+
+@pytest.mark.unit
 def test_materializable_reads_separate_turn_and_admitted_episode_provenance():
     fake = FakeNeo4j(default=[])
     TypedAssertionRepository(fake).materializable_assertions_for_entity("ent-x")

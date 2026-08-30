@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any, Callable
 
-from menhir.domain.typed_assertion import IDENTITY_VERSION, TypedAssertion, normalize_scalar
-from menhir.infrastructure.schema import get_scalar_state_activation_queries
-
+from menhir.domain.namespace import (
+    normalize_namespace,
+    tenant_scope_cypher,
+    tenant_scope_params,
+)
+from menhir.domain.typed_assertion import (
+    TypedAssertion,
+)
 from menhir.infrastructure.typed_assertion_models import (
-    ScalarStateActivationError,
     _RECORD_CYPHER,
 )
+
 
 class TypedAssertionWriteMixin:
     """Write and query durable `:TypedAssertion` nodes. Direct Neo4j CRUD, no View writes."""
@@ -122,8 +126,8 @@ class TypedAssertionWriteMixin:
         if materializable_only:
             preds.append("NOT coalesce(a.binding_pending, false)")
         if namespace is not None:
-            preds.append("a.namespace = $namespace")
-            params["namespace"] = namespace
+            preds.append(tenant_scope_cypher("a"))
+            params.update(tenant_scope_params(namespace))
         where = ("WHERE " + " AND ".join(preds)) if preds else ""
         rows = self._neo4j.execute(
             f"""
@@ -134,6 +138,7 @@ class TypedAssertionWriteMixin:
             WITH a, te, collect(DISTINCT source_ep.uuid) AS admitted_episode_uuids
             RETURN a.assertion_id AS assertion_id, a.claim_key AS claim_key,
                    a.subject_uuid AS subject_uuid, a.subject_display AS subject_display,
+                   a.namespace AS namespace,
                    a.attribute AS attribute, a.scope AS scope, a.value_kind AS value_kind,
                    a.unit AS unit, a.operation AS operation, a.value AS value,
                    a.value_json AS value_json, a.stated_span AS stated_span,
@@ -152,7 +157,10 @@ class TypedAssertionWriteMixin:
             """,
             params=params,
         )
-        return [self._hydrate(dict(r)) for r in rows]
+        hydrated = [self._hydrate(dict(r)) for r in rows]
+        for row in hydrated:
+            row["namespace"] = normalize_namespace(row.get("namespace"))
+        return hydrated
 
     def materializable_assertions_for_entity(
         self, subject_uuid: str, *, namespace: str | None = None

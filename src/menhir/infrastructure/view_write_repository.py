@@ -2,14 +2,9 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 import logging
-import re
-from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from datetime import datetime, timezone
-from enum import Enum
 from typing import Any
 from uuid import uuid4
 
@@ -26,7 +21,10 @@ logger = logging.getLogger(__name__)
 #: provenance refresh (plan D2) computes the count INSIDE Cypher (the union must be atomic), so the
 #: summary cannot be pre-rendered in Python — it is rendered as a template here and the count is
 #: substituted server-side in the same statement that writes the union.
+from menhir.infrastructure.view_kind_registry import resolve_view_kinds
 from menhir.infrastructure.view_models import (
+    _COUNT_TOKEN,
+    _SHARED_STAMPS,
     AdmissionAuditKind,
     CounterKind,
     ScalarHistoryKind,
@@ -34,26 +32,16 @@ from menhir.infrastructure.view_models import (
     TimelineKind,
     ViewClass,
     ViewKind,
-    _COUNT_TOKEN,
-    _SHARED_STAMPS,
     _checked_template,
     _counter_retrieval_text,
-    _counter_summary,
-    _day,
-    _fmt,
     _is_older,
     _label_for,
     _log_missing_episodes,
     _normalize_entries,
     _normalize_episode_uuids,
     _now,
-    _parse_dt,
-    _render_timeline,
-    _scalar_norm,
-    _timeline_sig,
     _timeline_surface,
 )
-from menhir.infrastructure.view_kind_registry import resolve_view_kinds
 
 
 class ViewWriteRepositoryMixin:
@@ -86,7 +74,9 @@ class ViewWriteRepositoryMixin:
         `subject_uuid` is supplied (scalar_state), the resolved entity UUID is the identity segment
         instead, so the key is entity-anchored, not text-anchored. A present-but-blank UUID is a bug
         (never silently fall back to text keying — that would recreate the rejected lexical sidecar)."""
-        ns = (namespace or "").strip()
+        from menhir.domain.namespace import namespace_to_group_id, normalize_namespace
+
+        ns = namespace_to_group_id(normalize_namespace(namespace))
         if subject_uuid is not None:
             ident = subject_uuid.strip()
             if not ident:
@@ -207,6 +197,7 @@ class ViewWriteRepositoryMixin:
         stale and must NOT overwrite current (fold-algebra Law 1); it is skipped, current stays
         authoritative. Without this the reconcile is arrival-ordered and installs stale totals."""
         from menhir.domain.namespace import (
+            namespace_to_group_id,
             normalize_namespace,
             stamped_namespace,
             tenant_scope_cypher,
@@ -228,7 +219,8 @@ class ViewWriteRepositoryMixin:
             )
 
         now = datetime.now(timezone.utc).isoformat()
-        ns_stamped = stamped_namespace(namespace)
+        namespace_key = normalize_namespace(namespace)
+        ns_stamped = stamped_namespace(namespace_key)
         current = self._current_by_key(key, view_class=view_class)
 
         if current is not None and str(current.get("sig")) == str(sig):
@@ -300,7 +292,6 @@ class ViewWriteRepositoryMixin:
         # `node_uuid` lets the saga coordinator FREEZE the new version's uuid at PREPARE, so a
         # crash-replay recreates the same node instead of forking a competing one (plan A6/E3).
         new_uuid = node_uuid or str(uuid4())
-        namespace_key = normalize_namespace(namespace)
         evidence_scope = tenant_scope_cypher("e")
         # Shared view identity + the kind's value slot, merged onto the fixed recall stamps.
         extra: dict[str, Any] = {
@@ -401,7 +392,7 @@ class ViewWriteRepositoryMixin:
             RETURN n.uuid AS uuid
             """
         params = {"uuid": new_uuid, "name": name[:300], "summary": summary[:1000],
-                  "ns": (namespace or ""), "ns_stamped": ns_stamped,
+                  "ns": namespace_to_group_id(namespace_key), "ns_stamped": ns_stamped,
                   "namespace_key": namespace_key, **tenant_scope_params(namespace_key),
                   "operation_id": new_uuid, "key": key, "eps": eps,
                   "source": source, "sc": float(source_confidence),
@@ -514,7 +505,11 @@ class ViewWriteRepositoryMixin:
         refresh then blocks there, and once it proceeds its read sees the other's committed list. It
         writes `last_accessed`, which this statement sets anyway, so the lock costs no extra property.
         """
-        from menhir.domain.namespace import normalize_namespace, tenant_scope_cypher, tenant_scope_params
+        from menhir.domain.namespace import (
+            normalize_namespace,
+            tenant_scope_cypher,
+            tenant_scope_params,
+        )
 
         namespace_key = normalize_namespace(namespace)
         rows = self.neo4j.execute(
@@ -616,7 +611,11 @@ class ViewWriteRepositoryMixin:
         The leading `SET n.last_accessed` takes the node's write lock before provenance is rewritten
         (same explicit-locking pattern as the union path). Handles an EMPTY set: prune all MENTIONS,
         store []."""
-        from menhir.domain.namespace import normalize_namespace, tenant_scope_cypher, tenant_scope_params
+        from menhir.domain.namespace import (
+            normalize_namespace,
+            tenant_scope_cypher,
+            tenant_scope_params,
+        )
 
         namespace_key = normalize_namespace(namespace)
         rows = self.neo4j.execute(

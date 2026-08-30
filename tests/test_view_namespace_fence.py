@@ -51,14 +51,17 @@ def test_new_fact_acquires_namespace_fence_before_current_and_evidence_reads() -
 
 
 @pytest.mark.unit
-def test_default_namespace_spellings_share_one_fence_key() -> None:
+@pytest.mark.parametrize("namespace", [None, "", "default"])
+def test_default_namespace_spellings_share_one_fence_and_physical_group(
+    namespace: str | None,
+) -> None:
     neo4j = _Neo4j([[], [{"uuid": "view-1"}]])
     repo = ViewRepository(neo4j)
 
     repo.record(
         "counter",
         subject="user",
-        namespace="",
+        namespace=namespace,
         counter="widgets",
         value=2,
         episode_uuids=[],
@@ -66,6 +69,8 @@ def test_default_namespace_spellings_share_one_fence_key() -> None:
 
     _, params = neo4j.calls[1]
     assert params["namespace_key"] == "default"
+    assert params["ns"] == ""
+    assert params["ns_stamped"] == "default"
     assert params["tenant_namespaces"] == ["default", ""]
 
 
