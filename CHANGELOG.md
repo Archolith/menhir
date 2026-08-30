@@ -1,3 +1,12 @@
+## 2026-08-29 - promote hosted web clients to operator authority
+
+- Promoted the separate ChatGPT and Claude OAuth clients to exact operator-tier grants with
+  read, write, and admin scopes. Each receives 49 of the 54 MCP tools, including artifact,
+  todo, conflict, scheduler, and scoped memory-administration operations.
+- Kept namespace-wide deletion, host-filesystem ingestion, and client credential administration
+  outside hosted connector authority. Bumped the consent-session schema so the scope elevation
+  requires fresh operator authorization; old access and refresh tokens fail the exact scope check.
+
 ## 2026-08-29 - bind production rights and consent to each OAuth client
 
 - Removed shared Agent Smith consent groups so every hosted and managed client requires an explicit

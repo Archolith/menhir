@@ -245,7 +245,7 @@ def _production_settings(**overrides: object) -> MemorySettings:
         "oauth_signing_key_path": str(
             Path(__file__).resolve().parent / "oauth-signing-key.test.json"
         ),
-        "client_policy_digest": "e62a46ec2582208eb6f80116c86cb473371b039fa9dc1892048b0c319e851571",
+        "client_policy_digest": "e7194d982a42f2ab8bc63dc1fe14a616d1eafc62f6e0b04f20343e07c6923c8e",
         "api_key": "test-api-key",
     }
     values.update(overrides)
@@ -317,7 +317,7 @@ def test_production_client_policy_is_digest_bound_and_tracks_clients() -> None:
     path = (
         Path(__file__).resolve().parents[1] / "deploy" / "client-policy.production.json"
     )
-    digest = "e62a46ec2582208eb6f80116c86cb473371b039fa9dc1892048b0c319e851571"
+    digest = "e7194d982a42f2ab8bc63dc1fe14a616d1eafc62f6e0b04f20343e07c6923c8e"
 
     from menhir.mcp.tools import ALL_TOOLS
 
@@ -328,31 +328,27 @@ def test_production_client_policy_is_digest_bound_and_tracks_clients() -> None:
     )
     policy = authority.require_client(
         client_id="69c2cd871b488ff4",
-        scopes=frozenset({"menhir:read", "menhir:write"}),
-        tier="agent",
+        scopes=frozenset({"menhir:read", "menhir:write", "menhir:admin"}),
+        tier="operator",
     )
 
     assert policy.label == "chatgpt-chat"
-    assert policy.maximum_tier == "agent"
-    web_allowed_tools = frozenset(
+    assert policy.maximum_tier == "operator"
+    web_denied_tools = frozenset(
         {
-            "add_memory",
-            "add_memory_and_track",
-            "build_context",
-            "get_client_context",
-            "get_enrichment_status",
-            "get_memory_stats",
-            "query_structure",
-            "read_flagged_memories",
-            "recall_context_memories",
-            "recall_memories",
-            "watch_enrichment",
+            "delete_namespace",
+            "ingest_document",
+            "ingest_project",
+            "mint_client",
+            "revoke_client",
         }
     )
+    web_allowed_tools = frozenset(tool.name for tool in ALL_TOOLS) - web_denied_tools
     assert policy.allowed_tools == web_allowed_tools
-    assert "list_todos" in policy.denied_tools
-    assert "ingest_project" not in policy.allowed_tools
-    assert "ingest_project" in policy.denied_tools
+    assert policy.denied_tools == web_denied_tools
+    assert "list_todos" in policy.allowed_tools
+    assert "resolve_conflict" in policy.allowed_tools
+    assert "pause_scheduler" in policy.allowed_tools
     assert policy.registration is not None
     assert policy.registration.redirect_uris == (
         "https://chatgpt.com/connector_platform_oauth_redirect",
@@ -360,8 +356,10 @@ def test_production_client_policy_is_digest_bound_and_tracks_clients() -> None:
 
     claude_web = authority.require_client(
         client_id="6cf6322fa828bb72",
-        scopes=frozenset({"menhir:read", "menhir:write", "offline_access"}),
-        tier="agent",
+        scopes=frozenset(
+            {"menhir:read", "menhir:write", "menhir:admin", "offline_access"}
+        ),
+        tier="operator",
     )
     assert claude_web.label == "claude-web"
     assert claude_web.registration is not None
@@ -370,15 +368,28 @@ def test_production_client_policy_is_digest_bound_and_tracks_clients() -> None:
     )
     assert claude_web.registration.protocol_scopes == frozenset({"offline_access"})
     assert claude_web.allowed_tools == web_allowed_tools
-    assert claude_web.denied_tools == policy.denied_tools
+    assert claude_web.denied_tools == web_denied_tools
+
+    with pytest.raises(PermissionError, match="scopes do not match"):
+        authority.require_client(
+            client_id="6cf6322fa828bb72",
+            scopes=frozenset({"menhir:read", "menhir:write", "offline_access"}),
+            tier="agent",
+        )
 
     with pytest.raises(PermissionError, match="scopes do not match"):
         authority.require_client(
             client_id="6cf6322fa828bb72",
             scopes=frozenset(
-                {"menhir:read", "menhir:write", "offline_access", "openid"}
+                {
+                    "menhir:read",
+                    "menhir:write",
+                    "menhir:admin",
+                    "offline_access",
+                    "openid",
+                }
             ),
-            tier="agent",
+            tier="operator",
         )
 
     bridge_ids = {

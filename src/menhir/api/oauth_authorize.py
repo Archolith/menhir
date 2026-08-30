@@ -65,7 +65,7 @@ _CONSENT_TTL_DEFAULT_S = 300.0
 
 # Phase 8: consent-session cookie (true one-click after the first approval).
 _SESSION_COOKIE = "menhir_as_session"
-_SESSION_SCHEMA_VERSION = 2
+_SESSION_SCHEMA_VERSION = 3
 _SESSION_TTL_DEFAULT_S = 600.0
 _CONSENT_HEADERS = {
     "Cache-Control": "no-store",
