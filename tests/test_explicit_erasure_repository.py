@@ -80,34 +80,6 @@ def test_single_erasure_preflight_is_revalidated_only_after_namespace_lock() -> 
 
 
 @pytest.mark.unit
-def test_single_erasure_deletes_a_direct_turn_evidence_target() -> None:
-    neo4j = _Neo4j([
-        [{"namespace_keys": ["project"]}],
-        [{
-            "memory_touched": 1,
-            "assertions_deleted": 0,
-            "heads_deleted": 0,
-            "dependent_views_retired": 2,
-            "dependent_views_scrubbed": 2,
-            "view_repairs_created": 2,
-            "watermarks_reset": 1,
-            "repairs": [],
-        }],
-    ])
-
-    result = MemoryQueryRepository(neo4j).delete_memory_with_scalar_cascade(
-        "turn-1", operation_id="erase-turn-1"
-    )
-
-    mutation = neo4j.calls[1][0]
-    assert "(n:TurnEvidence AND n.turn_id = $node_uuid)" in mutation
-    assert "WITH n WHERE n:TurnEvidence" in mutation
-    assert result["touched"] is True
-    assert result["memory_touched"] == 1
-    assert result["dependent_views_retired"] == 2
-
-
-@pytest.mark.unit
 def test_view_repairs_use_approved_status_and_deterministic_source_families() -> None:
     neo4j = _Neo4j([
         [{"namespace_keys": ["project"]}],

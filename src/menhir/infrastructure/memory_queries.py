@@ -990,8 +990,7 @@ class MemoryQueryRepository:
             }
             CALL {
                 OPTIONAL MATCH (n)
-                WHERE ((n:Entity OR n:Episodic) AND n.uuid = $node_uuid)
-                   OR (n:TurnEvidence AND n.turn_id = $node_uuid)
+                WHERE (n:Entity OR n:Episodic) AND n.uuid = $node_uuid
                 CALL {
                     WITH n
                     WITH n WHERE n:Entity
@@ -1020,11 +1019,6 @@ class MemoryQueryRepository:
                     WITH n
                     WITH n WHERE n:Episodic
                       AND NOT coalesce(n.processing_state, '') IN ['PENDING', 'ENRICHING']
-                    DETACH DELETE n
-                    RETURN 1 AS touched
-                    UNION
-                    WITH n
-                    WITH n WHERE n:TurnEvidence
                     DETACH DELETE n
                     RETURN 1 AS touched
                 }
