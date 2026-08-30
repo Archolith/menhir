@@ -1,0 +1,13 @@
+tunnel: <cloudflare-tunnel-uuid>
+credentials-file: /etc/cloudflared/credentials.json
+
+ingress:
+  - hostname: memory.example.com
+    path: ^/(?:mcp-http(?:/.*)?|oauth/(?:authorize|token|register|client-metadata/agent-smith\.json)|\.well-known/(?:jwks\.json|oauth-authorization-server(?:/.*)?|oauth-protected-resource(?:/.*)?)|livez|readyz)$
+    service: http://menhir-prod-app:8099
+    originRequest:
+      connectTimeout: 10s
+      noHappyEyeballs: false
+  - hostname: memory.example.com
+    service: http_status:404
+  - service: http_status:404

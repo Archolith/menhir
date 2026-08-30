@@ -15,16 +15,22 @@ from menhir.api.oauth_as_register import router as oauth_as_register_router
 
 pytestmark = pytest.mark.unit
 
-_ENABLED = SimpleNamespace(oauth_as_enabled=True, oauth_public_base_url="https://memory.example.com")
+_ENABLED = SimpleNamespace(
+    oauth_as_enabled=True, oauth_public_base_url="https://memory.example.com"
+)
 
 
 @pytest.fixture(autouse=True)
 def _isolate_client_store(tmp_path, monkeypatch):
     # Point the client-store singleton at a throwaway dir and reset it per test.
     monkeypatch.setenv("MENHIR_OAUTH_AS_DIR", str(tmp_path))
-    monkeypatch.setattr(oauth_client_store, "_client_store_singleton", None, raising=False)
+    monkeypatch.setattr(
+        oauth_client_store, "_client_store_singleton", None, raising=False
+    )
     yield
-    monkeypatch.setattr(oauth_client_store, "_client_store_singleton", None, raising=False)
+    monkeypatch.setattr(
+        oauth_client_store, "_client_store_singleton", None, raising=False
+    )
 
 
 def _client(settings, *, policy: ClientPolicyAuthority | None = None) -> TestClient:
@@ -36,17 +42,20 @@ def _client(settings, *, policy: ClientPolicyAuthority | None = None) -> TestCli
     return TestClient(app)
 
 
-def _production_policy(client_id: str) -> ClientPolicyAuthority:
-    policy = ClientPolicy(
-        client_id=client_id,
-        label="chatgpt-chat",
-        scopes=frozenset({"menhir:read", "menhir:write"}),
-        maximum_tier="agent",
-        namespace="",
-        allowed_tools=frozenset({"recall_memories"}),
-        denied_tools=frozenset({"delete_memory"}),
-    )
-    return ClientPolicyAuthority(version=1, digest="a" * 64, clients={client_id: policy})
+def _production_policy(*client_ids: str) -> ClientPolicyAuthority:
+    policies = {
+        client_id: ClientPolicy(
+            client_id=client_id,
+            label=f"web-{client_id}",
+            scopes=frozenset({"menhir:read", "menhir:write"}),
+            maximum_tier="agent",
+            namespace="",
+            allowed_tools=frozenset({"recall_memories"}),
+            denied_tools=frozenset({"delete_memory"}),
+        )
+        for client_id in client_ids
+    }
+    return ClientPolicyAuthority(version=1, digest="a" * 64, clients=policies)
 
 
 def test_disabled_returns_404():
@@ -61,7 +70,10 @@ def test_happy_path_registers_public_client():
     client = _client(_ENABLED)
     resp = client.post(
         "/oauth/register",
-        json={"redirect_uris": ["https://app.example.com/cb"], "client_name": "Test App"},
+        json={
+            "redirect_uris": ["https://app.example.com/cb"],
+            "client_name": "Test App",
+        },
     )
     assert resp.status_code == 201
     body = resp.json()
@@ -117,11 +129,7 @@ def test_https_and_loopback_http_accepted():
 def test_too_many_redirect_uris_returns_400():
     resp = _client(_ENABLED).post(
         "/oauth/register",
-        json={
-            "redirect_uris": [
-                f"https://a{i}.example.com/cb" for i in range(6)
-            ]
-        },
+        json={"redirect_uris": [f"https://a{i}.example.com/cb" for i in range(6)]},
     )
     assert resp.status_code == 400
     assert resp.json()["error"] == "invalid_client_metadata"
@@ -186,9 +194,7 @@ def test_production_dcr_returns_only_restored_policy_client_without_writes():
     ).post(
         "/oauth/register",
         json={
-            "redirect_uris": [
-                "https://chatgpt.com/connector_platform_oauth_redirect"
-            ],
+            "redirect_uris": ["https://chatgpt.com/connector_platform_oauth_redirect"],
             "scope": "menhir:write menhir:read",
             "token_endpoint_auth_method": "none",
             "grant_types": ["authorization_code", "refresh_token"],
@@ -240,3 +246,76 @@ def test_rejected_production_dcr_performs_zero_cleanup_or_registration_writes():
     assert response.status_code == 400
     assert get_client_store().count() == before
     assert get_client_store().get("stale-unrelated") is not None
+
+
+def test_production_dcr_selects_each_distinct_restored_web_client():
+    clients = {
+        "chatgpt-web": "https://chatgpt.example/callback",
+        "claude-web": "https://claude.example/callback",
+    }
+    for client_id, redirect_uri in clients.items():
+        get_client_store().register(
+            OAuthClient(
+                client_id=client_id,
+                client_name=client_id,
+                redirect_uris=(redirect_uri,),
+                scopes=("menhir:read", "menhir:write"),
+                client_secret_hash="",
+                created_at=1.0,
+                token_endpoint_auth_method="none",
+            )
+        )
+    test_client = _client(
+        SimpleNamespace(
+            oauth_as_enabled=True,
+            oauth_public_base_url="https://memory.example.com",
+            oauth_as_refresh_tokens_enabled=True,
+        ),
+        policy=_production_policy(*clients),
+    )
+
+    observed = {
+        redirect_uri: test_client.post(
+            "/oauth/register",
+            json={
+                "redirect_uris": [redirect_uri],
+                "scope": "menhir:read menhir:write",
+            },
+        ).json()["client_id"]
+        for redirect_uri in clients.values()
+    }
+
+    assert observed == {
+        "https://chatgpt.example/callback": "chatgpt-web",
+        "https://claude.example/callback": "claude-web",
+    }
+
+
+def test_production_dcr_rejects_ambiguous_restored_web_clients():
+    redirect_uri = "https://shared.example/callback"
+    for client_id in ("web-a", "web-b"):
+        get_client_store().register(
+            OAuthClient(
+                client_id=client_id,
+                client_name=client_id,
+                redirect_uris=(redirect_uri,),
+                scopes=("menhir:read", "menhir:write"),
+                client_secret_hash="",
+                created_at=1.0,
+                token_endpoint_auth_method="none",
+            )
+        )
+
+    response = _client(
+        SimpleNamespace(oauth_as_enabled=True),
+        policy=_production_policy("web-a", "web-b"),
+    ).post(
+        "/oauth/register",
+        json={
+            "redirect_uris": [redirect_uri],
+            "scope": "menhir:read menhir:write",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "invalid_client_metadata"

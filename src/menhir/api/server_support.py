@@ -21,7 +21,10 @@ from menhir.api.errors import error_response, request_id_for_request
 from menhir.api.oauth_as_metadata import router as oauth_as_metadata_router
 from menhir.api.oauth_as_register import router as oauth_as_register_router
 from menhir.api.oauth_authorize import router as oauth_authorize_router
-from menhir.api.oauth_client_store import configure_client_store
+from menhir.api.oauth_client_store import (
+    configure_client_store,
+    reconcile_policy_clients,
+)
 from menhir.api.oauth_keys import (
     configure_signing_key,
     configure_signing_key_readonly,
@@ -62,7 +65,9 @@ def build_server_prereqs(
     client_token_store = (
         None if candidate_readonly else configure_client_token_store(settings)
     )
-    oauth_as_register._register_limiter = oauth_as_register.build_register_limiter(settings)
+    oauth_as_register._register_limiter = oauth_as_register.build_register_limiter(
+        settings
+    )
     oauth_authorize._approve_limiter = oauth_authorize.build_approve_limiter(settings)
     oauth_client_store = None
     auth_code_store = None
@@ -82,12 +87,24 @@ def build_server_prereqs(
                 refresh_token_store = configure_refresh_store(settings)
     if settings.startup_scope == "production" and settings.oauth_enabled:
         if not tool_catalog:
-            raise ValueError("production startup requires the canonical MCP tool catalog")
+            raise ValueError(
+                "production startup requires the canonical MCP tool catalog"
+            )
         client_policy = load_client_policy(
             settings.client_policy_path,
             settings.client_policy_digest,
             tool_catalog=tool_catalog,
         )
+        if not candidate_readonly and oauth_client_store is not None:
+            reconcile_policy_clients(
+                client_policy,
+                oauth_client_store,
+                enabled_protocol_scopes=(
+                    frozenset({"offline_access"})
+                    if settings.oauth_as_refresh_tokens_enabled
+                    else frozenset()
+                ),
+            )
     return {
         "oauth_config": oauth_config,
         "client_token_store": client_token_store,
@@ -159,7 +176,9 @@ def register_exception_handlers(app: FastAPI) -> None:
     """Install consistent JSON exception handlers on the FastAPI app."""
 
     @app.exception_handler(HTTPException)
-    async def _http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+    async def _http_exception_handler(
+        request: Request, exc: HTTPException
+    ) -> JSONResponse:
         request_id = request_id_for_request(request)
         detail = exc.detail if isinstance(exc.detail, str) else "Request failed"
         code = f"http_{exc.status_code}"
@@ -204,7 +223,9 @@ def register_exception_handlers(app: FastAPI) -> None:
         )
 
     @app.exception_handler(PermissionError)
-    async def _permission_error_handler(request: Request, exc: PermissionError) -> JSONResponse:
+    async def _permission_error_handler(
+        request: Request, exc: PermissionError
+    ) -> JSONResponse:
         """Map a tenancy or tier refusal to 403 instead of letting it read as a crash.
 
         The backend boundary raises `PermissionError` for an ownership violation (see
@@ -235,7 +256,9 @@ def register_exception_handlers(app: FastAPI) -> None:
         )
 
     @app.exception_handler(Exception)
-    async def _unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    async def _unhandled_exception_handler(
+        request: Request, exc: Exception
+    ) -> JSONResponse:
         request_id = request_id_for_request(request)
         logger.exception(
             "Unhandled exception: %s %s request_id=%s — %s: %s",
@@ -254,7 +277,6 @@ def register_exception_handlers(app: FastAPI) -> None:
         )
 
 
-
 def configure_cors(app: FastAPI, settings: MemorySettings) -> None:
     """Attach CORS middleware when origins are configured."""
     cors_origins = list(settings.cors_origins)
@@ -267,7 +289,6 @@ def configure_cors(app: FastAPI, settings: MemorySettings) -> None:
         )
 
 
-
 def mount_server_routes(
     app: FastAPI,
     *,
@@ -277,7 +298,9 @@ def mount_server_routes(
 ) -> None:
     """Mount REST/OAuth/explorer/MCP routes onto the FastAPI app."""
     production_surface = startup_scope == "production"
-    candidate_readonly = production_surface and settings.runtime_mode == "candidate-readonly"
+    candidate_readonly = (
+        production_surface and settings.runtime_mode == "candidate-readonly"
+    )
 
     app.include_router(oauth_metadata_router)
     app.include_router(oauth_as_metadata_router)
@@ -319,7 +342,6 @@ def mount_server_routes(
         app.mount("/mcp", mcp_sse)
     streamable_handler = mcp_http_app.routes[0].app
     app.routes.insert(0, StarletteRoute("/mcp-http", endpoint=streamable_handler))
-
 
 
 def wrap_server_middlewares(

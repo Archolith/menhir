@@ -4,12 +4,18 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from archolith_oauth import valid_redirect_uri
+
 
 _TIER_RANK = {"readonly": 0, "agent": 1, "operator": 2}
+_PROTOCOL_SCOPES = frozenset({"offline_access"})
+_MAX_REDIRECT_URIS = 5
+_MAX_CLIENT_NAME_LEN = 255
 
 
 def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -22,6 +28,16 @@ def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 
 @dataclass(frozen=True)
+class OAuthClientRegistration:
+    """Static public-client metadata owned by the digest-bound policy."""
+
+    client_name: str
+    redirect_uris: tuple[str, ...]
+    token_endpoint_auth_method: str = "none"
+    protocol_scopes: frozenset[str] = frozenset()
+
+
+@dataclass(frozen=True)
 class ClientPolicy:
     client_id: str
     label: str
@@ -30,6 +46,19 @@ class ClientPolicy:
     namespace: str
     allowed_tools: frozenset[str]
     denied_tools: frozenset[str]
+    consent_group: str = ""
+    registration: OAuthClientRegistration | None = None
+
+    @property
+    def oauth_scopes(self) -> frozenset[str]:
+        """Exact OAuth grant: permissions plus reviewed protocol capabilities."""
+
+        protocol_scopes = (
+            frozenset()
+            if self.registration is None
+            else self.registration.protocol_scopes
+        )
+        return self.scopes | protocol_scopes
 
 
 @dataclass(frozen=True)
@@ -37,6 +66,24 @@ class ClientPolicyAuthority:
     version: int
     digest: str
     clients: dict[str, ClientPolicy]
+
+    def consent_group_clients(self, client_id: str) -> tuple[str, ...]:
+        """Return the exact policy-bound suite approved with *client_id*.
+
+        Empty groups remain client-scoped. Group membership is only sourced
+        from this digest-bound authority, never from dynamic registrations.
+        """
+
+        policy = self.policy_for_client_id(client_id)
+        if not policy.consent_group:
+            return (client_id,)
+        return tuple(
+            sorted(
+                candidate.client_id
+                for candidate in self.clients.values()
+                if candidate.consent_group == policy.consent_group
+            )
+        )
 
     def policy_for_client_id(self, client_id: str) -> ClientPolicy:
         """Resolve an immutable client identity or fail closed."""
@@ -55,11 +102,11 @@ class ClientPolicyAuthority:
         """Authorize an OAuth grant before any authority state is mutated."""
 
         policy = self.policy_for_client_id(client_id)
-        if scopes != policy.scopes:
+        if scopes != policy.oauth_scopes:
             raise PermissionError(
                 "OAuth authorization scopes do not match production client policy"
             )
-        if any(scope.endswith(":admin") for scope in scopes):
+        if any(scope.endswith(":admin") for scope in policy.scopes):
             raise PermissionError("OAuth admin scope is forbidden by production policy")
         return policy
 
@@ -71,7 +118,7 @@ class ClientPolicyAuthority:
         tier: str,
     ) -> ClientPolicy:
         policy = self.policy_for_client_id(client_id)
-        if scopes != policy.scopes:
+        if scopes != policy.oauth_scopes:
             raise PermissionError(
                 "OAuth token scopes do not match production client policy"
             )
@@ -135,15 +182,76 @@ def load_client_policy(
         namespace = str(raw.get("namespace", ""))
         allowed_tools = frozenset(str(value) for value in raw.get("allowed_tools", ()))
         denied_tools = frozenset(str(value) for value in raw.get("denied_tools", ()))
+        consent_group_raw = raw.get("consent_group", "")
+        consent_group = (
+            consent_group_raw.strip().lower()
+            if isinstance(consent_group_raw, str)
+            else ""
+        )
+        registration: OAuthClientRegistration | None = None
+        raw_registration = raw.get("registration")
+        if raw_registration is not None:
+            if not isinstance(raw_registration, dict):
+                raise ValueError(
+                    "production client policy registration must be an object"
+                )
+            allowed_registration_keys = {
+                "client_name",
+                "protocol_scopes",
+                "redirect_uris",
+                "token_endpoint_auth_method",
+            }
+            if set(raw_registration) - allowed_registration_keys:
+                raise ValueError(
+                    "production client policy registration has unknown fields"
+                )
+            client_name = raw_registration.get("client_name")
+            redirect_uris_raw = raw_registration.get("redirect_uris")
+            protocol_scopes_raw = raw_registration.get("protocol_scopes", [])
+            token_endpoint_auth_method = raw_registration.get(
+                "token_endpoint_auth_method", "none"
+            )
+            if (
+                not isinstance(client_name, str)
+                or not client_name.strip()
+                or len(client_name.strip()) > _MAX_CLIENT_NAME_LEN
+                or not isinstance(redirect_uris_raw, list)
+                or not 1 <= len(redirect_uris_raw) <= _MAX_REDIRECT_URIS
+                or any(not isinstance(uri, str) for uri in redirect_uris_raw)
+                or len(set(redirect_uris_raw)) != len(redirect_uris_raw)
+                or any(not valid_redirect_uri(uri) for uri in redirect_uris_raw)
+                or not isinstance(protocol_scopes_raw, list)
+                or any(not isinstance(scope, str) for scope in protocol_scopes_raw)
+                or len(set(protocol_scopes_raw)) != len(protocol_scopes_raw)
+                or not set(protocol_scopes_raw).issubset(_PROTOCOL_SCOPES)
+                or token_endpoint_auth_method != "none"
+            ):
+                raise ValueError(
+                    "production client policy has an invalid public-client registration"
+                )
+            registration = OAuthClientRegistration(
+                client_name=client_name.strip(),
+                redirect_uris=tuple(redirect_uris_raw),
+                token_endpoint_auth_method="none",
+                protocol_scopes=frozenset(protocol_scopes_raw),
+            )
         if (
             not label
             or label in labels
             or not scopes
+            or bool(scopes & _PROTOCOL_SCOPES)
             or maximum_tier not in _TIER_RANK
             or not allowed_tools
             or not denied_tools
             or bool(allowed_tools & denied_tools)
             or any(not value for value in scopes | allowed_tools | denied_tools)
+            or (
+                "consent_group" in raw
+                and (
+                    not consent_group
+                    or re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", consent_group) is None
+                )
+            )
         ):
             raise ValueError(
                 "production client policy has an incomplete or duplicate entry"
@@ -157,7 +265,26 @@ def load_client_policy(
             namespace=namespace,
             allowed_tools=allowed_tools,
             denied_tools=denied_tools,
+            consent_group=consent_group,
+            registration=registration,
         )
+
+    consent_group_authority: dict[str, tuple[object, ...]] = {}
+    for policy in clients.values():
+        if not policy.consent_group:
+            continue
+        signature = (
+            policy.scopes,
+            policy.maximum_tier,
+            policy.namespace,
+            policy.allowed_tools,
+            policy.denied_tools,
+        )
+        existing = consent_group_authority.setdefault(policy.consent_group, signature)
+        if existing != signature:
+            raise ValueError(
+                "production consent-group clients must have identical authority"
+            )
 
     if tool_catalog is not None:
         for policy in clients.values():
@@ -173,4 +300,9 @@ def load_client_policy(
     return ClientPolicyAuthority(version=1, digest=digest, clients=clients)
 
 
-__all__ = ["ClientPolicy", "ClientPolicyAuthority", "load_client_policy"]
+__all__ = [
+    "ClientPolicy",
+    "ClientPolicyAuthority",
+    "OAuthClientRegistration",
+    "load_client_policy",
+]

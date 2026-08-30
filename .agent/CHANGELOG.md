@@ -1,5 +1,50 @@
 # Changelog
 
+## 2026-08-28 - Bind hosted web clients to production OAuth policy
+
+- Add digest-bound static registration metadata so hosted web connectors are
+  reconstructed from production policy instead of manual OAuth-database edits.
+- Preserve ChatGPT's existing client ID and callback while adding a separate
+  `claude-web` public PKCE identity for Claude.ai.
+- Reconcile policy-owned clients atomically at production startup, preserve
+  prior exchange state, and fail closed on name, callback, scope, secret, or
+  token-auth drift.
+- Keep production DCR closed to unknown clients and reject ambiguous callback
+  matches so one web connector can never inherit another connector's identity.
+
+## 2026-08-28 - Isolate Agent Smith OAuth clients by harness
+
+- Replace the shared Agent Smith OAuth identity with thirteen policy-bound
+  client identities, each carrying a unique audit label and loopback callback
+  port for independent consent, token storage, and revocation.
+- Publish the per-client CIMD roster through the existing allowlisted metadata
+  endpoint and return 404 for the retired unqualified shared identity.
+- Bind those separate identities into one digest-controlled consent group, so
+  the operator secret is entered once per short authorization session while
+  every application still receives its own token and audit identity.
+- Resolve the server-owned Agent Smith CIMD roster locally instead of
+  hairpinning through Cloudflare, so VPS egress filtering or an IP block cannot
+  break authorization for metadata published by the same Menhir process.
+- Keep each identity on the same least-privilege read/write tool partition and
+  bind the complete roster to a new production policy digest.
+
+## 2026-08-28 - Keep Agent Smith OAuth sessions durable
+
+- Enable the explicit production authorization-server seam that issues a refresh
+  token to the digest-bound Agent Smith client without adding protocol-only
+  `offline_access` to its exact resource permission scope.
+- Document and test the Compose invariant so a future production render cannot
+  silently fall back to one-hour access-token-only browser sessions.
+
+## 2026-08-27 - Authorize Agent Smith OAuth bridge
+
+- Publish a stable CIMD document for Agent Smith's pinned `mcp-remote` bridge,
+  with fixed Windows and WSL loopback callbacks and no embedded credential.
+- Add the bridge identity to the digest-bound production client policy with the
+  existing agent tool partition and refresh-token scope.
+- Preserve the existing ChatGPT client unchanged and cover the metadata and
+  complete policy census with focused production tests.
+
 ## 2026-08-27 - Add full Contabo production release path
 
 - Added the immutable four-repository release authority, offline wheelhouse and

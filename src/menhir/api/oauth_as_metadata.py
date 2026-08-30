@@ -12,6 +12,20 @@ from menhir.config.oauth import _as_bool, _get_setting, build_oauth_config
 router = APIRouter()
 
 _REFRESH_TTL_DEFAULT_S = 30 * 24 * 60 * 60
+_AGENT_SMITH_CLIENTS: dict[str, tuple[str, int]] = {
+    "claude": ("Agent Smith - Claude", 43681),
+    "codex": ("Agent Smith - Codex", 43682),
+    "gemini": ("Agent Smith - Gemini", 43683),
+    "antigravity-ide": ("Agent Smith - Antigravity IDE", 43684),
+    "gemini-config": ("Agent Smith - Gemini Config", 43685),
+    "opencode": ("Agent Smith - OpenCode", 43686),
+    "qwen": ("Agent Smith - Qwen", 43687),
+    "goose": ("Agent Smith - Goose", 43688),
+    "zcode": ("Agent Smith - ZCode", 43690),
+    "cline": ("Agent Smith - Cline", 43691),
+    "wsl-claude": ("Agent Smith - Claude (WSL)", 43692),
+    "wsl-opencode": ("Agent Smith - OpenCode (WSL)", 43693),
+}
 
 
 def _as_enabled(settings: object) -> bool:
@@ -45,6 +59,43 @@ def build_authorization_server_config(settings: object) -> AuthorizationServerCo
     )
 
 
+def agent_smith_client_document_for_id(
+    client_id: str, settings: object
+) -> dict[str, object] | None:
+    """Build a locally authoritative Agent Smith CIMD document for *client_id*.
+
+    These identities are published by this same process and admitted only by
+    the digest-bound production policy. Resolving them locally avoids an
+    availability dependency on Cloudflare allowing the VPS to hairpin through
+    its own public hostname. Every other HTTPS client_id still uses the shared
+    SSRF-guarded outbound resolver.
+    """
+
+    config = build_authorization_server_config(settings)
+    prefix = f"{config.issuer}/oauth/client-metadata/agent-smith.json?client="
+    if not client_id.startswith(prefix):
+        return None
+    client_key = client_id[len(prefix) :]
+    profile = _AGENT_SMITH_CLIENTS.get(client_key)
+    if profile is None or client_id != f"{prefix}{client_key}":
+        return None
+    client_name, callback_port = profile
+    as_metadata = authorization_server_metadata(config)
+    return {
+        "client_id": client_id,
+        "client_name": client_name,
+        "redirect_uris": [
+            f"http://127.0.0.1:{callback_port}/oauth/callback",
+            f"http://localhost:{callback_port}/oauth/callback",
+        ],
+        "grant_types": as_metadata["grant_types_supported"],
+        "response_types": ["code"],
+        "token_endpoint_auth_method": "none",
+        "token_endpoint_auth_methods_supported": ["none"],
+        "scope": " ".join(as_metadata["scopes_supported"]),
+    }
+
+
 @router.get("/.well-known/oauth-authorization-server", include_in_schema=False)
 @router.get(
     "/.well-known/oauth-authorization-server/{_as_path:path}",
@@ -67,8 +118,46 @@ async def oauth_authorization_server_metadata(
     return JSONResponse(authorization_server_metadata(config))
 
 
+@router.get(
+    "/oauth/client-metadata/agent-smith.json",
+    include_in_schema=False,
+)
+async def agent_smith_client_metadata(request: Request) -> JSONResponse:
+    """Publish one stable public-client identity per Agent Smith connection.
+
+    This document contains no credential or grant. Production authorization
+    remains controlled by the immutable client policy and operator consent.
+    """
+
+    settings = getattr(request.app.state, "settings", None) or MemorySettings.from_env()
+    if not _as_enabled(settings):
+        raise HTTPException(
+            status_code=404,
+            detail="OAuth authorization-server metadata is not enabled",
+        )
+    try:
+        config = build_authorization_server_config(settings)
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    client_key = request.query_params.get("client", "")
+    profile = _AGENT_SMITH_CLIENTS.get(client_key)
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Unknown Agent Smith OAuth client")
+    client_id = (
+        f"{config.issuer}/oauth/client-metadata/agent-smith.json?client={client_key}"
+    )
+    document = agent_smith_client_document_for_id(client_id, settings)
+    if document is None:  # pragma: no cover - guarded by the profile lookup above
+        raise HTTPException(status_code=404, detail="Unknown Agent Smith OAuth client")
+    return JSONResponse(document)
+
+
 __all__ = [
+    "_AGENT_SMITH_CLIENTS",
+    "agent_smith_client_document_for_id",
     "_as_enabled",
+    "agent_smith_client_metadata",
     "build_authorization_server_config",
     "oauth_authorization_server_metadata",
     "router",
