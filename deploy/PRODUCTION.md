@@ -129,6 +129,18 @@ hex chars). Format is defined in `src/menhir/api/client_policy.py`
 (`load_client_policy`). The file is mounted read-only and its directory is
 `root:root 0444`.
 
+Tool authority is resolved from the exact OAuth `client_id`. Hosted web clients
+receive the reviewed memory, diagnostics, and structure surface. Agent Smith
+clients receive the smaller managed-workspace set named by their shared instructions,
+including the read-only `list_todos`; Codex alone additionally receives
+`add_memory_and_track`, which its generated MCP configuration explicitly pins.
+Consent is client-scoped: no client inherits another client's approval, even when
+their current tool sets overlap. `ingest_project` remains outside every OAuth client
+and uses the separate operator-controlled scaffold path.
+The release invalidates pre-change consent-session cookies so a previously grouped
+approval cannot survive the cutover; access and refresh tokens remain client-bound
+and are evaluated against the new policy on every request.
+
 ## 4. Bringing up production (authoritative, read-write)
 
 ```bash

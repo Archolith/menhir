@@ -112,6 +112,9 @@ Direction:
 - remote OAuth requests additionally bind their immutable OAuth configuration and verified scopes in
   `mcp/service_access.py`; only an invocation-tier denial becomes an MCP `mcp/www_authenticate`
   tool result, while tenancy, allowlist, argument, and domain refusals remain ordinary errors
+- production OAuth authority is client-specific: the exact digest-bound `client_id` selects the
+  complete tool decision, and consent cookies approve only that client rather than an application
+  suite; overlapping tool sets never imply shared authority or shared approval
 - all 54 MCP tools declare a title, reviewed safety annotations, and a minimum OAuth scope; startup
   rejects an incomplete or tier-incoherent declaration before the catalog is served
 - `core/backend_protocol.py` + `core/backend_impl.py` now define the backend-first MCP contract

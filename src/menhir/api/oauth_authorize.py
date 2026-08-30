@@ -65,6 +65,7 @@ _CONSENT_TTL_DEFAULT_S = 300.0
 
 # Phase 8: consent-session cookie (true one-click after the first approval).
 _SESSION_COOKIE = "menhir_as_session"
+_SESSION_SCHEMA_VERSION = 2
 _SESSION_TTL_DEFAULT_S = 600.0
 _CONSENT_HEADERS = {
     "Cache-Control": "no-store",
@@ -691,6 +692,7 @@ def _sign_session(
     attacker-registered client (AS-001)."""
     payload = {
         "kind": "session",
+        "version": _SESSION_SCHEMA_VERSION,
         "sub": sub,
         "clients": sorted(set(clients)),
         "iat": int(time.time()),
@@ -722,7 +724,11 @@ def _verify_session(
         payload = json.loads(payload_bytes)
     except Exception:
         return None
-    if not isinstance(payload, dict) or payload.get("kind") != "session":
+    if (
+        not isinstance(payload, dict)
+        or payload.get("kind") != "session"
+        or payload.get("version") != _SESSION_SCHEMA_VERSION
+    ):
         return None
     iat = payload.get("iat")
     if not isinstance(iat, (int, float)):
@@ -1014,17 +1020,12 @@ async def authorize_post(request: Request):
 
     # 6. Approve: issue a single-use code bound to the admin subject, and remember the
     # approval in a short-lived signed session cookie so repeat authorizes are one-click.
-    # Carry forward prior approvals. A digest-bound production consent group expands
-    # only to clients with identical authority, allowing one operator-secret entry for
-    # a managed application suite while preserving a distinct OAuth identity per app.
-    # Dynamic/unlisted clients remain strictly client-scoped (AS-001).
+    # Carry forward prior approvals, but approve only the exact client_id shown on this
+    # consent page. Distinct clients may carry distinct digest-bound authority, so no
+    # client may inherit another client's operator approval (AS-001).
     prior = _verify_session(request.cookies.get(_SESSION_COOKIE, ""), settings)
     prior_clients = prior[1] if prior else ()
-    authority = getattr(request.app.state, "client_policy", None)
-    if isinstance(authority, ClientPolicyAuthority):
-        newly_approved = authority.consent_group_clients(submitted["client_id"])
-    else:
-        newly_approved = (submitted["client_id"],)
+    newly_approved = (submitted["client_id"],)
     approved_clients = tuple(sorted(set(prior_clients) | set(newly_approved)))
 
     try:

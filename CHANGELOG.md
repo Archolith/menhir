@@ -1,3 +1,14 @@
+## 2026-08-29 - bind production rights and consent to each OAuth client
+
+- Removed shared Agent Smith consent groups so every hosted and managed client requires an explicit
+  approval and can carry an independent digest-bound tool policy.
+- Kept hosted web clients on the reviewed memory, diagnostics, and structure surface. Narrowed
+  Agent Smith clients to their documented workspace tools, including read-only `list_todos`, while
+  retaining `add_memory_and_track` only for Codex because its generated config explicitly pins it.
+- Rejected legacy or unknown client-policy fields, documented the authority boundary, and added
+  regression coverage for different client rights and non-transitive consent. Versioned consent
+  cookies invalidate the old group-capable format at deployment.
+
 ## 2026-08-29 - expose read-only project structure to production agents
 
 - Added `query_structure` to the digest-bound production tool surface for hosted web and

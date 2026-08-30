@@ -145,6 +145,14 @@ def test_valid_session_cookie_one_clicks():
     assert record.code_challenge == challenge
 
 
+def test_legacy_group_capable_session_cookie_is_invalidated(monkeypatch):
+    monkeypatch.setattr(oauth_authorize, "_SESSION_SCHEMA_VERSION", 1)
+    legacy = oauth_authorize._sign_session("menhir-admin", ("claude", "codex"))
+    monkeypatch.setattr(oauth_authorize, "_SESSION_SCHEMA_VERSION", 2)
+
+    assert oauth_authorize._verify_session(legacy) is None
+
+
 def test_garbage_cookie_falls_through_to_consent():
     _, challenge = _pkce()
     cid = _register_client()

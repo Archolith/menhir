@@ -7,7 +7,9 @@ from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 
 from menhir.api.auth import BearerAuthMiddleware
+from menhir.api.client_policy import ClientPolicy, ClientPolicyAuthority
 from menhir.api.oauth import OAuthAuthenticationError, OAuthConfig, OAuthPrincipal, _resource_matches
+from menhir.core.request_context import get_request_tool_allowlist
 from menhir.mcp.service_access import get_request_auth_mode, get_request_session, get_request_tier
 
 
@@ -250,7 +252,12 @@ class _FakeOAuthVerifier:
         return self.principal
 
 
-def _build_oauth_app(verifier: _FakeOAuthVerifier, *, static_api_key: str = "") -> TestClient:
+def _build_oauth_app(
+    verifier: _FakeOAuthVerifier,
+    *,
+    static_api_key: str = "",
+    client_policy: ClientPolicyAuthority | None = None,
+) -> TestClient:
     app = FastAPI()
 
     @app.get("/api/secure")
@@ -296,11 +303,19 @@ def _build_oauth_app(verifier: _FakeOAuthVerifier, *, static_api_key: str = "") 
             }
         )
 
+    @app.get("/api/tool-policy")
+    async def tool_policy():
+        allowed_tools = get_request_tool_allowlist()
+        return JSONResponse(
+            {"allowed_tools": sorted(allowed_tools) if allowed_tools is not None else None}
+        )
+
     wrapped = BearerAuthMiddleware(
         app,
         api_key=static_api_key,
         oauth_config=_oauth_config(),
         oauth_verifier=verifier,
+        client_policy=client_policy,
     )
     return TestClient(wrapped)
 
@@ -455,6 +470,59 @@ def test_oauth_api_accepts_valid_token_and_binds_scope_tier_identity():
         "tier": "readonly",
         "user_id": "user-123",
     }
+
+
+def test_oauth_binds_exact_client_tool_rights_per_request():
+    """Two clients cannot inherit each other's tool authority."""
+    scopes = frozenset({"menhir:read"})
+    authority = ClientPolicyAuthority(
+        version=1,
+        digest="test-digest",
+        clients={
+            "client-a": ClientPolicy(
+                client_id="client-a",
+                label="client-a",
+                scopes=scopes,
+                maximum_tier="readonly",
+                namespace="",
+                allowed_tools=frozenset({"recall_memories"}),
+                denied_tools=frozenset({"query_structure"}),
+            ),
+            "client-b": ClientPolicy(
+                client_id="client-b",
+                label="client-b",
+                scopes=scopes,
+                maximum_tier="readonly",
+                namespace="",
+                allowed_tools=frozenset({"query_structure"}),
+                denied_tools=frozenset({"recall_memories"}),
+            ),
+        },
+    )
+
+    def client_for(client_id: str) -> TestClient:
+        verifier = _FakeOAuthVerifier(
+            OAuthPrincipal(
+                subject="user-123",
+                client_id=client_id,
+                client_name=client_id,
+                scopes=scopes,
+                tier="readonly",
+            )
+        )
+        return _build_oauth_app(verifier, client_policy=authority)
+
+    response_a = client_for("client-a").get(
+        "/api/tool-policy", headers={"Authorization": "Bearer token-a"}
+    )
+    response_b = client_for("client-b").get(
+        "/api/tool-policy", headers={"Authorization": "Bearer token-b"}
+    )
+
+    assert response_a.status_code == 200
+    assert response_a.json() == {"allowed_tools": ["recall_memories"]}
+    assert response_b.status_code == 200
+    assert response_b.json() == {"allowed_tools": ["query_structure"]}
 
 
 def test_oauth_static_api_key_rejected_for_api_paths_when_enabled():

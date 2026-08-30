@@ -245,7 +245,7 @@ def _production_settings(**overrides: object) -> MemorySettings:
         "oauth_signing_key_path": str(
             Path(__file__).resolve().parent / "oauth-signing-key.test.json"
         ),
-        "client_policy_digest": "55d8ffca9f82c9b98945973e73aaa08e8778abd96b6e3b9737ec988112ff722e",
+        "client_policy_digest": "e62a46ec2582208eb6f80116c86cb473371b039fa9dc1892048b0c319e851571",
         "api_key": "test-api-key",
     }
     values.update(overrides)
@@ -317,7 +317,7 @@ def test_production_client_policy_is_digest_bound_and_tracks_clients() -> None:
     path = (
         Path(__file__).resolve().parents[1] / "deploy" / "client-policy.production.json"
     )
-    digest = "55d8ffca9f82c9b98945973e73aaa08e8778abd96b6e3b9737ec988112ff722e"
+    digest = "e62a46ec2582208eb6f80116c86cb473371b039fa9dc1892048b0c319e851571"
 
     from menhir.mcp.tools import ALL_TOOLS
 
@@ -334,10 +334,23 @@ def test_production_client_policy_is_digest_bound_and_tracks_clients() -> None:
 
     assert policy.label == "chatgpt-chat"
     assert policy.maximum_tier == "agent"
-    assert "add_memory" in policy.allowed_tools
-    assert "recall_memories" in policy.allowed_tools
-    assert "query_structure" in policy.allowed_tools
-    assert "query_structure" not in policy.denied_tools
+    web_allowed_tools = frozenset(
+        {
+            "add_memory",
+            "add_memory_and_track",
+            "build_context",
+            "get_client_context",
+            "get_enrichment_status",
+            "get_memory_stats",
+            "query_structure",
+            "read_flagged_memories",
+            "recall_context_memories",
+            "recall_memories",
+            "watch_enrichment",
+        }
+    )
+    assert policy.allowed_tools == web_allowed_tools
+    assert "list_todos" in policy.denied_tools
     assert "ingest_project" not in policy.allowed_tools
     assert "ingest_project" in policy.denied_tools
     assert policy.registration is not None
@@ -356,7 +369,7 @@ def test_production_client_policy_is_digest_bound_and_tracks_clients() -> None:
         "https://claude.ai/api/mcp/auth_callback",
     )
     assert claude_web.registration.protocol_scopes == frozenset({"offline_access"})
-    assert claude_web.allowed_tools == policy.allowed_tools
+    assert claude_web.allowed_tools == web_allowed_tools
     assert claude_web.denied_tools == policy.denied_tools
 
     with pytest.raises(PermissionError, match="scopes do not match"):
@@ -377,14 +390,36 @@ def test_production_client_policy_is_digest_bound_and_tracks_clients() -> None:
     }
     assert len(bridge_ids) == 12
     assert len({entry.label for entry in bridge_ids.values()}) == 12
-    assert {entry.consent_group for entry in bridge_ids.values()} == {"agent-smith"}
-    assert len(authority.consent_group_clients(next(iter(bridge_ids)))) == 12
-    assert all(
-        entry.allowed_tools == policy.allowed_tools for entry in bridge_ids.values()
+    agent_base_tools = frozenset(
+        {
+            "add_memory",
+            "build_context",
+            "list_todos",
+            "query_structure",
+            "read_flagged_memories",
+            "recall_context_memories",
+            "recall_memories",
+        }
     )
-    assert all(
-        entry.denied_tools == policy.denied_tools for entry in bridge_ids.values()
-    )
+    expected_agent_tools = {
+        "agent-smith-antigravity-ide": agent_base_tools,
+        "agent-smith-claude": agent_base_tools,
+        "agent-smith-cline": agent_base_tools,
+        "agent-smith-codex": agent_base_tools | {"add_memory_and_track"},
+        "agent-smith-gemini": agent_base_tools,
+        "agent-smith-gemini-config": agent_base_tools,
+        "agent-smith-goose": agent_base_tools,
+        "agent-smith-opencode": agent_base_tools,
+        "agent-smith-qwen": agent_base_tools,
+        "agent-smith-wsl-claude": agent_base_tools,
+        "agent-smith-wsl-opencode": agent_base_tools,
+        "agent-smith-zcode": agent_base_tools,
+    }
+    assert {
+        entry.label: entry.allowed_tools for entry in bridge_ids.values()
+    } == expected_agent_tools
+    assert all("ingest_project" in entry.denied_tools for entry in bridge_ids.values())
+    assert expected_agent_tools["agent-smith-codex"] != web_allowed_tools
     assert not any("reasonix" in client_id for client_id in authority.clients)
     assert (
         "https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json"
@@ -579,17 +614,12 @@ def test_client_policy_rejects_unsafe_web_registration(
         load_client_policy(str(policy_path), digest)
 
 
-def test_consent_group_rejects_mixed_authority(tmp_path: Path) -> None:
+def test_client_policy_rejects_legacy_cross_client_consent_group(tmp_path: Path) -> None:
     source = (
         Path(__file__).resolve().parents[1] / "deploy" / "client-policy.production.json"
     )
     payload = json.loads(source.read_text(encoding="utf-8"))
-    grouped = [
-        value
-        for value in payload["clients"].values()
-        if value.get("consent_group") == "agent-smith"
-    ]
-    grouped[0]["scopes"] = ["menhir:read"]
+    payload["clients"]["69c2cd871b488ff4"]["consent_group"] = "agent-smith"
     canonical = dict(payload)
     canonical.pop("canonical_digest", None)
     digest = hashlib.sha256(
@@ -601,5 +631,5 @@ def test_consent_group_rejects_mixed_authority(tmp_path: Path) -> None:
     policy_path = tmp_path / "mixed-group-policy.json"
     policy_path.write_text(json.dumps(payload), encoding="utf-8")
 
-    with pytest.raises(ValueError, match="identical authority"):
+    with pytest.raises(ValueError, match="unknown client fields"):
         load_client_policy(str(policy_path), digest)
