@@ -469,6 +469,14 @@ async def resolve_cimd_client(client_id: str, settings: object) -> OAuthClient:
     upserted under the exact URL client_id. Revalidation failure fails closed.
     Token/code exchange may still use the durable OAuthClient row after restart.
     """
+    from menhir.api.oauth_as_metadata import agent_smith_client_document_for_id
+
+    local_document = agent_smith_client_document_for_id(client_id, settings)
+    if local_document is not None:
+        client = _client_from_cimd_document(client_id, local_document, settings)
+        upsert_cimd_client(client, fetched_at=time.time())
+        return client
+
     store = get_client_store()
     now = time.time()
     cached = store.get(client_id)
@@ -978,11 +986,18 @@ async def authorize_post(request: Request):
 
     # 6. Approve: issue a single-use code bound to the admin subject, and remember the
     # approval in a short-lived signed session cookie so repeat authorizes are one-click.
-    # Carry forward any clients approved earlier in this session, then add this one, so a
-    # returning known client stays one-click while a brand-new client still needs consent.
+    # Carry forward prior approvals. A digest-bound production consent group expands
+    # only to clients with identical authority, allowing one operator-secret entry for
+    # a managed application suite while preserving a distinct OAuth identity per app.
+    # Dynamic/unlisted clients remain strictly client-scoped (AS-001).
     prior = _verify_session(request.cookies.get(_SESSION_COOKIE, ""), settings)
     prior_clients = prior[1] if prior else ()
-    approved_clients = tuple(sorted(set(prior_clients) | {submitted["client_id"]}))
+    authority = getattr(request.app.state, "client_policy", None)
+    if isinstance(authority, ClientPolicyAuthority):
+        newly_approved = authority.consent_group_clients(submitted["client_id"])
+    else:
+        newly_approved = (submitted["client_id"],)
+    approved_clients = tuple(sorted(set(prior_clients) | set(newly_approved)))
 
     try:
         response = _issue_code_redirect(

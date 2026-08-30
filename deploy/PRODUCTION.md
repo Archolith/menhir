@@ -146,6 +146,11 @@ docker compose -f deploy/docker-compose.production.yml up -d
 No `NEO4J_PASSWORD` in the environment: it is read from the mounted secret file.
 Health: `/livez` (liveness) and `/readyz` (readiness) via the proxy.
 
+For Cloudflare Tunnel ingress, start from
+`deploy/cloudflared-config.production.yml.example`. Its allowlist includes the
+Agent Smith CIMD document as well as the MCP, OAuth, discovery, and health
+surfaces; keep the catch-all 404 rules last.
+
 ## 5. Candidate-readonly (isolated proof boundary)
 
 `candidate-readonly` serves existing-token reads while never admitting authority

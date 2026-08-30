@@ -175,6 +175,9 @@ services:
       # and the signing key come from the mounted secret/OAuth paths (entrypoint),
       # never from this file.
       MENHIR_OAUTH_AS_REFRESH_TOKENS_ENABLED: "true"
+      # Agent Smith's digest-bound policy scopes are resource permissions only.
+      # Issue its refresh token without adding protocol-only offline_access.
+      MENHIR_OAUTH_AS_REFRESH_WITHOUT_OFFLINE_ACCESS_ENABLED: "true"
       MENHIR_OAUTH_AS_REFRESH_TTL_S: "2592000"
       MENHIR_OAUTH_AS_REFRESH_RETRY_GRACE_S: "5"
       # --- Production hardening flags ---
