@@ -41,7 +41,10 @@ The stack publishes no host ports. A reverse proxy must already exist on a
 Docker network named exactly `menhir-proxy`:
 
 ```bash
-docker network create menhir-proxy
+docker network create \
+  --subnet 172.30.0.0/24 \
+  --gateway 172.30.0.1 \
+  menhir-proxy
 ```
 
 `menhir` joins `menhir-proxy` under the alias `menhir-prod-app` (proxy forwards
