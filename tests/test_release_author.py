@@ -6,6 +6,7 @@ import importlib.util
 import json
 import subprocess
 import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -163,6 +164,7 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, dict]:
     spec = {
         "schema": 1,
         "release_id": "menhir-prod-0.2.0-1",
+        "release_author": "release-operator@example.com",
         "repositories": repos,
         "images": images,
         "evidence": evidence,
@@ -194,13 +196,48 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, dict]:
     return spec_path, tmp_path / "release.json", spec
 
 
+def _security_review(spec_path: Path, output: Path) -> Path:
+    request_path = output.with_name(output.name + ".review-request.json")
+    request = MODULE.author_release(
+        spec_path, request_path, review_request=True
+    )
+    review = {
+        "schema": 1,
+        "kind": "menhir-production-security-review",
+        "review_id": "security-review-1",
+        "release_author": request["release"]["release_author"],
+        "reviewer": "independent-security@example.com",
+        "reviewed_utc": datetime.now(timezone.utc).isoformat(),
+        "authority_sha256": request["authority_sha256"],
+        "verdict": "APPROVED",
+        "unresolved_findings": {"critical": 0, "high": 0},
+        "scope": sorted(MODULE.menhir_schema.REQUIRED_SECURITY_REVIEW_SCOPE),
+        "report_sha256": "a" * 64,
+    }
+    review_path = output.with_name(output.name + ".security-review.json")
+    review_path.write_text(json.dumps(review), encoding="utf-8")
+    return review_path
+
+
+def _author(spec_path: Path, output: Path) -> dict:
+    return MODULE.author_release(
+        spec_path, output, _security_review(spec_path, output)
+    )
+
+
 def test_authors_canonical_release_from_clean_exact_inputs(tmp_path: Path) -> None:
     spec_path, output, spec = _fixture(tmp_path)
 
-    release = MODULE.author_release(spec_path, output)
+    release = _author(spec_path, output)
 
     assert output.exists()
     assert json.loads(output.read_text(encoding="utf-8")) == release
+    assert release["security_review"]["authority_sha256"] == (
+        MODULE.menhir_schema.release_authority_sha256(release)
+    )
+    assert release["security_review"]["review_artifact_sha256"] == _sha(
+        output.with_name(output.name + ".security-review.json")
+    )
     assert release["rollback_anchors"]["prior_release_id"] == ""
     assert release["rollback_anchors"]["initial_release"] is True
     assert release["oauth_wheel_sha256"] == _sha(
@@ -254,7 +291,7 @@ def test_oauth_authority_files_are_required_rendered_artifacts(
     tmp_path: Path, destination: str, rendered_key: str
 ) -> None:
     spec_path, output, spec = _fixture(tmp_path)
-    release = MODULE.author_release(spec_path, output)
+    release = _author(spec_path, output)
 
     assert MODULE.RENDERED_ARTIFACT_DESTINATIONS[destination] == rendered_key
     assert release["artifacts"][destination] == {
@@ -266,7 +303,7 @@ def test_oauth_authority_files_are_required_rendered_artifacts(
     del spec["artifact_sources"][destination]
     spec_path.write_text(json.dumps(spec), encoding="utf-8")
     with pytest.raises(ValueError, match="installed-artifacts.json"):
-        MODULE.author_release(spec_path, tmp_path / "missing-artifact.json")
+        _author(spec_path, tmp_path / "missing-artifact.json")
 
 
 def test_refuses_dirty_repository(tmp_path: Path) -> None:
@@ -274,7 +311,7 @@ def test_refuses_dirty_repository(tmp_path: Path) -> None:
     (Path(spec["repositories"]["menhir"]) / "untracked.txt").write_text("dirty\n")
 
     with pytest.raises(ValueError, match="not clean"):
-        MODULE.author_release(spec_path, output)
+        _author(spec_path, output)
 
 
 def test_refuses_noncanonical_repository_remote(tmp_path: Path) -> None:
@@ -285,7 +322,7 @@ def test_refuses_noncanonical_repository_remote(tmp_path: Path) -> None:
         check=True,
     )
     with pytest.raises(ValueError, match="origin identity mismatch"):
-        MODULE.author_release(spec_path, output)
+        _author(spec_path, output)
 
 
 def test_refuses_provenance_mismatch(tmp_path: Path) -> None:
@@ -296,7 +333,7 @@ def test_refuses_provenance_mismatch(tmp_path: Path) -> None:
     provenance.write_text(json.dumps(value), encoding="utf-8")
 
     with pytest.raises(ValueError, match="provenance"):
-        MODULE.author_release(spec_path, output)
+        _author(spec_path, output)
 
 
 def test_refuses_oauth_wheel_payload_not_from_reviewed_commit(tmp_path: Path) -> None:
@@ -319,7 +356,7 @@ def test_refuses_oauth_wheel_payload_not_from_reviewed_commit(tmp_path: Path) ->
     provenance.write_text(json.dumps(value), encoding="utf-8")
 
     with pytest.raises(ValueError, match="reviewed OAuth source commit"):
-        MODULE.author_release(spec_path, output)
+        _author(spec_path, output)
 
 
 def test_refuses_oauth_wheel_executable_payload_outside_reviewed_package(
@@ -344,7 +381,7 @@ def test_refuses_oauth_wheel_executable_payload_outside_reviewed_package(
     provenance.write_text(json.dumps(value), encoding="utf-8")
 
     with pytest.raises(ValueError, match="unreviewed installable payload"):
-        MODULE.author_release(spec_path, output)
+        _author(spec_path, output)
 
 
 def test_non_initial_release_requires_prior_release(tmp_path: Path) -> None:
@@ -354,12 +391,12 @@ def test_non_initial_release_requires_prior_release(tmp_path: Path) -> None:
     spec_path.write_text(json.dumps(spec), encoding="utf-8")
 
     with pytest.raises(ValueError, match="requires prior_release"):
-        MODULE.author_release(spec_path, output)
+        _author(spec_path, output)
 
 
 def test_non_initial_release_pins_complete_prior_release_digest(tmp_path: Path) -> None:
     spec_path, prior_output, spec = _fixture(tmp_path)
-    prior = MODULE.author_release(spec_path, prior_output)
+    prior = _author(spec_path, prior_output)
     spec["release_id"] = "menhir-prod-0.2.0-2"
     spec["initial_release"] = False
     spec["prior_release"] = str(prior_output.resolve())
@@ -367,8 +404,60 @@ def test_non_initial_release_pins_complete_prior_release_digest(tmp_path: Path) 
     spec_path.write_text(json.dumps(spec), encoding="utf-8")
     output = tmp_path / "release-2.json"
 
-    release = MODULE.author_release(spec_path, output)
-
+    release = _author(spec_path, output)
     assert release["rollback_anchors"]["prior_release_id"] == prior["release_id"]
     assert release["rollback_anchors"]["prior_release_sha256"] == _sha(prior_output)
     assert release["rollback_anchors"]["initial_host_state_sha256"] == ""
+
+
+def test_refuses_release_without_independent_security_review(tmp_path: Path) -> None:
+    spec_path, output, _ = _fixture(tmp_path)
+
+    with pytest.raises(ValueError, match="security review is required"):
+        MODULE.author_release(spec_path, output)
+
+
+def test_refuses_overwriting_security_review_with_release(tmp_path: Path) -> None:
+    spec_path, output, _ = _fixture(tmp_path)
+    review_path = _security_review(spec_path, output)
+
+    with pytest.raises(ValueError, match="must not overwrite"):
+        MODULE.author_release(spec_path, review_path, review_path)
+
+
+def test_refuses_security_review_for_different_release_authority(tmp_path: Path) -> None:
+    spec_path, output, spec = _fixture(tmp_path)
+    review_path = _security_review(spec_path, output)
+    spec["release_author"] = "different-release-operator@example.com"
+    spec_path.write_text(json.dumps(spec), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="exact release authority"):
+        MODULE.author_release(spec_path, output, review_path)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    (
+        (lambda review: review.update(verdict="REJECTED"), "verdict"),
+        (
+            lambda review: review["unresolved_findings"].update(high=1),
+            "unresolved high",
+        ),
+        (
+            lambda review: review.update(reviewer=review["release_author"]),
+            "independent",
+        ),
+        (lambda review: review["scope"].pop(), "scope"),
+    ),
+)
+def test_refuses_unapproved_or_non_independent_security_review(
+    tmp_path: Path, mutation, message: str
+) -> None:
+    spec_path, output, _ = _fixture(tmp_path)
+    review_path = _security_review(spec_path, output)
+    review = json.loads(review_path.read_text(encoding="utf-8"))
+    mutation(review)
+    review_path.write_text(json.dumps(review), encoding="utf-8")
+
+    with pytest.raises(ValueError, match=message):
+        MODULE.author_release(spec_path, output, review_path)

@@ -127,9 +127,10 @@ def _build_generation(root: Path, files: dict[str, bytes]) -> dict:
 
 
 def _valid_release() -> dict:
-    return {
+    release = {
         "schema": 1,
         "release_id": "menhir-prod-0.2.0-1",
+        "release_author": "release-operator@example.com",
         "repos": {
             "menhir": "a" * 40,
             "archolith_oauth": "b" * 40,
@@ -225,12 +226,33 @@ def _valid_release() -> dict:
         "source_fence_tls_ca_sha256": "0" * 64,
         "external_evidence_public_keys": {"worker-a": "A" * 43, "worker-b": "A" * 43},
     }
+    release["security_review"] = {
+        "schema": 1,
+        "kind": "menhir-production-security-review",
+        "review_id": "security-review-1",
+        "release_author": release["release_author"],
+        "reviewer": "independent-security@example.com",
+        "reviewed_utc": datetime.now(timezone.utc).isoformat(),
+        "authority_sha256": _schema.release_authority_sha256(release),
+        "verdict": "APPROVED",
+        "unresolved_findings": {"critical": 0, "high": 0},
+        "scope": sorted(_schema.REQUIRED_SECURITY_REVIEW_SCOPE),
+        "report_sha256": "a" * 64,
+        "review_artifact_sha256": "b" * 64,
+    }
+    return release
 
 
 def _write_json(root: Path, name: str, obj) -> Path:
     path = root / name
     path.write_text(json.dumps(obj) + "\n")
     return path
+
+
+def _refresh_security_review(release: dict) -> None:
+    release["security_review"]["authority_sha256"] = (
+        _schema.release_authority_sha256(release)
+    )
 
 
 def _now() -> str:
@@ -278,6 +300,65 @@ def test_release_requires_dockerfile_wheel_manifest(tmp_path):
     path = _write_json(tmp_path, "release.json", release)
     with pytest.raises(ValueError):
         _schema.validate_release(str(path))
+
+
+def test_release_requires_exact_approved_independent_security_review(tmp_path):
+    release = _valid_release()
+    del release["security_review"]
+    path = _write_json(tmp_path, "missing-review.json", release)
+    with pytest.raises(ValueError, match="security_review"):
+        _schema.validate_release(str(path))
+
+    release = _valid_release()
+    release["security_review"]["verdict"] = "REJECTED"
+    path = _write_json(tmp_path, "rejected-review.json", release)
+    with pytest.raises(ValueError, match="APPROVED"):
+        _schema.validate_release(str(path))
+
+    release = _valid_release()
+    release["security_review"]["unresolved_findings"]["critical"] = 1
+    path = _write_json(tmp_path, "critical-review.json", release)
+    with pytest.raises(ValueError, match="unresolved critical"):
+        _schema.validate_release(str(path))
+
+    release = _valid_release()
+    release["security_review"]["reviewer"] = release["release_author"]
+    path = _write_json(tmp_path, "self-review.json", release)
+    with pytest.raises(ValueError, match="independent"):
+        _schema.validate_release(str(path))
+
+    release = _valid_release()
+    release["security_review"]["scope"][0] = []
+    path = _write_json(tmp_path, "malformed-scope.json", release)
+    with pytest.raises(ValueError, match="scope"):
+        _schema.validate_release(str(path))
+
+
+def test_release_security_review_is_bound_to_every_release_claim(tmp_path):
+    release = _valid_release()
+    release["images"]["menhir"] = "sha256:" + "f" * 64
+    path = _write_json(tmp_path, "stale-review.json", release)
+    with pytest.raises(ValueError, match="exact release authority"):
+        _schema.validate_release(str(path))
+
+
+@pytest.mark.parametrize(
+    ("script", "validator"),
+    (
+        ("backup-generation.sh", "validate-release"),
+        ("menhir-backup-upload-contabo.sh", "validate-release"),
+        ("restore-generation.sh", "validate-release"),
+        ("candidate-deploy.sh", "validate_release_authority"),
+        ("candidate-accept.sh", "validate-release"),
+        ("promote.sh", "validate_release_authority"),
+        ("rollback.sh", "validate_release_authority"),
+    ),
+)
+def test_every_production_mutation_path_uses_strict_release_validation(
+    script, validator
+):
+    source = (REPO_ROOT / "deploy" / script).read_text(encoding="utf-8")
+    assert validator in source
 
 
 def test_release_cryptographically_binds_oauth_wheel_to_source_commit(tmp_path):
@@ -593,6 +674,7 @@ def test_external_evidence_workers_aggregate_signed_distinct_networks(tmp_path):
         )
         public_keys[worker] = base64.urlsafe_b64encode(public).rstrip(b"=").decode()
     release["external_evidence_public_keys"] = public_keys
+    _refresh_security_review(release)
     release_path = _write_json(tmp_path, "release.json", release)
     checks_path = _write_json(
         tmp_path,
@@ -747,6 +829,7 @@ def test_source_fence_ed25519_authenticates_release_bound_claims(tmp_path):
     )
     release = _valid_release()
     release["source_fence_public_key"] = base64.urlsafe_b64encode(public).rstrip(b"=").decode()
+    _refresh_security_review(release)
     release_path = _write_json(tmp_path, "release.json", release)
     receipt = {
         "schema": 1,

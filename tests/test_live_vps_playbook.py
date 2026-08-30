@@ -97,3 +97,17 @@ def test_entrypoint_docs_link_to_the_canonical_playbook() -> None:
     assert "../../deploy/LIVE_VPS_PLAYBOOK.md" in (
         ROOT / ".agent" / "workflows" / "operations_runbook.md"
     ).read_text(encoding="utf-8")
+
+
+def test_playbook_requires_digest_bound_security_review_for_every_release() -> None:
+    source = PLAYBOOK.read_text(encoding="utf-8")
+    for required in (
+        "--review-request",
+        "--security-review",
+        "different identity from `release_author`",
+        "`APPROVED`",
+        "zero unresolved critical and high findings",
+        "mandatory for every release",
+        "cannot be reused",
+    ):
+        assert required in source

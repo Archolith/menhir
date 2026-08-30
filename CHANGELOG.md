@@ -1,3 +1,17 @@
+## 2026-08-30 - require an independent security review for every production release
+
+- Added a two-phase release-authoring flow that emits the exact candidate
+  authority digest for review and refuses final authoring without a matching
+  independent `APPROVED` attestation.
+- Bound the review to every release claim, including all four commits, evidence,
+  rendered artifacts, image digests, policies, rollback anchors, secret versions,
+  and installed artifacts; any drift invalidates approval.
+- Made zero unresolved critical/high findings and complete security scope strict
+  release-schema requirements inherited by bootstrap, backup, candidate,
+  promotion, rollback, and runtime validation paths.
+- Documented the permanent release gate and recorded the follow-up to replace
+  opaque MCP internal errors with actionable subsystem-specific diagnostics.
+
 ## 2026-08-29 - close the live operations gateway source blockers
 
 - Updated the live VPS playbook to the implemented fixed topology: local

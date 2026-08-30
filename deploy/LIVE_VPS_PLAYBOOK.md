@@ -127,14 +127,35 @@ gateway's OAuth protected-resource metadata must advertise the same audience
 and issuer.
 
 Create a release-author spec with the exact top-level fields enforced by
-`deploy/release-author.py`. Its `artifact_sources` must exactly match every
-destination in `deploy/installed-artifacts.json`. Git-backed entries identify a
-repository and committed path; the three generated files identify their
-rendered digest keys.
+`deploy/release-author.py`, including a bounded `release_author` identity. Its
+`artifact_sources` must exactly match every destination in
+`deploy/installed-artifacts.json`. Git-backed entries identify a repository and
+committed path; the three generated files identify their rendered digest keys.
+
+Every release requires a new independent security review. First generate the
+immutable review request; it contains the complete candidate release authority
+and its canonical SHA-256:
 
 ```powershell
-python deploy/release-author.py --spec <absolute-release-spec.json> --output <absolute-release.json>
+python deploy/release-author.py --spec <absolute-release-spec.json> --review-request <absolute-review-request.json>
 ```
+
+The security reviewer must be a different identity from `release_author`, use
+`deploy/security-review.json.example`, inspect every required scope, and retain
+the review request, completed review JSON, and detailed report whose digest is
+recorded as `report_sha256` in the immutable release packet. Approval is
+valid only when the review copies the request's exact `authority_sha256`, says
+`APPROVED`, and records zero unresolved critical and high findings. Then author
+the final release:
+
+```powershell
+python deploy/release-author.py --spec <absolute-release-spec.json> --security-review <absolute-security-review.json> --output <absolute-release.json>
+```
+
+The author recomputes all inputs, embeds the review and its file digest, and
+refuses stale or self-authored approval. Any change to a commit, evidence file,
+rendered artifact, image digest, policy, network, rollback anchor, secret
+version, or installed artifact invalidates the review.
 
 The release ID must be monotonic and match
 `menhir-prod-<major>.<minor>.<patch>-<sequence>`. Validate the result in a Linux
@@ -145,7 +166,9 @@ MENHIR_RELEASE_JSON=/absolute/path/release.json deploy/release-validate.sh
 ```
 
 Stop if any image is floating, a repository is dirty/noncanonical, evidence is
-missing, a rendered digest differs, or an installed destination is absent.
+missing, a rendered digest differs, an installed destination is absent, the
+security review is missing/stale/self-authored, its verdict is not `APPROVED`,
+or any critical/high finding remains unresolved.
 
 ## 3. One-time host bootstrap
 
@@ -270,6 +293,8 @@ release evidence during the observation window.
 ## 7. Routine later release
 
 After bootstrap is proven, later releases repeat sections 1, 2, 4, 5, and 6.
+The section 2 independent security review is mandatory for every release and
+cannot be reused because it is bound to the complete release authority digest.
 They still require a fresh backup and restore rehearsal. Reusing old receipts,
 editing an installed artifact in place, pulling a branch tip on the VPS, or
 calling the generic deployment connector invalidates the release.
