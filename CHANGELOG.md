@@ -1,3 +1,15 @@
+## 2026-08-29 - close the live operations gateway source blockers
+
+- Updated the live VPS playbook to the implemented fixed topology: local
+  no-shell root-wrapper dispatch, a Docker-bridge-only gateway listener, exact
+  Caddy peer admission, `/ops` TLS routing, and OAuth protected-resource
+  discovery bound to the operations audience.
+- Pinned the external `menhir-proxy` bootstrap command to subnet
+  `172.30.0.0/24` and gateway `172.30.0.1`, matching the fixed host listener.
+- Kept live activation explicitly unproven until the immutable four-repository
+  release is installed and passes backup, candidate, route, authorization, and
+  public negative-path acceptance on the VPS.
+
 ## 2026-08-29 - add a guarded live VPS deployment playbook
 
 - Added the canonical ordered workflow for immutable four-repository Menhir

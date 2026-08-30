@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PLAYBOOK = ROOT / "deploy" / "LIVE_VPS_PLAYBOOK.md"
 POLICY = ROOT / "deploy" / "client-policy.production.json"
 ENV_EXAMPLE = ROOT / "deploy" / "production.env.example"
+PRODUCTION = ROOT / "deploy" / "PRODUCTION.md"
 
 
 def _policy_digest() -> tuple[str, str]:
@@ -37,7 +38,7 @@ def test_production_env_uses_current_canonical_policy_digest() -> None:
     assert match.group(1) == declared
 
 
-def test_playbook_preserves_canonical_repositories_and_stop_gates() -> None:
+def test_playbook_preserves_canonical_repositories_and_network_authority() -> None:
     source = PLAYBOOK.read_text(encoding="utf-8")
     for required in (
         "`Archolith/menhir` | `main`",
@@ -46,12 +47,22 @@ def test_playbook_preserves_canonical_repositories_and_stop_gates() -> None:
         "`ctharvey/yawn.vps` | `master`",
         "`yawn.vps/main` is stale",
         "generic `vps_deploy`/`remote-deploy.sh` path is not authorized",
-        "Windows-only",
-        "127.0.0.1:8000",
-        "Never expose port 8000 or the",
-        "app's port 8099 directly",
+        "fixed local",
+        "172.30.0.1:8000",
+        "Caddy at `172.30.0.2` is the only admitted peer",
+        "https://memory.ctharvey.me/ops/mcp",
+        '"issuer": "https://memory.ctharvey.me"',
+        '"audience": "https://memory.ctharvey.me/ops/mcp"',
+        '"base_url": "https://memory.ctharvey.me/ops"',
+        "application port 8099 are never published directly",
     ):
         assert required in source
+
+    assert "blocked before first bootstrap" not in source
+    assert "currently dispatches through the Windows-only" not in source
+    production = PRODUCTION.read_text(encoding="utf-8")
+    assert "--subnet 172.30.0.0/24" in production
+    assert "--gateway 172.30.0.1" in production
 
 
 def test_playbook_orders_the_release_lifecycle() -> None:

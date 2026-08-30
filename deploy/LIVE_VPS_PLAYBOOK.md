@@ -5,25 +5,26 @@ Contabo VPS at `https://memory.ctharvey.me`. It complements the detailed
 [production contract](PRODUCTION.md); it does not replace any fail-closed check
 implemented by the release author, host wrappers, or Caddy supervisor.
 
-## Current readiness: blocked before first bootstrap
+## Current readiness: source-complete, live activation unproven
 
-Do not attempt the live cutover from the current repository tips until both of
-these gates are closed:
+The reviewed source topology closes the two original bootstrap blockers:
 
-1. `yawn.vps`'s Linux systemd service starts `menhir_server.py` on the VPS, but
-   `vps/menhir_tools.py` currently dispatches through the Windows-only
-   PowerShell/SSH `run_remote` path. The VPS gateway must instead invoke the
-   fixed local `sudo -n /srv/menhir/production/bin/<wrapper>` commands without a
-   shell. Add a Linux runtime test that executes a harmless fixed-wrapper double.
-2. The dedicated operations gateway binds only `127.0.0.1:8000`, while the
-   reviewed Caddy release exposes only Menhir's public MCP/OAuth/health routes.
-   Approve and release-bind a TLS ingress path for the operations gateway, or an
-   equally reviewed private connector transport. Never expose port 8000 or the
-   app's port 8099 directly.
+1. `yawn.vps`'s Linux gateway invokes only fixed local
+   `sudo -n /srv/menhir/production/bin/<wrapper>` argv without a shell. The
+   generic Windows PowerShell/SSH runner remains separate and cannot execute a
+   Menhir production operation.
+2. The gateway binds the host side of the fixed `menhir-proxy` bridge at
+   `172.30.0.1:8000`. Caddy at `172.30.0.2` is the only admitted peer and exposes
+   only the release-bound `/ops/mcp` and OAuth protected-resource metadata paths.
 
-These are stop gates, not documentation gaps. The application release may be
-built while they are being resolved, but the first production mutation and
-public route change wait for both proofs.
+The public operations resource is `https://memory.ctharvey.me/ops/mcp`. Its
+authorization server is `https://memory.ctharvey.me`; its Caddy prefix is
+`/ops`; and the prefix is stripped before the request reaches FastMCP. Port 8000
+and the application port 8099 are never published directly.
+
+This is source and test readiness, not proof of a deployed service. The first
+live activation still follows every bootstrap, artifact, backup, candidate,
+route, and acceptance gate below and records the immutable deployed commits.
 
 ## Authority map
 
@@ -111,6 +112,20 @@ Build in controlled CI, never on the VPS. Produce and retain:
 - source-fence public material and rollback anchors;
 - secret version identifiers only, never secret values.
 
+The rendered operations policy must bind these exact external authorities:
+
+```json
+{
+  "issuer": "https://memory.ctharvey.me",
+  "audience": "https://memory.ctharvey.me/ops/mcp",
+  "base_url": "https://memory.ctharvey.me/ops"
+}
+```
+
+Its exact client entries still decide scopes, tier, and visible tools. The
+gateway's OAuth protected-resource metadata must advertise the same audience
+and issuer.
+
 Create a release-author spec with the exact top-level fields enforced by
 `deploy/release-author.py`. Its `artifact_sources` must exactly match every
 destination in `deploy/installed-artifacts.json`. Git-backed entries identify a
@@ -141,8 +156,9 @@ general remote shell for this step.
 1. Install Docker/Compose, Python 3, GNU `flock`, `sha256sum`, `stat`, Caddy's
    existing stack, and the `yawn` account.
 2. Create the external Docker network `menhir-proxy` with the release-recorded
-   topology. Menhir is `menhir-prod-app` at `172.30.0.3`; Caddy is
-   `172.30.0.2`. Do not publish a Menhir host port.
+   topology: subnet `172.30.0.0/24` and gateway `172.30.0.1`. Menhir is
+   `menhir-prod-app` at `172.30.0.3`; Caddy is `172.30.0.2`. Do not publish a
+   Menhir host port.
 3. Create the fixed roots described in [PRODUCTION.md](PRODUCTION.md):
    `/srv/menhir/production`, `/srv/menhir/backups`,
    `/var/lib/menhir-production`, and `/var/log/menhir-production`.
@@ -163,8 +179,7 @@ general remote shell for this step.
    `caddy-release.sh adopt-current`. This records the live rollback authority
    without reloading Caddy.
 10. Enable the tmpfiles, reconciliation, operation, and dedicated gateway units
-    described in `yawn.vps/ops/menhir/README.md` only after the two readiness
-    blockers at the top of this playbook are closed.
+    described in `yawn.vps/ops/menhir/README.md` after artifact verification.
 
 Bootstrap acceptance:
 
@@ -172,13 +187,16 @@ Bootstrap acceptance:
 /srv/menhir/production/bin/verify-artifacts
 systemctl is-active menhir-caddy-reconcile.path
 systemctl is-active menhir-oauth-operations.service
-ss -lnt | grep '127.0.0.1:8000'
+ss -lnt | grep '172.30.0.1:8000'
+! ss -lnt | grep -E '(0.0.0.0|\[::\]):8000'
 ! ss -lnt | grep -E '(^|:)8099[[:space:]]'
 ```
 
-Also prove the approved operations TLS endpoint reaches only the OAuth-protected
-gateway and that an unauthenticated request is denied. A raw public listener is
-an acceptance failure.
+Also prove `https://memory.ctharvey.me/.well-known/oauth-protected-resource/ops/mcp`
+advertises `https://memory.ctharvey.me/ops/mcp`, the approved operations endpoint
+reaches only the OAuth-protected gateway, and an unauthenticated MCP request is
+denied. A raw public listener or any other public `/ops` path is an acceptance
+failure.
 
 ## 4. Execute a release through fixed operations
 
@@ -255,4 +273,3 @@ After bootstrap is proven, later releases repeat sections 1, 2, 4, 5, and 6.
 They still require a fresh backup and restore rehearsal. Reusing old receipts,
 editing an installed artifact in place, pulling a branch tip on the VPS, or
 calling the generic deployment connector invalidates the release.
-
