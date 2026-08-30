@@ -1,3 +1,17 @@
+## 2026-08-30 - harden the stacked core projection promotion
+
+- Kept `view_repository.py` as a declarative facade and moved instance-local ViewKind registry
+  validation into `view_kind_registry.py` and `view_write_repository.py`.
+- Canonicalized scalar target identity in `projection.py` and `scalar_projection_definition.py` so
+  default namespace aliases cannot fork work, hashes, or deterministic ordering.
+- Hardened `projection_lifecycle_repository.py` against coerced persisted target identities and
+  retained explicit transaction/rollback coverage in its infrastructure tests.
+- Routed projection and realization audit reads through the canonical tenancy helpers in
+  `projection_coverage_repository.py` and `realization_coverage_repository.py`.
+- Bound `typed_assertion_write_repository.py`, `scalar_projection_materializer.py`, and
+  `view_write_repository.py` to one logical default slot and its legacy physical group spelling,
+  with regression tests for assertion rows, view lookup, keys, and write parameters.
+
 ## 2026-08-30 - position Menhir around provenance and governance
 
 - Reframed the public README, runtime descriptions, CLI help, and agent template around
@@ -91,14 +105,3 @@
   digest-bound production policy.
 - Added regression coverage proving the retired client is neither published nor admitted by
   production policy while the remaining managed-client suite stays intact.
-
-## 2026-08-28 - fix: complete Claude web refresh authorization
-
-- OAuth protocol scopes are now separate from Menhir permission scopes, so
-  `offline_access` can request a refresh token without becoming a new access tier.
-- The dedicated Claude web registration alone declares `offline_access`; ChatGPT and every
-  Agent Smith registration keep their existing exact scope contracts.
-- Startup atomically upgrades the exact legacy Claude registration and refuses unknown or
-  disabled protocol scopes before the service accepts traffic.
-- Consent pages allow only the validated callback origin through CSP `form-action`, so
-  Chromium can follow the authorization POST redirect instead of stranding issued codes.
