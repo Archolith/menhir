@@ -16,6 +16,7 @@ from menhir.domain.scalar_state_fold import (
     fold_assertions,
 )
 from menhir.services.scalar_projection_definition import SCALAR_STATE_PROJECTION
+from menhir.services.scalar_projection_hash import scalar_projection_present_hash
 
 
 def _row(
@@ -189,3 +190,32 @@ def test_scalar_projection_canonicalizes_default_namespace_spellings(namespace):
     outcome = evaluate_projection(SCALAR_STATE_PROJECTION, [row])[0]
 
     assert outcome.target.namespace == "default"
+
+
+@pytest.mark.unit
+def test_present_hash_matches_persisted_scalar_and_timestamp_spellings() -> None:
+    target = ProjectionTarget(
+        subject_id="entity-1",
+        namespace="default",
+        key=("owned", "", "number", "count"),
+    )
+    common = {
+        "definition": SCALAR_STATE_PROJECTION,
+        "target": target,
+        "contributor_ids": ["a1"],
+        "effective_tier": "user",
+        "episode_uuids": ["ep-1"],
+    }
+
+    folded = scalar_projection_present_hash(
+        **common,
+        value=10,
+        valid_at="2026-01-01T00:00:00+00:00",
+    )
+    persisted = scalar_projection_present_hash(
+        **common,
+        value="10",
+        valid_at="2026-01-01T00:00:00Z[UTC]",
+    )
+
+    assert folded == persisted

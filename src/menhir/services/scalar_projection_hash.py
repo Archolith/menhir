@@ -5,9 +5,12 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Iterable
+from datetime import timezone
 from typing import Any
 
 from menhir.domain.projection import ProjectionDefinition, ProjectionTarget
+from menhir.domain.temporal import parse_iso8601
+from menhir.domain.typed_assertion import normalize_scalar
 
 __all__ = [
     "scalar_projection_absent_hash",
@@ -36,6 +39,13 @@ def _base(definition: ProjectionDefinition, target: ProjectionTarget) -> dict[st
     }
 
 
+def _canonical_time(value: object) -> str:
+    parsed = parse_iso8601(value)
+    if parsed is not None:
+        return parsed.astimezone(timezone.utc).isoformat()
+    return str(value or "").strip()
+
+
 def scalar_projection_absent_hash(
     definition: ProjectionDefinition,
     target: ProjectionTarget,
@@ -59,8 +69,12 @@ def scalar_projection_present_hash(
         {
             **_base(definition, target),
             "state": "present",
-            "value": value,
-            "valid_at": str(valid_at or ""),
+            # ScalarStateKind persists the canonical scalar string, not the fold's raw Python type.
+            # Hash that shared surface so numeric/bool/range values certify after graph read-back.
+            "value": normalize_scalar(value),
+            # Neo4j may render an equivalent instant with ``Z`` or a named zone. Identity is the
+            # instant, not the driver's timestamp spelling.
+            "valid_at": _canonical_time(valid_at),
             "scalar_contributors": sorted(str(item) for item in contributor_ids),
             "scalar_effective_tier": str(effective_tier or ""),
             "episode_uuids": sorted(str(item) for item in episode_uuids),

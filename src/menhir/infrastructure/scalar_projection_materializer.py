@@ -7,7 +7,7 @@ ProjectionTarget. Entity-wide scalar rebuild remains a compatibility path until 
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from menhir.domain.namespace import tenant_scope_cypher, tenant_scope_params
@@ -112,7 +112,10 @@ class ScalarStateProjectionMaterializer:
             slot_rows = tuple(
                 row for row in assertions if scalar_projection_target(row) == token.target
             )
-            outcome = SCALAR_STATE_PROJECTION.fold(token.target, slot_rows, self._as_of)
+            # This is a live orchestration boundary. ``as_of=None`` is a useful pure-fold seam in
+            # the domain, but here it would activate future assertions prematurely.
+            evaluation_time = self._as_of or datetime.now(timezone.utc)
+            outcome = SCALAR_STATE_PROJECTION.fold(token.target, slot_rows, evaluation_time)
             if isinstance(outcome, ProjectionMaterialization):
                 state = outcome.payload
                 self._materialize_state(views, state, token)

@@ -21,7 +21,13 @@ from menhir.services.scalar_projection_hash import (
 )
 
 
-def _row(assertion_id: str, *, attribute: str = "owned", value: int = 10) -> dict[str, object]:
+def _row(
+    assertion_id: str,
+    *,
+    attribute: str = "owned",
+    value: int = 10,
+    valid_at: str = "2026-01-01T00:00:00+00:00",
+) -> dict[str, object]:
     return {
         "assertion_id": assertion_id,
         "subject_uuid": "entity-1",
@@ -32,7 +38,7 @@ def _row(assertion_id: str, *, attribute: str = "owned", value: int = 10) -> dic
         "unit": "count",
         "operation": "absolute",
         "value": value,
-        "valid_at": "2026-01-01T00:00:00+00:00",
+        "valid_at": valid_at,
         "learned_at": "2026-01-01T00:00:00+00:00",
         "evidence_tier": "user",
         "episode_uuid": f"episode-{assertion_id}",
@@ -151,6 +157,23 @@ def test_retirement_certifies_only_physical_absence(monkeypatch: pytest.MonkeyPa
     token = _token(row, target_present=False)
     expected = scalar_projection_absent_hash(SCALAR_STATE_PROJECTION, token.target)
     tx = _Tx(current=True, hashes=["before", expected])
+    _install(monkeypatch, [row])
+
+    result = ScalarStateProjectionMaterializer()(tx, token)
+
+    assert result == expected
+    assert tx.current is False
+    assert tx.writes == []
+
+
+@pytest.mark.unit
+def test_default_materializer_clock_does_not_activate_future_assertions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    row = _row("future", valid_at="2099-01-01T00:00:00+00:00")
+    token = _token(row)
+    expected = scalar_projection_absent_hash(SCALAR_STATE_PROJECTION, token.target)
+    tx = _Tx(current=False, hashes=["before", expected])
     _install(monkeypatch, [row])
 
     result = ScalarStateProjectionMaterializer()(tx, token)

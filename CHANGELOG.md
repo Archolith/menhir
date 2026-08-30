@@ -10,7 +10,8 @@
   `projection_coverage_repository.py` and `realization_coverage_repository.py`.
 - Bound `typed_assertion_write_repository.py`, `scalar_projection_materializer.py`, and
   `view_write_repository.py` to one logical default slot and its legacy physical group spelling,
-  with regression tests for assertion rows, view lookup, keys, and write parameters.
+  canonicalized persisted scalar values/timestamps for lifecycle certification, and kept future
+  assertions inactive at the live materialization boundary; regression tests cover each seam.
 
 ## 2026-08-30 - position Menhir around provenance and governance
 
