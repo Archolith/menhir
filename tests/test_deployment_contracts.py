@@ -687,6 +687,12 @@ def test_cutover_disables_legacy_restart_before_quiesce_and_backup():
     assert source.index(disable) < source.index(quiesce)
 
 
+def test_runtime_image_does_not_require_retired_remote_fence_secret():
+    source = (Path(__file__).resolve().parents[1] / "deploy" / "Dockerfile").read_text()
+    assert "source-fence-token" not in source
+    assert "MENHIR_SOURCE_FENCE_TOKEN" not in source
+
+
 def test_release_binds_fixed_same_host_topology(tmp_path):
     release = _valid_release()
     path = _write_json(tmp_path, "release.json", release)

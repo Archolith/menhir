@@ -13,6 +13,8 @@
 - Pin candidate and replacement app/database images, modes, labels, and
   authority mounts; archive completed prior mutation markers so later releases
   remain repeatable without discarding forensic evidence.
+- Stop requiring the retired remote source-fence bearer token in the runtime
+  image entrypoint; the Docker census receipt is now the only writer fence.
 - Rewrite the live VPS and production playbooks around the single operator
   action and retain mandatory release-bound security review evidence.
 
