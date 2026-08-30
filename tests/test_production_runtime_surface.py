@@ -245,7 +245,7 @@ def _production_settings(**overrides: object) -> MemorySettings:
         "oauth_signing_key_path": str(
             Path(__file__).resolve().parent / "oauth-signing-key.test.json"
         ),
-        "client_policy_digest": "0db111af8b6abcae715af0972a91c28b41a8eb2915c23631682867c3fc7ed06f",
+        "client_policy_digest": "55d8ffca9f82c9b98945973e73aaa08e8778abd96b6e3b9737ec988112ff722e",
         "api_key": "test-api-key",
     }
     values.update(overrides)
@@ -317,7 +317,7 @@ def test_production_client_policy_is_digest_bound_and_tracks_clients() -> None:
     path = (
         Path(__file__).resolve().parents[1] / "deploy" / "client-policy.production.json"
     )
-    digest = "0db111af8b6abcae715af0972a91c28b41a8eb2915c23631682867c3fc7ed06f"
+    digest = "55d8ffca9f82c9b98945973e73aaa08e8778abd96b6e3b9737ec988112ff722e"
 
     from menhir.mcp.tools import ALL_TOOLS
 
@@ -336,6 +336,10 @@ def test_production_client_policy_is_digest_bound_and_tracks_clients() -> None:
     assert policy.maximum_tier == "agent"
     assert "add_memory" in policy.allowed_tools
     assert "recall_memories" in policy.allowed_tools
+    assert "query_structure" in policy.allowed_tools
+    assert "query_structure" not in policy.denied_tools
+    assert "ingest_project" not in policy.allowed_tools
+    assert "ingest_project" in policy.denied_tools
     assert policy.registration is not None
     assert policy.registration.redirect_uris == (
         "https://chatgpt.com/connector_platform_oauth_redirect",

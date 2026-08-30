@@ -1,3 +1,10 @@
+## 2026-08-29 - expose read-only project structure to production agents
+
+- Added `query_structure` to the digest-bound production tool surface for hosted web and
+  Agent Smith OAuth clients so connector sessions can inspect already-ingested repositories.
+- Kept `ingest_project` denied; expanding the production connector does not grant a new graph-write
+  path. Added policy assertions and documented the resulting authority boundary.
+
 ## 2026-08-29 - retire Reasonix OAuth authority
 
 - Removed the archived Reasonix client from Agent Smith's published OAuth metadata and

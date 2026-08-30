@@ -12,6 +12,9 @@ from this digest-bound policy and refuses to start if an existing row drifts.
 
 Both are public clients using authorization code plus PKCE S256. They have no
 client secret and must never share a client ID, token cache, or audit label.
+Their agent-tier tool surface includes the read-only `query_structure` tool so
+hosted connectors can inspect an already-ingested project graph. The graph-write
+`ingest_project` tool remains denied and requires an operator-controlled path.
 
 ## Connection behavior
 
