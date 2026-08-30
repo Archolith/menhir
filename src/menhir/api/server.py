@@ -41,7 +41,10 @@ def create_app(*, settings: MemorySettings | None = None) -> FastAPI:
 
     app = FastAPI(
         title="menhir",
-        description="Long-term graph memory for AI agents — REST + MCP remote.",
+        description=(
+            "Provenance, governed context, and code-impact analysis for coding agents "
+            "over REST and MCP."
+        ),
         version=menhir.__version__,
         docs_url=None if production_surface else "/api/docs",
         openapi_url=None if production_surface else "/api/openapi.json",

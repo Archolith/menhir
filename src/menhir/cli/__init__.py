@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
 app = typer.Typer(
     name="menhir",
-    help="Graph-based long-term memory system for AI agents.",
+    help="Provenance, governed context, and code-impact analysis for coding agents.",
     no_args_is_help=True,
 )
 app.add_typer(hook_app)

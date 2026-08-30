@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "archolith-menhir"
 version = "0.2.0"
-description = "Evidence-backed graph memory and code-impact analysis for coding agents."
+description = "Provenance, governed context, and code-impact analysis for coding agents."
 readme = "README.md"
 maintainers = [{ name = "Archolith", email = "contact@archolith.dev" }]
 license = "Apache-2.0"

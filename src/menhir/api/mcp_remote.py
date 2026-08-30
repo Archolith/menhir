@@ -13,7 +13,10 @@ from menhir.mcp.resources import register_memory_resources
 from menhir.mcp.service_access import get_client_tool_allowlist, get_request_tier
 from menhir.mcp.tools import register_all_tools
 
-_INSTRUCTIONS = "Long-term graph memory for AI agents. Store, recall, and manage memories."
+_INSTRUCTIONS = (
+    "Inspect provenance, govern durable context, and analyze repository structure "
+    "and change impact for coding agents."
+)
 
 
 @lru_cache(maxsize=1)

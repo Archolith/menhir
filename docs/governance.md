@@ -1,26 +1,64 @@
-# Menhir Governance Artifacts
+# Governance artifacts
 
-The launch-required governance artifacts for Menhir and how to regenerate them. These close the
-MVP governance gaps (LICENSE, SBOM, coverage artifact, model/version record).
+Menhir separates three kinds of governance that are easy to collapse into one claim:
 
-| Artifact | Location | Purpose |
+1. **Knowledge governance** controls which evidence is admitted, current, historical,
+   promoted, conflicted, or available to a client.
+2. **Supply-chain governance** records source licensing, installed dependencies, model
+   configuration, and test evidence.
+3. **Release provenance** binds reviewed source and build inputs to the exact artifacts
+   accepted by the deployment tooling.
+
+An artifact in this repository is evidence about its stated scope. It is not proof of a
+particular live deployment unless a release and its external receipts bind it.
+
+## Repository artifacts
+
+| Artifact | Location | Scope |
 |---|---|---|
-| **License** | `LICENSE` + `NOTICE` | Apache License 2.0. `NOTICE` carries the copyright attribution. |
-| **SBOM** | `sbom.json` | CycloneDX 1.6 software bill of materials — supply-chain dependency inventory. |
-| **Coverage artifact** | `coverage.xml` | Cobertura XML from the offline test suite (see caveat below). |
-| **Model/version record** | `docs/model-governance.md` | Every LLM/embedding model, provider, and where it is configured (AI-G01). |
+| License and notices | [`LICENSE`](../LICENSE), [`NOTICE`](../NOTICE), [`THIRD-PARTY-LICENSES.txt`](../THIRD-PARTY-LICENSES.txt) | Source and redistributed dependency notices |
+| Software bill of materials | [`sbom.json`](../sbom.json) | Reproducible CycloneDX inventory of one clean installed environment |
+| Coverage snapshot | `coverage.xml` (generated, not tracked) | Historical offline test execution, with the limitations below |
+| Model configuration record | [`model-governance.md`](model-governance.md) | Code defaults, environment overrides, and model-selection policy |
+| Runtime activation ledger | [`.agent/default-off-features.md`](../.agent/default-off-features.md) | Which implemented authority and retrieval paths are enabled by default |
+| Production release contract | [`deploy/PRODUCTION.md`](../deploy/PRODUCTION.md) | Release manifests, receipts, backup/restore, promotion, rollback, and live acceptance gates |
 
-## License (Apache-2.0)
+## Knowledge governance
 
-`LICENSE` is the Apache License 2.0. `NOTICE` holds the copyright line
-(`Copyright 2026 Archolith contributors`). `pyproject.toml` declares
-`license = "Apache-2.0"` (SPDX) so package metadata matches.
+Menhir preserves source episodes and first-class evidence behind derived knowledge.
+Candidates are withheld pending review; promoted memory requires operator authority;
+superseded and historical knowledge remains available for audit while current recall omits
+it by default. Conflict resolution is explicit. `get_provenance` expands a memory or
+derived View into source episodes, evidence, and code anchors.
 
-## SBOM (`sbom.json`)
+Namespaces, client policies, OAuth scopes, and reader/agent/operator tiers restrict which
+tools and knowledge scopes a client can use. They operate within Menhir's documented
+single-operator trust model and are not a general multi-tenant isolation claim.
 
-CycloneDX 1.6 JSON, **93 dependency components with per-dependency license data** (92/93; only
-`archolith-mcp-framework` lacks license metadata). The declared root component is
-`archolith-menhir` 0.2.0 under Apache-2.0. Generated from a clean wheel install. Regenerate:
+## SBOM
+
+The checked-in SBOM is CycloneDX 1.6 JSON with `reproducible=true` and 101 components,
+including `archolith-menhir` 0.2.0. Representative versions in that generated environment
+are:
+
+| Component | Version |
+|---|---:|
+| `archolith-mcp-framework` | 0.2.0 |
+| `archolith-oauth` | 0.2.0 |
+| `fastapi` | 0.139.0 |
+| `graphiti-core` | 0.29.2 |
+| `joserfc` | 1.7.3 |
+| `neo4j` | 6.2.0 |
+| `openai` | 2.45.0 |
+| `pydantic` | 2.13.4 |
+
+The SBOM inventories the environment used to generate it. Source dependencies in
+`pyproject.toml` may move to a different reviewed commit before the next SBOM refresh;
+release authority must bind the source pins, wheel, and generated SBOM together.
+Environment introspection also does not provide distribution-artifact hashes. A
+hash-bearing inventory requires hash-pinned build inputs.
+
+Regenerate from a clean environment:
 
 ```bash
 uvx --from cyclonedx-bom cyclonedx-py environment <clean-venv>/Scripts/python.exe \
@@ -28,59 +66,27 @@ uvx --from cyclonedx-bom cyclonedx-py environment <clean-venv>/Scripts/python.ex
     --gather-license-texts --output-reproducible -o sbom.json
 ```
 
-Key deps at generation: fastapi 0.141.1, joserfc 1.7.4, graphiti-core 0.29.3,
-cryptography 50.0.0, httpx 0.28.1, neo4j 6.2.0, pydantic 2.13.4,
-openai 2.53.0, and numpy 2.5.2.
+## Coverage snapshot
 
-**Prerequisite fix (2026-07-10):** the environment scan originally failed on a **corrupted
-`numpy-2.4.4.dist-info`** (only a `licenses/` subdir; no `METADATA`/`RECORD`, so
-`importlib.metadata` returned `Name = None`). Repaired by removing the broken dist-info and
-`pip install --force-reinstall --no-deps numpy==2.4.4` (the production server had to be stopped first
-— it held a Windows lock on numpy's `.pyd` binaries). If the scan ever fails again on package
-metadata, the fallback is a cleaned `pip freeze` → `cyclonedx_py requirements` (produces purls +
-versions but **no license data**).
-
-**Known gaps:** (1) **no artifact hashes** — an environment-introspection SBOM inventories *installed*
-packages and does not carry distribution-artifact hashes; a hash-bearing SBOM would require a
-hash-pinned lockfile (`pip-compile --generate-hashes`), tracked as a post-MVP hardening. (2)
-`archolith-mcp-framework` 0.2.0 does not declare its MIT license in package metadata; the repository
-license is recorded separately in `THIRD-PARTY-LICENSES.txt`.
-
-## Coverage artifact (`coverage.xml`)
-
-Cobertura XML over the **offline** test suite (`online`-marked tests that hit live services are
-skipped by default; pass `--run-online` to include them). Regenerate:
+`coverage.xml` is a generated offline-suite snapshot, not a tracked or current quality
+score. Online tests that require live services are skipped unless explicitly enabled, and
+line or branch execution does not prove the behavior of real Neo4j paths. Regenerate from
+the intended clean test environment and report its commit, command, date, pass/fail
+totals, skipped tests, and branch setting beside any published coverage claim.
 
 ```bash
-.venv/Scripts/python.exe -m pytest tests/ --cov=src/menhir --cov-report=xml:coverage.xml --cov-report=term -o addopts=""
+.venv/Scripts/python.exe -m pytest tests/ --cov=src/menhir \
+    --cov-report=xml:coverage.xml --cov-report=term -o addopts=""
 ```
 
-**Result at generation (2026-07-10, `main`):** **78.2% line coverage** (14,687 / 18,782 lines).
-Suite at generation: 2,699 passed, 2 failed, 32 skipped (11m18s). **The 2 failures were fixed
-same day** (see below) — the suite is now green.
+## Release provenance
 
-**Root cause of the 2 fixed failures (test hermeticity, not a code defect):**
-`test_oauth_authorize.py::test_post_empty_operator_key_403` and
-`test_oauth_consent_session.py::test_no_operator_key_disables_one_click` set `operator_key=""` on a
-settings double to mean "no admin key configured." But `api/oauth._get_setting` treats an empty
-settings value as "not configured" and falls through to `os.getenv("MENHIR_OPERATOR_KEY")` — which
-leaks in from the repo `.env` loaded into the process. So a real key resolved, the empty-key **403**
-branch (`oauth_authorize.py:580`) was skipped, and the wrong-secret **401** branch was hit instead.
-Production behavior is correct (empty config → env fallback is intentional); the tests just weren't
-isolating the env var. Fixed by clearing `MENHIR_OPERATOR_KEY` in each file's `_isolate` autouse
-fixture, so the settings value is authoritative and the intended 403 branch is exercised. These
-tests are environment-dependent: they passed in a clean CI env and failed only on a dev machine with
-`.env` present.
+The production authoring and validation tooling uses a strict `release.json` authority.
+It binds the reviewed repository commits and remotes, container images, OAuth wheel,
+manifests, SBOM, policies, installed artifact destinations, rollback anchors, and an
+independent security-review attestation. Runtime, backup, restore, candidate, promotion,
+and rollback receipts bind their own authority digests.
 
-**Honest caveat (TQ-03 + dark-code audit):** the headline line-coverage number **overstates real
-coverage**. `tests/conftest.py`'s `StubMemoryGraphAdapter` reimplements production contracts
-(conflict validation, episode state machine), and `test_perception.py` / `test_recall_service.py`
-are happy-path only. So executed-line coverage is high while behavioral coverage of the real Neo4j
-paths is thinner. Treat `coverage.xml` as a floor/inventory artifact, not proof of behavioral
-completeness. Strengthening this (real-adapter integration coverage) is a post-MVP quality item.
-
-## Model / version record
-
-See `docs/model-governance.md` (AI-G01) — models by role, provider selection, production `.env`
-selection, and the governance stance (models are explicit config, never auto-upgraded). Dependency
-versions live in `sbom.json`.
+These controls describe the shipped release contract. A live deployment remains unproven
+until its exact release and external acceptance evidence pass the gates in
+[`deploy/PRODUCTION.md`](../deploy/PRODUCTION.md).
