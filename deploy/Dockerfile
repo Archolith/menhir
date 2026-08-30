@@ -146,7 +146,6 @@ load_secret openai-api-key       OPENAI_API_KEY
 load_secret gemini-api-key       GEMINI_API_KEY
 load_secret local-llm-api-key    LOCAL_LLM_API_KEY
 load_required_secret operator-key MENHIR_OPERATOR_KEY
-load_required_secret source-fence-token MENHIR_SOURCE_FENCE_TOKEN
 load_required_oauth_secret oauth-consent-secret MENHIR_OAUTH_AS_CONSENT_SECRET
 load_secret api-key              MENHIR_API_KEY
 load_secret agent-key            MENHIR_AGENT_KEY
