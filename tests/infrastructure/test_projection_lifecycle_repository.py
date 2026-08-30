@@ -368,6 +368,47 @@ def test_pending_fails_closed_if_work_version_disagrees_with_shared_current_vers
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    "field,value,coerced_target",
+    [
+        (
+            "namespace",
+            7,
+            ProjectionTarget(namespace="7", subject_id="ent-1", key=("owned",)),
+        ),
+        (
+            "subject_id",
+            7,
+            ProjectionTarget(namespace="tenant-a", subject_id="7", key=("owned",)),
+        ),
+        (
+            "key",
+            [7],
+            ProjectionTarget(namespace="tenant-a", subject_id="ent-1", key=("7",)),
+        ),
+    ],
+)
+def test_pending_rejects_non_string_persisted_target_identity(
+    field: str,
+    value: object,
+    coerced_target: ProjectionTarget,
+) -> None:
+    repository = ProjectionLifecycleRepository(ScriptedNeo4j())
+    payload: dict[str, object] = {
+        "namespace": "tenant-a",
+        "subject_id": "ent-1",
+        "key": ["owned"],
+    }
+    payload[field] = value
+    row = _work_row(repository, coerced_target)
+    row["target_json"] = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    fake = ScriptedNeo4j(direct=[("MATCH (w:ProjectionWorkState)", [row])])
+
+    with pytest.raises(ProjectionLifecycleCorruptionError):
+        ProjectionLifecycleRepository(fake).pending(limit=10)
+
+
+@pytest.mark.unit
 def test_stale_worker_is_rejected_before_materialization_callback() -> None:
     target = _target()
     repository = ProjectionLifecycleRepository(ScriptedNeo4j())

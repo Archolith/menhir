@@ -92,12 +92,18 @@ def _target_from_json(raw: object) -> ProjectionTarget:
         namespace = payload.get("namespace")
         subject_id = payload["subject_id"]
         key = payload.get("key", [])
+        if namespace is not None and not isinstance(namespace, str):
+            raise TypeError("namespace must be a string or null")
+        if not isinstance(subject_id, str):
+            raise TypeError("subject_id must be a string")
         if not isinstance(key, list):
             raise TypeError("key must be a list")
+        if any(not isinstance(part, str) for part in key):
+            raise TypeError("key parts must be strings")
         return ProjectionTarget(
-            namespace=None if namespace is None else str(namespace),
-            subject_id=str(subject_id),
-            key=tuple(str(part) for part in key),
+            namespace=namespace,
+            subject_id=subject_id,
+            key=tuple(key),
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise ProjectionLifecycleCorruptionError(
