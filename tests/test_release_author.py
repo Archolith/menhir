@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import importlib.util
 import json
@@ -19,6 +20,27 @@ SPEC.loader.exec_module(MODULE)
 
 def _sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _record_line(name: str, payload: bytes) -> str:
+    digest = base64.urlsafe_b64encode(
+        hashlib.sha256(payload).digest()
+    ).rstrip(b"=").decode("ascii")
+    return f"{name},sha256={digest},{len(payload)}\n"
+
+
+def _refresh_record(members: dict[str, bytes]) -> None:
+    record_names = [name for name in members if name.endswith(".dist-info/RECORD")]
+    assert len(record_names) == 1
+    record_name = record_names[0]
+    members[record_name] = (
+        "".join(
+            _record_line(name, payload)
+            for name, payload in members.items()
+            if name != record_name
+        )
+        + f"{record_name},,\n"
+    ).encode("ascii")
 
 
 def _repo(path: Path, remote: str, files: dict[str, str]) -> str:
@@ -43,12 +65,25 @@ def _repo(path: Path, remote: str, files: dict[str, str]) -> str:
 
 def _wheel(path: Path) -> Path:
     wheel = path / "archolith_oauth-1.0-py3-none-any.whl"
+    metadata_dir = "archolith_oauth-1.0.dist-info"
+    members = {
+        "archolith_oauth/__init__.py": b"VALUE = 1\n",
+        f"{metadata_dir}/METADATA": b"Name: archolith-oauth\nVersion: 1.0\n",
+        f"{metadata_dir}/WHEEL": (
+            b"Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n"
+        ),
+        f"{metadata_dir}/entry_points.txt": (
+            b"[console_scripts]\narcholith-oauth = archolith_oauth.cli:main\n"
+        ),
+        f"{metadata_dir}/top_level.txt": b"archolith_oauth\n",
+        f"{metadata_dir}/licenses/LICENSE": b"test license\n",
+    }
+    record_name = f"{metadata_dir}/RECORD"
+    members[record_name] = b""
+    _refresh_record(members)
     with zipfile.ZipFile(wheel, "w") as archive:
-        archive.writestr("archolith_oauth/__init__.py", "VALUE = 1\n")
-        archive.writestr(
-            "archolith_oauth-1.0.dist-info/METADATA",
-            "Name: archolith-oauth\nVersion: 1.0\n",
-        )
+        for name, payload in members.items():
+            archive.writestr(name, payload)
     return wheel
 
 
@@ -270,6 +305,7 @@ def test_refuses_oauth_wheel_payload_not_from_reviewed_commit(tmp_path: Path) ->
     with zipfile.ZipFile(wheel) as archive:
         members = {name: archive.read(name) for name in archive.namelist()}
     members["archolith_oauth/__init__.py"] = b"VALUE = 999\n"
+    _refresh_record(members)
     with zipfile.ZipFile(wheel, "w") as archive:
         for name, payload in members.items():
             archive.writestr(name, payload)
@@ -291,8 +327,13 @@ def test_refuses_oauth_wheel_executable_payload_outside_reviewed_package(
 ) -> None:
     spec_path, output, spec = _fixture(tmp_path)
     wheel = Path(spec["evidence"]["oauth_wheel"])
-    with zipfile.ZipFile(wheel, "a") as archive:
-        archive.writestr("sitecustomize.py", "raise RuntimeError('unreviewed')\n")
+    with zipfile.ZipFile(wheel) as archive:
+        members = {name: archive.read(name) for name in archive.namelist()}
+    members["sitecustomize.py"] = b"raise RuntimeError('unreviewed')\n"
+    _refresh_record(members)
+    with zipfile.ZipFile(wheel, "w") as archive:
+        for name, payload in members.items():
+            archive.writestr(name, payload)
     wheel_sha = _sha(wheel)
     docker_manifest = Path(spec["evidence"]["dockerfile_wheel_manifest"])
     docker_manifest.write_text(f"{wheel_sha}  {wheel.name}\n", encoding="ascii")

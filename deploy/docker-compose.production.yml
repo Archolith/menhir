@@ -85,7 +85,6 @@ services:
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
-    pids_limit: 1024
     ulimits:
       nofile: { soft: 65536, hard: 65536 }
     environment:
@@ -111,13 +110,16 @@ services:
         limits:
           cpus: "2"
           memory: 4g
+          pids: 1024
     logging:
       driver: json-file
       options: { max-size: "10m", max-file: "3" }
     healthcheck:
       test: ["CMD-SHELL", "auth=$$(cat /run/secrets/neo4j_auth) && export NEO4J_USERNAME=$${auth%%/*} NEO4J_PASSWORD=$${auth#*/} && /var/lib/neo4j/bin/cypher-shell -a bolt://localhost:7687 'RETURN 1' >/dev/null 2>&1 || exit 1"]
       interval: 10s
-      timeout: 5s
+      # cypher-shell starts a JVM; on the production VPS cold probes can take
+      # longer than five seconds even when Bolt is immediately responsive.
+      timeout: 15s
       retries: 12
       start_period: 60s
 
@@ -141,7 +143,6 @@ services:
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
-    pids_limit: 256
     ulimits:
       nofile: { soft: 65536, hard: 65536 }
     environment:
@@ -231,6 +232,7 @@ services:
         limits:
           cpus: "1"
           memory: 2g
+          pids: 256
     logging:
       driver: json-file
       options: { max-size: "10m", max-file: "3" }
