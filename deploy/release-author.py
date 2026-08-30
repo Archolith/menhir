@@ -349,6 +349,35 @@ def _load_json(path: Path, label: str) -> dict[str, Any]:
     return value
 
 
+def _validate_policy_env_binding(policy_path: Path, env_path: Path) -> None:
+    policy = _load_json(policy_path, "client policy")
+    declared = policy.get("canonical_digest")
+    if not isinstance(declared, str) or not SHA256_RE.fullmatch(declared):
+        raise ValueError("client policy canonical_digest is invalid")
+    canonical = dict(policy)
+    canonical.pop("canonical_digest", None)
+    actual = hashlib.sha256(json.dumps(
+        canonical,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("ascii")).hexdigest()
+    if declared != actual:
+        raise ValueError("client policy canonical_digest does not match its payload")
+
+    try:
+        lines = env_path.read_text(encoding="ascii").splitlines()
+    except (OSError, UnicodeError) as exc:
+        raise ValueError("production environment must be ASCII") from exc
+    prefix = "MENHIR_CLIENT_POLICY_DIGEST="
+    matches = [line.removeprefix(prefix) for line in lines if line.startswith(prefix)]
+    if matches != [declared]:
+        raise ValueError(
+            "production environment must bind MENHIR_CLIENT_POLICY_DIGEST "
+            "to the client policy canonical_digest"
+        )
+
+
 def _validate_provenance(
     path: Path,
     repos: dict[str, str],
@@ -441,10 +470,15 @@ def author_release(
     )
 
     rendered_values = _exact(spec.get("rendered"), RENDERED, "rendered")
-    rendered = {
-        key: _sha256(_regular(rendered_values[key], f"rendered.{key}"))
+    rendered_paths = {
+        key: _regular(rendered_values[key], f"rendered.{key}")
         for key in sorted(RENDERED)
     }
+    _validate_policy_env_binding(
+        rendered_paths["policy_sha256"],
+        rendered_paths["production_env_sha256"],
+    )
+    rendered = {key: _sha256(path) for key, path in rendered_paths.items()}
     network = spec.get("network")
     if not isinstance(network, dict):
         raise ValueError("network must be an object")

@@ -150,9 +150,27 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, dict]:
         evidence[name] = str(path.resolve())
 
     rendered: dict[str, str] = {}
+    policy_payload = {"version": 1, "clients": {}}
+    policy_digest = hashlib.sha256(json.dumps(
+        policy_payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("ascii")).hexdigest()
     for name in MODULE.RENDERED:
         path = tmp_path / name
-        path.write_text(name + "\n", encoding="ascii")
+        if name == "policy_sha256":
+            path.write_text(json.dumps({
+                **policy_payload,
+                "canonical_digest": policy_digest,
+            }), encoding="ascii")
+        elif name == "production_env_sha256":
+            path.write_text(
+                f"MENHIR_CLIENT_POLICY_DIGEST={policy_digest}\n",
+                encoding="ascii",
+            )
+        else:
+            path.write_text(name + "\n", encoding="ascii")
         rendered[name] = str(path.resolve())
     prior_route = tmp_path / "prior-route.json"
     prior_route.write_text('{"route":"legacy"}\n', encoding="ascii")
@@ -266,6 +284,19 @@ def test_authors_canonical_release_from_clean_exact_inputs(tmp_path: Path) -> No
         capture_output=True,
         text=True,
     ).stdout.strip()
+
+
+def test_refuses_production_env_bound_to_raw_policy_file_digest(tmp_path: Path) -> None:
+    spec_path, output, spec = _fixture(tmp_path)
+    policy = Path(spec["rendered"]["policy_sha256"])
+    env = Path(spec["rendered"]["production_env_sha256"])
+    env.write_text(
+        f"MENHIR_CLIENT_POLICY_DIGEST={_sha(policy)}\n",
+        encoding="ascii",
+    )
+
+    with pytest.raises(ValueError, match="client policy canonical_digest"):
+        _author(spec_path, output)
 
 
 @pytest.mark.parametrize(

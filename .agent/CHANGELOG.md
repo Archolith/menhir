@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-08-30 - Make reviewed OAuth rights changes deployable
+
+- Reconcile a policy-owned OAuth client's exact scope set from the digest-bound
+  production policy while continuing to refuse name, callback, secret, and
+  token-auth metadata drift.
+- Preserve client creation and last-exchange history while applying reviewed
+  scope grants or removals atomically at startup.
+- Refuse release authoring when `MENHIR_CLIENT_POLICY_DIGEST` is bound to the
+  policy file hash instead of the policy's canonical payload digest.
+
 ## 2026-08-30 - Make same-host production releases one-command and resumable
 
 - Replace the impossible separate-source writer proof with a release- and

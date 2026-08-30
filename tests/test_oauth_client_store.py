@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from menhir.api.oauth_client_store import (
@@ -242,6 +244,36 @@ def test_reconcile_policy_clients_expands_exact_legacy_scope_atomically(tmp_path
     }
     assert stored.created_at == 123.0
     assert stored.last_exchanged == 456.0
+
+
+def test_reconcile_policy_clients_applies_reviewed_permission_scope_change(tmp_path):
+    store = OAuthClientStore(tmp_path / "as.db")
+    initial = _static_policy("chatgpt-web", "https://chatgpt.example/callback")
+    reconcile_policy_clients(_policy_authority(initial), store, now=123.0)
+    store.mark_exchanged("chatgpt-web", now=456.0)
+
+    elevated = replace(
+        initial,
+        scopes=frozenset({"menhir:read", "menhir:write", "menhir:admin"}),
+    )
+    assert reconcile_policy_clients(
+        _policy_authority(elevated), store, now=999.0
+    ) == ()
+
+    stored = store.get("chatgpt-web")
+    assert frozenset(stored.scopes) == {
+        "menhir:read",
+        "menhir:write",
+        "menhir:admin",
+    }
+    assert stored.created_at == 123.0
+    assert stored.last_exchanged == 456.0
+
+    assert reconcile_policy_clients(_policy_authority(initial), store) == ()
+    assert frozenset(store.get("chatgpt-web").scopes) == {
+        "menhir:read",
+        "menhir:write",
+    }
 
 
 def test_reconcile_policy_clients_refuses_disabled_protocol_scope(tmp_path):

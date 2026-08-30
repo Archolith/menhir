@@ -159,16 +159,16 @@ def reconcile_policy_clients(
     enabled_protocol_scopes: frozenset[str] = frozenset(),
     now: float | None = None,
 ) -> tuple[str, ...]:
-    """Seed policy-owned public clients atomically and reject stored drift.
+    """Seed and reconcile policy-owned public clients atomically.
 
     Registrations are optional because CIMD clients resolve from their metadata
     documents. A static web client, however, must be reproducible from the same
-    digest-bound artifact that grants its authority. Existing rows are never
-    overwritten except for an exact legacy permission-only scope row; any other
-    mismatch aborts the whole transaction before a partial policy reconciliation
-    can commit. Reviewed protocol capabilities are kept separate from Menhir
-    permission scopes; startup refuses capabilities that the running AS has
-    disabled and atomically expands that exact legacy row.
+    digest-bound artifact that grants its authority. Registration metadata is
+    immutable after creation, while the reviewed policy remains authoritative
+    for the client's exact scope set. Metadata drift aborts the whole transaction
+    before a partial reconciliation can commit. Reviewed protocol capabilities
+    are kept separate from Menhir permission scopes; startup refuses capabilities
+    that the running AS has disabled.
     """
 
     created_at = time.time() if now is None else float(now)
@@ -216,18 +216,12 @@ def reconcile_policy_clients(
                         or row["token_endpoint_auth_method"]
                         != registration.token_endpoint_auth_method
                     )
-                    legacy_scope_upgrade = (
-                        bool(registration.protocol_scopes)
-                        and stored_scopes == policy.scopes
-                    )
-                    if metadata_drifted or (
-                        stored_scopes != expected_scopes and not legacy_scope_upgrade
-                    ):
+                    if metadata_drifted:
                         raise ValueError(
                             "policy-owned OAuth client metadata does not match "
                             f"the configured authority: {policy.label}"
                         )
-                    if legacy_scope_upgrade:
+                    if stored_scopes != expected_scopes:
                         conn.execute(
                             "UPDATE oauth_clients SET scopes = ? WHERE client_id = ?",
                             (json.dumps(sorted(expected_scopes)), policy.client_id),
