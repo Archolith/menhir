@@ -12,11 +12,12 @@ from this digest-bound policy and refuses to start if an existing row drifts.
 
 Both are public clients using authorization code plus PKCE S256. They have no
 client secret and must never share a client ID, token cache, or audit label.
-They are operator clients with read, write, and admin scopes and receive 49 of
-the 54 MCP tools. The five excluded tools cross separate trust boundaries:
-`delete_namespace`, host-filesystem `ingest_document` / `ingest_project`, and
-credential-authority `mint_client` / `revoke_client`. Each client requires its
-own operator consent; approving ChatGPT never approves Claude, or vice versa.
+They are operator clients with read, write, and admin scopes and receive 51 of
+the 54 MCP tools, including `ingest_document` and `ingest_project`. The three
+excluded tools cross separate authority boundaries: namespace-wide
+`delete_namespace` and credential-authority `mint_client` / `revoke_client`.
+Each client requires its own operator consent; approving ChatGPT never approves
+Claude, or vice versa.
 
 Changing the hosted clients from agent to operator authority invalidates prior
 consent-session cookies. Existing access and refresh tokens lack `menhir:admin`

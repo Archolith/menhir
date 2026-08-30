@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "canonical_digest": "e7194d982a42f2ab8bc63dc1fe14a616d1eafc62f6e0b04f20343e07c6923c8e",
+  "canonical_digest": "4e16b8b3de88c9d20aa5f766d6be82cfa8fcb41ff5644c6d3841bea6937be953",
   "clients": {
     "69c2cd871b488ff4": {
       "label": "chatgpt-chat",
@@ -41,6 +41,8 @@
         "get_memory_stats",
         "get_provenance",
         "get_todo",
+        "ingest_document",
+        "ingest_project",
         "link_artifacts",
         "list_artifact_questions",
         "list_artifacts",
@@ -71,8 +73,6 @@
       ],
       "denied_tools": [
         "delete_namespace",
-        "ingest_document",
-        "ingest_project",
         "mint_client",
         "revoke_client"
       ]
@@ -119,6 +119,8 @@
         "get_memory_stats",
         "get_provenance",
         "get_todo",
+        "ingest_document",
+        "ingest_project",
         "link_artifacts",
         "list_artifact_questions",
         "list_artifacts",
@@ -149,8 +151,6 @@
       ],
       "denied_tools": [
         "delete_namespace",
-        "ingest_document",
-        "ingest_project",
         "mint_client",
         "revoke_client"
       ]
