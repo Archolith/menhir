@@ -1,0 +1,88 @@
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+PLAYBOOK = ROOT / "deploy" / "LIVE_VPS_PLAYBOOK.md"
+POLICY = ROOT / "deploy" / "client-policy.production.json"
+ENV_EXAMPLE = ROOT / "deploy" / "production.env.example"
+
+
+def _policy_digest() -> tuple[str, str]:
+    payload = json.loads(POLICY.read_text(encoding="utf-8"))
+    declared = payload.pop("canonical_digest")
+    canonical = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("ascii")
+    return declared, hashlib.sha256(canonical).hexdigest()
+
+
+def test_production_env_uses_current_canonical_policy_digest() -> None:
+    declared, actual = _policy_digest()
+    assert declared == actual
+
+    match = re.search(
+        r"^MENHIR_CLIENT_POLICY_DIGEST=([0-9a-f]{64})$",
+        ENV_EXAMPLE.read_text(encoding="utf-8"),
+        re.MULTILINE,
+    )
+    assert match is not None
+    assert match.group(1) == declared
+
+
+def test_playbook_preserves_canonical_repositories_and_stop_gates() -> None:
+    source = PLAYBOOK.read_text(encoding="utf-8")
+    for required in (
+        "`Archolith/menhir` | `main`",
+        "`Archolith/archolith_oauth` | `main`",
+        "`ctharvey/yawn.deploy` | `main`",
+        "`ctharvey/yawn.vps` | `master`",
+        "`yawn.vps/main` is stale",
+        "generic `vps_deploy`/`remote-deploy.sh` path is not authorized",
+        "Windows-only",
+        "127.0.0.1:8000",
+        "Never expose port 8000 or the",
+        "app's port 8099 directly",
+    ):
+        assert required in source
+
+
+def test_playbook_orders_the_release_lifecycle() -> None:
+    source = PLAYBOOK.read_text(encoding="utf-8")
+    operations = (
+        "`menhir_backup_submit()`",
+        "`menhir_restore_rehearsal_submit()`",
+        "`menhir_candidate_deploy()`",
+        "`menhir_candidate_accept()`",
+        "`menhir_caddy_route_apply()`",
+        "`menhir_promote()`",
+    )
+    positions = [source.index(operation) for operation in operations]
+    assert positions == sorted(positions)
+
+    for inspection in (
+        "`menhir_release_inspect()`",
+        "`menhir_status()`",
+        "`menhir_generation_inspect()`",
+        "`menhir_backup_status()`",
+        "`menhir_caddy_route_rollback()`",
+        "`menhir_rollback()`",
+        "`menhir_restore_production_submit(confirm=True)`",
+    ):
+        assert inspection in source
+
+
+def test_entrypoint_docs_link_to_the_canonical_playbook() -> None:
+    expected = "LIVE_VPS_PLAYBOOK.md"
+    assert expected in (ROOT / "deploy" / "README.md").read_text(encoding="utf-8")
+    assert expected in (ROOT / "deploy" / "PRODUCTION.md").read_text(encoding="utf-8")
+    assert "../../deploy/LIVE_VPS_PLAYBOOK.md" in (
+        ROOT / ".agent" / "workflows" / "operations_runbook.md"
+    ).read_text(encoding="utf-8")

@@ -1,3 +1,18 @@
+## 2026-08-29 - add a guarded live VPS deployment playbook
+
+- Added the canonical ordered workflow for immutable four-repository Menhir
+  releases, one-time host bootstrap, backup/rehearsal/candidate/route/promotion,
+  acceptance, and phase-aware rollback.
+- Documented two real first-bootstrap stop gates in the current operations
+  gateway: its Linux service still dispatches through a Windows-only runner,
+  and no reviewed TLS transport currently reaches its loopback listener.
+- Updated the production environment example to the current digest-bound hosted
+  operator policy and added contract tests to prevent workflow or digest drift.
+- Removed the stale blanket rejection of admin-scoped production authorization.
+  Exact client policy still controls the full scope set, so ChatGPT and Claude
+  can complete their reviewed operator grant while narrower clients remain
+  unable to request admin authority.
+
 ## 2026-08-29 - allow hosted operators to ingest documents and projects
 
 - Added `ingest_document` and `ingest_project` to the exact ChatGPT and Claude operator policies.

@@ -1,5 +1,8 @@
 # Menhir production deployment
 
+Operators should follow the ordered [live VPS deployment playbook](LIVE_VPS_PLAYBOOK.md).
+This document is the detailed production contract behind that workflow.
+
 Production container/deployment contract. Separate from the test stacks in this
 directory (`docker-compose.test.yml`, `docker-compose.full.yml`) and from the
 old source-building `Dockerfile` behavior. Production is image-immutable and
