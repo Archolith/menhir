@@ -2,6 +2,10 @@
 
 Operational runbook for the backend-first `menhir` service.
 
+For an immutable deployment or promotion on the live VPS, use the canonical
+[live VPS deployment playbook](../../deploy/LIVE_VPS_PLAYBOOK.md). The local
+Windows startup instructions below are not a production deployment path.
+
 For MCP connection details, see [backend-first-mcp.md](backend-first-mcp.md).
 For log files, request ids, and error envelopes, see [logging-and-troubleshooting.md](logging-and-troubleshooting.md).
 For enrichment-specific stall diagnosis, see [troubleshoot_enrichment_stalls.md](troubleshoot_enrichment_stalls.md).

@@ -1,5 +1,9 @@
 # Menhir Docker deployment
 
+For an immutable production release to the live VPS, start with the
+[live VPS deployment playbook](LIVE_VPS_PLAYBOOK.md) and use
+[PRODUCTION.md](PRODUCTION.md) as the detailed contract.
+
 A containerized Menhir for **test deployments** — in particular, validating the
 auth/OAuth surface (including the proxied-deployment guards **CT-001** and
 **RL-001**) behind a real reverse proxy, which cannot be exercised locally.

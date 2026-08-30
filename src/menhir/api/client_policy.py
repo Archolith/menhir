@@ -86,8 +86,6 @@ class ClientPolicyAuthority:
             raise PermissionError(
                 "OAuth authorization scopes do not match production client policy"
             )
-        if any(scope.endswith(":admin") for scope in policy.scopes):
-            raise PermissionError("OAuth admin scope is forbidden by production policy")
         return policy
 
     def require_client(

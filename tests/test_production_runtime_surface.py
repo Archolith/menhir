@@ -353,6 +353,10 @@ def test_production_client_policy_is_digest_bound_and_tracks_clients() -> None:
     assert policy.registration.redirect_uris == (
         "https://chatgpt.com/connector_platform_oauth_redirect",
     )
+    assert authority.require_authorization(
+        client_id="69c2cd871b488ff4",
+        scopes=frozenset({"menhir:read", "menhir:write", "menhir:admin"}),
+    ) is policy
 
     claude_web = authority.require_client(
         client_id="6cf6322fa828bb72",
@@ -369,6 +373,18 @@ def test_production_client_policy_is_digest_bound_and_tracks_clients() -> None:
     assert claude_web.registration.protocol_scopes == frozenset({"offline_access"})
     assert claude_web.allowed_tools == web_allowed_tools
     assert claude_web.denied_tools == web_denied_tools
+    assert authority.require_authorization(
+        client_id="6cf6322fa828bb72",
+        scopes=frozenset(
+            {"menhir:read", "menhir:write", "menhir:admin", "offline_access"}
+        ),
+    ) is claude_web
+
+    with pytest.raises(PermissionError, match="scopes do not match"):
+        authority.require_authorization(
+            client_id="https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client=codex",
+            scopes=frozenset({"menhir:read", "menhir:admin"}),
+        )
 
     with pytest.raises(PermissionError, match="scopes do not match"):
         authority.require_client(
