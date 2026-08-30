@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from menhir.domain.namespace import normalize_namespace, tenant_scope_cypher, tenant_scope_params
+
 
 class ProjectionCoverageRepository:
     """Purpose-built Neo4j reader for scalar projection coverage."""
@@ -46,10 +48,10 @@ class ProjectionCoverageRepository:
             raise ValueError("projection coverage audit requires a non-blank subject_uuid")
 
         rows = self._neo4j.execute(
-            """
-            MATCH (a:TypedAssertion {subject_uuid: $subject_uuid})
-            WHERE $namespace IS NULL OR a.namespace = $namespace
-            OPTIONAL MATCH (h:TypedAssertionHead {source_key: a.source_key})
+            f"""
+            MATCH (a:TypedAssertion {{subject_uuid: $subject_uuid}})
+            WHERE {tenant_scope_cypher("a")}
+            OPTIONAL MATCH (h:TypedAssertionHead {{source_key: a.source_key}})
             OPTIONAL MATCH (h)-[:CURRENT]->(cur:TypedAssertion)
             WITH a, h, collect(cur) AS currents
             RETURN a.assertion_id AS assertion_id, a.assertion_key AS assertion_key,
@@ -93,9 +95,12 @@ class ProjectionCoverageRepository:
                      a.value_kind, coalesce(a.unit, ''), a.valid_at, a.learned_at,
                      a.assertion_id
             """,
-            params={"subject_uuid": subject_uuid, "namespace": namespace},
+            params={"subject_uuid": subject_uuid, **tenant_scope_params(namespace)},
         )
-        return [self._hydrate_assertion(dict(row)) for row in rows]
+        hydrated = [self._hydrate_assertion(dict(row)) for row in rows]
+        for row in hydrated:
+            row["namespace"] = normalize_namespace(row.get("namespace"))
+        return hydrated
 
     def list_scalar_state_views_for_audit(
         self,
@@ -113,10 +118,10 @@ class ProjectionCoverageRepository:
             raise ValueError("projection coverage audit requires a non-blank subject_uuid")
 
         rows = self._neo4j.execute(
-            """
-            MATCH (n:Entity {view_kind: 'scalar_state', view_subject_uuid: $subject_uuid})
+            f"""
+            MATCH (n:Entity {{view_kind: 'scalar_state', view_subject_uuid: $subject_uuid}})
             WHERE coalesce(n.view_current, true)
-              AND ($namespace IS NULL OR n.group_id = $namespace)
+              AND {tenant_scope_cypher("n")}
             RETURN n.uuid AS uuid, n.view_key AS view_key,
                    n.view_subject_uuid AS subject_uuid, n.group_id AS namespace,
                    coalesce(n.view_current, true) AS view_current,
@@ -132,6 +137,9 @@ class ProjectionCoverageRepository:
             ORDER BY coalesce(n.group_id, ''), n.ss_attribute, coalesce(n.ss_scope, ''),
                      n.ss_kind, coalesce(n.ss_unit, ''), n.view_key, n.uuid
             """,
-            params={"subject_uuid": subject_uuid, "namespace": namespace},
+            params={"subject_uuid": subject_uuid, **tenant_scope_params(namespace)},
         )
-        return [dict(row) for row in rows]
+        result = [dict(row) for row in rows]
+        for row in result:
+            row["namespace"] = normalize_namespace(row.get("namespace"))
+        return result
