@@ -232,7 +232,7 @@ def _production_settings(**overrides: object) -> MemorySettings:
         "oauth_signing_key_path": str(
             Path(__file__).resolve().parent / "oauth-signing-key.test.json"
         ),
-        "client_policy_digest": "a9d8f74e6c16bd259039b66e7512a0d3377c5f5676298511d242a96587bd283a",
+        "client_policy_digest": "492a55112649ae9aa4c6625fd3677fb0b052889e391ec7bda10a78daf198d716",
         "api_key": "test-api-key",
     }
     values.update(overrides)
@@ -304,7 +304,7 @@ def test_production_client_policy_is_digest_bound_and_tracks_clients() -> None:
     path = (
         Path(__file__).resolve().parents[1] / "deploy" / "client-policy.production.json"
     )
-    digest = "a9d8f74e6c16bd259039b66e7512a0d3377c5f5676298511d242a96587bd283a"
+    digest = "492a55112649ae9aa4c6625fd3677fb0b052889e391ec7bda10a78daf198d716"
 
     from menhir.mcp.tools import ALL_TOOLS
 
@@ -331,12 +331,13 @@ def test_production_client_policy_is_digest_bound_and_tracks_clients() -> None:
             "https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client="
         )
     }
-    assert len(bridge_ids) == 13
-    assert len({entry.label for entry in bridge_ids.values()}) == 13
+    assert len(bridge_ids) == 12
+    assert len({entry.label for entry in bridge_ids.values()}) == 12
     assert {entry.consent_group for entry in bridge_ids.values()} == {"agent-smith"}
-    assert len(authority.consent_group_clients(next(iter(bridge_ids)))) == 13
+    assert len(authority.consent_group_clients(next(iter(bridge_ids)))) == 12
     assert all(entry.allowed_tools == policy.allowed_tools for entry in bridge_ids.values())
     assert all(entry.denied_tools == policy.denied_tools for entry in bridge_ids.values())
+    assert not any("reasonix" in client_id for client_id in authority.clients)
     assert (
         "https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json"
         not in authority.clients

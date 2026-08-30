@@ -21,7 +21,6 @@ _AGENT_SMITH_CLIENTS: dict[str, tuple[str, int]] = {
     "opencode": ("Agent Smith - OpenCode", 43686),
     "qwen": ("Agent Smith - Qwen", 43687),
     "goose": ("Agent Smith - Goose", 43688),
-    "reasonix": ("Agent Smith - Reasonix", 43689),
     "zcode": ("Agent Smith - ZCode", 43690),
     "cline": ("Agent Smith - Cline", 43691),
     "wsl-claude": ("Agent Smith - Claude (WSL)", 43692),

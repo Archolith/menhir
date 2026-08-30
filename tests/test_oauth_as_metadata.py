@@ -208,10 +208,23 @@ def test_agent_smith_clients_have_distinct_ids_labels_and_ports():
         for client_key in _AGENT_SMITH_CLIENTS
     ]
 
-    assert len(payloads) == 13
-    assert len({payload["client_id"] for payload in payloads}) == 13
-    assert len({payload["client_name"] for payload in payloads}) == 13
-    assert len({payload["redirect_uris"][0] for payload in payloads}) == 13
+    assert len(payloads) == 12
+    assert len({payload["client_id"] for payload in payloads}) == 12
+    assert len({payload["client_name"] for payload in payloads}) == 12
+    assert len({payload["redirect_uris"][0] for payload in payloads}) == 12
+
+
+def test_retired_reasonix_client_is_not_published():
+    settings = SimpleNamespace(
+        oauth_as_enabled=True,
+        oauth_public_base_url="https://memory.example.com",
+    )
+
+    response = _client(settings).get(
+        "/oauth/client-metadata/agent-smith.json?client=reasonix"
+    )
+
+    assert response.status_code == 404
 
 
 def test_retired_shared_agent_smith_client_is_not_published():
