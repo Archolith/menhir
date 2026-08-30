@@ -21,10 +21,6 @@ from menhir.services.scheduler_protocols import LifecycleServiceProtocol
 from menhir.domain.models import FreshnessState, ProcessingState
 from menhir.domain.utils import source_confidence_for
 from menhir.infrastructure import GraphitiClient, MemoryGraphAdapter
-from menhir.infrastructure.evidence_publication_intents import (
-    EvidencePublicationIntentRepository,
-    PublicationDispatchSuppressed,
-)
 from menhir.infrastructure.scheduler_trace import (
     build_episode_parent_metadata,
     emit_scheduler_task_event,
@@ -107,11 +103,6 @@ class EnrichmentContext:
     # shutdown. None (the default) means "don't track" — used by tests that construct
     # EnrichmentContext directly without a real IngestService behind it.
     register_background_task: Callable[[asyncio.Task], None] | None = None
-    # Optional, activation-gated publication protocol.  No runtime/bootstrap path constructs this
-    # repository yet because the managed tombstone HMAC key ring and created-only Graphiti artifact
-    # manifest do not exist.  Tests and a future explicit activation hook can inject it without
-    # changing the extraction API; absence preserves the currently deployed path.
-    evidence_publication_intents: EvidencePublicationIntentRepository | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -653,56 +644,18 @@ async def run_graphiti_extraction(
 
                 relationless_repair_context_loader = _load_relationless_repair_context
 
-            episode_name = str(ctx.claimed.get("name") or ctx.episode_uuid)
-            source_description = str(ctx.claimed.get("source") or "claude-code")
-            reference_time = coerce_reference_time(
-                ctx.claimed.get("reference_time") or ctx.claimed.get("queued_at")
-            )
-            publication_intent = None
-            if ctx.evidence_publication_intents is not None:
-                publication_intent = ctx.evidence_publication_intents.begin(
-                    episode_uuid=ctx.episode_uuid,
-                    namespace=namespace,
-                    expected_name=episode_name,
-                    source_description=source_description,
-                    reference_time=reference_time,
-                )
-                if not publication_intent.dispatch_allowed:
-                    raise PublicationDispatchSuppressed(
-                        "Graphiti dispatch refused because publication intent "
-                        f"{publication_intent.intent_key!r} is already "
-                        f"{publication_intent.status}"
-                    )
-
             graphiti_result = await add_episode_with_timeout(
                 ctx.graphiti_client,
-                name=episode_name,
+                name=str(ctx.claimed.get("name") or ctx.episode_uuid),
                 episode_body=compose_episode_body(ctx.claimed),
-                source_description=source_description,
-                reference_time=reference_time,
+                source_description=str(ctx.claimed.get("source") or "claude-code"),
+                reference_time=coerce_reference_time(ctx.claimed.get("reference_time") or ctx.claimed.get("queued_at")),
                 episode_uuid=ctx.episode_uuid,
                 attempt=ctx.processing_attempts,
                 timeout_s=ctx.graphiti_add_episode_timeout_s,
                 group_id=group_id,
                 relationless_repair_context_loader=relationless_repair_context_loader,
             )
-            if publication_intent is not None:
-                publication_transition = (
-                    ctx.evidence_publication_intents.finalize_remote_outcome(
-                        publication_intent,
-                        remote_episode_uuid=str(graphiti_result.episode.uuid),
-                    )
-                )
-                if not publication_transition.finalized:
-                    logger.warning(
-                        "Graphiti evidence quarantined episode_id=%s remote_episode_id=%s "
-                        "reason=%s candidates=%s tombstones=%s",
-                        ctx.episode_uuid,
-                        graphiti_result.episode.uuid,
-                        publication_transition.reason,
-                        publication_transition.candidate_count,
-                        publication_transition.tombstone_count,
-                    )
         except Exception:  # re-raised; record telemetry for any graphiti failure
             record_lifecycle_event(
                 component="ingest_worker",

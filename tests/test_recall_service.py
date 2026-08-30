@@ -47,16 +47,6 @@ def _build_recall_service(stub_graphiti_client, stub_memory_graph_adapter, **kwa
     )
 
 
-@pytest.mark.unit
-def test_projection_recall_eligibility_requires_explicit_true() -> None:
-    from menhir.services.recall_pipeline import _projection_is_recall_eligible
-
-    assert _projection_is_recall_eligible({"recall_eligible": True}) is True
-    assert _projection_is_recall_eligible({}) is False
-    assert _projection_is_recall_eligible({"recall_eligible": False}) is False
-    assert _projection_is_recall_eligible({"recall_eligible": 1}) is False
-
-
 def _setup_search_and_metadata(stub_graphiti_client, stub_memory_graph_adapter, **overrides):
     """Configure stubs with default search results and metadata."""
     scope = overrides.get("scope", "PERSISTENT")
@@ -176,61 +166,6 @@ async def test_recall_candidate_exclusion_is_unconditional(
     result = await svc.recall("test query", include_session=True)
 
     assert len(result.results) == 0
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_recall_excludes_view_whose_durable_provenance_is_not_live(
-    stub_graphiti_client, stub_memory_graph_adapter
-) -> None:
-    """A UUID receipt without its evidence node is not a recallable memory."""
-    _setup_search_and_metadata(stub_graphiti_client, stub_memory_graph_adapter)
-    stub_memory_graph_adapter.candidate_metadata[0].update({
-        "is_view": True,
-        "view_current": True,
-        "episode_uuids": ["deleted-evidence"],
-        "view_provenance_live": False,
-    })
-    svc = _build_recall_service(stub_graphiti_client, stub_memory_graph_adapter)
-
-    result = await svc.recall("test query")
-
-    assert [row.uuid for row in result.results] == ["entity-2"]
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "override",
-    [
-        {"view_class": "METRIC"},
-        {"view_audience": "OPERATOR"},
-        {"view_current": False},
-        {"retired": True},
-        {"view_provenance_live": False},
-    ],
-    ids=["non-fact", "operator", "noncurrent", "retired", "provenance-mismatch"],
-)
-async def test_recall_view_contract_is_fail_closed_even_with_superseded_opt_in(
-    stub_graphiti_client, stub_memory_graph_adapter, override
-) -> None:
-    _setup_search_and_metadata(stub_graphiti_client, stub_memory_graph_adapter)
-    view_meta = {
-        "is_view": True,
-        "view_kind": "counter",
-        "view_class": "FACT",
-        "view_audience": "RECALL",
-        "view_current": True,
-        "retired": False,
-        "view_provenance_live": True,
-    }
-    view_meta.update(override)
-    stub_memory_graph_adapter.candidate_metadata[0].update(view_meta)
-    svc = _build_recall_service(stub_graphiti_client, stub_memory_graph_adapter)
-
-    result = await svc.recall("test query", include_superseded=True)
-
-    assert [row.uuid for row in result.results] == ["entity-2"]
 
 
 @pytest.mark.unit
@@ -1841,7 +1776,6 @@ async def test_scalar_authority_view_injected_for_surfaced_slot(
             "name": "user's owned: 37. current owned = 37.", "view_key": "vk-owned",
             "attribute": "owned", "subject_uuid": subject_uuid, "namespace": "proj",
             "valid_at": "2026-07-02T00:00:00+00:00",
-            "recall_eligible": True,
         }
 
     stub_memory_graph_adapter.fetch_current_scalar_view_for_slot = _fetch_view
@@ -1892,7 +1826,6 @@ async def test_asof_query_with_unresolvable_date_injects_nothing(
             "name": "user's owned: 37. current owned = 37.", "view_key": "vk-owned",
             "attribute": "owned", "subject_uuid": subject_uuid, "namespace": "proj",
             "valid_at": "2026-07-02T00:00:00+00:00",
-            "recall_eligible": True,
         }
 
     stub_memory_graph_adapter.fetch_current_scalar_view_for_slot = _fetch_view
@@ -1933,7 +1866,6 @@ async def test_scalar_authority_annotates_view_that_already_won_vector_search(
             "uuid": "view-owned-current", "value": 37, "name": view_name,
             "attribute": "owned", "subject_uuid": subject_uuid, "namespace": "proj",
             "valid_at": "2026-07-02T00:00:00+00:00",
-            "recall_eligible": True,
         })
     stub_memory_graph_adapter.scalar_state_service = lambda: SimpleNamespace(
         current_authority=lambda subj, *, namespace, as_of: {
@@ -1948,36 +1880,6 @@ async def test_scalar_authority_annotates_view_that_already_won_vector_search(
     assert matched[0].is_scalar_authority is True
     assert res.authority_layer is not None
     assert [(v.attribute, v.status) for v in res.authority_layer] == [("owned", "leads")]
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_scalar_authority_rejects_repository_ineligible_projection_without_new_kwargs(
-    stub_graphiti_client, stub_memory_graph_adapter
-) -> None:
-    _setup_search_and_metadata(stub_graphiti_client, stub_memory_graph_adapter)
-    stub_memory_graph_adapter.search_assertion_embeddings = (
-        lambda vec, *, limit, namespaces: _one_observation_hit()
-    )
-    calls: list[dict] = []
-
-    def _fetch_view(*, subject_uuid, attribute, scope, value_kind, unit, namespace):
-        calls.append({"subject_uuid": subject_uuid, "namespace": namespace})
-        return {
-            "uuid": "operator-view", "value": 37, "name": "operator-only current 37",
-            "recall_eligible": False,
-        }
-
-    stub_memory_graph_adapter.fetch_current_scalar_view_for_slot = _fetch_view
-    svc = _build_recall_service(
-        stub_graphiti_client, stub_memory_graph_adapter, scalar_view_authority_enabled=True,
-    )
-
-    result = await svc.recall("how many rare coins now", namespace="proj")
-
-    assert calls == [{"subject_uuid": "ent-coins", "namespace": "proj"}]
-    assert "operator-only current 37" not in {row.name for row in result.results}
-    assert not result.authority_layer
 
 
 @pytest.mark.unit
@@ -1998,7 +1900,6 @@ async def test_scalar_authority_stays_advisory_without_foundation(
             "uuid": "view-owned-current", "value": 37, "name": "user's owned: 37. current owned = 37.",
             "attribute": "owned", "subject_uuid": subject_uuid, "namespace": "proj",
             "valid_at": "2026-07-02T00:00:00+00:00",
-            "recall_eligible": True,
         }
     )
     stub_memory_graph_adapter.scalar_state_service = lambda: SimpleNamespace(
@@ -2031,7 +1932,6 @@ async def test_scalar_authority_leads_on_user_founds_at_agent_tier(
             "uuid": "view-owned-current", "value": 37, "name": "user's owned: 37. current owned = 37.",
             "attribute": "owned", "subject_uuid": subject_uuid, "namespace": "proj",
             "valid_at": "2026-07-02T00:00:00+00:00",
-            "recall_eligible": True,
         }
     )
     stub_memory_graph_adapter.scalar_state_service = lambda: SimpleNamespace(
@@ -2080,7 +1980,6 @@ def _setup_two_subject_authority(stub_graphiti_client, stub_memory_graph_adapter
             "name": f"{subject_uuid} owned current", "attribute": "owned",
             "subject_uuid": subject_uuid, "namespace": "proj",
             "valid_at": "2026-07-02T00:00:00+00:00",
-            "recall_eligible": True,
         }
 
     stub_memory_graph_adapter.fetch_current_scalar_view_for_slot = _fetch_view
@@ -2224,9 +2123,7 @@ async def test_scalar_asof_fold_leads_for_as_of_date_query(
     )
     current_view_calls: list[int] = []
     stub_memory_graph_adapter.fetch_current_scalar_view_for_slot = (
-        lambda **kw: current_view_calls.append(1) or {
-            "uuid": "v", "value": 37, "name": "current 37", "recall_eligible": True,
-        }
+        lambda **kw: current_view_calls.append(1) or {"uuid": "v", "value": 37, "name": "current 37"}
     )
     st = FoldedScalarState(
         subject_uuid="ent-coins", subject_display="user", attribute="owned", scope="",
@@ -2267,9 +2164,7 @@ async def test_authority_annotation_recall_audit_event_emitted(
         lambda vec, *, limit, namespaces: _one_observation_hit()
     )
     stub_memory_graph_adapter.fetch_current_scalar_view_for_slot = (
-        lambda **kw: {
-            "uuid": "v", "value": 37, "name": "current 37", "recall_eligible": True,
-        }
+        lambda **kw: {"uuid": "v", "value": 37, "name": "current 37"}
     )
     stub_memory_graph_adapter.scalar_state_service = lambda: SimpleNamespace(
         current_authority=lambda subj, *, namespace, as_of: {("owned", "", "count", ""): "agent"},

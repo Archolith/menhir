@@ -148,7 +148,6 @@ class ViewWriteRepositoryMixin:
             require_newer=kind.lww_register and not authoritative, refresh_props=effective_refresh,
             replace_provenance=authoritative,
             summary_template=_checked_template(kind, subject, payload, summary, len(eps)),
-            lifecycle_props=kind.view_stamps(payload),
         )
         res["view_value"] = props.get("view_value")
         return res
@@ -177,7 +176,6 @@ class ViewWriteRepositoryMixin:
         view_class: ViewClass = ViewClass.FACT, node_uuid: str | None = None,
         refresh_props: dict[str, Any] | None = None, summary_template: str | None = None,
         subject_uuid: str | None = None, replace_provenance: bool = False,
-        lifecycle_props: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """The one place a View version is written. Idempotent on `sig`: unchanged -> refresh
         provenance/access only; changed -> create a fresh current version and supersede the prior
@@ -197,21 +195,10 @@ class ViewWriteRepositoryMixin:
         incoming world-time `valid_at` is >= the current version's. A temporally-older event is
         stale and must NOT overwrite current (fold-algebra Law 1); it is skipped, current stays
         authoritative. Without this the reconcile is arrival-ordered and installs stale totals."""
-        from menhir.domain.namespace import (
-            normalize_namespace,
-            stamped_namespace,
-            tenant_scope_cypher,
-            tenant_scope_params,
-        )
+        from menhir.domain.namespace import stamped_namespace
 
         label = _label_for(view_class)
         eps = _normalize_episode_uuids(episode_uuids)
-        lifecycle = lifecycle_props or {
-            "view_class": view_class.value,
-            "view_subtype": kind,
-            "view_audience": "OPERATOR",
-        }
-        refresh_props = {**lifecycle, **dict(refresh_props or {})}
         if view_class is ViewClass.METRIC and (name_embedding is not None or eps):
             raise ValueError(
                 "METRIC views are instrumentation, not memories: they must not carry a "
@@ -236,41 +223,13 @@ class ViewWriteRepositoryMixin:
                 # eps so a shrunk contributor set prunes stale MENTIONS.
                 prov = self._replace_fact_provenance(
                     current["uuid"], eps, now, summary_template=summary_template,
-                    refresh_props=refresh_props, namespace=namespace,
+                    refresh_props=refresh_props,
                 )
             elif view_class is ViewClass.FACT and eps:
                 prov = self._refresh_fact_provenance(
                     current["uuid"], eps, now, summary_template=summary_template,
-                    refresh_props=refresh_props, namespace=namespace,
+                    refresh_props=refresh_props,
                 )
-            elif view_class is ViewClass.FACT:
-                namespace_key = normalize_namespace(namespace)
-                touched = self.neo4j.execute(
-                    """
-                    MERGE (f:EvidenceNamespaceFence {namespace_key: $namespace_key})
-                    ON CREATE SET f.generation = 0, f.created_at = datetime($now)
-                    SET f.lock_nonce = $operation_id, f.locked_at = datetime($now)
-                    WITH f
-                    MATCH (n:Entity {uuid: $u})
-                    WHERE coalesce(n.view_current, n.qs_current, true)
-                      AND NOT coalesce(n.retired, false)
-                    SET n.last_accessed = $now,
-                        n.view_fence_generation = f.generation
-                    SET n += $refresh
-                    RETURN n.uuid AS uuid
-                    """,
-                    {
-                        "namespace_key": namespace_key,
-                        "operation_id": f"touch:{current['uuid']}:{now}",
-                        "u": current["uuid"],
-                        "now": now,
-                        "refresh": dict(refresh_props or {}),
-                    },
-                    timeout_s=SAGA_MUTATION_TIMEOUT_S,
-                )
-                if not touched:
-                    raise ValueError("FACT View refresh refused after concurrent lifecycle change")
-                prov = {}
             else:
                 self.neo4j.execute(
                     f"MATCH (n:{label} {{uuid:$u}}) SET n.last_accessed=$now, n += $refresh "
@@ -291,13 +250,10 @@ class ViewWriteRepositoryMixin:
         # `node_uuid` lets the saga coordinator FREEZE the new version's uuid at PREPARE, so a
         # crash-replay recreates the same node instead of forking a competing one (plan A6/E3).
         new_uuid = node_uuid or str(uuid4())
-        namespace_key = normalize_namespace(namespace)
-        evidence_scope = tenant_scope_cypher("e")
         # Shared view identity + the kind's value slot, merged onto the fixed recall stamps.
         extra: dict[str, Any] = {
             "is_view": True, "view_kind": kind, "view_key": key,
             "view_subject": subject.strip(), "view_current": True, "view_sig": str(sig),
-            **lifecycle,
             # entity-anchored identity (scalar_state): the resolved UUID drives the key while
             # view_subject keeps the display. Only stamped when supplied, so existing kinds unchanged.
             **({"view_subject_uuid": subject_uuid.strip()} if subject_uuid else {}),
@@ -307,9 +263,10 @@ class ViewWriteRepositoryMixin:
             **{k: v for k, v in (audit_props or {}).items() if v is not None},
         }
         if view_class is ViewClass.FACT:
-            # Durable, version-local provenance (plan D1). The UUID list is the audit receipt and
-            # MENTIONS is the live retention edge. A current FACT may only be written when every UUID
-            # resolves to live evidence; explicit evidence erasure retires the dependent View.
+            # Durable, version-local provenance (plan D1). MENTIONS alone is not provenance: it only
+            # exists while the :Episodic node does, so episode churn silently drains a fact's evidence
+            # (prod has facts claiming supporting events with zero surviving MENTIONS). The UUID list
+            # is stored ON the fact, so the count stays true even after the episodes are gone.
             extra["episode_uuids"] = eps
             extra["supporting_event_count"] = len(eps)
         # DB-level "one current per view_key" boundary for scalar_state ONLY (C.4.4.4). The property is
@@ -341,40 +298,12 @@ class ViewWriteRepositoryMixin:
         # create-and-supersede a single execute() is preserved (a mid-statement crash rolls back both).
         clear_current_key = "REMOVE o.ss_view_key_current" if kind == "scalar_state" else ""
         create_and_supersede = f"""
-            MERGE (f:EvidenceNamespaceFence {{namespace_key: $namespace_key}})
-            ON CREATE SET f.generation = 0, f.created_at = datetime($now)
-            SET f.lock_nonce = $operation_id, f.locked_at = datetime($now)
-            WITH f
-            OPTIONAL MATCH (actual:{label})
-            WHERE (actual.view_key = $key OR actual.qs_key = $key)
-              AND coalesce(actual.view_current, actual.qs_current, true)
-            WITH f, actual
-            WHERE ($old IS NULL AND actual IS NULL) OR actual.uuid = $old
-            CALL {{
-                UNWIND CASE WHEN size($eps) = 0 THEN [null] ELSE $eps END AS eid
-                OPTIONAL MATCH (e)
-                WHERE ((e:Episodic AND e.uuid = eid) OR
-                       (e:TurnEvidence AND e.turn_id = eid))
-                  AND {evidence_scope}
-                  AND e.evidence_finalized = true
-                  AND NOT coalesce(e.evidence_quarantined, false)
-                WITH eid, [candidate IN collect(DISTINCT e)
-                           WHERE candidate IS NOT NULL] AS candidates
-                WITH collect({{eid: eid, candidates: candidates}}) AS resolved
-                RETURN [row IN resolved WHERE size(row.candidates) = 1 |
-                        head(row.candidates)] AS evidence,
-                       size([row IN resolved WHERE size(row.candidates) = 1]) AS resolved_count
-            }}
-            WITH f, actual, evidence, resolved_count
-            WHERE resolved_count = size($eps)
-              AND all(e IN evidence WHERE
-                  coalesce(e.evidence_generation, e.publication_generation) = f.generation)
             OPTIONAL MATCH (old:{label} {{uuid: $old}})
             FOREACH (o IN CASE WHEN old IS NULL THEN [] ELSE [old] END |
                 SET o.view_current = false, o.qs_current = false, o.superseded_by = $uuid,
                     o.expired_at = datetime($now), o.last_accessed = $now
                 {clear_current_key})
-            WITH f, old, evidence
+            WITH old
             CREATE (n:{label} {{
                 uuid: $uuid, name: $name, summary: $summary, content: $summary,
                 group_id: $ns, namespace: $ns_stamped, {_SHARED_STAMPS},
@@ -382,25 +311,20 @@ class ViewWriteRepositoryMixin:
                 valid_at: datetime($valid_at), created_at: datetime($now), last_accessed: datetime($now)
             }})
             SET n += $extra
-            SET n.view_fence_generation = f.generation
             FOREACH (_ IN CASE WHEN $emb IS NULL THEN [] ELSE [1] END |
                 SET n.name_embedding = $emb)
             FOREACH (o IN CASE WHEN old IS NULL THEN [] ELSE [old] END |
                 SET n.supersedes = $old
                 MERGE (n)-[:SUPERSEDES]->(o))
-            FOREACH (e IN evidence | MERGE (e)-[:MENTIONS]->(n))
-            RETURN n.uuid AS uuid
             """
         params = {"uuid": new_uuid, "name": name[:300], "summary": summary[:1000],
                   "ns": (namespace or ""), "ns_stamped": ns_stamped,
-                  "namespace_key": namespace_key, **tenant_scope_params(namespace_key),
-                  "operation_id": new_uuid, "key": key, "eps": eps,
                   "source": source, "sc": float(source_confidence),
                   "valid_at": valid_at, "now": now, "extra": extra, "emb": name_embedding,
                   "old": old_uuid}
         if kind == "scalar_state":
             try:
-                write_rows = self.neo4j.execute(
+                self.neo4j.execute(
                     create_and_supersede, params, timeout_s=SAGA_MUTATION_TIMEOUT_S
                 )
             except _Neo4jConstraintError:
@@ -429,30 +353,25 @@ class ViewWriteRepositoryMixin:
                             "winner_sig": winner_sig}
                 raise
         else:
-            write_rows = self.neo4j.execute(
+            self.neo4j.execute(
                 create_and_supersede, params, timeout_s=SAGA_MUTATION_TIMEOUT_S
             )
-        if not write_rows:
-            raise ValueError(
-                "FACT View write refused: every declared contributor UUID must resolve to live "
-                ":Episodic or :TurnEvidence evidence"
-            )
+        prov = self._link_episodes(new_uuid, eps, now, view_class=view_class)
+
         return {"uuid": new_uuid, "view_key": key, "kind": kind,
-                "created": True, "superseded": current is not None,
-                "episodes_present": len(eps), "episodes_missing": 0,
-                "supporting_event_count": len(eps)}
+                "created": True, "superseded": current is not None, **prov}
 
     def _link_episodes(
         self, node_uuid: str, episode_uuids: list[str], now: str,
         *, view_class: ViewClass = ViewClass.FACT,
     ) -> dict[str, Any]:
-        """Provenance: (evidence)-[:MENTIONS]->(view) for each contributing source.
+        """Provenance: (:Episodic)-[:MENTIONS]->(view) for each contributing episode.
 
         Reports which episodes were actually PRESENT and which were MISSING instead of silently
         no-opping (plan D3). The old query inner-MATCHed the episodes, so a fact whose episodes had
         already been reaped got zero MENTIONS and zero signal about it -- the exact way prod facts
-        ended up claiming supporting events they could not point at. Both legacy ``:Episodic`` and
-        production ``:TurnEvidence`` inputs are evidence anchors.
+        ended up claiming supporting events they could not point at. Missing UUIDs stay in the
+        durable `episode_uuids` list and keep counting; MENTIONS is repaired if the episode returns.
 
         Only FACT views carry MENTIONS; METRIC nodes never do (the _write_version guard forbids
         passing episodes for METRIC), so this is a no-op there.
@@ -464,12 +383,10 @@ class ViewWriteRepositoryMixin:
             f"""
             MATCH (n:{label} {{uuid:$u}})
             UNWIND $eps AS eid
-            OPTIONAL MATCH (ep:Episodic {{uuid: eid}})
-            OPTIONAL MATCH (te:TurnEvidence {{turn_id: eid}})
-            WITH n, coalesce(ep, te) AS e
+            OPTIONAL MATCH (e:Episodic {{uuid: eid}})
             FOREACH (_ IN CASE WHEN e IS NULL THEN [] ELSE [1] END |
                 MERGE (e)-[:MENTIONS]->(n))
-            RETURN collect(coalesce(e.uuid, e.turn_id)) AS present
+            RETURN collect(e.uuid) AS present
             """,
             {"u": node_uuid, "eps": episode_uuids},
         )
@@ -481,7 +398,6 @@ class ViewWriteRepositoryMixin:
     def _refresh_fact_provenance(
         self, node_uuid: str, episode_uuids: list[str], now: str, *,
         summary_template: str | None, refresh_props: dict[str, Any] | None,
-        namespace: str | None,
     ) -> dict[str, Any]:
         """Unchanged-value provenance refresh for a FACT (plan D2), in ONE Neo4j operation.
 
@@ -505,50 +421,12 @@ class ViewWriteRepositoryMixin:
         refresh then blocks there, and once it proceeds its read sees the other's committed list. It
         writes `last_accessed`, which this statement sets anyway, so the lock costs no extra property.
         """
-        from menhir.domain.namespace import normalize_namespace, tenant_scope_cypher, tenant_scope_params
-
-        namespace_key = normalize_namespace(namespace)
         rows = self.neo4j.execute(
             """
-            MERGE (f:EvidenceNamespaceFence {namespace_key: $namespace_key})
-            ON CREATE SET f.generation = 0, f.created_at = datetime($now)
-            SET f.lock_nonce = $operation_id, f.locked_at = datetime($now)
-            WITH f
             MATCH (n:Entity {uuid:$u})
-            WHERE coalesce(n.view_current, n.qs_current, true)
-              AND NOT coalesce(n.retired, false)
-            OPTIONAL MATCH (old_evidence)-[:MENTIONS]->(n)
-            WHERE old_evidence:Episodic OR old_evidence:TurnEvidence
-            WITH f, n, collect(DISTINCT coalesce(old_evidence.uuid,
-                                                 old_evidence.turn_id)) AS old_mentions
-            WHERE size(old_mentions) = size(coalesce(n.episode_uuids, []))
-              AND all(eid IN old_mentions WHERE eid IN coalesce(n.episode_uuids, []))
-            CALL {
-                WITH n
-                WITH n, (coalesce(n.episode_uuids, []) + $eps) AS all_eids
-                UNWIND CASE WHEN size(all_eids) = 0 THEN [null] ELSE all_eids END AS eid
-                WITH DISTINCT n, eid
-                OPTIONAL MATCH (e)
-                WHERE ((e:Episodic AND e.uuid = eid) OR
-                       (e:TurnEvidence AND e.turn_id = eid))
-                  AND """ + tenant_scope_cypher("e") + """
-                  AND e.evidence_finalized = true
-                  AND NOT coalesce(e.evidence_quarantined, false)
-                WITH eid, [candidate IN collect(DISTINCT e)
-                           WHERE candidate IS NOT NULL] AS candidates
-                WITH collect({eid: eid, candidates: candidates}) AS resolved
-                RETURN [row IN resolved WHERE size(row.candidates) = 1 |
-                        head(row.candidates)] AS evidence,
-                       [row IN resolved | row.eid] AS requested,
-                       size([row IN resolved WHERE size(row.candidates) = 1]) AS resolved_count
-            }
-            WITH f, n, evidence, requested, resolved_count
-            WHERE resolved_count = size(requested)
-              AND all(e IN evidence WHERE
-                  coalesce(e.evidence_generation, e.publication_generation) = f.generation)
-            SET n.last_accessed = $now, n.view_fence_generation = f.generation
-            WITH n, (coalesce(n.episode_uuids, []) + $eps) AS all_eids
-            UNWIND CASE WHEN size(all_eids) = 0 THEN [null] ELSE all_eids END AS eid
+            SET n.last_accessed = $now
+            WITH n
+            UNWIND (coalesce(n.episode_uuids, []) + $eps) AS eid
             WITH n, eid ORDER BY eid
             WITH n, collect(DISTINCT eid) AS uuids
             SET n.episode_uuids = uuids,
@@ -561,28 +439,18 @@ class ViewWriteRepositoryMixin:
             WITH n, uuids
             CALL {
                 WITH n, uuids
-                UNWIND CASE WHEN size(uuids) = 0 THEN [null] ELSE uuids END AS eid
-                OPTIONAL MATCH (ep:Episodic {uuid: eid})
-                OPTIONAL MATCH (te:TurnEvidence {turn_id: eid})
-                WITH n, coalesce(ep, te) AS e
-                FOREACH (_ IN CASE WHEN e IS NULL THEN [] ELSE [1] END |
-                    MERGE (e)-[:MENTIONS]->(n))
-                RETURN [uuid IN collect(coalesce(e.uuid, e.turn_id))
-                        WHERE uuid IS NOT NULL] AS present
+                UNWIND uuids AS eid
+                MATCH (e:Episodic {uuid: eid})
+                MERGE (e)-[:MENTIONS]->(n)
+                RETURN collect(e.uuid) AS present
             }
             RETURN uuids AS stored, present
             """,
             {"u": node_uuid, "eps": episode_uuids, "now": now, "token": _COUNT_TOKEN,
-             "namespace_key": namespace_key,
-             "operation_id": f"refresh:{node_uuid}:{now}",
-             "tpl": summary_template, "refresh": dict(refresh_props or {}),
-             **tenant_scope_params(namespace_key)},
+             "tpl": summary_template, "refresh": dict(refresh_props or {})},
         )
         if not rows:
-            raise ValueError(
-                "FACT View provenance refresh refused: every stored contributor UUID must resolve "
-                "to live :Episodic or :TurnEvidence evidence"
-            )
+            return {"episodes_present": 0, "episodes_missing": 0}
         row = dict(rows[0])
         stored = [str(u) for u in (row.get("stored") or [])]
         present = {str(u) for u in (row.get("present") or [])}
@@ -594,7 +462,6 @@ class ViewWriteRepositoryMixin:
     def _replace_fact_provenance(
         self, node_uuid: str, episode_uuids: list[str], now: str, *,
         summary_template: str | None, refresh_props: dict[str, Any] | None,
-        namespace: str | None,
     ) -> dict[str, Any]:
         """Unchanged-signature provenance REPLACEMENT for an authoritative rebuild, in ONE Neo4j
         operation. Unlike `_refresh_fact_provenance` (which UNIONS), this sets `episode_uuids` to
@@ -607,46 +474,10 @@ class ViewWriteRepositoryMixin:
         The leading `SET n.last_accessed` takes the node's write lock before provenance is rewritten
         (same explicit-locking pattern as the union path). Handles an EMPTY set: prune all MENTIONS,
         store []."""
-        from menhir.domain.namespace import normalize_namespace, tenant_scope_cypher, tenant_scope_params
-
-        namespace_key = normalize_namespace(namespace)
         rows = self.neo4j.execute(
             """
-            MERGE (f:EvidenceNamespaceFence {namespace_key: $namespace_key})
-            ON CREATE SET f.generation = 0, f.created_at = datetime($now)
-            SET f.lock_nonce = $operation_id, f.locked_at = datetime($now)
-            WITH f
             MATCH (n:Entity {uuid:$u})
-            WHERE coalesce(n.view_current, n.qs_current, true)
-              AND NOT coalesce(n.retired, false)
-            OPTIONAL MATCH (old_evidence)-[:MENTIONS]->(n)
-            WHERE old_evidence:Episodic OR old_evidence:TurnEvidence
-            WITH f, n, collect(DISTINCT coalesce(old_evidence.uuid,
-                                                 old_evidence.turn_id)) AS old_mentions
-            WHERE size(old_mentions) = size(coalesce(n.episode_uuids, []))
-              AND all(eid IN old_mentions WHERE eid IN coalesce(n.episode_uuids, []))
-            CALL {
-                WITH n
-                UNWIND CASE WHEN size($eps) = 0 THEN [null] ELSE $eps END AS eid
-                OPTIONAL MATCH (e)
-                WHERE ((e:Episodic AND e.uuid = eid) OR
-                       (e:TurnEvidence AND e.turn_id = eid))
-                  AND """ + tenant_scope_cypher("e") + """
-                  AND e.evidence_finalized = true
-                  AND NOT coalesce(e.evidence_quarantined, false)
-                WITH eid, [candidate IN collect(DISTINCT e)
-                           WHERE candidate IS NOT NULL] AS candidates
-                WITH collect({eid: eid, candidates: candidates}) AS resolved
-                RETURN [row IN resolved WHERE size(row.candidates) = 1 |
-                        head(row.candidates)] AS evidence,
-                       size([row IN resolved WHERE size(row.candidates) = 1]) AS resolved_count
-            }
-            WITH f, n, evidence, resolved_count
-            WHERE resolved_count = size($eps)
-              AND all(e IN evidence WHERE
-                  coalesce(e.evidence_generation, e.publication_generation) = f.generation)
             SET n.last_accessed = $now,
-                n.view_fence_generation = f.generation,
                 n.episode_uuids = $eps,
                 n.supporting_event_count = size($eps),
                 n.summary = CASE WHEN $tpl IS NULL THEN n.summary
@@ -657,37 +488,24 @@ class ViewWriteRepositoryMixin:
             WITH n
             CALL {
                 WITH n
-                OPTIONAL MATCH (old)-[m:MENTIONS]->(n)
-                WHERE NOT coalesce(old.uuid, old.turn_id) IN $eps
-                  AND (old:Episodic OR old:TurnEvidence)
+                OPTIONAL MATCH (old:Episodic)-[m:MENTIONS]->(n)
+                WHERE NOT old.uuid IN $eps
                 DELETE m
                 RETURN count(*) AS pruned
             }
             WITH n
             CALL {
                 WITH n
-                UNWIND CASE WHEN size($eps) = 0 THEN [null] ELSE $eps END AS eid
-                OPTIONAL MATCH (ep:Episodic {uuid: eid})
-                OPTIONAL MATCH (te:TurnEvidence {turn_id: eid})
-                WITH n, coalesce(ep, te) AS e
-                FOREACH (_ IN CASE WHEN e IS NULL THEN [] ELSE [1] END |
-                    MERGE (e)-[:MENTIONS]->(n))
-                RETURN [uuid IN collect(coalesce(e.uuid, e.turn_id))
-                        WHERE uuid IS NOT NULL] AS present
+                UNWIND $eps AS eid
+                MATCH (e:Episodic {uuid: eid})
+                MERGE (e)-[:MENTIONS]->(n)
+                RETURN collect(e.uuid) AS present
             }
             RETURN present
             """,
             {"u": node_uuid, "eps": episode_uuids, "now": now, "token": _COUNT_TOKEN,
-             "namespace_key": namespace_key,
-             "operation_id": f"replace:{node_uuid}:{now}",
-             "tpl": summary_template, "refresh": dict(refresh_props or {}),
-             **tenant_scope_params(namespace_key)},
+             "tpl": summary_template, "refresh": dict(refresh_props or {})},
         )
-        if not rows:
-            raise ValueError(
-                "FACT View authoritative rebuild refused: every declared contributor UUID must "
-                "resolve to live :Episodic or :TurnEvidence evidence"
-            )
         present = {str(u) for u in (dict(rows[0]).get("present") or [])} if rows else set()
         missing = [u for u in episode_uuids if u not in present]
         _log_missing_episodes(node_uuid, episode_uuids, missing)

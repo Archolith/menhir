@@ -85,7 +85,6 @@ def _postcard_history_view():
         "operation_counts": {"delta": 2},
         "first_valid_at": "2023-08-11T00:00:00+00:00",
         "last_valid_at": "2023-11-30T00:00:00+00:00",
-        "recall_eligible": True,
         "entries": [
             {
                 "assertion_id": "a1", "operation": "delta", "value": 17,
@@ -206,35 +205,6 @@ async def test_history_lane_injects_advisory_for_delta_only_slot(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_history_lane_rejects_repository_ineligible_view_without_new_kwargs(
-    stub_graphiti_client, stub_memory_graph_adapter,
-) -> None:
-    _setup_search_and_metadata(stub_graphiti_client, stub_memory_graph_adapter)
-    history = _postcard_history_view()
-    history["recall_eligible"] = False
-    calls: list[dict] = []
-    _setup_observation_lane(
-        stub_memory_graph_adapter, history_view=history, state_view=None,
-    )
-
-    def _fetch_history(*, subject_uuid, attribute, scope, value_kind, unit, namespace):
-        calls.append({"subject_uuid": subject_uuid, "namespace": namespace})
-        return history
-
-    stub_memory_graph_adapter.fetch_scalar_history = _fetch_history
-    svc = _build_svc(
-        stub_graphiti_client, stub_memory_graph_adapter,
-        scalar_view_authority_enabled=False, scalar_history_enabled=True,
-    )
-
-    result = await svc.recall("how many postcards do I have", namespace="proj")
-
-    assert calls == [{"subject_uuid": "ent-postcards", "namespace": "proj"}]
-    assert "history-view-postcards" not in {row.uuid for row in result.results}
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("history_enabled", "authority_enabled", "expected_history"),
     [(False, False, False), (False, True, False), (True, False, True), (True, True, True)],
@@ -339,7 +309,6 @@ async def test_history_lane_skips_when_scalar_state_exists_on_current_query(
         "view_key": "vk-1", "attribute": "postcard_count",
         "subject_uuid": "ent-postcards", "namespace": "proj",
         "valid_at": "2026-07-01T00:00:00+00:00",
-        "recall_eligible": True,
     }
     _setup_observation_lane(stub_memory_graph_adapter,
                            history_view=_postcard_history_view(),
@@ -363,7 +332,6 @@ async def test_history_lane_surfaces_for_history_query_even_when_state_exists(
         "view_key": "vk-1", "attribute": "postcard_count",
         "subject_uuid": "ent-postcards", "namespace": "proj",
         "valid_at": "2026-07-01T00:00:00+00:00",
-        "recall_eligible": True,
     }
     _setup_observation_lane(stub_memory_graph_adapter,
                            history_view=_postcard_history_view(),

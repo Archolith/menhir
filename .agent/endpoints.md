@@ -379,7 +379,6 @@ Read flagged memories for startup bootstrap context.
 - **`workspace`** (str, optional): Empty selects `general` pins only. A key selects `general` plus the exact normalized `workspace:<key>` pins.
 - This call records that `reader_id` has read the current flagged-memory version for that exact bootstrap selection.
 - Returns compact JSON with `items[]` containing summary-sized flagged memory entries for bootstrap efficiency.
-- Derived Views are returned only when current, not retired, and fully backed by live `:Episodic` or `:TurnEvidence` contributors; internal, superseded, candidate, gone, and orphaned Views are excluded.
 
 ### `recall_context_memories`
 Concept id: `mcp.tool.recall_context_memories`
@@ -787,11 +786,6 @@ Server runtime metadata and high-level graph counts, including compact scheduler
 Concept id: `mcp.resource.memory.recent`
 
 Most recently accessed or created memory nodes (limited to 10) using the compact memory shape.
-
-The local, not-yet-deployed implementation uses the same fail-closed View policy as bootstrap
-recall: a current, non-retired View requires complete live provenance. Explicit UUID inspection
-remains available for operator/audit use. Coordinated schema activation, reconciliation, and writer
-deployment are still required before this describes production behavior.
 
 ### `memory://system/lifecycle-trace`
 Concept id: `mcp.resource.system.lifecycle_trace`

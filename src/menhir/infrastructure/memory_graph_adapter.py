@@ -713,10 +713,17 @@ class MemoryGraphAdapter:
         The caller is responsible for refusing the default/shared group and for any
         node-count safety gate. Intended for tearing down throwaway/eval namespaces.
         """
+        if namespace is None:
+            rows = self.neo4j.execute(
+                "MATCH (n) WHERE n.group_id = $group_id "
+                "WITH n DETACH DELETE n RETURN count(n) AS deleted",
+                params={"group_id": group_id},
+            )
+            return int(rows[0].get("deleted", 0)) if rows else 0
+
         operation_id = uuidlib.uuid4().hex
-        logical_namespace = str(namespace or group_id).strip()
         result = self._memory_queries.delete_namespace_with_scalar_cascade(
-            group_id, logical_namespace, operation_id=operation_id)
+            group_id, namespace, operation_id=operation_id)
         repair = self.scalar_state_service().repair_pending_deletions(
             operation_id=operation_id, as_of=datetime.now(timezone.utc))
         if repair["failed"]:

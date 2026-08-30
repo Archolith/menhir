@@ -433,19 +433,6 @@ sets `activation_pending=true`; present-time authority folds exclude it until th
 it at or after `valid_at`. `ScalarStateView` is a disposable materialized projection of that log,
 not an independent source of truth.
 
-In the local, not-yet-deployed lifecycle implementation, FACT View provenance is stored twice for
-different purposes: `episode_uuids` is the deterministic
-version-local audit receipt, while `(:Episodic|:TurnEvidence)-[:MENTIONS]->(:Entity {is_view:true})`
-is the live retention link. A current FACT View with declared contributors is writable and
-recallable only when every UUID resolves to one of those evidence labels. Derived Views are excluded
-from ordinary memory compression/deletion. Explicit memory, TurnEvidence, or namespace erasure
-atomically retires dependent current Views (`retired_reason=contributing_evidence_erased`), removes
-the erased identifiers from all retained View receipts, and clears the affected counter/scalar/event
-watermarks so surviving evidence may rebuild the projection. Direct UUID inspection may still show
-retired history; generic recent/bootstrap/scored recall does not. Optional schema activation and
-legacy reconciliation have not run, and replay tombstones remain non-operational until an HMAC key
-ring and producer checks are provided.
-
 `ScalarHistoryView` is a second projection kind (`view_kind="scalar_history"`) for the same slot.
 It preserves every delta/absolute/correction/expiry assertion in source-time order without computing
 an absolute current value. Key prefix is `sh_` (vs `ss_` for state). The View payload is a JSON

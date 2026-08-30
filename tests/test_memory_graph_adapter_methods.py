@@ -543,27 +543,27 @@ def test_increment_episode_llm_usage_updates_attempt_and_total() -> None:
 
 @pytest.mark.unit
 def test_delete_memory_returns_true_when_node_is_deleted() -> None:
-    neo4j = _StubNeo4jRepository(responses=[
-        [{"namespace_keys": ["default"]}],
-        [{"memory_touched": 1, "assertions_deleted": 0, "heads_deleted": 0, "repairs": []}],
-    ])
+    neo4j = _StubNeo4jRepository(responses=[[
+        {"memory_touched": 1, "assertions_deleted": 0, "heads_deleted": 0, "repairs": []}
+    ]])
     adapter = MemoryGraphAdapter(neo4j=neo4j)
 
     result = adapter.delete_memory("entity-123")
 
     assert result is True
-    mutation = neo4j.calls[1]
-    assert mutation["params"]["node_uuid"] == "entity-123"
-    assert mutation["params"]["operation_id"]
-    assert "ScalarProjectionRepair" in mutation["query"]
-    assert "deleted_by_user" in mutation["query"]
-    assert "DETACH DELETE" in mutation["query"]
-    assert "ADMITTED_ON" in mutation["query"]
+    assert neo4j.calls[0]["params"]["node_uuid"] == "entity-123"
+    assert neo4j.calls[0]["params"]["operation_id"]
+    assert "ScalarProjectionRepair" in neo4j.calls[0]["query"]
+    assert "deleted_by_user" in neo4j.calls[0]["query"]
+    assert "DETACH DELETE" in neo4j.calls[0]["query"]
+    assert "ADMITTED_ON" in neo4j.calls[0]["query"]
 
 
 @pytest.mark.unit
 def test_delete_memory_returns_false_when_no_node_found() -> None:
-    neo4j = _StubNeo4jRepository(responses=[[{"namespace_keys": []}]])
+    neo4j = _StubNeo4jRepository(responses=[[
+        {"memory_touched": 0, "assertions_deleted": 0, "heads_deleted": 0, "repairs": []}
+    ]])
     adapter = MemoryGraphAdapter(neo4j=neo4j)
 
     result = adapter.delete_memory("nonexistent")
@@ -573,17 +573,15 @@ def test_delete_memory_returns_false_when_no_node_found() -> None:
 
 @pytest.mark.unit
 def test_delete_memory_returns_true_for_a_surfaced_assertion() -> None:
-    neo4j = _StubNeo4jRepository(responses=[
-        [{"namespace_keys": ["ns"]}],
-        [{"memory_touched": 0, "assertions_deleted": 1, "heads_deleted": 1,
-          "repairs": [{"subject_uuid": "ent-1", "namespace": "ns"}]}],
-        [],
-    ])
+    neo4j = _StubNeo4jRepository(responses=[[
+        {"memory_touched": 0, "assertions_deleted": 1, "heads_deleted": 1,
+         "repairs": [{"subject_uuid": "ent-1", "namespace": "ns"}]}
+    ], []])
     adapter = MemoryGraphAdapter(neo4j=neo4j)
 
     assert adapter.delete_memory("assertion-1") is True
-    assert "a.assertion_id = $node_uuid" in neo4j.calls[1]["query"]
-    assert "as_of" not in neo4j.calls[1]["params"]
+    assert "a.assertion_id = $node_uuid" in neo4j.calls[0]["query"]
+    assert "as_of" not in neo4j.calls[0]["params"]
 
 
 @pytest.mark.unit

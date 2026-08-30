@@ -1,10 +1,10 @@
 """Durable fact provenance (Plan 2 step 5 / Part D).
 
 A fact's evidence used to live ONLY in (:Episodic)-[:MENTIONS]->(fact) edges, so when an episode was
-reaped the fact silently lost its provenance while its summary kept claiming the supporting events.
-A fact version stores a sorted, deduplicated `episode_uuids` audit receipt plus an exact
-`supporting_event_count`, and every receipt UUID must resolve to live `:Episodic` or
-`:TurnEvidence` before a current version can be written or refreshed.
+reaped the fact silently lost its provenance while its summary kept claiming the supporting events
+(prod has facts asserting "2 supporting events" with zero surviving MENTIONS). A fact version now
+stores a durable, sorted, deduplicated `episode_uuids` list plus an exact `supporting_event_count`,
+and an unchanged-value rewrite UNIONS the incoming UUIDs into it inside a single Cypher statement.
 
 See workspace-root .agent/plans/menhir-metric-provenance-redesign.md (Part D).
 """
@@ -73,11 +73,7 @@ def test_template_is_discarded_when_it_cannot_reconstruct_the_summary():
 
 def _make_episodes(repo, ns: str, uuids: list[str]) -> None:
     repo.execute(
-        "MERGE (f:EvidenceNamespaceFence {namespace_key: $ns}) "
-        "ON CREATE SET f.generation = 0 "
-        "WITH f UNWIND $eps AS eid "
-        "CREATE (e:Episodic {uuid: eid, group_id: $ns, content: 'x', "
-        "evidence_finalized: true, evidence_generation: f.generation})",
+        "UNWIND $eps AS eid CREATE (e:Episodic {uuid: eid, group_id: $ns, content: 'x'})",
         {"eps": uuids, "ns": ns},
     )
 
@@ -109,32 +105,6 @@ def test_fact_stores_durable_episode_uuids_and_exact_count(test_neo4j_repo):
     assert got["count"] == 2                  # exact length of the stored list
     assert "2 supporting event(s)" in got["summary"]
     assert got["mentions"] == 2
-
-
-@pytest.mark.online
-def test_fact_accepts_turn_evidence_turn_id_as_live_provenance(test_neo4j_repo):
-    adapter = MemoryGraphAdapter(neo4j=test_neo4j_repo)
-    ns = f"prov-{uuidlib.uuid4().hex[:8]}"
-    turn_id = f"{ns}-turn"
-    test_neo4j_repo.execute(
-        "MERGE (f:EvidenceNamespaceFence {namespace_key: $ns}) "
-        "ON CREATE SET f.generation = 0 "
-        "CREATE (:TurnEvidence {turn_id:$turn, namespace:$ns, text:'I own 2 widgets', "
-        "evidence_finalized: true, evidence_generation: f.generation})",
-        {"turn": turn_id, "ns": ns},
-    )
-
-    adapter.record_counter(
-        subject="user", counter="widgets", value=2.0, namespace=ns,
-        episode_uuids=[turn_id],
-    )
-
-    rows = test_neo4j_repo.execute(
-        "MATCH (:TurnEvidence {turn_id:$turn})-[:MENTIONS]->(v:Entity {view_key:$key}) "
-        "RETURN v.episode_uuids AS eps, v.supporting_event_count AS count",
-        {"turn": turn_id, "key": f"{ns}::user::widgets"},
-    )
-    assert dict(rows[0]) == {"eps": [turn_id], "count": 1}
 
 
 @pytest.mark.online
@@ -171,30 +141,32 @@ def test_unchanged_value_rewrite_unions_provenance_and_keeps_the_version(test_ne
 
 
 @pytest.mark.online
-def test_missing_episode_refuses_current_fact_until_evidence_exists(test_neo4j_repo):
-    """A durable UUID receipt is not evidence and cannot create a current FACT View."""
+def test_missing_episodes_stay_in_the_durable_list_and_keep_counting(test_neo4j_repo):
+    """D3: a reaped episode does NOT silently drain the fact's evidence. The UUID stays in the list
+    and keeps counting; MENTIONS is repaired if the episode ever comes back."""
     adapter = MemoryGraphAdapter(neo4j=test_neo4j_repo)
     ns = f"prov-{uuidlib.uuid4().hex[:8]}"
     present, reaped = f"{ns}-here", f"{ns}-gone"
     _make_episodes(test_neo4j_repo, ns, [present])        # `reaped` never exists
 
-    with pytest.raises(ValueError, match="every declared contributor UUID"):
-        adapter.record_counter(
-            subject="user", counter="bike_spend", value=500.0, namespace=ns,
-            episode_uuids=[present, reaped],
-        )
-    assert _fact(test_neo4j_repo, f"{ns}::user::bike_spend") == {}
+    res = adapter.record_counter(subject="user", counter="bike_spend", value=500.0, namespace=ns,
+                                 episode_uuids=[present, reaped])
 
-    # Once the missing source exists, the same write is admissible and links both contributors.
-    _make_episodes(test_neo4j_repo, ns, [reaped])
-    res = adapter.record_counter(
-        subject="user", counter="bike_spend", value=500.0, namespace=ns,
-        episode_uuids=[present, reaped],
-    )
+    assert res["episodes_present"] == 1
+    assert res["episodes_missing"] == 1                    # reported, not silently dropped
     got = _fact(test_neo4j_repo, f"{ns}::user::bike_spend")
-    assert res["episodes_missing"] == 0
-    assert got["eps"] == sorted([present, reaped])
-    assert got["mentions"] == 2 and got["count"] == 2
+    assert got["eps"] == sorted([present, reaped])         # missing UUID retained
+    assert got["count"] == 2                               # and still counted
+    assert got["mentions"] == 1                            # only the surviving episode is linked
+
+    # The episode returns -> the next refresh repairs MENTIONS without touching the version.
+    _make_episodes(test_neo4j_repo, ns, [reaped])
+    adapter.record_counter(subject="user", counter="bike_spend", value=500.0, namespace=ns,
+                           episode_uuids=[reaped])
+    repaired = _fact(test_neo4j_repo, f"{ns}::user::bike_spend")
+    assert repaired["uuid"] == got["uuid"]
+    assert repaired["mentions"] == 2
+    assert repaired["count"] == 2
 
 
 @pytest.mark.online

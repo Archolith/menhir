@@ -131,13 +131,10 @@ def test_cf216_default_namespace_maps_to_the_empty_group_id() -> None:
 
 
 def test_cf216_unscoped_read_is_unchanged() -> None:
-    """Isolation is opt-in: an unspecified namespace must not add a tenant parameter/filter.
-
-    The shared View lifecycle predicate may still mention ``group_id`` to prove that a View and
-    each of its exact incoming evidence relationships belong to the same canonical tenant.
-    """
+    """Isolation is opt-in: an unspecified namespace must produce the same query and the same
+    params it produced before this fix existed."""
     query, params = _flagged_call(None)
-    assert "$group_ids" not in query
+    assert "group_id" not in query
     assert "group_ids" not in params
 
 

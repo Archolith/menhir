@@ -85,7 +85,6 @@ def test_namespace_delete_removes_namespace_keyed_episode_lifecycle_rows():
     assert fake_neo4j.last_params == {
         "group_id": "eval-ns",
         "namespace": "eval-ns",
-        "namespace_key": "eval-ns",
         "operation_id": "delete-op",
     }
 

@@ -47,15 +47,6 @@ the arithmetic, ordering, latest/predecessor selection, or supersession inside t
 and durable assertion/event logs remain the source of truth. Views and scalar/event projections are
 additive, rebuildable products, never replacements for their contributors.
 
-The local, not-yet-deployed lifecycle implementation gives current FACT Views a live-provenance
-contract: every UUID in `episode_uuids` must resolve to an
-`:Episodic` or `:TurnEvidence` node, and the evidence-to-View `MENTIONS` relationship is the automatic
-retention authority. Ordinary memory decay does not manage derived Views. Authorized evidence
-erasure instead retires dependent current Views, scrubs the erased UUID from retained history, and
-resets fold cursors in the same graph transaction; generic recall fails closed on any orphaned View.
-Activation remains blocked on schema/backfill coordination plus runtime publication-recovery,
-tombstone-key, and generic-repair-dispatch services.
-
 The original July frame described “one View node shape plus N folds.” Current code keeps the useful
 invariant—new capabilities should reuse the event-log/projection boundary and shared write/query
 infrastructure—but does not require every projection to share one physical Neo4j label or one value

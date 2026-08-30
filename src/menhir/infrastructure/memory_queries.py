@@ -9,13 +9,10 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import re
 from typing import Any
-from uuid import uuid4
 
 from menhir.domain.bootstrap_scope import bootstrap_selection, normalize_bootstrap_scope
-from menhir.domain.namespace import normalize_namespace, namespace_spellings, namespace_to_group_ids
-from menhir.domain.recall_visibility import default_recall_visibility_cypher
+from menhir.domain.namespace import namespace_spellings, namespace_to_group_ids
 from menhir.domain.structural_memory import non_structural_memory_cypher
 from menhir.domain.recall import adjacency_edge_pattern
 from menhir.infrastructure.cypher import (
@@ -35,34 +32,6 @@ ADMISSION_NEVER_LINKED = "never_linked"
 ADMISSION_LINKED = "linked"
 #: No turns captured, so there is nothing to pair and nothing to report.
 ADMISSION_NO_TURNS = "no_turns"
-
-_OPAQUE_DIGEST_PATTERN = re.compile(r"^[A-Za-z0-9_-]{32,256}$")
-_DIGEST_KEY_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
-
-
-def _validated_evidence_tombstone_params(
-    *, evidence_digest: str | None, digest_key_id: str | None
-) -> dict[str, str] | None:
-    """Validate an already-keyed opaque erasure identity without deriving one locally.
-
-    These repositories currently receive only the raw evidence identifier and have no HMAC
-    material or caller-supplied digest/key-id fields.  Returning ``None`` when both values are
-    absent keeps current public signatures compatible; supplying only one value, or a value that
-    is not an opaque token, fails closed.  A future service boundary may call this helper after it
-    computes the digest with managed key material.  This helper intentionally never accepts or
-    hashes the raw erased identifier.
-    """
-    digest = str(evidence_digest or "").strip()
-    key_id = str(digest_key_id or "").strip()
-    if not digest and not key_id:
-        return None
-    if not digest or not key_id:
-        raise ValueError("evidence tombstones require both an opaque digest and digest key id")
-    if _OPAQUE_DIGEST_PATTERN.fullmatch(digest) is None:
-        raise ValueError("evidence tombstone digest must be an opaque base64url/hex-like token")
-    if _DIGEST_KEY_ID_PATTERN.fullmatch(key_id) is None:
-        raise ValueError("evidence tombstone digest key id is invalid")
-    return {"evidence_digest": digest, "digest_key_id": key_id}
 
 
 def admission_provenance_state(*, turn_evidence_count: int, admission_edge_count: int) -> str:
@@ -184,11 +153,7 @@ class MemoryQueryRepository:
         """Return the most recently accessed or created memory nodes."""
 
         safe_limit = max(1, min(limit, 50))
-        where = [
-            "(n:Entity OR n:Episodic)",
-            non_structural_memory_cypher("n"),
-            default_recall_visibility_cypher("n"),
-        ]
+        where = ["(n:Entity OR n:Episodic)", non_structural_memory_cypher("n")]
         params: dict[str, Any] = {"limit": safe_limit}
         if namespace is not None and str(namespace).strip():
             where.append("coalesce(n.namespace, 'default') = $namespace")
@@ -220,8 +185,7 @@ class MemoryQueryRepository:
         where = ["(n:Entity OR n:Episodic)",
                  "coalesce(n.user_flagged, false) = true",
                  "n.bootstrap_scope IN $allowed_scopes",
-                 non_structural_memory_cypher("n"),
-                 default_recall_visibility_cypher("n")]
+                 non_structural_memory_cypher("n")]
         params: dict[str, Any] = {
             "limit": safe_limit,
             "allowed_scopes": allowed_scopes,
@@ -255,8 +219,7 @@ class MemoryQueryRepository:
         where = ["(n:Entity OR n:Episodic)",
                  "coalesce(n.user_flagged, false) = true",
                  "n.bootstrap_scope IN $allowed_scopes",
-                 non_structural_memory_cypher("n"),
-                 default_recall_visibility_cypher("n")]
+                 non_structural_memory_cypher("n")]
         params: dict[str, Any] = {"allowed_scopes": allowed_scopes}
         group_ids = namespace_to_group_ids(namespace)
         if group_ids is not None:
@@ -300,11 +263,7 @@ class MemoryQueryRepository:
         """Return memory nodes filtered by scope, optionally restricted to one namespace."""
 
         safe_limit = max(1, min(limit, 50))
-        where = [
-            "(n:Entity OR n:Episodic)",
-            "n.scope = $scope",
-            default_recall_visibility_cypher("n"),
-        ]
+        where = ["(n:Entity OR n:Episodic)", "n.scope = $scope"]
         params: dict[str, Any] = {"scope": scope, "limit": safe_limit}
         if namespace is not None and str(namespace).strip():
             where.append("coalesce(n.namespace, 'default') = $namespace")
@@ -324,7 +283,7 @@ class MemoryQueryRepository:
         """Return entity memories filtered by type, optionally restricted to one namespace."""
 
         safe_limit = max(1, min(limit, 50))
-        where = ["n.type = $memory_type", default_recall_visibility_cypher("n")]
+        where = ["n.type = $memory_type"]
         params: dict[str, Any] = {"memory_type": memory_type, "limit": safe_limit}
         if namespace is not None and str(namespace).strip():
             where.append("coalesce(n.namespace, 'default') = $namespace")
@@ -740,218 +699,8 @@ class MemoryQueryRepository:
         for every affected subject+namespace in the SAME Neo4j transaction as the deletion.  Thus a
         crash can delay View repair, but can never make the work undiscoverable (G15/G20).
         """
-        namespace_rows = self.neo4j.execute(
-            """
-            OPTIONAL MATCH (target)
-            WHERE ((target:Entity OR target:Episodic) AND target.uuid = $node_uuid)
-               OR (target:TurnEvidence AND target.turn_id = $node_uuid)
-               OR (target:TypedAssertion AND (
-                   target.assertion_id = $node_uuid
-                   OR target.episode_uuid = $node_uuid
-                   OR target.subject_uuid = $node_uuid
-               ))
-            WITH [target IN collect(DISTINCT target) WHERE target IS NOT NULL |
-                CASE
-                    WHEN trim(toString(coalesce(target.namespace, target.group_id, ''))) = ''
-                    THEN 'default'
-                    ELSE trim(toString(coalesce(target.namespace, target.group_id)))
-                END
-            ] AS keys
-            UNWIND CASE WHEN size(keys) = 0 THEN [null] ELSE keys END AS namespace_key
-            RETURN collect(DISTINCT namespace_key) AS namespace_keys
-            """,
-            params={"node_uuid": node_uuid},
-        )
-        namespace_keys = [
-            str(value) for value in (
-                namespace_rows[0].get("namespace_keys", []) if namespace_rows else []
-            ) if value is not None and str(value).strip()
-        ]
-        if not namespace_keys:
-            return self._empty_memory_erasure_result()
-        if len(namespace_keys) != 1:
-            raise RuntimeError(
-                "evidence erasure target resolves to multiple canonical namespaces; refusing "
-                "an unfenced cross-namespace mutation"
-            )
-        return self._delete_memory_with_scalar_cascade_in_namespace(
-            node_uuid,
-            operation_id=operation_id,
-            namespace_key=namespace_keys[0],
-        )
-
-    @staticmethod
-    def _empty_memory_erasure_result() -> dict[str, Any]:
-        return {
-            "touched": False,
-            "memory_touched": 0,
-            "assertions_deleted": 0,
-            "heads_deleted": 0,
-            "dependent_views_retired": 0,
-            "dependent_views_scrubbed": 0,
-            "view_repairs_created": 0,
-            "watermarks_reset": 0,
-            "repairs": [],
-        }
-
-    def _delete_memory_with_scalar_cascade_in_namespace(
-        self, node_uuid: str, *, operation_id: str, namespace_key: str
-    ) -> dict[str, Any]:
-        """Apply one erasure after locking and revalidating its preflight namespace."""
         rows = self.neo4j.execute(
             """
-            MERGE (f:EvidenceNamespaceFence {namespace_key: $namespace_key})
-            ON CREATE SET f.generation = 0, f.created_at = datetime()
-            SET f.lock_nonce = $operation_id, f.locked_at = datetime()
-            WITH f
-            OPTIONAL MATCH (target)
-            WHERE ((target:Entity OR target:Episodic) AND target.uuid = $node_uuid)
-               OR (target:TurnEvidence AND target.turn_id = $node_uuid)
-               OR (target:TypedAssertion AND (
-                   target.assertion_id = $node_uuid
-                   OR target.episode_uuid = $node_uuid
-                   OR target.subject_uuid = $node_uuid
-               ))
-            WITH f, [candidate IN collect(DISTINCT target) WHERE candidate IS NOT NULL |
-                CASE
-                    WHEN trim(toString(coalesce(candidate.namespace, candidate.group_id, ''))) = ''
-                    THEN 'default'
-                    ELSE trim(toString(coalesce(candidate.namespace, candidate.group_id)))
-                END
-            ] AS actual_namespace_keys
-            WHERE size(actual_namespace_keys) > 0
-              AND all(actual_key IN actual_namespace_keys WHERE actual_key = f.namespace_key)
-            WITH [f] AS fences
-            CALL {
-                WITH fences
-                OPTIONAL MATCH (v:Entity)
-                WHERE (coalesce(v.is_view, false)
-                       OR coalesce(v.is_quantstate, false)
-                       OR v.view_kind IS NOT NULL)
-                  AND (
-                      $node_uuid IN coalesce(v.episode_uuids, [])
-                      OR v.turn_evidence_uuid = $node_uuid
-                      OR EXISTS {
-                          MATCH (evidence)-[:MENTIONS]->(v)
-                          WHERE (evidence:Episodic AND evidence.uuid = $node_uuid)
-                             OR (evidence:TurnEvidence AND evidence.turn_id = $node_uuid)
-                      }
-                  )
-                WITH fences, collect(DISTINCT v) AS dependent_views
-                WITH fences, dependent_views,
-                     [v IN dependent_views
-                      WHERE coalesce(v.view_current, v.qs_current, true)
-                        AND NOT coalesce(v.retired, false)] AS current_views
-                FOREACH (v IN dependent_views |
-                    SET v.episode_uuids = [eid IN coalesce(v.episode_uuids, [])
-                                           WHERE eid <> $node_uuid],
-                        v.supporting_event_count = size([eid IN coalesce(v.episode_uuids, [])
-                                                         WHERE eid <> $node_uuid])
-                )
-                FOREACH (v IN [candidate IN dependent_views
-                               WHERE candidate.turn_evidence_uuid = $node_uuid] |
-                    REMOVE v.turn_evidence_uuid
-                )
-                FOREACH (v IN current_views |
-                    SET v.view_current = false,
-                        v.qs_current = false,
-                        v.retired = true,
-                        v.retired_reason = 'contributing_evidence_erased',
-                        v.expired_at = datetime(),
-                        v.last_accessed = datetime()
-                    REMOVE v.ss_view_key_current
-                )
-                WITH fences, dependent_views, current_views,
-                     [v IN current_views | {
-                         view: v,
-                         source_family: CASE
-                             WHEN v.view_kind IN ['scalar_state', 'scalar_history']
-                             THEN 'typed_scalar_assertions'
-                             WHEN v.view_kind = 'timeline' AND EXISTS {
-                                 MATCH (v)-[:EVENT_HISTORY_ENTRY]->(:TypedEventAssertion)
-                             }
-                             THEN 'typed_event_assertions'
-                             ELSE 'none'
-                         END,
-                         reconstructible: CASE
-                             WHEN v.view_kind IN ['scalar_state', 'scalar_history'] AND EXISTS {
-                                 MATCH (v)-[:CURRENT_ANCHOR|CONTRIBUTED_TO|HISTORY_ENTRY]
-                                       ->(source:TypedAssertion)
-                                 WHERE NOT (
-                                     source.assertion_id = $node_uuid
-                                     OR source.episode_uuid = $node_uuid
-                                     OR source.subject_uuid = $node_uuid
-                                     OR EXISTS {
-                                         MATCH (:Episodic {uuid: $node_uuid})-[:ADMITTED_ON]
-                                               ->(:TurnEvidence {turn_id: source.episode_uuid})
-                                     }
-                                 )
-                             }
-                             THEN true
-                             WHEN v.view_kind = 'timeline' AND EXISTS {
-                                 MATCH (v)-[:EVENT_HISTORY_ENTRY]->(source:TypedEventAssertion)
-                                 WHERE coalesce(source.episode_uuid, '') <> $node_uuid
-                                   AND coalesce(source.turn_evidence_uuid, '') <> $node_uuid
-                             }
-                             THEN true
-                             ELSE false
-                         END
-                     }] AS view_repairs
-                FOREACH (repair IN view_repairs |
-                    MERGE (rr:ViewProjectionRepair {
-                        repair_key: $operation_id + '\u001f' + repair.view.uuid
-                    })
-                    ON CREATE SET rr.operation_id = $operation_id,
-                                  rr.operation_kind = 'EVIDENCE_ERASURE',
-                                  rr.view_uuid = repair.view.uuid,
-                                  rr.view_key = coalesce(repair.view.view_key, repair.view.qs_key),
-                                  rr.view_kind = repair.view.view_kind,
-                                  rr.namespace = coalesce(
-                                      repair.view.namespace, repair.view.group_id, 'default'),
-                                  rr.namespace_key = head(fences).namespace_key,
-                                  rr.fence_generation = head(fences).generation,
-                                  rr.view_subtype = repair.view.view_subtype,
-                                  rr.subject_uuid = repair.view.view_subject_uuid,
-                                  rr.predicate = repair.view.view_predicate,
-                                  rr.domain = coalesce(repair.view.view_domain, ''),
-                                  rr.source_family = repair.source_family,
-                                  rr.reconstructible = repair.reconstructible,
-                                  rr.remaining_evidence_count = size(
-                                      coalesce(repair.view.episode_uuids, [])),
-                                  rr.status = CASE
-                                      WHEN repair.reconstructible THEN 'pending'
-                                      ELSE 'terminal_not_rebuildable'
-                                  END,
-                                  rr.terminal_reason = CASE
-                                      WHEN NOT repair.reconstructible
-                                      THEN 'not_rebuildable'
-                                      ELSE null
-                                  END,
-                                  rr.started_at = datetime()
-                )
-                WITH fences, dependent_views, current_views
-                CALL {
-                    WITH fences, dependent_views
-                    WITH [fence IN fences | fence.namespace_key]
-                         + [v IN dependent_views |
-                            coalesce(v.namespace, v.group_id, 'default')] AS namespaces
-                    UNWIND CASE WHEN size(namespaces) = 0
-                                THEN [null] ELSE namespaces END AS ns
-                    OPTIONAL MATCH (w)
-                    WHERE (w:ConsolidationWatermark OR w:ScalarConsolidationWatermark
-                           OR w:EventConsolidationWatermark)
-                      AND (coalesce(w.group_id, w.namespace, '') = ns
-                           OR (ns = 'default'
-                               AND coalesce(w.group_id, w.namespace, '') = ''))
-                    WITH collect(DISTINCT w) AS watermarks
-                    FOREACH (w IN watermarks | DETACH DELETE w)
-                    RETURN size([w IN watermarks WHERE w IS NOT NULL]) AS watermarks_reset
-                }
-                RETURN size(current_views) AS dependent_views_retired,
-                       size(dependent_views) AS dependent_views_scrubbed,
-                       size(current_views) AS view_repairs_created,
-                       watermarks_reset
-            }
             CALL {
                 MATCH (a:TypedAssertion)
                 WHERE a.assertion_id = $node_uuid
@@ -1024,29 +773,17 @@ class MemoryQueryRepository:
                 }
                 RETURN count(touched) AS memory_touched
             }
-            WITH repairs, source_keys, assertions_deleted, memory_touched,
-                 dependent_views_retired, dependent_views_scrubbed,
-                 view_repairs_created, watermarks_reset
+            WITH repairs, source_keys, assertions_deleted, memory_touched
             UNWIND CASE WHEN size(source_keys) = 0 THEN [null] ELSE source_keys END AS source_key
             OPTIONAL MATCH (h:TypedAssertionHead {source_key: source_key})
             WHERE source_key IS NOT NULL AND NOT (h)-[:HAS_VERSION]->(:TypedAssertion)
-            WITH repairs, assertions_deleted, memory_touched, collect(h) AS orphan_heads,
-                 dependent_views_retired, dependent_views_scrubbed,
-                 view_repairs_created, watermarks_reset
+            WITH repairs, assertions_deleted, memory_touched, collect(h) AS orphan_heads
             FOREACH (h IN orphan_heads | DETACH DELETE h)
             RETURN assertions_deleted, memory_touched, repairs,
-                   size([h IN orphan_heads WHERE h IS NOT NULL]) AS heads_deleted,
-                   dependent_views_retired, dependent_views_scrubbed,
-                   view_repairs_created, watermarks_reset
+                   size([h IN orphan_heads WHERE h IS NOT NULL]) AS heads_deleted
             """,
-            params={
-                "node_uuid": node_uuid,
-                "operation_id": operation_id,
-                "namespace_key": namespace_key,
-            },
+            params={"node_uuid": node_uuid, "operation_id": operation_id},
         )
-        if not rows:
-            return self._empty_memory_erasure_result()
         row = dict(rows[0]) if rows else {}
         return {
             "touched": bool(int(row.get("memory_touched", 0) or 0)
@@ -1054,19 +791,49 @@ class MemoryQueryRepository:
             "memory_touched": int(row.get("memory_touched", 0) or 0),
             "assertions_deleted": int(row.get("assertions_deleted", 0) or 0),
             "heads_deleted": int(row.get("heads_deleted", 0) or 0),
-            "dependent_views_retired": int(row.get("dependent_views_retired", 0) or 0),
-            "dependent_views_scrubbed": int(row.get("dependent_views_scrubbed", 0) or 0),
-            "view_repairs_created": int(row.get("view_repairs_created", 0) or 0),
-            "watermarks_reset": int(row.get("watermarks_reset", 0) or 0),
             "repairs": [dict(r) for r in (row.get("repairs") or [])],
         }
 
     def delete_memory(self, node_uuid: str) -> bool:
-        """Compatibility seam that cannot bypass View invalidation or repair journalling."""
-        result = self.delete_memory_with_scalar_cascade(
-            node_uuid, operation_id=uuid4().hex
+        """Legacy simple deletion seam; callers should use the scalar-cascading adapter method."""
+        rows = self.neo4j.execute(
+            """
+            MATCH (n)
+            WHERE (n:Entity OR n:Episodic) AND n.uuid = $node_uuid
+            CALL {
+                WITH n
+                WITH n WHERE n:Entity
+                DETACH DELETE n
+                RETURN 1 AS touched
+                UNION
+                WITH n
+                WITH n WHERE n:Episodic AND coalesce(n.processing_state, '') IN ['PENDING', 'ENRICHING']
+                SET n.processing_state = 'FAILED',
+                    n.processing_stage = 'failed',
+                    n.processing_substage = 'deleted_by_user',
+                    n.processing_substage_started_at = datetime(),
+                    n.processing_progress = coalesce(n.processing_progress, 100.0),
+                    n.processing_completed_at = datetime(),
+                    n.processing_owner = null,
+                    n.processing_lease_expires_at = null,
+                    n.processing_heartbeat_at = datetime(),
+                    n.processing_error = 'deleted_by_user',
+                    n.processing_llm_active_task = null,
+                    n.processing_llm_active_kind = null,
+                    n.processing_llm_active_model = null,
+                    n.processing_llm_active_endpoint = null
+                RETURN 1 AS touched
+                UNION
+                WITH n
+                WITH n WHERE n:Episodic AND NOT coalesce(n.processing_state, '') IN ['PENDING', 'ENRICHING']
+                DETACH DELETE n
+                RETURN 1 AS touched
+            }
+            RETURN count(*) AS nodes_deleted
+            """,
+            params={"node_uuid": node_uuid},
         )
-        return bool(result["touched"])
+        return bool(rows and int(rows[0].get("nodes_deleted", 0)) > 0)
 
     def delete_namespace_with_scalar_cascade(
         self, group_id: str, namespace: str, *, operation_id: str
@@ -1089,19 +856,10 @@ class MemoryQueryRepository:
         meant a crash in that window left raw prompts behind with no unresolved erasure row capable
         of resuming them. Folding the label into this MATCH makes its removal atomic with the rest
         of the partition, which is the only way that durability argument holds."""
-        namespace_key = normalize_namespace(namespace)
         rows = self.neo4j.execute(
             """
-            MERGE (f:EvidenceNamespaceFence {namespace_key: $namespace_key})
-            ON CREATE SET f.generation = 0, f.created_at = datetime()
-            SET f.lock_nonce = $operation_id,
-                f.locked_at = datetime(),
-                f.generation = coalesce(f.generation, 0) + 1,
-                f.last_reset_operation_id = $operation_id,
-                f.last_reset_at = datetime()
-            WITH f
             OPTIONAL MATCH (a:TypedAssertion {namespace: $namespace})
-            WITH f, collect(DISTINCT CASE WHEN a IS NULL THEN null ELSE {
+            WITH collect(DISTINCT CASE WHEN a IS NULL THEN null ELSE {
                      subject_uuid: a.subject_uuid,
                      namespace: a.namespace
                  } END) AS repairs
@@ -1117,8 +875,8 @@ class MemoryQueryRepository:
                               rr.subject_uuid = repair.subject_uuid,
                               rr.status = 'pending', rr.started_at = datetime()
             )
-            WITH f, repairs
-            OPTIONAL MATCH (n)
+            WITH repairs
+            MATCH (n)
             WHERE n.group_id = $group_id
                OR (n:Episodic AND n.namespace = $namespace)
                OR (n:TypedAssertion AND n.namespace = $namespace)
@@ -1132,146 +890,18 @@ class MemoryQueryRepository:
                                 WHERE ev.namespace = $namespace }
                    AND NOT EXISTS { MATCH (n)-[:HAS_VERSION]->(ev2:TypedEventAssertion)
                                     WHERE ev2.namespace <> $namespace })
-            WITH f, repairs, collect(DISTINCT n) AS doomed
-            WITH f, repairs, doomed,
-                 [n IN doomed WHERE coalesce(n.uuid, n.turn_id) IS NOT NULL |
-                    coalesce(n.uuid, n.turn_id)] AS doomed_uuids
-            OPTIONAL MATCH (v:Entity)
-            WHERE (coalesce(v.is_view, false)
-                   OR coalesce(v.is_quantstate, false)
-                   OR v.view_kind IS NOT NULL)
-              AND NOT v IN doomed
-              AND (
-                  any(eid IN coalesce(v.episode_uuids, []) WHERE eid IN doomed_uuids)
-                  OR v.turn_evidence_uuid IN doomed_uuids
-                  OR EXISTS {
-                      MATCH (evidence)-[:MENTIONS]->(v)
-                      WHERE evidence IN doomed
-                  }
-              )
-            WITH f, repairs, doomed, doomed_uuids,
-                 collect(DISTINCT v) AS dependent_views
-            WITH f, repairs, doomed, doomed_uuids, dependent_views,
-                 [v IN dependent_views
-                  WHERE coalesce(v.view_current, v.qs_current, true)
-                    AND NOT coalesce(v.retired, false)] AS current_views,
-                 [v IN dependent_views
-                  | coalesce(v.namespace, v.group_id, 'default')] AS dependent_namespaces
-            FOREACH (v IN dependent_views |
-                SET v.episode_uuids = [eid IN coalesce(v.episode_uuids, [])
-                                       WHERE NOT eid IN doomed_uuids],
-                    v.supporting_event_count = size([eid IN coalesce(v.episode_uuids, [])
-                                                     WHERE NOT eid IN doomed_uuids])
-            )
-            FOREACH (v IN [candidate IN dependent_views
-                           WHERE candidate.turn_evidence_uuid IN doomed_uuids] |
-                REMOVE v.turn_evidence_uuid
-            )
-            FOREACH (v IN current_views |
-                SET v.view_current = false,
-                    v.qs_current = false,
-                    v.retired = true,
-                    v.retired_reason = 'contributing_namespace_erased',
-                    v.expired_at = datetime(),
-                    v.last_accessed = datetime()
-                REMOVE v.ss_view_key_current
-            )
-            WITH f, repairs, doomed, doomed_uuids, dependent_views, current_views,
-                 dependent_namespaces,
-                 [v IN current_views | {
-                     view: v,
-                     source_family: CASE
-                         WHEN v.view_kind IN ['scalar_state', 'scalar_history']
-                         THEN 'typed_scalar_assertions'
-                         WHEN v.view_kind = 'timeline' AND EXISTS {
-                             MATCH (v)-[:EVENT_HISTORY_ENTRY]->(:TypedEventAssertion)
-                         }
-                         THEN 'typed_event_assertions'
-                         ELSE 'none'
-                     END,
-                     reconstructible: CASE
-                         WHEN v.view_kind IN ['scalar_state', 'scalar_history'] AND EXISTS {
-                             MATCH (v)-[:CURRENT_ANCHOR|CONTRIBUTED_TO|HISTORY_ENTRY]
-                                   ->(source:TypedAssertion)
-                             WHERE NOT source IN doomed
-                         }
-                         THEN true
-                         WHEN v.view_kind = 'timeline' AND EXISTS {
-                             MATCH (v)-[:EVENT_HISTORY_ENTRY]->(source:TypedEventAssertion)
-                             WHERE NOT source IN doomed
-                         }
-                         THEN true
-                         ELSE false
-                     END
-                 }] AS view_repairs
-            FOREACH (repair IN view_repairs |
-                MERGE (rr:ViewProjectionRepair {
-                    repair_key: $operation_id + '\u001f' + repair.view.uuid
-                })
-                ON CREATE SET rr.operation_id = $operation_id,
-                              rr.operation_kind = 'NAMESPACE_ERASURE',
-                              rr.view_uuid = repair.view.uuid,
-                              rr.view_key = coalesce(repair.view.view_key, repair.view.qs_key),
-                              rr.view_kind = repair.view.view_kind,
-                              rr.namespace = coalesce(
-                                  repair.view.namespace, repair.view.group_id, 'default'),
-                              rr.namespace_key = f.namespace_key,
-                              rr.fence_generation = f.generation,
-                              rr.view_subtype = repair.view.view_subtype,
-                              rr.subject_uuid = repair.view.view_subject_uuid,
-                              rr.predicate = repair.view.view_predicate,
-                              rr.domain = coalesce(repair.view.view_domain, ''),
-                              rr.source_family = repair.source_family,
-                              rr.reconstructible = repair.reconstructible,
-                              rr.remaining_evidence_count = size(
-                                  coalesce(repair.view.episode_uuids, [])),
-                              rr.status = CASE
-                                  WHEN repair.reconstructible THEN 'pending'
-                                  ELSE 'terminal_not_rebuildable'
-                              END,
-                              rr.terminal_reason = CASE
-                                  WHEN NOT repair.reconstructible
-                                  THEN 'not_rebuildable'
-                                  ELSE null
-                              END,
-                              rr.started_at = datetime()
-            )
-            WITH f, repairs, doomed, dependent_views, current_views,
-                 dependent_namespaces
-            CALL {
-                WITH f, dependent_namespaces
-                WITH [f.namespace_key] + dependent_namespaces AS namespaces
-                UNWIND namespaces AS ns
-                OPTIONAL MATCH (w)
-                WHERE (w:ConsolidationWatermark OR w:ScalarConsolidationWatermark
-                       OR w:EventConsolidationWatermark)
-                  AND (coalesce(w.group_id, w.namespace, '') = ns
-                       OR (ns = 'default'
-                           AND coalesce(w.group_id, w.namespace, '') = ''))
-                WITH collect(DISTINCT w) AS watermarks
-                FOREACH (w IN watermarks | DETACH DELETE w)
-                RETURN size([w IN watermarks WHERE w IS NOT NULL]) AS watermarks_reset
-            }
+            WITH repairs, collect(DISTINCT n) AS doomed
             FOREACH (n IN doomed | DETACH DELETE n)
-            RETURN size(doomed) AS deleted, repairs,
-                   size(current_views) AS dependent_views_retired,
-                   size(dependent_views) AS dependent_views_scrubbed,
-                   size(current_views) AS view_repairs_created,
-                   watermarks_reset
+            RETURN size(doomed) AS deleted, repairs
             """,
             params={
                 "group_id": group_id,
                 "namespace": namespace,
-                "namespace_key": namespace_key,
                 "operation_id": operation_id,
             },
         )
         row = dict(rows[0]) if rows else {}
         return {
             "deleted": int(row.get("deleted", 0) or 0),
-            "dependent_views_retired": int(row.get("dependent_views_retired", 0) or 0),
-            "dependent_views_scrubbed": int(row.get("dependent_views_scrubbed", 0) or 0),
-            "view_repairs_created": int(row.get("view_repairs_created", 0) or 0),
-            "watermarks_reset": int(row.get("watermarks_reset", 0) or 0),
             "repairs": [dict(r) for r in (row.get("repairs") or [])],
         }

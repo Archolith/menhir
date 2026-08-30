@@ -244,8 +244,6 @@ class _FakeNeo4j:
 
     def execute(self, query: str, params: dict | None = None, **_kwargs):
         self.calls.append((query, params or {}))
-        if "CREATE (n:" in query:
-            return [{"uuid": (params or {})["uuid"]}]
         return []  # _current_by_key -> None -> CREATE
 
     def create_extra(self) -> dict:
@@ -335,11 +333,6 @@ class _UnchangedSigNeo4j:
         # _current_by_key: report an existing current version with a matching signature.
         if "coalesce(n.view_current, n.qs_current, true)" in query:
             return [{"uuid": "cur-1", "sig": self._sig, "valid_at": "2026-07-01T00:00:00+00:00"}]
-        if "RETURN present" in query:
-            return [{"present": list((params or {}).get("eps", []))}]
-        if "RETURN uuids AS stored, present" in query:
-            eps = list((params or {}).get("eps", []))
-            return [{"stored": eps, "present": eps}]
         return []
 
     def refresh_dict(self):
@@ -394,13 +387,11 @@ def test_same_signature_replaces_provenance_not_union():
     q, p = fake.replace_call()
     assert p["eps"] == ["ep-new"]                                    # exact replacement set
     assert "n.supporting_event_count = size($eps)" in q             # count = exact length
-    assert "WHERE NOT coalesce(old.uuid, old.turn_id) IN $eps" in q  # prune either evidence label
-    assert "DELETE m" in q                                         # prune stale MENTIONS (ep-old)
+    assert "WHERE NOT old.uuid IN $eps" in q and "DELETE m" in q    # prune stale MENTIONS (ep-old)
     assert "MERGE (e)-[:MENTIONS]->(n)" in q                        # link the new set
     assert p["refresh"]["scalar_contributors"] == ["a-new"]         # refreshed contributor snapshot
-    # Union assignment must NOT appear on this path. The lifecycle guard may still read the old
-    # receipt to verify that its incoming MENTIONS set is exact before replacing it.
-    assert "SET n.episode_uuids = uuids" not in q
+    # union behavior must NOT appear on this path
+    assert "coalesce(n.episode_uuids, [])" not in q
 
 
 class _LwwFakeNeo4j:
@@ -415,8 +406,6 @@ class _LwwFakeNeo4j:
         self.calls.append((query, params or {}))
         if "coalesce(n.view_current, n.qs_current, true)" in query:  # _current_by_key
             return [self.current] if self.current else []
-        if "CREATE (n:" in query:
-            return [{"uuid": (params or {})["uuid"]}]
         return []
 
     def created(self) -> bool:
@@ -504,101 +493,3 @@ def test_list_and_retire_scalar_state_queries():
     assert repo2.retire_scalar_state(view_key="vk") is True
     rq = repo2.neo4j.calls[-1][0]
     assert "n.view_current = false" in rq and "n.retired = true" in rq
-
-
-@pytest.mark.unit
-def test_direct_current_getter_returns_ineligible_view_for_inspection():
-    class _InspectNeo4j:
-        def __init__(self):
-            self.query = ""
-
-        def execute(self, query, params=None):
-            self.query = query
-            return [{
-                "uuid": "counter-operator", "subject": "ops", "counter": "denials",
-                "value": 2.0, "valid_at": "2026-08-28T00:00:00Z",
-                "recall_eligible": False,
-            }]
-
-    neo4j = _InspectNeo4j()
-    row = ViewRepository(neo4j).fetch_counter(subject="ops", counter="denials")
-
-    assert row is not None
-    assert row["uuid"] == "counter-operator"
-    assert row["recall_eligible"] is False
-    # Eligibility is projected as status, never inserted into the authoritative getter's WHERE.
-    where_clause = neo4j.query.split("RETURN", 1)[0]
-    assert "view_audience" not in where_clause
-    assert "MENTIONS" not in where_clause
-
-
-class _CaptureScalarHistoryRecord(ViewRepository):
-    def __init__(self):
-        self.recorded: list[tuple[str, dict]] = []
-
-    def record(self, kind_name, **kwargs):
-        self.recorded.append((kind_name, kwargs))
-        return {"uuid": "history-1", "view_key": "history-key"}
-
-
-def _record_history(repo: _CaptureScalarHistoryRecord, **overrides):
-    kwargs = {
-        "subject": "user", "subject_uuid": "subject-1", "attribute": "postcards",
-        "scope": "collection", "value_kind": "count", "unit": "cards", "entries": [],
-        "history_signature": "sig", "operation_counts": {"delta": 1}, "entry_count": 1,
-        "first_valid_at": "2026-08-01T00:00:00Z",
-        "last_valid_at": "2026-08-02T00:00:00Z",
-    }
-    kwargs.update(overrides)
-    return repo.record_scalar_history(**kwargs)
-
-
-@pytest.mark.unit
-def test_scalar_history_writer_requires_explicit_recallable_signal():
-    default_repo = _CaptureScalarHistoryRecord()
-    enabled_repo = _CaptureScalarHistoryRecord()
-
-    _record_history(default_repo)
-    _record_history(enabled_repo, recallable=True)
-
-    assert default_repo.recorded[0][0] == "scalar_history"
-    assert default_repo.recorded[0][1]["recallable"] is False
-    assert enabled_repo.recorded[0][1]["recallable"] is True
-
-
-class _CaptureViewListing:
-    def __init__(self):
-        self.query = ""
-        self.params: dict = {}
-
-    def execute(self, query, params=None):
-        self.query = query
-        self.params = params or {}
-        return []
-
-
-@pytest.mark.unit
-def test_generic_view_listing_defaults_to_exact_recall_visibility():
-    neo4j = _CaptureViewListing()
-
-    ViewRepository(neo4j).list_views(kind="timeline", namespace="tenant-1")
-
-    assert "n.view_class = 'FACT'" in neo4j.query
-    assert "n.view_audience = 'RECALL'" in neo4j.query
-    assert "coalesce(n.view_current, n.qs_current, false)" in neo4j.query
-    assert "NOT coalesce(n.retired, false)" in neo4j.query
-    assert "MATCH (e)-[:MENTIONS]->(n)" in neo4j.query
-    assert "COUNT { MATCH ()-[:MENTIONS]->(n) }" in neo4j.query
-    assert neo4j.params == {"kind": "timeline", "ns": "tenant-1", "limit": 100}
-
-
-@pytest.mark.unit
-def test_operator_view_listing_requires_explicit_opt_in():
-    neo4j = _CaptureViewListing()
-
-    ViewRepository(neo4j).list_views(include_operator=True)
-
-    assert "n.view_audience IN ['RECALL', 'OPERATOR']" in neo4j.query
-    assert "coalesce(n.view_current, n.qs_current, false)" in neo4j.query
-    assert "NOT coalesce(n.retired, false)" in neo4j.query
-    assert "MATCH (e)-[:MENTIONS]->(n)" not in neo4j.query
