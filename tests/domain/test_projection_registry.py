@@ -171,6 +171,52 @@ def test_projection_output_order_is_target_stable():
 
 
 @pytest.mark.unit
+def test_projection_output_order_distinguishes_unscoped_and_named_namespaces():
+    base = _ownership_definition()
+
+    def target(row):
+        assert isinstance(row, dict)
+        return ProjectionTarget(
+            subject_id=str(row["parcel"]),
+            namespace=row.get("namespace"),
+            key=("current_owner",),
+        )
+
+    definition = ProjectionDefinition(
+        definition_id=base.definition_id,
+        version=base.version,
+        input_assertion_types=base.input_assertion_types,
+        output_view_kind=base.output_view_kind,
+        assertion_id_resolver=base.assertion_id_resolver,
+        assertion_type_resolver=base.assertion_type_resolver,
+        target_resolver=target,
+        fold=base.fold,
+    )
+    rows = [
+        {
+            "id": "named",
+            "type": "investigation.deed_owner",
+            "parcel": "parcel-1",
+            "owner": "Alice",
+            "namespace": "default",
+        },
+        {
+            "id": "unscoped",
+            "type": "investigation.deed_owner",
+            "parcel": "parcel-1",
+            "owner": "Alice",
+            "namespace": None,
+        },
+    ]
+
+    forward = evaluate_projection(definition, rows)
+    reverse = evaluate_projection(definition, list(reversed(rows)))
+
+    assert forward == reverse
+    assert tuple(outcome.target.namespace for outcome in forward) == (None, "default")
+
+
+@pytest.mark.unit
 def test_duplicate_definition_and_assertion_ids_fail_closed():
     definition = _ownership_definition()
     with pytest.raises(ValueError, match="duplicate projection definition_id"):
@@ -252,6 +298,9 @@ def test_fold_cannot_forge_output_kind_target_or_lineage():
 
 @pytest.mark.unit
 def test_definition_metadata_is_validated_without_interpreting_names():
+    with pytest.raises(ValueError, match="namespace"):
+        ProjectionTarget(subject_id="subject", namespace="")
+
     with pytest.raises(ValueError, match="version"):
         ProjectionDefinition(
             definition_id="x",

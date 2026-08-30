@@ -38,14 +38,22 @@ class ProjectionTarget:
     def __post_init__(self) -> None:
         if not isinstance(self.subject_id, str) or not self.subject_id.strip():
             raise ValueError("ProjectionTarget.subject_id must be non-blank")
-        if self.namespace is not None and not isinstance(self.namespace, str):
-            raise TypeError("ProjectionTarget.namespace must be a string or None")
+        if self.namespace is not None:
+            if not isinstance(self.namespace, str):
+                raise TypeError("ProjectionTarget.namespace must be a string or None")
+            if not self.namespace.strip():
+                raise ValueError("ProjectionTarget.namespace must be non-blank when provided")
         if not isinstance(self.key, tuple) or any(not isinstance(part, str) for part in self.key):
             raise TypeError("ProjectionTarget.key must be a tuple of strings")
 
     @property
-    def sort_key(self) -> tuple[str, str, tuple[str, ...]]:
-        return (self.namespace or "", self.subject_id, self.key)
+    def sort_key(self) -> tuple[int, str, str, tuple[str, ...]]:
+        return (
+            0 if self.namespace is None else 1,
+            self.namespace or "",
+            self.subject_id,
+            self.key,
+        )
 
 
 @dataclass(frozen=True)

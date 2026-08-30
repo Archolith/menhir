@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
+from menhir.domain.namespace import normalize_namespace
 from menhir.domain.projection import (
     ProjectionAbstention,
     ProjectionDefinition,
@@ -46,7 +47,7 @@ def _target(assertion: object) -> ProjectionTarget:
     row = _row(assertion)
     return ProjectionTarget(
         subject_id=str(row.get("subject_uuid") or ""),
-        namespace=(str(row["namespace"]) if row.get("namespace") is not None else None),
+        namespace=normalize_namespace(row.get("namespace")),
         key=(
             str(row.get("attribute") or "").strip().lower(),
             str(row.get("scope") or "").strip().lower(),

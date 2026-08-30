@@ -173,3 +173,19 @@ def test_scalar_definition_accepts_all_existing_operation_families_without_core_
     )
     assert SCALAR_STATE_PROJECTION.output_view_kind == "scalar_state"
     assert SCALAR_STATE_PROJECTION.definition_id == "typed_scalar.current_state"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("namespace", [None, "", "default"])
+def test_scalar_projection_canonicalizes_default_namespace_spellings(namespace):
+    row = _row(
+        "anchor",
+        operation="absolute",
+        value=10,
+        valid_at="2026-01-01T00:00:00+00:00",
+        namespace=namespace,
+    )
+
+    outcome = evaluate_projection(SCALAR_STATE_PROJECTION, [row])[0]
+
+    assert outcome.target.namespace == "default"
