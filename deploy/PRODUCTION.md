@@ -164,6 +164,10 @@ scan and publish that image, and pass its immutable registry digest as
 pins both the upstream image and upgraded OpenSSL package versions; the final
 base-image digest and its scan are part of the release authority.
 
+Build, scan, and publish `deploy/neo4j-base.Dockerfile` the same way and use
+that output digest for `NEO4J_IMAGE`. It preserves the reviewed Neo4j release
+while applying every OS-package security fix available at release time.
+
 ```bash
 export MENHIR_IMAGE="<registry>/menhir:<version>@sha256:<digest>"
 export NEO4J_IMAGE="neo4j:5-community@sha256:<digest>"
