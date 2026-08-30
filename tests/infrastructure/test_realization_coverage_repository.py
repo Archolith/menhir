@@ -129,6 +129,26 @@ def test_scalar_hash_reflects_actual_installed_state_not_expected_membership() -
 
 
 @pytest.mark.unit
+def test_scalar_hash_maps_default_namespace_through_canonical_tenant_scope() -> None:
+    target = ProjectionTarget(
+        namespace="default",
+        subject_id="entity-1",
+        key=("height", "", "number", "cm"),
+    )
+    fake = ScriptedNeo4j([[]])
+
+    ScalarStateProjectionHashSource(fake).current_projection_hash(
+        definition=SCALAR_STATE_PROJECTION,
+        target=target,
+        target_present=True,
+    )
+
+    query, params = fake.calls[0]
+    assert "tenant_namespaces" in query
+    assert params["tenant_namespaces"] == ["default", ""]
+
+
+@pytest.mark.unit
 def test_scalar_hash_has_distinct_canonical_absent_state() -> None:
     target = _target()
     source = ScalarStateProjectionHashSource(ScriptedNeo4j([[], []]))

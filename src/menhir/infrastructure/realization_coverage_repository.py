@@ -10,6 +10,7 @@ import hashlib
 import json
 from typing import Any
 
+from menhir.domain.namespace import tenant_scope_cypher, tenant_scope_params
 from menhir.domain.projection import ProjectionDefinition, ProjectionTarget
 from menhir.domain.projection_lifecycle import (
     ProjectionFreshnessAssessment,
@@ -39,7 +40,12 @@ def _target_from_json(raw: object) -> ProjectionTarget:
         raise ProjectionLifecycleCorruptionError("persisted realization subject_id is invalid")
     if not isinstance(key, list) or any(not isinstance(part, str) for part in key):
         raise ProjectionLifecycleCorruptionError("persisted realization target key is invalid")
-    return ProjectionTarget(namespace=namespace, subject_id=subject_id, key=tuple(key))
+    try:
+        return ProjectionTarget(namespace=namespace, subject_id=subject_id, key=tuple(key))
+    except (TypeError, ValueError) as exc:
+        raise ProjectionLifecycleCorruptionError(
+            "persisted realization target does not satisfy ProjectionTarget"
+        ) from exc
 
 
 class RealizationLifecycleRepository:
@@ -167,13 +173,13 @@ class ScalarStateProjectionHashSource:
             raise ValueError("scalar-state projection target key must contain four slot parts")
         attribute, scope, value_kind, unit = target.key
         rows = self._neo4j.execute(
-            """
-            MATCH (n:Entity {view_kind:'scalar_state', view_subject_uuid:$subject_uuid,
-                             ss_attribute:$attribute, ss_kind:$value_kind})
+            f"""
+            MATCH (n:Entity {{view_kind:'scalar_state', view_subject_uuid:$subject_uuid,
+                             ss_attribute:$attribute, ss_kind:$value_kind}})
             WHERE coalesce(n.view_current, true)
               AND coalesce(n.ss_scope, '') = $scope
               AND coalesce(n.ss_unit, '') = $unit
-              AND ((n.group_id IS NULL AND $namespace IS NULL) OR n.group_id = $namespace)
+              AND {tenant_scope_cypher("n")}
             RETURN n.ss_value AS value,
                    toString(n.valid_at) AS valid_at,
                    coalesce(n.scalar_contributors, []) AS scalar_contributors,
@@ -186,7 +192,7 @@ class ScalarStateProjectionHashSource:
                 "scope": scope,
                 "value_kind": value_kind,
                 "unit": unit,
-                "namespace": target.namespace,
+                **tenant_scope_params(target.namespace),
             },
         )
         if len(rows) > 1:
