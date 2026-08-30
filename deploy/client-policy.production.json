@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "canonical_digest": "55d8ffca9f82c9b98945973e73aaa08e8778abd96b6e3b9737ec988112ff722e",
+  "canonical_digest": "e62a46ec2582208eb6f80116c86cb473371b039fa9dc1892048b0c319e851571",
   "clients": {
     "69c2cd871b488ff4": {
       "label": "chatgpt-chat",
@@ -163,19 +163,16 @@
       "namespace": "",
       "allowed_tools": [
         "add_memory",
-        "add_memory_and_track",
         "build_context",
-        "get_client_context",
-        "get_enrichment_status",
-        "get_memory_stats",
+        "list_todos",
         "query_structure",
         "read_flagged_memories",
         "recall_context_memories",
-        "recall_memories",
-        "watch_enrichment"
+        "recall_memories"
       ],
       "denied_tools": [
         "add_candidate",
+        "add_memory_and_track",
         "add_todo",
         "audit_artifact_corpus",
         "close_memory",
@@ -189,7 +186,10 @@
         "force_scheduler_takeover",
         "get_artifact",
         "get_artifact_relationships",
+        "get_client_context",
+        "get_enrichment_status",
         "get_episode_trace",
+        "get_memory_stats",
         "get_provenance",
         "get_todo",
         "ingest_document",
@@ -200,7 +200,6 @@
         "list_clients",
         "list_conflicts",
         "list_enrichment_queue",
-        "list_todos",
         "mint_client",
         "pause_scheduler",
         "promote_memory",
@@ -217,9 +216,9 @@
         "supersede_artifact",
         "transition_artifact",
         "unflag_memory",
-        "view_entropy"
-      ],
-      "consent_group": "agent-smith"
+        "view_entropy",
+        "watch_enrichment"
+      ]
     },
     "https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client=codex": {
       "label": "agent-smith-codex",
@@ -233,14 +232,11 @@
         "add_memory",
         "add_memory_and_track",
         "build_context",
-        "get_client_context",
-        "get_enrichment_status",
-        "get_memory_stats",
+        "list_todos",
         "query_structure",
         "read_flagged_memories",
         "recall_context_memories",
-        "recall_memories",
-        "watch_enrichment"
+        "recall_memories"
       ],
       "denied_tools": [
         "add_candidate",
@@ -257,7 +253,10 @@
         "force_scheduler_takeover",
         "get_artifact",
         "get_artifact_relationships",
+        "get_client_context",
+        "get_enrichment_status",
         "get_episode_trace",
+        "get_memory_stats",
         "get_provenance",
         "get_todo",
         "ingest_document",
@@ -268,7 +267,6 @@
         "list_clients",
         "list_conflicts",
         "list_enrichment_queue",
-        "list_todos",
         "mint_client",
         "pause_scheduler",
         "promote_memory",
@@ -285,9 +283,9 @@
         "supersede_artifact",
         "transition_artifact",
         "unflag_memory",
-        "view_entropy"
-      ],
-      "consent_group": "agent-smith"
+        "view_entropy",
+        "watch_enrichment"
+      ]
     },
     "https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client=gemini": {
       "label": "agent-smith-gemini",
@@ -299,19 +297,16 @@
       "namespace": "",
       "allowed_tools": [
         "add_memory",
-        "add_memory_and_track",
         "build_context",
-        "get_client_context",
-        "get_enrichment_status",
-        "get_memory_stats",
+        "list_todos",
         "query_structure",
         "read_flagged_memories",
         "recall_context_memories",
-        "recall_memories",
-        "watch_enrichment"
+        "recall_memories"
       ],
       "denied_tools": [
         "add_candidate",
+        "add_memory_and_track",
         "add_todo",
         "audit_artifact_corpus",
         "close_memory",
@@ -325,7 +320,10 @@
         "force_scheduler_takeover",
         "get_artifact",
         "get_artifact_relationships",
+        "get_client_context",
+        "get_enrichment_status",
         "get_episode_trace",
+        "get_memory_stats",
         "get_provenance",
         "get_todo",
         "ingest_document",
@@ -336,7 +334,6 @@
         "list_clients",
         "list_conflicts",
         "list_enrichment_queue",
-        "list_todos",
         "mint_client",
         "pause_scheduler",
         "promote_memory",
@@ -353,9 +350,9 @@
         "supersede_artifact",
         "transition_artifact",
         "unflag_memory",
-        "view_entropy"
-      ],
-      "consent_group": "agent-smith"
+        "view_entropy",
+        "watch_enrichment"
+      ]
     },
     "https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client=antigravity-ide": {
       "label": "agent-smith-antigravity-ide",
@@ -367,19 +364,16 @@
       "namespace": "",
       "allowed_tools": [
         "add_memory",
-        "add_memory_and_track",
         "build_context",
-        "get_client_context",
-        "get_enrichment_status",
-        "get_memory_stats",
+        "list_todos",
         "query_structure",
         "read_flagged_memories",
         "recall_context_memories",
-        "recall_memories",
-        "watch_enrichment"
+        "recall_memories"
       ],
       "denied_tools": [
         "add_candidate",
+        "add_memory_and_track",
         "add_todo",
         "audit_artifact_corpus",
         "close_memory",
@@ -393,7 +387,10 @@
         "force_scheduler_takeover",
         "get_artifact",
         "get_artifact_relationships",
+        "get_client_context",
+        "get_enrichment_status",
         "get_episode_trace",
+        "get_memory_stats",
         "get_provenance",
         "get_todo",
         "ingest_document",
@@ -404,7 +401,6 @@
         "list_clients",
         "list_conflicts",
         "list_enrichment_queue",
-        "list_todos",
         "mint_client",
         "pause_scheduler",
         "promote_memory",
@@ -421,9 +417,9 @@
         "supersede_artifact",
         "transition_artifact",
         "unflag_memory",
-        "view_entropy"
-      ],
-      "consent_group": "agent-smith"
+        "view_entropy",
+        "watch_enrichment"
+      ]
     },
     "https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client=gemini-config": {
       "label": "agent-smith-gemini-config",
@@ -435,19 +431,16 @@
       "namespace": "",
       "allowed_tools": [
         "add_memory",
-        "add_memory_and_track",
         "build_context",
-        "get_client_context",
-        "get_enrichment_status",
-        "get_memory_stats",
+        "list_todos",
         "query_structure",
         "read_flagged_memories",
         "recall_context_memories",
-        "recall_memories",
-        "watch_enrichment"
+        "recall_memories"
       ],
       "denied_tools": [
         "add_candidate",
+        "add_memory_and_track",
         "add_todo",
         "audit_artifact_corpus",
         "close_memory",
@@ -461,7 +454,10 @@
         "force_scheduler_takeover",
         "get_artifact",
         "get_artifact_relationships",
+        "get_client_context",
+        "get_enrichment_status",
         "get_episode_trace",
+        "get_memory_stats",
         "get_provenance",
         "get_todo",
         "ingest_document",
@@ -472,7 +468,6 @@
         "list_clients",
         "list_conflicts",
         "list_enrichment_queue",
-        "list_todos",
         "mint_client",
         "pause_scheduler",
         "promote_memory",
@@ -489,9 +484,9 @@
         "supersede_artifact",
         "transition_artifact",
         "unflag_memory",
-        "view_entropy"
-      ],
-      "consent_group": "agent-smith"
+        "view_entropy",
+        "watch_enrichment"
+      ]
     },
     "https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client=opencode": {
       "label": "agent-smith-opencode",
@@ -503,19 +498,16 @@
       "namespace": "",
       "allowed_tools": [
         "add_memory",
-        "add_memory_and_track",
         "build_context",
-        "get_client_context",
-        "get_enrichment_status",
-        "get_memory_stats",
+        "list_todos",
         "query_structure",
         "read_flagged_memories",
         "recall_context_memories",
-        "recall_memories",
-        "watch_enrichment"
+        "recall_memories"
       ],
       "denied_tools": [
         "add_candidate",
+        "add_memory_and_track",
         "add_todo",
         "audit_artifact_corpus",
         "close_memory",
@@ -529,7 +521,10 @@
         "force_scheduler_takeover",
         "get_artifact",
         "get_artifact_relationships",
+        "get_client_context",
+        "get_enrichment_status",
         "get_episode_trace",
+        "get_memory_stats",
         "get_provenance",
         "get_todo",
         "ingest_document",
@@ -540,7 +535,6 @@
         "list_clients",
         "list_conflicts",
         "list_enrichment_queue",
-        "list_todos",
         "mint_client",
         "pause_scheduler",
         "promote_memory",
@@ -557,9 +551,9 @@
         "supersede_artifact",
         "transition_artifact",
         "unflag_memory",
-        "view_entropy"
-      ],
-      "consent_group": "agent-smith"
+        "view_entropy",
+        "watch_enrichment"
+      ]
     },
     "https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client=qwen": {
       "label": "agent-smith-qwen",
@@ -571,19 +565,16 @@
       "namespace": "",
       "allowed_tools": [
         "add_memory",
-        "add_memory_and_track",
         "build_context",
-        "get_client_context",
-        "get_enrichment_status",
-        "get_memory_stats",
+        "list_todos",
         "query_structure",
         "read_flagged_memories",
         "recall_context_memories",
-        "recall_memories",
-        "watch_enrichment"
+        "recall_memories"
       ],
       "denied_tools": [
         "add_candidate",
+        "add_memory_and_track",
         "add_todo",
         "audit_artifact_corpus",
         "close_memory",
@@ -597,7 +588,10 @@
         "force_scheduler_takeover",
         "get_artifact",
         "get_artifact_relationships",
+        "get_client_context",
+        "get_enrichment_status",
         "get_episode_trace",
+        "get_memory_stats",
         "get_provenance",
         "get_todo",
         "ingest_document",
@@ -608,7 +602,6 @@
         "list_clients",
         "list_conflicts",
         "list_enrichment_queue",
-        "list_todos",
         "mint_client",
         "pause_scheduler",
         "promote_memory",
@@ -625,9 +618,9 @@
         "supersede_artifact",
         "transition_artifact",
         "unflag_memory",
-        "view_entropy"
-      ],
-      "consent_group": "agent-smith"
+        "view_entropy",
+        "watch_enrichment"
+      ]
     },
     "https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client=goose": {
       "label": "agent-smith-goose",
@@ -639,19 +632,16 @@
       "namespace": "",
       "allowed_tools": [
         "add_memory",
-        "add_memory_and_track",
         "build_context",
-        "get_client_context",
-        "get_enrichment_status",
-        "get_memory_stats",
+        "list_todos",
         "query_structure",
         "read_flagged_memories",
         "recall_context_memories",
-        "recall_memories",
-        "watch_enrichment"
+        "recall_memories"
       ],
       "denied_tools": [
         "add_candidate",
+        "add_memory_and_track",
         "add_todo",
         "audit_artifact_corpus",
         "close_memory",
@@ -665,7 +655,10 @@
         "force_scheduler_takeover",
         "get_artifact",
         "get_artifact_relationships",
+        "get_client_context",
+        "get_enrichment_status",
         "get_episode_trace",
+        "get_memory_stats",
         "get_provenance",
         "get_todo",
         "ingest_document",
@@ -676,7 +669,6 @@
         "list_clients",
         "list_conflicts",
         "list_enrichment_queue",
-        "list_todos",
         "mint_client",
         "pause_scheduler",
         "promote_memory",
@@ -693,9 +685,9 @@
         "supersede_artifact",
         "transition_artifact",
         "unflag_memory",
-        "view_entropy"
-      ],
-      "consent_group": "agent-smith"
+        "view_entropy",
+        "watch_enrichment"
+      ]
     },
     "https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client=zcode": {
       "label": "agent-smith-zcode",
@@ -707,19 +699,16 @@
       "namespace": "",
       "allowed_tools": [
         "add_memory",
-        "add_memory_and_track",
         "build_context",
-        "get_client_context",
-        "get_enrichment_status",
-        "get_memory_stats",
+        "list_todos",
         "query_structure",
         "read_flagged_memories",
         "recall_context_memories",
-        "recall_memories",
-        "watch_enrichment"
+        "recall_memories"
       ],
       "denied_tools": [
         "add_candidate",
+        "add_memory_and_track",
         "add_todo",
         "audit_artifact_corpus",
         "close_memory",
@@ -733,7 +722,10 @@
         "force_scheduler_takeover",
         "get_artifact",
         "get_artifact_relationships",
+        "get_client_context",
+        "get_enrichment_status",
         "get_episode_trace",
+        "get_memory_stats",
         "get_provenance",
         "get_todo",
         "ingest_document",
@@ -744,7 +736,6 @@
         "list_clients",
         "list_conflicts",
         "list_enrichment_queue",
-        "list_todos",
         "mint_client",
         "pause_scheduler",
         "promote_memory",
@@ -761,9 +752,9 @@
         "supersede_artifact",
         "transition_artifact",
         "unflag_memory",
-        "view_entropy"
-      ],
-      "consent_group": "agent-smith"
+        "view_entropy",
+        "watch_enrichment"
+      ]
     },
     "https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client=cline": {
       "label": "agent-smith-cline",
@@ -775,19 +766,16 @@
       "namespace": "",
       "allowed_tools": [
         "add_memory",
-        "add_memory_and_track",
         "build_context",
-        "get_client_context",
-        "get_enrichment_status",
-        "get_memory_stats",
+        "list_todos",
         "query_structure",
         "read_flagged_memories",
         "recall_context_memories",
-        "recall_memories",
-        "watch_enrichment"
+        "recall_memories"
       ],
       "denied_tools": [
         "add_candidate",
+        "add_memory_and_track",
         "add_todo",
         "audit_artifact_corpus",
         "close_memory",
@@ -801,7 +789,10 @@
         "force_scheduler_takeover",
         "get_artifact",
         "get_artifact_relationships",
+        "get_client_context",
+        "get_enrichment_status",
         "get_episode_trace",
+        "get_memory_stats",
         "get_provenance",
         "get_todo",
         "ingest_document",
@@ -812,7 +803,6 @@
         "list_clients",
         "list_conflicts",
         "list_enrichment_queue",
-        "list_todos",
         "mint_client",
         "pause_scheduler",
         "promote_memory",
@@ -829,9 +819,9 @@
         "supersede_artifact",
         "transition_artifact",
         "unflag_memory",
-        "view_entropy"
-      ],
-      "consent_group": "agent-smith"
+        "view_entropy",
+        "watch_enrichment"
+      ]
     },
     "https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client=wsl-claude": {
       "label": "agent-smith-wsl-claude",
@@ -843,19 +833,16 @@
       "namespace": "",
       "allowed_tools": [
         "add_memory",
-        "add_memory_and_track",
         "build_context",
-        "get_client_context",
-        "get_enrichment_status",
-        "get_memory_stats",
+        "list_todos",
         "query_structure",
         "read_flagged_memories",
         "recall_context_memories",
-        "recall_memories",
-        "watch_enrichment"
+        "recall_memories"
       ],
       "denied_tools": [
         "add_candidate",
+        "add_memory_and_track",
         "add_todo",
         "audit_artifact_corpus",
         "close_memory",
@@ -869,7 +856,10 @@
         "force_scheduler_takeover",
         "get_artifact",
         "get_artifact_relationships",
+        "get_client_context",
+        "get_enrichment_status",
         "get_episode_trace",
+        "get_memory_stats",
         "get_provenance",
         "get_todo",
         "ingest_document",
@@ -880,7 +870,6 @@
         "list_clients",
         "list_conflicts",
         "list_enrichment_queue",
-        "list_todos",
         "mint_client",
         "pause_scheduler",
         "promote_memory",
@@ -897,9 +886,9 @@
         "supersede_artifact",
         "transition_artifact",
         "unflag_memory",
-        "view_entropy"
-      ],
-      "consent_group": "agent-smith"
+        "view_entropy",
+        "watch_enrichment"
+      ]
     },
     "https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client=wsl-opencode": {
       "label": "agent-smith-wsl-opencode",
@@ -911,19 +900,16 @@
       "namespace": "",
       "allowed_tools": [
         "add_memory",
-        "add_memory_and_track",
         "build_context",
-        "get_client_context",
-        "get_enrichment_status",
-        "get_memory_stats",
+        "list_todos",
         "query_structure",
         "read_flagged_memories",
         "recall_context_memories",
-        "recall_memories",
-        "watch_enrichment"
+        "recall_memories"
       ],
       "denied_tools": [
         "add_candidate",
+        "add_memory_and_track",
         "add_todo",
         "audit_artifact_corpus",
         "close_memory",
@@ -937,7 +923,10 @@
         "force_scheduler_takeover",
         "get_artifact",
         "get_artifact_relationships",
+        "get_client_context",
+        "get_enrichment_status",
         "get_episode_trace",
+        "get_memory_stats",
         "get_provenance",
         "get_todo",
         "ingest_document",
@@ -948,7 +937,6 @@
         "list_clients",
         "list_conflicts",
         "list_enrichment_queue",
-        "list_todos",
         "mint_client",
         "pause_scheduler",
         "promote_memory",
@@ -965,9 +953,9 @@
         "supersede_artifact",
         "transition_artifact",
         "unflag_memory",
-        "view_entropy"
-      ],
-      "consent_group": "agent-smith"
+        "view_entropy",
+        "watch_enrichment"
+      ]
     }
   }
 }

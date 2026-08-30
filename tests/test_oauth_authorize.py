@@ -447,30 +447,45 @@ def test_post_approve_issues_code_and_redirects():
     assert record.code_challenge == challenge
 
 
-def test_production_consent_group_uses_one_secret_for_distinct_clients():
+def test_production_consent_is_scoped_to_the_exact_client():
     _, challenge = _pkce()
     scopes = frozenset({"menhir:read", "menhir:write"})
     cid_a = _register_client(scopes=tuple(scopes), client_name="Claude")
     cid_b = _register_client(scopes=tuple(scopes), client_name="Codex")
 
-    def entry(client_id: str, label: str) -> ClientPolicy:
+    def entry(
+        client_id: str,
+        label: str,
+        *,
+        allowed_tools: frozenset[str],
+        denied_tools: frozenset[str],
+    ) -> ClientPolicy:
         return ClientPolicy(
             client_id=client_id,
             label=label,
             scopes=scopes,
             maximum_tier="agent",
             namespace="",
-            allowed_tools=frozenset({"recall_memories"}),
-            denied_tools=frozenset({"add_memory"}),
-            consent_group="agent-smith",
+            allowed_tools=allowed_tools,
+            denied_tools=denied_tools,
         )
 
     authority = ClientPolicyAuthority(
         version=1,
         digest="test",
         clients={
-            cid_a: entry(cid_a, "agent-smith-claude"),
-            cid_b: entry(cid_b, "agent-smith-codex"),
+            cid_a: entry(
+                cid_a,
+                "agent-smith-claude",
+                allowed_tools=frozenset({"recall_memories"}),
+                denied_tools=frozenset({"add_memory", "query_structure"}),
+            ),
+            cid_b: entry(
+                cid_b,
+                "agent-smith-codex",
+                allowed_tools=frozenset({"recall_memories", "query_structure"}),
+                denied_tools=frozenset({"add_memory"}),
+            ),
         },
     )
     client = _client(policy=authority)
@@ -490,7 +505,7 @@ def test_production_consent_group_uses_one_secret_for_distinct_clients():
     ).group(1)
     verified = oauth_authorize._verify_session(session_cookie, _ENABLED)
     assert verified is not None
-    assert set(verified[1]) == {cid_a, cid_b}
+    assert verified[1] == (cid_a,)
 
     second = client.get(
         "/oauth/authorize",
@@ -499,8 +514,8 @@ def test_production_consent_group_uses_one_secret_for_distinct_clients():
         ),
         headers={"cookie": f"menhir_as_session={session_cookie}"},
     )
-    assert second.status_code == 302
-    assert "code" in _location_query(second)
+    assert second.status_code == 200
+    assert "Authorize connection" in second.text
 
 
 def test_consent_approval_survives_authorization_store_recreation(monkeypatch):

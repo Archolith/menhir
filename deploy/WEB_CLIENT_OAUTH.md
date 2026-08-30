@@ -15,6 +15,8 @@ client secret and must never share a client ID, token cache, or audit label.
 Their agent-tier tool surface includes the read-only `query_structure` tool so
 hosted connectors can inspect an already-ingested project graph. The graph-write
 `ingest_project` tool remains denied and requires an operator-controlled path.
+`list_todos` remains denied to hosted web clients. Each client requires its own
+operator consent; approving ChatGPT never approves Claude, or vice versa.
 
 ## Connection behavior
 
