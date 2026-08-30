@@ -1,5 +1,5 @@
 """
-menhir - Graph-based long-term memory system.
+menhir - Provenance, governed context, and code-impact analysis for coding agents.
 """
 
 from importlib.metadata import PackageNotFoundError, version

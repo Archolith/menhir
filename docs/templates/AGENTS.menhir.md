@@ -1,6 +1,7 @@
-# Menhir memory and code-context rules
+# Menhir provenance, governance, and code-context rules
 
-Use the configured Menhir MCP server for durable memory and structural code context.
+Use the configured Menhir MCP access surface for provenance-linked context, governed
+knowledge, and structural code analysis.
 
 1. At session startup, call `read_flagged_memories` and then `recall_context_memories` with the same stable
    `reader_id` and the registered workspace key: `<workspace-key>`.

@@ -1,41 +1,55 @@
 # Menhir
 
-> Git records what changed. A code index records what depends on it. Menhir keeps the
-> evidence and decisions behind agent work, including what later became stale or
-> superseded and which files and tests still carry the impact.
+> Git records what changed. Menhir records why an agent acted, where the evidence came
+> from, whether it is still current, and which code and tests carry the impact.
 
-Menhir is a [Model Context Protocol](https://modelcontextprotocol.io/) memory and
-code-context service built for coding agents. It stores source episodes and governed
-semantic memory in the same [Neo4j](https://neo4j.com/) graph as files, symbols, callers,
-and tests. Paths and attached Git diffs connect decisions, failed approaches, plans, and
-handoffs to the code they concern.
+Menhir is an evidence and code-intelligence service for coding agents. It joins source
+episodes, governed knowledge, engineering artifacts, repository structure, callers, and
+tests in one [Neo4j](https://neo4j.com/) graph. Paths and attached Git diffs connect
+decisions, failed approaches, plans, and handoffs to the code they concern.
 
 [Graphiti](https://github.com/getzep/graphiti) handles entity extraction and graph search.
-Menhir adds project indexing, impact analysis, currentness and lifecycle policy,
-provenance, typed state, and agent-facing tools.
+Menhir adds repository indexing, coverage-aware impact analysis, provenance inspection,
+current and historical lifecycle policy, typed state, artifact governance, and scoped
+client authority. [Model Context Protocol](https://modelcontextprotocol.io/) is one access
+surface alongside REST, a local explorer, and a stdio bridge; it is not the product
+category.
 
 The current package version is `0.2.0`. Menhir is built for a single operator, requires
-Python 3.12 or newer, and exposes 52 MCP tools plus 9 read-only MCP resources.
+Python 3.12 or newer, and is designed for local or operator-controlled deployment.
 
 [Quick start](#quick-start) | [Agent workflow](#a-coding-loop) |
 [Blast radius](#code-graph-and-blast-radius) |
-[Governance](#governance-and-currentness) | [Security](#security-and-privacy)
+[Governance](#governance-and-currentness) | [Evaluation](#evaluation-posture) |
+[Security](#security-and-privacy)
 
 ## Why Menhir is useful for agentic coding
 
-Menhir's main distinction is the connection between remembered context and live code
-structure. A result can carry the files it belongs to, the code and tests affected by a
-change, an advisory stale-anchor label, and receipts showing where the claim came from.
+Menhir makes agent context inspectable. A result can carry the source episode behind a
+claim, the files it belongs to, its current or superseded state, the code and tests
+affected by a change, and an advisory warning when a code anchor may be stale.
 
-| Capability | What the coding agent gets |
-|------------|----------------------------|
-| Structural code graph | Files, symbols, imports, calls, tests, endpoints, dependencies, and cross-project references |
-| Code-linked memory | Memories anchored to repository paths found in their narrative or attached Git diff |
-| Change analysis | Direct and transitive dependents, function callers, affected tests, and related memories in one blast-radius query |
-| Governed recall | Review-only candidates, persistent memory, operator-promoted ground truth, superseded history, conflicts, and source receipts |
-| Typed state | Immutable scalar assertions folded into rebuildable current-state and history Views |
-| Engineering artifacts | Plans, reviews, investigations, implementation reports, and handoffs with typed status and relationships |
-| Agent integrations | Optional prompt and file-event hooks that preserve durable context without installing themselves or blocking the coding session |
+| Capability | What the coding agent gets | Availability |
+|------------|----------------------------|--------------|
+| Structural code graph | Files, symbols, imports, calls, tests, endpoints, dependencies, and cross-project references | Shipped |
+| Coverage-aware change analysis | Direct and transitive dependents, function callers, affected tests, and related evidence; incomplete indexes produce caveats instead of a false "safe" result | Shipped |
+| Code-linked evidence | Memories anchored to repository paths found in their narrative or attached Git diff, with source episodes retained for inspection | Shipped |
+| Governed knowledge | Review-only candidates, persistent knowledge, operator-designated authority, conflicts, superseded history, and provenance expansion | Shipped |
+| Engineering artifacts | Plans, reviews, investigations, implementation reports, and handoffs with typed status and relationships | Shipped |
+| Typed temporal state | Immutable assertions with valid and learned time folded into rebuildable current-state and history Views | Shipped, activation and authority opt-in |
+| Agent evidence producers | Prompt and file-event hooks that capture bounded durable evidence without storing full transcripts or file contents | Optional |
+| Release provenance | Strict manifests bind reviewed source commits, build artifacts, installed destinations, policies, and security-review authority | Deployment tooling |
+
+The result is a trace an operator can inspect rather than a context blob an agent must
+trust:
+
+```text
+source episode or artifact
+  -> governed memory or typed assertion
+  -> provenance and lifecycle state
+  -> repository path and Git evidence
+  -> callers, dependents, and affected tests
+```
 
 ### How the pieces connect
 
@@ -49,8 +63,8 @@ governed memory, code structure, and blast-radius context.
 ![Menhir follows a changed file through bounded blast-radius analysis into agent-ready context](docs/assets/menhir-03-blast-radius.png)
 
 The structural and semantic entities live in the same Neo4j graph and share project and
-namespace boundaries. A client does not have to join independent responses from a code
-index and a memory service.
+namespace boundaries. A client does not have to join independent responses from separate
+context systems.
 
 Current development is concentrated on ingest and projection correctness for typed
 scalar state. The [typed scalar section](#typed-scalar-memory-and-current-priorities)
@@ -147,14 +161,14 @@ lifecycle state, and operator authority:
 |-------|-----------------|
 | `CANDIDATE` | Low-trust staging area. Candidates are withheld from recall until a human approves them. |
 | `PERSISTENT` | Normal durable memory that remains subject to conflict and lifecycle handling. |
-| `PROMOTED` | Operator-curated, verified ground truth. Only persistent memory can be promoted, and normal merge handling cannot absorb it. |
+| `PROMOTED` | Operator-designated authority. Only persistent memory can be promoted, and normal merge handling cannot absorb it. Promotion does not independently verify the evidence. |
 | Superseded or historical | Kept for audit and historical queries, but omitted from current-belief recall by default. |
 
-`get_provenance` expands a memory or derived View into its source episodes, first-class
-evidence, and structural anchor paths. Conflict tools can scan, review, and explicitly
-resolve contradictory memories. Removing promoted content requires an explicit
-operator override. Namespaces and credential tiers keep projects and client roles
-separate within the single-operator trust model.
+`get_provenance` expands a memory or derived View into its source episodes, any attached
+first-class evidence, and structural anchor paths. Conflict tools can scan, review, and
+explicitly resolve contradictory memories. Removing promoted content requires an
+explicit operator override. Namespaces and credential tiers keep projects and client
+roles separate within the single-operator trust model.
 
 Menhir also treats engineering documents as `WorkArtifact` objects. Git still owns the
 Markdown bytes; Menhir tracks stable identity, type, status, code locations, open
@@ -169,6 +183,19 @@ Some read-side authority gates, event-history authority, deterministic scalar ro
 and retrieval experiments remain opt-in. The
 [activation ledger](.agent/default-off-features.md) records their actual default state
 and the evidence required before activation.
+
+## Evaluation posture
+
+Menhir uses benchmark evidence as an activation gate. A retained LongMemEval-derived
+corpus includes temporal-reasoning and knowledge-update questions, but the current run is
+diagnostic: it used the Oracle corpus, a non-fresh graph, and a dirty source revision, and
+it did not run the full-haystack LME-S protocol. There is no current public headline
+score.
+
+That evidence has still been operationally useful. Read-side oracle, warden, belief, and
+related frontier retrieval experiments that were neutral or negative remain disabled by
+default. See the [evaluation posture](docs/evaluation.md) for publication rules, scope
+limits, and the distinction between shipped behavior and research evidence.
 
 ## How memory moves through the system
 
@@ -390,7 +417,7 @@ Static credentials can be configured with `MENHIR_API_KEY`, `MENHIR_AGENT_KEY`,
 the client may call.
 
 If no credential is configured, Menhir permits open access only on a loopback bind. See
-[Security](#security) before exposing the service to another machine.
+[Security](#security-and-privacy) before exposing the service to another machine.
 
 Clients may also identify themselves by name with the `X-Menhir-Client-Name` header, which
 `MENHIR_CLIENT_NAMESPACES` and `MENHIR_CLIENT_TOOLS` use to pin a client to one namespace or
