@@ -142,7 +142,7 @@ def test_begin_persists_stable_ids_under_fence_before_dispatch() -> None:
     assert params["operation_id"] == publication_operation_id("queued-1")
     assert "i.generation = f.generation" in query
     assert created.generation == 7
-    assert kwargs["safe_to_reexecute"] is True
+    assert kwargs.get("safe_to_reexecute", False) is False
     assert created.dispatch_allowed is True
 
 
@@ -195,7 +195,7 @@ def test_finalize_locks_fence_and_uses_only_opaque_tombstone_probes() -> None:
     assert "i.completed_at = coalesce(i.completed_at" in query
     assert params["artifact_node_uuids"] == ["remote-1", "entity-1", "entity-2"]
     assert params["artifact_edge_uuids"] == ["edge-1", "mentions-1"]
-    assert kwargs["safe_to_reexecute"] is True
+    assert kwargs.get("safe_to_reexecute", False) is False
     assert result.finalized is True
 
 
@@ -245,7 +245,7 @@ def test_claim_lease_preserves_and_returns_captured_publication_generation() -> 
     assert "SET i.generation" not in query
     assert intents[0].generation == 7
     assert intents[0].lease_generation == 3
-    assert kwargs["safe_to_reexecute"] is True
+    assert kwargs.get("safe_to_reexecute", False) is False
 
 
 @dataclass

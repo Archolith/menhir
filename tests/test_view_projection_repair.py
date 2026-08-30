@@ -78,7 +78,7 @@ def test_claim_is_locked_then_rechecks_eligibility_and_captures_fences() -> None
     assert "r.attempt_count = coalesce(r.attempt_count, 0) + 1" in query
     assert "r.claimed_fence_generation = coalesce(f.generation, 0)" in query
     assert params == {"owner_id": "worker-f", "limit": 3, "lease_seconds": 90}
-    assert kwargs["safe_to_reexecute"] is True
+    assert kwargs.get("safe_to_reexecute", False) is False
     assert claims[0].predicate == "purchased"
     assert claims[0].fence_generation == 7
 
