@@ -47,6 +47,33 @@ egress, so it cannot download plugins - APOC is not required by Menhir's Cypher
 and is intentionally not installed). Menhir's outbound LLM/embedding calls leave
 via `menhir-proxy`, which must have internet egress.
 
+### Cloudflare Tunnel alternative
+
+`docker-compose.cloudflared.yml` is the hardened, separate ingress project for
+hosts that use a locally-managed Cloudflare Tunnel instead of the shared Caddy
+origin. Copy `cloudflared.production.yml.example` to the host's root-owned
+`/srv/menhir/production/ingress/cloudflared-config.yml`, replace the tunnel UUID,
+and install the tunnel credential as
+`/srv/menhir/production/secrets/cloudflare/credentials.json`. Both files must be
+`root:65532 0440`; their parent directories must be `root:65532 0750`.
+
+The tunnel is fixed at `172.30.0.2`, the sole trusted proxy peer, and forwards to
+`menhir-prod-app:8099`. Its path expression is an authoritative public allowlist:
+MCP, OAuth, metadata, and health routes pass; all other paths return a tunnel-side
+404 and never reach Menhir. Validate the rendered rules before starting it:
+
+```bash
+cloudflared tunnel --config cloudflared-config.yml ingress validate
+docker compose -p menhir-ingress -f deploy/docker-compose.cloudflared.yml config --quiet
+docker compose -p menhir-ingress -f deploy/docker-compose.cloudflared.yml up -d
+```
+
+When managing DNS from a workstation that also runs another tunnel, pass a
+management config that does not contain a default `tunnel:` field. Otherwise
+`cloudflared` can silently target that default instead of the tunnel named on
+the command line. Verify the selected UUID with `cloudflared tunnel info` before
+changing the CNAME.
+
 ## 2. Secret ownership (fixed-path, read-only, never in env or Git)
 
 Secrets are files under `/srv/menhir/production/secrets/`, grouped by consumer
