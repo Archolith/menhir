@@ -158,6 +158,12 @@ exact policy check, forcing a fresh authorization for the operator grant.
 
 ## 4. Bringing up production (authoritative, read-write)
 
+Build `deploy/python-base.Dockerfile` in the controlled release environment,
+scan and publish that image, and pass its immutable registry digest as
+`PYTHON_BASE` when building `deploy/Dockerfile`. The base recipe deliberately
+pins both the upstream image and upgraded OpenSSL package versions; the final
+base-image digest and its scan are part of the release authority.
+
 ```bash
 export MENHIR_IMAGE="<registry>/menhir:<version>@sha256:<digest>"
 export NEO4J_IMAGE="neo4j:5-community@sha256:<digest>"
