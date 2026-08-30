@@ -26,14 +26,21 @@ Files:
 | `release-lib.sh` | Fixed paths, root-file validation, health checks, release/receipt/mutation-marker helpers. |
 | `secrets-map.sh` | Explicit secret owner/mode map + enforce/verify (GID 10001 vs 7474). |
 | `release-validate.sh` | Validate the immutable `release.json`. |
-| `release-author.py` | Authors the immutable release from clean canonical Git remotes, committed blobs, rendered files, image digests, and evidence. |
+| `release-author.py` | Creates a digest-bound security-review request, then authors the immutable release only from matching independent approval and clean canonical inputs. |
 | `release.json.example` | Shape reference; the real artifact map contains every destination in `installed-artifacts.json`. |
+| `security-review.json.example` | Mandatory independent review attestation; exact authority digest, full scope, APPROVED verdict, and zero unresolved critical/high findings. |
 | `lib/menhir_schema.py` | Strict duplicate-key-rejecting schemas for manifest/release/receipts. |
 | `lib/make_manifest.py` | Strict generation manifest writer (exact set equality + classification). |
 | `production.env.example` | Non-secret root-owned release/image/provider configuration template. |
 
 All host paths below assume the fixed roots (`/srv/menhir/production` and
 `/srv/menhir/backups`); every one is overridable via the documented env vars.
+
+No production command accepts a release without the mandatory security review
+embedded in `release.json`. The strict validator recomputes its authority digest
+before bootstrap, backup, candidate, restore, promotion, rollback, and runtime
+binding checks; a missing, stale, self-authored, rejected, incomplete, or
+critical/high-open review fails closed before production mutation.
 
 ## 1. Prerequisite: external network and reverse proxy
 

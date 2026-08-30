@@ -82,13 +82,30 @@ _REQUIRED_AUTHORITY = frozenset({
 })
 
 _RELEASE_TOP_KEYS = frozenset({
-    "schema", "release_id", "repos", "oauth_wheel_sha256", "oauth_wheel_source", "images",
+    "schema", "release_id", "release_author", "security_review", "repos",
+    "oauth_wheel_sha256", "oauth_wheel_source", "images",
     "wheel_manifest_sha256", "dockerfile_wheel_manifest_sha256",
     "sbom_sha256", "scan_evidence_sha256", "provenance_sha256",
     "rendered", "network", "rollback_anchors", "secret_version_ids",
     "artifacts", "repo_remotes", "source_fence_key_id",
     "source_fence_public_key", "source_fence_tls_ca_sha256",
     "external_evidence_public_keys",
+})
+_RELEASE_SECURITY_REVIEW_KEYS = frozenset({
+    "schema", "kind", "review_id", "release_author", "reviewer",
+    "reviewed_utc", "authority_sha256", "verdict", "unresolved_findings",
+    "scope", "report_sha256", "review_artifact_sha256",
+})
+_RELEASE_SECURITY_FINDINGS = frozenset({"critical", "high"})
+REQUIRED_SECURITY_REVIEW_SCOPE = frozenset({
+    "authentication-and-oauth-authority",
+    "authorization-and-client-tool-policy",
+    "secret-handling",
+    "network-and-ingress-boundaries",
+    "host-privilege-and-command-wrappers",
+    "supply-chain-and-build-evidence",
+    "backup-restore-and-rollback",
+    "runtime-hardening-and-observability",
 })
 _RELEASE_REPOS = frozenset({"menhir", "archolith_oauth", "yawn_deploy", "yawn_vps"})
 _RELEASE_IMAGES = frozenset({"menhir", "neo4j", "caddy", "base"})
@@ -232,6 +249,18 @@ def _require_sha256(value, label):
     if not _SHA256_RE.match(value):
         raise ValueError("%s must be a 64-char lowercase sha256" % label)
     return value
+
+
+def release_authority_sha256(release: dict) -> str:
+    """Digest every release claim except the security review itself."""
+    if not isinstance(release, dict):
+        raise ValueError("release authority must be a JSON object")
+    authority = dict(release)
+    authority.pop("security_review", None)
+    payload = json.dumps(
+        authority, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+    ).encode("ascii")
+    return hashlib.sha256(payload).hexdigest()
 
 
 def _require_digest(value, label):
@@ -399,6 +428,11 @@ def validate_release(path: str) -> dict:
     if release.get("schema") != SCHEMA_VERSION:
         raise ValueError("release.json schema must be %d" % SCHEMA_VERSION)
     _require_release_id(release.get("release_id"), "release_id")
+    release_author = _require_str(release.get("release_author"), "release_author")
+    if len(release_author) > 128 or not re.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9._@+-]*", release_author
+    ):
+        raise ValueError("release_author must be a safe bounded identity")
 
     repos = release.get("repos")
     _require_exact_keys(repos, _RELEASE_REPOS, "repos")
@@ -562,6 +596,56 @@ def validate_release(path: str) -> dict:
                 "artifacts[%s] is a required rendered artifact bound to %s"
                 % (path, rendered_key)
             )
+
+    review = release.get("security_review")
+    _require_exact_keys(review, _RELEASE_SECURITY_REVIEW_KEYS, "security_review")
+    if review.get("schema") != 1 \
+            or review.get("kind") != "menhir-production-security-review":
+        raise ValueError("security_review kind/schema is invalid")
+    _require_key_id(review.get("review_id"), "security_review.review_id")
+    if review.get("release_author") != release_author:
+        raise ValueError("security_review release_author differs from release authority")
+    reviewer = _require_str(review.get("reviewer"), "security_review.reviewer")
+    if len(reviewer) > 128 or not re.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9._@+-]*", reviewer
+    ):
+        raise ValueError("security_review.reviewer must be a safe bounded identity")
+    if reviewer.casefold() == release_author.casefold():
+        raise ValueError("security reviewer must be independent from release author")
+    reviewed_utc = _parse_utc(
+        review.get("reviewed_utc"), "security_review.reviewed_utc"
+    )
+    if reviewed_utc > datetime.now(timezone.utc) + timedelta(seconds=60):
+        raise ValueError("security_review.reviewed_utc is in the future")
+    if review.get("verdict") != "APPROVED":
+        raise ValueError("security_review verdict must be APPROVED")
+    findings = review.get("unresolved_findings")
+    _require_exact_keys(
+        findings, _RELEASE_SECURITY_FINDINGS,
+        "security_review.unresolved_findings",
+    )
+    for severity in sorted(_RELEASE_SECURITY_FINDINGS):
+        count = findings.get(severity)
+        if isinstance(count, bool) or not isinstance(count, int) or count != 0:
+            raise ValueError(
+                "security_review unresolved %s findings must be zero" % severity
+            )
+    scope = review.get("scope")
+    if not isinstance(scope, list) \
+            or any(not isinstance(item, str) for item in scope) \
+            or len(scope) != len(set(scope)) \
+            or set(scope) != REQUIRED_SECURITY_REVIEW_SCOPE:
+        raise ValueError("security_review scope must cover every required security area")
+    _require_sha256(review.get("report_sha256"), "security_review.report_sha256")
+    _require_sha256(
+        review.get("review_artifact_sha256"),
+        "security_review.review_artifact_sha256",
+    )
+    authority_sha = _require_sha256(
+        review.get("authority_sha256"), "security_review.authority_sha256"
+    )
+    if authority_sha != release_authority_sha256(release):
+        raise ValueError("security_review does not bind the exact release authority")
     return release
 
 

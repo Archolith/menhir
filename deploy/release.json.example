@@ -1,6 +1,7 @@
 {
   "schema": 1,
   "release_id": "menhir-prod-0.2.0-<seq>",
+  "release_author": "<release-operator-identity>",
   "repos": {
     "menhir": "<40-lowercase-hex>",
     "archolith_oauth": "<40-lowercase-hex>",
@@ -95,6 +96,32 @@
       "sha256": "<same-digest-as-rendered.oauth_public_key_sha256>",
       "rendered_key": "oauth_public_key_sha256"
     }
+  },
+  "security_review": {
+    "schema": 1,
+    "kind": "menhir-production-security-review",
+    "review_id": "<safe-unique-review-id>",
+    "release_author": "<same-as-release_author>",
+    "reviewer": "<independent-security-reviewer-identity>",
+    "reviewed_utc": "<timezone-aware-ISO-8601>",
+    "authority_sha256": "<canonical-release-authority-sha256>",
+    "verdict": "APPROVED",
+    "unresolved_findings": {
+      "critical": 0,
+      "high": 0
+    },
+    "scope": [
+      "authentication-and-oauth-authority",
+      "authorization-and-client-tool-policy",
+      "backup-restore-and-rollback",
+      "host-privilege-and-command-wrappers",
+      "network-and-ingress-boundaries",
+      "runtime-hardening-and-observability",
+      "secret-handling",
+      "supply-chain-and-build-evidence"
+    ],
+    "report_sha256": "<64-lowercase-hex>",
+    "review_artifact_sha256": "<64-lowercase-hex>"
   },
   "source_fence_key_id": "<source-only-ed25519-key-version-id>",
   "source_fence_public_key": "<43-char-unpadded-base64url-ed25519-public-key>",

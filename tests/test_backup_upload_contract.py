@@ -53,9 +53,10 @@ def _generation_tree_hash(root: Path) -> dict[str, str]:
 
 
 def _valid_release() -> dict:
-    return {
+    release = {
         "schema": 1,
         "release_id": "menhir-prod-0.2.0-1",
+        "release_author": "release-operator@example.com",
         "repos": {
             "menhir": "a" * 40,
             "archolith_oauth": "b" * 40,
@@ -156,6 +157,33 @@ def _valid_release() -> dict:
         "source_fence_tls_ca_sha256": "0" * 64,
         "external_evidence_public_keys": {"worker-a": "A" * 43, "worker-b": "A" * 43},
     }
+    authority = json.dumps(
+        release, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+    ).encode("ascii")
+    release["security_review"] = {
+        "schema": 1,
+        "kind": "menhir-production-security-review",
+        "review_id": "security-review-1",
+        "release_author": release["release_author"],
+        "reviewer": "independent-security@example.com",
+        "reviewed_utc": datetime.now(timezone.utc).isoformat(),
+        "authority_sha256": hashlib.sha256(authority).hexdigest(),
+        "verdict": "APPROVED",
+        "unresolved_findings": {"critical": 0, "high": 0},
+        "scope": [
+            "authentication-and-oauth-authority",
+            "authorization-and-client-tool-policy",
+            "backup-restore-and-rollback",
+            "host-privilege-and-command-wrappers",
+            "network-and-ingress-boundaries",
+            "runtime-hardening-and-observability",
+            "secret-handling",
+            "supply-chain-and-build-evidence",
+        ],
+        "report_sha256": "a" * 64,
+        "review_artifact_sha256": "b" * 64,
+    }
+    return release
 
 
 GEN_FILES = {

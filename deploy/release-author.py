@@ -27,12 +27,17 @@ import verify_wheelhouse  # noqa: E402
 
 
 SPEC_KEYS = frozenset({
-    "schema", "release_id", "repositories", "images", "evidence",
+    "schema", "release_id", "release_author", "repositories", "images", "evidence",
     "rendered", "network", "initial_release", "prior_release",
     "prior_route", "initial_prior_images", "secret_version_ids",
     "artifact_sources", "source_fence_key_id", "source_fence_public_key",
     "source_fence_tls_ca", "external_evidence_public_keys",
     "initial_host_state",
+})
+SECURITY_REVIEW_KEYS = frozenset({
+    "schema", "kind", "review_id", "release_author", "reviewer",
+    "reviewed_utc", "authority_sha256", "verdict", "unresolved_findings",
+    "scope", "report_sha256",
 })
 REPOSITORIES = frozenset({"menhir", "archolith_oauth", "yawn_deploy", "yawn_vps"})
 IMAGES = frozenset({"menhir", "neo4j", "caddy", "base"})
@@ -374,8 +379,16 @@ def _validate_provenance(
         raise ValueError("provenance does not bind the exact release inputs")
 
 
-def author_release(spec_path: Path, output_path: Path) -> dict[str, Any]:
+def author_release(
+    spec_path: Path,
+    output_path: Path,
+    security_review_path: Path | None = None,
+    *,
+    review_request: bool = False,
+) -> dict[str, Any]:
     spec_path = _regular(str(spec_path), "spec")
+    if output_path.resolve() == spec_path.resolve():
+        raise ValueError("output must not overwrite the release spec")
     spec = _exact(_load_json(spec_path, "release spec"), SPEC_KEYS, "release spec")
     if spec.get("schema") != 1:
         raise ValueError("release spec schema must be 1")
@@ -385,6 +398,10 @@ def author_release(spec_path: Path, output_path: Path) -> dict[str, Any]:
         raise ValueError(
             "release_id must match menhir-prod-<major>.<minor>.<patch>-<sequence>"
         )
+    release_author = spec.get("release_author")
+    if not isinstance(release_author, str) or len(release_author) > 128 \
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._@+-]*", release_author):
+        raise ValueError("release_author must be a safe bounded identity")
 
     repo_paths = _exact(spec.get("repositories"), REPOSITORIES, "repositories")
     repo_identities = {
@@ -551,6 +568,7 @@ def author_release(spec_path: Path, output_path: Path) -> dict[str, Any]:
     release = {
         "schema": 1,
         "release_id": release_id,
+        "release_author": release_author,
         "repos": repos,
         "repo_remotes": repo_remotes,
         "oauth_wheel_sha256": oauth_sha,
@@ -577,32 +595,84 @@ def author_release(spec_path: Path, output_path: Path) -> dict[str, Any]:
         "external_evidence_public_keys": external_evidence_public_keys,
     }
 
+    authority_sha = menhir_schema.release_authority_sha256(release)
+    if review_request:
+        if security_review_path is not None:
+            raise ValueError("review request generation does not accept a security review")
+        document = {
+            "schema": 1,
+            "kind": "menhir-production-security-review-request",
+            "authority_sha256": authority_sha,
+            "release": release,
+        }
+    else:
+        if security_review_path is None:
+            raise ValueError("an independent security review is required")
+        review_path = _regular(str(security_review_path), "security_review")
+        if output_path.resolve() == review_path.resolve():
+            raise ValueError("output must not overwrite the security review")
+        review = _exact(
+            _load_json(review_path, "security review"),
+            SECURITY_REVIEW_KEYS,
+            "security review",
+        )
+        if review.get("schema") != 1 \
+                or review.get("kind") != "menhir-production-security-review":
+            raise ValueError("security review kind/schema is invalid")
+        if review.get("authority_sha256") != authority_sha:
+            raise ValueError("security review does not bind the exact release authority")
+        if review.get("release_author") != release_author:
+            raise ValueError("security review release_author mismatch")
+        release["security_review"] = {
+            **review,
+            "review_artifact_sha256": _sha256(review_path),
+        }
+        document = release
+
     parent = output_path.resolve().parent
     parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary = tempfile.mkstemp(prefix=".release.", dir=parent)
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
-            json.dump(release, handle, indent=2, sort_keys=True)
+            json.dump(document, handle, indent=2, sort_keys=True)
             handle.write("\n")
             handle.flush()
             os.fsync(handle.fileno())
         os.chmod(temporary, 0o400)
-        menhir_schema.validate_release(temporary)
+        if not review_request:
+            menhir_schema.validate_release(temporary)
         os.replace(temporary, output_path)
         _fsync_directory(parent)
     finally:
         if os.path.exists(temporary):
+            # Windows refuses unlinking a read-only file. Validation failures
+            # must preserve the original error instead of being masked by
+            # temporary-file cleanup.
+            try:
+                os.chmod(temporary, 0o600)
+            except OSError:
+                pass
             os.unlink(temporary)
-    return release
+    return document
 
 
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--spec", required=True, type=Path)
-    parser.add_argument("--output", required=True, type=Path)
+    destination = parser.add_mutually_exclusive_group(required=True)
+    destination.add_argument("--output", type=Path)
+    destination.add_argument("--review-request", type=Path)
+    parser.add_argument("--security-review", type=Path)
     args = parser.parse_args(argv[1:])
     try:
-        author_release(args.spec, args.output)
+        if args.review_request is not None:
+            if args.security_review is not None:
+                raise ValueError("--review-request cannot be combined with --security-review")
+            author_release(args.spec, args.review_request, review_request=True)
+        else:
+            if args.security_review is None:
+                raise ValueError("--security-review is required with --output")
+            author_release(args.spec, args.output, args.security_review)
     except (OSError, subprocess.CalledProcessError, ValueError) as exc:
         print(f"release authoring failed: {exc}", file=sys.stderr)
         return 1
