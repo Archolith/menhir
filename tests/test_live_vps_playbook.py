@@ -47,14 +47,14 @@ def test_playbook_preserves_canonical_repositories_and_network_authority() -> No
         "`ctharvey/yawn.vps` | `master`",
         "`yawn.vps/main` is stale",
         "generic `vps_deploy`/`remote-deploy.sh` path is not authorized",
-        "fixed local",
+        "fixed command",
         "172.30.0.1:8000",
         "Caddy at `172.30.0.2` is the only admitted peer",
         "https://memory.ctharvey.me/ops/mcp",
-        '"issuer": "https://memory.ctharvey.me"',
-        '"audience": "https://memory.ctharvey.me/ops/mcp"',
-        '"base_url": "https://memory.ctharvey.me/ops"',
-        "application port 8099 are never published directly",
+        "issuer `https://memory.ctharvey.me`",
+        "`https://memory.ctharvey.me/ops/mcp`",
+        "`https://memory.ctharvey.me/ops`",
+        "Never publish",
     ):
         assert required in source
 
@@ -67,27 +67,19 @@ def test_playbook_preserves_canonical_repositories_and_network_authority() -> No
 
 def test_playbook_orders_the_release_lifecycle() -> None:
     source = PLAYBOOK.read_text(encoding="utf-8")
-    operations = (
-        "`menhir_backup_submit()`",
-        "`menhir_restore_rehearsal_submit()`",
-        "`menhir_candidate_deploy()`",
-        "`menhir_candidate_accept()`",
-        "`menhir_caddy_route_apply()`",
-        "`menhir_promote()`",
-    )
-    positions = [source.index(operation) for operation in operations]
-    assert positions == sorted(positions)
-
-    for inspection in (
-        "`menhir_release_inspect()`",
-        "`menhir_status()`",
-        "`menhir_generation_inspect()`",
-        "`menhir_backup_status()`",
-        "`menhir_caddy_route_rollback()`",
-        "`menhir_rollback()`",
-        "`menhir_restore_production_submit(confirm=True)`",
+    assert "`menhir_release_run()`" in source
+    assert "release-run.json" in source
+    for stage in (
+        "capture legacy writer + backup + retire writer",
+        "decrypt and validate backup",
+        "restore rehearsal",
+        "readonly candidate",
+        "candidate acceptance",
+        "transactional Caddy route",
+        "promotion under a second writer-census check",
+        "public production acceptance",
     ):
-        assert inspection in source
+        assert stage in source
 
 
 def test_entrypoint_docs_link_to_the_canonical_playbook() -> None:

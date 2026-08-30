@@ -75,6 +75,13 @@ PRODUCTION_ENV="/srv/menhir/production/release/production.env"
 
 load_production_env
 
+# Release cutovers capture the exact live legacy writer before quiescing and
+# retire it only after the backup has been uploaded and verified. This keeps
+# capture -> stop -> backup -> restart-disable -> removal under one host lock.
+same_host_cutover="${MENHIR_SAME_HOST_CUTOVER:-0}"
+[ "$same_host_cutover" = 0 ] || [ "$same_host_cutover" = 1 ] \
+    || { echo "MENHIR_SAME_HOST_CUTOVER must be 0 or 1" >&2; exit 1; }
+
 MENHIR_IMAGE="${MENHIR_IMAGE:?MENHIR_IMAGE (digest-pinned menhir image) is required}"
 NEO4J_IMAGE="${NEO4J_IMAGE:?NEO4J_IMAGE (digest-pinned neo4j image) is required}"
 MENHIR_RELEASE_COMMIT="${MENHIR_RELEASE_COMMIT:?MENHIR_RELEASE_COMMIT is required}"
@@ -133,7 +140,6 @@ for s in \
     neo4j/neo4j-auth \
     menhir/neo4j-password \
     menhir/operator-key \
-    menhir/source-fence-token \
     oauth/oauth_signing_key.json \
     oauth/retry-response-keyring.json \
     oauth/oauth-consent-secret; do
@@ -165,6 +171,64 @@ generation="$(basename "$target")"
 was_running="stopped"
 if docker compose -f "${COMPOSE_FILE}" ps --status running --quiet 2>/dev/null | grep -q .; then
     was_running="running"
+fi
+
+fence_intent="${STATUS_DIR}/same-host-writer-fence-intent.json"
+fence_receipt="${STATUS_DIR}/same-host-writer-fence.json"
+fence_helper="${HELPER_DIR}/same_host_fence.py"
+legacy_app_id=""
+legacy_database_id=""
+if [ "$same_host_cutover" = 1 ]; then
+    [ "$was_running" = running ] \
+        || { echo "same-host cutover requires the legacy production stack to be running so its identity can be captured" >&2; exit 1; }
+    inspect_tmp="$(mktemp "${BACKUP_ROOT}/.legacy-inspect.XXXXXXXX")"
+    docker inspect menhir-prod-app menhir-prod-neo4j > "$inspect_tmp" \
+        || { rm -f "$inspect_tmp"; echo "same-host cutover could not inspect the legacy app and database containers" >&2; exit 1; }
+    rm -f "$fence_intent" "$fence_receipt"
+    python3 "$fence_helper" capture-intent "$RELEASE_JSON" "$inspect_tmp" "$fence_intent"
+    rm -f "$inspect_tmp"
+    legacy_app_id="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["legacy"]["app"]["container_id"])' "$fence_intent")"
+    legacy_database_id="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["legacy"]["database"]["container_id"])' "$fence_intent")"
+    # Close the reboot/daemon-restart resurrection window before the long
+    # backup begins. A failed cutover deliberately leaves the captured pair
+    # restart-disabled and stopped for explicit recovery.
+    docker update --restart=no "$legacy_app_id" "$legacy_database_id" >/dev/null
+
+    # first-mutation is transaction-scoped. Preserve the completed prior
+    # generation's marker before beginning a new cutover; never overwrite or
+    # discard it, and never clear a marker that is not the current generation.
+    if [ -f "$mutation_marker" ]; then
+        prior_mutation_generation="$(sed -n '1p' "$mutation_marker")"
+        prior_current_generation="$(current_generation)"
+        [ "$prior_mutation_generation" = "$prior_current_generation" ] \
+            || { echo "prior first-mutation marker does not match current-generation; recovery is required" >&2; exit 1; }
+        mutation_history="${STATUS_DIR}/mutation-history/${prior_mutation_generation}.txt"
+        install -d -o root -g root -m 0700 "$(dirname "$mutation_history")"
+        python3 - "$mutation_marker" "$mutation_history" <<'PYEOF'
+import os,sys,tempfile
+source,target=sys.argv[1:3]
+data=open(source,"rb").read()
+if os.path.exists(target):
+    if open(target,"rb").read()!=data:
+        raise SystemExit("prior mutation history conflicts with the durable marker")
+else:
+    parent=os.path.dirname(target)
+    fd,tmp=tempfile.mkstemp(prefix=".mutation-history-",dir=parent)
+    try:
+        with os.fdopen(fd,"wb") as handle:
+            handle.write(data); handle.flush(); os.fsync(handle.fileno())
+        os.chmod(tmp,0o400); os.replace(tmp,target)
+        directory=os.open(parent,os.O_RDONLY)
+        try: os.fsync(directory)
+        finally: os.close(directory)
+    finally:
+        if os.path.exists(tmp): os.unlink(tmp)
+os.unlink(source)
+directory=os.open(os.path.dirname(source),os.O_RDONLY)
+try: os.fsync(directory)
+finally: os.close(directory)
+PYEOF
+    fi
 fi
 
 echo "Backup generation: ${generation} (stack was ${was_running})"
@@ -279,7 +343,6 @@ for evidence in \
     secrets/neo4j/neo4j-auth \
     secrets/menhir/neo4j-password \
     secrets/menhir/operator-key \
-    secrets/menhir/source-fence-token \
     secrets/oauth/oauth_signing_key.json \
     secrets/oauth/retry-response-keyring.json \
     secrets/oauth/oauth-consent-secret \
@@ -346,8 +409,23 @@ python3 "$SCHEMA" validate-receipt-binding "$BACKUP_RECEIPT" backup-upload \
 
 echo "Backup ${generation} uploaded and verified; plaintext staging removed."
 
-# Restart only after a fully successful, uploaded generation; restart failure is fatal.
-if [ "${was_running}" = "running" ]; then
+# A release cutover retires the exact captured app and database containers only
+# after the verified backup exists. Durable host data remains in place for the
+# candidate and reviewed replacement; no legacy container is restarted.
+if [ "$same_host_cutover" = 1 ]; then
+    docker rm "$legacy_app_id" "$legacy_database_id" >/dev/null
+    census_tmp="$(mktemp "${BACKUP_ROOT}/.writer-census.XXXXXXXX")"
+    container_ids="$(docker ps -aq)"
+    if [ -n "$container_ids" ]; then
+        # shellcheck disable=SC2086
+        docker inspect $container_ids > "$census_tmp"
+    else
+        printf '[]\n' > "$census_tmp"
+    fi
+    python3 "$fence_helper" finalize "$RELEASE_JSON" "$fence_intent" "$census_tmp" "$fence_receipt"
+    rm -f "$census_tmp"
+    echo "Verified backup complete; exact legacy Menhir writer retired under the maintenance lock."
+elif [ "${was_running}" = "running" ]; then
     echo "Restoring stack menhir-prod to its prior running state ..."
     docker compose -f "${COMPOSE_FILE}" up -d \
         || { echo "FATAL: failed to restart stack after successful backup; restart it manually" >&2; exit 1; }

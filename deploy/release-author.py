@@ -30,8 +30,7 @@ SPEC_KEYS = frozenset({
     "schema", "release_id", "release_author", "repositories", "images", "evidence",
     "rendered", "network", "initial_release", "prior_release",
     "prior_route", "initial_prior_images", "secret_version_ids",
-    "artifact_sources", "source_fence_key_id", "source_fence_public_key",
-    "source_fence_tls_ca", "external_evidence_public_keys",
+    "artifact_sources",
     "initial_host_state",
 })
 SECURITY_REVIEW_KEYS = frozenset({
@@ -55,7 +54,6 @@ SECRET_VERSIONS = frozenset({
     "neo4j-auth", "neo4j-password", "oauth-signing-key",
     "oauth-retry-keyring", "oauth-consent-secret", "operator-key",
     "client-policy", "provider-key",
-    "source-fence-token",
 })
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -542,29 +540,6 @@ def author_release(
             "blob_oid": blob_oid,
         }
 
-    source_fence_key_id = spec.get("source_fence_key_id")
-    if not isinstance(source_fence_key_id, str) or len(source_fence_key_id) > 64 \
-            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", source_fence_key_id):
-        raise ValueError("source_fence_key_id must be a safe bounded key id")
-    source_fence_public_key = spec.get("source_fence_public_key")
-    menhir_schema._decode_ed25519_public_key(  # release-schema authority
-        source_fence_public_key, "source_fence_public_key"
-    )
-    source_fence_tls_ca_sha256 = _sha256(
-        _regular(spec.get("source_fence_tls_ca"), "source_fence_tls_ca")
-    )
-    external_evidence_public_keys = spec.get("external_evidence_public_keys")
-    if not isinstance(external_evidence_public_keys, dict) or len(external_evidence_public_keys) < 2:
-        raise ValueError("external_evidence_public_keys must contain at least two workers")
-    for worker_id, public_key in external_evidence_public_keys.items():
-        if not isinstance(worker_id, str) or not re.fullmatch(
-            r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", worker_id
-        ):
-            raise ValueError("external evidence worker id is invalid")
-        menhir_schema._decode_ed25519_public_key(
-            public_key, f"external_evidence_public_keys.{worker_id}"
-        )
-
     release = {
         "schema": 1,
         "release_id": release_id,
@@ -589,10 +564,16 @@ def author_release(
         "rollback_anchors": rollback,
         "secret_version_ids": secret_versions,
         "artifacts": artifacts,
-        "source_fence_key_id": source_fence_key_id,
-        "source_fence_public_key": source_fence_public_key,
-        "source_fence_tls_ca_sha256": source_fence_tls_ca_sha256,
-        "external_evidence_public_keys": external_evidence_public_keys,
+        "deployment": {
+            "topology": "same-host-docker",
+            "legacy_container": "menhir-prod-app",
+            "production_container": "menhir-prod-app",
+            "candidate_container": "menhir-candidate-app",
+            "legacy_database_container": "menhir-prod-neo4j",
+            "candidate_database_container": "menhir-candidate-neo4j",
+            "compose_project": "menhir-prod",
+            "compose_service": "menhir",
+        },
     }
 
     authority_sha = menhir_schema.release_authority_sha256(release)
