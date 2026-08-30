@@ -319,7 +319,7 @@ def test_reconcile_policy_clients_rejects_drift_without_partial_writes(tmp_path)
     )
     claude = _static_policy("claude-web", "https://claude.example/callback")
 
-    with pytest.raises(ValueError, match="does not match"):
+    with pytest.raises(ValueError, match="drifted fields: redirect_uris"):
         reconcile_policy_clients(_policy_authority(claude, drifted), store)
 
     assert store.get("claude-web") is None

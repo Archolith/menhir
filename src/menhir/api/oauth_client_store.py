@@ -209,17 +209,23 @@ def reconcile_policy_clients(
                         raise ValueError(
                             "policy-owned OAuth client metadata is malformed"
                         ) from exc
-                    metadata_drifted = (
-                        row["client_name"] != registration.client_name
-                        or stored_redirect_uris != registration.redirect_uris
-                        or row["client_secret_hash"] != ""
-                        or row["token_endpoint_auth_method"]
+                    metadata_drift = []
+                    if row["client_name"] != registration.client_name:
+                        metadata_drift.append("client_name")
+                    if stored_redirect_uris != registration.redirect_uris:
+                        metadata_drift.append("redirect_uris")
+                    if row["client_secret_hash"] != "":
+                        metadata_drift.append("client_secret_hash")
+                    if (
+                        row["token_endpoint_auth_method"]
                         != registration.token_endpoint_auth_method
-                    )
-                    if metadata_drifted:
+                    ):
+                        metadata_drift.append("token_endpoint_auth_method")
+                    if metadata_drift:
                         raise ValueError(
                             "policy-owned OAuth client metadata does not match "
-                            f"the configured authority: {policy.label}"
+                            f"the configured authority: {policy.label}; "
+                            f"drifted fields: {', '.join(metadata_drift)}"
                         )
                     if stored_scopes != expected_scopes:
                         conn.execute(
