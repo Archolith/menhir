@@ -549,9 +549,15 @@ def test_release_schema_helpers_support_installed_flat_layout() -> None:
     release_validate = (root / "deploy" / "release-validate.sh").read_text(
         encoding="utf-8"
     )
+    release_run = (root / "deploy" / "release-run.sh").read_text(encoding="utf-8")
 
     assert '[ -f "$schema" ] || schema="${helper_dir}/menhir_schema.py"' in release_lib
     assert '[ -f "$SCHEMA" ] || SCHEMA="${SCRIPT_DIR}/menhir_schema.py"' in release_validate
+    assert (
+        '[ -f "$same_host_helper" ] || '
+        'same_host_helper="${SCRIPT_DIR}/same_host_fence.py"'
+    ) in release_run
+    assert 'python3 "${SCRIPT_DIR}/lib/same_host_fence.py"' not in release_run
 
 
 def test_production_compose_uses_compose_v5_compatible_pid_limits() -> None:
