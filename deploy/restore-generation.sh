@@ -176,13 +176,13 @@ release_manifest_sha256="$(sha256sum "$RELEASE_JSON" | cut -d' ' -f1)"
 
 backup_receipt="${STATUS_DIR}/backup-receipts/${gen_id}.json"
 [ -f "$backup_receipt" ] && [ ! -L "$backup_receipt" ] \
-    || { echo "release-bound backup upload receipt is required" >&2; exit 1; }
+    || { echo "release-bound local backup receipt is required" >&2; exit 1; }
 [ "$(stat -c '%u' "$backup_receipt")" = 0 ] \
-    || { echo "backup upload receipt must be root-owned" >&2; exit 1; }
+    || { echo "local backup receipt must be root-owned" >&2; exit 1; }
 backup_receipt_mode="$(stat -c '%a' "$backup_receipt")"
 (( ((8#${backup_receipt_mode}) & 8#022) == 0 )) \
-    || { echo "backup upload receipt must not be group/other writable" >&2; exit 1; }
-python3 "$SCHEMA" validate-receipt-binding "$backup_receipt" backup-upload \
+    || { echo "local backup receipt must not be group/other writable" >&2; exit 1; }
+python3 "$SCHEMA" validate-receipt-binding "$backup_receipt" backup-local \
     "$RELEASE_JSON" "$gen_id" "$manifest_sha256_actual" \
     "$manifest_menhir_digest" "$manifest_neo4j_digest" \
     || { echo "backup receipt does not bind this restored generation" >&2; exit 1; }

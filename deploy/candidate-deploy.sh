@@ -20,7 +20,7 @@ marker="${BACKUP_ROOT}/candidate/${generation}/REHEARSAL-PASSED"
 [ "$(read_generation "$marker" "candidate rehearsal marker")" = "$generation" ] \
     || { echo "candidate rehearsal marker mismatch" >&2; exit 1; }
 backup_receipt="$(backup_receipt_path)"
-validate_receipt_binding "$backup_receipt" backup-upload "$generation" \
+validate_receipt_binding "$backup_receipt" backup-local "$generation" \
     "$manifest_sha" "$menhir_digest" "$neo4j_digest"
 same_host_fence="${STATUS_DIR}/same-host-writer-fence.json"
 require_root_file "$same_host_fence" "same-host writer-fence receipt"

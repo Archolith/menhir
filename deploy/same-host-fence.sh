@@ -12,9 +12,9 @@ load_production_env
 acquire_release_lock
 validate_release_authority
 backup_receipt="$(backup_receipt_path)"
-validate_receipt_file "$backup_receipt" backup-upload
+validate_receipt_file "$backup_receipt" backup-local
 schema_py validate-backup-promotion "$backup_receipt" \
-    || { echo "same-host writer retirement requires a fresh verified off-host backup" >&2; exit 1; }
+    || { echo "same-host writer retirement requires a fresh verified local backup" >&2; exit 1; }
 
 helper="${SCRIPT_DIR}/lib/same_host_fence.py"
 [ -f "$helper" ] || helper="${SCRIPT_DIR}/same_host_fence.py"

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Durable plaintext-cleanup transaction for an uploaded backup generation.
+"""Durable plaintext-cleanup transaction for a local encrypted generation.
 
-The off-host object is already verified before this helper is used.  A root-owned
-journal binds the pending receipt and the two fixed local paths.  Re-running
+The persisted encrypted archive is already verified before this helper is used. A
+root-owned journal binds the pending receipt and the two fixed local paths. Re-running
 ``complete`` after SIGKILL is idempotent: plaintext is either still at the
 generation path, atomically parked at the cleanup path, or already absent.  The
 receipt is finalized only after both plaintext locations are absent.

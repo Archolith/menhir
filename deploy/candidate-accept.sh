@@ -57,7 +57,7 @@ python3 "$SCHEMA" validate-release "${MENHIR_PROD_ROOT}/release/release.json"
 [ "$(read_generation "${candidate_root}/REHEARSAL-PASSED" "rehearsal marker")" = "$generation" ] \
     || { echo "candidate rehearsal marker mismatch" >&2; exit 1; }
 backup_receipt="$(backup_receipt_path)"
-validate_receipt_file "$backup_receipt" backup-upload
+validate_receipt_file "$backup_receipt" backup-local
 
 # --- Same-host writer fence (exact legacy identity + current Docker census) ---
 same_host_fence="${STATUS_DIR}/same-host-writer-fence.json"

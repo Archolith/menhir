@@ -11,7 +11,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 load_production_env
 acquire_release_lock
 receipt="$(backup_receipt_path)"
-validate_receipt_file "$receipt" backup-upload
+validate_receipt_file "$receipt" backup-local
 schema_py validate-backup-promotion "$receipt"
 
 identity="/etc/menhir/backup-restore.agekey"
@@ -60,7 +60,7 @@ schema_py validate-manifest "${destination}/MANIFEST.json" "$destination"
 manifest_sha="$(sha256sum "${destination}/MANIFEST.json" | cut -d' ' -f1)"
 menhir_digest="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["build"]["menhir_image_digest"])' "${destination}/MANIFEST.json")"
 neo4j_digest="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["build"]["neo4j_image_digest"])' "${destination}/MANIFEST.json")"
-validate_receipt_binding "$receipt" backup-upload "$generation" "$manifest_sha" "$menhir_digest" "$neo4j_digest"
+validate_receipt_binding "$receipt" backup-local "$generation" "$manifest_sha" "$menhir_digest" "$neo4j_digest"
 write_generation_record "${STATUS_DIR}/restore-selection" "$generation"
 rm -f "$plaintext"
 trap - EXIT

@@ -104,10 +104,14 @@ with Compose project `menhir-candidate`, service `menhir`, and runtime mode
   durable-state inventory, and source commit;
 - `SHA256SUMS`, strict `MANIFEST.json`, and a completion marker.
 
-The root upload wrapper encrypts with age, uploads the exact version to the
-configured S3 bucket, verifies digest/readback/SSE/Object Lock COMPLIANCE, tests
-delete denial on a separate sacrificial object, retains at least two local
-encrypted generations, removes plaintext, and writes the structured receipt.
+`menhir-backup-local.sh` protects the exact generation outside the active writer by
+encrypting it with age under `/srv/menhir/backups/encrypted`, verifying a decrypt/hash
+roundtrip, retaining the encrypted archive on the VPS, removing plaintext staging, and
+writing a structured release-bound receipt. The retention target is at least two
+generations as backups accumulate. An operator may additionally copy the encrypted
+archive to the desktop; that optional copy never gates the VPS release transaction.
+No remote object store, cloud backup provider, provider CLI, or provider credential is
+part of the production backup contract.
 
 `stage-generation.sh` selects the archive only from that receipt and decrypts
 with `/etc/menhir/backup-restore.agekey` (root, mode 0400/0600). Extraction
@@ -137,8 +141,8 @@ app and Neo4j containers before quiescing:
 - host machine-id digest;
 - release ID and release-file digest.
 
-Only after the complete off-host/WORM backup receipt verifies does the same
-locked transaction disable restart and remove that exact app/database pair. It then
+Only after the complete approved backup receipt verifies does the same locked
+transaction disable restart and remove that exact app/database pair. It then
 scans every Docker container, including stopped containers. The scan rejects the
 captured IDs/names, either production Compose service, any production-mode Menhir,
 a renamed writer using the captured app image, and any Neo4j container mounting

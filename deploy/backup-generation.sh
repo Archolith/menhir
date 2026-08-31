@@ -25,14 +25,13 @@
 #   * unique no-collision generation id (mktemp -d)
 #   * quiesced: the menhir-prod stack is stopped while the snapshot is taken;
 #     on failure the stack is LEFT STOPPED; it is restarted only after a fully
-#     successful, wrapper-uploaded generation, and a restart failure is FATAL
+#     successful, locally persisted generation, and a restart failure is FATAL
 #   * never logs secrets: contents are copied + hashed, never echoed
 #   * no fail-open: every required evidence item aborts on missing/failure
 #   * neo4j-admin runs as UID/GID 7474 against a writable, 7474-owned target
-#   * encrypted off-host/WORM upload is a REQUIRED root-owned wrapper; the
-#     script fails closed if absent and only reports success after the wrapper
-#     encrypts client-side, uploads off-host, verifies identity/immutability/
-#     WORM retention, and removes the plaintext staging.
+#   * an encrypted local backup is a REQUIRED root-owned step; the script fails
+#     closed if absent and only reports success after the wrapper encrypts,
+#     roundtrip-verifies, persists, receipts, and removes plaintext staging.
 #
 # Run as root. Same environment as `docker compose up` is required.
 #
@@ -46,7 +45,7 @@
 #   MENHIR_PROD_POLICY_DIR=${MENHIR_PROD_ROOT}/policy
 #   MENHIR_BACKUP_ROOT=/srv/menhir/backups
 #   MENHIR_MAINTENANCE_LOCK=/run/lock/menhir-production.lock
-#   MENHIR_BACKUP_WRAPPER=/usr/local/sbin/menhir-backup-upload
+#   MENHIR_BACKUP_LOCAL_WRAPPER=/usr/local/sbin/menhir-backup-local
 #   MENHIR_IMAGE, NEO4J_IMAGE (required, digest-pinned)
 set -euo pipefail
 umask 077
@@ -70,13 +69,13 @@ SECRETS_DIR="${MENHIR_PROD_SECRETS_DIR:-${MENHIR_PROD_ROOT}/secrets}"
 POLICY_DIR="${MENHIR_PROD_POLICY_DIR:-${MENHIR_PROD_ROOT}/policy}"
 BACKUP_ROOT="${MENHIR_BACKUP_ROOT:-/srv/menhir/backups}"
 LOCK="${MENHIR_MAINTENANCE_LOCK:-/run/lock/menhir-production.lock}"
-WRAPPER="${MENHIR_BACKUP_WRAPPER:-/usr/local/sbin/menhir-backup-upload}"
+WRAPPER="${MENHIR_BACKUP_LOCAL_WRAPPER:-/usr/local/sbin/menhir-backup-local}"
 PRODUCTION_ENV="/srv/menhir/production/release/production.env"
 
 load_production_env
 
 # Release cutovers capture the exact live legacy writer before quiescing and
-# retire it only after the backup has been uploaded and verified. This keeps
+# retire it only after the local backup has been persisted and verified. This keeps
 # capture -> stop -> backup -> restart-disable -> removal under one host lock.
 same_host_cutover="${MENHIR_SAME_HOST_CUTOVER:-0}"
 [ "$same_host_cutover" = 0 ] || [ "$same_host_cutover" = 1 ] \
@@ -375,39 +374,39 @@ manifest_sha256="$( (cd "${target}" && sha256sum MANIFEST.json | cut -d' ' -f1) 
 printf '%s\n' "${manifest_sha256}" > "${target}/COMPLETE"
 
 echo "Local generation complete and verified: ${target}"
-echo "Invoking encrypted off-host/WORM upload wrapper: ${WRAPPER}"
+echo "Invoking encrypted local backup wrapper: ${WRAPPER}"
 
 if [ ! -x "${WRAPPER}" ] || [ -L "${WRAPPER}" ] \
     || [ "$(stat -c '%u' "${WRAPPER}" 2>/dev/null || echo -1)" != 0 ]; then
-    echo "FATAL: upload wrapper must be a root-owned regular executable (not a" >&2
+    echo "FATAL: local backup wrapper must be a root-owned regular executable (not a" >&2
     echo "symlink) at ${WRAPPER}. Stack is left stopped." >&2
     exit 1
 fi
 mode="$(stat -c '%a' "${WRAPPER}")"
 # shellcheck disable=SC2016
 (( ((8#${mode}) & 8#022) == 0 )) \
-    || { echo "FATAL: upload wrapper must not be group/other writable" >&2; exit 1; }
+    || { echo "FATAL: local backup wrapper must not be group/other writable" >&2; exit 1; }
 
 # Fail closed: only the wrapper's success counts. It removes the plaintext
 # staging directory on success; any non-zero exit is a failed backup.
-"${WRAPPER}" "${target}" || { echo "FATAL: off-host/WORM upload failed; stack is left stopped" >&2; exit 1; }
+"${WRAPPER}" "${target}" || { echo "FATAL: encrypted local backup failed; stack is left stopped" >&2; exit 1; }
 
 # The wrapper must have written an atomic, structured receipt proving the
-# off-host object identity, WORM retention, plaintext removal, and /readyz
-# recovery. Promotion re-parses this exact file and never reads mtime.
-BACKUP_RECEIPT="${MENHIR_BACKUP_RECEIPT:-${STATUS_DIR:-/var/lib/menhir-production}/backup-upload-receipt.json}"
+# local archive identity, encryption roundtrip, retention inventory, plaintext
+# removal, and /readyz recovery. Promotion re-parses this exact file.
+BACKUP_RECEIPT="${MENHIR_BACKUP_RECEIPT:-${STATUS_DIR:-/var/lib/menhir-production}/backup-local-receipt.json}"
 [ -f "$BACKUP_RECEIPT" ] && [ ! -L "$BACKUP_RECEIPT" ] \
-    || { echo "FATAL: upload wrapper did not produce a receipt at ${BACKUP_RECEIPT}" >&2; exit 1; }
+    || { echo "FATAL: local backup wrapper did not produce a receipt at ${BACKUP_RECEIPT}" >&2; exit 1; }
 [ "$(stat -c '%u' "$BACKUP_RECEIPT")" = 0 ] \
-    || { echo "FATAL: backup upload receipt must be root-owned" >&2; exit 1; }
+    || { echo "FATAL: local backup receipt must be root-owned" >&2; exit 1; }
 receipt_mode="$(stat -c '%a' "$BACKUP_RECEIPT")"
 (( ((8#${receipt_mode}) & 8#022) == 0 )) \
-    || { echo "FATAL: backup upload receipt must not be group/other writable" >&2; exit 1; }
-python3 "$SCHEMA" validate-receipt-binding "$BACKUP_RECEIPT" backup-upload \
+    || { echo "FATAL: local backup receipt must not be group/other writable" >&2; exit 1; }
+python3 "$SCHEMA" validate-receipt-binding "$BACKUP_RECEIPT" backup-local \
     "$RELEASE_JSON" "$generation" "$manifest_sha256" "$menhir_digest" "$neo4j_digest" \
-    || { echo "FATAL: backup upload receipt failed validation or release binding" >&2; exit 1; }
+    || { echo "FATAL: local backup receipt failed validation or release binding" >&2; exit 1; }
 
-echo "Backup ${generation} uploaded and verified; plaintext staging removed."
+echo "Backup ${generation} persisted locally and verified; plaintext staging removed."
 
 # A release cutover retires the exact captured app and database containers only
 # after the verified backup exists. Durable host data remains in place for the

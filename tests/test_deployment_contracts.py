@@ -350,7 +350,7 @@ def test_release_security_review_is_bound_to_every_release_claim(tmp_path):
     ("script", "validator"),
     (
         ("backup-generation.sh", "validate-release"),
-        ("menhir-backup-upload-contabo.sh", "validate-release"),
+        ("menhir-backup-local.sh", "validate-release"),
         ("restore-generation.sh", "validate-release"),
         ("candidate-deploy.sh", "validate_release_authority"),
         ("candidate-accept.sh", "validate-release"),
@@ -462,46 +462,22 @@ def _receipt_release():
     }
 
 
-def _backup_upload_receipt():
+def _backup_local_receipt():
     return {
         "schema": 1,
-        "kind": "backup-upload",
+        "kind": "backup-local",
         "operation_job_id": "test-backup-job-1",
         "generation": "generation.Abc123",
         "manifest_sha256": "e" * 64,
         "release": _receipt_release(),
-        "offhost": {
-            "bucket": "menhir-backups",
-            "production_backup": {
-                "object_key": "menhir/generation.Abc123/archive.tar.gz.age",
-                "version_id": "version-production-1",
-                "object_sha256": "f" * 64,
-                "object_size": 123,
-                "server_side_encryption": "AES256",
-                "lock_mode": "COMPLIANCE",
-                "worm_retention_until": "2031-01-01T00:00:00Z",
-                "version_readback_verified": True,
-                "client_encryption": {
-                    "algorithm": "age-x25519",
-                    "recipient": "age1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq",
-                    "plaintext_archive_sha256": "a" * 64,
-                },
-            },
-            "sacrificial_probe": {
-                "object_key": "menhir/worm-delete-denial-probes/generation.Abc123/probe",
-                "version_id": "version-probe-1",
-                "object_sha256": "b" * 64,
-                "object_size": 42,
-                "server_side_encryption": "AES256",
-                "lock_mode": "COMPLIANCE",
-                "worm_retention_until": "2031-01-01T00:00:00Z",
-                "version_readback_verified": True,
-                "locked_version_delete_denied": True,
-                "version_persisted_after_delete_denial": True,
-            },
+        "encryption": {
+            "algorithm": "age-x25519",
+            "recipient": "age1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq",
+            "plaintext_archive_sha256": "a" * 64,
+            "roundtrip_verified": True,
         },
         "local_encrypted_archives": {
-            "minimum_retained_generations": 2,
+            "retention_target_generations": 2,
             "retained_generation_count": 2,
             "current_archive_path": "/srv/menhir/backups/encrypted/generation.Abc123-current.tar.gz.age",
             "archives": [
@@ -524,10 +500,10 @@ def _backup_upload_receipt():
     }
 
 
-def test_backup_upload_receipt_valid(tmp_path):
-    receipt = _backup_upload_receipt()
+def test_backup_local_receipt_valid(tmp_path):
+    receipt = _backup_local_receipt()
     path = _write_json(tmp_path, "receipt.json", receipt)
-    _schema.validate_receipt(str(path), "backup-upload")
+    _schema.validate_receipt(str(path), "backup-local")
 
 
 def test_release_schema_refuses_empty_prior_anchor_for_non_initial(tmp_path):
@@ -539,48 +515,43 @@ def test_release_schema_refuses_empty_prior_anchor_for_non_initial(tmp_path):
         _schema.validate_release(str(path))
 
 
-def test_backup_upload_receipt_requires_worm_denial(tmp_path):
-    receipt = _backup_upload_receipt()
-    receipt["offhost"]["sacrificial_probe"]["locked_version_delete_denied"] = False
+def test_backup_local_receipt_requires_roundtrip_verification(tmp_path):
+    receipt = _backup_local_receipt()
+    receipt["encryption"]["roundtrip_verified"] = False
     path = _write_json(tmp_path, "receipt.json", receipt)
-    with pytest.raises(ValueError, match="locked_version_delete_denied"):
-        _schema.validate_receipt(str(path), "backup-upload")
+    with pytest.raises(ValueError, match="roundtrip_verified"):
+        _schema.validate_receipt(str(path), "backup-local")
 
 
-def test_backup_upload_receipt_requires_distinct_production_and_probe_objects(tmp_path):
-    receipt = _backup_upload_receipt()
-    production = receipt["offhost"]["production_backup"]
-    probe = receipt["offhost"]["sacrificial_probe"]
-    production["object_key"] = \
-        "menhir/worm-delete-denial-probes/generation.Abc123/shared"
-    probe["object_key"] = production["object_key"]
-    probe["version_id"] = production["version_id"]
+def test_backup_local_receipt_requires_age_encryption(tmp_path):
+    receipt = _backup_local_receipt()
+    receipt["encryption"]["algorithm"] = "plaintext"
     path = _write_json(tmp_path, "receipt.json", receipt)
-    with pytest.raises(ValueError, match="must differ"):
-        _schema.validate_receipt(str(path), "backup-upload")
+    with pytest.raises(ValueError, match="age-x25519"):
+        _schema.validate_receipt(str(path), "backup-local")
 
 
-def test_backup_upload_receipt_requires_current_generation_in_local_evidence(tmp_path):
-    receipt = _backup_upload_receipt()
+def test_backup_local_receipt_requires_current_generation_in_local_evidence(tmp_path):
+    receipt = _backup_local_receipt()
     receipt["local_encrypted_archives"]["archives"][0]["generation"] = \
         "generation.Other789"
     receipt["local_encrypted_archives"]["archives"][0]["path"] = \
         "/srv/menhir/backups/encrypted/generation.Other789-current.tar.gz.age"
     path = _write_json(tmp_path, "receipt.json", receipt)
     with pytest.raises(ValueError, match="current generation"):
-        _schema.validate_receipt(str(path), "backup-upload")
+        _schema.validate_receipt(str(path), "backup-local")
 
 
-def test_backup_upload_receipt_requires_configured_distinct_generation_count(tmp_path):
-    receipt = _backup_upload_receipt()
+def test_backup_local_receipt_requires_correct_distinct_generation_count(tmp_path):
+    receipt = _backup_local_receipt()
     receipt["local_encrypted_archives"]["archives"][1]["generation"] = \
         "generation.Abc123"
     receipt["local_encrypted_archives"]["archives"][1]["path"] = \
         "/srv/menhir/backups/encrypted/generation.Abc123-prior.tar.gz.age"
-    receipt["local_encrypted_archives"]["retained_generation_count"] = 1
+    receipt["local_encrypted_archives"]["retained_generation_count"] = 2
     path = _write_json(tmp_path, "receipt.json", receipt)
-    with pytest.raises(ValueError, match="configured minimum"):
-        _schema.validate_receipt(str(path), "backup-upload")
+    with pytest.raises(ValueError, match="distinct evidence"):
+        _schema.validate_receipt(str(path), "backup-local")
 
 
 def test_restore_uses_the_selected_generations_immutable_backup_receipt():
@@ -639,7 +610,7 @@ def test_receipt_kind_mismatch(tmp_path):
     }
     path = _write_json(tmp_path, "receipt.json", receipt)
     with pytest.raises(ValueError, match="kind"):
-        _schema.validate_receipt(str(path), "backup-upload")
+        _schema.validate_receipt(str(path), "backup-local")
 
 
 def test_promotion_revalidates_same_host_writer_census_under_lock():

@@ -7,6 +7,11 @@ artifact_status: PROPOSED
 
 # Menhir full production migration to Contabo
 
+> **Backup contract correction (2026-08-31):** this plan never had owner authority to
+> require a cloud/object-store backup service. The release backup is an encrypted,
+> round-trip-verified archive retained locally on the VPS. It may also be copied to the
+> operator desktop after completion. Desktop availability does not gate release.
+
 ## Decision
 
 Move the complete Menhir production stack to the existing Contabo VPS:
@@ -98,7 +103,8 @@ In scope:
 - immutable-client OAuth/tool policy and durable refresh-retry idempotency;
 - hardened Menhir and Neo4j containers, networks, volumes, secrets, limits, health, and monitoring;
 - a rehearsed Neo4j + OAuth state migration from the private host to Contabo;
-- encrypted off-host backups, restore drills, cutover, rollback, and real ChatGPT E2E proof;
+- encrypted VPS-local backups, optional desktop archives, restore drills, cutover, rollback, and
+  real ChatGPT E2E proof;
 - retiring the old public gateway, private worker/runtime, public tunnel route, and source writer
   only after the observation window.
 
@@ -131,7 +137,8 @@ is a full Menhir compromise. Container/network isolation limits accidental expos
 cross-service blast radius but is not a defense against hostile VPS root or provider control. On
 2026-08-25 the owner explicitly accepted Contabo's provider-at-rest trust boundary for this migration;
 that acceptance does not weaken host hardening, secret isolation, or recovery requirements.
-Encrypted off-host backups remain mandatory.
+Encrypted, round-trip-verified VPS-local backups remain mandatory. An encrypted copy may also be
+archived on the operator desktop, but no cloud backup provider is required or implied.
 
 ## Production invariants
 
@@ -183,9 +190,9 @@ Encrypted off-host backups remain mandatory.
     cannot become production until its provenance, vulnerability result, SBOM, signatures when
     available, health checks, database compatibility, and rollback digest are recorded. Runtime
     drift, an unexpected published port, or a changed firewall rule blocks cutover and alerts later.
-14. Backup credentials on the VPS cannot delete or rewrite retained off-host generations. Backup
-    encryption keys and recovery material are stored separately from the host, and a host/root
-    compromise must not silently destroy the only recoverable copy.
+14. Backup creation uses fixed root-owned VPS paths and cannot overwrite an existing archive.
+    Every release-bound archive is encrypted, round-trip-verified, hashed, and retained locally;
+    the encrypted artifact may additionally be copied and hash-verified on the operator desktop.
 15. A versioned durable-state manifest enumerates every writable file, SQLite database and journal
     mode, key, secret, volume, graph database, queue/scheduler record, configuration authority, and
     audit store. Each entry names its writer, consistency boundary, migration inclusion, recurring
@@ -271,7 +278,7 @@ writer lacks both a manifest row and candidate-fence classification.
   firewall policy. Keep two tested administrative sessions during firewall changes and define the
   timed rollback command first, so hardening cannot strand the operator.
 - Require phishing-resistant MFA/passkeys where supported for Contabo, Cloudflare, the registrar,
-  image registry, backup provider, and alerting account. Store tested recovery codes offline; remove
+  image registry, and alerting account. Store tested recovery codes offline; remove
   stale users/sessions/tokens; use scoped service tokens instead of global account keys; and enable
   account, DNS, firewall, certificate, and VPS lifecycle change notifications to an off-host channel.
 - Patch the supported LTS host and Docker Engine to reviewed security levels, record pending reboot
@@ -496,7 +503,7 @@ If entrypoint args/env/cwd change, regenerate and validate the central MCP regis
   `vps_shell`, `vps_ssh`, `vps_exec`, `vps_compose`, Caddy reload, file/env mutation, or prune.
 - Long operations submit a background job and return an opaque job ID well inside the gateway's
   90-second request boundary. Define separate wall-clock limits for quiesce, dump/check, package,
-  off-host upload, restore/load/check, and resume; persist sanitized phase progress and terminal
+  local encryption/persistence, restore/load/check, and resume; persist sanitized phase progress and terminal
   state; and cap every MCP response and retained diagnostic excerpt at 8 KiB. Timeout or cancellation
   is a failed terminal state: terminate the process tree, prove descendants exited, preserve bounded
   evidence and recovery anchors, resume service only when the operation contract says it is safe,
@@ -504,7 +511,7 @@ If entrypoint args/env/cwd change, regenerate and validate the central MCP regis
   truncation, secret redaction, process death, and lock retention/release.
 - Replace timer-listing as backup evidence with a dedicated status record for each complete authority
   generation: unique ID/epoch, start/end/result, source release/config identity, writer-quiescence
-  proof, manifest and artifact hashes, local/off-host object identity, immutable-retention result,
+  proof, manifest and artifact hashes, local encrypted-archive identity and retention inventory,
   verification result, last clean-volume restore result/age, resume result, and bounded redacted
   failure. Missing/stale/mixed-generation status blocks deploy/cutover and alerts.
 
@@ -577,7 +584,8 @@ If entrypoint args/env/cwd change, regenerate and validate the central MCP regis
   commands all resolve to the recorded source digest; a floating tag is not evidence.
 - Compare databases, counts, indexes/constraints and ONLINE state, selected content digests, artifact
   graph relationships, namespaces, pending/enriching state, and read-only recall probes. Destroy the
-  rehearsal volume only after evidence is retained and the backup is confirmed off-host.
+  rehearsal volume only after evidence is retained and the encrypted VPS-local backup receipt is
+  confirmed complete.
 - Run auth-shape, OAuth AS, MCP initialize/list/call, immutable-client policy, route/network denial,
   direct-origin/AOP denial, SSH recovery, IPv4/IPv6 external port scan, Docker firewall-reboot,
   container-privilege/mount/socket census, restart/refresh, log-redaction, security-alert, and
@@ -659,20 +667,16 @@ If entrypoint args/env/cwd change, regenerate and validate the central MCP regis
   and dump/check both `neo4j` and `system` with the pinned source-compatible admin image. Bind all
   artifacts to one unique epoch/sequence/build/config/checksum manifest. Resume Neo4j and Menhir only
   after the local generation validates; failure keeps writes unavailable and alerts the operator.
-- Keep at least two complete local generations within the disk budget and 7 daily/4 weekly encrypted
-  off-host generations. Run recurring consistency checks and a monthly clean-volume restore of the
+- Keep at least two encrypted generations on the VPS within the disk budget. Run recurring
+  consistency checks and a monthly clean-volume restore of the
   complete generation. Acceptance requires restored OAuth discovery, existing-client access-token
   validation, refresh-family rotation/retry behavior, graph read/write/recall, queue/scheduler
   reconciliation, and enrichment continuation. A logical graph export is supplemental, not the
   disaster-recovery authority.
-- Use an off-host backend or broker under a separate failure domain that enforces unique immutable
-  object generations, retention lock/WORM, and create-only credentials for the VPS. "Where
-  supported" is not acceptable: before cutover, negative probes using the actual VPS credential
-  must fail to overwrite or delete a dedicated sacrificial retained test generation while a new
-  uniquely named generation succeeds. Never use the only meaningful recovery generation for a
-  denial probe. Restore/delete credentials and client-side encryption recovery keys remain off-host;
-  deletion/retention changes alert out of band. Test recovery from a credential-isolated clean
-  machine with the production host unavailable.
+- Archive names are unique and creation refuses replacement. The receipt inventories retained
+  encrypted generations and binds the current archive hash to the release and state manifest.
+  After the VPS-local receipt is complete, `scripts/menhir-backup-archive.ps1` may copy the named
+  encrypted archive to the operator desktop and must verify the receipt SHA-256 before finalizing it.
 - Before the first Contabo OAuth or graph mutation, rollback may restore the old route and immutable
   source state after deliberately re-enabling source services and rechecking the original digests.
 - After any Contabo OAuth or graph mutation, prefer roll-forward remediation. If rollback is
@@ -682,7 +686,7 @@ If entrypoint args/env/cwd change, regenerate and validate the central MCP regis
   rehearsal did not pass, the post-mutation plan is explicitly roll-forward-only. If state integrity
   is uncertain, require connector reauthorization and explicitly account for accepted data loss.
   Never run both writers, mix generations, or perform DNS-only rollback.
-- After seven stable days and a successful off-host restore drill, revoke obsolete tunnel
+- After seven stable days and a successful encrypted-archive restore drill, revoke obsolete tunnel
   credentials, remove old public routes, archive the Windows launcher, and retain the source dump
   under the approved recovery retention before secure retirement.
 
@@ -697,12 +701,12 @@ filenames may change during implementation, but ownership and proof boundaries m
 | Menhir | `deploy/Dockerfile`; a new production Compose file under `deploy/`; dependency lock/wheel and OS-package manifests; `src/menhir/config/settings_model.py`; `src/menhir/api/server.py`; `src/menhir/api/server_support.py`; route assembly; `oauth_authorize.py`; OAuth client/refresh/key adapters; diagnostics; `.env.example`; deployment/backup/restore runbooks | production config render; image dependency-closure/SBOM/scan verification; public-route absence; candidate graph/OAuth/telemetry writer census; `/livez` and both `/readyz` modes; consent-JTI and refresh retry restart/replay/concurrency tests; container/network/secret/limit tests; complete-generation restore and real MCP/ChatGPT lifecycle |
 | `archolith_oauth` (`https://github.com/Archolith/archolith_oauth`, currently pinned at `586d715a9f87db17c9b2feaa652715e01afe5214`) | clone/review as its own repository; extend its SQLite schema and refresh transaction API so family rotation and encrypted retry-receipt insertion occur in one `menhir_oauth_as.db` transaction; expose the atomic consent-JTI consume plus authorization-code issue boundary if Menhir cannot own that same-connection transaction; update package metadata/changelog | package unit/integration tests for commit/rollback/crash interleavings, concurrent exact/variant retries, revocation/purge, consent replay, schema upgrade and downgrade refusal; build wheel in isolation, verify hashes/contents, install into a clean Menhir environment, pin the reviewed new commit and wheel hash in `pyproject.toml`/`uv.lock`, and retain the old commit/wheel as rollback anchor |
 | `yawn.deploy` | `docker-compose.yml`; `Caddyfile`; `releases.json`; `lib/registry.sh`; `remote-deploy.sh`; `wait-for-readiness.sh`; `check-drift.sh`; new Caddy transaction/probe helpers as needed | extend `tests/registry.test.sh` and add Caddy transaction tests proving target isolation, `--no-deps`, config validation, all-vhost probes, failure recording, exact rollback, external-network survival, immutable release fields, and live-Docker/config/network drift detection |
-| `yawn.vps` | `vps/core.py`; new `vps/menhir_tools.py` and `vps/tool_policy.py`; `vps/jobs.py`; `vps/compose_tools.py`; `vps/maintenance_tools.py`; `vps/logs_tools.py`; `vps/tier_auth.py`; `vps_server.py`; root-owned fixed-argument wrapper/systemd-unit definitions and operator runbook; README/CHANGELOG | extend `tests/test_vps_server.py`, `tests/test_tools_integration.py`, `tests/test_deploy_repo_target.py`, `tests/test_logs_tools.py`, and `tests/test_remediation_containment.py`; add focused Menhir operations tests for exact roots/project/files/services/actions and generation IDs, client-ID/audience/tool allowlist plus tier denial, generic-tool non-inheritance, traversal/symlink/metacharacter rejection, 90-second job submission, phase timeout/cancel/process-tree cleanup, 8 KiB output/redaction, lock concurrency/restart/stale recovery, protected-resource prune denial, immutable deploy anchors, quiesced backup, corruption/mixed-generation/off-host/WORM failures, clean-volume rehearsal, production-restore safeguards, and rollback refusal |
+| `yawn.vps` | `vps/core.py`; new `vps/menhir_tools.py` and `vps/tool_policy.py`; `vps/jobs.py`; `vps/compose_tools.py`; `vps/maintenance_tools.py`; `vps/logs_tools.py`; `vps/tier_auth.py`; `vps_server.py`; root-owned fixed-argument wrapper/systemd-unit definitions and operator runbook; README/CHANGELOG | extend `tests/test_vps_server.py`, `tests/test_tools_integration.py`, `tests/test_deploy_repo_target.py`, `tests/test_logs_tools.py`, and `tests/test_remediation_containment.py`; add focused Menhir operations tests for exact roots/project/files/services/actions and generation IDs, client-ID/audience/tool allowlist plus tier denial, generic-tool non-inheritance, traversal/symlink/metacharacter rejection, 90-second job submission, phase timeout/cancel/process-tree cleanup, 8 KiB output/redaction, lock concurrency/restart/stale recovery, protected-resource prune denial, immutable deploy anchors, quiesced backup, corruption/mixed-generation/local-archive failures, clean-volume rehearsal, production-restore safeguards, and rollback refusal |
 
 The final implementation report records the four source commits, package/wheel hashes, all deployed image/config digests,
 the release-authority record, exact commands/results, rollback anchors, live-host evidence, and every
 skipped hosted/external check. Menhir tests cannot substitute for Yawn deploy/operations tests, and
-local tests cannot certify Contabo, Cloudflare, off-host retention, or real ChatGPT behavior.
+local tests cannot certify Contabo, Cloudflare, VPS filesystem durability, or real ChatGPT behavior.
 
 ## Acceptance gates
 
@@ -714,7 +718,7 @@ local tests cannot certify Contabo, Cloudflare, off-host retention, or real Chat
 | Proxy network | the explicitly named external network is pre-created, declared external by both projects, survives repeated deploy/down/rollback/prune denial, retains Caddy's prior attachments, and contains only Caddy plus alias `menhir-prod-app` |
 | Caddy transaction | Caddy-only release target validates complete config, changes no unrelated service, probes every vhost and Menhir denial path, records failures, and restores prior config/image/network state on injected failure |
 | Host access | named non-root key-only SSH works; root/password login fails; sudo is bounded; Contabo console recovery is tested |
-| Control plane | Contabo, Cloudflare, registrar, registry, backup, and alerting accounts have MFA, scoped tokens, offline recovery, and change alerts |
+| Control plane | Contabo, Cloudflare, registrar, registry, and alerting accounts have MFA, scoped tokens, offline recovery, and change alerts |
 | Origin protection | Full (strict), hostname AOP, selected Origin CA lifecycle, Host/SNI checks, rotation rehearsal, and direct-origin probes pass; Cloudflare-only L3 ingress or its shared-host exception is recorded |
 | Docker boundary | no privileged/host-namespace/device/socket workloads; fixed UIDs, dropped capabilities, seccomp/AppArmor, limits, and read-only mounts are proven |
 | Firewall | provider + host + Docker-aware rules survive reboot; external scan matches the shared-service matrix; range updates prove add-before-remove, invalid-set refusal, last-known-good retention, staleness alert, and rollback |
@@ -732,7 +736,7 @@ local tests cannot certify Contabo, Cloudflare, off-host retention, or real Chat
 | Supply chain | every image/config is digest-pinned; SBOM, scan, provenance/signature evidence, patch decision, and rollback digest are recorded |
 | Release/drift | immutable four-repository release record, including the installed `archolith_oauth` wheel/commit, matches live image/config/project/network/port/mount/firewall state; branch heads, empty pins, and Git-only drift are refused |
 | Detection | off-host alerts fire for login, port/firewall/image drift, restart/OOM, disk, TLS/AOP, OAuth anomaly, backup age, and critical patch state |
-| Backup immutability | actual VPS credential creates a unique generation but cannot overwrite/delete retained objects; WORM retention, deletion alerts, off-host keys, and clean-machine restore pass |
+| Backup integrity | release creates a uniquely named encrypted VPS-local archive, round-trip verification passes, receipt hash and local inventory validate, plaintext is removed, and a clean restore passes |
 | Operations | cold restart, complete quiesced backup, clean restore, key/AOP rotation, and either reverse-state rollback or an owner-accepted roll-forward-only mutation boundary are rehearsed |
 | Operations boundary | immutable client-ID/audience/tool capability plus tier confines the Menhir credential to dedicated fixed-root/project/file/service/action operations; bounded redacted execution, shared maintenance lock, prune containment, hostile-input refusal, and generic-tool non-inheritance are proven |
 | Compromise recovery | clean-host rebuild and credential-rotation tabletop identifies owners, ordering, token-revocation decision, and maximum acceptable loss |
@@ -785,7 +789,7 @@ python -m pytest \
 ```
 
 Cutover additionally requires the real container/network census, Neo4j dump/check/load rehearsal,
-real ChatGPT lifecycle, cold service restart, encrypted off-host restore, and source/target writer
+real ChatGPT lifecycle, cold service restart, encrypted VPS-local restore, and source/target writer
 fence evidence. Unit tests alone do not authorize migration.
 
 ## Alternatives considered
@@ -809,7 +813,8 @@ fence evidence. Unit tests alone do not authorize migration.
 - Menhir and Yawn share one physical host and provider failure domain. Separate Compose projects,
   networks, volumes, limits, and deployments prevent routine coupling but not host loss.
 - Root/provider compromise exposes the memory corpus and credentials. This plan is production-ready
-  only under the recorded at-rest trust decision and tested off-host recovery.
+  only under the recorded at-rest trust decision and tested encrypted local recovery. An optional
+  desktop archive reduces host-loss exposure but is not a release gate.
 - Docker isolation is defense in depth, not a root/daemon boundary. Anyone able to control the Docker
   daemon or join the `docker` group is treated as host root; no application or broad automation gets
   that access.

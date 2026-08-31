@@ -22,50 +22,38 @@ primary endpoint, a role/scope/tool mismatch, or a digest mismatch. Never work
 around a refusal by creating another memory endpoint, editing live OAuth rows,
 or issuing a broader token.
 
-## Current live state and rollout blocker (2026-08-31)
+## Current live state (2026-08-31)
 
 Production is healthy on `menhir-prod-0.2.0-5`, Menhir commit `04425f87`, and
 policy version 1. The version-2 access contract is committed but is not live.
-The host currently lacks both `/etc/menhir/backup-upload.conf` and
-`/srv/menhir/production/secrets/menhir/acceptance-token`. There is no
+There is no
 `/var/lib/menhir-production/release-run.json` because release 5 was installed by
 the audited initial in-place bootstrap path.
 
-Do not install a newer bundle or invoke `release-run.sh` while either prerequisite
-is absent. Installing the policy and environment before the runner can complete
-would leave the running release and its restart authority inconsistent. Do not
-repeat the in-place bootstrap for an ordinary release.
-
-The backup prerequisite requires a real Contabo S3 bucket with Object Lock
-COMPLIANCE enabled, a fixed root-owned AWS profile, and an `age_recipient` matching
-`/etc/menhir/backup-restore.agekey`. These are external authorities and must not be
-invented from another service's credentials. The acceptance file must contain one
-fresh OAuth access token for a policy-owned client; never copy a refresh token or a
-static operator secret into it. Remove the access-token file after the release
-observation is complete.
+Backups are mandatory before a writer replacement or state migration. The approved
+contract is local: create an age-encrypted archive under
+`/srv/menhir/backups/encrypted`, verify an encrypt/decrypt hash roundtrip, retain the
+archive and a release-bound receipt on the VPS, and keep at least two generations as
+they become available. The encrypted archive may also be copied to the operator's
+desktop after backup completion; desktop availability never gates the VPS transaction.
+No remote object store, cloud backup provider, provider CLI, or provider credential is
+part of this contract. Do not infer one from the VPS host or an earlier migration plan.
 
 ## Mandatory read-only preflight
 
 Run this before building or reviewing a release. Every check is read-only:
 
 ```bash
-sudo -n test -f /etc/menhir/backup-upload.conf
-sudo -n test -f /root/.aws/credentials
-sudo -n test -f /root/.aws/config
-sudo -n test -f /etc/menhir/backup-restore.agekey
-sudo -n test -f /srv/menhir/production/secrets/menhir/acceptance-token
 sudo -n /srv/menhir/production/bin/verify-artifacts
+sudo -n /srv/menhir/production/bin/backup-status
 curl -fsS https://memory.ctharvey.me/readyz
 ```
 
-Additionally verify the backup config and fixed profile by running the backup
-wrapper's reviewed provider checks in a non-mutating rehearsal environment. Do not
-discover missing backup authority by stopping production. Verify the acceptance
-token against `/mcp-http` immediately before release and ensure it remains valid for
-the entire backup, rehearsal, candidate, promotion, and public-acceptance window.
-If the token lifetime cannot cover that window, stop: the release procedure needs a
-reviewed refresh or just-in-time credential mechanism rather than a hand-copied
-long-lived credential.
+For a writer replacement, verify the local backup wrapper in a non-mutating rehearsal
+environment and prove a complete clean restore. Do not discover a missing restore key
+or unwritable local archive root by stopping production. For any procedure that exercises MCP
+acceptance, obtain a fresh policy-owned OAuth access token just in time; never persist a
+refresh token or static operator secret as an acceptance credential.
 
 ## Normal operator path
 
@@ -149,8 +137,8 @@ The review is mandatory for every release and cannot be reused after any input c
 
 Bootstrap is the only setup-heavy step. It is not repeated for routine releases.
 
-1. Install Docker/Compose, Python 3, GNU `flock`, `age`, `sqlite3`, AWS CLI,
-   `sha256sum`, and the existing Caddy stack.
+1. Install Docker/Compose, Python 3, GNU `flock`, `age`, `sqlite3`, `sha256sum`,
+   and the existing Caddy stack.
 2. Create `menhir-proxy` with subnet `172.30.0.0/24` and gateway
    `172.30.0.1`. Caddy is `172.30.0.2`; Menhir is `172.30.0.3`. Never publish
    Menhir port 8099.
@@ -158,9 +146,10 @@ Bootstrap is the only setup-heavy step. It is not repeated for routine releases.
    `/var/lib/menhir-production`, and `/var/log/menhir-production` as root-owned
    fixed roots.
 4. Provision the secret map from `deploy/secrets-map.sh`.
-5. Provision `/etc/menhir/backup-restore.agekey`, root-owned mode `0400` or
-   `0600`, and configure its public recipient in `/etc/menhir/backup-upload.conf`.
-   Back up the identity through the separate recovery channel.
+5. Provision `/etc/menhir/backup-restore.agekey` as a root-owned mode `0400` or
+   `0600` identity, install `/usr/local/sbin/menhir-backup-local`, and create the
+   root-owned archive root. Record and test the desktop archival procedure without
+   exposing secret values in the release bundle or logs.
 6. Install every immutable path in `deploy/installed-artifacts.json`, including
    `release-run.sh`, `stage-generation.sh`, `same-host-fence.sh`, and their
    Python validators.
@@ -191,9 +180,9 @@ to the gateway.
 The first stage captures the exact running legacy app and database container IDs,
 image IDs, Compose project/service labels, runtime mode, restart policies, networks, host
 machine identity, release ID, and release digest. While holding the shared host
-lock it quiesces the stack, creates and verifies the complete backup, uploads
-the encrypted archive with WORM evidence, disables restart on the captured app,
-and removes that exact pair. A current all-container census then refuses:
+lock it quiesces the stack, creates and verifies the complete encrypted local backup,
+records a durable receipt, disables restart on the captured
+app, and removes that exact pair. A current all-container census then refuses:
 
 - either captured container ID or legacy name;
 - any `menhir-prod` app/database Compose service;

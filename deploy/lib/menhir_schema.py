@@ -13,7 +13,7 @@ deployment-authority records Menhir owns:
                           digest-pinned; the Dockerfile wheel-hash manifest is
                           mandatory.
   * ``receipt``         - atomic structured receipts emitted by the backup
-                          upload wrapper, the restore rehearsal, and the
+                          local backup wrapper, the restore rehearsal, and the
                           candidate-acceptance verifier. Promotion consumes the
                           exact parsed fields and never reads mtime.
 
@@ -794,36 +794,19 @@ def validate_source_fence(path: str) -> dict:
 # Receipts
 # ---------------------------------------------------------------------------
 
-_RECEIPT_KINDS = frozenset({"backup-upload", "rehearsal", "candidate-accept"})
+_RECEIPT_KINDS = frozenset({"backup-local", "rehearsal", "candidate-accept"})
 
 _RECEIPT_RELEASE_KEYS = frozenset(
     {"release_id", "release_manifest_sha256", "menhir_image_digest",
      "neo4j_image_digest"}
 )
 
-_OFFHOST_KEYS = frozenset({
-    "bucket", "production_backup", "sacrificial_probe",
-})
-
-_PRODUCTION_BACKUP_KEYS = frozenset({
-    "object_key", "version_id", "object_sha256", "object_size",
-    "server_side_encryption", "lock_mode", "worm_retention_until",
-    "version_readback_verified", "client_encryption",
-})
-
-_SACRIFICIAL_PROBE_KEYS = frozenset({
-    "object_key", "version_id", "object_sha256", "object_size",
-    "server_side_encryption", "lock_mode", "worm_retention_until",
-    "version_readback_verified", "locked_version_delete_denied",
-    "version_persisted_after_delete_denial",
-})
-
-_CLIENT_ENCRYPTION_KEYS = frozenset({
-    "algorithm", "recipient", "plaintext_archive_sha256",
+_LOCAL_ENCRYPTION_KEYS = frozenset({
+    "algorithm", "recipient", "plaintext_archive_sha256", "roundtrip_verified",
 })
 
 _LOCAL_ARCHIVES_KEYS = frozenset({
-    "minimum_retained_generations", "retained_generation_count",
+    "retention_target_generations", "retained_generation_count",
     "current_archive_path", "archives",
 })
 
@@ -860,89 +843,36 @@ def validate_receipt(path: str, kind: str) -> dict:
     _require_sha256(receipt.get("manifest_sha256"), "receipt.manifest_sha256")
     _validate_receipt_release(receipt.get("release"), "receipt.release")
 
-    if kind == "backup-upload":
+    if kind == "backup-local":
         _require_exact_keys(receipt, frozenset({
             "schema", "kind", "operation_job_id", "generation",
             "manifest_sha256", "release",
-            "offhost", "local_encrypted_archives", "plaintext_removed", "checked_utc",
-        }), "backup-upload receipt")
+            "encryption", "local_encrypted_archives", "plaintext_removed", "checked_utc",
+        }), "backup-local receipt")
         operation_job_id = _require_str(
-            receipt.get("operation_job_id"), "backup-upload.operation_job_id"
+            receipt.get("operation_job_id"), "backup-local.operation_job_id"
         )
         if not _OPERATION_JOB_ID_RE.match(operation_job_id):
-            raise ValueError("backup-upload.operation_job_id is invalid")
-        offhost = receipt.get("offhost")
-        _require_exact_keys(offhost, _OFFHOST_KEYS, "offhost")
-        _require_str(offhost.get("bucket"), "offhost.bucket")
-        production = offhost.get("production_backup")
-        _require_exact_keys(production, _PRODUCTION_BACKUP_KEYS,
-                            "offhost.production_backup")
-        for key in ("object_key", "version_id", "worm_retention_until"):
-            _require_str(production.get(key), "offhost.production_backup.%s" % key)
-        _require_sha256(production.get("object_sha256"),
-                        "offhost.production_backup.object_sha256")
-        if not isinstance(production.get("object_size"), int) or \
-                isinstance(production.get("object_size"), bool) or \
-                production["object_size"] <= 0:
-            raise ValueError("offhost.production_backup.object_size must be positive")
-        if production.get("server_side_encryption") != "AES256":
-            raise ValueError("offhost.production_backup.server_side_encryption must be AES256")
-        if production.get("lock_mode") != "COMPLIANCE":
-            raise ValueError("offhost.production_backup.lock_mode must be COMPLIANCE")
-        if production.get("version_readback_verified") is not True:
-            raise ValueError("offhost.production_backup.version_readback_verified must be true")
-        client_encryption = production.get("client_encryption")
-        _require_exact_keys(client_encryption, _CLIENT_ENCRYPTION_KEYS,
-                            "offhost.production_backup.client_encryption")
-        if client_encryption.get("algorithm") != "age-x25519":
-            raise ValueError(
-                "offhost.production_backup.client_encryption.algorithm must be age-x25519"
-            )
-        recipient = _require_str(client_encryption.get("recipient"),
-                                 "offhost.production_backup.client_encryption.recipient")
+            raise ValueError("backup-local.operation_job_id is invalid")
+        encryption = receipt.get("encryption")
+        _require_exact_keys(encryption, _LOCAL_ENCRYPTION_KEYS, "encryption")
+        if encryption.get("algorithm") != "age-x25519":
+            raise ValueError("encryption.algorithm must be age-x25519")
+        recipient = _require_str(encryption.get("recipient"), "encryption.recipient")
         if not recipient.startswith("age1"):
-            raise ValueError(
-                "offhost.production_backup.client_encryption.recipient must be an age recipient"
-            )
-        _require_sha256(client_encryption.get("plaintext_archive_sha256"),
-                        "offhost.production_backup.client_encryption.plaintext_archive_sha256")
-
-        probe = offhost.get("sacrificial_probe")
-        _require_exact_keys(probe, _SACRIFICIAL_PROBE_KEYS,
-                            "offhost.sacrificial_probe")
-        for key in ("object_key", "version_id", "worm_retention_until"):
-            _require_str(probe.get(key), "offhost.sacrificial_probe.%s" % key)
-        if "/worm-delete-denial-probes/" not in probe["object_key"]:
-            raise ValueError(
-                "offhost.sacrificial_probe.object_key must use the dedicated probe prefix"
-            )
-        _require_sha256(probe.get("object_sha256"),
-                        "offhost.sacrificial_probe.object_sha256")
-        if not isinstance(probe.get("object_size"), int) or \
-                isinstance(probe.get("object_size"), bool) or probe["object_size"] <= 0:
-            raise ValueError("offhost.sacrificial_probe.object_size must be positive")
-        if probe.get("server_side_encryption") != "AES256":
-            raise ValueError("offhost.sacrificial_probe.server_side_encryption must be AES256")
-        if probe.get("lock_mode") != "COMPLIANCE":
-            raise ValueError("offhost.sacrificial_probe.lock_mode must be COMPLIANCE")
-        if probe.get("version_readback_verified") is not True:
-            raise ValueError("offhost.sacrificial_probe.version_readback_verified must be true")
-        if probe.get("locked_version_delete_denied") is not True:
-            raise ValueError("offhost.sacrificial_probe.locked_version_delete_denied must be true")
-        if probe.get("version_persisted_after_delete_denial") is not True:
-            raise ValueError(
-                "offhost.sacrificial_probe.version_persisted_after_delete_denial must be true"
-            )
-        if production["object_key"] == probe["object_key"] or \
-                production["version_id"] == probe["version_id"]:
-            raise ValueError("production backup and sacrificial probe key/version must differ")
+            raise ValueError("encryption.recipient must be an age recipient")
+        _require_sha256(encryption.get("plaintext_archive_sha256"),
+                        "encryption.plaintext_archive_sha256")
+        if encryption.get("roundtrip_verified") is not True:
+            raise ValueError("encryption.roundtrip_verified must be true")
 
         local_archives = receipt.get("local_encrypted_archives")
         _require_exact_keys(local_archives, _LOCAL_ARCHIVES_KEYS,
                             "local_encrypted_archives")
-        retained = local_archives.get("minimum_retained_generations")
-        if not isinstance(retained, int) or isinstance(retained, bool) or retained < 2:
-            raise ValueError("local encrypted retention must keep at least two generations")
+        retention_target = local_archives.get("retention_target_generations")
+        if not isinstance(retention_target, int) or isinstance(retention_target, bool) \
+                or retention_target < 2:
+            raise ValueError("local encrypted retention target must be at least two generations")
         archives = local_archives.get("archives")
         if not isinstance(archives, list) or not archives:
             raise ValueError("local_encrypted_archives.archives must be a non-empty list")
@@ -978,16 +908,12 @@ def validate_receipt(path: str, kind: str) -> dict:
                     isinstance(archive.get("size"), bool) or archive["size"] <= 0:
                 raise ValueError("%s.size must be positive" % label)
             if archive_generation == generation and \
-                    local_path == current_archive_path and \
-                    archive_sha256 == production["object_sha256"] and \
-                    archive["size"] == production["object_size"]:
+                    local_path == current_archive_path:
                 current_matches.append(archive)
         retained_count = local_archives.get("retained_generation_count")
         if not isinstance(retained_count, int) or isinstance(retained_count, bool) or \
                 retained_count != len(archive_generations):
             raise ValueError("local retained generation count must match distinct evidence")
-        if retained_count < retained:
-            raise ValueError("local retained generations are fewer than configured minimum")
         if not current_matches:
             raise ValueError(
                 "local encrypted archive evidence must include the current generation"
@@ -996,11 +922,7 @@ def validate_receipt(path: str, kind: str) -> dict:
         # only a finalized receipt with True may gate promotion/retirement.
         if not isinstance(receipt.get("plaintext_removed"), bool):
             raise ValueError("plaintext_removed must be a boolean")
-        _parse_utc(receipt.get("checked_utc"), "backup-upload.checked_utc")
-        _parse_utc(production.get("worm_retention_until"),
-                   "offhost.production_backup.worm_retention_until")
-        _parse_utc(probe.get("worm_retention_until"),
-                   "offhost.sacrificial_probe.worm_retention_until")
+        _parse_utc(receipt.get("checked_utc"), "backup-local.checked_utc")
 
     elif kind == "rehearsal":
         _require_exact_keys(receipt, frozenset({
@@ -1068,19 +990,10 @@ def validate_receipt_binding(path: str, kind: str, release_path: str,
 
 def validate_backup_promotion(path: str) -> dict:
     """Apply the stricter freshness/retention gate used only for promotion."""
-    receipt = validate_receipt(path, "backup-upload")
+    receipt = validate_receipt(path, "backup-local")
     if receipt.get("plaintext_removed") is not True:
         raise ValueError("plaintext removal must be confirmed before promotion")
-    _require_fresh(receipt["checked_utc"], "backup-upload.checked_utc", 3600)
-    for object_name in ("production_backup", "sacrificial_probe"):
-        retention = _parse_utc(
-            receipt["offhost"][object_name]["worm_retention_until"],
-            "offhost.%s.worm_retention_until" % object_name,
-        )
-        if retention < datetime.now(timezone.utc) + timedelta(days=30):
-            raise ValueError(
-                "offhost.%s WORM retention must extend at least 30 days" % object_name
-            )
+    _require_fresh(receipt["checked_utc"], "backup-local.checked_utc", 3600)
     return receipt
 
 

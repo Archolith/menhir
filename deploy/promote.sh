@@ -51,7 +51,7 @@ acc_gen="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["gener
 
 # A fresh, complete, uploaded backup generation must exist (exact receipt, no mtime).
 backup_receipt="$(backup_receipt_path)"
-validate_receipt_file "$backup_receipt" backup-upload
+validate_receipt_file "$backup_receipt" backup-local
 schema_py validate-backup-promotion "$backup_receipt"
 bak_gen="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["generation"])' "$backup_receipt")"
 [ "$bak_gen" = "$candidate" ] || { echo "backup receipt generation mismatch" >&2; exit 1; }
@@ -63,7 +63,7 @@ menhir_digest="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))[
 neo4j_digest="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["build"]["neo4j_image_digest"])' "$candidate_manifest")"
 validate_receipt_binding "$accept_receipt" candidate-accept "$candidate" \
     "$manifest_sha" "$menhir_digest" "$neo4j_digest"
-validate_receipt_binding "$backup_receipt" backup-upload "$candidate" \
+validate_receipt_binding "$backup_receipt" backup-local "$candidate" \
     "$manifest_sha" "$menhir_digest" "$neo4j_digest"
 
 # A durable first-mutation marker turns every retry into roll-forward recovery.

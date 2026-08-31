@@ -81,7 +81,7 @@ v=json.load(open(sys.argv[1],encoding="utf-8")); r=v.get("release") or {}
 raise SystemExit(0 if r.get("release_id")==sys.argv[2] and r.get("release_manifest_sha256")==sys.argv[3] else 1)
 PYEOF
 then
-    validate_receipt_file "$backup_receipt" backup-upload
+    validate_receipt_file "$backup_receipt" backup-local
     schema_py validate-backup-promotion "$backup_receipt"
     generation="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["generation"])' "$backup_receipt")"
 
@@ -116,7 +116,7 @@ then
         manifest_sha="$(sha256sum "$manifest" | cut -d' ' -f1)"
         menhir_digest="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["build"]["menhir_image_digest"])' "$manifest")"
         neo4j_digest="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["build"]["neo4j_image_digest"])' "$manifest")"
-        validate_receipt_binding "$backup_receipt" backup-upload "$generation" \
+        validate_receipt_binding "$backup_receipt" backup-local "$generation" \
             "$manifest_sha" "$menhir_digest" "$neo4j_digest"
         advance staged
 

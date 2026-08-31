@@ -64,6 +64,6 @@
     "/srv/yawn/projects/yawn.vps/vps/menhir_capabilities.py",
     "/srv/yawn/projects/yawn.vps/vps/menhir_tools.py",
     "/srv/yawn/projects/yawn.vps/vps/oauth_policy.py",
-    "/usr/local/sbin/menhir-backup-upload"
+    "/usr/local/sbin/menhir-backup-local"
   ]
 }

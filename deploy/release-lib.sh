@@ -258,17 +258,17 @@ validate_external_prerequisite_binding() { # path
     schema_py validate-prerequisite-binding "$path" "$RELEASE_JSON"
 }
 
-# The backup upload wrapper must be a root-owned, regular, non-symlink, non-
+# The local backup wrapper must be a root-owned, regular, non-symlink, non-
 # group/other-writable executable.
-require_upload_wrapper() { # path
+require_local_backup_wrapper() { # path
     local path="$1"
     [ -f "$path" ] && [ ! -L "$path" ] && [ -x "$path" ] \
-        || { echo "upload wrapper must be a regular executable file: $path" >&2; exit 1; }
-    [ "$(stat -c '%u' "$path")" = 0 ] || { echo "upload wrapper must be root-owned" >&2; exit 1; }
+        || { echo "local backup wrapper must be a regular executable file: $path" >&2; exit 1; }
+    [ "$(stat -c '%u' "$path")" = 0 ] || { echo "local backup wrapper must be root-owned" >&2; exit 1; }
     local mode; mode="$(stat -c '%a' "$path")"
     # shellcheck disable=SC2016
     (( ((8#${mode}) & 8#022) == 0 )) \
-        || { echo "upload wrapper must not be group/other writable" >&2; exit 1; }
+        || { echo "local backup wrapper must not be group/other writable" >&2; exit 1; }
 }
 
 # Durable first-target-mutation marker (the point of no return).
@@ -327,5 +327,5 @@ current_generation() {
 
 # Receipts bound to the accepted generation; promotion parses these exact files
 # and never consults mtime.
-backup_receipt_path() { printf '%s\n' "${STATUS_DIR}/backup-upload-receipt.json"; }
+backup_receipt_path() { printf '%s\n' "${STATUS_DIR}/backup-local-receipt.json"; }
 accept_receipt_path() { printf '%s\n' "${STATUS_DIR}/candidate-accept-receipt.json"; }

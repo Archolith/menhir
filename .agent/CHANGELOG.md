@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-08-31 - Correct production backup authority
+
+- Remove the unapproved external object-store/provider requirement from the production plan,
+  playbook, release scripts, receipts, and verification contracts.
+- Require a unique encrypted archive retained locally on the VPS, age decryption round-trip and
+  plaintext hash verification, a release-bound receipt, and plaintext-generation cleanup.
+- Allow a receipt-hash-verified copy of the encrypted archive on the operator desktop after the
+  authoritative VPS backup completes; desktop availability does not block a release.
+
 ## 2026-08-31 - Make the production client access contract executable
 
 - Fix one canonical client data-plane endpoint at
@@ -31,7 +40,8 @@
 
 - Replace the impossible separate-source writer proof with a release- and
   host-bound Docker census that captures, restart-disables, and retires the
-  exact legacy Menhir app and Neo4j containers only after a verified off-host
+  exact legacy Menhir app and Neo4j containers only after a verified encrypted
+  VPS-local
   backup.
 - Add root-only backup decryption/staging and `release-run.sh`, which rebuilds
   progress from receipts and live runtime evidence, reconciles interrupted
@@ -95,7 +105,7 @@
 - Added the immutable four-repository release authority, offline wheelhouse and
   reviewed OAuth source binding, full production Compose/runtime surface, and
   exact client-policy enforcement with tier-bound access tokens.
-- Added encrypted retained-generation backups, sacrificial WORM verification,
+- Added encrypted retained-generation backups, integrity verification,
   replay-safe restore authority, candidate acceptance, promotion, rollback,
   external evidence aggregation, and a scoped source-fence producer.
 - Added canonical collision-safe Neo4j authority hashing and release-bound
@@ -175,12 +185,12 @@
   The target now runs OAuth, MCP, full Menhir runtime/enrichment, and Neo4j on Contabo while exposing
   only Caddy and isolating Neo4j on a Docker-internal network.
 - Define immutable-client `chatgpt-chat` policy, durable refresh retries, exact-version offline Neo4j
-  dump/check/load rehearsal, OAuth/graph single-writer fencing, encrypted off-host backups,
+  dump/check/load rehearsal, OAuth/graph single-writer fencing, encrypted VPS-local backups,
   route/network minimization, cutover, reverse-state rollback, observability, and real ChatGPT E2E
   acceptance gates.
 - Add a production host-security gate: recoverable key-only SSH, Docker-aware IPv4/IPv6 firewalling,
   Cloudflare-only mTLS origin ingress, non-root least-privilege containers, immutable image evidence,
-  separated backup authority, off-host detection, and clean-host compromise recovery.
+  receipt-bound backup authority, optional desktop archival, and clean-host compromise recovery.
 - Close the initial eight plan-level Sol blockers, then ground continued fresh Sol reviews in the
   actual Menhir, `yawn.deploy`, and `yawn.vps` repositories. Add the resulting external-network and
   Caddy-only transaction contract, whole-host capacity gate, immutable dependency/release authority,
