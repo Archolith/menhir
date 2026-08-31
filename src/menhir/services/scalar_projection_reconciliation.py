@@ -5,7 +5,7 @@ assertion persistence owns its existing transaction boundary. This coordinator t
 T5 durable work generation as the crash-recovery boundary:
 
 1. dirty the exact affected scalar slot(s);
-2. fence/materialize/certify each generation through the T8 materializer;
+2. fence/materialize/certify each generation through an injected lifecycle/materializer seam;
 3. leave any uncommitted generation pending if materialization raises or the process exits.
 
 The legacy entity-wide rebuild remains available to callers during staged cutover. This module owns
@@ -16,17 +16,15 @@ caller may do that only after the returned token is certified.
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
-from menhir.domain.projection import ProjectionTarget
+from menhir.domain.projection import ProjectionDefinition, ProjectionTarget
 from menhir.domain.projection_lifecycle import (
     ProjectionFreshnessCertificate,
     ProjectionWorkToken,
 )
-from menhir.infrastructure.projection_lifecycle_repository import ProjectionLifecycleRepository
-from menhir.infrastructure.scalar_projection_materializer import ScalarStateProjectionMaterializer
 from menhir.services.scalar_projection_definition import (
     SCALAR_STATE_PROJECTION,
     scalar_projection_target,
@@ -46,6 +44,34 @@ _TARGET_FIELDS = (
     "unit",
     "operation",
 )
+
+
+class _ScalarMaterializer(Protocol):
+    """Transaction-scoped callback used by lifecycle certification."""
+
+    def __call__(self, tx: Any, token: ProjectionWorkToken) -> str: ...
+
+
+class _ProjectionLifecycle(Protocol):
+    """Minimal lifecycle capability required by scalar reconciliation."""
+
+    def dirty_targets(
+        self,
+        definition: ProjectionDefinition,
+        targets: Sequence[ProjectionTarget],
+        *,
+        reason: str,
+    ) -> tuple[ProjectionWorkToken, ...]: ...
+
+    def commit(
+        self,
+        token: ProjectionWorkToken,
+        *,
+        derivation_id: str,
+        materialize: _ScalarMaterializer,
+    ) -> ProjectionFreshnessCertificate: ...
+
+    def pending(self, *, limit: int = 100) -> tuple[ProjectionWorkToken, ...]: ...
 
 
 def _require_token(name: str, value: object) -> str:
@@ -110,14 +136,12 @@ class ScalarProjectionReconciler:
 
     def __init__(
         self,
-        lifecycle: ProjectionLifecycleRepository,
+        lifecycle: _ProjectionLifecycle,
         *,
-        materializer: ScalarStateProjectionMaterializer | None = None,
+        materializer: _ScalarMaterializer,
     ) -> None:
-        if not isinstance(lifecycle, ProjectionLifecycleRepository):
-            raise TypeError("lifecycle must be a ProjectionLifecycleRepository")
         self._lifecycle = lifecycle
-        self._materializer = materializer or ScalarStateProjectionMaterializer()
+        self._materializer = materializer
 
     def dirty_assertions(
         self,
@@ -172,8 +196,8 @@ class ScalarProjectionReconciler:
         """Dirty exact affected slots, then synchronously reconcile their new generations.
 
         If a commit raises, every not-yet-certified generation remains durable and discoverable via
-        ``ProjectionLifecycleRepository.pending``. The caller must not clear its own projection
-        recovery marker for the failed assertion batch.
+        the injected lifecycle repository's pending-work seam. The caller must not clear its own
+        projection recovery marker for the failed assertion batch.
         """
 
         tokens = self.dirty_assertions(assertions, reason=reason)
