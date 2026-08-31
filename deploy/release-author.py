@@ -21,9 +21,11 @@ from typing import Any
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR / "lib"))
+sys.path.insert(0, str(SCRIPT_DIR.parent / "src"))
 
 import menhir_schema  # noqa: E402
 import verify_wheelhouse  # noqa: E402
+from menhir.access_contract import validate_access_contract  # noqa: E402
 
 
 SPEC_KEYS = frozenset({
@@ -351,6 +353,9 @@ def _load_json(path: Path, label: str) -> dict[str, Any]:
 
 def _validate_policy_env_binding(policy_path: Path, env_path: Path) -> None:
     policy = _load_json(policy_path, "client policy")
+    if policy.get("version") != 2:
+        raise ValueError("production client policy must use version 2 access contract")
+    validate_access_contract(policy.get("access_contract"), policy.get("clients"))
     declared = policy.get("canonical_digest")
     if not isinstance(declared, str) or not SHA256_RE.fullmatch(declared):
         raise ValueError("client policy canonical_digest is invalid")

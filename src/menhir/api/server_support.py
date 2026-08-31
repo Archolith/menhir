@@ -95,6 +95,9 @@ def build_server_prereqs(
             settings.client_policy_digest,
             tool_catalog=tool_catalog,
         )
+        if client_policy.access_contract is None:
+            raise ValueError("production startup requires a version 2 access contract")
+        client_policy.access_contract.require_primary_endpoint(oauth_config.resource)
         if not candidate_readonly and oauth_client_store is not None:
             reconcile_policy_clients(
                 client_policy,

@@ -8,6 +8,10 @@ from types import SimpleNamespace
 import pytest
 
 from menhir.api.client_policy import load_client_policy
+from menhir.access_contract import (
+    CANONICAL_PRIMARY_ENDPOINT,
+    EXPECTED_PRODUCT_ROLES,
+)
 from menhir.api.production_routes import readyz, source_fence_probe
 from menhir.api.server import create_app
 from menhir.api.server_support import build_server_prereqs
@@ -152,6 +156,9 @@ def test_candidate_prereqs_do_not_open_mutating_oauth_stores(monkeypatch) -> Non
     from menhir.api import server_support
 
     marker = object()
+    policy_marker = SimpleNamespace(
+        access_contract=SimpleNamespace(require_primary_endpoint=lambda endpoint: None)
+    )
     monkeypatch.setattr(
         server_support, "configure_signing_key_readonly", lambda settings: marker
     )
@@ -166,7 +173,9 @@ def test_candidate_prereqs_do_not_open_mutating_oauth_stores(monkeypatch) -> Non
         lambda settings: (_ for _ in ()).throw(AssertionError("token store opened")),
     )
     monkeypatch.setattr(
-        server_support, "load_client_policy", lambda path, digest, **kwargs: marker
+        server_support,
+        "load_client_policy",
+        lambda path, digest, **kwargs: policy_marker,
     )
     monkeypatch.setattr(
         server_support,
@@ -211,7 +220,7 @@ def test_candidate_prereqs_do_not_open_mutating_oauth_stores(monkeypatch) -> Non
     assert prereqs["oauth_client_store"] is None
     assert prereqs["auth_code_store"] is None
     assert prereqs["oauth_refresh_store"] is None
-    assert prereqs["client_policy"] is marker
+    assert prereqs["client_policy"] is policy_marker
 
 
 def test_candidate_mode_requires_production_surface() -> None:
@@ -236,16 +245,16 @@ def _production_settings(**overrides: object) -> MemorySettings:
         "oauth_enabled": True,
         "oauth_as_enabled": True,
         "oauth_as_refresh_tokens_enabled": True,
-        "oauth_public_base_url": "https://memory.example.test",
-        "oauth_resource": "https://memory.example.test/mcp-http",
-        "oauth_audiences": ("https://memory.example.test/mcp-http",),
-        "oauth_issuer": "https://memory.example.test",
-        "oauth_jwks_uri": "https://memory.example.test/.well-known/jwks.json",
+        "oauth_public_base_url": "https://memory.ctharvey.me",
+        "oauth_resource": "https://memory.ctharvey.me/mcp-http",
+        "oauth_audiences": ("https://memory.ctharvey.me/mcp-http",),
+        "oauth_issuer": "https://memory.ctharvey.me",
+        "oauth_jwks_uri": "https://memory.ctharvey.me/.well-known/jwks.json",
         "client_policy_path": str(policy_path),
         "oauth_signing_key_path": str(
             Path(__file__).resolve().parent / "oauth-signing-key.test.json"
         ),
-        "client_policy_digest": "4e16b8b3de88c9d20aa5f766d6be82cfa8fcb41ff5644c6d3841bea6937be953",
+        "client_policy_digest": "6d9ccdb4cf3e2e29123abf62178dbc165bd30933fcc677764d992b3f22f24a68",
         "api_key": "test-api-key",
     }
     values.update(overrides)
@@ -317,7 +326,7 @@ def test_production_client_policy_is_digest_bound_and_tracks_clients() -> None:
     path = (
         Path(__file__).resolve().parents[1] / "deploy" / "client-policy.production.json"
     )
-    digest = "4e16b8b3de88c9d20aa5f766d6be82cfa8fcb41ff5644c6d3841bea6937be953"
+    digest = "6d9ccdb4cf3e2e29123abf62178dbc165bd30933fcc677764d992b3f22f24a68"
 
     from menhir.mcp.tools import ALL_TOOLS
 
@@ -380,6 +389,14 @@ def test_production_client_policy_is_digest_bound_and_tracks_clients() -> None:
         ),
     ) is claude_web
 
+    assert authority.version == 2
+    assert authority.access_contract is not None
+    assert authority.access_contract.primary_endpoint == CANONICAL_PRIMARY_ENDPOINT
+    assert {
+        product: access.role
+        for product, access in authority.access_contract.products.items()
+    } == EXPECTED_PRODUCT_ROLES
+
     with pytest.raises(PermissionError, match="scopes do not match"):
         authority.require_authorization(
             client_id="https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client=codex",
@@ -417,6 +434,19 @@ def test_production_client_policy_is_digest_bound_and_tracks_clients() -> None:
     }
     assert len(bridge_ids) == 12
     assert len({entry.label for entry in bridge_ids.values()}) == 12
+    for label in {
+        "agent-smith-claude",
+        "agent-smith-codex",
+        "agent-smith-wsl-claude",
+    }:
+        operator = next(entry for entry in bridge_ids.values() if entry.label == label)
+        assert operator.maximum_tier == "operator"
+        assert operator.scopes == frozenset(
+            {"menhir:read", "menhir:write", "menhir:admin"}
+        )
+        assert operator.allowed_tools == web_allowed_tools
+        assert operator.denied_tools == web_denied_tools
+        assert "get_provenance" in operator.allowed_tools
     agent_base_tools = frozenset(
         {
             "add_memory",
@@ -430,23 +460,28 @@ def test_production_client_policy_is_digest_bound_and_tracks_clients() -> None:
     )
     expected_agent_tools = {
         "agent-smith-antigravity-ide": agent_base_tools,
-        "agent-smith-claude": agent_base_tools,
         "agent-smith-cline": agent_base_tools,
-        "agent-smith-codex": agent_base_tools | {"add_memory_and_track"},
         "agent-smith-gemini": agent_base_tools,
         "agent-smith-gemini-config": agent_base_tools,
         "agent-smith-goose": agent_base_tools,
         "agent-smith-opencode": agent_base_tools,
         "agent-smith-qwen": agent_base_tools,
-        "agent-smith-wsl-claude": agent_base_tools,
         "agent-smith-wsl-opencode": agent_base_tools,
         "agent-smith-zcode": agent_base_tools,
     }
     assert {
-        entry.label: entry.allowed_tools for entry in bridge_ids.values()
+        entry.label: entry.allowed_tools
+        for entry in bridge_ids.values()
+        if entry.maximum_tier == "agent"
     } == expected_agent_tools
-    assert all("ingest_project" in entry.denied_tools for entry in bridge_ids.values())
-    assert expected_agent_tools["agent-smith-codex"] != web_allowed_tools
+    assert all(
+        "ingest_project" in entry.denied_tools
+        for entry in bridge_ids.values()
+        if entry.maximum_tier == "agent"
+    )
+    assert bridge_ids[
+        "https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client=codex"
+    ].allowed_tools == web_allowed_tools
     assert not any("reasonix" in client_id for client_id in authority.clients)
     assert (
         "https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json"
@@ -598,7 +633,38 @@ def test_client_policy_rejects_protocol_scope_as_permission(tmp_path: Path) -> N
     policy_path = tmp_path / "protocol-scope-policy.json"
     digest = _write_policy_with_digest(policy_path, payload)
 
-    with pytest.raises(ValueError, match="incomplete or duplicate"):
+    with pytest.raises(ValueError, match="claude operator scopes drifted"):
+        load_client_policy(str(policy_path), digest)
+
+
+def test_client_policy_rejects_contract_role_drift(tmp_path: Path) -> None:
+    source = (
+        Path(__file__).resolve().parents[1] / "deploy" / "client-policy.production.json"
+    )
+    payload = json.loads(source.read_text(encoding="utf-8"))
+    codex_id = (
+        "https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client=codex"
+    )
+    payload["clients"][codex_id]["maximum_tier"] = "agent"
+    policy_path = tmp_path / "role-drift-policy.json"
+    digest = _write_policy_with_digest(policy_path, payload)
+
+    with pytest.raises(ValueError, match="codex client tier"):
+        load_client_policy(str(policy_path), digest)
+
+
+def test_client_policy_rejects_second_primary_endpoint(tmp_path: Path) -> None:
+    source = (
+        Path(__file__).resolve().parents[1] / "deploy" / "client-policy.production.json"
+    )
+    payload = json.loads(source.read_text(encoding="utf-8"))
+    payload["access_contract"]["primary_endpoint"] = (
+        "https://memory.ctharvey.me/mcp"
+    )
+    policy_path = tmp_path / "endpoint-drift-policy.json"
+    digest = _write_policy_with_digest(policy_path, payload)
+
+    with pytest.raises(ValueError, match="canonical /mcp-http"):
         load_client_policy(str(policy_path), digest)
 
 

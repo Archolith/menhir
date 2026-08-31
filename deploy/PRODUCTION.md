@@ -4,6 +4,13 @@ The operator sequence is in [LIVE_VPS_PLAYBOOK.md](LIVE_VPS_PLAYBOOK.md). This
 document defines the host, authority, backup, candidate, writer-fence, and
 recovery invariants enforced by the fixed scripts.
 
+The client data-plane invariant is in
+[ACCESS_CONTRACT.md](ACCESS_CONTRACT.md): the only production client endpoint is
+`https://memory.ctharvey.me/mcp-http`; ChatGPT, Codex, and every Claude variant
+are operators; OpenCode variants are agents; and each client proves its
+policy-bound identity through OAuth 2.1 authorization code + PKCE S256 and a
+signed JWT access token.
+
 ## Host topology
 
 Production uses Compose project `menhir-prod` with two services: `menhir` and
@@ -47,9 +54,12 @@ token is not required.
 
 The immutable client policy is mounted read-only. Its canonical digest must
 match `MENHIR_CLIENT_POLICY_DIGEST`, the rendered policy file, and
-`release.json`. Each OAuth client has its own scopes, tier, and tool allowlist;
-ChatGPT and Claude are operators, including ingest, without namespace deletion
-or client-administration tools.
+`release.json`. Policy version 2 embeds the canonical endpoint and product role
+contract. Each OAuth client has its own scopes, tier, and tool allowlist;
+ChatGPT, Codex, and Claude are operators, including provenance and ingest,
+without namespace deletion or client-administration tools. OpenCode is an
+agent with the bounded daily memory surface. Release authoring and production
+startup refuse drift from that matrix.
 
 ## Immutable release authority
 

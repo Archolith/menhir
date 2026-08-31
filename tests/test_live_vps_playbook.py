@@ -11,6 +11,7 @@ PLAYBOOK = ROOT / "deploy" / "LIVE_VPS_PLAYBOOK.md"
 POLICY = ROOT / "deploy" / "client-policy.production.json"
 ENV_EXAMPLE = ROOT / "deploy" / "production.env.example"
 PRODUCTION = ROOT / "deploy" / "PRODUCTION.md"
+ACCESS_CONTRACT = ROOT / "deploy" / "ACCESS_CONTRACT.md"
 
 
 def _policy_digest() -> tuple[str, str]:
@@ -36,6 +37,37 @@ def test_production_env_uses_current_canonical_policy_digest() -> None:
     )
     assert match is not None
     assert match.group(1) == declared
+
+
+def test_access_contract_is_executable_and_documented() -> None:
+    payload = json.loads(POLICY.read_text(encoding="utf-8"))
+    contract = payload["access_contract"]
+    assert payload["version"] == 2
+    assert contract["primary_endpoint"] == "https://memory.ctharvey.me/mcp-http"
+    assert {
+        product: entry["role"]
+        for product, entry in contract["products"].items()
+    } == {
+        "chatgpt": "operator",
+        "codex": "operator",
+        "claude": "operator",
+        "opencode": "agent",
+    }
+
+    access_doc = ACCESS_CONTRACT.read_text(encoding="utf-8")
+    playbook = PLAYBOOK.read_text(encoding="utf-8")
+    for required in (
+        "https://memory.ctharvey.me/mcp-http",
+        "OAuth 2.1 authorization code with PKCE S256",
+        "signed JWT",
+        "| ChatGPT | `operator` |",
+        "| Codex | `operator` |",
+        "| Claude | `operator` |",
+        "| OpenCode | `agent` |",
+    ):
+        assert required in access_doc
+    assert "ACCESS_CONTRACT.md" in playbook
+    assert "production startup refuse" in playbook
 
 
 def test_playbook_preserves_canonical_repositories_and_network_authority() -> None:
@@ -89,6 +121,13 @@ def test_entrypoint_docs_link_to_the_canonical_playbook() -> None:
     assert "../../deploy/LIVE_VPS_PLAYBOOK.md" in (
         ROOT / ".agent" / "workflows" / "operations_runbook.md"
     ).read_text(encoding="utf-8")
+    for path in (
+        ROOT / "deploy" / "README.md",
+        ROOT / "deploy" / "PRODUCTION.md",
+        ROOT / ".agent" / "architecture.md",
+        ROOT / ".agent" / "workflows" / "operations_runbook.md",
+    ):
+        assert "ACCESS_CONTRACT.md" in path.read_text(encoding="utf-8")
 
 
 def test_playbook_requires_digest_bound_security_review_for_every_release() -> None:

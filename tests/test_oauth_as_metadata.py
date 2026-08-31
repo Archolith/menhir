@@ -166,8 +166,8 @@ def test_agent_smith_client_metadata_is_stable_public_client():
         oauth_as_enabled=True,
         oauth_public_base_url="https://memory.example.com",
         oauth_as_refresh_tokens_enabled=True,
-        oauth_scopes_supported=("menhir:read", "menhir:write"),
-        oauth_admin_scopes=(),
+        oauth_scopes_supported=("menhir:read", "menhir:write", "menhir:admin"),
+        oauth_admin_scopes=("menhir:admin",),
     )
 
     response = _client(settings).get(
@@ -187,7 +187,14 @@ def test_agent_smith_client_metadata_is_stable_public_client():
         "http://localhost:43681/oauth/callback",
     ]
     assert payload["grant_types"] == ["authorization_code", "refresh_token"]
-    assert payload["scope"] == "menhir:read menhir:write offline_access"
+    assert payload["scope"] == (
+        "menhir:read menhir:write menhir:admin offline_access"
+    )
+
+    opencode = _client(settings).get(
+        "/oauth/client-metadata/agent-smith.json?client=opencode"
+    ).json()
+    assert opencode["scope"] == "menhir:read menhir:write offline_access"
 
 
 def test_agent_smith_clients_have_distinct_ids_labels_and_ports():

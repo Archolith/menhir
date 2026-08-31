@@ -6,6 +6,7 @@ from archolith_oauth import AuthorizationServerConfig, authorization_server_meta
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
+from menhir.access_contract import AGENT_SCOPES, OPERATOR_SCOPES
 from menhir.config import MemorySettings
 from menhir.config.oauth import _as_bool, _get_setting, build_oauth_config
 
@@ -26,6 +27,7 @@ _AGENT_SMITH_CLIENTS: dict[str, tuple[str, int]] = {
     "wsl-claude": ("Agent Smith - Claude (WSL)", 43692),
     "wsl-opencode": ("Agent Smith - OpenCode (WSL)", 43693),
 }
+_OPERATOR_AGENT_SMITH_CLIENTS = frozenset({"claude", "codex", "wsl-claude"})
 
 
 def _as_enabled(settings: object) -> bool:
@@ -81,6 +83,16 @@ def agent_smith_client_document_for_id(
         return None
     client_name, callback_port = profile
     as_metadata = authorization_server_metadata(config)
+    permission_scopes = (
+        OPERATOR_SCOPES
+        if client_key in _OPERATOR_AGENT_SMITH_CLIENTS
+        else AGENT_SCOPES
+    )
+    advertised_scopes = [
+        scope
+        for scope in as_metadata["scopes_supported"]
+        if scope in permission_scopes or scope == "offline_access"
+    ]
     return {
         "client_id": client_id,
         "client_name": client_name,
@@ -92,7 +104,7 @@ def agent_smith_client_document_for_id(
         "response_types": ["code"],
         "token_endpoint_auth_method": "none",
         "token_endpoint_auth_methods_supported": ["none"],
-        "scope": " ".join(as_metadata["scopes_supported"]),
+        "scope": " ".join(advertised_scopes),
     }
 
 
@@ -155,6 +167,7 @@ async def agent_smith_client_metadata(request: Request) -> JSONResponse:
 
 __all__ = [
     "_AGENT_SMITH_CLIENTS",
+    "_OPERATOR_AGENT_SMITH_CLIENTS",
     "agent_smith_client_document_for_id",
     "_as_enabled",
     "agent_smith_client_metadata",

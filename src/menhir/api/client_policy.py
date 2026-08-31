@@ -10,6 +10,8 @@ from typing import Any
 
 from archolith_oauth import valid_redirect_uri
 
+from menhir.access_contract import ProductionAccessContract, validate_access_contract
+
 
 _TIER_RANK = {"readonly": 0, "agent": 1, "operator": 2}
 _PROTOCOL_SCOPES = frozenset({"offline_access"})
@@ -64,6 +66,7 @@ class ClientPolicyAuthority:
     version: int
     digest: str
     clients: dict[str, ClientPolicy]
+    access_contract: ProductionAccessContract | None = None
 
     def policy_for_client_id(self, client_id: str) -> ClientPolicy:
         """Resolve an immutable client identity or fail closed."""
@@ -136,8 +139,14 @@ def load_client_policy(
         )
     except json.JSONDecodeError as exc:
         raise ValueError("production client policy is not valid JSON") from exc
-    if not isinstance(payload, dict) or payload.get("version") != 1:
-        raise ValueError("production client policy must use supported version 1")
+    if not isinstance(payload, dict) or payload.get("version") not in {1, 2}:
+        raise ValueError("production client policy must use supported version 1 or 2")
+    version = int(payload["version"])
+    expected_top_keys = {"version", "canonical_digest", "clients"}
+    if version == 2:
+        expected_top_keys.add("access_contract")
+    if set(payload) != expected_top_keys:
+        raise ValueError("production client policy has invalid top-level fields")
     digest = hashlib.sha256(_canonical_payload(payload)).hexdigest()
     declared_digest = str(payload.get("canonical_digest", ""))
     if not expected_digest or digest != expected_digest or digest != declared_digest:
@@ -148,6 +157,14 @@ def load_client_policy(
     raw_clients = payload.get("clients")
     if not isinstance(raw_clients, dict) or not raw_clients:
         raise ValueError("production client policy must contain at least one client")
+
+    access_contract = None
+    if version == 2:
+        access_contract = validate_access_contract(
+            payload.get("access_contract"),
+            raw_clients,
+            tool_catalog=tool_catalog,
+        )
 
     clients: dict[str, ClientPolicy] = {}
     labels: set[str] = set()
@@ -255,7 +272,12 @@ def load_client_policy(
                     f"catalog (missing={missing}, unknown={unknown})"
                 )
 
-    return ClientPolicyAuthority(version=1, digest=digest, clients=clients)
+    return ClientPolicyAuthority(
+        version=version,
+        digest=digest,
+        clients=clients,
+        access_contract=access_contract,
+    )
 
 
 __all__ = [

@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-08-31 - Make the production client access contract executable
+
+- Fix one canonical client data-plane endpoint at
+  `https://memory.ctharvey.me/mcp-http` and document the distinction from the
+  release-only `/ops/mcp` surface.
+- Promote Codex and all Claude client variants to operator while retaining
+  OpenCode variants as bounded agents; operator clients now include
+  `get_provenance` and the full normal operator tool surface.
+- Add a versioned, digest-bound product access contract covering OAuth 2.1,
+  PKCE S256, signed JWT access tokens, stable per-client identities, roles,
+  scopes, and tool partitions.
+- Make production startup and release authoring refuse endpoint, role, scope,
+  tool-census, or digest drift, with focused positive and negative tests.
+- Publish the contract in the workspace root, deployment playbook, production
+  docs, and Agent Smith metadata so future sessions and clients resolve the
+  same authority without reconstructing it from history.
+
 ## 2026-08-30 - Make reviewed OAuth rights changes deployable
 
 - Reconcile a policy-owned OAuth client's exact scope set from the digest-bound

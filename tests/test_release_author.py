@@ -150,20 +150,16 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, dict]:
         evidence[name] = str(path.resolve())
 
     rendered: dict[str, str] = {}
-    policy_payload = {"version": 1, "clients": {}}
-    policy_digest = hashlib.sha256(json.dumps(
-        policy_payload,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=True,
-    ).encode("ascii")).hexdigest()
+    policy_payload = json.loads(
+        (MODULE_PATH.parent / "client-policy.production.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    policy_digest = policy_payload["canonical_digest"]
     for name in MODULE.RENDERED:
         path = tmp_path / name
         if name == "policy_sha256":
-            path.write_text(json.dumps({
-                **policy_payload,
-                "canonical_digest": policy_digest,
-            }), encoding="ascii")
+            path.write_text(json.dumps(policy_payload), encoding="ascii")
         elif name == "production_env_sha256":
             path.write_text(
                 f"MENHIR_CLIENT_POLICY_DIGEST={policy_digest}\n",
@@ -296,6 +292,36 @@ def test_refuses_production_env_bound_to_raw_policy_file_digest(tmp_path: Path) 
     )
 
     with pytest.raises(ValueError, match="client policy canonical_digest"):
+        _author(spec_path, output)
+
+
+def test_refuses_digest_valid_policy_with_product_role_drift(tmp_path: Path) -> None:
+    spec_path, output, spec = _fixture(tmp_path)
+    policy_path = Path(spec["rendered"]["policy_sha256"])
+    env_path = Path(spec["rendered"]["production_env_sha256"])
+    policy = json.loads(policy_path.read_text(encoding="utf-8"))
+    codex_id = (
+        "https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client=codex"
+    )
+    policy["clients"][codex_id]["maximum_tier"] = "agent"
+    canonical = dict(policy)
+    canonical.pop("canonical_digest")
+    digest = hashlib.sha256(
+        json.dumps(
+            canonical,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        ).encode("ascii")
+    ).hexdigest()
+    policy["canonical_digest"] = digest
+    policy_path.write_text(json.dumps(policy), encoding="ascii")
+    env_path.write_text(
+        f"MENHIR_CLIENT_POLICY_DIGEST={digest}\n",
+        encoding="ascii",
+    )
+
+    with pytest.raises(ValueError, match="codex client tier"):
         _author(spec_path, output)
 
 

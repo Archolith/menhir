@@ -6,6 +6,22 @@ uses a Docker-authoritative same-host fence; it does not require a fictional
 second source host, source-only signing key, mTLS listener, or two external
 evidence workers.
 
+## Non-negotiable client access invariant
+
+The canonical client data-plane endpoint is
+`https://memory.ctharvey.me/mcp-http`. ChatGPT, Codex, and Claude are
+`operator`; OpenCode is `agent`. Every product and host variant uses its own
+policy-bound OAuth client identity and OAuth 2.1 authorization code + PKCE S256;
+Menhir issues and verifies a client-, audience-, scope-, and tier-bound signed
+JWT. The complete identity matrix and tool boundaries are in
+[`ACCESS_CONTRACT.md`](ACCESS_CONTRACT.md).
+
+`deploy/client-policy.production.json` version 2 is the executable authority.
+Release authoring and production startup refuse a missing contract, a different
+primary endpoint, a role/scope/tool mismatch, or a digest mismatch. Never work
+around a refusal by creating another memory endpoint, editing live OAuth rows,
+or issuing a broader token.
+
 ## Normal operator path
 
 After the one-time bootstrap and immutable release installation, one fixed
@@ -154,6 +170,12 @@ TLS, Authenticated Origin Pull, firewall/listener, and public-path contracts.
 Public acceptance after promotion verifies `/livez`, production-mode `/readyz`,
 OAuth discovery, MCP initialize/list/call, recall, and mutation with the fixed
 short-lived acceptance credential.
+
+It must also verify the access contract: all four products target `/mcp-http`;
+their signed token resolves to the expected client identity and role; an allowed
+tool succeeds; and a denied tool remains absent/refused. A Codex or Claude token
+issued before an agent-to-operator promotion is expected to fail exact-policy
+validation until that client reauthorizes.
 
 ## Recovery
 

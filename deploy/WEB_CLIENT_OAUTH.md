@@ -1,5 +1,9 @@
 # Hosted web-client OAuth
 
+The cross-client endpoint, identity, cryptography, and role invariant is
+canonical in [`ACCESS_CONTRACT.md`](ACCESS_CONTRACT.md). This file contains the
+hosted-web-specific callback procedure only.
+
 `deploy/client-policy.production.json` is the source of truth for hosted web
 connector identity, callback metadata, scopes, tier, namespace, and tool
 authority. Production startup atomically seeds missing static public clients

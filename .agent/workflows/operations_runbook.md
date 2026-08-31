@@ -5,6 +5,9 @@ Operational runbook for the backend-first `menhir` service.
 For an immutable deployment or promotion on the live VPS, use the canonical
 [live VPS deployment playbook](../../deploy/LIVE_VPS_PLAYBOOK.md). The local
 Windows startup instructions below are not a production deployment path.
+Production clients use only `https://memory.ctharvey.me/mcp-http`; identity,
+OAuth proof, and product roles are fixed by
+[ACCESS_CONTRACT.md](../../deploy/ACCESS_CONTRACT.md).
 
 For MCP connection details, see [backend-first-mcp.md](backend-first-mcp.md).
 For log files, request ids, and error envelopes, see [logging-and-troubleshooting.md](logging-and-troubleshooting.md).

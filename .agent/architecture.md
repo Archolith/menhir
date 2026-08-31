@@ -115,9 +115,10 @@ Direction:
 - production OAuth authority is client-specific: the exact digest-bound `client_id` selects the
   complete tool decision, and consent cookies approve only that client rather than an application
   suite; overlapping tool sets never imply shared authority or shared approval
-- the hosted ChatGPT and Claude identities are operator-tier clients with broad operational and
-  ingestion rights; namespace-wide deletion and client credential administration remain separate
-  trust boundaries and are explicitly denied
+- the production access contract fixes one client data-plane endpoint (`/mcp-http`) and product
+  roles across host variants: ChatGPT, Codex, and Claude are operator-tier; OpenCode is agent-tier;
+  namespace-wide deletion and client credential administration remain separate trust boundaries
+  and are explicitly denied (see `deploy/ACCESS_CONTRACT.md`)
 - all 54 MCP tools declare a title, reviewed safety annotations, and a minimum OAuth scope; startup
   rejects an incomplete or tier-incoherent declaration before the catalog is served
 - `core/backend_protocol.py` + `core/backend_impl.py` now define the backend-first MCP contract
