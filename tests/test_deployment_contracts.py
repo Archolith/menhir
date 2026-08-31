@@ -165,6 +165,7 @@ def _valid_release() -> dict:
             "production_env_sha256": "0" * 64,
             "operations_policy_sha256": "1" * 64,
             "oauth_public_key_sha256": "2" * 64,
+            "python_runtime_digest_sha256": "3" * 64,
         },
         "network": {
             "project": "menhir-prod",
@@ -212,6 +213,11 @@ def _valid_release() -> dict:
                 "kind": "rendered",
                 "sha256": "2" * 64,
                 "rendered_key": "oauth_public_key_sha256",
+            },
+            "/etc/yawn-vps/menhir-python-runtime.sha256": {
+                "kind": "rendered",
+                "sha256": "3" * 64,
+                "rendered_key": "python_runtime_digest_sha256",
             },
             "/srv/menhir/production/release/production.env": {
                 "kind": "rendered",
@@ -392,6 +398,7 @@ def test_release_requires_four_commits(tmp_path):
     (
         ("/etc/yawn-vps/menhir-oauth-policy.json", "operations_policy_sha256"),
         ("/etc/yawn-vps/menhir-oauth-public.pem", "oauth_public_key_sha256"),
+        ("/etc/yawn-vps/menhir-python-runtime.sha256", "python_runtime_digest_sha256"),
     ),
 )
 def test_release_requires_oauth_authority_rendered_artifacts(
@@ -554,6 +561,98 @@ def test_backup_local_receipt_requires_correct_distinct_generation_count(tmp_pat
         _schema.validate_receipt(str(path), "backup-local")
 
 
+def _live_backup_receipt(tmp_path):
+    archive_root = tmp_path / "encrypted"
+    archive_root.mkdir()
+    current = archive_root / "generation.Abc123-current.tar.gz.age"
+    prior = archive_root / "generation.Prior456-prior.tar.gz.age"
+    current.write_bytes(b"current encrypted archive")
+    prior.write_bytes(b"prior encrypted archive")
+    receipt = _backup_local_receipt()
+    receipt["local_encrypted_archives"]["current_archive_path"] = str(current)
+    for entry, path in zip(
+            receipt["local_encrypted_archives"]["archives"], (current, prior)):
+        entry["path"] = str(path)
+        entry["sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+        entry["size"] = path.stat().st_size
+    receipt_path = _write_json(tmp_path, "backup-receipt.json", receipt)
+    return archive_root, current, receipt_path, receipt
+
+
+def test_backup_promotion_verifies_live_archive_bytes(tmp_path):
+    archive_root, current, receipt_path, _ = _live_backup_receipt(tmp_path)
+    _schema.validate_backup_promotion(str(receipt_path), str(archive_root))
+
+    current.write_bytes(b"tampered")
+    with pytest.raises(ValueError, match="size|digest"):
+        _schema.validate_backup_promotion(str(receipt_path), str(archive_root))
+
+
+def test_backup_promotion_refuses_missing_archive(tmp_path):
+    archive_root, current, receipt_path, _ = _live_backup_receipt(tmp_path)
+    current.unlink()
+    with pytest.raises(OSError):
+        _schema.validate_backup_promotion(str(receipt_path), str(archive_root))
+
+
+def test_backup_receipt_requires_retention_target_to_be_met(tmp_path):
+    receipt = _backup_local_receipt()
+    receipt["local_encrypted_archives"]["retention_target_generations"] = 3
+    path = _write_json(tmp_path, "receipt.json", receipt)
+    with pytest.raises(ValueError, match="below retention target"):
+        _schema.validate_receipt(str(path), "backup-local")
+
+
+def test_bootstrap_backup_is_valid_but_cannot_gate_promotion(tmp_path):
+    receipt = _backup_local_receipt()
+    receipt["local_encrypted_archives"]["retention_target_generations"] = 1
+    receipt["local_encrypted_archives"]["retained_generation_count"] = 1
+    receipt["local_encrypted_archives"]["archives"] = [
+        receipt["local_encrypted_archives"]["archives"][0]
+    ]
+    path = _write_json(tmp_path, "receipt.json", receipt)
+    _schema.validate_receipt(str(path), "backup-local")
+    with pytest.raises(ValueError, match="two retained encrypted generations"):
+        _schema.validate_backup_promotion(str(path), str(tmp_path))
+
+
+def test_desktop_archive_receipt_binds_current_backup_and_release(tmp_path):
+    archive_root, current, backup_path, backup = _live_backup_receipt(tmp_path)
+    release = _valid_release()
+    release["release_id"] = backup["release"]["release_id"]
+    release_path = _write_json(tmp_path, "release.json", release)
+    release_sha = hashlib.sha256(release_path.read_bytes()).hexdigest()
+    backup["release"]["release_manifest_sha256"] = release_sha
+    backup_path.write_text(json.dumps(backup), encoding="utf-8")
+    desktop = {
+        "schema": 1,
+        "kind": "menhir-desktop-archive",
+        "generation": backup["generation"],
+        "release": {
+            "release_id": release["release_id"],
+            "release_manifest_sha256": release_sha,
+        },
+        "archive": {
+            "sha256": hashlib.sha256(current.read_bytes()).hexdigest(),
+            "size_bytes": current.stat().st_size,
+        },
+        "desktop_destination": r"C:\\Backups\\Menhir\\generation.Abc123.tar.gz.age",
+        "archived_utc": _now(),
+    }
+    desktop_path = _write_json(tmp_path, "desktop-receipt.json", desktop)
+
+    _schema.validate_desktop_archive(
+        str(desktop_path), str(backup_path), str(release_path), str(archive_root)
+    )
+
+    desktop["archive"]["sha256"] = "0" * 64
+    desktop_path.write_text(json.dumps(desktop), encoding="utf-8")
+    with pytest.raises(ValueError, match="does not bind"):
+        _schema.validate_desktop_archive(
+            str(desktop_path), str(backup_path), str(release_path), str(archive_root)
+        )
+
+
 def test_restore_uses_the_selected_generations_immutable_backup_receipt():
     source = (REPO_ROOT / "deploy" / "restore-generation.sh").read_text(
         encoding="utf-8"
@@ -632,6 +731,14 @@ def test_release_run_reconstructs_progress_instead_of_trusting_state():
     assert 'same_host_fence.py" verify' in source
     assert "--allow-production" in source
     assert "current-generation" in source
+    assert 'validate-desktop-archive "$desktop_receipt" "$backup_receipt" "$RELEASE_JSON"' in source
+    assert "requires a completed local backup and verified desktop archive receipt" in source
+
+
+def test_promotion_requires_release_bound_desktop_archive_receipt():
+    source = (Path(__file__).resolve().parents[1] / "deploy" / "promote.sh").read_text()
+    assert 'require_root_file "$desktop_receipt" "desktop archive receipt"' in source
+    assert 'validate-desktop-archive "$desktop_receipt" "$backup_receipt" "$RELEASE_JSON"' in source
 
 
 def test_candidate_deploy_census_fences_app_and_database_before_start():

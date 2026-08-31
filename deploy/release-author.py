@@ -50,8 +50,9 @@ RENDERED = frozenset({
     "menhir_compose_sha256", "yawn_compose_sha256", "caddy_sha256",
     "registry_sha256", "policy_sha256", "yawn_env_sha256",
     "production_env_sha256", "operations_policy_sha256",
-    "oauth_public_key_sha256",
+    "oauth_public_key_sha256", "python_runtime_digest_sha256",
 })
+LITERAL_RENDERED_DIGESTS = frozenset({"yawn_env_sha256"})
 SECRET_VERSIONS = frozenset({
     "neo4j-auth", "neo4j-password", "oauth-signing-key",
     "oauth-retry-keyring", "oauth-consent-secret", "operator-key",
@@ -78,6 +79,7 @@ RENDERED_ARTIFACT_DESTINATIONS = {
     "/srv/menhir/production/release/production.env": "production_env_sha256",
     "/etc/yawn-vps/menhir-oauth-policy.json": "operations_policy_sha256",
     "/etc/yawn-vps/menhir-oauth-public.pem": "oauth_public_key_sha256",
+    "/etc/yawn-vps/menhir-python-runtime.sha256": "python_runtime_digest_sha256",
 }
 
 
@@ -475,15 +477,24 @@ def author_release(
     )
 
     rendered_values = _exact(spec.get("rendered"), RENDERED, "rendered")
-    rendered_paths = {
-        key: _regular(rendered_values[key], f"rendered.{key}")
-        for key in sorted(RENDERED)
-    }
+    rendered_paths = {}
+    rendered = {}
+    for key in sorted(RENDERED):
+        value = rendered_values[key]
+        if key in LITERAL_RENDERED_DIGESTS and isinstance(value, str) \
+                and value.startswith("sha256:"):
+            if not DIGEST_RE.fullmatch(value):
+                raise ValueError(f"rendered.{key} literal digest is invalid")
+            rendered[key] = value.removeprefix("sha256:")
+            continue
+        if isinstance(value, str) and value.startswith("sha256:"):
+            raise ValueError(f"rendered.{key} does not permit a literal digest")
+        rendered_paths[key] = _regular(value, f"rendered.{key}")
     _validate_policy_env_binding(
         rendered_paths["policy_sha256"],
         rendered_paths["production_env_sha256"],
     )
-    rendered = {key: _sha256(path) for key, path in rendered_paths.items()}
+    rendered.update({key: _sha256(path) for key, path in rendered_paths.items()})
     network = spec.get("network")
     if not isinstance(network, dict):
         raise ValueError("network must be an object")

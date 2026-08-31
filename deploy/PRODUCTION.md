@@ -107,9 +107,10 @@ with Compose project `menhir-candidate`, service `menhir`, and runtime mode
 `menhir-backup-local.sh` protects the exact generation outside the active writer by
 encrypting it with age under `/srv/menhir/backups/encrypted`, verifying a decrypt/hash
 roundtrip, retaining the encrypted archive on the VPS, removing plaintext staging, and
-writing a structured release-bound receipt. The retention target is at least two
-generations as backups accumulate. An operator may additionally copy the encrypted
-archive to the desktop; that optional copy never gates the VPS release transaction.
+writing a structured release-bound receipt. A new host may write one bootstrap
+generation, but promotion requires a second distinct encrypted generation and
+revalidates both files. The exact cutover archive must also be copied to the desktop;
+promotion requires a fresh root-owned receipt bound to that verified desktop copy.
 No remote object store, cloud backup provider, provider CLI, or provider credential is
 part of the production backup contract.
 

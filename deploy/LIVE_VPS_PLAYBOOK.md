@@ -33,9 +33,10 @@ the audited initial in-place bootstrap path.
 Backups are mandatory before a writer replacement or state migration. The approved
 contract is local: create an age-encrypted archive under
 `/srv/menhir/backups/encrypted`, verify an encrypt/decrypt hash roundtrip, retain the
-archive and a release-bound receipt on the VPS, and keep at least two generations as
-they become available. The encrypted archive may also be copied to the operator's
-desktop after backup completion; desktop availability never gates the VPS transaction.
+archive and a release-bound receipt on the VPS, and keep at least two generations
+before promotion. On a new host, take a bootstrap snapshot first and then the distinct
+cutover snapshot. Copy the cutover archive to the operator's desktop and publish the
+fresh release-bound desktop receipt before continuing the release transaction.
 No remote object store, cloud backup provider, provider CLI, or provider credential is
 part of this contract. Do not infer one from the VPS host or an earlier migration plan.
 
@@ -57,11 +58,12 @@ refresh token or static operator secret as an acceptance credential.
 
 ## Normal operator path
 
-After the one-time bootstrap and immutable release installation, one fixed
-command performs and records the release:
+After the immutable release is installed, the desktop deployment command performs the
+pre-cutover snapshot when needed, final cutover backup, verified desktop archive, and
+then invokes the fixed resumable VPS release command:
 
 ```bash
-sudo -n /srv/menhir/production/bin/release-run.sh
+PowerShell -File C:\Users\thron\IdeaProjects\scripts\deploy-menhir.ps1
 ```
 
 The same operation is exposed to approved operator clients as
@@ -148,8 +150,9 @@ Bootstrap is the only setup-heavy step. It is not repeated for routine releases.
 4. Provision the secret map from `deploy/secrets-map.sh`.
 5. Provision `/etc/menhir/backup-restore.agekey` as a root-owned mode `0400` or
    `0600` identity, install `/usr/local/sbin/menhir-backup-local`, and create the
-   root-owned archive root. Record and test the desktop archival procedure without
-   exposing secret values in the release bundle or logs.
+   root-owned archive root. Install and test the desktop archival procedure; its
+   root-owned receipt is a promotion prerequisite. Never expose secret values in the
+   release bundle or logs.
 6. Install every immutable path in `deploy/installed-artifacts.json`, including
    `release-run.sh`, `stage-generation.sh`, `same-host-fence.sh`, and their
    Python validators.
