@@ -560,6 +560,15 @@ def test_release_schema_helpers_support_installed_flat_layout() -> None:
     assert 'python3 "${SCRIPT_DIR}/lib/same_host_fence.py"' not in release_run
 
 
+def test_secret_mode_verifier_normalizes_shell_octal_notation() -> None:
+    source = (
+        Path(__file__).resolve().parents[1] / "deploy" / "secrets-map.sh"
+    ).read_text(encoding="utf-8")
+
+    assert 'normalized_mode="${m#0}"' in source
+    assert '[ "$am" = "$normalized_mode" ]' in source
+
+
 def test_production_compose_uses_compose_v5_compatible_pid_limits() -> None:
     compose = (
         Path(__file__).resolve().parents[1]
