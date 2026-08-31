@@ -1,3 +1,15 @@
+## 2026-08-30 - plan the remaining Menhir foundation abstraction
+
+- Added one umbrella execution plan and four focused phase plans for the durable extension
+  substrate, runtime projection host, investigation/personality proofs, and developer-surface plus
+  production cutover work.
+- Defined phase dependencies, estimates, zero-core-vocabulary proof gates, documentation ownership,
+  and whole-program acceptance criteria.
+- Applied an expand/backfill/drain/verify/enforce/contract rollout to production activation while
+  keeping physical default-namespace key migration explicitly separate.
+- Reconciled the mutation-kernel promotion roadmap with the implemented PR stack and routed every
+  new executable plan through the active plan index.
+
 ## 2026-08-30 - harden the stacked core projection promotion
 
 - Kept `view_repository.py` as a declarative facade and moved instance-local ViewKind registry

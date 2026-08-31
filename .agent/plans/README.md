@@ -14,6 +14,11 @@ This index routes the current execution owners listed below exactly once.
 
 | Document | Current ownership |
 |---|---|
+| [`menhir-foundation-completion-2026-08-30.md`](menhir-foundation-completion-2026-08-30.md) | Route the remaining core-promotion work through extension substrate, runtime orchestration, hostile-domain proofs, and a measured production cutover. |
+| [`menhir-foundation-phase-1-extension-substrate-2026-08-30.md`](menhir-foundation-phase-1-extension-substrate-2026-08-30.md) | Add the domain-neutral durable assertion/admission substrate and trusted host composition needed by non-scalar extensions. |
+| [`menhir-foundation-phase-2-runtime-orchestration-2026-08-30.md`](menhir-foundation-phase-2-runtime-orchestration-2026-08-30.md) | Wire definition publication, dirty discovery, bounded workers, recovery, telemetry, and scalar shadow execution through the promoted lifecycle. |
+| [`menhir-foundation-phase-3-hostile-domain-proofs-2026-08-30.md`](menhir-foundation-phase-3-hostile-domain-proofs-2026-08-30.md) | Prove investigation and personality end to end through public seams, with zero domain vocabulary or switches in core. |
+| [`menhir-foundation-phase-4-developer-surface-and-cutover-2026-08-30.md`](menhir-foundation-phase-4-developer-surface-and-cutover-2026-08-30.md) | Stabilize the public authoring/test surface and perform expand/backfill/drain/verify/enforce/contract production activation. |
 | [`menhir-contabo-full-production-migration-2026-08-25.md`](menhir-contabo-full-production-migration-2026-08-25.md) | Move the complete OAuth/MCP/runtime/Neo4j stack to Contabo through an isolated Menhir Compose project, a transactional shared-Caddy integration, immutable releases, bounded VPS operations, verified state transfer, and rollback-safe graph/OAuth authority. |
 | [`menhir-research-execution-ladder.md`](menhir-research-execution-ladder.md) | Dependency-ordered research → code → bench sequence. Read-side rungs are closed; Track W6 is the remaining write-side rung. |
 | [`menhir-work-artifact-reconciliation-2026-08-11.md`](menhir-work-artifact-reconciliation-2026-08-11.md) | Add read-only corpus parity auditing, hash/Git-backed source reconciliation, bounded move detectors, and a separately approved live-graph repair. |

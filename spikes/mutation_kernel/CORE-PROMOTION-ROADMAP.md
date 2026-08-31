@@ -2,6 +2,13 @@
 
 Status: active research/promotion plan
 
+Execution continuation (2026-08-30): tranches 1–5 have now been implemented and audited across the
+stacked core-promotion PRs, with scalar lifecycle materialization serving as the first production
+adapter proof. Runtime wiring, hostile-domain proofs, packaging, and cutover are owned by
+[`menhir-foundation-completion-2026-08-30.md`](../../.agent/plans/menhir-foundation-completion-2026-08-30.md)
+and its four phase plans. The original tranche descriptions below remain the architectural record;
+their status labels and milestone sequence are reconciled to the current code.
+
 This roadmap converts the mutation-kernel research into production-facing extension seams in small, independently testable tranches. The goal is **not** to rewrite Menhir or promote the spike schema wholesale. The goal is to expose the generic architecture that production already largely contains, preserve existing coding/scalar behavior as the compatibility baseline, and prove each abstraction with more than one domain before expanding it.
 
 ## Governing rules
@@ -86,7 +93,7 @@ Exit criterion: **met**. The validation workflow completed successfully, existin
 
 ## Tranche 3 — Authority and admission policy boundary
 
-**Status: next**
+**Status: contract implemented and validated; authoritative generic assertion-write wiring remains**
 
 Goal: remove the assumption that one global authority hierarchy is semantically sufficient for every domain while retaining a hard core-controlled admission ceiling.
 
@@ -114,6 +121,8 @@ Required proof cases:
 Exit criterion: two materially different domains use the same core admission contract without domain vocabulary appearing in core.
 
 ## Tranche 4 — Projection-definition registration
+
+**Status: implemented and validated**
 
 Goal: move from externally registered input/output vocabulary to externally registered belief/materialization semantics.
 
@@ -144,6 +153,9 @@ Required proof:
 
 ## Tranche 5 — Incremental projection lifecycle
 
+**Status: repository lifecycle, fencing, receipts, and scalar adapter implemented and validated;
+production host/scheduler wiring remains**
+
 Goal: promote the generic lifecycle guarantees proven in the spike into production infrastructure.
 
 Candidate pieces, promoted only as needed:
@@ -163,6 +175,8 @@ Do **not** import the spike schema as-is. Map each guarantee onto existing produ
 Exit criterion: crash/retry/replay/version-change tests show that stale workers cannot overwrite newer semantic state and missed work can be rediscovered.
 
 ## Tranche 6 — Hostile second-domain proof: investigation
+
+**Status: next executable domain proof**
 
 Goal: prove the promoted API can support a domain with substantially different semantics from coding/scalars.
 
@@ -187,6 +201,8 @@ Exit criterion: an investigation fixture can ingest domain-specific evidence and
 
 ## Tranche 7 — Personality cross-check
 
+**Status: planned after investigation**
+
 Goal: verify that investigation was not merely a new hard-coded special case.
 
 Re-run the personality hostile-domain experiment through the same production extension interfaces.
@@ -201,6 +217,8 @@ Required proof:
 Exit criterion: at least coding/scalar, investigation, and personality operate through the same generic lifecycle contracts while retaining different semantics.
 
 ## Tranche 8 — Extension packaging and developer surface
+
+**Status: planned after both hostile-domain proofs**
 
 Only after the semantic contracts have survived multiple domains, define the developer-facing extension surface.
 
@@ -218,6 +236,8 @@ Avoid runtime/plugin machinery unless actual deployment requirements demand it. 
 Exit criterion: an extension can be implemented outside core with a small, documented public interface and deterministic startup validation.
 
 ## Tranche 9 — Production integration and consolidation
+
+**Status: planned as a staged rollout after the developer surface is proven**
 
 Goal: remove redundant closed/internal paths only after generic replacements are proven.
 
@@ -287,13 +307,13 @@ That distinction should guide promotion decisions: **keep domain meaning outside
 ```text
 1. Open ViewKind registration                         DONE
 2. Open evidence/source-kind registration             DONE
-3. Promote authority/admission boundary               NEXT
-4. Register projection definitions
-5. Promote lifecycle/versioning/fencing
-6. Prove investigation through public extension API
-7. Prove personality through the same API
-8. Define packaging/developer surface
-9. Consolidate and reconcile with audit/remediation
+3. Promote authority/admission boundary               CONTRACT DONE; WRITE WIRING IN PHASE 1
+4. Register projection definitions                    DONE
+5. Promote lifecycle/versioning/fencing               CORE DONE; RUNTIME WIRING IN PHASE 2
+6. Prove investigation through public extension API   PHASE 3A
+7. Prove personality through the same API             PHASE 3B
+8. Define packaging/developer surface                 PHASE 4A
+9. Consolidate and reconcile with audit/remediation   PHASE 4B
 10. Explore higher-order belief/provenance features
 ```
 
