@@ -19,7 +19,16 @@ EXPECTED = {
     "policy": ("policy", "exact-tree-copy", "exact-tree-copy", ()),
     "release/release.json": ("config/release.json", "exact-file-copy", "release-authority-validation", ()),
 }
-EXCLUDED = {"state/neo4j/logs": "operational logs are non-authoritative and independently rotated"}
+EXCLUDED = {
+    "state/neo4j/logs": "operational logs are non-authoritative and independently rotated",
+    "runtime/menhir/tmp/logs/server.access.log": (
+        "container-local access log is non-authoritative and discarded with the container"
+    ),
+}
+EXPECTED_EPHEMERAL_WRITES = {
+    "menhir": frozenset({"/tmp/logs/server.access.log"}),
+    "neo4j": frozenset(),
+}
 COMPOSE_MOUNTS = {
     "${MENHIR_STATE_ROOT:-/srv/menhir/production/state}/neo4j/data",
     "${MENHIR_STATE_ROOT:-/srv/menhir/production/state}/neo4j/logs",
@@ -134,7 +143,8 @@ def reconcile_live(live: dict) -> dict:
         normalized = [posixpath.normpath(v.removesuffix(" (deleted)")) for v in values]
         for value in normalized:
             if not any(value == root or value.startswith(root + "/")
-                       for root in authority_destinations[service]):
+                       for root in authority_destinations[service]) \
+                    and value not in EXPECTED_EPHEMERAL_WRITES[service]:
                 raise ValueError("writer %s has an open file outside declared mounts: %s"
                                  % (service, value))
     return live

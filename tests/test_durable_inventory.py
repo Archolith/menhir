@@ -132,6 +132,16 @@ def test_live_durable_census_rejects_open_file_outside_declared_mounts():
         reconcile_live(live)
 
 
+def test_live_durable_census_allows_only_the_declared_ephemeral_access_log():
+    live = _live_census()
+    live["open_files"]["menhir"].append("/tmp/logs/server.access.log")
+    assert reconcile_live(live) is live
+
+    live["open_files"]["menhir"].append("/tmp/logs/unclassified.db")
+    with pytest.raises(ValueError, match="outside declared mounts"):
+        reconcile_live(live)
+
+
 def test_live_durable_census_accepts_raw_observations_only_after_classification():
     live = _live_census()
     live["open_files"] = {"menhir": ["/tmp/undeclared-writer.db"], "neo4j": []}
