@@ -22,6 +22,51 @@ primary endpoint, a role/scope/tool mismatch, or a digest mismatch. Never work
 around a refusal by creating another memory endpoint, editing live OAuth rows,
 or issuing a broader token.
 
+## Current live state and rollout blocker (2026-08-31)
+
+Production is healthy on `menhir-prod-0.2.0-5`, Menhir commit `04425f87`, and
+policy version 1. The version-2 access contract is committed but is not live.
+The host currently lacks both `/etc/menhir/backup-upload.conf` and
+`/srv/menhir/production/secrets/menhir/acceptance-token`. There is no
+`/var/lib/menhir-production/release-run.json` because release 5 was installed by
+the audited initial in-place bootstrap path.
+
+Do not install a newer bundle or invoke `release-run.sh` while either prerequisite
+is absent. Installing the policy and environment before the runner can complete
+would leave the running release and its restart authority inconsistent. Do not
+repeat the in-place bootstrap for an ordinary release.
+
+The backup prerequisite requires a real Contabo S3 bucket with Object Lock
+COMPLIANCE enabled, a fixed root-owned AWS profile, and an `age_recipient` matching
+`/etc/menhir/backup-restore.agekey`. These are external authorities and must not be
+invented from another service's credentials. The acceptance file must contain one
+fresh OAuth access token for a policy-owned client; never copy a refresh token or a
+static operator secret into it. Remove the access-token file after the release
+observation is complete.
+
+## Mandatory read-only preflight
+
+Run this before building or reviewing a release. Every check is read-only:
+
+```bash
+sudo -n test -f /etc/menhir/backup-upload.conf
+sudo -n test -f /root/.aws/credentials
+sudo -n test -f /root/.aws/config
+sudo -n test -f /etc/menhir/backup-restore.agekey
+sudo -n test -f /srv/menhir/production/secrets/menhir/acceptance-token
+sudo -n /srv/menhir/production/bin/verify-artifacts
+curl -fsS https://memory.ctharvey.me/readyz
+```
+
+Additionally verify the backup config and fixed profile by running the backup
+wrapper's reviewed provider checks in a non-mutating rehearsal environment. Do not
+discover missing backup authority by stopping production. Verify the acceptance
+token against `/mcp-http` immediately before release and ensure it remains valid for
+the entire backup, rehearsal, candidate, promotion, and public-acceptance window.
+If the token lifetime cannot cover that window, stop: the release procedure needs a
+reviewed refresh or just-in-time credential mechanism rather than a hand-copied
+long-lived credential.
+
 ## Normal operator path
 
 After the one-time bootstrap and immutable release installation, one fixed
