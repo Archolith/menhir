@@ -757,6 +757,16 @@ def test_runtime_binding_distinguishes_policy_file_and_canonical_digests():
     assert '(policy_digest, sha(policy_path), "configured policy")' not in source
 
 
+def test_generation_checksum_manifest_is_not_self_referential():
+    root = Path(__file__).resolve().parents[1]
+    backup = (root / "deploy" / "backup-generation.sh").read_text()
+    restore = (root / "deploy" / "restore-generation.sh").read_text()
+    assert "! -path './SHA256SUMS'" in backup
+    assert "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  ./SHA256SUMS" in restore
+    assert "invalid legacy SHA256SUMS self-entry" in restore
+    assert "unexpected SHA256SUMS self-entry" in restore
+
+
 def test_promotion_requires_release_bound_desktop_archive_receipt():
     source = (Path(__file__).resolve().parents[1] / "deploy" / "promote.sh").read_text()
     assert 'require_root_file "$desktop_receipt" "desktop archive receipt"' in source
