@@ -738,7 +738,9 @@ def test_release_run_reconstructs_progress_instead_of_trusting_state():
     assert 'require_root_file "$state" "release-run state"' in source
     assert '"${SCRIPT_DIR}/same-host-fence.sh"' in source
     assert '"$caddy_release" reconcile' in source
-    assert 'same_host_fence.py" verify' in source
+    assert 'same_host_helper="${SCRIPT_DIR}/lib/same_host_fence.py"' in source
+    assert 'same_host_helper="${SCRIPT_DIR}/same_host_fence.py"' in source
+    assert '"$same_host_helper" verify' in source
     assert "--allow-production" in source
     assert "current-generation" in source
     assert 'validate-desktop-archive "$desktop_receipt" "$backup_receipt" "$RELEASE_JSON"' in source
