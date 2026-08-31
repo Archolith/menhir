@@ -9,18 +9,6 @@ from typing import Any
 from uuid import uuid4
 
 from menhir.infrastructure.neo4j import SAGA_MUTATION_TIMEOUT_S
-
-try:  # neo4j is a hard runtime dep; guard the import so unit imports without the driver still load.
-    from neo4j.exceptions import ConstraintError as _Neo4jConstraintError
-except Exception:  # pragma: no cover - driver always present in the running service
-    _Neo4jConstraintError = ()  # type: ignore[assignment]
-
-logger = logging.getLogger(__name__)
-
-#: Placeholder for the supporting-event count inside a kind's `summary_template`. The unchanged-value
-#: provenance refresh (plan D2) computes the count INSIDE Cypher (the union must be atomic), so the
-#: summary cannot be pre-rendered in Python — it is rendered as a template here and the count is
-#: substituted server-side in the same statement that writes the union.
 from menhir.infrastructure.view_kind_registry import resolve_view_kinds
 from menhir.infrastructure.view_models import (
     _COUNT_TOKEN,
@@ -42,6 +30,17 @@ from menhir.infrastructure.view_models import (
     _now,
     _timeline_surface,
 )
+
+try:  # neo4j is a hard runtime dep; guard the import so unit imports without the driver still load.
+    from neo4j.exceptions import ConstraintError as _Neo4jConstraintError
+except Exception:  # pragma: no cover - driver always present in the running service
+    _Neo4jConstraintError = ()  # type: ignore[assignment]
+
+logger = logging.getLogger(__name__)
+
+# `_COUNT_TOKEN` is the placeholder for the supporting-event count inside a kind's
+# `summary_template`. Provenance refresh computes the count inside Cypher so the union remains
+# atomic, then substitutes the count into the template in the same statement.
 
 
 class ViewWriteRepositoryMixin:
@@ -74,9 +73,11 @@ class ViewWriteRepositoryMixin:
         `subject_uuid` is supplied (scalar_state), the resolved entity UUID is the identity segment
         instead, so the key is entity-anchored, not text-anchored. A present-but-blank UUID is a bug
         (never silently fall back to text keying — that would recreate the rejected lexical sidecar)."""
-        from menhir.domain.namespace import namespace_to_group_id, normalize_namespace
-
-        ns = namespace_to_group_id(normalize_namespace(namespace))
+        # Keep the persisted View identity byte-compatible with deployed rows.  Logical default
+        # aliases are unified by tenant-scope reads and the namespace fence, but changing this
+        # segment from ``default`` to ``""`` needs a staged data migration; doing it in the shared
+        # writer would otherwise create a second current View beside an existing ``default::`` row.
+        ns = (namespace or "").strip()
         if subject_uuid is not None:
             ident = subject_uuid.strip()
             if not ident:
@@ -197,7 +198,6 @@ class ViewWriteRepositoryMixin:
         stale and must NOT overwrite current (fold-algebra Law 1); it is skipped, current stays
         authoritative. Without this the reconcile is arrival-ordered and installs stale totals."""
         from menhir.domain.namespace import (
-            namespace_to_group_id,
             normalize_namespace,
             stamped_namespace,
             tenant_scope_cypher,
@@ -220,7 +220,7 @@ class ViewWriteRepositoryMixin:
 
         now = datetime.now(timezone.utc).isoformat()
         namespace_key = normalize_namespace(namespace)
-        ns_stamped = stamped_namespace(namespace_key)
+        ns_stamped = stamped_namespace(namespace)
         current = self._current_by_key(key, view_class=view_class)
 
         if current is not None and str(current.get("sig")) == str(sig):
@@ -392,7 +392,7 @@ class ViewWriteRepositoryMixin:
             RETURN n.uuid AS uuid
             """
         params = {"uuid": new_uuid, "name": name[:300], "summary": summary[:1000],
-                  "ns": namespace_to_group_id(namespace_key), "ns_stamped": ns_stamped,
+                  "ns": (namespace or ""), "ns_stamped": ns_stamped,
                   "namespace_key": namespace_key, **tenant_scope_params(namespace_key),
                   "operation_id": new_uuid, "key": key, "eps": eps,
                   "source": source, "sc": float(source_confidence),

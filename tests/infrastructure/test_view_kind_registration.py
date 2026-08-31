@@ -50,13 +50,19 @@ def test_default_registry_preserves_builtin_universe_and_is_instance_local() -> 
     assert repo.KINDS is not ViewRepository.KINDS
 
 
-def test_view_key_collapses_default_namespace_aliases() -> None:
-    keys = {
-        ViewRepository._key(namespace, "Alice", "finding", subject_uuid="entity-1")
-        for namespace in (None, "", "  ", "default", " default ")
-    }
-
-    assert keys == {"::entity-1::finding"}
+def test_view_key_preserves_deployed_default_namespace_identity() -> None:
+    assert ViewRepository._key(
+        None, "Alice", "finding", subject_uuid="entity-1"
+    ) == "::entity-1::finding"
+    assert ViewRepository._key(
+        "", "Alice", "finding", subject_uuid="entity-1"
+    ) == "::entity-1::finding"
+    assert ViewRepository._key(
+        "default", "Alice", "finding", subject_uuid="entity-1"
+    ) == "default::entity-1::finding"
+    assert ViewRepository._key(
+        " default ", "Alice", "finding", subject_uuid="entity-1"
+    ) == "default::entity-1::finding"
     assert ViewRepository._key(
         "tenant-a", "Alice", "finding", subject_uuid="entity-1"
     ) == "tenant-a::entity-1::finding"
