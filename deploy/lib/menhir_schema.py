@@ -113,8 +113,9 @@ _RELEASE_RENDERED = frozenset({
     "menhir_compose_sha256", "yawn_compose_sha256", "caddy_sha256",
     "registry_sha256", "policy_sha256", "yawn_env_sha256",
     "production_env_sha256", "operations_policy_sha256",
-    "oauth_public_key_sha256", "python_runtime_digest_sha256",
+    "oauth_public_key_sha256",
 })
+_RELEASE_RENDERED_OPTIONAL = frozenset({"python_runtime_digest_sha256"})
 _RELEASE_NETWORK = frozenset({
     "project", "external_network", "alias", "peers",
 })
@@ -494,8 +495,10 @@ def validate_release(path: str) -> dict:
     _require_sha256(release.get("provenance_sha256"), "provenance_sha256")
 
     rendered = release.get("rendered")
-    _require_exact_keys(rendered, _RELEASE_RENDERED, "rendered")
-    for key in sorted(_RELEASE_RENDERED):
+    if not isinstance(rendered, dict) or not _RELEASE_RENDERED.issubset(rendered) \
+            or not set(rendered).issubset(_RELEASE_RENDERED | _RELEASE_RENDERED_OPTIONAL):
+        raise ValueError("rendered has invalid labels")
+    for key in sorted(rendered):
         _require_sha256(rendered.get(key), "rendered.%s" % key)
 
     network = release.get("network")
@@ -587,11 +590,18 @@ def validate_release(path: str) -> dict:
             digest = _require_sha256(entry.get("sha256"),
                                      "artifacts[%s].sha256" % path)
             rendered_key = entry.get("rendered_key")
-            if rendered_key not in _RELEASE_RENDERED or rendered.get(rendered_key) != digest:
+            if rendered_key not in (_RELEASE_RENDERED | _RELEASE_RENDERED_OPTIONAL) \
+                    or rendered.get(rendered_key) != digest:
                 raise ValueError("artifacts[%s] is not bound to rendered authority" % path)
         else:
             raise ValueError("artifacts[%s].kind must be git or rendered" % path)
     for path, rendered_key in _RELEASE_REQUIRED_RENDERED_ARTIFACTS.items():
+        if rendered_key in _RELEASE_RENDERED_OPTIONAL and rendered_key not in rendered:
+            if path in artifacts:
+                raise ValueError(
+                    "artifacts[%s] cannot exist without rendered authority" % path
+                )
+            continue
         entry = artifacts.get(path)
         if not isinstance(entry, dict) or entry.get("kind") != "rendered" \
                 or entry.get("rendered_key") != rendered_key \

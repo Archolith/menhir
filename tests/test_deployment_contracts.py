@@ -287,6 +287,16 @@ def test_release_valid(tmp_path):
     _schema.validate_release(str(path))
 
 
+def test_prior_release_without_new_runtime_binding_remains_valid(tmp_path):
+    release = _valid_release()
+    del release["rendered"]["python_runtime_digest_sha256"]
+    del release["artifacts"]["/etc/yawn-vps/menhir-python-runtime.sha256"]
+    release["security_review"]["authority_sha256"] = \
+        _schema.release_authority_sha256(release)
+    path = _write_json(tmp_path, "prior-release.json", release)
+    _schema.validate_release(str(path))
+
+
 @pytest.mark.parametrize("label", ["repos", "images", "rendered", "network", "rollback_anchors"])
 def test_release_rejects_unknown_top_level_label(tmp_path, label):
     release = _valid_release()
