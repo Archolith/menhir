@@ -173,7 +173,44 @@ each sweep needs an owner, a cadence, and a receipt. *Both checkouts or neither:
 worth having in frontier is worth a landing path in production, hotfix-style, until the forks
 converge.
 
-## 5. What each layer owes the governance frame
+## 5. Planned generic-extension governance — unimplemented
+
+The generic extension foundation described by the foundation plans is **planned and
+unimplemented**. ADR 0002 remains **PROPOSED** and requires owner acceptance before implementation;
+these rules are governance targets, not descriptions of shipped behavior. No implementation or
+production-readiness claim is permitted until repository, concurrency, lifecycle, rollout, and
+deployed evidence establish it.
+
+- **Admission is host-bound.** One host-owned binding for each assertion type and purpose selects
+  the source resolver, grant/authority semantics, policy, codec, repository, and journal route. A
+  request may select a registered type and purpose but never its authority or those bindings. An
+  upward authority request is recorded and clamped to the ingress ceiling before mapped policy may
+  reject, reinterpret, or lower it; policy may never raise it.
+- **Namespace is part of authority identity.** Canonical namespace participates in every source,
+  grant, assertion, currentness head/set, hash, journal stream, projection target, uniqueness key,
+  and transaction fence. Ambiguous or cross-namespace alias resolution fails closed.
+- **Evidence is not belief.** The source observation/evidence, admission decision, and assertion are
+  immutable and remain distinct from the current belief/View derived from them. Refolding may replace
+  or retire a View without rewriting or erasing its observation, decision, assertion, or lineage.
+- **The journal alone authorizes work.** The assertion mutation and its ordered journal fact commit
+  in one transaction. That transactional journal is the sole work authority; immediate dispatch is
+  optional latency only, and consumers advance durable cursors only with idempotent dirty/retire
+  application.
+- **Currentness is source-relative and auditable.** Each source-and-claim head has at most one
+  current assertion while independent sources may disagree. Same-version conflicts and stale
+  assertions remain durable, labeled audit evidence but cannot move the head or become current
+  projection input; removal advances the head to an immutable tombstone and preserves prior lineage.
+- **Ownership is singular through cutover.** Every assertion type has exactly one writer and one
+  currentness authority. Current scalar `TypedAssertion` and event `TypedEventAssertion` paths remain
+  legacy-owned, with generic adapters read-only and no dual writes, until a separately fenced,
+  measured cutover transfers authority.
+- **Runtime behavior and promotion are evidence-bound.** Behavior-bound manifests and release/runtime
+  digests must make semantic drift and mixed composition fail readiness; corrupt, ambiguous, stale,
+  or unsupported state must produce evidence-bearing typed diagnostics rather than fallback. A
+  durable writer-authority handoff and append-only, release-bound rollout receipts must prove each
+  promotion stage before generic lifecycle writes become authoritative.
+
+## 6. What each layer owes the governance frame
 
 | layer | already compliant | owes |
 |---|---|---|
@@ -183,7 +220,7 @@ converge.
 | lifecycle | keep-both conflicts; type exemptions; disarms in place | destruction warrants; archive-reading rehydration; lawful signals before re-arming |
 | platform | MCP tier model; namespace guards | one door (Q4/Q7 + OAuth); the decision ledger; sink attribution (Q2) |
 
-## 6. Summary — the principles, portable
+## 7. Summary — the principles, portable
 
 1. **Correctness undeployed is correctness absent.** Governance keeps mechanisms honest and their
    absence visible; track the designed-vs-deployed delta as a first-class artifact.

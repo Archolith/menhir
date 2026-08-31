@@ -29,6 +29,32 @@ Client surfaces:
 - REST (`/api/*`)
   - canonical health/readiness/stats and memory endpoints
 
+### Planned generic projection boundary (not implemented)
+
+The generic projection foundation is planned only. The generic projection host, ordered-journal
+consumer, temporal wakeups, runtime manifest digest, typed corruption states, writer census, and
+cutover receipts are not implemented operator surfaces and have no current commands or readiness
+fields. The proposed [master plan](../plans/menhir-foundation-completion-2026-08-30.md),
+[Phase 2 runtime plan](../plans/menhir-foundation-phase-2-runtime-orchestration-2026-08-30.md),
+[Phase 4 cutover plan](../plans/menhir-foundation-phase-4-developer-surface-and-cutover-2026-08-30.md),
+and [ADR 0002](../adr/0002-generic-assertion-currentness-and-journal.md) describe a future target;
+ADR 0002 is **PROPOSED**, not accepted. Operators must not infer or enable a generic scheduler or
+public extension surface from those documents. Current scalar- and event-specific repositories,
+writers, and behavior remain authoritative; the existing scheduler and readiness fields documented
+below do not imply generic projection orchestration.
+
+When implemented, projection readiness belongs to the backend runtime owner (`menhir serve`), never
+to stdio MCP. Backend readiness must fail closed on runtime-manifest or adapter-digest drift and on a
+missing active definition. Diagnostics must expose per-definition work, freshness, and corruption,
+plus durable journal cursor and census-watermark state.
+
+Future production activation must follow **Expand → read-only Backfill → Drain** (including the
+atomic authority flip and post-flip materialization) **→ Verify → Enforce → Contract**. Drain and
+Verify each require separate 7-day continuous attested windows; Contract requires a 14-day
+continuous attested window. Old-image rollback is allowed only before the first durable production
+mutation. After that boundary, recovery must roll forward to a certified fence-aware release or use
+a verified reverse generation with an atomic authority flip.
+
 ## Startup
 
 ### Windows

@@ -1,6 +1,6 @@
 # Current plan index
 
-Status: current execution routing index, audited 2026-08-11.
+Status: current execution routing index, audited 2026-08-30.
 
 This directory contains executable ownership: active plans, partially implemented plans with a
 named residual, and owner decisions that still control whether work exists. Lower-priority work is
@@ -14,11 +14,11 @@ This index routes the current execution owners listed below exactly once.
 
 | Document | Current ownership |
 |---|---|
-| [`menhir-foundation-completion-2026-08-30.md`](menhir-foundation-completion-2026-08-30.md) | Route the remaining core-promotion work through extension substrate, runtime orchestration, hostile-domain proofs, and a measured production cutover. |
-| [`menhir-foundation-phase-1-extension-substrate-2026-08-30.md`](menhir-foundation-phase-1-extension-substrate-2026-08-30.md) | Add the domain-neutral durable assertion/admission substrate and trusted host composition needed by non-scalar extensions. |
-| [`menhir-foundation-phase-2-runtime-orchestration-2026-08-30.md`](menhir-foundation-phase-2-runtime-orchestration-2026-08-30.md) | Wire definition publication, dirty discovery, bounded workers, recovery, telemetry, and scalar shadow execution through the promoted lifecycle. |
-| [`menhir-foundation-phase-3-hostile-domain-proofs-2026-08-30.md`](menhir-foundation-phase-3-hostile-domain-proofs-2026-08-30.md) | Prove investigation and personality end to end through public seams, with zero domain vocabulary or switches in core. |
-| [`menhir-foundation-phase-4-developer-surface-and-cutover-2026-08-30.md`](menhir-foundation-phase-4-developer-surface-and-cutover-2026-08-30.md) | Stabilize the public authoring/test surface and perform expand/backfill/drain/verify/enforce/contract production activation. |
+| [`menhir-foundation-completion-2026-08-30.md`](menhir-foundation-completion-2026-08-30.md) | Route 9–13 engineer-weeks through one admission → mutation journal → lifecycle certification → exclusive writer-authority chain. |
+| [`menhir-foundation-phase-1-extension-substrate-2026-08-30.md`](menhir-foundation-phase-1-extension-substrate-2026-08-30.md) | Add namespace-bound generic assertions, atomic admission decisions, source-relative currentness, an ordered mutation journal, and explicit legacy writer ownership. |
+| [`menhir-foundation-phase-2-runtime-orchestration-2026-08-30.md`](menhir-foundation-phase-2-runtime-orchestration-2026-08-30.md) | Consume the journal through behavior-bound publication, fair bounded workers, temporal wakeups, typed freshness/corruption diagnostics, and read-only scalar shadow. |
+| [`menhir-foundation-phase-3-hostile-domain-proofs-2026-08-30.md`](menhir-foundation-phase-3-hostile-domain-proofs-2026-08-30.md) | Prove materially different investigation and personality algebras through a frozen provisional seam, real provenance, hostile key collisions, and actual bounded recall. |
+| [`menhir-foundation-phase-4-developer-surface-and-cutover-2026-08-30.md`](menhir-foundation-phase-4-developer-surface-and-cutover-2026-08-30.md) | Stabilize clean-installable author/host/test APIs and perform an attested, mutually exclusive writer cutover with durable definition retirement. |
 | [`menhir-contabo-full-production-migration-2026-08-25.md`](menhir-contabo-full-production-migration-2026-08-25.md) | Move the complete OAuth/MCP/runtime/Neo4j stack to Contabo through an isolated Menhir Compose project, a transactional shared-Caddy integration, immutable releases, bounded VPS operations, verified state transfer, and rollback-safe graph/OAuth authority. |
 | [`menhir-research-execution-ladder.md`](menhir-research-execution-ladder.md) | Dependency-ordered research → code → bench sequence. Read-side rungs are closed; Track W6 is the remaining write-side rung. |
 | [`menhir-work-artifact-reconciliation-2026-08-11.md`](menhir-work-artifact-reconciliation-2026-08-11.md) | Add read-only corpus parity auditing, hash/Git-backed source reconciliation, bounded move detectors, and a separately approved live-graph repair. |
@@ -29,6 +29,11 @@ This index routes the current execution owners listed below exactly once.
 | [`menhir-projection-realization-coverage-implementation.md`](menhir-projection-realization-coverage-implementation.md) | Projection parity and realization-observation coverage implementation. |
 | [`menhir-unbounded-graph-writes-2026-08-09.md`](menhir-unbounded-graph-writes-2026-08-09.md) | Bound raw graph-write payload retention rather than only enrichment input. |
 | [`menhir-view-evidence-lifecycle-2026-08-28.md`](menhir-view-evidence-lifecycle-2026-08-28.md) | Keep current View contributors alive under automatic lifecycle work, invalidate dependent Views on explicit erasure, and exclude stale/internal/orphaned Views from recall. |
+
+Foundation Phase 1 is blocked on owner acceptance of proposed
+[ADR 0002 — generic assertion currentness and mutation journal](../adr/0002-generic-assertion-currentness-and-journal.md).
+The ADR resolves the design questions needed for implementation but does not make the generic
+extension substrate or scheduler available.
 
 ## Partially implemented
 

@@ -150,6 +150,19 @@ inventory and excludes the unrelated release-baseline repair.
 | 3 | investigation and personality extension examples, extension test guide, architecture boundary notes, `CHANGELOG.md` |
 | 4 | public extension guide, compatibility/versioning policy, migration runbook, production acceptance report, `CHANGELOG.md` |
 
+### Documentation status — 2026-08-30
+
+- Canonical architecture, data-model, governance, operations, plan-routing, and agent-usage docs
+  describe this foundation only as a planned implementation target and preserve the current legacy
+  scalar/event authority boundary.
+- Proposed ADR 0002 fixes the candidate assertion/currentness/journal design. Phase 1 implementation
+  remains blocked until the owner accepts or amends it.
+- The stable extension API reference, template, compatibility policy, migration runbook, production
+  receipts, and implementation reports remain phase deliverables; planning prose is not substituted
+  for those artifacts.
+- The shipped default-off activation ledger intentionally has no generic foundation entry. Add one
+  only after code is complete and an actual activation flag/gate exists.
+
 ## Whole-program acceptance
 
 The abstraction process is complete when all of the following are true:

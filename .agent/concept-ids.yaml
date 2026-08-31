@@ -5,6 +5,9 @@ runtime:
   runtime.projections:
     owner: architecture.md
     meaning: Event-log, deterministic-fold, and disposable-projection boundary
+  runtime.foundation_target:
+    owner: architecture.md
+    meaning: Proposed, unimplemented generic extension authority chain and phase boundary
   runtime.stack:
     owner: architecture.md
     meaning: Runtime stack and major dependencies
@@ -124,6 +127,9 @@ model:
   model.turn_evidence:
     owner: data_models.md
     meaning: Selective :TurnEvidence raw-evidence node contract (ADR 0001)
+  model.generic_extension_assertion:
+    owner: data_models.md
+    meaning: Proposed, unimplemented generic assertion, source-relative currentness, and mutation-journal target (ADR 0002)
   model.edge:
     owner: data_models.md
     meaning: Edge field contract

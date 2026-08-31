@@ -16,6 +16,7 @@ model section you need.
 - Need edge / conflict fields: read `model.edge` and `model.conflict`
 - Need Python return types: read `model.domain.session` and `model.domain.ingest_result`
 - Need env / payload contract: read `model.config`
+- Need the proposed generic assertion/currentness/journal target: read `model.generic_extension_assertion`
 - Need terminology help first: read `glossary.md`
 
 ## Modeling primitives
@@ -464,6 +465,130 @@ fields only; `claim_key` additionally binds the source locator. Structural compo
 with a versioned receipt. Consolidation shadow schema v2 compares these sidecars in memory and emits
 only hashes plus closed diagnostic enums in its new compositional section; the existing raw shadow
 summary remains intact for backward comparison.
+
+### Planned/unimplemented: generic extension assertion, currentness, and mutation journal
+
+Concept id: `model.generic_extension_assertion`
+
+> **Status: PLANNED / UNIMPLEMENTED.** This is the proposed target from
+> [ADR 0002](adr/0002-generic-assertion-currentness-and-journal.md), whose status is `PROPOSED`;
+> owner acceptance is still required. None of the nodes, relationships, uniqueness
+> constraints, writer ownership changes, or readiness rules below should be read as existing graph
+> behavior. Current `TypedAssertion` scalar and `TypedEventAssertion` event schemas and their legacy
+> repository/service writers remain unchanged.
+
+The proposed core-owned graph records keep immutable evidence, mutable currentness, ordered routing,
+and erasure proof in separate authority roles:
+
+| Target record | Proposed role | Proposed mutable fields |
+|---|---|---|
+| `:GenericAssertion` | Immutable admitted assertion envelope and lifecycle operation | none |
+| `:GenericAssertionPayload` | Canonical extension-owned payload bytes | none; authorized erasure may remove the node |
+| `:AdmissionDecision` | Immutable admission snapshot of source, grant, ceiling, policy, and result | none |
+| `:GenericAssertionHead` | Unique source-relative currentness fence | `head_revision` and its one `CURRENT_ASSERTION` edge |
+| `:ProjectionInputMutation` | Immutable ordered journal/outbox fact | none; delivery metadata is separate |
+| `:MutationStreamHead` | Sequence allocator for one namespace/type/purpose stream | `last_sequence` |
+| `:AssertionErasureReceipt` | Immutable proof that payload bytes were removed under policy | none |
+
+The exact proposed semantic relationships are:
+
+```text
+(:GenericAssertion)-[:HAS_PAYLOAD]->(:GenericAssertionPayload)
+(:GenericAssertion)-[:ADMITTED_BY]->(:AdmissionDecision)
+(:GenericAssertion)-[:ASSERTS_FROM]->(:TurnEvidence|:Episodic|other registered source)
+(:GenericAssertion)-[:SUPERSEDES]->(:GenericAssertion)
+(:GenericAssertionHead)-[:CURRENT_ASSERTION]->(:GenericAssertion)
+(:ProjectionInputMutation)-[:RECORDS_ASSERTION]->(:GenericAssertion)
+(:AssertionErasureReceipt)-[:ERASED_PAYLOAD_OF]->(:GenericAssertion)
+```
+
+These are target names and roles, not active constraints. The proposal permits indexes and
+non-semantic bookkeeping, but does not permit collapsing these authority roles or making an
+extension-owned node authoritative for core replay/currentness.
+
+**Namespace and the three keys.** Canonical namespace is proposed as non-null and part of every
+source, grant, assertion, head, hash, journal-stream, projection-target, uniqueness, transaction,
+and fence identity. A generic writer would never store an empty, omitted, or legacy alias spelling;
+legacy aliases would be accepted only at a read boundary that resolves to exactly one canonical
+namespace or fails closed. The keys intentionally answer different questions:
+
+| Key | Proposed identity |
+|---|---|
+| `assertion_key` | Request replay/collision identity: caller-supplied stable `assertion_id`, scoped by canonical namespace and assertion type; never content-derived |
+| `claim_key` | Extension-defined semantic claim family: canonical namespace, assertion type, purpose, subject identity, and codec-validated canonical `claim_discriminator` |
+| `head_key` | Source-relative currentness: the namespace-bound durable source identity added to `claim_key` |
+
+All three would use versioned, domain-separated SHA-256 derivation over length-delimited canonical
+UTF-8 components, while human-readable IDs remain for audit. Because `head_key` includes source
+identity, each source may have one current contribution to a claim while independent sources remain
+current simultaneously for the extension fold to compare.
+
+**Versions and currentness.** `payload_schema_version` would describe payload encoding/decoding;
+`interpretation_version` would order semantic replacements inside one `head_key`. They are
+independent integers and neither is a projection-definition version. For a non-replay write, a
+greater interpretation version would move the head and `SUPERSEDES` the prior current assertion.
+An equal version with the same assertion ID and canonical content is exact replay. Equal-version
+different content would be retained as `SAME_VERSION_CONFLICT`; a lower version would be retained as
+`STALE_RECORDED`. Neither disposition would move the head or become a current projection input.
+Both would still receive journal entries for complete audit ordering, but only a head-changing entry
+would dirty or retire projection work.
+
+**Removal, rebinding, and payload erasure.** A removal would be an immutable
+`:GenericAssertion {operation: 'REMOVE'}` with no payload node and an interpretation version greater
+than the current head. The head would point to this tombstone, meaning that source contributes no
+live assertion to the claim; prior assertions and their `SUPERSEDES` chain remain. This assertion
+removal is distinct from Phase 4 projection-definition retirement.
+
+Subject identity is part of `claim_key` and would never be changed in place. Rebinding would lock the
+old and new heads in sorted key order, write a REMOVE tombstone for the old head and a new assertion
+for the new head, and record both target transitions in one transaction and one journal entry. A
+plain update that changes subject identity would be refused.
+
+Authorized payload erasure would delete exactly the `:GenericAssertionPayload` node and create an
+immutable `:AssertionErasureReceipt` linked by `ERASED_PAYLOAD_OF`. The receipt would retain the
+assertion key, payload hash, byte length, policy/authorization identity, transaction time, and
+reason. The source, admission decision, assertion envelope, hashes, head chain, and journal facts
+would remain. Reads/exports would return a typed erased-payload result rather than cached or
+re-encoded content; a current assertion missing required payload would make dependent projection
+state unavailable/corrupt until lifecycle invalidation or rebuilding from remaining evidence.
+
+**Ordered mutation routing.** Each proposed stream is keyed by
+`(canonical_namespace, assertion_type, purpose)`. In the same admission transaction,
+`:MutationStreamHead` would allocate a strictly increasing sequence and the writer would append one
+`:ProjectionInputMutation`, unique by stream and sequence. That immutable fact would include the
+assertion/decision identity, operation, disposition, commit time, source and claim identity, old/new
+head and subject/target routing identities (including tombstone state), relevant schema/codec/
+interpretation versions, immutable routing identity, and enough before/after data to route the
+transition without rereading mutable source, grant, or policy state. Exact replay would reuse the
+original mutation; immediate dispatch would be optional latency optimization, never ordering
+authority.
+
+Phase 2 would own a separate durable consumer cursor. It would advance only in the same transaction
+that idempotently applies every dirty/retire transition for the journal entry. Historical census
+would use a snapshot plus upper journal watermark and recheck absence before retirement. Delivery
+attempts, claims, quarantine, and other transport metadata would remain separate from the immutable
+`ProjectionInputMutation`.
+
+**Compatibility ownership and generic-write refusal.** Until an attested Phase 4 writer-fence
+cutover changes authority, the proposed ownership boundary is:
+
+| Assertion family | Currentness/admission writer | Generic read adapter | Generic write |
+|---|---|---|---|
+| scalar `TypedAssertion` | existing legacy scalar repository/service | proposed read-only adapter | refused |
+| `TypedEventAssertion` | existing legacy event repository/service | proposed read-only adapter | refused |
+| registered generic types | proposed generic `admit_and_record` repository | native | allowed only after implementation/enablement |
+
+The planned host would refuse startup for missing, duplicate, or overlapping ownership, and no
+transaction would dual-write legacy and generic assertion stores. This does not change the scalar or
+event writer ownership that exists today and does not claim universal generic admission.
+
+**Mixed-version readiness.** The proposed host manifest would declare supported envelope,
+payload-schema, interpretation, codec, identity, hash, journal, and policy versions. Readiness would
+fail when an active current head, undispatched journal entry, or pending lifecycle item requires an
+unsupported or ambiguously comparable version. Unsupported historical non-current assertions could
+remain stored and exportable from their original bytes, but would never become current through
+fallback decoding. An exact replay could return an opaque original receipt without reinterpretation
+only when stored integrity remains verifiable.
 
 ### TypedEventAssertion node, EventLane value object, and event timeline projection
 

@@ -12,6 +12,33 @@ It now behaves as a client and requires a running backend server:
 - stdio MCP: client-only
 - remote MCP: HTTP-mounted, tools only
 
+## Planned generic projection boundary (not implemented)
+
+Backend-first ownership will also govern any future generic projection runtime, but that foundation
+is planned and unimplemented. The generic projection host, ordered-journal consumer, temporal
+wakeups, runtime manifest digest, typed corruption states, writer census, and cutover receipts have
+no current operator commands or readiness fields. The proposed
+[master plan](../plans/menhir-foundation-completion-2026-08-30.md),
+[Phase 2 runtime plan](../plans/menhir-foundation-phase-2-runtime-orchestration-2026-08-30.md),
+[Phase 4 cutover plan](../plans/menhir-foundation-phase-4-developer-surface-and-cutover-2026-08-30.md),
+and [ADR 0002](../adr/0002-generic-assertion-currentness-and-journal.md) describe the future target;
+ADR 0002 is **PROPOSED**, not accepted. Do not configure stdio MCP, infer a generic scheduler, or
+present a public extension surface from those plans. Current scalar- and event-specific
+repositories, writers, and behavior remain authoritative.
+
+When implemented, readiness for the projection host must live on the backend and fail closed on
+runtime-manifest or adapter-digest drift and on a missing active definition. Backend diagnostics must
+report per-definition work, freshness, and corruption, together with durable journal cursor and
+census-watermark state. Stdio MCP remains a client and must never own or independently report that
+runtime readiness.
+
+Future production activation must follow **Expand → read-only Backfill → Drain** (atomic authority
+flip, then post-flip materialization) **→ Verify → Enforce → Contract**, with separate continuous
+attested windows of 7 days for Drain, 7 days for Verify, and 14 days for Contract. Old-image rollback
+is allowed only before the first durable production mutation; afterward the recovery path is a roll
+forward to a certified fence-aware release or a verified reverse generation with an atomic authority
+flip.
+
 ## Required backend
 
 The backend must be reachable before stdio MCP starts:

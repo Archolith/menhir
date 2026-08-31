@@ -1,3 +1,15 @@
+## 2026-08-30 - specify the extension-foundation contracts
+
+- Revised the five Menhir foundation plans after four independent Sol reviews, closing namespace,
+  mutation-recovery, behavior-digest, hostile-domain, writer-cutover, packaging, and rollout-evidence
+  gaps without changing runtime behavior.
+- Added proposed ADR 0002 for generic assertion identity, source-relative currentness, admission
+  replay, tombstones/rebinding, payload erasure, ordered mutation streams, and legacy writer
+  ownership; owner acceptance remains required before Phase 1 implementation.
+- Propagated the planned/current boundary into architecture, data-model, governance, operations,
+  plan-routing, and agent guidance so unimplemented extension APIs or schedulers cannot be mistaken
+  for shipped default-off features.
+
 ## 2026-08-30 - plan the remaining Menhir foundation abstraction
 
 - Added one umbrella execution plan and four focused phase plans for the durable extension

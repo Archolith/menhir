@@ -12,6 +12,9 @@ This file is the architectural source of truth. Keep operator runbooks, launcher
 - Need provider wiring: read `runtime.providers`
 - Need queue / telemetry behavior: read `runtime.ops` and `runtime.storage`
 - Need write-time memory projections: read `runtime.projections` and `data_models.md`
+- Need extension / foundation work: read `runtime.foundation_target`, then the
+  [foundation completion plan](plans/menhir-foundation-completion-2026-08-30.md) and
+  [ADR 0002](adr/0002-generic-assertion-currentness-and-journal.md)
 - Need package ownership: read `runtime.packages`
 - Need operator commands / readiness checks / logs: use `workflows/operations_runbook.md` and `workflows/logging-and-troubleshooting.md`
 
@@ -66,6 +69,62 @@ Batch and incremental execution are two evaluation modes of the same fold laws, 
 and stateful operation families. Event-time ordering, replay/dedup, and anchor+delta reconciliation
 are specified in `reference/fold-algebra.md`; precision and abstention policy are specified in
 `memory-aggregation-under-uncertainty.md`.
+
+### Planned extension foundation target — not implemented
+
+Concept id: `runtime.foundation_target`
+
+This is a bounded target architecture from the **PROPOSED**, unimplemented
+[foundation completion plan](plans/menhir-foundation-completion-2026-08-30.md) and its four phase
+plans. [ADR 0002](adr/0002-generic-assertion-currentness-and-journal.md) is also **PROPOSED**, not
+accepted. Neither document describes the current runtime or authorizes a completion claim.
+
+The planned authority chain is singular:
+
+```text
+namespace-bound durable source
+  -> atomic admit_and_record
+       + immutable admission decision and assertion
+       + ordered mutation journal
+  -> Phase 2 ordered consumer and dirty/retire work generation
+  -> generation- and definition-fenced lifecycle commit and certification
+  -> freshness-gated bounded recall
+```
+
+In this target, Core owns namespace-bound identity, provenance binding, immutable envelopes and
+admission receipts, the ordered mutation journal, definition publication, generations, atomic
+fencing, lifecycle receipts, freshness assessment, corruption diagnostics, and bounded execution.
+The host owns trusted composition: the mapping from assertion type and purpose to source resolver,
+grant authority, policy, codec/repository, projection adapter, and deployed behavior identity.
+Extensions own domain vocabulary, payload validation, target derivation, fold meaning,
+abstention/retirement semantics, View payloads, and installed-state hash semantics. Request data and
+extension code do not select or raise their own admission authority.
+
+The planned Phase 2 runtime semantic digest identifies the canonical, complete behavior of a
+published projection definition, including its fold, codecs, materializer, and installed-state hash
+adapter. It is deliberately distinct from the Phase 4 extension descriptor digest. Phase 4 plans an
+immutable extension descriptor plus a release-bound host runtime digest over ordered descriptor
+digests, host API and lifecycle/compatibility identities, and semantic host configuration; those
+values become valid production identity only when matched by the immutable release/image
+attestation.
+
+The extension seam is staged. Phase 2 plans to freeze a narrow, provisional facade or import
+allowlist before Phase 3. Phase 3's hostile-domain proofs use that commit-pinned seam; they do not
+make repository or scheduler internals public. Stable extension-author, host-integration, and test-kit
+APIs, packaging, compatibility policy, and distribution remain Phase 4 work.
+
+Definition retirement is likewise a planned durable Phase 4 protocol, not omission of extension
+code and not assertion removal. A higher retirement generation must stop new enrollment, fence the
+final journal watermark, retire and certify all known targets through the lifecycle commit, drain
+remaining work, and publish a durable definition tombstone before code may be omitted. Retirement
+preserves durable sources, admission decisions, assertions, journal history, and lifecycle receipts;
+reinstallation proceeds through a new compatible active generation.
+
+Current-state boundary: scalar and event families retain their existing family-specific admission,
+currentness, repositories, and projection behavior. They are not generic writable assertion
+families, and no foundation cutover has occurred. Generic production admission/currentness,
+Phase 2 journal-consumer scheduling and work generation, the public extension-authoring surface,
+durable definition retirement, and the Phase 4 writer-authority cutover are not shipped.
 
 ## Technology Stack
 
@@ -683,6 +742,12 @@ Operational sidecar storage:
 ## Roadmap State
 
 Concept id: `runtime.roadmap`
+
+The extension foundation is a **PROPOSED 9–13 engineer-week plan**, routed through the
+[foundation completion plan](plans/menhir-foundation-completion-2026-08-30.md), its four phase plans,
+and proposed [ADR 0002](adr/0002-generic-assertion-currentness-and-journal.md). This estimate is a
+roadmap pointer, not evidence that any foundation phase, generic scheduler, public authoring surface,
+or production cutover is complete.
 
 The project is in **post-v1 hardening** mode (M0-M7 complete):
 

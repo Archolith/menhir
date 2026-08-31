@@ -47,6 +47,9 @@ Start with one file:
 - exploring new View shapes (design exploration, not settled) -> `memory-view-kinds-frontier-transfer.md`
 - current local-MVP roadmap -> `../docs/roadmap/menhir-mvp-roadmap.md`
 - current executable plans and dependency order -> `plans/README.md`
+- Menhir-as-a-foundation abstraction work ->
+  `plans/menhir-foundation-completion-2026-08-30.md`, then
+  `adr/0002-generic-assertion-currentness-and-journal.md`; this surface is planned, not shipped
 - useful non-executable design, research, and negative evidence -> `reference/README.md`
 
 Use `concept-ids.md` only when you need an exact concept id or owner doc.

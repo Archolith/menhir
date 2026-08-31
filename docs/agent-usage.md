@@ -43,6 +43,20 @@ context instead of asking Menhir to guess them.
 - If tool discovery is incomplete, use the MCP client's tool discovery mechanism instead of inventing a
   tool name or argument.
 
+## Extension foundation status
+
+Menhir does not yet expose a stable extension-author API, generic assertion write endpoint, dynamic
+plugin loader, or production generic projection scheduler. Do not import private infrastructure and
+describe it as a supported extension seam, and do not infer that a plan or proposed ADR represents
+available runtime behavior.
+
+The implementation target is routed by the
+[foundation completion plan](../.agent/plans/menhir-foundation-completion-2026-08-30.md). Its proposed
+[generic assertion/currentness ADR](../.agent/adr/0002-generic-assertion-currentness-and-journal.md)
+defines the identity and journal decisions still awaiting owner acceptance. Until the phases land,
+consumer agents should use the existing public MCP/REST operations and treat scalar/event admission,
+currentness, scheduling, and feature flags exactly as documented by the current runtime.
+
 ## Ready-to-copy default
 
 The maintained, paste-ready instruction block is

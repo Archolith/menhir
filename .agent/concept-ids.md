@@ -31,6 +31,7 @@ Use this file only after that when you need an exact id or owner.
 |----|-------|
 | `runtime.overview` | `architecture.md` |
 | `runtime.projections` | `architecture.md` |
+| `runtime.foundation_target` | `architecture.md` |
 | `runtime.ops` | `architecture.md` |
 | `runtime.shape` | `architecture.md` |
 | `runtime.dependencies` | `architecture.md` |
@@ -59,6 +60,7 @@ Use this file only after that when you need an exact id or owner.
 | `model.entity` | `data_models.md` |
 | `model.episode` | `data_models.md` |
 | `model.turn_evidence` | `data_models.md` |
+| `model.generic_extension_assertion` | `data_models.md` |
 | `model.edge` | `data_models.md` |
 | `model.conflict` | `data_models.md` |
 | `model.config` | `data_models.md` |
