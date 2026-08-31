@@ -543,6 +543,17 @@ def test_candidate_compose_uses_exact_restored_production_authorities() -> None:
     assert "toString(" not in release_lib
 
 
+def test_release_schema_helpers_support_installed_flat_layout() -> None:
+    root = Path(__file__).resolve().parents[1]
+    release_lib = (root / "deploy" / "release-lib.sh").read_text(encoding="utf-8")
+    release_validate = (root / "deploy" / "release-validate.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert '[ -f "$schema" ] || schema="${helper_dir}/menhir_schema.py"' in release_lib
+    assert '[ -f "$SCHEMA" ] || SCHEMA="${SCRIPT_DIR}/menhir_schema.py"' in release_validate
+
+
 def test_production_compose_uses_compose_v5_compatible_pid_limits() -> None:
     compose = (
         Path(__file__).resolve().parents[1]

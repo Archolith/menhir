@@ -198,7 +198,13 @@ production_down() {
 
 RELEASE_JSON="${MENHIR_RELEASE_JSON:-/srv/menhir/production/release/release.json}"
 
-schema_py() { python3 "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/menhir_schema.py" "$@"; }
+schema_py() {
+    local helper_dir schema
+    helper_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    schema="${helper_dir}/lib/menhir_schema.py"
+    [ -f "$schema" ] || schema="${helper_dir}/menhir_schema.py"
+    python3 "$schema" "$@"
+}
 
 validate_release_authority() {
     require_root_file "$RELEASE_JSON" "release.json"
