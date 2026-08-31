@@ -37,6 +37,16 @@ __all__ = [
     "ScalarProjectionReconciler",
 ]
 
+_TARGET_FIELDS = (
+    "subject_uuid",
+    "namespace",
+    "attribute",
+    "scope",
+    "value_kind",
+    "unit",
+    "operation",
+)
+
 
 def _require_token(name: str, value: object) -> str:
     if not isinstance(value, str) or not value.strip():
@@ -44,12 +54,21 @@ def _require_token(name: str, value: object) -> str:
     return value.strip()
 
 
-def _unique_targets(assertions: Iterable[Mapping[str, Any]]) -> tuple[ProjectionTarget, ...]:
+def _target_row(assertion: object) -> dict[str, Any]:
+    """Expose only the projection-identity fields from a row or live TypedAssertion object."""
+
+    if isinstance(assertion, Mapping):
+        return dict(assertion)
+    row = {field: getattr(assertion, field, None) for field in _TARGET_FIELDS}
+    if not row["subject_uuid"]:
+        raise TypeError("assertions must be mappings or expose typed-scalar identity fields")
+    return row
+
+
+def _unique_targets(assertions: Iterable[object]) -> tuple[ProjectionTarget, ...]:
     targets: dict[tuple[int, str, str, tuple[str, ...]], ProjectionTarget] = {}
     for assertion in assertions:
-        if not isinstance(assertion, Mapping):
-            raise TypeError("assertions must contain mapping rows")
-        target = scalar_projection_target(dict(assertion))
+        target = scalar_projection_target(_target_row(assertion))
         targets[target.sort_key] = target
     return tuple(targets[key] for key in sorted(targets))
 
@@ -102,11 +121,11 @@ class ScalarProjectionReconciler:
 
     def dirty_assertions(
         self,
-        assertions: Iterable[Mapping[str, Any]],
+        assertions: Iterable[object],
         *,
         reason: str = "typed_scalar_mutation",
     ) -> tuple[ProjectionWorkToken, ...]:
-        """Advance work generations for the unique scalar slots touched by assertion rows."""
+        """Advance work generations for the unique scalar slots touched by assertions."""
 
         reason = _require_token("reason", reason)
         targets = _unique_targets(assertions)
@@ -145,7 +164,7 @@ class ScalarProjectionReconciler:
 
     def reconcile_assertions(
         self,
-        assertions: Iterable[Mapping[str, Any]],
+        assertions: Iterable[object],
         *,
         operation_id: str,
         reason: str = "typed_scalar_mutation",
