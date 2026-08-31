@@ -24,9 +24,19 @@ EXCLUDED = {
     "runtime/menhir/tmp/logs/server.access.log": (
         "container-local access log is non-authoritative and discarded with the container"
     ),
+    "runtime/menhir/tmp/logs/server.err.log": (
+        "container-local error log is non-authoritative and discarded with the container"
+    ),
+    "runtime/menhir/tmp/logs/server.log": (
+        "container-local server log is non-authoritative and discarded with the container"
+    ),
 }
 EXPECTED_EPHEMERAL_WRITES = {
-    "menhir": frozenset({"/tmp/logs/server.access.log"}),
+    "menhir": frozenset({
+        "/tmp/logs/server.access.log",
+        "/tmp/logs/server.err.log",
+        "/tmp/logs/server.log",
+    }),
     "neo4j": frozenset(),
 }
 COMPOSE_MOUNTS = {

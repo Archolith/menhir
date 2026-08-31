@@ -132,9 +132,13 @@ def test_live_durable_census_rejects_open_file_outside_declared_mounts():
         reconcile_live(live)
 
 
-def test_live_durable_census_allows_only_the_declared_ephemeral_access_log():
+def test_live_durable_census_allows_only_the_declared_ephemeral_server_logs():
     live = _live_census()
-    live["open_files"]["menhir"].append("/tmp/logs/server.access.log")
+    live["open_files"]["menhir"].extend([
+        "/tmp/logs/server.access.log",
+        "/tmp/logs/server.err.log",
+        "/tmp/logs/server.log",
+    ])
     assert reconcile_live(live) is live
 
     live["open_files"]["menhir"].append("/tmp/logs/unclassified.db")
