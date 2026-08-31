@@ -49,38 +49,33 @@ def bind_and_persist_typed_scalars(
     perceiver_version: str = "v1",
     now: Callable[[], str] | None = None,
     mark_projection_complete: Callable[[list[str]], Any] | None = None,
+    reconcile_scalar_projection: Callable[[TypedAssertion, str], Any] | None = None,
     resolve_self_subject: ResolveSelfSubject | None = None,
     lookup_namespace_entities: LookupNamespaceEntities | None = None,
     embed: "Callable[[str], list[float] | None] | None" = None,
     embed_version: str | None = None,
 ) -> dict[str, Any]:
-    """Bind committed decisions to resolved entities, persist them as durable `:TypedAssertion`s, and
-    rebuild the affected ScalarStateViews. Deterministic given the injected seams (so it is fully
-    offline-testable). Never records for an abstained decision; never rebuilds a `binding_pending`
-    advisory (which has no UUID-keyed View). Re-running over the same episode is a no-op at the store
-    (same `assertion_key`) and at the fold (idempotent rebuild). Returns
-    {persisted, bound, advisory, mismatched, rebuilt, results}. A `mismatched` decision is one whose
-    source claim is already durably bound to a DIFFERENT entity (C.4.4): the store refuses to re-bind
-    or add a second owner, and we do NOT rebuild a View for the presented entity — it is surfaced for
-    observability (the merge path, not perception, owns rebinding).
+    """Bind committed decisions to resolved entities and persist durable ``:TypedAssertion`` rows.
 
-    `lookup_namespace_entities` is the OPTIONAL same-namespace repository fallback (see
-    `_resolve_subject`): it is consulted only after exact local episode matching fails, and only when a
-    nonblank `namespace` is present. Absent/None keeps binding strictly local — byte-compatible with
-    callers that predate the seam."""
+    Bound assertions normally rebuild the entity-wide scalar projection through
+    ``rebuild_scalar_state`` for backwards compatibility. When ``reconcile_scalar_projection`` is
+    supplied, the newly persisted assertion itself is handed to that seam instead, so the caller may
+    dirty/materialize/certify only its exact lifecycle slot. The assertion-level ``projection_pending``
+    marker is cleared only after that reconciliation returns successfully. A reconciliation exception
+    is deliberately not converted into a legacy rebuild: both durable recovery signals must remain
+    visible after a failed lifecycle cutover.
+
+    Never records for an abstained decision; never projects a ``binding_pending`` advisory. Returns
+    {persisted, bound, advisory, mismatched, rebuilt, results}. ``rebuilt`` remains the compatibility
+    counter for successfully completed projections regardless of which projection seam completed them.
+
+    ``lookup_namespace_entities`` is the OPTIONAL same-namespace repository fallback (see
+    ``_resolve_subject``): it is consulted only after exact local episode matching fails, and only when
+    a nonblank ``namespace`` is present. Absent/None keeps binding strictly local."""
     learned_at = (now or _utc_now_iso)()
     results: list[dict[str, Any]] = []
     bound = advisory = mismatched = rebuilt = 0
     for d in decisions:
-        # AUDITABILITY: a vetoed claim is the single most common outcome in this pipeline and,
-        # until this emit existed, the only one that left no trace -- the `perceive` event below
-        # fires only AFTER record_assertion, so it explains claims that already WON. Everything
-        # needed is already computed on the decision; nothing here re-derives anything.
-        #
-        # `distribution` is the load-bearing field: it says WHY the k samples disagreed, which is
-        # otherwise recoverable only by re-running extraction. Its keys are separator-joined
-        # interpretation labels plus control-prefixed sentinels, rendered readable here (raw
-        # control characters would be hostile in a JSON details blob).
         _audit.audit(
             "gate", d.veto or ("commit" if d.committed else "vetoed"),
             namespace=namespace,
@@ -90,8 +85,6 @@ def bind_and_persist_typed_scalars(
                 "k": d.k,
                 "reason": d.reason,
                 "distribution": {_readable_vote(k): v for k, v in (d.distribution or {}).items()},
-                # a committed decision with no proposal is a defect, not an abstention; flag it
-                # rather than silently filing it as a veto.
                 "no_proposal": bool(d.committed and d.proposal is None),
             },
         )
@@ -110,10 +103,6 @@ def bind_and_persist_typed_scalars(
             subject_uuid = advisory_subject_uuid(d.source_key)
             subject_display = p.subject_text
 
-        # 4a.1 write-time observation embedding: cosine surface from the user's own words (stated_span),
-        # so a new observation is searchable immediately without waiting for the backfill. Only when an
-        # embedder AND its version are supplied; embed returns None on provider error (-> no embedding,
-        # backfill fills later) so it can never drop the assertion write.
         name_embedding = None
         if embed is not None and embed_version and p.stated_span:
             try:
@@ -126,10 +115,6 @@ def bind_and_persist_typed_scalars(
             valid_at=valid_at, learned_at=learned_at, time_basis=time_basis,
             name_embedding=name_embedding,
             embed_version=(embed_version if name_embedding is not None else None),
-            # Authority is FORCED to the perception tier here — never trust `d.evidence_tier`. This is
-            # the probabilistic extraction path; a directly-constructed decision requesting "user" or
-            # "manual" must not be able to grant itself authority the fold would then honor. Higher
-            # tiers come only from other write paths, never from perception.
             evidence_tier=PERCEPTION_EVIDENCE_TIER, namespace=namespace,
             perceiver_version=perceiver_version)
         rec = record_assertion(assertion)
@@ -158,26 +143,26 @@ def bind_and_persist_typed_scalars(
             "binding_pending": binding_pending, "binding_mismatch": binding_mismatch,
             "assertion_id": rec.get("assertion_id"),
         }
-        # An already-bound-to-a-different-entity mismatch (C.4.4): the store kept the existing owner and
-        # refused a second binding, so this write bound nothing here — do NOT rebuild for the presented
-        # subject. Surfaced for observability; rebinding is the merge path's job, never perception's.
         if binding_mismatch:
             mismatched += 1
             logger.warning(
                 "typed-scalar binding mismatch on source_key=%s: claim already bound to a different "
                 "entity than %s; not rebinding", d.source_key, subject_uuid)
-        # Only a truly bound, non-pending, non-mismatch assertion may materialize a View. An
-        # intended-bound row the store still flagged binding_pending (its Episodic/Entity node was
-        # absent at write time) is NOT materialized here and is left for the repair pass.
         elif is_bound and not binding_pending:
             bound += 1
-            entry["rebuild"] = rebuild_scalar_state(subject_uuid)
-            if _rebuild_succeeded(entry["rebuild"]):
-                # Clear the projection marker the record set on this newly-bound row, but ONLY
-                # after every enabled projection completes.  An incomplete history redraw stays
-                # selectable by the C.4.4 repair pass.
-                if mark_projection_complete is not None and rec.get("assertion_id"):
-                    mark_projection_complete([str(rec["assertion_id"])])
+            assertion_id = str(rec.get("assertion_id") or "")
+            if reconcile_scalar_projection is not None:
+                # The operation id is anchored to the durable assertion row, not an in-memory batch
+                # ordinal, so lifecycle certification replay derives the same id after a retry.
+                entry["reconciliation"] = reconcile_scalar_projection(assertion, assertion_id)
+                projection_complete = True
+            else:
+                entry["rebuild"] = rebuild_scalar_state(subject_uuid)
+                projection_complete = _rebuild_succeeded(entry["rebuild"])
+
+            if projection_complete:
+                if mark_projection_complete is not None and assertion_id:
+                    mark_projection_complete([assertion_id])
                 rebuilt += 1
             else:
                 entry["projection_incomplete"] = True
@@ -225,8 +210,6 @@ def _assertion_from_pending_row(row: dict[str, Any], *, subject_uuid: str, subje
         evidence_tier=PERCEPTION_EVIDENCE_TIER,
         perceiver_version=str(row.get("perceiver_version") or "v1"),
         namespace=row.get("namespace"),
-        # re-derive deterministically from the stored span (same result as the original write); the
-        # monotone write never downgrades a correction already persisted on the node.
         absolute_semantics=classify_absolute_semantics(
             str(row["stated_span"]), str(row["operation"])),
     )
@@ -273,7 +256,6 @@ def repair_pending_bindings(
         if aid:
             scanned_ids.append(aid)
         row_ns = row.get("namespace")
-        # fail-closed targeting: never repair/rebuild a row outside an explicit allowlist.
         if allowed_namespaces is not None and row_ns not in allowed_namespaces:
             results.append({"source_key": row.get("source_key"), "repaired": False,
                             "reason": "namespace not allowed"})
@@ -308,7 +290,6 @@ def repair_pending_bindings(
                                     "subject_uuid": subject_uuid, "reason": "still binding_pending"})
                     continue
             else:
-                # projection-only: already bound; rebuild its View for the stored real subject.
                 subject_uuid = str(row.get("subject_uuid") or "")
                 if not subject_uuid or subject_uuid.startswith(_ADVISORY_UUID_PREFIX):
                     still_pending += 1
@@ -316,7 +297,6 @@ def repair_pending_bindings(
                                     "reason": "projection row without a real subject"})
                     continue
 
-            # rebuild in the ROW's namespace, then clear the projection marker ONLY on success.
             _audit.audit(
                 "bind_repair", "adopted" if is_advisory else "projection",
                 namespace=row_ns, subject_uuid=subject_uuid,
@@ -343,8 +323,6 @@ def repair_pending_bindings(
                 "pending-binding repair errored on source_key=%s; leaving for retry",
                 row.get("source_key"))
 
-    # advance the fairness frontier for EVERY row we looked at (bound+rebuilt rows leave the set via
-    # cleared markers; the stamp matters for the ones that stayed pending/mismatched/errored).
     if mark_attempted is not None and scanned_ids:
         mark_attempted(scanned_ids)
 
