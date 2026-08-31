@@ -8,12 +8,11 @@ from menhir.domain.projection_lifecycle import (
     ProjectionFreshnessCertificate,
     ProjectionWorkToken,
 )
-from menhir.infrastructure.projection_lifecycle_repository import ProjectionLifecycleRepository
 from menhir.services.scalar_projection_definition import SCALAR_STATE_PROJECTION
 from menhir.services.scalar_projection_reconciliation import ScalarProjectionReconciler
 
 
-class _FakeLifecycle(ProjectionLifecycleRepository):
+class _FakeLifecycle:
     def __init__(self) -> None:
         self.generation = 0
         self.dirty_calls: list[tuple[Any, tuple[Any, ...], str]] = []
