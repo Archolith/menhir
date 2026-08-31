@@ -747,6 +747,16 @@ def test_release_run_reconstructs_progress_instead_of_trusting_state():
     assert "requires a completed local backup and verified desktop archive receipt" in source
 
 
+def test_runtime_binding_distinguishes_policy_file_and_canonical_digests():
+    source = (Path(__file__).resolve().parents[1] / "deploy" / "release-lib.sh").read_text()
+    assert 'policy.pop("canonical_digest", "")' in source
+    assert 'actual_policy_digest=hashlib.sha256(json.dumps(' in source
+    assert '(release["rendered"]["policy_sha256"], sha(policy_path), "policy")' in source
+    assert '(policy_digest, declared_policy_digest, "configured policy")' in source
+    assert '(declared_policy_digest, actual_policy_digest, "canonical policy")' in source
+    assert '(policy_digest, sha(policy_path), "configured policy")' not in source
+
+
 def test_promotion_requires_release_bound_desktop_archive_receipt():
     source = (Path(__file__).resolve().parents[1] / "deploy" / "promote.sh").read_text()
     assert 'require_root_file "$desktop_receipt" "desktop archive receipt"' in source

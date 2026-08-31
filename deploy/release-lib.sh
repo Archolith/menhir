@@ -226,6 +226,11 @@ validate_runtime_release_binding() {
 import hashlib, json, sys
 release_path, compose_path, policy_path, production_env_path, release_id, commit, menhir, neo4j, policy_digest = sys.argv[1:10]
 release=json.load(open(release_path, encoding="utf-8"))
+policy=json.load(open(policy_path, encoding="utf-8"))
+declared_policy_digest=policy.pop("canonical_digest", "")
+actual_policy_digest=hashlib.sha256(json.dumps(
+    policy, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+).encode("ascii")).hexdigest()
 sha=lambda p: hashlib.sha256(open(p,"rb").read()).hexdigest()
 checks=[
     (release["release_id"], release_id, "release id"),
@@ -235,7 +240,8 @@ checks=[
     (release["rendered"]["menhir_compose_sha256"], sha(compose_path), "compose"),
     (release["rendered"]["policy_sha256"], sha(policy_path), "policy"),
     (release["rendered"]["production_env_sha256"], sha(production_env_path), "production env"),
-    (policy_digest, sha(policy_path), "configured policy"),
+    (policy_digest, declared_policy_digest, "configured policy"),
+    (declared_policy_digest, actual_policy_digest, "canonical policy"),
 ]
 for expected, actual, label in checks:
     if expected != actual:
