@@ -1,0 +1,13 @@
+Cmnd_Alias MENHIR_SCAFFOLD_READ = \
+    /srv/menhir/scaffold/bin/menhir_scaffold.py verify, \
+    /srv/menhir/scaffold/bin/menhir_scaffold.py verify --app-only, \
+    /srv/menhir/scaffold/bin/menhir_scaffold.py status
+
+Cmnd_Alias MENHIR_APP_ONLY = \
+    /srv/menhir/scaffold/bin/menhir_app_only.py classify *, \
+    /srv/menhir/scaffold/bin/menhir_app_only.py deploy *, \
+    /srv/menhir/scaffold/bin/menhir_app_only.py recover, \
+    /srv/menhir/scaffold/bin/menhir_app_only.py live, \
+    /srv/menhir/scaffold/bin/menhir_app_only.py check
+
+%menhir-operators ALL=(root) NOPASSWD: MENHIR_SCAFFOLD_READ, MENHIR_APP_ONLY
