@@ -2,18 +2,34 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 import logging
-import re
-from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from datetime import datetime, timezone
-from enum import Enum
 from typing import Any
 from uuid import uuid4
 
 from menhir.infrastructure.neo4j import SAGA_MUTATION_TIMEOUT_S
+from menhir.infrastructure.view_kind_registry import resolve_view_kinds
+from menhir.infrastructure.view_models import (
+    _COUNT_TOKEN,
+    _SHARED_STAMPS,
+    AdmissionAuditKind,
+    CounterKind,
+    ScalarHistoryKind,
+    ScalarStateKind,
+    TimelineKind,
+    ViewClass,
+    ViewKind,
+    _checked_template,
+    _counter_retrieval_text,
+    _is_older,
+    _label_for,
+    _log_missing_episodes,
+    _normalize_entries,
+    _normalize_episode_uuids,
+    _now,
+    _timeline_surface,
+)
 
 try:  # neo4j is a hard runtime dep; guard the import so unit imports without the driver still load.
     from neo4j.exceptions import ConstraintError as _Neo4jConstraintError
@@ -22,38 +38,9 @@ except Exception:  # pragma: no cover - driver always present in the running ser
 
 logger = logging.getLogger(__name__)
 
-#: Placeholder for the supporting-event count inside a kind's `summary_template`. The unchanged-value
-#: provenance refresh (plan D2) computes the count INSIDE Cypher (the union must be atomic), so the
-#: summary cannot be pre-rendered in Python — it is rendered as a template here and the count is
-#: substituted server-side in the same statement that writes the union.
-from menhir.infrastructure.view_models import (
-    AdmissionAuditKind,
-    CounterKind,
-    ScalarHistoryKind,
-    ScalarStateKind,
-    TimelineKind,
-    ViewClass,
-    ViewKind,
-    _COUNT_TOKEN,
-    _SHARED_STAMPS,
-    _checked_template,
-    _counter_retrieval_text,
-    _counter_summary,
-    _day,
-    _fmt,
-    _is_older,
-    _label_for,
-    _log_missing_episodes,
-    _normalize_entries,
-    _normalize_episode_uuids,
-    _now,
-    _parse_dt,
-    _render_timeline,
-    _scalar_norm,
-    _timeline_sig,
-    _timeline_surface,
-)
-from menhir.infrastructure.view_kind_registry import resolve_view_kinds
+# `_COUNT_TOKEN` is the placeholder for the supporting-event count inside a kind's
+# `summary_template`. Provenance refresh computes the count inside Cypher so the union remains
+# atomic, then substitutes the count into the template in the same statement.
 
 
 class ViewWriteRepositoryMixin:
@@ -86,6 +73,10 @@ class ViewWriteRepositoryMixin:
         `subject_uuid` is supplied (scalar_state), the resolved entity UUID is the identity segment
         instead, so the key is entity-anchored, not text-anchored. A present-but-blank UUID is a bug
         (never silently fall back to text keying — that would recreate the rejected lexical sidecar)."""
+        # Keep the persisted View identity byte-compatible with deployed rows.  Logical default
+        # aliases are unified by tenant-scope reads and the namespace fence, but changing this
+        # segment from ``default`` to ``""`` needs a staged data migration; doing it in the shared
+        # writer would otherwise create a second current View beside an existing ``default::`` row.
         ns = (namespace or "").strip()
         if subject_uuid is not None:
             ident = subject_uuid.strip()
@@ -228,6 +219,7 @@ class ViewWriteRepositoryMixin:
             )
 
         now = datetime.now(timezone.utc).isoformat()
+        namespace_key = normalize_namespace(namespace)
         ns_stamped = stamped_namespace(namespace)
         current = self._current_by_key(key, view_class=view_class)
 
@@ -300,7 +292,6 @@ class ViewWriteRepositoryMixin:
         # `node_uuid` lets the saga coordinator FREEZE the new version's uuid at PREPARE, so a
         # crash-replay recreates the same node instead of forking a competing one (plan A6/E3).
         new_uuid = node_uuid or str(uuid4())
-        namespace_key = normalize_namespace(namespace)
         evidence_scope = tenant_scope_cypher("e")
         # Shared view identity + the kind's value slot, merged onto the fixed recall stamps.
         extra: dict[str, Any] = {
@@ -514,7 +505,11 @@ class ViewWriteRepositoryMixin:
         refresh then blocks there, and once it proceeds its read sees the other's committed list. It
         writes `last_accessed`, which this statement sets anyway, so the lock costs no extra property.
         """
-        from menhir.domain.namespace import normalize_namespace, tenant_scope_cypher, tenant_scope_params
+        from menhir.domain.namespace import (
+            normalize_namespace,
+            tenant_scope_cypher,
+            tenant_scope_params,
+        )
 
         namespace_key = normalize_namespace(namespace)
         rows = self.neo4j.execute(
@@ -616,7 +611,11 @@ class ViewWriteRepositoryMixin:
         The leading `SET n.last_accessed` takes the node's write lock before provenance is rewritten
         (same explicit-locking pattern as the union path). Handles an EMPTY set: prune all MENTIONS,
         store []."""
-        from menhir.domain.namespace import normalize_namespace, tenant_scope_cypher, tenant_scope_params
+        from menhir.domain.namespace import (
+            normalize_namespace,
+            tenant_scope_cypher,
+            tenant_scope_params,
+        )
 
         namespace_key = normalize_namespace(namespace)
         rows = self.neo4j.execute(
