@@ -119,6 +119,11 @@ Direction:
   roles across host variants: ChatGPT, Codex, and Claude are operator-tier; OpenCode is agent-tier;
   namespace-wide deletion and client credential administration remain separate trust boundaries
   and are explicitly denied (see `deploy/ACCESS_CONTRACT.md`)
+- `deploy/scaffold/menhir_app_only.py` is the sole root-owned app-image replacement
+  authority: it mechanically classifies immutable bundles, holds the production lock,
+  recreates only the Compose `menhir` service, preserves the Neo4j container identity,
+  performs authenticated acceptance with a 60-second read-only deploy-probe JWT, and
+  atomically commits or restores the prior image and release authority
 - all 54 MCP tools declare a title, reviewed safety annotations, and a minimum OAuth scope; startup
   rejects an incomplete or tier-incoherent declaration before the catalog is served
 - `core/backend_protocol.py` + `core/backend_impl.py` now define the backend-first MCP contract

@@ -9,6 +9,18 @@ Production clients use only `https://memory.ctharvey.me/mcp-http`; identity,
 OAuth proof, and product roles are fixed by
 [ACCESS_CONTRACT.md](../../deploy/ACCESS_CONTRACT.md).
 
+Routine app-image releases use the root workspace wrapper and an explicit reviewed bundle:
+
+```powershell
+PowerShell -File C:\Users\thron\IdeaProjects\scripts\deploy-menhir.ps1 `
+  -Mode AppOnly -BundlePath <reviewed-install-bundle> `
+  -SourceRepository C:\Users\thron\IdeaProjects\projects\archolith\menhir
+```
+
+The wrapper and installed scaffold classify the diff; callers cannot assert `app-only`.
+Policy, OAuth, schema, deployment-tool, host, or data changes are refused before mutation.
+See the live playbook for `Classify` and `Recover` commands.
+
 For MCP connection details, see [backend-first-mcp.md](backend-first-mcp.md).
 For log files, request ids, and error envelopes, see [logging-and-troubleshooting.md](logging-and-troubleshooting.md).
 For enrichment-specific stall diagnosis, see [troubleshoot_enrichment_stalls.md](troubleshoot_enrichment_stalls.md).

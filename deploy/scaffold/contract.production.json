@@ -23,6 +23,7 @@
     {"digest": true, "gid": 0, "mode": "0440", "path": "/etc/sudoers.d/menhir-scaffold", "uid": 0},
     {"digest": false, "gid": 0, "mode": "0400", "path": "/etc/menhir/scaffold-contract.json", "uid": 0},
     {"digest": true, "gid": 0, "mode": "0755", "path": "/srv/menhir/scaffold/bin/menhir_scaffold.py", "uid": 0},
+    {"digest": true, "gid": 0, "mode": "0755", "path": "/srv/menhir/scaffold/bin/menhir_app_only.py", "uid": 0},
     {"digest": true, "gid": 0, "mode": "0644", "path": "/etc/systemd/system/menhir-scaffold-audit.service", "uid": 0},
     {"digest": true, "gid": 0, "mode": "0644", "path": "/etc/systemd/system/menhir-scaffold-audit.timer", "uid": 0}
   ],

@@ -382,6 +382,8 @@ def evaluate_evidence(
         failures.append("restore drill is not bound to the current VPS generation")
     if evidence.get("maintenance_stage") not in (None, "complete"):
         failures.append("an unfinished maintenance transaction is active")
+    if evidence.get("app_only_stage") not in (None, "complete"):
+        failures.append("an unfinished app-only transaction is active")
     if evidence.get("candidate_containers"):
         failures.append("candidate containers remain on the host")
     if not evidence.get("runtime_healthy"):
@@ -445,6 +447,11 @@ def operational_evidence(contract: dict[str, Any]) -> dict[str, Any]:
     stage = None
     if RELEASE_RUN.exists():
         stage = strict_load(RELEASE_RUN).get("stage")
+    app_only_stage = None
+    app_only_active = STATUS_ROOT / "app-only-active.json"
+    if app_only_active.exists():
+        require_safe_root_file(app_only_active, "active app-only transaction")
+        app_only_stage = strict_load(app_only_active).get("stage")
     archives = list(Path("/srv/menhir/backups/encrypted").glob("*.tar.gz.age"))
     retained_generations = sorted({
         path.name.split("-", 1)[0]
@@ -461,6 +468,7 @@ def operational_evidence(contract: dict[str, Any]) -> dict[str, Any]:
         "desktop_generation": desktop.get("generation"),
         "drill_generation": drill.get("generation"),
         "maintenance_stage": stage,
+        "app_only_stage": app_only_stage,
         "candidate_containers": candidates,
         "runtime_healthy": runtime_healthy,
         "public_ready": public_ready(contract["runtime"]["public_ready_url"]),

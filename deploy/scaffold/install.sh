@@ -17,7 +17,7 @@ def unique(pairs):
         value[key]=item
     return value
 value=json.load(open(manifest,encoding="utf-8"),object_pairs_hook=unique)
-expected={"contract.production.json","menhir_scaffold.py","menhir-scaffold-audit.service","menhir-scaffold-audit.timer","menhir-scaffold.sudoers","install.sh"}
+expected={"contract.production.json","menhir_scaffold.py","menhir_app_only.py","menhir-scaffold-audit.service","menhir-scaffold-audit.timer","menhir-scaffold.sudoers","install.sh"}
 if set(value)!={"schema","kind","files"} or value["schema"]!=1 or value["kind"]!="menhir-scaffold-bundle" or set(value["files"])!=expected:
     raise SystemExit("scaffold bundle manifest mismatch")
 for name,want in value["files"].items():
@@ -31,6 +31,7 @@ PY
 install -d -o root -g root -m 0755 /srv/menhir/scaffold /srv/menhir/scaffold/bin
 install -o root -g root -m 0400 "${bundle}/contract.production.json" /etc/menhir/scaffold-contract.json
 install -o root -g root -m 0755 "${bundle}/menhir_scaffold.py" /srv/menhir/scaffold/bin/menhir_scaffold.py
+install -o root -g root -m 0755 "${bundle}/menhir_app_only.py" /srv/menhir/scaffold/bin/menhir_app_only.py
 systemctl disable --now menhir-backup.timer 2>/dev/null || true
 rm -f /usr/local/sbin/menhir-scheduled-backup \
     /etc/systemd/system/menhir-backup.service \

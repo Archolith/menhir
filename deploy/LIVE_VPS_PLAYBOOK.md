@@ -101,8 +101,10 @@ The normal deployment is one command and performs only these blocking gates:
 The required wrapper interface is:
 
 ```powershell
-# Required contract; not implemented by the current wrapper yet.
-PowerShell -File C:\Users\thron\IdeaProjects\scripts\deploy-menhir.ps1 -Mode AppOnly -Release <release-id>
+PowerShell -File C:\Users\thron\IdeaProjects\scripts\deploy-menhir.ps1 `
+  -Mode AppOnly `
+  -BundlePath <reviewed-install-bundle> `
+  -SourceRepository C:\Users\thron\IdeaProjects\projects\archolith\menhir
 ```
 
 The wrapper must enforce these default app-only admission limits from scaffold policy:
@@ -126,9 +128,11 @@ building, scans, release authoring, and human review are release preparation, no
 cutover work. Scheduled backup creation, restore drills, and desktop archival continue
 outside the app-only critical path.
 
-The existing `scripts/deploy-menhir.ps1` currently implements the full maintenance
-transaction below. Until it has an explicit, mechanically guarded app-only mode, do not
-describe it as the five-minute path and do not replace it with ad-hoc SSH commands.
+`scripts/deploy-menhir.ps1` dispatches this mode to the fixed app-only operator wrapper.
+The wrapper hashes the explicit bundle, proves its source diff, uploads to a private
+fixed-format staging directory, and invokes the root-owned runner through exact sudoers
+commands. The runner mints a 60-second `menhir-deploy-probe` JWT in memory; no acceptance
+token or refresh token is stored. Do not replace this path with ad-hoc SSH commands.
 
 ## Full maintenance transaction
 
@@ -195,10 +199,12 @@ No caller can substitute those names or selectors.
 
 ## Release review policy
 
-All releases require normal source review and automated CI evidence. A new independent
-security review bound to the complete release authority digest is mandatory for
-`security-config`, `maintenance`, and any change to authentication, authorization,
-secrets, privileged deployment, backup, restore, recovery, or release-authoring code:
+All releases require normal source review and automated CI evidence. Security review is
+mandatory for every release, but an `app-only` release may carry forward the prior
+approval only for sensitive surfaces proven byte-identical. A new independent security
+review bound to the complete release authority digest is mandatory for `security-config`,
+`maintenance`, and any change to authentication, authorization, secrets, privileged
+deployment, backup, restore, recovery, or release-authoring code:
 
 ```powershell
 python deploy/release-author.py --spec <absolute-spec.json> --review-request <absolute-request.json>
@@ -206,8 +212,9 @@ python deploy/release-author.py --spec <absolute-spec.json> --security-review <a
 ```
 
 The reviewer must be a different identity from `release_author`, record `APPROVED`,
-cover every affected required scope, and leave zero unresolved critical and high
-findings. An `app-only` release does not require a fresh whole-platform security review
+cover every affected required scope, and leave zero unresolved critical and high findings.
+A review is bound to one authority digest and cannot be reused for changed surfaces.
+An `app-only` release does not require a fresh whole-platform security review
 when CI proves all sensitive surfaces are byte-identical to the last approved release.
 The prior approval remains authority only for those unchanged surfaces.
 
@@ -223,7 +230,7 @@ PowerShell -File C:\Users\thron\IdeaProjects\scripts\menhir-scaffold.ps1 -Mode S
 PowerShell -File C:\Users\thron\IdeaProjects\scripts\menhir-scaffold.ps1 -Mode AppOnly
 ```
 
-`AppOnly` is the admission gate the future fast deployment wrapper must call before
+`AppOnly` is the admission gate the fast deployment wrapper calls before
 its first mutation. It validates the root-owned contract/receipt, exact runtime,
 retention and freshness evidence, retained desktop generation, current clean-load
 drill, absence of candidate/maintenance state, and public production readiness.
@@ -280,6 +287,9 @@ issuer `https://memory.ctharvey.me`, audience
 to the gateway.
 
 ## What `release-run.sh` proves
+
+The desktop maintenance wrapper invokes the fixed `menhir_release_run()` operation;
+the app-only path never invokes it.
 
 The first stage captures the exact running legacy app and database container IDs,
 image IDs, Compose project/service labels, runtime mode, restart policies, networks, host

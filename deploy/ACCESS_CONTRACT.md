@@ -62,6 +62,11 @@ An `agent` has `menhir:read` and `menhir:write` and the bounded daily memory
 surface: `add_memory`, `build_context`, `list_todos`, `query_structure`,
 `read_flagged_memories`, `recall_context_memories`, and `recall_memories`.
 
+`menhir-deploy-probe` is a non-product, read-only service identity used only for
+post-replacement acceptance. It has exactly `menhir:read`, can call only
+`recall_memories`, and receives a 60-second signed JWT minted in memory by the
+root-owned deployment runner. It has no refresh token and no stored credential.
+
 The contract covers host variants. A WSL Claude identity cannot remain an agent
 while Claude is declared an operator, and a WSL OpenCode identity cannot be
 promoted independently of OpenCode.
