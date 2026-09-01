@@ -235,20 +235,9 @@ fi
 
 if ! at_least complete; then
     echo "[8/8] Running public production acceptance"
-    base="${MENHIR_PUBLIC_BASE_URL:?MENHIR_PUBLIC_BASE_URL is required}"
-    ready="$(curl -fsS "${base}/readyz")"
-    printf '%s' "$ready" | grep -q '"status":"ready"' \
-        || { echo "public /readyz did not report ready" >&2; exit 1; }
-    printf '%s' "$ready" | grep -q '"mode":"production"' \
-        || { echo "public /readyz did not report production mode" >&2; exit 1; }
-    curl -fsS "${base}/livez" >/dev/null
-    curl -fsS "${base}/.well-known/jwks.json" >/dev/null
-    token_file="${MENHIR_PROD_ROOT}/secrets/menhir/acceptance-token"
-    require_root_file "$token_file" "short-lived production acceptance token"
-    IFS= read -r token < "$token_file"
-    helper="${SCRIPT_DIR}/lib/mcp_acceptance_probe.py"
-    [ -f "$helper" ] || helper="${SCRIPT_DIR}/mcp_acceptance_probe.py"
-    python3 "$helper" "$base" "$token"
+    app_only_accept="/srv/menhir/scaffold/bin/menhir_app_only.py"
+    require_root_file "$app_only_accept" "installed app-only acceptance authority"
+    python3 "$app_only_accept" accept-current
     write_stage complete "$generation"; stage=complete
 fi
 

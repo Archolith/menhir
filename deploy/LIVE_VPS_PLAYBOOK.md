@@ -132,7 +132,8 @@ outside the app-only critical path.
 The wrapper hashes the explicit bundle, proves its source diff, uploads to a private
 fixed-format staging directory, and invokes the root-owned runner through exact sudoers
 commands. The runner mints a 60-second `menhir-deploy-probe` JWT in memory; no acceptance
-token or refresh token is stored. Do not replace this path with ad-hoc SSH commands.
+token or refresh token is stored. The full maintenance transaction reuses this same
+acceptance authority after promotion. Do not replace this path with ad-hoc SSH commands.
 
 ## Full maintenance transaction
 
