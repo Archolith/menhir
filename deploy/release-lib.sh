@@ -139,7 +139,8 @@ candidate_neo4j_authority_digest() {
     # from the candidate's pinned Menhir image. Neo4j is already healthy, but
     # the long-running candidate app intentionally has not started yet.
     # The script is streamed over stdin and emits only the final digest.
-    candidate_compose "$generation" run --rm --no-deps -T --memory 4g menhir python3 - neo4j \
+    MENHIR_APP_MEMORY_LIMIT=4g candidate_compose "$generation" config --quiet
+    MENHIR_APP_MEMORY_LIMIT=4g candidate_compose "$generation" run --rm --no-deps -T menhir python3 - neo4j \
         < "$(authority_digest_tool)"
 }
 

@@ -16,6 +16,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
@@ -834,7 +835,12 @@ def test_candidate_prestart_neo4j_digest_uses_ephemeral_reviewed_image() -> None
         "candidate_neo4j_authority_digest() {", 1
     )[1].split("\n}", 1)[0]
     assert (
-        'candidate_compose "$generation" run --rm --no-deps -T --memory 4g menhir '
+        'MENHIR_APP_MEMORY_LIMIT=4g candidate_compose "$generation" config --quiet'
+        in digest_function
+    )
+    assert (
+        'MENHIR_APP_MEMORY_LIMIT=4g candidate_compose "$generation" run '
+        '--rm --no-deps -T menhir '
         "python3 - neo4j" in digest_function
     )
     assert "docker exec -i menhir-candidate-app" not in digest_function
@@ -1034,7 +1040,42 @@ def test_neo4j_enterprise_query_inventory_requires_roles_and_privileges():
 def test_release_library_defines_canonical_prod_root_and_hash_memory_limit():
     source = (REPO_ROOT / "deploy" / "release-lib.sh").read_text(encoding="utf-8")
     assert 'MENHIR_PROD_ROOT="${MENHIR_PROD_ROOT:-${MENHIR_ROOT}}"' in source
-    assert 'run --rm --no-deps -T --memory 4g menhir python3 - neo4j' in source
+    assert 'MENHIR_APP_MEMORY_LIMIT=4g candidate_compose "$generation" config --quiet' in source
+    assert '--rm --no-deps -T menhir python3 - neo4j' in source
+    assert '--memory 4g' not in source
+
+
+def test_compose_parser_resolves_authority_memory_limit_to_four_gibibytes():
+    if shutil.which("docker") is None:
+        pytest.skip("docker CLI unavailable")
+    env = {
+        **os.environ,
+        "MENHIR_IMAGE": "example.invalid/menhir@sha256:" + "1" * 64,
+        "NEO4J_IMAGE": "example.invalid/neo4j@sha256:" + "2" * 64,
+        "MENHIR_RUNTIME_MODE": "candidate-readonly",
+        "MENHIR_INSTANCE_ID": "parser-test",
+        "MENHIR_RELEASE_ID": "parser-test",
+        "MENHIR_PUBLIC_BASE_URL": "https://memory.example",
+        "MENHIR_CLIENT_POLICY_DIGEST": "3" * 64,
+        "LLM_CHAT_PROVIDER": "openai",
+        "GRAPHITI_LLM_PROVIDER": "openai",
+        "GRAPHITI_EMBED_PROVIDER": "openai",
+        "MENHIR_APP_MEMORY_LIMIT": "4g",
+    }
+    completed = subprocess.run(
+        [
+            "docker", "compose", "--file",
+            str(REPO_ROOT / "deploy" / "docker-compose.production.yml"),
+            "config", "--format", "json",
+        ],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    config = json.loads(completed.stdout)
+    assert int(config["services"]["menhir"]["mem_limit"]) == 4 * 1024**3
 
 
 def _run_fake_neo4j_authority(monkeypatch, components):
