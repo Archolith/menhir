@@ -237,6 +237,9 @@ fi
 
 if ! at_least complete; then
     echo "[8/8] Running public production acceptance"
+    production_lock="/run/lock/menhir-production.lock"
+    exec 9>"$production_lock"
+    flock -n 9 || { echo "another Menhir production operation is active: $production_lock" >&2; exit 75; }
     app_only_accept="/srv/menhir/scaffold/bin/menhir_app_only.py"
     require_root_file "$app_only_accept" "installed app-only acceptance authority"
     python3 "$app_only_accept" accept-current

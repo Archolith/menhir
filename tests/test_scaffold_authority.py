@@ -340,5 +340,7 @@ def test_maintenance_release_reuses_in_memory_probe_acceptance() -> None:
     release_run = (
         Path(__file__).resolve().parents[1] / "deploy" / "release-run.sh"
     ).read_text(encoding="utf-8")
+    assert 'production_lock="/run/lock/menhir-production.lock"' in release_run
+    assert 'flock -n 9' in release_run
     assert 'python3 "$app_only_accept" accept-current' in release_run
     assert "acceptance-token" not in release_run
