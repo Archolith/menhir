@@ -22,23 +22,31 @@ primary endpoint, a role/scope/tool mismatch, or a digest mismatch. Never work
 around a refusal by creating another memory endpoint, editing live OAuth rows,
 or issuing a broader token.
 
-## Current live state (2026-08-31)
+## Determine live state; never document a release number
 
-Production is healthy on `menhir-prod-0.2.0-5`, Menhir commit `04425f87`, and
-policy version 1. The version-2 access contract is committed but is not live.
-There is no
-`/var/lib/menhir-production/release-run.json` because release 5 was installed by
-the audited initial in-place bootstrap path.
+Release numbers, commits, image digests, and scratch-workspace paths do not belong in
+this playbook. They become false as soon as the next deployment starts. Read the live
+authority and runtime instead:
 
-Backups are mandatory before a writer replacement or state migration. The approved
-contract is local: create an age-encrypted archive under
-`/srv/menhir/backups/encrypted`, verify an encrypt/decrypt hash roundtrip, retain the
-archive and a release-bound receipt on the VPS, and keep at least two generations
-before promotion. On a new host, take a bootstrap snapshot first and then the distinct
-cutover snapshot. Copy the cutover archive to the operator's desktop and publish the
-fresh release-bound desktop receipt before continuing the release transaction.
-No remote object store, cloud backup provider, provider CLI, or provider credential is
-part of this contract. Do not infer one from the VPS host or an earlier migration plan.
+```bash
+sudo -n /srv/menhir/production/bin/verify-artifacts
+sudo -n python3 -c 'import json; v=json.load(open("/srv/menhir/production/release/release.json")); print(v["release_id"], v["repos"]["menhir"], v["images"]["menhir"])'
+docker inspect -f '{{.Name}} {{.Image}} {{.State.Health.Status}}' menhir-prod-app menhir-prod-neo4j
+curl -fsS https://memory.ctharvey.me/readyz
+```
+
+`/var/lib/menhir-production/release-run.json` is an unfinished maintenance
+transaction when its stage is not `complete`. A normal app-only deployment must refuse
+to start while such a transaction is active; the operator must reconcile or explicitly
+close that maintenance operation first.
+
+Backups are a continuously maintained host invariant, not work recreated for every
+application release. Keep at least two age-encrypted generations under
+`/srv/menhir/backups/encrypted`, archive verified copies on the operator desktop, and
+run scheduled restore drills. A fresh release-bound cutover backup and desktop receipt
+remain mandatory for writer replacement, state migration, or disaster recovery. No
+remote object store, cloud backup provider, provider CLI, or provider credential is
+part of this contract.
 
 ## Mandatory read-only preflight
 
@@ -56,22 +64,86 @@ or unwritable local archive root by stopping production. For any procedure that 
 acceptance, obtain a fresh policy-owned OAuth access token just in time; never persist a
 refresh token or static operator secret as an acceptance credential.
 
-## Normal operator path
+## Deployment classes
 
-After the immutable release is installed, the desktop deployment command performs the
-pre-cutover snapshot when needed, final cutover backup, verified desktop archive, and
-then invokes the fixed resumable VPS release command:
+Every release must declare exactly one deployment class. Unknown or mixed changes
+fail closed into `maintenance`.
 
-```bash
-PowerShell -File C:\Users\thron\IdeaProjects\scripts\deploy-menhir.ps1
+| Class | Use when | Time target | Required path |
+|---|---|---:|---|
+| `app-only` | Only the Menhir application image changes; data, schema, policy, OAuth, host, route, and lifecycle contracts are unchanged | 5 minutes | Verify scaffold, pull app digest, replace app only, accept, automatic image rollback |
+| `security-config` | OAuth, client policy, scopes, secrets metadata, or application configuration changes without a data migration | Planned | Focused independent review plus app replacement and access-contract acceptance |
+| `maintenance` | Neo4j, schema, migration/startup writes, durable inventory, backup/restore code, deployment tooling, Caddy, networking, systemd, sudoers, or host topology changes | No 5-minute promise | Full backup, rehearsal, candidate, fence, route, promotion transaction |
+| `recovery` | Restoring authority after data loss or an interrupted irreversible operation | No 5-minute promise | Verified generation restore and recovery playbook |
+
+Classification must be produced mechanically from the immutable release inputs and
+included in CI evidence. A caller cannot self-assert `app-only`. In particular,
+`app-only` requires unchanged Neo4j/Caddy digests, Compose and lifecycle artifacts,
+durable-state inventory, policy digest, OAuth wheel/gateway, secret map, schema version,
+and migration/startup-write surfaces.
+
+## Swift app-only operator path
+
+The normal deployment is one command and performs only these blocking gates:
+
+1. select an explicit immutable release; never select a bundle by directory mtime;
+2. verify CI evidence and the mechanically generated `app-only` classification;
+3. acquire the deployment lock and refuse an active maintenance/recovery transaction;
+4. verify the existing scaffold receipt, current writer census, backup freshness, desktop
+   archive freshness, and most recent scheduled restore-drill result;
+5. pull the exact Menhir image digest while leaving Neo4j and Caddy running;
+6. replace only `menhir-prod-app` using the existing state and network authority;
+7. run bounded internal and public `/readyz`, `/livez`, JWKS, OAuth identity, and MCP
+   initialize/list/recall/mutation acceptance with an automatically minted short-lived
+   probe token;
+8. record success, or automatically restore the prior app digest if acceptance fails.
+
+The required wrapper interface is:
+
+```powershell
+# Required contract; not implemented by the current wrapper yet.
+PowerShell -File C:\Users\thron\IdeaProjects\scripts\deploy-menhir.ps1 -Mode AppOnly -Release <release-id>
 ```
 
-The same operation is exposed to approved operator clients as
-`menhir_release_run()`. A repeated call resumes the exact release and generation
-from `/var/lib/menhir-production/release-run.json`; it never starts a different
-release silently.
+The wrapper must enforce these default app-only admission limits from scaffold policy:
 
-The command reports eight named stages and stops at the first failed invariant:
+- at least two complete encrypted generations on the VPS;
+- newest verified encrypted generation no older than 24 hours;
+- newest verified desktop archive no older than 24 hours;
+- successful clean restore drill no older than seven days;
+- image pull/preparation budget of 60 seconds;
+- app replacement and readiness budget of 120 seconds;
+- authenticated acceptance budget of 60 seconds;
+- automatic rollback budget of 60 seconds.
+
+The total foreground budget is five minutes. A timeout fails and rolls back; it does not
+escalate automatically into the maintenance transaction. If backup or restore evidence
+is stale, the deploy reports the exact scheduled job that must be repaired and exits
+without stopping production.
+
+The five-minute clock starts when the reviewed release is already published. CI image
+building, scans, release authoring, and human review are release preparation, not VPS
+cutover work. Scheduled backup creation, restore drills, and desktop archival continue
+outside the app-only critical path.
+
+The existing `scripts/deploy-menhir.ps1` currently implements the full maintenance
+transaction below. Until it has an explicit, mechanically guarded app-only mode, do not
+describe it as the five-minute path and do not replace it with ad-hoc SSH commands.
+
+## Full maintenance transaction
+
+For `maintenance`, the desktop command performs the release-bound cutover backup,
+verified desktop archive, and fixed resumable VPS transaction:
+
+```powershell
+PowerShell -File C:\Users\thron\IdeaProjects\scripts\deploy-menhir.ps1 -BundlePath <reviewed-install-bundle>
+```
+
+An explicit bundle is required; timestamp-based discovery is not release authority.
+A repeated maintenance call resumes the exact release and generation from
+`/var/lib/menhir-production/release-run.json`; it never starts another release silently.
+
+The transaction reports eight named stages and stops at the first failed invariant:
 
 ```text
 capture legacy writer + backup + retire writer
@@ -121,23 +193,40 @@ topology. The topology authority is:
 
 No caller can substitute those names or selectors.
 
-## Mandatory release security review
+## Release review policy
 
-Every release still requires a new independent security review bound to the
-complete release authority digest:
+All releases require normal source review and automated CI evidence. A new independent
+security review bound to the complete release authority digest is mandatory for
+`security-config`, `maintenance`, and any change to authentication, authorization,
+secrets, privileged deployment, backup, restore, recovery, or release-authoring code:
 
 ```powershell
 python deploy/release-author.py --spec <absolute-spec.json> --review-request <absolute-request.json>
 python deploy/release-author.py --spec <absolute-spec.json> --security-review <absolute-review.json> --output <absolute-release.json>
 ```
 
-The reviewer must be a different identity from `release_author`, record
-`APPROVED`, cover every required scope, and leave zero unresolved critical and high findings.
-The review is mandatory for every release and cannot be reused after any input changes.
+The reviewer must be a different identity from `release_author`, record `APPROVED`,
+cover every affected required scope, and leave zero unresolved critical and high
+findings. An `app-only` release does not require a fresh whole-platform security review
+when CI proves all sensitive surfaces are byte-identical to the last approved release.
+The prior approval remains authority only for those unchanged surfaces.
 
-## One-time host bootstrap
+## One-time host scaffold
 
-Bootstrap is the only setup-heavy step. It is not repeated for routine releases.
+The scaffold is the only setup-heavy step. It is not recreated for routine releases.
+
+Install it once from the workspace root and use the read-only commands thereafter:
+
+```powershell
+PowerShell -File C:\Users\thron\IdeaProjects\scripts\menhir-scaffold.ps1 -Mode Install
+PowerShell -File C:\Users\thron\IdeaProjects\scripts\menhir-scaffold.ps1 -Mode Status
+PowerShell -File C:\Users\thron\IdeaProjects\scripts\menhir-scaffold.ps1 -Mode AppOnly
+```
+
+`AppOnly` is the admission gate the future fast deployment wrapper must call before
+its first mutation. It validates the root-owned contract/receipt, exact runtime,
+retention and freshness evidence, retained desktop generation, current clean-load
+drill, absence of candidate/maintenance state, and public production readiness.
 
 1. Install Docker/Compose, Python 3, GNU `flock`, `age`, `sqlite3`, `sha256sum`,
    and the existing Caddy stack.
@@ -159,8 +248,20 @@ Bootstrap is the only setup-heavy step. It is not repeated for routine releases.
 7. Install the release record at
    `/srv/menhir/production/release/release.json`, root-owned and not writable by
    group or other.
-8. Run `/srv/menhir/production/bin/verify-artifacts` and enable the dedicated
-   Menhir operations gateway.
+8. Run `/srv/menhir/production/bin/verify-artifacts`, enable the dedicated Menhir
+   operations gateway, install the read-only admission-audit timer and desktop-archive
+   job, and write a root-owned scaffold receipt binding the installed host contract.
+
+Neo4j Community provides offline `dump`, not online `backup`. Therefore
+`backup-generation.sh` remains an explicit maintenance operation: it quiesces the
+stack and must never be installed as an unattended timer. Its completed clean-load
+check supplies current backup and restore-drill evidence outside the app-only critical
+path. The daily scaffold timer audits that evidence without stopping production.
+
+Routine deploys verify that receipt and the referenced files. They do not rerun
+`groupadd`, `usermod`, recursive ownership normalization, `systemctl enable`, network
+creation, key provisioning, or gateway bootstrap unless the release is classified as
+`maintenance` and explicitly changes that surface.
 
 Bootstrap acceptance includes:
 
@@ -234,6 +335,8 @@ observation window.
 
 ## Routine later release
 
-Routine releases repeat only clean input preparation, immutable build/review,
-exact artifact installation, and `menhir_release_run()`. Host topology, backup
-identity, network, systemd, sudoers, and gateway bootstrap are not recreated.
+Routine app-only releases repeat only immutable CI preparation, explicit release
+selection, scaffold verification, exact app-image pull, app-only replacement,
+authenticated acceptance, and automatic prior-image rollback on failure. Host
+topology, Neo4j, Caddy, backup identity, network, systemd, sudoers, gateway bootstrap,
+full backup generation, and restore rehearsal are not recreated.

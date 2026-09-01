@@ -1,0 +1,6 @@
+Cmnd_Alias MENHIR_SCAFFOLD_READ = \
+    /srv/menhir/scaffold/bin/menhir_scaffold.py verify, \
+    /srv/menhir/scaffold/bin/menhir_scaffold.py verify --app-only, \
+    /srv/menhir/scaffold/bin/menhir_scaffold.py status
+
+%menhir-operators ALL=(root) NOPASSWD: MENHIR_SCAFFOLD_READ

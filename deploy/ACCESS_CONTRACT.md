@@ -71,9 +71,11 @@ promoted independently of OpenCode.
 Any endpoint, authentication, identity, role, scope, or tool-boundary change
 must update the versioned access contract in `client-policy.production.json`,
 recompute its canonical digest, update `production.env.example`, pass the
-focused access/release tests, receive the normal independent security review,
-and deploy through `release-run.sh`. Do not repair drift by editing the live
-OAuth database, issuing a broader token, or adding another endpoint.
+focused access/release tests, receive an independent security review, and be
+classified `security-config`. Use the focused security-config deployment path when it
+exists; until then, use the full maintenance `release-run.sh` transaction. An access
+contract change can never be classified `app-only`. Do not repair drift by editing the
+live OAuth database, issuing a broader token, or adding another endpoint.
 
 After deployment, existing Codex and local Claude grants must reauthorize: old
 tokens carry the former agent scopes/tier and are rejected by the exact policy

@@ -1,0 +1,53 @@
+{
+  "backup_policy": {
+    "desktop_archive_max_age_hours": 24,
+    "minimum_encrypted_generations": 2,
+    "restore_drill_max_age_hours": 168,
+    "vps_backup_max_age_hours": 24
+  },
+  "directories": [
+    {"gid": 0, "mode": "0755", "path": "/srv/menhir/production", "uid": 0},
+    {"gid": 0, "mode": "0755", "path": "/srv/menhir/backups", "uid": 0},
+    {"gid": 0, "mode": "0700", "path": "/srv/menhir/backups/encrypted", "uid": 0},
+    {"gid": 0, "mode": "0755", "path": "/srv/menhir/scaffold", "uid": 0},
+    {"gid": 0, "mode": "0755", "path": "/srv/menhir/scaffold/bin", "uid": 0},
+    {"gid": 0, "mode": "0755", "path": "/var/lib/menhir-production", "uid": 0},
+    {"gid": 0, "mode": "0755", "path": "/var/log/menhir-production", "uid": 0},
+    {"gid": 0, "mode": "0700", "path": "/etc/menhir", "uid": 0},
+    {"gid": 0, "mode": "0755", "path": "/etc/yawn-vps", "uid": 0}
+  ],
+  "files": [
+    {"digest": false, "gid": 0, "mode": "0600", "path": "/etc/menhir/backup-restore.agekey", "uid": 0},
+    {"digest": true, "gid": 0, "mode": "0440", "path": "/etc/sudoers.d/menhir-production", "uid": 0},
+    {"digest": true, "gid": 0, "mode": "0644", "path": "/etc/tmpfiles.d/menhir-production.conf", "uid": 0},
+    {"digest": true, "gid": 0, "mode": "0440", "path": "/etc/sudoers.d/menhir-scaffold", "uid": 0},
+    {"digest": false, "gid": 0, "mode": "0400", "path": "/etc/menhir/scaffold-contract.json", "uid": 0},
+    {"digest": true, "gid": 0, "mode": "0755", "path": "/srv/menhir/scaffold/bin/menhir_scaffold.py", "uid": 0},
+    {"digest": true, "gid": 0, "mode": "0644", "path": "/etc/systemd/system/menhir-scaffold-audit.service", "uid": 0},
+    {"digest": true, "gid": 0, "mode": "0644", "path": "/etc/systemd/system/menhir-scaffold-audit.timer", "uid": 0}
+  ],
+  "groups": [
+    {"gid": 1001, "members": ["thron", "yawn"], "name": "menhir-operators"}
+  ],
+  "host": {"os_id": "ubuntu", "os_version": "24.04"},
+  "identities": [
+    {"gid": 986, "home": "/nonexistent", "name": "yawn", "shell": "/usr/sbin/nologin", "uid": 999},
+    {"gid": 1000, "home": "/home/thron", "name": "thron", "shell": "/bin/bash", "uid": 1000}
+  ],
+  "kind": "menhir-host-scaffold-contract",
+  "network": {"driver": "bridge", "gateway": "172.30.0.1", "name": "menhir-proxy", "subnet": "172.30.0.0/24"},
+  "runtime": {
+    "app_container": "menhir-prod-app",
+    "app_service": "menhir",
+    "compose_project": "menhir-prod",
+    "database_container": "menhir-prod-neo4j",
+    "database_service": "neo4j",
+    "public_ready_url": "https://memory.ctharvey.me/readyz"
+  },
+  "schema": 1,
+  "units": [
+    {"active": "active", "enabled": "enabled", "name": "menhir-caddy-reconcile.path"},
+    {"active": "active", "enabled": "enabled", "name": "menhir-oauth-operations.service"},
+    {"active": "active", "enabled": "enabled", "name": "menhir-scaffold-audit.timer"}
+  ]
+}
