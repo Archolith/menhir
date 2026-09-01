@@ -89,7 +89,8 @@ wait_container_healthy() {
 }
 
 candidate_compose() {
-    local generation="$1" candidate_root="${BACKUP_ROOT}/candidate/${generation}"
+    local generation="$1"
+    local candidate_root="${BACKUP_ROOT}/candidate/${generation}"
     shift
     MENHIR_COMPOSE_PROJECT=menhir-candidate \
     MENHIR_RUNTIME_MODE=candidate-readonly \
@@ -152,7 +153,8 @@ candidate_authority_digest() {
 }
 
 candidate_up() {
-    local generation="$1" candidate_root="${BACKUP_ROOT}/candidate/${generation}"
+    local generation="$1"
+    local candidate_root="${BACKUP_ROOT}/candidate/${generation}"
     local state_root="${candidate_root}/state"
     [ -f "${BACKUP_ROOT}/candidate/${generation}/REHEARSAL-PASSED" ] \
         || { echo "candidate rehearsal marker missing" >&2; return 1; }

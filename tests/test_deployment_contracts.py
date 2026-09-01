@@ -1078,6 +1078,43 @@ def test_compose_parser_resolves_authority_memory_limit_to_four_gibibytes():
     assert int(config["services"]["menhir"]["mem_limit"]) == 4 * 1024**3
 
 
+def test_candidate_shell_functions_do_not_require_ambient_generation(tmp_path):
+    def bash_path(path: Path) -> str:
+        resolved = path.resolve()
+        if os.name == "nt":
+            return f"/mnt/{resolved.drive[0].lower()}{resolved.as_posix()[2:]}"
+        return resolved.as_posix()
+
+    source = (REPO_ROOT / "deploy" / "release-lib.sh").read_text(encoding="utf-8")
+    backup_root = tmp_path / "backups"
+    source = source.replace(
+        'BACKUP_ROOT="/srv/menhir/backups"',
+        f'BACKUP_ROOT="{bash_path(backup_root)}"',
+    )
+    library = tmp_path / "release-lib.sh"
+    library.write_text(source, encoding="utf-8", newline="\n")
+    (backup_root / "candidate" / "abc").mkdir(parents=True)
+    (backup_root / "candidate" / "abc" / "REHEARSAL-PASSED").write_text("ok\n")
+    script = f'''set -euo pipefail
+source "{bash_path(library)}"
+compose_env() {{ :; }}
+unset generation || true
+candidate_down abc
+candidate_compose() {{ :; }}
+wait_healthy() {{ :; }}
+install() {{ :; }}
+unset generation || true
+candidate_up abc
+'''
+    completed = subprocess.run(
+        ["bash", "-c", script],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+
 def _run_fake_neo4j_authority(monkeypatch, components):
     import neo4j
 
