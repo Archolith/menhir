@@ -537,7 +537,7 @@ def test_candidate_compose_uses_exact_restored_production_authorities() -> None:
     assert "SHOW ROLES WITH USERS" in authority_digest
     assert "SHOW PRIVILEGES" in authority_digest
     assert (
-        'candidate_compose "$generation" run --rm --no-deps -T menhir '
+        'candidate_compose "$generation" run --rm --no-deps -T --memory 4g menhir '
         "python3 - neo4j" in release_lib
     )
     assert "toString(" not in release_lib

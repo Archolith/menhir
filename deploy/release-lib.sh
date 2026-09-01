@@ -3,6 +3,7 @@ set -euo pipefail
 umask 077
 
 MENHIR_ROOT="/srv/menhir/production"
+MENHIR_PROD_ROOT="${MENHIR_PROD_ROOT:-${MENHIR_ROOT}}"
 COMPOSE_FILE="${MENHIR_ROOT}/deploy/docker-compose.production.yml"
 PRODUCTION_ENV="${MENHIR_ROOT}/release/production.env"
 STATUS_DIR="/var/lib/menhir-production"
@@ -138,7 +139,7 @@ candidate_neo4j_authority_digest() {
     # from the candidate's pinned Menhir image. Neo4j is already healthy, but
     # the long-running candidate app intentionally has not started yet.
     # The script is streamed over stdin and emits only the final digest.
-    candidate_compose "$generation" run --rm --no-deps -T menhir python3 - neo4j \
+    candidate_compose "$generation" run --rm --no-deps -T --memory 4g menhir python3 - neo4j \
         < "$(authority_digest_tool)"
 }
 

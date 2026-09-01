@@ -834,7 +834,7 @@ def test_candidate_prestart_neo4j_digest_uses_ephemeral_reviewed_image() -> None
         "candidate_neo4j_authority_digest() {", 1
     )[1].split("\n}", 1)[0]
     assert (
-        'candidate_compose "$generation" run --rm --no-deps -T menhir '
+        'candidate_compose "$generation" run --rm --no-deps -T --memory 4g menhir '
         "python3 - neo4j" in digest_function
     )
     assert "docker exec -i menhir-candidate-app" not in digest_function
@@ -1029,6 +1029,12 @@ def test_neo4j_community_query_inventory_omits_enterprise_only_authority():
 def test_neo4j_enterprise_query_inventory_requires_roles_and_privileges():
     queries = dict(_authority.NEO4J_ENTERPRISE_AUTHORITY_QUERIES)
     assert set(queries) == {"roles", "privileges"}
+
+
+def test_release_library_defines_canonical_prod_root_and_hash_memory_limit():
+    source = (REPO_ROOT / "deploy" / "release-lib.sh").read_text(encoding="utf-8")
+    assert 'MENHIR_PROD_ROOT="${MENHIR_PROD_ROOT:-${MENHIR_ROOT}}"' in source
+    assert 'run --rm --no-deps -T --memory 4g menhir python3 - neo4j' in source
 
 
 def _run_fake_neo4j_authority(monkeypatch, components):
