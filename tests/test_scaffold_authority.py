@@ -127,6 +127,15 @@ def test_fresh_retained_desktop_archive_can_lag_latest_backup() -> None:
     assert scaffold.evaluate_evidence(contract()["backup_policy"], evidence, now) == []
 
 
+def test_duplicate_archives_do_not_satisfy_distinct_generation_minimum() -> None:
+    now = dt.datetime(2026, 9, 1, tzinfo=dt.timezone.utc)
+    evidence = valid_evidence(now)
+    evidence["encrypted_generations"] = 2
+    evidence["retained_generations"] = ["generation.same"]
+    failures = scaffold.evaluate_evidence(contract()["backup_policy"], evidence, now)
+    assert "insufficient encrypted backup generations" in failures
+
+
 def test_stat_row_rejects_wrong_path_type(tmp_path: Path) -> None:
     regular = tmp_path / "regular"
     regular.write_text("x", encoding="ascii")

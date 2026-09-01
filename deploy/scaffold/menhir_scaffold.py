@@ -29,6 +29,8 @@ CONTRACT_PATH = Path("/etc/menhir/scaffold-contract.json")
 RECEIPT_PATH = Path("/var/lib/menhir-production/scaffold-receipt.json")
 STATUS_ROOT = Path("/var/lib/menhir-production")
 RELEASE_PATH = Path("/srv/menhir/production/release/release.json")
+SCHEMA_PATH = Path("/srv/menhir/production/bin/menhir_schema.py")
+ENCRYPTED_BACKUP_ROOT = Path("/srv/menhir/backups/encrypted")
 BACKUP_RECEIPT = STATUS_ROOT / "backup-local-receipt.json"
 DESKTOP_RECEIPT = STATUS_ROOT / "desktop-archive-receipt.json"
 DRILL_RECEIPT = STATUS_ROOT / "scaffold-restore-drill-receipt.json"
@@ -150,6 +152,37 @@ def run(command: list[str], *, check: bool = True) -> str:
     except (OSError, subprocess.SubprocessError) as exc:
         raise ScaffoldError(f"command failed: {' '.join(command)}: {exc}") from exc
     return result.stdout.strip()
+
+
+def verify_encrypted_archives(backup: dict[str, Any]) -> list[str]:
+    """Rehash the distinct encrypted generations bound by the backup receipt."""
+    local = backup.get("local_encrypted_archives")
+    archives = local.get("archives") if isinstance(local, dict) else None
+    if not isinstance(archives, list) or not archives:
+        raise ScaffoldError("backup receipt contains no encrypted archive evidence")
+    generations: set[str] = set()
+    for row in archives:
+        if not isinstance(row, dict):
+            raise ScaffoldError("backup receipt archive entry is invalid")
+        generation = row.get("generation")
+        path_value = row.get("path")
+        if not isinstance(generation, str) or not isinstance(path_value, str):
+            raise ScaffoldError("backup receipt archive identity is invalid")
+        path = Path(path_value)
+        if path.parent != ENCRYPTED_BACKUP_ROOT:
+            raise ScaffoldError("encrypted archive is outside the fixed backup root")
+        try:
+            info = path.lstat()
+        except OSError as exc:
+            raise ScaffoldError(f"encrypted archive is missing: {path}") from exc
+        if path.is_symlink() or not stat.S_ISREG(info.st_mode):
+            raise ScaffoldError("encrypted archive must be a regular non-symlink file")
+        if info.st_size != row.get("size") or sha256_file(path) != row.get("sha256"):
+            raise ScaffoldError("encrypted archive differs from its backup receipt")
+        generations.add(generation)
+    if local.get("retained_generation_count") != len(generations):
+        raise ScaffoldError("retained generation count is not distinct receipt evidence")
+    return sorted(generations)
 
 
 def stat_row(path: str, include_digest: bool, expected_type: str) -> dict[str, Any]:
@@ -362,7 +395,11 @@ def evaluate_evidence(
     policy: dict[str, int], evidence: dict[str, Any], now: dt.datetime,
 ) -> list[str]:
     failures: list[str] = []
-    if evidence["encrypted_generations"] < policy["minimum_encrypted_generations"]:
+    distinct_generations = {
+        value for value in evidence.get("retained_generations", [])
+        if isinstance(value, str) and value.startswith("generation.")
+    }
+    if len(distinct_generations) < policy["minimum_encrypted_generations"]:
         failures.append("insufficient encrypted backup generations")
     checks = (
         ("vps_backup_utc", "vps_backup_max_age_hours", "VPS backup"),
@@ -443,6 +480,9 @@ def operational_evidence(contract: dict[str, Any]) -> dict[str, Any]:
     backup = strict_load(BACKUP_RECEIPT)
     desktop = strict_load(DESKTOP_RECEIPT)
     drill = strict_load(DRILL_RECEIPT)
+    require_safe_root_file(SCHEMA_PATH, "backup promotion validator")
+    run(["python3", str(SCHEMA_PATH), "validate-receipt", str(BACKUP_RECEIPT), "backup-local"])
+    retained_generations = verify_encrypted_archives(backup)
     runtime_healthy, candidates = inspect_runtime(contract)
     stage = None
     if RELEASE_RUN.exists():
@@ -452,14 +492,8 @@ def operational_evidence(contract: dict[str, Any]) -> dict[str, Any]:
     if app_only_active.exists():
         require_safe_root_file(app_only_active, "active app-only transaction")
         app_only_stage = strict_load(app_only_active).get("stage")
-    archives = list(Path("/srv/menhir/backups/encrypted").glob("*.tar.gz.age"))
-    retained_generations = sorted({
-        path.name.split("-", 1)[0]
-        for path in archives
-        if path.name.startswith("generation.") and "-" in path.name
-    })
     return {
-        "encrypted_generations": len(archives),
+        "encrypted_generations": len(retained_generations),
         "retained_generations": retained_generations,
         "vps_backup_utc": backup.get("checked_utc"),
         "desktop_archive_utc": desktop.get("archived_utc"),
