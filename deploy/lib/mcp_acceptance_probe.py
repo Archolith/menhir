@@ -54,6 +54,28 @@ def _require_success(status: int, response: dict, label: str) -> None:
         raise RuntimeError(f"{label} failed: HTTP {status}: {response}")
 
 
+def _is_explicit_mutation_refusal(status: int, response: dict) -> bool:
+    if status == 503 and response.get("error") == "temporarily_unavailable":
+        return True
+    if status // 100 != 2:
+        return False
+    if response.get("error") or response.get("result", {}).get("isError") is True:
+        return True
+    # FastMCP currently serializes a tool-raised PermissionError as text while
+    # leaving isError false. Accept only the exact, explicit tier denial for
+    # this probe's add_memory call; ordinary successful content cannot pass.
+    content = response.get("result", {}).get("content", [])
+    return any(
+        isinstance(item, dict)
+        and item.get("type") == "text"
+        and isinstance(item.get("text"), str)
+        and item["text"].startswith("Error: PermissionError:")
+        and "cannot invoke `add_memory`" in item["text"]
+        and "requires 'agent'" in item["text"]
+        for item in content
+    )
+
+
 def main() -> int:
     if len(sys.argv) != 3:
         print("usage: mcp_acceptance_probe.py <base-url> <bearer-token>", file=sys.stderr)
@@ -98,14 +120,7 @@ def main() -> int:
             "text": "candidate acceptance probe -- must never persist",
             "source": "menhir-candidate-accept"}},
     }, session)
-    is_http_fence = (
-        status == 503
-        and isinstance(response, dict)
-        and response.get("error") == "temporarily_unavailable"
-    )
-    is_jsonrpc_error = bool(response.get("error"))
-    is_tool_error = bool(response.get("result", {}).get("isError"))
-    if not (is_http_fence or (status // 100 == 2 and (is_jsonrpc_error or is_tool_error))):
+    if not _is_explicit_mutation_refusal(status, response):
         raise RuntimeError(
             f"candidate mutation was not explicitly refused: HTTP {status}: {response}")
     print("MCP recall succeeded and mutation was refused")
