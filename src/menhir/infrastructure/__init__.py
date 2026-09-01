@@ -5,6 +5,7 @@ from .graphiti_client import GraphitiClient
 from .llm import LLMAdapter
 from .memory_graph_adapter import MemoryGraphAdapter, PhaseOneSchemaResult, PolicyStampResult
 from .neo4j import Neo4jRepository, Neo4jTransaction
+from .projection_coverage_repository import ProjectionCoverageRepository
 from .projection_lifecycle_repository import (
     PROJECTION_LIFECYCLE_SCHEMA_QUERIES,
     ProjectionLifecycleRepository,
@@ -30,6 +31,7 @@ __all__ = [
     "MemoryGraphAdapter",
     "Neo4jRepository",
     "Neo4jTransaction",
+    "ProjectionCoverageRepository",
     "ProjectionLifecycleRepository",
     "PROJECTION_LIFECYCLE_SCHEMA_QUERIES",
     "projection_lifecycle_schema_queries",
