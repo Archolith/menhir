@@ -65,15 +65,11 @@ def _is_explicit_mutation_refusal(status: int, response: dict) -> bool:
     # leaving isError false. Accept only the exact, explicit tier denial for
     # this probe's add_memory call; ordinary successful content cannot pass.
     content = response.get("result", {}).get("content", [])
-    return any(
-        isinstance(item, dict)
-        and item.get("type") == "text"
-        and isinstance(item.get("text"), str)
-        and item["text"].startswith("Error: PermissionError:")
-        and "cannot invoke `add_memory`" in item["text"]
-        and "requires 'agent'" in item["text"]
-        for item in content
+    exact_denial = (
+        "Error: PermissionError: Token tier 'readonly' cannot invoke "
+        "`add_memory` (requires 'agent')"
     )
+    return content == [{"type": "text", "text": exact_denial}]
 
 
 def main() -> int:

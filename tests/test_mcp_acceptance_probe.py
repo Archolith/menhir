@@ -44,6 +44,43 @@ def test_rejects_success_and_lookalike_error_text() -> None:
     assert not PROBE._is_explicit_mutation_refusal(200, lookalike)
 
 
+def test_rejects_denial_with_success_suffix_or_mixed_success_content() -> None:
+    denial = (
+        "Error: PermissionError: Token tier 'readonly' cannot invoke "
+        "`add_memory` (requires 'agent')"
+    )
+    suffixed = {
+        "result": {
+            "content": [{"type": "text", "text": denial + "; mutation nevertheless succeeded"}],
+            "isError": False,
+        }
+    }
+    mixed = {
+        "result": {
+            "content": [
+                {"type": "text", "text": denial},
+                {"type": "text", "text": "memory added successfully"},
+            ],
+            "isError": False,
+        }
+    }
+    opposite = {
+        "result": {
+            "content": [{
+                "type": "text",
+                "text": (
+                    "Error: PermissionError: requires 'agent' check was bypassed; "
+                    "caller can now invoke `add_memory`"
+                ),
+            }],
+            "isError": False,
+        }
+    }
+    assert not PROBE._is_explicit_mutation_refusal(200, suffixed)
+    assert not PROBE._is_explicit_mutation_refusal(200, mixed)
+    assert not PROBE._is_explicit_mutation_refusal(200, opposite)
+
+
 def test_accepts_existing_structured_refusals() -> None:
     assert PROBE._is_explicit_mutation_refusal(
         503, {"error": "temporarily_unavailable"}
