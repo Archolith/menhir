@@ -45,6 +45,14 @@ DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
 HEX64 = re.compile(r"[0-9a-f]{64}")
 ENV_KEY = re.compile(r"[A-Z][A-Z0-9_]*")
 ALLOWED_ENV_CHANGES = {"MENHIR_IMAGE", "MENHIR_RELEASE_COMMIT", "MENHIR_RELEASE_ID"}
+PROTECTED_SOURCE_PATTERNS = tuple(re.compile(value) for value in (
+    r"^deploy/", r"^\.github/",
+    r"^(pyproject\.toml|uv\.lock|poetry\.lock|requirements[^/]*)$",
+    r"^src/menhir/config/", r"^src/menhir/api/(auth|client_policy|oauth[^/]*)\.py$",
+    r"^src/menhir/core/(bootstrap|runtime|runtime_preflight)\.py$",
+    r"^src/menhir/infrastructure/(schema|migration_batches|embedding_dimensions)\.py$",
+    r"^src/menhir/infrastructure/telemetry/schema_migrations\.py$",
+))
 ALLOWED_RELEASE_SCALARS = (
     ("release_id",),
     ("repos", "menhir"),
@@ -321,6 +329,40 @@ def validate_source_manifest(
             raise AppOnlyError(f"source install-bundle does not bind {path}")
 
 
+def recompute_source_classification(
+    history_bundle: Path, live_commit: str, candidate_commit: str,
+) -> tuple[list[str], list[str]]:
+    """Recompute the protected-path decision from commit-addressed Git objects."""
+    if history_bundle.stat().st_size > 128 * 1024 * 1024:
+        raise AppOnlyError("source history bundle is unexpectedly large")
+    with tempfile.TemporaryDirectory(prefix="menhir-app-only-git-") as temporary:
+        repository = Path(temporary) / "repository.git"
+        run(["git", "clone", "--quiet", "--bare", str(history_bundle), str(repository)], 30)
+        observed_live = run(
+            ["git", "-C", str(repository), "rev-parse", "refs/heads/live^{commit}"], 10,
+        )
+        observed_candidate = run(
+            ["git", "-C", str(repository), "rev-parse", "refs/heads/candidate^{commit}"], 10,
+        )
+        if observed_live != live_commit or observed_candidate != candidate_commit:
+            raise AppOnlyError("source history bundle is not bound to the release commits")
+        output = run([
+            "git", "-C", str(repository), "diff", "--name-only",
+            "--diff-filter=ACDMRTUXB", observed_live, observed_candidate,
+        ], 30)
+    changed = sorted(set(output.splitlines()))
+    if not changed or any(
+        not path or path.startswith("/") or ".." in path.split("/") for path in changed
+    ):
+        raise AppOnlyError("trusted source diff is empty or invalid")
+    forbidden = sorted(
+        path for path in changed if any(pattern.search(path) for pattern in PROTECTED_SOURCE_PATTERNS)
+    )
+    if not any(path.startswith("src/") for path in changed):
+        raise AppOnlyError("trusted source diff changes no application source path")
+    return changed, forbidden
+
+
 def load_bundle(bundle_id: str, destination: Path | None = None) -> dict[str, Any]:
     if not BUNDLE_ID.fullmatch(bundle_id):
         raise AppOnlyError("bundle id must be 32 lowercase hexadecimal characters")
@@ -334,7 +376,7 @@ def load_bundle(bundle_id: str, destination: Path | None = None) -> dict[str, An
         raise AppOnlyError("uploaded app-only bundle must be a private directory owned by thron")
     names = (
         "app-only-manifest.json", "release.json", "production.env",
-        "source-manifest.json", "classification-evidence.json",
+        "source-manifest.json", "classification-evidence.json", "source-history.bundle",
     )
     for name in names:
         require_upload(bundle / name, name)
@@ -379,6 +421,13 @@ def load_bundle(bundle_id: str, destination: Path | None = None) -> dict[str, An
     if evidence.get("live_commit") != strict_load(LIVE_RELEASE).get("repos", {}).get("menhir") \
             or evidence.get("candidate_commit") != release.get("repos", {}).get("menhir"):
         raise AppOnlyError("classification evidence is not bound to the live and candidate commits")
+    trusted_changed, trusted_forbidden = recompute_source_classification(
+        bundle / "source-history.bundle", evidence["live_commit"], evidence["candidate_commit"],
+    )
+    if changed_paths != trusted_changed or evidence.get("forbidden_matches") != trusted_forbidden:
+        raise AppOnlyError("caller classification differs from the trusted source diff")
+    if trusted_forbidden:
+        raise AppOnlyError("source diff contains protected app-only paths")
     return {
         "path": bundle, "release": release, "env": env,
         "release_sha": release_sha, "env_sha": env_sha, "evidence": evidence,
