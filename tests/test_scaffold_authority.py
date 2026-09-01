@@ -334,3 +334,11 @@ def test_probe_policy_refuses_broader_identity(
     monkeypatch.setattr(app_only, "require_root_file", lambda path, label: None)
     with pytest.raises(app_only.AppOnlyError, match="exact read-only"):
         app_only.require_probe_policy()
+
+
+def test_maintenance_release_reuses_in_memory_probe_acceptance() -> None:
+    release_run = (
+        Path(__file__).resolve().parents[1] / "deploy" / "release-run.sh"
+    ).read_text(encoding="utf-8")
+    assert 'python3 "$app_only_accept" accept-current' in release_run
+    assert "acceptance-token" not in release_run

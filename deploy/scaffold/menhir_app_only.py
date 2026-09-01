@@ -785,21 +785,29 @@ def check_live() -> dict[str, Any]:
     lock = acquire_lock()
     try:
         run([str(SCAFFOLD), "verify", "--app-only"], 30)
-        release = strict_load(LIVE_RELEASE)
-        environment = parse_env(LIVE_ENV)
-        database_id = str(inspect_container("menhir-prod-neo4j").get("Id"))
-        accept_production(
-            environment["MENHIR_PUBLIC_BASE_URL"], release["release_id"],
-            release["images"]["menhir"], database_id,
-        )
-        return {
-            "status": "accepted",
-            "release_id": release["release_id"],
-            "menhir_image": release["images"]["menhir"],
-            "checked_utc": now_iso(),
-        }
+        return accept_current()
     finally:
         lock.close()
+
+
+def accept_current() -> dict[str, Any]:
+    """Accept the current release while a maintenance stage journal is active."""
+
+    require_root_file(LIVE_RELEASE, "live release")
+    require_root_file(LIVE_ENV, "live production environment")
+    release = strict_load(LIVE_RELEASE)
+    environment = parse_env(LIVE_ENV)
+    database_id = str(inspect_container("menhir-prod-neo4j").get("Id"))
+    accept_production(
+        environment["MENHIR_PUBLIC_BASE_URL"], release["release_id"],
+        release["images"]["menhir"], database_id,
+    )
+    return {
+        "status": "accepted",
+        "release_id": release["release_id"],
+        "menhir_image": release["images"]["menhir"],
+        "checked_utc": now_iso(),
+    }
 
 
 def parser() -> argparse.ArgumentParser:
@@ -812,6 +820,7 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("recover")
     commands.add_parser("live")
     commands.add_parser("check")
+    commands.add_parser("accept-current")
     return result
 
 
@@ -829,8 +838,10 @@ def main(argv: list[str]) -> int:
             value = recover()
         elif args.command == "live":
             value = live_info()
-        else:
+        elif args.command == "check":
             value = check_live()
+        else:
+            value = accept_current()
     except AppOnlyError as exc:
         print(f"REFUSED: {exc}", file=sys.stderr)
         return 1
