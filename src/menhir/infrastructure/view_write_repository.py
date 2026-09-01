@@ -7,6 +7,7 @@ import json
 import logging
 import re
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
@@ -52,6 +53,8 @@ from menhir.infrastructure.view_models import (
     _timeline_sig,
     _timeline_surface,
 )
+from menhir.infrastructure.view_kind_registry import resolve_view_kinds
+
 
 class ViewWriteRepositoryMixin:
     """Single writer for View :Entity nodes (all kinds). Direct Neo4j CRUD.
@@ -65,8 +68,14 @@ class ViewWriteRepositoryMixin:
         CounterKind(), TimelineKind(), AdmissionAuditKind(), ScalarStateKind(),
         ScalarHistoryKind())}
 
-    def __init__(self, neo4j: Any) -> None:
+    def __init__(
+        self,
+        neo4j: Any,
+        *,
+        kinds: Mapping[str, ViewKind] | None = None,
+    ) -> None:
         self.neo4j = neo4j
+        self.KINDS = resolve_view_kinds(self.KINDS, kinds)
 
     # ------------------------------------------------------------------ keys / surfaces (compat)
 
