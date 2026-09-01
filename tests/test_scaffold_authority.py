@@ -336,11 +336,14 @@ def test_probe_policy_refuses_broader_identity(
         app_only.require_probe_policy()
 
 
-def test_maintenance_release_reuses_in_memory_probe_acceptance() -> None:
+def test_maintenance_release_uses_release_owned_in_memory_probe_acceptance() -> None:
     release_run = (
         Path(__file__).resolve().parents[1] / "deploy" / "release-run.sh"
     ).read_text(encoding="utf-8")
     assert 'production_lock="/run/lock/menhir-production.lock"' in release_run
     assert 'flock -n 9' in release_run
-    assert 'python3 "$app_only_accept" accept-current' in release_run
+    assert 'acceptance_probe="${SCRIPT_DIR}/mcp_acceptance_probe.py"' in release_run
+    assert '"${SCRIPT_DIR}/verify-artifacts"' in release_run
+    assert 'python3 "$acceptance_probe" production' in release_run
+    assert "/srv/menhir/scaffold/bin/menhir_app_only.py" not in release_run
     assert "acceptance-token" not in release_run

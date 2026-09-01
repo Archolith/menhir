@@ -238,9 +238,12 @@ if ! at_least complete; then
     production_lock="/run/lock/menhir-production.lock"
     exec 9>"$production_lock"
     flock -n 9 || { echo "another Menhir production operation is active: $production_lock" >&2; exit 75; }
-    app_only_accept="/srv/menhir/scaffold/bin/menhir_app_only.py"
-    require_root_file "$app_only_accept" "installed app-only acceptance authority"
-    python3 "$app_only_accept" accept-current
+    acceptance_probe="${SCRIPT_DIR}/mcp_acceptance_probe.py"
+    client_policy="${MENHIR_ROOT}/policy/client-policy.json"
+    require_root_file "$acceptance_probe" "release-owned production acceptance probe"
+    require_root_file "$client_policy" "production client policy"
+    "${SCRIPT_DIR}/verify-artifacts"
+    python3 "$acceptance_probe" production "$MENHIR_PUBLIC_BASE_URL" "$RELEASE_JSON" "$client_policy"
     write_stage complete "$generation"; stage=complete
 fi
 
