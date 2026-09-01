@@ -1015,3 +1015,102 @@ def test_neo4j_authority_query_inventory_includes_security_authority():
             "users", "roles", "privileges"} <= set(queries)
     assert "SHOW ROLES WITH USERS" in queries["roles"]
     assert "SHOW PRIVILEGES" in queries["privileges"]
+
+
+def test_neo4j_community_query_inventory_omits_enterprise_only_authority():
+    queries = dict(_authority.NEO4J_COMMUNITY_AUTHORITY_QUERIES)
+    assert {"nodes", "relationships", "indexes", "constraints", "databases",
+            "users"} <= set(queries)
+    assert "roles" not in queries
+    assert "privileges" not in queries
+    assert "dbms.components" in _authority.NEO4J_COMPONENT_QUERY
+
+
+def test_neo4j_enterprise_query_inventory_requires_roles_and_privileges():
+    queries = dict(_authority.NEO4J_ENTERPRISE_AUTHORITY_QUERIES)
+    assert set(queries) == {"roles", "privileges"}
+
+
+def _run_fake_neo4j_authority(monkeypatch, components):
+    import neo4j
+
+    calls = []
+
+    class Session:
+        def __init__(self, database):
+            self.database = database
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def run(self, query):
+            calls.append((self.database, query))
+            if query == _authority.NEO4J_COMPONENT_QUERY:
+                return components
+            return []
+
+    class Driver:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def session(self, *, database):
+            return Session(database)
+
+    monkeypatch.setattr(neo4j.GraphDatabase, "driver", lambda *_args, **_kwargs: Driver())
+    digest = _authority.neo4j_authority_digest(
+        uri="bolt://neo4j:7687", username="neo4j", password="secret", database="neo4j"
+    )
+    return digest, calls
+
+
+def test_neo4j_community_execution_omits_enterprise_queries(monkeypatch):
+    digest, calls = _run_fake_neo4j_authority(
+        monkeypatch,
+        [{"name": "Neo4j Kernel", "versions": ["5.26.30"], "edition": "community"}],
+    )
+    queries = [query for _database, query in calls]
+    assert len(digest) == 64
+    assert "SHOW USERS" in queries
+    assert "SHOW ROLES WITH USERS" not in queries
+    assert "SHOW PRIVILEGES" not in queries
+
+
+def test_neo4j_enterprise_execution_requires_security_queries(monkeypatch):
+    _digest, calls = _run_fake_neo4j_authority(
+        monkeypatch,
+        [{"name": "Neo4j Kernel", "versions": ["5.26.30"], "edition": "enterprise"}],
+    )
+    queries = [query for _database, query in calls]
+    assert "SHOW ROLES WITH USERS" in queries
+    assert "SHOW PRIVILEGES" in queries
+
+
+def test_neo4j_component_authority_changes_digest(monkeypatch):
+    first, _calls = _run_fake_neo4j_authority(
+        monkeypatch,
+        [{"name": "Neo4j Kernel", "versions": ["5.26.29"], "edition": "community"}],
+    )
+    second, _calls = _run_fake_neo4j_authority(
+        monkeypatch,
+        [{"name": "Neo4j Kernel", "versions": ["5.26.30"], "edition": "community"}],
+    )
+    assert first != second
+
+
+@pytest.mark.parametrize("components", [
+    [],
+    [{"name": "Neo4j Kernel", "versions": ["5"], "edition": "unknown"}],
+    [
+        {"name": "Neo4j Kernel", "versions": ["5"], "edition": "community"},
+        {"name": "Other", "versions": ["5"], "edition": "enterprise"},
+    ],
+])
+def test_neo4j_edition_detection_fails_closed(monkeypatch, components):
+    with pytest.raises(ValueError):
+        _run_fake_neo4j_authority(monkeypatch, components)
