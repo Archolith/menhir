@@ -7,7 +7,11 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from menhir.infrastructure.todo_repository import TodoRepository
+from menhir.infrastructure.todo_repository import (
+    TODO_AGE_DAYS_CYPHER,
+    TODO_STALE_AFTER_DAYS,
+    TodoRepository,
+)
 from menhir.cli.output import format_hook_output
 
 
@@ -935,7 +939,11 @@ def test_get_todo_returns_row_when_found() -> None:
 
     assert result is not None
     assert result["content"] == "A very long multi-part todo body"
-    assert neo4j.calls[0]["params"] == {"uuid": "u1", "namespaces": None}
+    assert neo4j.calls[0]["params"] == {
+        "uuid": "u1",
+        "namespaces": None,
+        "stale_after": TODO_STALE_AFTER_DAYS,
+    }
 
 
 @pytest.mark.unit
@@ -1085,3 +1093,70 @@ def test_list_todos_tool_empty() -> None:
 
     assert "open (0)" in result
     assert "(none)" in result
+
+
+# ---------------------------------------------------------------------------
+# Todo age SSOT (duration.inDays, not duration.between)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_age_ssot_uses_indays_not_between_on_every_age_read() -> None:
+    """Every age-bearing query must route through TODO_AGE_DAYS_CYPHER.
+
+    `duration.between` returns a structured duration: months are extracted
+    first, so `.days` is only the sub-month remainder and a 3-month-old todo
+    reports 5. That capped every displayed age at ~31, made the stale flag
+    near-unreachable, and made close_stale_todos(older_than_days>=32) a
+    permanent no-op. This pins the fix at every call site at once, so
+    re-inlining a duration call in a new query fails here rather than
+    silently under-reporting age again.
+    """
+    neo4j = _StubNeo4j()
+    repo = TodoRepository(neo4j)
+
+    repo.list_todos()
+    repo.get_todo("u1")
+    repo.close_stale_todos(older_than_days=90, dry_run=True)
+
+    assert len(neo4j.calls) >= 3
+    for call in neo4j.calls:
+        query = call["query"]
+        assert "duration.between" not in query, (
+            "duration.between under-reports age by extracting months first; "
+            "use TODO_AGE_DAYS_CYPHER"
+        )
+        assert TODO_AGE_DAYS_CYPHER in query
+
+
+@pytest.mark.unit
+def test_stale_threshold_is_parameterized_not_inlined() -> None:
+    """The staleness cutoff has one definition, passed as $stale_after."""
+    neo4j = _StubNeo4j()
+    repo = TodoRepository(neo4j)
+
+    repo.list_todos()
+    repo.get_todo("u1")
+
+    for call in neo4j.calls:
+        assert "age_days > 30" not in call["query"]
+        assert "$stale_after" in call["query"]
+        assert call["params"]["stale_after"] == TODO_STALE_AFTER_DAYS
+
+
+@pytest.mark.unit
+def test_close_stale_todos_selects_on_true_total_days() -> None:
+    """A 90-day cutoff must be expressible; the old expression could not match it.
+
+    `.days` off a structured duration never exceeds ~31, so `>= 90` matched
+    nothing regardless of how old a todo actually was -- and close_stale_todos
+    defaults to older_than_days=60, so its default was a no-op too.
+    """
+    neo4j = _StubNeo4j()
+    repo = TodoRepository(neo4j)
+
+    repo.close_stale_todos(older_than_days=90, dry_run=True)
+
+    query = neo4j.calls[0]["query"]
+    assert f"{TODO_AGE_DAYS_CYPHER} >= $days" in query
+    assert neo4j.calls[0]["params"]["days"] == 90

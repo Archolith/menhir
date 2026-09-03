@@ -30,6 +30,27 @@ from menhir.domain.todo_location import (
 _VALID_PRIORITIES = frozenset({"low", "normal", "high"})
 _VALID_STATUSES = frozenset({"open", "closed"})
 
+#: Canonical todo-age expression. THE single source of truth: every read that
+#: reports an age, flags staleness, or selects todos by age MUST use this and
+#: never inline its own duration call.
+#:
+#: `duration.between(a, b)` returns a STRUCTURED duration whose months are
+#: extracted first, so its `.days` component is only the sub-month remainder --
+#: a todo created 2026-05-28 and read on 2026-09-02 is "3 months 5 days" and
+#: reports `.days == 5`. That silently capped every age at ~31, made the
+#: `> TODO_STALE_AFTER_DAYS` flag near-unreachable, and turned
+#: `close_stale_todos(older_than_days=60)` into a permanent no-op.
+#: `duration.inDays(a, b)` returns a day-only duration, so `.days` is the true
+#: total. Verified against the live graph: see tests in tests/test_todo.py.
+#:
+#: Binds the node to the alias `n`; every query using it must name its :Todo `n`.
+TODO_AGE_DAYS_CYPHER = "duration.inDays(datetime(n.created_at), datetime()).days"
+
+#: Days open before a todo is flagged stale in read output. Passed as the
+#: `$stale_after` query parameter rather than inlined, so the threshold has one
+#: definition too.
+TODO_STALE_AFTER_DAYS = 30
+
 #: Shared silo. Every :Todo carries a non-null namespace -- "unscoped" is not
 #: representable. Reads that request a silo also see this bucket, so todos
 #: written before namespacing (backfilled to 'default') stay visible.
@@ -536,9 +557,7 @@ class TodoRepository:
             MATCH (n:Todo)
             WHERE n.status = $status
               AND ($namespaces IS NULL OR n.namespace IN $namespaces)
-            WITH n, duration.between(
-                datetime(n.created_at), datetime()
-            ).days AS age_days
+            WITH n, """ + TODO_AGE_DAYS_CYPHER + """ AS age_days
             RETURN
                 n.uuid       AS uuid,
                 n.content    AS content,
@@ -551,7 +570,7 @@ class TodoRepository:
                 n.due_date   AS due_date,
                 n.namespace  AS namespace,
                 age_days     AS age_days,
-                CASE WHEN age_days > 30 THEN true ELSE false END AS stale
+                CASE WHEN age_days > $stale_after THEN true ELSE false END AS stale
             ORDER BY
                 CASE n.priority
                     WHEN 'high'   THEN 0
@@ -561,7 +580,12 @@ class TodoRepository:
                 n.created_at ASC
             LIMIT $limit
             """,
-            {"status": safe_status, "limit": safe_limit, "namespaces": namespaces},
+            {
+                "status": safe_status,
+                "limit": safe_limit,
+                "namespaces": namespaces,
+                "stale_after": TODO_STALE_AFTER_DAYS,
+            },
         )
 
     def get_todo(self, uuid: str, *, namespace: str | None = None) -> dict[str, Any] | None:
@@ -589,7 +613,7 @@ class TodoRepository:
             OPTIONAL MATCH (n)-[:REFERENCES_FILE]->(f:Entity)
             OPTIONAL MATCH (n)-[:CREATED_FROM]->(ep:Episodic)
             WITH n, f, ep,
-                 duration.between(datetime(n.created_at), datetime()).days AS age_days
+                 """ + TODO_AGE_DAYS_CYPHER + """ AS age_days
             OPTIONAL MATCH (n)-[:HAS_LOCATION]->(loc:TodoLocation)
             WITH n, f, ep, age_days, loc ORDER BY loc.ordinal ASC
             WITH n, f, ep, age_days,
@@ -608,14 +632,18 @@ class TodoRepository:
                 n.due_date   AS due_date,
                 n.namespace  AS namespace,
                 age_days     AS age_days,
-                CASE WHEN age_days > 30 THEN true ELSE false END AS stale,
+                CASE WHEN age_days > $stale_after THEN true ELSE false END AS stale,
                 f.structure_path    AS linked_file_path,
                 f.structure_project AS linked_file_project,
                 ep.uuid             AS episode_uuid,
                 locations           AS locations
             LIMIT 1
             """,
-            {"uuid": uuid, "namespaces": namespaces},
+            {
+                "uuid": uuid,
+                "namespaces": namespaces,
+                "stale_after": TODO_STALE_AFTER_DAYS,
+            },
         )
         if not rows:
             return None
@@ -697,7 +725,7 @@ class TodoRepository:
         rows = self.neo4j.execute(
             f"""
             MATCH (n:Todo {{status: 'open'}})
-            WHERE duration.between(datetime(n.created_at), datetime()).days >= $days
+            WHERE {TODO_AGE_DAYS_CYPHER} >= $days
               {ns_filter}
             RETURN n.uuid AS uuid, n.content AS content, n.created_at AS created_at
             ORDER BY n.created_at ASC
