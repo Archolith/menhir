@@ -46,6 +46,7 @@ class ListTodosTool(BaseTextTool):
             return "\n".join(lines)
 
         truncated_any = False
+        supersedes_any = False
         stale_count = sum(1 for r in rows if r.get("stale"))
         if stale_count:
             lines.append(
@@ -67,10 +68,23 @@ class ListTodosTool(BaseTextTool):
             age = row.get("age_days")
             stale_marker = " ⚠ STALE" if row.get("stale") else ""
             age_str = f" | age: {age}d" if age is not None else ""
+            # A refile carries prior context under a uuid the agent would otherwise never
+            # ask for. This listing is where a todo is met, so the marker belongs here;
+            # the uuids themselves come from get_todo.
+            n_prior = row.get("supersedes_count") or 0
+            prior = (
+                f" | refile of {n_prior} earlier todo(s)" if n_prior else ""
+            )
             lines.append(f"[{tag}] uuid={uuid}{ref} — {snippet}{stale_marker}")
-            lines.append(f"        created: {created} | closed: {closed}{due}{age_str}")
+            lines.append(f"        created: {created} | closed: {closed}{due}{age_str}{prior}")
+            supersedes_any = supersedes_any or bool(n_prior)
 
         if truncated_any:
             lines.append("… content above is truncated at 100 chars — get_todo(uuid) returns the full text")
+        if supersedes_any:
+            lines.append(
+                "… a todo marked 'refile of' replaced earlier ones — get_todo(uuid) lists them, "
+                "and they carry the prior attempt's context"
+            )
 
         return "\n".join(lines)

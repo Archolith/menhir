@@ -1544,3 +1544,91 @@ def test_get_todo_tool_omits_lineage_lines_when_there_is_none() -> None:
 
     assert "superseded by" not in result
     assert "supersedes" not in result
+
+
+# ---------------------------------------------------------------------------
+# Refile discoverability: the marker must reach the surfaces an agent actually meets
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_list_todos_reports_a_predecessor_count_per_row() -> None:
+    """get_todo renders the lineage, but nothing calls get_todo unless a listing first
+    says there is one to look up."""
+    neo4j = _StubNeo4j(responses=[[
+        {"uuid": "a", "content": "refile", "pred_namespaces": ["default", "default"]},
+        {"uuid": "b", "content": "fresh", "pred_namespaces": []},
+    ]])
+    repo = TodoRepository(neo4j)
+
+    rows = repo.list_todos()
+
+    assert rows[0]["supersedes_count"] == 2
+    assert rows[1]["supersedes_count"] == 0
+    # The raw namespace list is an implementation detail and must not leak outward.
+    assert "pred_namespaces" not in rows[0]
+
+
+@pytest.mark.unit
+def test_list_todos_counts_only_predecessors_the_caller_may_see() -> None:
+    neo4j = _StubNeo4j(responses=[[
+        {"uuid": "a", "content": "x", "pred_namespaces": ["alpha", "beta", "default"]},
+    ]])
+    repo = TodoRepository(neo4j)
+
+    rows = repo.list_todos(namespace="alpha")
+
+    # alpha + the shared bucket count; beta is another silo.
+    assert rows[0]["supersedes_count"] == 2
+
+
+@pytest.mark.unit
+def test_list_todos_tool_surfaces_the_refile_marker() -> None:
+    from menhir.mcp.tools.ops.list_todos import ListTodosTool
+
+    tool = ListTodosTool()
+    backend = MagicMock()
+    backend.list_todos = AsyncMock(return_value=[
+        {"uuid": "a", "content": "refiled work", "priority": "high",
+         "created_at": "2026-09-03", "supersedes_count": 2},
+    ])
+    tool.get_backend = MagicMock(return_value=backend)
+
+    import asyncio
+    result = asyncio.run(tool.endpoint(status="open", limit=25))
+
+    assert "refile of 2 earlier todo(s)" in result
+    assert "get_todo(uuid) lists them" in result
+
+
+@pytest.mark.unit
+def test_list_todos_tool_stays_quiet_when_nothing_was_refiled() -> None:
+    from menhir.mcp.tools.ops.list_todos import ListTodosTool
+
+    tool = ListTodosTool()
+    backend = MagicMock()
+    backend.list_todos = AsyncMock(return_value=[
+        {"uuid": "a", "content": "fresh", "priority": "normal",
+         "created_at": "2026-09-03", "supersedes_count": 0},
+    ])
+    tool.get_backend = MagicMock(return_value=backend)
+
+    import asyncio
+    result = asyncio.run(tool.endpoint(status="open", limit=25))
+
+    assert "refile" not in result
+
+
+@pytest.mark.unit
+def test_hook_output_marks_a_refiled_todo() -> None:
+    out = format_hook_output(
+        [],
+        todos=[
+            {"priority": "high", "content": "refiled work", "supersedes_count": 3},
+            {"priority": "normal", "content": "fresh work", "supersedes_count": 0},
+        ],
+    )
+
+    assert "(refile of 3)" in out
+    assert "fresh work" in out
+    assert "fresh work (refile" not in out

@@ -754,8 +754,16 @@ class TodoRepository:
     ) -> list[dict[str, Any]]:
         """List todos filtered by status, sorted by priority then created_at.
 
-        Each row includes an ``age_days`` field and a ``stale`` flag (True if
-        the todo has been open for more than 30 days).
+        Each row includes an ``age_days`` field, a ``stale`` flag (True if the todo has
+        been open for more than 30 days), and ``supersedes_count``.
+
+        ``supersedes_count`` is the discovery half of supersession. `get_todo` renders
+        the full lineage, but nothing reaches `get_todo` unless something first says
+        there is a lineage to look up -- and this listing (plus the session-start hook
+        and the bootstrap recall, which both call it) is where an agent actually meets a
+        todo. A todo that is a refile carries prior context under a uuid the agent would
+        otherwise never ask for. A count rather than the uuids: listings are token-
+        sensitive, and the marker only needs to be enough to prompt the drill-down.
 
         ``namespace`` is opt-in: omitting it lists every silo (the historical
         behavior). Supplying one narrows to that silo plus ``DEFAULT_NAMESPACE``,
@@ -767,13 +775,16 @@ class TodoRepository:
         namespaces = (
             [normalize_namespace(namespace), DEFAULT_NAMESPACE] if namespace else None
         )
-        return self.neo4j.execute(
-            """
+        rows = self.neo4j.execute(
+            f"""
             MATCH (n:Todo)
             WHERE n.status = $status
               AND ($namespaces IS NULL OR n.namespace IN $namespaces)
-            WITH n, """ + TODO_AGE_DAYS_CYPHER + """ AS age_days
+            WITH n, {TODO_AGE_DAYS_CYPHER} AS age_days
+            OPTIONAL MATCH (pred:Todo)-[:{_TODO_SUPERSESSION_EDGE}]->(n)
+            WITH n, age_days, collect(pred.namespace) AS pred_namespaces
             RETURN
+                pred_namespaces AS pred_namespaces,
                 n.uuid       AS uuid,
                 n.content    AS content,
                 n.code_ref   AS code_ref,
@@ -802,6 +813,22 @@ class TodoRepository:
                 "stale_after": TODO_STALE_AFTER_DAYS,
             },
         )
+        # Collapse the predecessor namespaces into a count the renderers can show.
+        # Counted in Python, and scoped, for the reason `todo_supersession` gives: the
+        # todo visibility rule is "own silo OR default bucket", which is not the rule
+        # `tenant_scope_cypher` implements, and hand-writing a fourth tenancy predicate
+        # in this file is what CF-127's ratchet exists to stop.
+        out = []
+        for row in rows:
+            record = dict(row)
+            pred_namespaces = record.pop("pred_namespaces", None) or []
+            record["supersedes_count"] = sum(
+                1
+                for ns in pred_namespaces
+                if namespaces is None or (ns or DEFAULT_TODO_NAMESPACE) in namespaces
+            )
+            out.append(record)
+        return out
 
     def get_todo(self, uuid: str, *, namespace: str | None = None) -> dict[str, Any] | None:
         """Fetch one todo by uuid with its full, untruncated content and edges.
