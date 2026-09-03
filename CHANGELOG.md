@@ -1,3 +1,12 @@
+## 2026-09-03 - add Utopia prior-art comparison
+
+- Added a revision-pinned comparison of Utopia's governed bitemporal knowledge application against
+  Menhir's code-linked evidence, repository structure, agent authority, and change-impact model.
+- Recorded the novelty and category boundary, the ideas worth borrowing, the ideas to keep outside
+  Menhir core, and a dependency-aware follow-up order.
+- Updated the prior-art index to classify Utopia as the strongest adjacent comparison for enterprise
+  world models rather than a direct replacement for Menhir's software-understanding center.
+
 ## 2026-08-30 - position Menhir around provenance and governance
 
 - Reframed the public README, runtime descriptions, CLI help, and agent template around
@@ -91,14 +100,3 @@
   digest-bound production policy.
 - Added regression coverage proving the retired client is neither published nor admitted by
   production policy while the remaining managed-client suite stays intact.
-
-## 2026-08-28 - fix: complete Claude web refresh authorization
-
-- OAuth protocol scopes are now separate from Menhir permission scopes, so
-  `offline_access` can request a refresh token without becoming a new access tier.
-- The dedicated Claude web registration alone declares `offline_access`; ChatGPT and every
-  Agent Smith registration keep their existing exact scope contracts.
-- Startup atomically upgrades the exact legacy Claude registration and refuses unknown or
-  disabled protocol scopes before the service accepts traffic.
-- Consent pages allow only the validated callback origin through CSP `form-action`, so
-  Chromium can follow the authorization POST redirect instead of stranding issued codes.
