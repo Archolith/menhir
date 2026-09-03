@@ -1160,3 +1160,47 @@ def test_close_stale_todos_selects_on_true_total_days() -> None:
     query = neo4j.calls[0]["query"]
     assert f"{TODO_AGE_DAYS_CYPHER} >= $days" in query
     assert neo4j.calls[0]["params"]["days"] == 90
+
+
+@pytest.mark.unit
+def test_stale_banner_reports_the_ssot_threshold_not_a_literal(monkeypatch) -> None:
+    """The stale banner must render TODO_STALE_AFTER_DAYS, not a hardcoded 30.
+
+    `list_todos` rendered "N todo(s) older than 30 days" from a literal while the
+    `stale` flag it describes is computed server-side from TODO_STALE_AFTER_DAYS.
+    That is a fourth, out-of-band encoding of the same threshold: change the
+    constant and the banner silently lies about which todos it just flagged.
+
+    The threshold is perturbed here deliberately. Asserting "older than 30 days"
+    against the real constant proves nothing while the constant happens to be 30 --
+    a hardcoded literal passes that assertion identically. Only a value the literal
+    cannot produce distinguishes the two.
+    """
+    import menhir.mcp.tools.ops.list_todos as list_todos_mod
+    from menhir.mcp.tools.ops.list_todos import ListTodosTool
+
+    monkeypatch.setattr(list_todos_mod, "TODO_STALE_AFTER_DAYS", 45)
+
+    tool = ListTodosTool()
+    backend = MagicMock()
+    backend.list_todos = AsyncMock(
+        return_value=[
+            {
+                "uuid": "abc",
+                "content": "Old thing",
+                "priority": "normal",
+                "created_at": "2026-05-28T10:00:00+00:00",
+                "age_days": 98,
+                "stale": True,
+            }
+        ]
+    )
+    tool.get_backend = MagicMock(return_value=backend)
+
+    import asyncio
+    result = asyncio.run(tool.endpoint(status="open", limit=25))
+
+    assert "older than 45 days" in result
+    assert "older than 30 days" not in result
+    assert "age: 98d" in result
+    assert "STALE" in result

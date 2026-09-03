@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from menhir.infrastructure.todo_repository import TODO_STALE_AFTER_DAYS
 from menhir.mcp.tools.base import BaseTextTool
 from menhir.mcp.contracts import ToolScope
 
@@ -47,7 +48,10 @@ class ListTodosTool(BaseTextTool):
         truncated_any = False
         stale_count = sum(1 for r in rows if r.get("stale"))
         if stale_count:
-            lines.append(f"⚠ {stale_count} todo(s) older than 30 days — consider closing or splitting")
+            lines.append(
+                f"⚠ {stale_count} todo(s) older than {TODO_STALE_AFTER_DAYS} days"
+                " — consider closing or splitting"
+            )
 
         for row in rows:
             tag = (row.get("priority") or "normal").upper()
