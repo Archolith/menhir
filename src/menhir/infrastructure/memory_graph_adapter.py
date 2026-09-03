@@ -1787,6 +1787,20 @@ class MemoryGraphAdapter:
             return {"attempted": True, "applied": False, "reason": f"error:{type(exc).__name__}"}
         return {"attempted": True, **result}
 
+    def supersede_todo(self, old_uuid: str, new_uuid: str) -> dict[str, Any]:
+        return self._todos.supersede_todo(old_uuid, new_uuid)
+
+    def resolve_todo(self, todo_uuid: str, memory_uuid: str) -> dict[str, Any]:
+        return self._todos.resolve_todo(todo_uuid, memory_uuid)
+
+    def reopen_todo(self, todo_uuid: str, memory_uuid: str) -> dict[str, Any]:
+        return self._todos.reopen_todo(todo_uuid, memory_uuid)
+
+    def link_memory_to_todo(
+        self, memory_uuid: str, todo_uuid: str, relation: str
+    ) -> dict[str, Any]:
+        return self._todos.link_memory_to_todo(memory_uuid, todo_uuid, relation)
+
     def close_todo(self, uuid: str) -> bool:
         return self._todos.close_todo(uuid)
 

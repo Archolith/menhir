@@ -6,6 +6,7 @@ created and managed directly via Cypher, never queued for LLM processing.
 Graph edges created at write time:
   (:Todo)-[:REFERENCES_FILE]->(:Entity)   — structural file node for code_ref
   (:Todo)-[:CREATED_FROM]->(:Episodic)    — episode that triggered the TODO
+  (:Todo)-[:SUPERSEDED_BY]->(:Todo)       — refile lineage, see `supersede_todo`
 """
 
 from __future__ import annotations
@@ -88,6 +89,19 @@ _ALL_TODO_INBOUND_EDGES: list[str] = [
     *_TODO_LINK_RELATIONS.values(),
     *_TODO_LIFECYCLE_RELATIONS.values(),
 ]
+
+#: The one todo-to-todo edge. Every other edge on a :Todo points INWARD from a semantic
+#: object, because knowledge belongs in memories and never accumulates inside the todo.
+#: This one is deliberately different, and the exception is narrow enough to state exactly:
+#: supersession is an IDENTITY fact ("this node replaced that node"), not a knowledge claim.
+#: It is the same category as RESOLVES_TODO -- lifecycle, not meaning -- and it makes neither
+#: todo describe the other. Admitting it was an owner decision on 2026-09-03, taken because
+#: the inward-only alternative (both todos hung off the refiling memory) cannot express which
+#: replacement belongs to which original when one memory refiles N todos into M.
+#:
+#: A todo still never becomes a semantic object: this edge is not recallable, and CF-247's
+#: ADJACENCY_EDGE_TYPES allowlist (RELATES_TO, MENTIONS) excludes it from ranking entirely.
+_TODO_SUPERSESSION_EDGE = "SUPERSEDED_BY"
 
 
 # Words to skip when extracting keywords for entity matching
@@ -346,6 +360,11 @@ class TodoRepository:
         an operational object -- knowledge lives in memories and semantic
         objects, never accumulating inside the todo itself.
 
+        The single exception is SUPERSEDED_BY (see ``supersede_todo``), which is
+        todo-to-todo because it states an identity fact rather than a knowledge
+        claim. It is not reachable from here: this method only ever writes the
+        relations in ``_TODO_LINK_RELATIONS``.
+
         Eligibility is deliberately narrow. Only PERSISTENT, non-structural
         entities may link. A file does not "address" a todo, and admitting
         structural nodes would recreate the CONCERNS noise problem in a typed
@@ -483,6 +502,105 @@ class TodoRepository:
             "applied": False,
             "reason": "todo_not_in_expected_status_or_memory_ineligible",
             "expected_status": from_status,
+        }
+
+    # ------------------------------------------------------------------
+    # Supersession (todo -> todo)
+    # ------------------------------------------------------------------
+
+    def supersede_todo(self, old_uuid: str, new_uuid: str) -> dict[str, Any]:
+        """Close ``old`` and record that ``new`` replaced it, atomically.
+
+        Menhir has no update path: editing a todo means closing it and adding a
+        replacement, which until now dropped the link between the two. This is that
+        link, written as the same kind of single statement ``resolve_todo`` is -- a
+        SUPERSEDED_BY edge pointing at a still-open todo, or a closed todo with no
+        record of what replaced it, are both states the graph must never hold.
+
+        Deliberately NOT built on ``_lifecycle_transition``: that helper hardcodes the
+        memory side of the edge (``:Entity`` with ``scope = 'PERSISTENT'`` and no
+        ``structure_role``), and this edge has a ``:Todo`` on both ends. The two
+        eligibility rules have nothing in common, so they stay separate rather than
+        growing a parameter that means "which of two unrelated predicates to apply".
+
+        Refusals, all returned as a reason rather than raised:
+
+        - ``old`` must be open. This is also what makes re-supersession and cycles
+          impossible: superseding closes ``old``, so it can never be the ``old`` of a
+          second call, and it can never be the ``new`` of one either (``new`` must be
+          open too, so B-supersedes-A-supersedes-B cannot close).
+        - ``new`` must exist, be open, and not be ``old`` itself.
+        - ``old`` must not already have a successor. Redundant with the status guard on
+          the normal path, and kept because ``reopen_todo`` can return a superseded todo
+          to open -- without this, a second call would leave two SUPERSEDED_BY edges and
+          no answer to "which one replaced it".
+        - Namespace, mirroring the slice-1 rule exactly: ``new`` must be in ``old``'s
+          silo or in the shared default bucket. The asymmetry is inherited on purpose --
+          a default-bucket todo cannot be superseded by a siloed one, the same way a
+          memory cannot link across silos.
+        """
+        if old_uuid == new_uuid:
+            return {"applied": False, "reason": "cannot_supersede_itself"}
+
+        now = datetime.now(timezone.utc).isoformat()
+        rows = self.neo4j.execute(
+            f"""
+            MATCH (t_old:Todo {{uuid: $old_uuid}})
+            WHERE t_old.status = 'open'
+              AND NOT (t_old)-[:{_TODO_SUPERSESSION_EDGE}]->(:Todo)
+            MATCH (t_new:Todo {{uuid: $new_uuid}})
+            WHERE t_new.status = 'open'
+              AND t_new.namespace IN [coalesce(t_old.namespace, $default_ns), $default_ns]
+            MERGE (t_old)-[:{_TODO_SUPERSESSION_EDGE}]->(t_new)
+            SET t_old.status = 'closed', t_old.closed_at = $now
+            WITH t_old
+            OPTIONAL MATCH (t_old)-[:HAS_REMINDER]->(r:Entity {{type: 'TEMPORAL'}})
+            SET r.status = 'completed', r.last_accessed = $now
+            RETURN count(t_old) AS applied
+            """,
+            {
+                "old_uuid": old_uuid,
+                "new_uuid": new_uuid,
+                "default_ns": DEFAULT_TODO_NAMESPACE,
+                "now": now,
+            },
+        )
+        if rows and int(rows[0].get("applied", 0)) > 0:
+            return {
+                "applied": True,
+                "status": "closed",
+                "edge_type": _TODO_SUPERSESSION_EDGE,
+                "superseded_by": new_uuid,
+            }
+        return {
+            "applied": False,
+            "reason": "old_not_open_or_already_superseded_or_new_ineligible",
+        }
+
+    def todo_supersession(self, todo_uuid: str) -> dict[str, Any]:
+        """Both directions of this todo's refile lineage.
+
+        The reader half of ``supersede_todo``. CF-143 removed two edge types that were
+        written on every create and read by nothing; this exists so SUPERSEDED_BY never
+        becomes the third. It is surfaced through ``get_todo``.
+        """
+        rows = self.neo4j.execute(
+            f"""
+            MATCH (t:Todo {{uuid: $uuid}})
+            OPTIONAL MATCH (t)-[:{_TODO_SUPERSESSION_EDGE}]->(succ:Todo)
+            WITH t, succ
+            OPTIONAL MATCH (pred:Todo)-[:{_TODO_SUPERSESSION_EDGE}]->(t)
+            RETURN succ.uuid AS superseded_by,
+                   collect(DISTINCT pred.uuid) AS supersedes
+            LIMIT 1
+            """,
+            {"uuid": todo_uuid},
+        )
+        if not rows:
+            return {"superseded_by": None, "supersedes": []}
+        return {
+            "superseded_by": rows[0].get("superseded_by"),
+            "supersedes": rows[0].get("supersedes") or [],
         }
 
     def close_todo(self, uuid: str) -> bool:
@@ -654,6 +772,9 @@ class TodoRepository:
         # rows before aggregation.
         todo = dict(rows[0])
         todo["inbound_links"] = self.todo_inbound_links(uuid)
+        # Fetched separately for the same reason inbound links are: a third and fourth
+        # collect over independent relationships would multiply intermediate rows.
+        todo["supersession"] = self.todo_supersession(uuid)
         return todo
 
     def search_by_query(

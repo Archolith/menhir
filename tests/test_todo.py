@@ -12,6 +12,7 @@ from menhir.infrastructure.todo_repository import (
     TODO_STALE_AFTER_DAYS,
     TodoRepository,
 )
+from menhir.domain.todo_location import DEFAULT_TODO_NAMESPACE
 from menhir.cli.output import format_hook_output
 
 
@@ -1204,3 +1205,136 @@ def test_stale_banner_reports_the_ssot_threshold_not_a_literal(monkeypatch) -> N
     assert "older than 30 days" not in result
     assert "age: 98d" in result
     assert "STALE" in result
+
+
+# ---------------------------------------------------------------------------
+# Supersession (todo -> todo), Phase B slice 2
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_supersede_todo_writes_edge_and_closes_in_one_statement() -> None:
+    """Atomicity comes from a single statement, as with resolve/reopen."""
+    neo4j = _StubNeo4j(responses=[[{"applied": 1}]])
+    repo = TodoRepository(neo4j)
+
+    result = repo.supersede_todo("old1", "new1")
+
+    assert result["applied"] is True
+    assert result["status"] == "closed"
+    assert result["superseded_by"] == "new1"
+    assert len(neo4j.calls) == 1
+    query = neo4j.calls[0]["query"]
+    assert "MERGE (t_old)-[:SUPERSEDED_BY]->(t_new)" in query
+    assert "SET t_old.status = 'closed'" in query
+
+
+@pytest.mark.unit
+def test_supersede_requires_old_open_and_new_open() -> None:
+    neo4j = _StubNeo4j(responses=[[{"applied": 1}]])
+    repo = TodoRepository(neo4j)
+
+    repo.supersede_todo("old1", "new1")
+
+    query = neo4j.calls[0]["query"]
+    assert "WHERE t_old.status = 'open'" in query
+    assert "WHERE t_new.status = 'open'" in query
+
+
+@pytest.mark.unit
+def test_supersede_refuses_a_todo_that_already_has_a_successor() -> None:
+    """Guards the reopen path: without it a second call leaves two successors."""
+    neo4j = _StubNeo4j(responses=[[{"applied": 1}]])
+    repo = TodoRepository(neo4j)
+
+    repo.supersede_todo("old1", "new1")
+
+    assert "NOT (t_old)-[:SUPERSEDED_BY]->(:Todo)" in neo4j.calls[0]["query"]
+
+
+@pytest.mark.unit
+def test_supersede_refuses_self_supersession_without_touching_the_graph() -> None:
+    neo4j = _StubNeo4j()
+    repo = TodoRepository(neo4j)
+
+    result = repo.supersede_todo("same", "same")
+
+    assert result["applied"] is False
+    assert result["reason"] == "cannot_supersede_itself"
+    assert neo4j.calls == []
+
+
+@pytest.mark.unit
+def test_supersede_confines_the_new_todo_to_the_old_silo_or_default() -> None:
+    neo4j = _StubNeo4j(responses=[[{"applied": 1}]])
+    repo = TodoRepository(neo4j)
+
+    repo.supersede_todo("old1", "new1")
+
+    query = neo4j.calls[0]["query"]
+    assert "t_new.namespace IN [coalesce(t_old.namespace, $default_ns), $default_ns]" in query
+    assert neo4j.calls[0]["params"]["default_ns"] == DEFAULT_TODO_NAMESPACE
+
+
+@pytest.mark.unit
+def test_supersede_refusal_reports_reason_without_raising() -> None:
+    neo4j = _StubNeo4j(responses=[[{"applied": 0}]])
+    repo = TodoRepository(neo4j)
+
+    result = repo.supersede_todo("old1", "new1")
+
+    assert result["applied"] is False
+    assert "reason" in result
+
+
+@pytest.mark.unit
+def test_supersede_completes_the_linked_reminder() -> None:
+    """Mirrors close_todo: a superseded todo's reminder must not stay open."""
+    neo4j = _StubNeo4j(responses=[[{"applied": 1}]])
+    repo = TodoRepository(neo4j)
+
+    repo.supersede_todo("old1", "new1")
+
+    query = neo4j.calls[0]["query"]
+    assert "HAS_REMINDER" in query
+    assert "r.status = $reminder_status" not in query
+    assert "SET r.status = 'completed'" in query
+
+
+@pytest.mark.unit
+def test_todo_supersession_reads_both_directions() -> None:
+    """CF-143 guard: the written edge has a reader."""
+    neo4j = _StubNeo4j(
+        responses=[[{"superseded_by": "new1", "supersedes": ["older1", "older2"]}]]
+    )
+    repo = TodoRepository(neo4j)
+
+    lineage = repo.todo_supersession("t1")
+
+    assert lineage["superseded_by"] == "new1"
+    assert lineage["supersedes"] == ["older1", "older2"]
+
+
+@pytest.mark.unit
+def test_todo_supersession_is_empty_when_there_is_no_lineage() -> None:
+    neo4j = _StubNeo4j(responses=[[]])
+    repo = TodoRepository(neo4j)
+
+    lineage = repo.todo_supersession("t1")
+
+    assert lineage["superseded_by"] is None
+    assert lineage["supersedes"] == []
+
+
+@pytest.mark.unit
+def test_get_todo_surfaces_supersession() -> None:
+    neo4j = _StubNeo4j(responses=[
+        [{"uuid": "t1", "content": "body"}],
+        [],
+        [{"superseded_by": "new1", "supersedes": []}],
+    ])
+    repo = TodoRepository(neo4j)
+
+    todo = repo.get_todo("t1")
+
+    assert todo["supersession"]["superseded_by"] == "new1"

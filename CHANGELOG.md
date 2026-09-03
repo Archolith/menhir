@@ -1,3 +1,23 @@
+## 2026-09-03 - todo lifecycle and refile lineage reach the MCP surface
+
+- Added `supersede_todo`: closes a todo and writes a `SUPERSEDED_BY` edge to its
+  replacement in one statement. Menhir has no update path, so editing a todo means
+  closing it and adding a new one; until now that lineage was lost. The edge is the
+  first todo-to-todo relationship and the exception to the inward-only rule is
+  recorded at its definition -- supersession is an identity fact, not a knowledge
+  claim, and a todo still never becomes a semantic object.
+- Exposed `resolve_todo`, `reopen_todo`, and `link_memory_to_todo`, which were
+  written, tested, and unreachable since slice 1: no MCP tool and no caller outside
+  `TodoRepository`. All four run the ownership guard on every uuid they name.
+- `get_todo` now returns a `supersession` block (`superseded_by`, `supersedes`), so
+  the new edge has a reader rather than becoming the next CF-143 dead edge.
+- Updated the production client policy for the four new tools and recomputed its
+  canonical digest to
+  `047fd945ea56033036a68a20f03eb9208f0127cff70a0cba59423b7e834420aa`.
+  **`MENHIR_CLIENT_POLICY_DIGEST` must be updated on the deployed host before this
+  ships, or startup fails closed. Independent security review and reauthorization of
+  existing grants are still outstanding, per deploy/ACCESS_CONTRACT.md.**
+
 ## 2026-08-30 - position Menhir around provenance and governance
 
 - Reframed the public README, runtime descriptions, CLI help, and agent template around
