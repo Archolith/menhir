@@ -654,9 +654,16 @@ as a `SUPERSEDED_BY` edge rather than as prose in some memory.
 - **`old_uuid`** (str): TODO being replaced. Must be open and have no successor already.
 - **`new_uuid`** (str): Replacement TODO. Must be open, and in the old todo's namespace or
   the shared `default` bucket.
-- Returns confirmation, or the reason it was refused.
-- Read the lineage back through `get_todo`, which surfaces a `supersession` block with
-  `superseded_by` and `supersedes`.
+- Returns confirmation, or a specific reason: `old_todo_not_found`,
+  `old_todo_already_superseded`, `old_todo_not_open`, `new_todo_ineligible`, or
+  `cannot_supersede_itself`.
+- Read the lineage back through `get_todo`, which prints `superseded by: <uuid>` and
+  `supersedes: <uuid>` lines, scoped to your namespace.
+- `superseded_by` is a LIST. More than one successor means concurrent supersessions
+  raced; `get_todo` prints a warning and the lineage is ambiguous until one edge is
+  removed. Note the namespace rule is the INVERSE of `supersede_artifact`'s: here the
+  NEW todo must be in the OLD one's silo (or `default`), where for artifacts the OLD
+  must be in the NEW one's.
 
 ### `resolve_todo`
 Concept id: `mcp.tool.resolve_todo`
@@ -674,7 +681,9 @@ Concept id: `mcp.tool.reopen_todo`
 
 Reopen a closed TODO and record the memory that reopened it. Clears `closed_at` and returns
 any linked reminder to open.
-- **`todo_uuid`** (str): TODO to reopen. Must be closed.
+- **`todo_uuid`** (str): TODO to reopen. Must be closed, and must NOT be superseded --
+  reopening a superseded todo would leave an open node still pointing at its replacement.
+  To revive superseded work, act on the successor instead.
 - **`memory_uuid`** (str): Memory that reopened it, same eligibility as `resolve_todo`.
 - Returns confirmation, or the reason it was refused.
 

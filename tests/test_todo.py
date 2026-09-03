@@ -1272,7 +1272,10 @@ def test_supersede_confines_the_new_todo_to_the_old_silo_or_default() -> None:
     repo.supersede_todo("old1", "new1")
 
     query = neo4j.calls[0]["query"]
-    assert "t_new.namespace IN [coalesce(t_old.namespace, $default_ns), $default_ns]" in query
+    # Both sides coalesced: a null namespace on EITHER end must not silently make the
+    # row unmatchable, which `null IN [...]` would do.
+    assert "coalesce(t_new.namespace, $default_ns)" in query
+    assert "IN [coalesce(t_old.namespace, $default_ns), $default_ns]" in query
     assert neo4j.calls[0]["params"]["default_ns"] == DEFAULT_TODO_NAMESPACE
 
 
@@ -1304,14 +1307,16 @@ def test_supersede_completes_the_linked_reminder() -> None:
 @pytest.mark.unit
 def test_todo_supersession_reads_both_directions() -> None:
     """CF-143 guard: the written edge has a reader."""
-    neo4j = _StubNeo4j(
-        responses=[[{"superseded_by": "new1", "supersedes": ["older1", "older2"]}]]
-    )
+    neo4j = _StubNeo4j(responses=[[{
+        "superseded_by": [{"uuid": "new1", "ns": "default"}],
+        "supersedes": [{"uuid": "older1", "ns": "default"},
+                       {"uuid": "older2", "ns": "default"}],
+    }]])
     repo = TodoRepository(neo4j)
 
     lineage = repo.todo_supersession("t1")
 
-    assert lineage["superseded_by"] == "new1"
+    assert lineage["superseded_by"] == ["new1"]
     assert lineage["supersedes"] == ["older1", "older2"]
 
 
@@ -1322,7 +1327,7 @@ def test_todo_supersession_is_empty_when_there_is_no_lineage() -> None:
 
     lineage = repo.todo_supersession("t1")
 
-    assert lineage["superseded_by"] is None
+    assert lineage["superseded_by"] == []
     assert lineage["supersedes"] == []
 
 
@@ -1331,10 +1336,211 @@ def test_get_todo_surfaces_supersession() -> None:
     neo4j = _StubNeo4j(responses=[
         [{"uuid": "t1", "content": "body"}],
         [],
-        [{"superseded_by": "new1", "supersedes": []}],
+        [{"superseded_by": [{"uuid": "new1", "ns": "default"}], "supersedes": []}],
     ])
     repo = TodoRepository(neo4j)
 
     todo = repo.get_todo("t1")
 
-    assert todo["supersession"]["superseded_by"] == "new1"
+    assert todo["supersession"]["superseded_by"] == ["new1"]
+
+
+# ---------------------------------------------------------------------------
+# Review remediation (2026-09-03): regressions for each confirmed finding
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_supersede_refuses_a_new_todo_that_already_has_a_successor() -> None:
+    """The cycle guard. supersede(A,B) / reopen(A) / supersede(B,A) built A->B->A
+    because only t_old was guarded; every ancestor carries an outgoing edge, so
+    guarding t_new is what makes a cycle unconstructible."""
+    neo4j = _StubNeo4j(responses=[[{"applied": 1}]])
+    repo = TodoRepository(neo4j)
+
+    repo.supersede_todo("old1", "new1")
+
+    assert "NOT (t_new)-[:SUPERSEDED_BY]->(:Todo)" in neo4j.calls[0]["query"]
+
+
+@pytest.mark.unit
+def test_reopen_refuses_a_superseded_todo() -> None:
+    """Reopening one produced an open node still carrying SUPERSEDED_BY -- the state
+    supersede_todo's own docstring calls impossible."""
+    neo4j = _StubNeo4j(responses=[[{"applied": 1}]])
+    repo = TodoRepository(neo4j)
+
+    repo.reopen_todo("t1", "m1")
+
+    assert "NOT (t)-[:SUPERSEDED_BY]->(:Todo)" in neo4j.calls[0]["query"]
+
+
+@pytest.mark.unit
+def test_resolve_does_not_carry_the_successor_guard() -> None:
+    """The guard is reopen-only: resolving a superseded todo is legitimate."""
+    neo4j = _StubNeo4j(responses=[[{"applied": 1}]])
+    repo = TodoRepository(neo4j)
+
+    repo.resolve_todo("t1", "m1")
+
+    assert "SUPERSEDED_BY" not in neo4j.calls[0]["query"]
+
+
+@pytest.mark.unit
+def test_supersession_collects_successors_rather_than_truncating() -> None:
+    """Two successors (concurrent supersessions) must both surface. The previous
+    query made succ.uuid a grouping key and took an unordered LIMIT 1, dropping one
+    at random."""
+    neo4j = _StubNeo4j(responses=[[{
+        "superseded_by": [{"uuid": "new1", "ns": "default"},
+                          {"uuid": "new2", "ns": "default"}],
+        "supersedes": [],
+    }]])
+    repo = TodoRepository(neo4j)
+
+    lineage = repo.todo_supersession("t1")
+
+    assert lineage["superseded_by"] == ["new1", "new2"]
+    query = neo4j.calls[0]["query"]
+    assert "collect(DISTINCT {uuid: succ.uuid" in query
+    assert "LIMIT 1" not in query
+
+
+@pytest.mark.unit
+def test_supersession_scopes_both_sides_to_the_caller_silo() -> None:
+    """A shared default-bucket todo must not hand a foreign reader the uuids of
+    siloed todos on either end of its lineage."""
+    neo4j = _StubNeo4j(responses=[[{
+        "superseded_by": [{"uuid": "mine", "ns": "alpha"},
+                          {"uuid": "shared", "ns": DEFAULT_TODO_NAMESPACE}],
+        "supersedes": [{"uuid": "theirs", "ns": "beta"}],
+    }]])
+    repo = TodoRepository(neo4j)
+
+    lineage = repo.todo_supersession("t1", ["alpha", DEFAULT_TODO_NAMESPACE])
+
+    # Own silo and the shared bucket are visible; another silo's uuid is not.
+    assert lineage["superseded_by"] == ["mine", "shared"]
+    assert lineage["supersedes"] == []
+
+
+@pytest.mark.unit
+def test_get_todo_passes_its_namespace_filter_into_the_lineage_read() -> None:
+    neo4j = _StubNeo4j(responses=[
+        [{"uuid": "t1", "content": "body"}],
+        [],
+        [{"superseded_by": [], "supersedes": []}],
+    ])
+    repo = TodoRepository(neo4j)
+
+    todo = repo.get_todo("t1", namespace="alpha")
+
+    # get_todo matched the todo under this list; the lineage must be filtered by the
+    # same one, so the two rules cannot drift apart.
+    assert neo4j.calls[0]["params"]["namespaces"] == ["alpha", DEFAULT_TODO_NAMESPACE]
+    assert todo["supersession"] == {"superseded_by": [], "supersedes": []}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "rows,expected",
+    [
+        ([], "old_todo_not_found"),
+        ([{"status": "open", "has_successor": True}], "old_todo_already_superseded"),
+        ([{"status": "closed", "has_successor": False}], "old_todo_not_open"),
+        ([{"status": "open", "has_successor": False}], "new_todo_ineligible"),
+    ],
+)
+def test_supersede_refusal_names_the_failed_precondition(rows, expected) -> None:
+    """One opaque reason covered five causes, and `already_superseded` is reachable."""
+    neo4j = _StubNeo4j(responses=[[{"applied": 0}], rows])
+    repo = TodoRepository(neo4j)
+
+    result = repo.supersede_todo("old1", "new1")
+
+    assert result["applied"] is False
+    assert result["reason"] == expected
+
+
+@pytest.mark.unit
+def test_link_relations_are_not_re_listed_in_the_tool_layer() -> None:
+    """CF-150 shape: the tool validated against its own copy of the whitelist."""
+    from menhir.domain.todo_location import TODO_LINK_RELATIONS
+    from menhir.infrastructure.todo_repository import _TODO_LINK_RELATIONS
+    from menhir.mcp.tools.ops.link_memory_to_todo import _RELATIONS
+
+    assert _TODO_LINK_RELATIONS is TODO_LINK_RELATIONS
+    assert set(_RELATIONS) == set(TODO_LINK_RELATIONS)
+
+
+@pytest.mark.unit
+def test_get_todo_tool_renders_supersession_lineage() -> None:
+    """The block reached the dict and never reached the agent: GetTodoTool builds its
+    output from named keys and had no branch for it, so the edge had no reader on the
+    only surface that matters."""
+    from menhir.mcp.tools.ops.get_todo import GetTodoTool
+
+    tool = GetTodoTool()
+    backend = MagicMock()
+    backend.get_todo = AsyncMock(
+        return_value={
+            "uuid": "old-1",
+            "content": "body",
+            "status": "closed",
+            "priority": "normal",
+            "supersession": {"superseded_by": ["new-1"], "supersedes": ["older-1"]},
+        }
+    )
+    tool.get_backend = MagicMock(return_value=backend)
+
+    import asyncio
+    result = asyncio.run(tool.endpoint(uuid="old-1"))
+
+    assert "superseded by: new-1" in result
+    assert "supersedes: older-1" in result
+
+
+@pytest.mark.unit
+def test_get_todo_tool_warns_on_an_ambiguous_lineage() -> None:
+    from menhir.mcp.tools.ops.get_todo import GetTodoTool
+
+    tool = GetTodoTool()
+    backend = MagicMock()
+    backend.get_todo = AsyncMock(
+        return_value={
+            "uuid": "old-1",
+            "content": "body",
+            "status": "closed",
+            "supersession": {"superseded_by": ["new-1", "new-2"], "supersedes": []},
+        }
+    )
+    tool.get_backend = MagicMock(return_value=backend)
+
+    import asyncio
+    result = asyncio.run(tool.endpoint(uuid="old-1"))
+
+    assert "new-1" in result and "new-2" in result
+    assert "WARNING" in result
+
+
+@pytest.mark.unit
+def test_get_todo_tool_omits_lineage_lines_when_there_is_none() -> None:
+    from menhir.mcp.tools.ops.get_todo import GetTodoTool
+
+    tool = GetTodoTool()
+    backend = MagicMock()
+    backend.get_todo = AsyncMock(
+        return_value={
+            "uuid": "t1",
+            "content": "body",
+            "status": "open",
+            "supersession": {"superseded_by": [], "supersedes": []},
+        }
+    )
+    tool.get_backend = MagicMock(return_value=backend)
+
+    import asyncio
+    result = asyncio.run(tool.endpoint(uuid="t1"))
+
+    assert "superseded by" not in result
+    assert "supersedes" not in result

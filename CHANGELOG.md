@@ -1,3 +1,31 @@
+## 2026-09-03 - fix ten review findings in the todo supersession surface
+
+- **`get_todo` now actually prints the lineage.** The repository attached a
+  `supersession` block and `GetTodoTool` had no branch for it, so the SUPERSEDED_BY
+  edge had no agent-facing reader -- the CF-143 dead-edge shape the feature was
+  built to avoid. The same-day claim that it had a reader was wrong.
+- **Cycles were reachable and are now blocked twice.** `supersede(A,B)` ->
+  `reopen(A)` -> `supersede(B,A)` built A->B->A, because only the OLD todo was
+  guarded against having a successor and `reopen_todo` returned a superseded todo
+  to open without clearing its edge. `supersede_todo` now guards the NEW todo too,
+  and `reopen_todo` refuses a superseded todo outright.
+- **The lineage reader no longer drops data.** Two successors (which concurrent
+  supersessions can still produce) previously became two rows behind an unordered
+  `LIMIT 1`, silently discarding one; `superseded_by` is now a list, and `get_todo`
+  warns when it holds more than one.
+- **Backend-boundary ownership guard.** The four todo ops are reachable through the
+  generic `/api/internal/backend/{operation}` dispatch, which injects a namespace
+  only into methods declaring one -- none of these do. They now call
+  `_require_own_todo` / `_require_own_memory` at the backend, not only in the tools.
+- Lineage reads are scoped to the caller's silo; the relation whitelist has one
+  definition instead of two; refusals name which precondition failed; and both
+  namespace comparisons are coalesced. The inverted namespace rule versus
+  `supersede_artifact` is documented rather than changed.
+
+Verified: 8483 passed, 347 skipped. The Cypher remains unexecuted by tests (stubbed
+driver); the cycle sequence was replayed through the real methods against a
+predicate-evaluating fake to confirm both guards compose.
+
 ## 2026-09-03 - todo lifecycle and refile lineage reach the MCP surface
 
 - Added `supersede_todo`: closes a todo and writes a `SUPERSEDED_BY` edge to its

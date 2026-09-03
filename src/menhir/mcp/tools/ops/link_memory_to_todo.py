@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from menhir.domain.todo_location import TODO_LINK_RELATIONS
 from menhir.mcp.ownership import foreign_object_refusal
 from menhir.mcp.tools.base import BaseTextTool
 from menhir.mcp.contracts import ToolScope
 
-_RELATIONS = ("mentions", "addresses")
+# Read from the domain, never re-listed here: a local copy and the repository's
+# whitelist would agree until someone adds a relation to one of them, and the
+# resulting refusal would surface at the transport layer where nobody looks.
+_RELATIONS = tuple(TODO_LINK_RELATIONS)
 
 
 async def link_memory_to_todo(
