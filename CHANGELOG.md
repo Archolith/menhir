@@ -1,3 +1,12 @@
+## 2026-09-04 - align production OAuth and agent todo authority
+
+- Restored `menhir:admin` to the production compose authorization-server scope surface so the
+  digest-bound Codex, Claude, and ChatGPT operator grants can be issued.
+- Granted every agent-tier client the complete todo workflow: list, read, add, close, and stale
+  close, while retaining the existing agent OAuth tier and all non-todo denials.
+- Made production startup fail closed when runtime scope/tier configuration cannot satisfy the
+  canonical access contract, and added compose plus startup regression coverage.
+
 ## 2026-08-30 - position Menhir around provenance and governance
 
 - Reframed the public README, runtime descriptions, CLI help, and agent template around
