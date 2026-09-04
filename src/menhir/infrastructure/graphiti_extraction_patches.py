@@ -1098,7 +1098,7 @@ def _record_self_binding(
         result = SelfBindResult(
             outcome=SelfBindOutcome.AMBIGUOUS,
             mode=receipt.self_bind_mode,
-            self_like_without_evidence=sum(
+            self_like_without_subject_authority=sum(
                 1 for n in nodes if is_self_alias(getattr(n, "name", None))
             ),
         )

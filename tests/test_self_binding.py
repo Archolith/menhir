@@ -53,7 +53,7 @@ def _declared(namespace: str = "default") -> SelfIdentityContext:
     """A trusted internal caller declaring that this episode's subject IS the owner.
 
     The only evidence that binds. No production producer emits it yet -- see
-    `test_no_production_producer_declares_a_self_subject`, which pins that.
+    `test_self_identity_producer_census`, which pins the production construction surface.
     """
     return SelfIdentityContext(
         namespace=namespace,
@@ -144,10 +144,10 @@ def test_a_trusted_turn_alone_binds_nothing_at_all():
 
     result = bind_canonical_self(nodes, [], {}, _trusted())
 
-    assert result.outcome is SelfBindOutcome.ORDINARY_USER_ENTITY
+    assert result.outcome is SelfBindOutcome.SELF_LIKE_UNRESOLVED
     assert [n.uuid for n in nodes] == ["speaker", "rbac"]
-    assert result.self_like_without_evidence == 2
-    assert result.first_person_without_authority == 1
+    assert result.self_like_without_subject_authority == 2
+    assert result.first_person_unresolved == 1
 
 
 @pytest.mark.unit
@@ -162,15 +162,17 @@ def test_reported_speech_does_not_bind_the_quoted_speaker():
 
     assert result.bound is False
     assert nodes[0].uuid == "quoted"
-    assert result.first_person_without_authority == 1
+    assert result.first_person_unresolved == 1
 
 
 @pytest.mark.unit
-def test_no_production_producer_declares_a_self_subject():
-    """The consequence that must not be discovered in production: EXPLICIT_SELF_SUBJECT is the
-    only binding evidence, and nothing constructs it, so binding is inert until per-node subject
-    provenance exists. If a producer ever starts emitting it, this test fails and forces a review
-    of what that producer actually proves."""
+def test_pending_episode_factory_never_declares_a_self_subject():
+    """The production factory never strengthens a persisted source into node-level authority.
+
+    This is a behavior check over representative inputs, not the producer guard. The structural
+    census in ``test_self_identity_producer_census`` separately fails on any new construction or
+    factory call site.
+    """
     from menhir.domain.self_identity import self_context_for_pending_episode
 
     for source in ("user", "manual", "claude-code", "agent_inference", "hook", ""):
@@ -189,9 +191,9 @@ def test_lone_generic_user_in_a_trusted_turn_does_not_bind():
 
     result = bind_canonical_self(nodes, edges, index_map, _trusted())
 
-    assert result.outcome is SelfBindOutcome.ORDINARY_USER_ENTITY
+    assert result.outcome is SelfBindOutcome.SELF_LIKE_UNRESOLVED
     assert result.bound is False
-    assert result.self_like_without_evidence == 1
+    assert result.self_like_without_subject_authority == 1
     assert nodes[0].uuid == "rbac"
     assert edges[0].source_node_uuid == "rbac"
     assert index_map == {"rbac": [0]}
@@ -518,7 +520,7 @@ def test_unclassified_self_like_emissions_are_counted():
     result = bind_canonical_self(nodes, [], {}, _untrusted())
 
     assert result.outcome is SelfBindOutcome.NOT_ELIGIBLE
-    assert result.self_like_without_evidence == 2
+    assert result.self_like_without_subject_authority == 2
     assert [n.uuid for n in nodes] == ["a", "b", "c"]
 
 
@@ -526,7 +528,7 @@ def test_unclassified_self_like_emissions_are_counted():
 def test_no_self_like_emission_counts_zero():
     nodes = [_Node("a", "Rachel")]
     result = bind_canonical_self(nodes, [], {}, _untrusted())
-    assert result.self_like_without_evidence == 0
+    assert result.self_like_without_subject_authority == 0
 
 
 @pytest.mark.unit
@@ -606,15 +608,15 @@ def test_observe_records_the_refusal_and_does_not_fail_the_episode(monkeypatch):
     assert recorded, "the refusal produced no telemetry"
     details = recorded[0]["details"]
     assert details["outcome"] == "ambiguous"
-    assert details["self_like_without_evidence"] == 2
+    assert details["self_like_without_subject_authority"] == 2
 
 
 @pytest.mark.unit
-def test_ordinary_user_entity_is_recorded_as_its_own_outcome(monkeypatch):
+def test_self_like_unresolved_is_recorded_as_its_own_outcome(monkeypatch):
     """The count that says how often a trusted turn mentions a `user` binding declines to claim."""
     result, recorded = _recording_binder(
         monkeypatch, [_Node("rbac", "user")], SelfBindMode.ENFORCE, identity=_trusted()
     )
 
-    assert result.outcome is SelfBindOutcome.ORDINARY_USER_ENTITY
-    assert recorded[0]["details"]["outcome"] == "ordinary_user_entity"
+    assert result.outcome is SelfBindOutcome.SELF_LIKE_UNRESOLVED
+    assert recorded[0]["details"]["outcome"] == "self_like_unresolved"

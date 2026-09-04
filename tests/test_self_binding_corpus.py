@@ -110,7 +110,7 @@ def test_unclassified_self_like_emissions_are_visible_in_the_controls():
     counted = 0
     for case in NEGATIVE_CASES:
         result, _ = _replay(case, SelfBindMode.ENFORCE)
-        counted += result.self_like_without_evidence
+        counted += result.self_like_without_subject_authority
     assert counted >= 5, "self-like emissions from untrusted producers are not being counted"
 
 

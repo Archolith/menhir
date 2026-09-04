@@ -97,7 +97,7 @@ _SELF_TURNS = (
         category="manual_memory",
         source="manual",
         entity_names=("I", "espresso"),
-        expected=SelfBindOutcome.ORDINARY_USER_ENTITY,
+        expected=SelfBindOutcome.SELF_LIKE_UNRESOLVED,
         note=(
             "`manual` is apex-tier and gated identically to `user`, and it still does not bind: "
             "the gate proves the AUTHOR, and nothing here says which node is that author."
@@ -136,7 +136,7 @@ _CONTROLS = (
         category="mixed_subject",
         source="user",
         entity_names=("I", "the user", "AuthService"),
-        expected=SelfBindOutcome.ORDINARY_USER_ENTITY,
+        expected=SelfBindOutcome.SELF_LIKE_UNRESOLVED,
         note=(
             "'I gave the user read access.' Neither binds: the RBAC `user` is a foreign subject, "
             "and the first person has no provenance proving it is not quoted."
@@ -147,7 +147,7 @@ _CONTROLS = (
         category="generic_account_user",
         source="user",
         entity_names=("user", "permissions table"),
-        expected=SelfBindOutcome.ORDINARY_USER_ENTITY,
+        expected=SelfBindOutcome.SELF_LIKE_UNRESOLVED,
         note=(
             "REVIEW P1 round 2. A trusted author does not make a lone third-person `user` the "
             "author. This is the exact shape production fragments on, and declining it is why "
@@ -159,7 +159,7 @@ _CONTROLS = (
         category="ambiguous_subject",
         source="user",
         entity_names=("I", "myself"),
-        expected=SelfBindOutcome.ORDINARY_USER_ENTITY,
+        expected=SelfBindOutcome.SELF_LIKE_UNRESOLVED,
         note=(
             "Neither carries authority, so this is declined rather than ambiguous. The ambiguous "
             "path needs a declared subject -- see `declared_subject_with_two_aliases`."
@@ -182,7 +182,7 @@ _CONTROLS = (
         category="quoted_speech",
         source="user",
         entity_names=("I", "Rachel"),
-        expected=SelfBindOutcome.ORDINARY_USER_ENTITY,
+        expected=SelfBindOutcome.SELF_LIKE_UNRESOLVED,
         note=(
             "REVIEW P1 round 3. 'She told me, \"I will handle it\"' -- a proven human turn whose "
             "extracted `I` is someone else. Extraction discards the quote boundary, so grammatical "

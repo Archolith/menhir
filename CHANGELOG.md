@@ -41,8 +41,11 @@
   and `off` are currently behaviorally identical. That is deliberate -- correct and doing nothing
   beats plausible and occasionally catastrophic -- but it means preventing forks needs per-node
   subject provenance from extraction (each node's source span, and whether it is quoted speech),
-  which does not exist. The new `ordinary_user_entity` outcome and `first_person_without_authority`
-  counter size that work in observe mode.
+  which does not exist. The `self_like_unresolved` outcome,
+  `self_like_without_subject_authority`, and `first_person_unresolved` counters describe the
+  unclassified population in observe mode; they deliberately do not predict which nodes are safe
+  to bind. A structural census now fails on any new context constructor, factory call site, or
+  executable `EXPLICIT_SELF_SUBJECT` reference.
 - **A missing driver or a failed canonical-node read is no longer treated as "absent".** Graphiti saves with
   `SET n = $entity_data`, which replaces the property map, so falling back to the sparse extracted
   node on a transient driver error would let a later write erase the stored node's markers,
@@ -58,7 +61,7 @@
   measure nothing in production while looking like a metric. The saturation signature the RCA
   depends on stays visible in `candidate_count_max` and `multiple_exact_llm`. Dedupe-prompt sizes
   are recorded per batch and per section -- entities, candidates including their attributes, the
-  episode, and previous episodes.
+  episode, and previous episodes including their serialized timestamps.
 - **An ambiguous refusal is now recorded before it raises**, and observe mode no longer fails
   the episode: the outcome an operator most needs during an observation window was the only one
   producing no telemetry.

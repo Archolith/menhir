@@ -1153,10 +1153,16 @@ def _measure_prompt_sections(
         for i, c in enumerate(candidate_nodes)
     ]
     episode_content = getattr(episode, "content", "") if episode is not None else ""
-    previous_context = [
-        {"content": getattr(ep, "content", ""), "timestamp": None}
-        for ep in (previous_episodes if isinstance(previous_episodes, (list, tuple)) else [])
-    ]
+    previous_context = []
+    for ep in (previous_episodes if isinstance(previous_episodes, (list, tuple)) else []):
+        valid_at = getattr(ep, "valid_at", None)
+        try:
+            timestamp = valid_at.isoformat() if valid_at else None
+        except Exception:  # noqa: BLE001 - measurement must not break ingest
+            timestamp = None
+        previous_context.append(
+            {"content": getattr(ep, "content", ""), "timestamp": timestamp}
+        )
 
     entity_chars = _size(extracted_context)
     candidate_chars = _size(existing_context)

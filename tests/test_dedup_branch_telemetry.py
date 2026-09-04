@@ -195,6 +195,29 @@ def test_prompt_sections_count_the_episode_and_previous_episodes():
 
 
 @pytest.mark.unit
+def test_prompt_sections_count_previous_episode_timestamps():
+    """Graphiti serializes ``valid_at.isoformat()`` into every history item. Omitting it made a
+    timestamped history measure identically to one without timestamps."""
+    from menhir.infrastructure.graphiti_model_patches import _measure_prompt_sections
+
+    without_timestamp = _measure_prompt_sections(
+        [], [], None, None, [SimpleNamespace(content="same", valid_at=None)]
+    )
+    with_timestamp = _measure_prompt_sections(
+        [],
+        [],
+        None,
+        None,
+        [SimpleNamespace(content="same", valid_at=datetime(2026, 9, 4, tzinfo=timezone.utc))],
+    )
+
+    assert (
+        with_timestamp["previous_episode_chars"]
+        > without_timestamp["previous_episode_chars"]
+    )
+
+
+@pytest.mark.unit
 def test_prompt_measurement_never_raises_on_malformed_input():
     """It runs per dedupe batch in the ingest path."""
     from menhir.infrastructure.graphiti_model_patches import _measure_prompt_sections

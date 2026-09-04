@@ -616,8 +616,11 @@ subject, so that raises `AmbiguousSelfBindingError` and writes nothing.
 is correct and does nothing, rather than plausible and occasionally catastrophic. Making it do
 something requires **per-node subject provenance from extraction** -- each node's source span plus
 whether that span is quoted or reported speech -- which is a plan-level gap, not a tuning question.
-`ordinary_user_entity` and `first_person_without_authority` in observe mode size exactly what that
-work would buy.
+The production construction surface is pinned by an AST census: two context constructions inside
+the sole factory, one factory call at Graphiti dispatch, and no executable
+`EXPLICIT_SELF_SUBJECT` producer. `self_like_unresolved` and `first_person_unresolved` in observe
+mode count the population needing classification. They do **not** say which nodes provenance would
+ultimately bind; first-person quoted speech is explicitly part of that upper bound.
 
 **Persisting the canonical node.** Graphiti saves a resolved node with `SET n = $entity_data`,
 which REPLACES the property map. The bypass therefore commits the STORED canonical node when one

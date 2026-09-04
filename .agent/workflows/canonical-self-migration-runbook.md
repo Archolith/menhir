@@ -10,6 +10,9 @@ document and cannot be performed with the tooling in the repository today.
 
 Background: `.agent/plans/menhir-scanner-generic-entity-recall-pollution-rca.md` (accepted RCA) and
 `.agent/plans/menhir-canonical-self-remediation-plan.md` in the workspace meta-repo.
+The 2026-09-04 observation corrections are in
+`.agent/plans/menhir-canonical-self-observation-correction-2026-09-04.md`; they supersede the
+parent plan's node-authority, score-bound, and historical-population assumptions.
 
 ## What is live
 
@@ -34,21 +37,23 @@ Treat this as a durable-write-semantics change, not an app-only config flip.
 
    | Field | What it tells you |
    |---|---|
-   | `outcome` | `bound` / `not_eligible` / `no_self_candidate` / `ordinary_user_entity` / `ambiguous` |
-   | `ordinary_user_entity` | self-alias entities in a trusted turn that binding declined for lack of a declared subject. **Expect this to be every self-bearing episode**, since nothing emits `EXPLICIT_SELF_SUBJECT` today. Its volume is the size of the prize for building per-node subject provenance. |
-   | `first_person_without_authority` | the subset of those that were first-person. The sharper number: how many binds a span/attribution signal from extraction would enable. |
+   | `outcome` | `bound` / `not_eligible` / `no_self_candidate` / `self_like_unresolved` / `ambiguous` |
+   | `self_like_unresolved` | self-alias entities in a trusted turn that binding declined for lack of a declared subject. This is an unresolved candidate count, not proof that a node is either the human or a generic user. |
+   | `first_person_unresolved` | the first-person subset. This is an upper bound for provenance work, not a bind forecast: quoted or reported speech may remain non-self. |
    | `bound` (non-zero) | a producer has started declaring self subjects. Find out which, and what it actually proves, BEFORE trusting the count. |
    | `ambiguous` | two declared aliases in one payload; binding refused and wrote nothing. |
-   | `self_like_without_evidence` | self-alias entities that did NOT bind, on any outcome |
+   | `self_like_without_subject_authority` | self-alias entities that did NOT bind, on any outcome; it makes no disposition claim |
    | `evidence_kind`, `speaker_role`, `source_kind` | why the decision went that way |
 
    Ambiguous refusals are recorded before they raise, and in `observe` they do not fail the
    episode -- observing must never change ingest success.
 
-3. **The gate is `self_like_without_evidence`.** A persistently non-zero count means self-like
-   entities are still being minted outside the trusted path and are still fragmenting recall.
-   Understand them by producer and source before enforcing. Zero known false-positive binds is the
-   activation requirement.
+3. **The observation population is `self_like_without_subject_authority`.** A persistently
+   non-zero count means extraction is still emitting self-like labels that this subsystem cannot
+   classify. It does not prove those nodes are human-self forks or generic-user entities. Break it
+   down by producer and source, then inspect provenance before making either disposition. Zero
+   known false-positive binds remains an activation requirement, but this count alone cannot meet
+   it.
 4. **Watch the dedup branch counters** (component `graphiti_dedup`, events
    `deterministic_resolution_branches` and `resolution_outcomes`). `multiple_exact_llm` staying
    high for a name means that name's candidate window is saturated — the exact condition that
@@ -56,7 +61,7 @@ Treat this as a durable-write-semantics change, not an app-only config flip.
    Per-candidate cosine scores are deliberately absent: graphiti's search ranks by score and then
    drops it from the returned record, so any reported bound would have been measured from
    embeddings that are `None` in production. `llm_prompt_*` sizes the dedupe prompt by section
-   (entities, candidates with attributes, episode, previous episodes).
+   (entities, candidates with attributes, episode, previous episodes including timestamps).
 5. **Do not set `enforce` expecting it to prevent forks today.** With no `EXPLICIT_SELF_SUBJECT`
    producer, `enforce` and `off` are behaviorally identical — the flag is ready for a mechanism
    whose evidence source does not exist yet. Build per-node subject provenance first; until then
@@ -136,3 +141,5 @@ list contains no `/tmp` path.
 7. Telemetry carries enums, counts and UUIDs — never memory text or arbitrary entity names.
 8. A canonical-node read failure -- or a missing driver -- is an error, never "absent". Falling
    back on either would let graphiti's replacing save erase the stored node.
+9. The producer census is structural, not sample-based. Any new context constructor, factory
+   caller, or executable `EXPLICIT_SELF_SUBJECT` reference requires an explicit contract review.
