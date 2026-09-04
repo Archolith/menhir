@@ -1636,6 +1636,11 @@ def _resolve_valid_time(
 #: case; the rest are defensive. This is an EXACT allowlist, NEVER a prefix — a possessed object like
 #: "my car" (subject="my car") and every NAMED third party fall through to ordinary entity binding and
 #: can therefore never bind to self.
+#: DOMAIN: scalar-proposal ``subject_text``. Deliberately NARROWER than the extraction-time set in
+#: ``graphiti_extraction_patches`` (which adds "my"/"mine"): those are plausible entity NAMES but not
+#: plausible SUBJECTS -- a proposal with subject "my" is malformed, and admitting it would bind
+#: garbage to the human. Do not "unify" these three sets; they answer different questions over
+#: different inputs. See ``domain/self_identity.SELF_ALIASES``.
 SELF_TOKENS = frozenset({"user", "the user", "i", "me", "myself"})
 
 #: Canonical display for a self-bound subject. Matches the extraction prompt's subject convention so a

@@ -111,12 +111,19 @@ GATE_APPROVED_HUMAN_SOURCES = frozenset({"user", "manual"})
 #: Normalized names that *may* denote the human, consulted ONLY after trusted evidence exists.
 #: Membership here is never itself evidence -- see :func:`is_self_alias`.
 #:
-#: This mirrors the extraction-time set in ``graphiti_extraction_patches`` (third-person plus
-#: first-person), which governs the same seam this identity contract binds at. Two other
-#: divergent sets exist today -- ``typed_scalar_rules.SELF_TOKENS`` (no ``my``/``mine``) and
-#: ``event_consolidation._SELF_TOKENS`` (adds ``speaker``). They are deliberately NOT rewired
-#: here: consolidating them changes behavior in three subsystems and is out of scope for this
-#: change. Recorded in the Phase 0 baseline as follow-up work.
+#: DOMAIN: extracted entity NAMES, mirroring ``graphiti_extraction_patches``, which governs the
+#: same seam this contract binds at.
+#:
+#: Two other self-token sets exist and are **deliberately different, not drift**. They answer
+#: different questions over different inputs, so unifying them would widen admission in three
+#: subsystems -- each widening a chance to bind something that is not the human:
+#:
+#: - ``typed_scalar_rules.SELF_TOKENS`` -- scalar-proposal ``subject_text``. Omits ``my``/``mine``
+#:   because those are plausible entity names but malformed subjects.
+#: - ``event_consolidation._SELF_TOKENS`` -- event-proposal subject. Adds ``speaker``, which only
+#:   that producer emits; admitting it here would bind an entity named "speaker" to the human.
+#:
+#: Do not merge them.
 SELF_ALIASES = frozenset({"user", "the user", "i", "me", "my", "mine", "myself"})
 
 

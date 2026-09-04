@@ -399,6 +399,9 @@ _SELF_ENTITY_NAME = "user"
 
 #: Labels denoting the HUMAN. Third-person ("user") is how gpt-4o-mini actually writes the speaker;
 #: first-person is included for extractors that phrase it that way.
+#: DOMAIN: extracted entity NAMES. Includes "my"/"mine" because an extractor can emit them as an
+#: endpoint name; the scalar and event subject allowlists deliberately exclude them. Three sets, three
+#: questions -- see ``domain/self_identity.SELF_ALIASES`` before changing any of them.
 _SELF_THIRD_PERSON = frozenset({"user", "the user"})
 _SELF_FIRST_PERSON = frozenset({"i", "me", "my", "mine", "myself"})
 _ASSISTANT_POLICY_SELF_LABELS = _SELF_THIRD_PERSON | _SELF_FIRST_PERSON

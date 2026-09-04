@@ -597,8 +597,21 @@ class MemoryGraphAdapter:
 
     def ensure_self_entity(self, namespace: str) -> str:
         """Idempotently MERGE the canonical per-namespace self :Entity and return its (deterministic)
-        uuid — the binding target for first-person typed-scalar assertions (C.4.3 canonical self)."""
+        uuid — the binding target for first-person typed-scalar assertions (C.4.3 canonical self).
+
+        NON-DESTRUCTIVE. Creates or updates only the canonical target. Pre-existing forks are
+        reported, never absorbed; see `EpisodeLifecycleRepository.ensure_self_entity`."""
         return self._episodes.ensure_self_entity(namespace)
+
+    def detect_self_forks(self, namespace: str) -> list[str]:
+        """Read-only inventory of same-named self forks for `namespace`.
+
+        Discovery is deliberately separate from consolidation: this reports what an operator-only,
+        journaled migration would have to consider, and mutates nothing."""
+        return self._episodes.detect_self_forks(
+            namespace=namespace,
+            self_uuid=self._episodes.ensure_self_entity(namespace),
+        )
 
     def stamp_ingest_metadata(
         self,

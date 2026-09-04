@@ -8,6 +8,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
+from menhir.domain.namespace import namespace_to_group_id
 from menhir.domain.self_identity import self_uuid_for_namespace
 from menhir.domain.utils import source_confidence_for
 from menhir.infrastructure.cypher import (
@@ -865,12 +866,9 @@ class EpisodeLifecycleRepository:
         through the perception self-seam, not lexical MENTIONS matching, so no per-episode `user` node is
         ever minted. Marked `is_self` + `entity_role='self'` for provenance/observability.
 
-        ABSORBS an extraction-minted twin (`_absorb_self_entity_forks`). Extraction now names the self
-        endpoint explicitly so a first-person edge survives, which mints a SECOND `user` :Entity — and
-        the two creators are independent, so every namespace where both fire forks deterministically.
-        Left alone, the user's facts accumulate on the extraction node while Views anchor to this one,
-        splitting one identity in half. Absorbing here rather than in a repair pass means the two never
-        coexist: whichever creator runs second folds into this uuid."""
+NON-DESTRUCTIVE. It creates or updates the canonical target and nothing else. If same-named
+        forks exist it REPORTS them (`SELF_FORKS_REQUIRE_MIGRATION`) and leaves them untouched;
+        consolidating them is an operator-only, journaled migration, never a side effect of a write."""
         if not namespace:
             raise ValueError("ensure_self_entity requires a non-empty namespace")
         self_uuid = self_uuid_for_namespace(namespace)
@@ -880,7 +878,7 @@ class EpisodeLifecycleRepository:
             ON CREATE SET n.created_at = datetime(), n.summary = $summary
             SET n.name = $name,
                 n.namespace = $namespace,
-                n.group_id = $namespace,
+                n.group_id = $group_id,
                 n.is_self = true,
                 n.entity_role = 'self'
             """,
@@ -888,124 +886,63 @@ class EpisodeLifecycleRepository:
                 "self_uuid": self_uuid,
                 "name": _SELF_ENTITY_NAME,
                 "namespace": namespace,
+                # Logical `default` maps to physical "". Writing the logical name here is the
+                # activation hazard the RCA recorded: it would target a partition holding none of
+                # the production data.
+                "group_id": namespace_to_group_id(namespace),
                 "summary": "Canonical first-person self identity for this namespace.",
             },
         )
-        self._absorb_self_entity_forks(namespace=namespace, self_uuid=self_uuid)
+        forks = self.detect_self_forks(namespace=namespace, self_uuid=self_uuid)
+        if forks:
+            # DO NOT absorb here. The old path bulk-rewired and DETACH DELETEd every same-named
+            # node, which is lossy (it drops fork-to-canonical edges as "split artifacts") and
+            # cannot be reviewed or undone. Consolidation is now an operator-only, journaled
+            # migration driven by an approved UUID manifest -- never a side effect of a write.
+            logger.warning(
+                "SELF_FORKS_REQUIRE_MIGRATION namespace=%s canonical=%s forks=%d",
+                namespace, self_uuid, len(forks),
+            )
         return self_uuid
 
-    def _absorb_self_entity_forks(self, *, namespace: str, self_uuid: str) -> int:
-        """Fold any extraction-minted `user` :Entity in `namespace` into the canonical self node.
+    def detect_self_forks(self, *, namespace: str, self_uuid: str) -> list[str]:
+        """Return the uuids of same-named self forks in `namespace`. READ ONLY.
 
-        Recall resolves a first-person query's subject by computing `uuid5("menhir-self:<ns>")` with NO
-        database read (recall_pipeline G17), so the canonical uuid is fixed and the twin is what has to
-        move -- not the other way round.
+        Replaces `_absorb_self_entity_forks`, which rewired every incident relationship and ended
+        in `DETACH DELETE` as a side effect of an ordinary write. That was lossy and unreviewable:
+        its `m.uuid <> $self_uuid` predicates deliberately DROPPED fork-to-canonical relationships
+        as "split artifacts". Consolidation is now an operator-only, journaled migration driven by
+        an approved UUID manifest, and its relationship contract preserves exactly those edges --
+        so that Cypher must not be revived, adapted, or used as a migration template.
 
-        Carries the twin's `name_embedding` and richer summary across BEFORE deleting it. This is not
-        cosmetic: the canonical node is written by raw Cypher and has no embedding, so it is invisible
-        to semantic search. Folding an embedded node into an unembedded one without carrying the vector
-        would move every fact the user stated onto a node recall cannot find -- strictly worse than the
-        fork. Returns the number of twins absorbed.
+        Transitional read: accepts BOTH physical spellings. The old writer stamped
+        `group_id = $namespace`, so a `default` namespace wrote group "default", while the
+        namespace SSOT maps `default` -> "". Detection must see forks under either.
 
-        Matches ONLY the exact canonical name. `:Entity` nodes carrying `is_view`/`is_quantstate` are
-        never touched: a View is a projection, and absorbing one would fold a derived answer into the
-        subject it describes.
+        Matches only the exact canonical name, and never `is_view`/`is_quantstate` nodes: a View is
+        a projection, and folding one into the subject it describes would destroy a derived answer.
         """
-        forks = [
+        group_ids = [namespace_to_group_id(namespace)]
+        if namespace not in group_ids:
+            group_ids.append(namespace)
+        return [
             str(row["uuid"])
             for row in self.neo4j.execute(
                 f"""
                 MATCH (f:Entity)
-                WHERE f.group_id = $namespace AND f.uuid <> $self_uuid
+                WHERE f.group_id IN $group_ids AND f.uuid <> $self_uuid
                       AND toLower(f.name) = $name
                       AND {non_derived_view_cypher("f")}
                 RETURN f.uuid AS uuid
                 """,
-                params={"namespace": namespace, "self_uuid": self_uuid, "name": _SELF_ENTITY_NAME},
+                params={
+                    "group_ids": group_ids,
+                    "self_uuid": self_uuid,
+                    "name": _SELF_ENTITY_NAME,
+                },
             )
             if row.get("uuid")
         ]
-        if not forks:
-            return 0
-
-        # Identity first: the embedding and the accumulated summary are what make the surviving node
-        # findable. `properties(r)` copies graphiti's edge payload verbatim (uuid, fact, fact_embedding,
-        # episodes, valid_at/invalid_at) -- rewiring an entity edge without it would keep the shape of
-        # the graph and lose the fact it carried.
-        self.neo4j.execute(
-            """
-            MATCH (c:Entity {uuid: $self_uuid})
-            MATCH (f:Entity) WHERE f.uuid IN $forks
-            WITH c, f ORDER BY size(coalesce(f.summary, '')) DESC LIMIT 1
-            SET c.name_embedding = coalesce(c.name_embedding, f.name_embedding),
-                c.labels          = coalesce(c.labels, f.labels),
-                c.source          = coalesce(c.source, f.source),
-                c.source_confidence = coalesce(c.source_confidence, f.source_confidence),
-                c.summary = CASE
-                    WHEN size(coalesce(f.summary, '')) > size(coalesce(c.summary, '')) THEN f.summary
-                    ELSE c.summary END
-            """,
-            params={"self_uuid": self_uuid, "forks": forks},
-        )
-        # `:RELATES_TO` carries TWO unrelated edge families and they cannot be rewired the same way:
-        #   * graphiti FACT edges -- uuid, fact, fact_embedding, episodes, valid_at. Keyed by uuid.
-        #   * menhir CORRELATION edges -- weight, bridged_from, last_traversed. NO uuid at all.
-        # A uuid-keyed MERGE crashes on the second family ("null property value for 'uuid'"), and a
-        # bare `MERGE (c)-[:RELATES_TO]->(m)` for them would MATCH an existing FACT edge between the
-        # same pair and overwrite it with correlation properties -- destroying the fact. So the
-        # identified family MERGEs on its identity and the anonymous family is CREATEd outright.
-        # CREATE cannot duplicate on replay: the twin is deleted in this same call, so there is never
-        # a second pass with edges left to move.
-        for statement in (
-            # Outgoing entity edges. Self-loops are dropped: an edge from the twin BACK to the canonical
-            # node describes the user relating to themselves, which is an artifact of the split.
-            """
-            MATCH (f:Entity)-[r:RELATES_TO]->(m)
-            WHERE f.uuid IN $forks AND m.uuid <> $self_uuid AND r.uuid IS NOT NULL
-            MATCH (c:Entity {uuid: $self_uuid})
-            MERGE (c)-[r2:RELATES_TO {uuid: r.uuid}]->(m)
-            SET r2 = properties(r)
-            """,
-            """
-            MATCH (f:Entity)-[r:RELATES_TO]->(m)
-            WHERE f.uuid IN $forks AND m.uuid <> $self_uuid AND r.uuid IS NULL
-            MATCH (c:Entity {uuid: $self_uuid})
-            CREATE (c)-[r2:RELATES_TO]->(m)
-            SET r2 = properties(r)
-            """,
-            """
-            MATCH (m)-[r:RELATES_TO]->(f:Entity)
-            WHERE f.uuid IN $forks AND m.uuid <> $self_uuid AND r.uuid IS NOT NULL
-            MATCH (c:Entity {uuid: $self_uuid})
-            MERGE (m)-[r2:RELATES_TO {uuid: r.uuid}]->(c)
-            SET r2 = properties(r)
-            """,
-            """
-            MATCH (m)-[r:RELATES_TO]->(f:Entity)
-            WHERE f.uuid IN $forks AND m.uuid <> $self_uuid AND r.uuid IS NULL
-            MATCH (c:Entity {uuid: $self_uuid})
-            CREATE (m)-[r2:RELATES_TO]->(c)
-            SET r2 = properties(r)
-            """,
-            # Episode provenance: which episodes mentioned the self.
-            """
-            MATCH (e:Episodic)-[:MENTIONS]->(f:Entity) WHERE f.uuid IN $forks
-            MATCH (c:Entity {uuid: $self_uuid})
-            MERGE (e)-[:MENTIONS]->(c)
-            """,
-            """
-            MATCH (f:Entity) WHERE f.uuid IN $forks
-            DETACH DELETE f
-            """,
-        ):
-            self.neo4j.execute(
-                statement, params={"self_uuid": self_uuid, "forks": forks}
-            )
-        logger.info(
-            "Absorbed %d extraction-minted self entit%s into the canonical self namespace=%s",
-            len(forks), "y" if len(forks) == 1 else "ies", namespace,
-        )
-        return len(forks)
 
     def lookup_entities_by_normalized_names(
         self, namespace: str, spellings: list[str],

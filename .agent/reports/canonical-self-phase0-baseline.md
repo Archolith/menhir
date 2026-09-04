@@ -299,3 +299,62 @@ inventory, and the disposition of every producer.
 the `off | observe | enforce` bind mode. Both are required before Phase 2's exit gate is met. The
 bind mode is most naturally added with Phase 3's binding seam, since there is nothing to gate
 until binding exists.
+
+---
+
+# Phases 1-4 — implementation record
+
+| Phase | Commit | State |
+|---|---|---|
+| 1 identity primitives | `7410b34d` | complete |
+| 2 evidence propagation | `e1bc6626`, `648c45d5` | complete except observe-telemetry |
+| 3 deterministic binding | `d49c1dd9`, `d7a50e9f` | complete, ships `off` |
+| 4 absorber neutralization | pending commit | complete |
+
+## Decisions taken
+
+**Self-alias sets are NOT consolidated (approved).** The three sets answer different questions
+over different inputs, so merging them would widen admission in three subsystems:
+
+| Set | Domain | Distinguishing tokens |
+|---|---|---|
+| `graphiti_extraction_patches` | extracted entity *names* | has `my`, `mine` |
+| `typed_scalar_rules.SELF_TOKENS` | scalar proposal `subject_text` | omits `my`/`mine` (malformed as subjects) |
+| `event_consolidation._SELF_TOKENS` | event proposal subject | adds `speaker` (only that producer emits it) |
+
+Each definition now carries a comment naming its domain and forbidding the merge.
+
+**Phase 4 scope extended (approved)** to `memory_graph_adapter.ensure_self_entity` -- the surface
+every caller actually binds to -- and the `EventConsolidationGraph` Protocol they type-check
+against. Neither is named in the plan; without both, callers keep the old single-method contract.
+
+## Phase 4 changes
+
+- `_absorb_self_entity_forks` **deleted**, not merely unreferenced. Its `DETACH DELETE` and the
+  `m.uuid <> $self_uuid` predicates that dropped fork-to-canonical edges are gone from executable
+  Cypher; a test parses the module's AST and fails if either returns to a query literal (prose
+  mentions are allowed and deliberate).
+- `detect_self_forks()` replaces it: read-only, returns uuids, mutates nothing.
+- `ensure_self_entity` now reports `SELF_FORKS_REQUIRE_MIGRATION` and leaves forks untouched.
+- **Mapping hazard fixed** (only after the destructive path was gone, per plan sequencing): the
+  canonical write used `group_id = $namespace`, so logical `default` would have created the node
+  in group `"default"` -- a partition holding none of the production data. Now uses
+  `namespace_to_group_id()`.
+- Detection reads **both** physical spellings (`""` and the logical name), because the old writer's
+  forks live under the wrong one; a single-spelling read would report zero forks on exactly the
+  population that has them.
+- `scripts/replay_fold_flags.py` needs no change: it reaches only the adapter, and the absorber no
+  longer exists, so its non-destructiveness is structural rather than conventional.
+
+Tests cover 0, 1, 2, 15 and 70 forks (the production-shaped count) and assert the *absence* of
+writes rather than the presence of a result.
+
+## Open
+
+- Phase 2 observe-only telemetry for self-like extractions lacking trusted evidence.
+- Phase 5 observability (dedup branch counters).
+- Phases 7-11 remain blocked on the census and restored-copy rehearsal, per the plan.
+- `test_concurrent_enrichment_parallelizes_across_namespaces` asserts exact `peak == 3` and is
+  load-sensitive: 2 failures across 31 runs on this tree, 0 across 12 on baseline, but 20/20 in
+  isolation and the change adds 1.15us per episode. Pre-existing fragility, not a regression;
+  worth loosening or marking `timing`.
