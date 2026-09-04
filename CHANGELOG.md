@@ -28,18 +28,21 @@
 
 ## 2026-09-04 - close six review findings on the canonical-self prevention path
 
-- **Binding now requires node-level subject authority, not just a proven author.** Trusted
+- **Binding now requires a DECLARED node-level subject, and nothing else qualifies.** Trusted
   evidence proves who AUTHORED an episode; it never proves which extracted entity that author is.
-  A first-person name (`I`, `me`, `my`) in a trusted human turn does prove it, by grammar. A
-  third-person `user` does not -- it is as likely to be an RBAC role, a `users` table, or the
-  person a support turn is about -- so it now stays an ordinary entity and is counted under the
-  new `ordinary_user_entity` outcome. Two proving nodes in one payload raise
-  `AmbiguousSelfBindingError` and write nothing, leaving the episode retryable.
-  This narrows the mechanism: third-person `user` extractions, which are most of the existing
-  fork population, are no longer prevented at write time. Folding a foreign subject into the
-  canonical identity is the one outcome no later migration can separate, so declining is the
-  correct trade -- and `EXPLICIT_SELF_SUBJECT` is the declared extension point for a producer that
-  can vouch for a third-person subject.
+  Three successive rules tried to answer the second question from the entity's name -- the literal
+  string `user`, then an arity guard, then first-person grammar -- and each has a counterexample
+  inside a valid human turn, the last being reported speech (`She told me, "I will handle it"`
+  extracts an `I` who is someone else). All three made the same mistake: treating a property of
+  the extracted STRING as a fact about its PROVENANCE. Only `EXPLICIT_SELF_SUBJECT`, a trusted
+  internal caller declaring the episode's subject to be the owner, now binds; two declared aliases
+  in one payload raise `AmbiguousSelfBindingError` and write nothing.
+  **No production producer emits that declaration, so the prevention path is inert**: `enforce`
+  and `off` are currently behaviorally identical. That is deliberate -- correct and doing nothing
+  beats plausible and occasionally catastrophic -- but it means preventing forks needs per-node
+  subject provenance from extraction (each node's source span, and whether it is quoted speech),
+  which does not exist. The new `ordinary_user_entity` outcome and `first_person_without_authority`
+  counter size that work in observe mode.
 - **A missing driver or a failed canonical-node read is no longer treated as "absent".** Graphiti saves with
   `SET n = $entity_data`, which replaces the property map, so falling back to the sparse extracted
   node on a transient driver error would let a later write erase the stored node's markers,
@@ -49,10 +52,13 @@
   supplies neither, so no structural reader would have recognized the node just created.
 - **Resolution telemetry now covers the LLM outcomes**, not only deterministic similarity:
   `llm_selected_candidate`, `llm_selected_new`, `no_candidates_new`, unresolved count,
-  candidate-count bounds, embedding model and dimension. Candidate cosine bounds are now
-  MEASURED from the two name embeddings, since graphiti's search discards the score it ranked by,
-  and the event reports how many pairs were measurable. Dedupe-prompt section sizes are recorded
-  per batch.
+  candidate-count bounds, embedding model and dimension. Per-candidate cosine scores are NOT
+  recorded: graphiti's search ranks by score and then drops it, omitting `name_embedding` from the
+  returned record and popping it from `attributes`, so a measurement taken here would silently
+  measure nothing in production while looking like a metric. The saturation signature the RCA
+  depends on stays visible in `candidate_count_max` and `multiple_exact_llm`. Dedupe-prompt sizes
+  are recorded per batch and per section -- entities, candidates including their attributes, the
+  episode, and previous episodes.
 - **An ambiguous refusal is now recorded before it raises**, and observe mode no longer fails
   the episode: the outcome an operator most needs during an observation window was the only one
   producing no telemetry.

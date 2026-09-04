@@ -67,6 +67,8 @@ def test_corpus_covers_every_category_the_plan_names():
     """A corpus missing its controls proves only that binding works, never that it is narrow."""
     required = {
         "ambiguous_subject",
+        "explicit_self_subject",
+        "quoted_speech",
         "trusted_user_turn",
         "assistant_echo",
         "project_scan",

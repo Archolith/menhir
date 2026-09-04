@@ -592,25 +592,32 @@ orphan the episode's facts.
 | Question | Answered by | Evidence |
 |---|---|---|
 | Who wrote this episode? | `eligible_self_evidence` | gate-approved persisted `source` |
-| Which extracted node IS that author? | `proves_self_subject` | the node's grammatical person |
+| Which extracted node IS that author? | `proves_self_subject` | a DECLARED subject, and nothing else |
 
-A first-person node (`I`, `me`, `my`, `mine`, `myself`) inside a turn whose author is proven names
-that author by grammar. A third-person `user` / `the user` does not: a human turn can legitimately
-discuss an application/RBAC `user`, a `users` table, or the person a support ticket is about. Those
-stay ordinary entities, take the ordinary Graphiti path, and are recorded under the
-`ordinary_user_entity` outcome. Third-person references bind only under `EXPLICIT_SELF_SUBJECT`,
-where a trusted internal caller vouches for the subject -- the declared extension point, which no
-production producer emits today.
+**No property of the extracted name answers the second question.** Three revisions tried to make
+one answer it, and each had a counterexample inside a perfectly valid human turn:
 
-Two nodes carrying subject authority still cannot both be the author, so that payload raises
-`AmbiguousSelfBindingError` and writes nothing; the episode stays retryable with its text intact.
+| Attempted rule | Counterexample |
+|---|---|
+| the literal name `user` | an RBAC role, a `users` table, the customer a support turn is about |
+| more than one self alias is ambiguous, one is proof | a lone RBAC `user`, unaccompanied |
+| first-person grammar proves the author | reported speech: `She told me, "I will handle it"` |
 
-**What this costs, stated plainly.** The existing fork population is named `user`, in the third
-person. Declining those means enforce mode prevents materially fewer new forks than the plan first
-assumed -- it prevents the first-person path and nothing else. That is the deliberate trade:
-binding a foreign subject into the canonical identity is the one outcome no later migration can
-separate. Whether it is worth building per-node authority for third-person references is an
-observe-mode question, answered by the `ordinary_user_entity` count.
+The common error is treating a property of the extracted STRING as a fact about its PROVENANCE. By
+the time binding runs, extraction has discarded the quote boundaries, source spans and speaker
+attribution that would separate these cases, so no name-shaped rule can be sound. Only
+`EXPLICIT_SELF_SUBJECT` -- a trusted internal caller declaring this episode's subject to be the
+owner -- carries node-level authority. Two declared aliases in one payload still cannot both be the
+subject, so that raises `AmbiguousSelfBindingError` and writes nothing.
+
+**Consequence: the prevention path is inert in production.** No producer constructs
+`EXPLICIT_SELF_SUBJECT`, so `proves_self_subject` returns false for every real episode and
+`enforce` would bind nothing. This is deliberate and load-bearing, not an oversight: the mechanism
+is correct and does nothing, rather than plausible and occasionally catastrophic. Making it do
+something requires **per-node subject provenance from extraction** -- each node's source span plus
+whether that span is quoted or reported speech -- which is a plan-level gap, not a tuning question.
+`ordinary_user_entity` and `first_person_without_authority` in observe mode size exactly what that
+work would buy.
 
 **Persisting the canonical node.** Graphiti saves a resolved node with `SET n = $entity_data`,
 which REPLACES the property map. The bypass therefore commits the STORED canonical node when one

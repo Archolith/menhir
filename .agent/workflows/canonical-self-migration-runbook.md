@@ -35,8 +35,10 @@ Treat this as a durable-write-semantics change, not an app-only config flip.
    | Field | What it tells you |
    |---|---|
    | `outcome` | `bound` / `not_eligible` / `no_self_candidate` / `ordinary_user_entity` / `ambiguous` |
-   | `ordinary_user_entity` (repeatedly) | trusted turns are producing third-person `user` entities that binding declines to claim. This is the count that decides whether per-node authority for third-person references is worth building -- and, since the existing fork population is third-person, whether `enforce` prevents anything worth the change. |
-   | `ambiguous` | two nodes both carried subject authority; binding refused and wrote nothing. |
+   | `ordinary_user_entity` | self-alias entities in a trusted turn that binding declined for lack of a declared subject. **Expect this to be every self-bearing episode**, since nothing emits `EXPLICIT_SELF_SUBJECT` today. Its volume is the size of the prize for building per-node subject provenance. |
+   | `first_person_without_authority` | the subset of those that were first-person. The sharper number: how many binds a span/attribution signal from extraction would enable. |
+   | `bound` (non-zero) | a producer has started declaring self subjects. Find out which, and what it actually proves, BEFORE trusting the count. |
+   | `ambiguous` | two declared aliases in one payload; binding refused and wrote nothing. |
    | `self_like_without_evidence` | self-alias entities that did NOT bind, on any outcome |
    | `evidence_kind`, `speaker_role`, `source_kind` | why the decision went that way |
 
@@ -47,10 +49,18 @@ Treat this as a durable-write-semantics change, not an app-only config flip.
    entities are still being minted outside the trusted path and are still fragmenting recall.
    Understand them by producer and source before enforcing. Zero known false-positive binds is the
    activation requirement.
-4. **Watch the dedup branch counters** (component `graphiti_dedup`, event
-   `deterministic_resolution_branches`). `multiple_exact_llm` staying high for a name means that
-   name's candidate window is saturated — the exact condition that fragmented `user`.
-5. Only then set `enforce`.
+4. **Watch the dedup branch counters** (component `graphiti_dedup`, events
+   `deterministic_resolution_branches` and `resolution_outcomes`). `multiple_exact_llm` staying
+   high for a name means that name's candidate window is saturated — the exact condition that
+   fragmented `user` — and `candidate_count_max` pinned at the window limit is the same signal.
+   Per-candidate cosine scores are deliberately absent: graphiti's search ranks by score and then
+   drops it from the returned record, so any reported bound would have been measured from
+   embeddings that are `None` in production. `llm_prompt_*` sizes the dedupe prompt by section
+   (entities, candidates with attributes, episode, previous episodes).
+5. **Do not set `enforce` expecting it to prevent forks today.** With no `EXPLICIT_SELF_SUBJECT`
+   producer, `enforce` and `off` are behaviorally identical — the flag is ready for a mechanism
+   whose evidence source does not exist yet. Build per-node subject provenance first; until then
+   `observe` is the only mode worth running, and only to size that work.
 
 ### Rollback asymmetry
 
@@ -119,7 +129,9 @@ list contains no `/tmp` path.
 4. A proven self causes zero candidate searches and zero dedup-LLM calls.
 5. Ambiguous evidence fails visibly and retryably, never by picking one. Proving who authored an
    episode never proves which extracted node is that author: that is a separate, node-level
-   question (`proves_self_subject`), and without an answer to it the payload does not bind.
+   question (`proves_self_subject`), and without an answer to it the payload does not bind. No
+   property of the extracted NAME can answer it — not the literal string, not its grammatical
+   person — because a name is not provenance.
 6. Runtime paths never delete or absorb forks.
 7. Telemetry carries enums, counts and UUIDs — never memory text or arbitrary entity names.
 8. A canonical-node read failure -- or a missing driver -- is an error, never "absent". Falling

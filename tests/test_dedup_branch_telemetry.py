@@ -156,51 +156,51 @@ def test_outcome_telemetry_never_raises():
 
 
 @pytest.mark.unit
-def test_candidate_score_bounds_are_measured_not_inferred():
-    """Graphiti's candidate search discards the cosine score it ranked by, so the bound is
-    measured here from the two name embeddings. The RCA's mechanism is a window saturated at
-    cosine 1.0; that signature has to be visible in telemetry to be attributable."""
-    from menhir.infrastructure.graphiti_model_patches import _candidate_score_bounds
-
-    extracted = _node("user", "e1")
-    extracted.name_embedding = [1.0, 0.0]
-    identical = _node("user", "c1")
-    identical.name_embedding = [1.0, 0.0]
-    orthogonal = _node("Rachel", "c2")
-    orthogonal.name_embedding = [0.0, 1.0]
-
-    low, high, measured = _candidate_score_bounds([extracted], [[identical, orthogonal]])
-
-    assert measured == 2
-    assert high == pytest.approx(1.0)
-    assert low == pytest.approx(0.0)
-
-
-@pytest.mark.unit
-def test_unmeasurable_candidates_report_zero_pairs_not_a_zero_score():
-    """Candidates hydrated without name_embedding are unmeasurable. Reporting 0.0 would read as
-    'no similar candidates', which is the opposite of what an unmeasured window means."""
-    from menhir.infrastructure.graphiti_model_patches import _candidate_score_bounds
-
-    low, high, measured = _candidate_score_bounds([_node("user", "e1")], [[_node("user", "c1")]])
-
-    assert (low, high, measured) == (None, None, 0)
-
-
-@pytest.mark.unit
-def test_prompt_sections_size_the_fields_graphiti_serializes():
+def test_prompt_sections_count_candidate_attributes():
+    """REVIEW P2. Measuring only name/labels/summary undercounts by whatever matters most: a
+    candidate carrying a 1,000-character attribute was reported as nine characters, so the number
+    could not answer what is actually filling a saturated dedupe prompt."""
     from menhir.infrastructure.graphiti_model_patches import _measure_prompt_sections
 
     candidate = _node("Rachel", "c1")
     candidate.summary = "x" * 500
+    candidate.attributes = {"bio": "y" * 1000}
 
     sizes = _measure_prompt_sections([_node("user", "e1")], [candidate])
 
+    assert sizes["candidate_chars"] > 1000, "the candidate attribute was not counted"
+    # ...while the summary is still sliced to 120 in the prompt, so the full 500 is NOT counted.
+    assert sizes["candidate_chars"] < 1000 + 500
+
+
+@pytest.mark.unit
+def test_prompt_sections_count_the_episode_and_previous_episodes():
+    """The other half of the undercount: both were omitted entirely."""
+    from types import SimpleNamespace
+
+    from menhir.infrastructure.graphiti_model_patches import _measure_prompt_sections
+
+    sizes = _measure_prompt_sections(
+        [_node("user", "e1")],
+        [],
+        None,
+        SimpleNamespace(content="e" * 300),
+        [SimpleNamespace(content="p" * 200, valid_at=None)],
+    )
+
+    assert sizes["episode_chars"] >= 300
+    assert sizes["previous_episode_count"] == 1
+    assert sizes["previous_episode_chars"] >= 200
+    assert sizes["total_chars"] >= sizes["episode_chars"] + sizes["previous_episode_chars"]
+
+
+@pytest.mark.unit
+def test_prompt_measurement_never_raises_on_malformed_input():
+    """It runs per dedupe batch in the ingest path."""
+    from menhir.infrastructure.graphiti_model_patches import _measure_prompt_sections
+
+    sizes = _measure_prompt_sections([object()], [object()], object(), object(), object())
     assert sizes["entity_count"] == 1
-    assert sizes["candidate_count"] == 1
-    # The candidate summary is sliced to 120 characters in the dedupe prompt, so the measurement
-    # must not report the full 500.
-    assert sizes["candidate_chars"] == len("Rachel") + 120
 
 
 @pytest.mark.unit
@@ -223,12 +223,27 @@ def test_outcome_event_carries_the_score_and_prompt_fields(monkeypatch):
         [],
         _state([None], []),
         set(),
-        [{"entity_count": 1, "entity_chars": 4, "candidate_count": 15, "candidate_chars": 900}],
+        [
+            {
+                "entity_count": 1,
+                "entity_chars": 100,
+                "candidate_count": 15,
+                "candidate_chars": 900,
+                "episode_chars": 200,
+                "previous_episode_count": 0,
+                "previous_episode_chars": 0,
+                "total_chars": 1200,
+            }
+        ],
     )
 
     d = recorded[0]
-    assert d["candidate_scores_measured"] == 0
-    assert d["candidate_score_max"] is None
     assert d["llm_prompt_batches"] == 1
     assert d["llm_prompt_candidate_count_max"] == 15
     assert d["llm_prompt_candidate_chars_max"] == 900
+    assert d["llm_prompt_total_chars_max"] == 1200
+    # Per-candidate cosine scores are deliberately NOT here: graphiti's search discards the score
+    # it ranked by, so any value would have been measured from embeddings that are None in
+    # production. The saturation signature stays visible in candidate_count_max.
+    assert "candidate_score_max" not in d
+    assert "candidate_count_max" in d

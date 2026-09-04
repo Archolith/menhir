@@ -39,9 +39,7 @@ def _node(uuid: str, name: str):
 def receipt_with_bound_self():
     """An active receipt whose self binding already succeeded, as the resolver would find it."""
     try:
-        ctx = self_context_for_pending_episode(
-            source="user", namespace="default", episode_uuid="ep-1"
-        )
+        ctx = _declared(episode_uuid="ep-1")
         receipt = begin_extraction_receipt("ep-1", "body", self_identity=ctx)
         nodes = [_node("rand-1", "I")]
         receipt.self_bind_result = bind_canonical_self(nodes, [], {}, ctx)
@@ -57,6 +55,25 @@ def test_bound_self_is_visible_to_the_resolver(receipt_with_bound_self):
     receipt, _ = receipt_with_bound_self
     assert receipt.self_bind_result.bound is True
     assert _pre_resolved_self_uuid() == self_uuid_for_namespace("default")
+
+
+
+def _declared(namespace: str = "default", episode_uuid: str = "ep"):
+    """A declared self subject: the only evidence that binds, so the only way to exercise the
+    resolver bypass at all."""
+    from menhir.domain.self_identity import (
+        SelfEvidenceKind,
+        SelfIdentityContext,
+        SpeakerRole,
+    )
+
+    return SelfIdentityContext(
+        namespace=namespace,
+        speaker_role=SpeakerRole.USER,
+        evidence_kind=SelfEvidenceKind.EXPLICIT_SELF_SUBJECT,
+        source_kind="manual",
+        episode_uuid=episode_uuid,
+    )
 
 
 @pytest.mark.unit
@@ -124,7 +141,7 @@ async def _resolve(monkeypatch, nodes) -> tuple[list[list[str]], list[object], o
 async def test_proven_self_triggers_no_candidate_search_and_no_dedup_llm(monkeypatch):
     """The load-bearing assertion. Asserting only the resulting uuid would pass even while the
     fragmenting search still ran, so assert the calls themselves do not happen."""
-    ctx = self_context_for_pending_episode(source="user", namespace="default", episode_uuid="ep")
+    ctx = _declared()
     try:
         receipt = begin_extraction_receipt("ep", "body", self_identity=ctx)
         nodes = [_node("rand-1", "I"), _node("rand-2", "Rachel")]
@@ -176,7 +193,7 @@ async def test_existing_canonical_node_is_preserved_not_overwritten(monkeypatch)
 
     from menhir.infrastructure.graphiti_model_patches import _patch_graphiti_adaptive_dedupe
 
-    ctx = self_context_for_pending_episode(source="user", namespace="default", episode_uuid="ep")
+    ctx = _declared()
     canonical = self_uuid_for_namespace("default")
     try:
         receipt = begin_extraction_receipt("ep", "body", self_identity=ctx)
@@ -223,7 +240,7 @@ async def test_first_self_episode_creates_the_canonical_node(monkeypatch):
 
     from menhir.infrastructure.graphiti_model_patches import _patch_graphiti_adaptive_dedupe
 
-    ctx = self_context_for_pending_episode(source="user", namespace="default", episode_uuid="ep")
+    ctx = _declared()
     try:
         receipt = begin_extraction_receipt("ep", "body", self_identity=ctx)
         nodes = [_node("rand-1", "I")]
@@ -305,7 +322,7 @@ async def test_first_canonical_node_carries_its_markers(monkeypatch):
 
     monkeypatch.setattr(EntityNode, "get_by_uuid", _missing)
 
-    ctx = self_context_for_pending_episode(source="user", namespace="proj-a", episode_uuid="e")
+    ctx = _declared("proj-a", "e")
     extracted = _node("x", "user")
     got = await _existing_canonical_node(SimpleNamespace(driver=object()), extracted, ctx)
 

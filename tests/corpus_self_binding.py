@@ -55,38 +55,53 @@ class CorpusCase:
         )
 
 
+def _declared(namespace: str, name: str) -> SelfIdentityContext:
+    """A declared self subject -- the only evidence that binds anything."""
+    return SelfIdentityContext(
+        namespace=namespace,
+        speaker_role=SpeakerRole.USER,
+        evidence_kind=SelfEvidenceKind.EXPLICIT_SELF_SUBJECT,
+        source_kind="manual",
+        episode_uuid=f"ep-{name}",
+    )
+
+
 # --------------------------------------------------------------------------- true positives
 
 _SELF_TURNS = (
     CorpusCase(
         name="first_person_fact",
-        category="trusted_user_turn",
-        source="user",
+        category="explicit_self_subject",
+        source="manual",
         entity_names=("I", "Chicago"),
         expected=SelfBindOutcome.BOUND,
         expects_self=True,
+        identity_override=_declared("default", "first_person_fact"),
         note=(
-            "The ordinary case: a gate-approved human turn stating a fact about themselves in "
-            "the first person, which is what makes THIS NODE the author."
+            "The only binding shape there is: a declared subject. Note the source alone would NOT "
+            "produce this context -- no production producer constructs one."
         ),
     ),
     CorpusCase(
         name="single_self_alias_with_third_party",
-        category="trusted_user_turn",
-        source="user",
+        category="explicit_self_subject",
+        source="manual",
         entity_names=("me", "Rachel"),
         expected=SelfBindOutcome.BOUND,
         expects_self=True,
-        note="One self alias beside a named third party is the ordinary shape.",
+        identity_override=_declared("default", "single_self_alias_with_third_party"),
+        note="One self alias beside a named third party, under a declared subject.",
     ),
     CorpusCase(
         name="manual_semantic_memory",
         category="manual_memory",
         source="manual",
         entity_names=("I", "espresso"),
-        expected=SelfBindOutcome.BOUND,
-        expects_self=True,
-        note="`manual` is apex-tier and gated identically to `user`; a granted claim is the human.",
+        expected=SelfBindOutcome.ORDINARY_USER_ENTITY,
+        note=(
+            "`manual` is apex-tier and gated identically to `user`, and it still does not bind: "
+            "the gate proves the AUTHOR, and nothing here says which node is that author."
+        ),
     ),
     CorpusCase(
         name="explicit_self_subject_third_person",
@@ -95,17 +110,10 @@ _SELF_TURNS = (
         entity_names=("the user", "espresso"),
         expected=SelfBindOutcome.BOUND,
         expects_self=True,
-        identity_override=SelfIdentityContext(
-            namespace="default",
-            speaker_role=SpeakerRole.USER,
-            evidence_kind=SelfEvidenceKind.EXPLICIT_SELF_SUBJECT,
-            source_kind="manual",
-            episode_uuid="ep-explicit_self_subject_third_person",
-        ),
+        identity_override=_declared("default", "explicit_self_subject_third_person"),
         note=(
-            "The only way a third-person reference binds: a trusted internal caller declares the "
-            "episode's subject IS the owner, which is node-level authority the text cannot give. "
-            "No production producer emits this today."
+            "A declared subject binds regardless of the name's grammatical person, because the "
+            "declaration -- not the string -- is the authority. No production producer emits it."
         ),
     ),
     CorpusCase(
@@ -128,11 +136,10 @@ _CONTROLS = (
         category="mixed_subject",
         source="user",
         entity_names=("I", "the user", "AuthService"),
-        expected=SelfBindOutcome.BOUND,
-        expects_self=True,
+        expected=SelfBindOutcome.ORDINARY_USER_ENTITY,
         note=(
-            "'I gave the user read access.' The first person is the author and binds; the RBAC "
-            "`user` beside it keeps its own uuid, and is counted as a self-like non-bind."
+            "'I gave the user read access.' Neither binds: the RBAC `user` is a foreign subject, "
+            "and the first person has no provenance proving it is not quoted."
         ),
     ),
     CorpusCase(
@@ -152,8 +159,35 @@ _CONTROLS = (
         category="ambiguous_subject",
         source="user",
         entity_names=("I", "myself"),
+        expected=SelfBindOutcome.ORDINARY_USER_ENTITY,
+        note=(
+            "Neither carries authority, so this is declined rather than ambiguous. The ambiguous "
+            "path needs a declared subject -- see `declared_subject_with_two_aliases`."
+        ),
+    ),
+    CorpusCase(
+        name="declared_subject_with_two_aliases",
+        category="ambiguous_subject",
+        source="manual",
+        entity_names=("I", "myself"),
         expected=SelfBindOutcome.AMBIGUOUS,
-        note="Both carry subject authority; nothing proves they are one node. Fail closed.",
+        identity_override=_declared("default", "declared_subject_with_two_aliases"),
+        note=(
+            "A declared subject still cannot say WHICH of two aliases is that subject, so the "
+            "payload fails closed and writes nothing."
+        ),
+    ),
+    CorpusCase(
+        name="reported_speech_quoting_someone_else",
+        category="quoted_speech",
+        source="user",
+        entity_names=("I", "Rachel"),
+        expected=SelfBindOutcome.ORDINARY_USER_ENTITY,
+        note=(
+            "REVIEW P1 round 3. 'She told me, \"I will handle it\"' -- a proven human turn whose "
+            "extracted `I` is someone else. Extraction discards the quote boundary, so grammatical "
+            "person cannot be authority."
+        ),
     ),
     # --- assistant echo ---
     CorpusCase(
@@ -246,13 +280,14 @@ _CONTROLS = (
     CorpusCase(
         name="relationless_repair_of_user_turn",
         category="retry_repair",
-        source="user",
+        source="manual",
         entity_names=("I", "Rachel"),
         expected=SelfBindOutcome.BOUND,
         expects_self=True,
+        identity_override=_declared("default", "relationless_repair_of_user_turn"),
         note=(
             "The repair pass re-runs extraction and replaces the payload, so binding must be "
-            "applied to the repaired result -- and must still bind, since the source is unchanged."
+            "applied to the repaired result -- and must still bind, since the evidence is unchanged."
         ),
     ),
 )

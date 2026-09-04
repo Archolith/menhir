@@ -11,9 +11,11 @@ boundary proved the episode's author, the self node is rewritten to the determin
 per-namespace UUID *before* candidate acquisition, so it never enters similarity search, the dedup
 prompt, or Menhir's identity gate.
 
-What it is not: a name rule. An entity called ``user`` with no trusted evidence stays an ordinary
-semantic entity and takes the ordinary Graphiti path. See ``domain/self_identity`` for the
-evidence contract.
+What it is not: a name rule. No property of an extracted entity's NAME -- not the literal string
+``user``, not first-person grammar -- promotes it to the human, because a name is not provenance.
+Binding requires a declared per-node subject (``EXPLICIT_SELF_SUBJECT``), and since no production
+producer emits one yet, this module is inert in production by construction. See
+``domain/self_identity.proves_self_subject`` for why, and what would change it.
 """
 
 from __future__ import annotations
@@ -26,6 +28,7 @@ from typing import Any
 from menhir.domain.self_identity import (
     SelfIdentityContext,
     eligible_self_evidence,
+    is_first_person_alias,
     is_self_alias,
     proves_self_subject,
 )
@@ -84,10 +87,12 @@ class SelfBindOutcome(StrEnum):
     NO_SELF_CANDIDATE = "no_self_candidate"
     AMBIGUOUS = "ambiguous"
     #: The payload held self-LIKE entities, the episode's author was proven, and none of those
-    #: entities carried node-level subject authority -- so they are ordinary entities and take the
-    #: ordinary Graphiti path. Distinct from NO_SELF_CANDIDATE, which saw no self-like name at
-    #: all: this is the count that says how often a trusted turn mentions a third-person `user`
-    #: that binding deliberately declines to claim.
+    #: entities carried node-level subject authority -- so they stay ordinary entities and take the
+    #: ordinary Graphiti path. Distinct from NO_SELF_CANDIDATE, which saw no self-like name at all.
+    #:
+    #: Until a producer emits EXPLICIT_SELF_SUBJECT this is the outcome for EVERY trusted turn
+    #: containing a self alias, first-person included, so its count is the size of what per-node
+    #: subject provenance would unlock.
     ORDINARY_USER_ENTITY = "ordinary_user_entity"
 
 
@@ -111,6 +116,11 @@ class SelfBindResult:
     #: understood by producer and source: a persistently non-zero count means self-like entities
     #: are still being minted outside the trusted path, and are still fragmenting recall.
     self_like_without_evidence: int = 0
+    #: First-person nodes inside a payload whose author WAS proven, declined for lack of node-level
+    #: subject provenance. This is the decision metric: it is how many binds a per-node span/
+    #: attribution signal from extraction would enable, and it is zero-cost to read in observe mode
+    #: before committing to build one.
+    first_person_without_authority: int = 0
 
     def telemetry_details(self, identity: SelfIdentityContext | None) -> dict[str, Any]:
         """Structured, privacy-safe record of one binding decision.
@@ -128,6 +138,7 @@ class SelfBindResult:
             "edge_endpoints_rewritten": self.edge_endpoints_rewritten,
             "index_map_keys_merged": self.index_map_keys_merged,
             "self_like_without_evidence": self.self_like_without_evidence,
+            "first_person_without_authority": self.first_person_without_authority,
         }
         if identity is not None:
             details.update(
@@ -193,22 +204,26 @@ def bind_canonical_self(
 
     # Two questions, deliberately separated. `self_like` is "could this be the human" -- a name
     # test, never authority. `self_nodes` is "does THIS NODE carry subject authority", which is
-    # what binding requires. The trusted episode signal proves who AUTHORED the episode and
-    # nothing more; a lone third-person `user` in a human turn is an ordinary entity (an RBAC
-    # role, a `users` table, the customer the turn is about), and rewriting it to the canonical
-    # UUID would fold a foreign subject into the human identity -- the false-positive bind this
-    # module exists to prevent, and the one no later migration can separate again.
+    # what binding requires and which only a declared subject can answer. The trusted episode
+    # signal proves who AUTHORED the episode and nothing more, so no name shape promotes a node:
+    # a third-person `user` may be an RBAC role or a `users` table, and a first-person `I` may be
+    # reported speech quoting someone else. Rewriting either to the canonical UUID would fold a
+    # foreign subject into the human identity -- the false-positive bind this module exists to
+    # prevent, and the one no later migration can separate again.
     self_like = [n for n in nodes if is_self_alias(getattr(n, "name", None))]
     self_nodes = [n for n in nodes if proves_self_subject(getattr(n, "name", None), identity)]
     if not self_nodes:
-        # Self-like names present but none proving: they stay ordinary entities. Counted, because
-        # a persistently high count is what says whether per-node subject authority for
-        # third-person references is worth building.
+        # Self-like names present but none proving: they stay ordinary entities. Both counts are
+        # recorded because together they size the gap -- how much self-like traffic arrives, and
+        # how much of it per-node provenance from extraction would actually let us bind.
         if self_like:
             return SelfBindResult(
                 SelfBindOutcome.ORDINARY_USER_ENTITY,
                 mode=mode,
                 self_like_without_evidence=len(self_like),
+                first_person_without_authority=sum(
+                    1 for n in self_like if is_first_person_alias(getattr(n, "name", None))
+                ),
             )
         return SelfBindResult(SelfBindOutcome.NO_SELF_CANDIDATE, mode=mode)
 

@@ -16,7 +16,9 @@ Two rules carry the whole design:
    ``.agent/plans/menhir-scanner-generic-entity-recall-pollution-rca.md``.
 3. **Authorship is not subjecthood.** Proving who wrote an episode does not prove which extracted
    entity that author is. :func:`eligible_self_evidence` answers the first question and
-   :func:`proves_self_subject` the second; binding requires both.
+   :func:`proves_self_subject` the second; binding requires both. No property of the extracted
+   NAME -- not the literal string, not its grammatical person -- can answer the second, because
+   the name is not provenance. Only a declared subject can, and nothing declares one yet.
 
 The physical Graphiti partition is derived separately by
 :func:`menhir.domain.namespace.namespace_to_group_id`. Logical ``default`` maps to physical
@@ -42,6 +44,7 @@ __all__ = [
     "SelfIdentityContext",
     "SpeakerRole",
     "eligible_self_evidence",
+    "is_first_person_alias",
     "is_self_alias",
     "normalize_logical_namespace",
     "proves_self_subject",
@@ -130,15 +133,24 @@ GATE_APPROVED_HUMAN_SOURCES = frozenset({"user", "manual"})
 #:   that producer emits; admitting it here would bind an entity named "speaker" to the human.
 #:
 #: Do not merge them.
-#: First-person references. Inside an episode whose author is proven, one of these names the
-#: AUTHOR by grammar -- that is a fact about the node, not about the episode.
+#: First-person references. These are self-LIKE and, like every other name shape, NOT authority.
+#:
+#: A previous revision treated first-person grammar as node-level proof: inside a turn whose author
+#: was proven, an extracted `I` was taken to name that author. That is wrong for the same reason
+#: the literal name `user` is wrong -- grammatical person is a property of the extracted STRING,
+#: not of where the string came from. The counterexample is reported speech: a proven human turn
+#: reading `She told me, "I will handle it"` extracts an `I` that is a different person, and by the
+#: time binding sees the payload there is no quote boundary, source span, or speaker attribution
+#: left to distinguish the two. Restoring first-person as authority requires extraction to return
+#: per-node provenance (the span each node came from, plus whether that span is inside quoted or
+#: reported speech). See ``proves_self_subject``.
 FIRST_PERSON_SELF_ALIASES = frozenset({"i", "me", "my", "mine", "myself"})
 
 #: Third-person labels for the human. These are self-LIKE and never self-PROVING on their own: a
 #: human turn can discuss an application or RBAC ``user`` distinct from the speaker ("I gave the
 #: user read access"), and an entity named ``user`` in a scan is ordinary software vocabulary.
-#: They bind only under :attr:`SelfEvidenceKind.EXPLICIT_SELF_SUBJECT`, where a trusted internal
-#: caller has vouched that the episode's subject IS the owner.
+#: Like every alias, they bind only under :attr:`SelfEvidenceKind.EXPLICIT_SELF_SUBJECT`, where a
+#: trusted internal caller has vouched that the episode's subject IS the owner.
 THIRD_PERSON_SELF_ALIASES = frozenset({"user", "the user"})
 
 SELF_ALIASES = FIRST_PERSON_SELF_ALIASES | THIRD_PERSON_SELF_ALIASES
@@ -210,6 +222,16 @@ def is_self_alias(name: Any) -> bool:
     return _normalize_alias(name) in SELF_ALIASES
 
 
+def is_first_person_alias(name: Any) -> bool:
+    """Whether *name* is a first-person self alias.
+
+    **Not authority** -- see :func:`proves_self_subject`. This exists only so binding can COUNT
+    the first-person nodes it declines, which is the measurement that says how much a per-node
+    provenance signal would actually buy.
+    """
+    return _normalize_alias(name) in FIRST_PERSON_SELF_ALIASES
+
+
 def _normalize_alias(name: Any) -> str:
     """Fold an extracted entity name for alias comparison. ``""`` for anything unusable."""
     if name is None:
@@ -227,26 +249,28 @@ def proves_self_subject(name: Any, context: SelfIdentityContext | None) -> bool:
     a support turn is about -- into the canonical human identity, which no later migration can
     separate again.
 
-    Two combinations prove a subject, and no others:
+    Exactly one thing proves it: :attr:`SelfEvidenceKind.EXPLICIT_SELF_SUBJECT`, where a trusted
+    internal caller declares that this episode's subject IS the owner. That declaration is the
+    authority; nothing here infers it from text.
 
-    * a FIRST-PERSON name in a :attr:`SelfEvidenceKind.TRUSTED_USER_TURN`. The author is speaking,
-      and "I" in the author's own words is the author.
-    * any self alias under :attr:`SelfEvidenceKind.EXPLICIT_SELF_SUBJECT`, where a trusted
-      internal caller has declared the episode's subject to be the owner. That declaration is the
-      per-node authority; nothing infers it from text.
+    **No name shape qualifies, first-person included.** Two successive revisions tried to promote
+    one: first the literal name ``user``, then first-person grammar. Both are properties of the
+    extracted string rather than of its provenance, and both have counterexamples inside a
+    perfectly valid human turn -- an RBAC ``user`` for the first, reported speech
+    (``She told me, "I will handle it"``) for the second. By the time binding runs, extraction has
+    discarded the quote boundaries, source spans and speaker attribution that would separate them.
 
-    A third-person ``user`` in an ordinary human turn is therefore NOT the human here. It is
-    counted as a self-like emission and takes the ordinary entity path.
+    **Consequence, stated where it cannot be missed:** no production producer emits
+    ``EXPLICIT_SELF_SUBJECT`` today, so this returns ``False`` for every real episode and binding
+    is inert. Making the prevention path do anything requires per-node subject provenance from
+    extraction first. That is a plan-level gap, not a tuning question.
     """
     if not eligible_self_evidence(context):
         return False
     assert context is not None  # narrowed by eligible_self_evidence
-    normalized = _normalize_alias(name)
-    if not normalized:
+    if context.evidence_kind is not SelfEvidenceKind.EXPLICIT_SELF_SUBJECT:
         return False
-    if context.evidence_kind is SelfEvidenceKind.EXPLICIT_SELF_SUBJECT:
-        return normalized in SELF_ALIASES
-    return normalized in FIRST_PERSON_SELF_ALIASES
+    return _normalize_alias(name) in SELF_ALIASES
 
 
 def self_context_for_pending_episode(
