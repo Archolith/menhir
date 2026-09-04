@@ -8,6 +8,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
+from menhir.domain.self_identity import self_uuid_for_namespace
 from menhir.domain.utils import source_confidence_for
 from menhir.infrastructure.cypher import (
     Cypher,
@@ -872,7 +873,7 @@ class EpisodeLifecycleRepository:
         coexist: whichever creator runs second folds into this uuid."""
         if not namespace:
             raise ValueError("ensure_self_entity requires a non-empty namespace")
-        self_uuid = str(uuid.uuid5(uuid.NAMESPACE_URL, f"menhir-self:{namespace}"))
+        self_uuid = self_uuid_for_namespace(namespace)
         self.neo4j.execute(
             """
             MERGE (n:Entity {uuid: $self_uuid})
