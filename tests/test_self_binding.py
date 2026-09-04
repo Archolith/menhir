@@ -417,3 +417,55 @@ def test_observe_still_surfaces_the_ambiguous_case():
     nodes = [_Node("random-1", "user"), _Node(canonical, "Rachel")]
     with pytest.raises(AmbiguousSelfBindingError):
         bind_canonical_self(nodes, [], {}, _trusted(), SelfBindMode.OBSERVE)
+
+
+# --------------------------------------------------------------------------- observability
+
+
+@pytest.mark.unit
+def test_telemetry_carries_no_content_or_entity_names():
+    """Instrumentation must never leak memory text or arbitrary entity names -- the names in
+    question are exactly the ones a user typed. Enums, counts, UUIDs and namespace only."""
+    nodes = [_Node("random-1", "user"), _Node("secret", "Rachel's divorce lawyer")]
+    ctx = _trusted()
+    result = bind_canonical_self(nodes, [], {}, ctx)
+
+    details = result.telemetry_details(ctx)
+    blob = repr(details)
+
+    assert "Rachel" not in blob
+    assert "divorce" not in blob
+    assert details["outcome"] == "bound"
+    assert details["namespace"] == "default"
+    assert details["evidence_kind"] == "trusted_user_turn"
+    assert details["rewritten_node_count"] == 1
+    # The bound uuid is deterministic and derivable from the namespace, so it discloses nothing.
+    assert details["self_uuid"] == self_uuid_for_namespace("default")
+
+
+@pytest.mark.unit
+def test_unclassified_self_like_emissions_are_counted():
+    """Activation requires knowing whether self-like entities still arrive from untrusted
+    producers -- a persistently non-zero count means recall is still being fragmented."""
+    nodes = [_Node("a", "user"), _Node("b", "I"), _Node("c", "Rachel")]
+    result = bind_canonical_self(nodes, [], {}, _untrusted())
+
+    assert result.outcome is SelfBindOutcome.NOT_ELIGIBLE
+    assert result.self_like_without_evidence == 2
+    assert [n.uuid for n in nodes] == ["a", "b", "c"]
+
+
+@pytest.mark.unit
+def test_no_self_like_emission_counts_zero():
+    nodes = [_Node("a", "Rachel")]
+    result = bind_canonical_self(nodes, [], {}, _untrusted())
+    assert result.self_like_without_evidence == 0
+
+
+@pytest.mark.unit
+def test_telemetry_without_identity_still_renders():
+    """A None identity must not make the recorder raise inside an ingest."""
+    result = bind_canonical_self([_Node("a", "user")], [], {}, None)
+    details = result.telemetry_details(None)
+    assert details["outcome"] == "not_eligible"
+    assert "namespace" not in details

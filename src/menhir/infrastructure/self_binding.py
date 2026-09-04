@@ -98,6 +98,38 @@ class SelfBindResult:
     nodes_collapsed: int = 0
     edge_endpoints_rewritten: int = 0
     index_map_keys_merged: int = 0
+    #: Self-alias nodes present in a payload that did NOT bind. Activation requires this to be
+    #: understood by producer and source: a persistently non-zero count means self-like entities
+    #: are still being minted outside the trusted path, and are still fragmenting recall.
+    self_like_without_evidence: int = 0
+
+    def telemetry_details(self, identity: SelfIdentityContext | None) -> dict[str, Any]:
+        """Structured, privacy-safe record of one binding decision.
+
+        Deliberately carries no memory text and no arbitrary entity names -- only enums, counts,
+        UUIDs and the logical namespace. An entity name here would leak episode content into
+        telemetry, and the names in question are exactly the ones a user typed.
+        """
+        details: dict[str, Any] = {
+            "outcome": str(self.outcome),
+            "mode": str(self.mode),
+            "self_uuid": self.self_uuid,
+            "rewritten_node_count": len(self.rewritten_node_uuids),
+            "nodes_collapsed": self.nodes_collapsed,
+            "edge_endpoints_rewritten": self.edge_endpoints_rewritten,
+            "index_map_keys_merged": self.index_map_keys_merged,
+            "self_like_without_evidence": self.self_like_without_evidence,
+        }
+        if identity is not None:
+            details.update(
+                {
+                    "namespace": identity.namespace,
+                    "speaker_role": str(identity.speaker_role),
+                    "evidence_kind": str(identity.evidence_kind or ""),
+                    "source_kind": identity.source_kind,
+                }
+            )
+        return details
 
     @property
     def bound(self) -> bool:
@@ -135,7 +167,17 @@ def bind_canonical_self(
         return SelfBindResult(SelfBindOutcome.NOT_ELIGIBLE, mode=mode)
 
     if not eligible_self_evidence(identity):
-        return SelfBindResult(SelfBindOutcome.NOT_ELIGIBLE, mode=mode)
+        # Count self-like emissions that did not bind. This is the signal that says whether the
+        # trusted-evidence contract actually covers production traffic: if entities named "user"
+        # keep appearing from untrusted producers, they keep fragmenting recall and activation is
+        # not yet safe. Counting names is fine; recording them is not.
+        return SelfBindResult(
+            SelfBindOutcome.NOT_ELIGIBLE,
+            mode=mode,
+            self_like_without_evidence=sum(
+                1 for n in nodes if is_self_alias(getattr(n, "name", None))
+            ),
+        )
 
     assert identity is not None  # narrowed by eligible_self_evidence
     canonical_uuid = identity.self_uuid

@@ -1068,6 +1068,31 @@ def _needs_relationless_repair(
     )
 
 
+def _record_self_binding(
+    nodes: list[Any],
+    edges: list[Any],
+    index_map: dict[str, list[int]],
+    receipt: CombinedExtractionReceipt,
+) -> SelfBindResult:
+    """Run the binding decision and record it, without letting telemetry break extraction."""
+    result = bind_canonical_self(
+        nodes, edges, index_map, receipt.self_identity, receipt.self_bind_mode
+    )
+    try:
+        from menhir.infrastructure.telemetry.recorders import record_lifecycle_event
+
+        record_lifecycle_event(
+            component="self_binding",
+            event="canonical_self_decision",
+            state=str(result.outcome),
+            episode_uuid=receipt.episode_key or None,
+            details=result.telemetry_details(receipt.self_identity),
+        )
+    except Exception:  # noqa: BLE001 - observability must never fail an ingest
+        logger.exception("Failed to record canonical-self binding telemetry")
+    return result
+
+
 async def _run_graphiti_combined_extraction(
     clients: Any,
     episode: Any,
@@ -1169,8 +1194,8 @@ async def _run_graphiti_combined_extraction(
     # discarded. This is the last point where the payload is final and Graphiti has not yet
     # acquired candidates.
     if receipt is not None and receipt.self_identity is not None:
-        receipt.self_bind_result = bind_canonical_self(
-            nodes, edges, index_map, receipt.self_identity, receipt.self_bind_mode
+        receipt.self_bind_result = _record_self_binding(
+            nodes, edges, index_map, receipt
         )
 
     if receipt is not None:
