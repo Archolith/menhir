@@ -6,6 +6,21 @@ uses a Docker-authoritative same-host fence; it does not require a fictional
 second source host, source-only signing key, mTLS listener, or two external
 evidence workers.
 
+## Risk-scaled release rule
+
+This production service is self-hosted for one owner and has no external users. Release acceptance
+must test the exact image and the complete delta from the deployed commit using the provider/model
+read from the live configuration, then use the mechanically selected deployment class and one
+post-deploy synthetic canary. Do not add representative-user cohorts, progressive fleet stages,
+multi-day observation gates, or new shadow infrastructure when there is one writer and the owner
+can immediately roll back.
+
+Risk scaling does not bypass controls that protect durable state or access authority. Immutable
+release identity, CI, mechanical classification, backup/restore freshness, OAuth acceptance,
+writer fencing where the selected class requires it, and bounded rollback remain mandatory. A
+release containing several features is tested and reviewed as one candidate; a focused feature
+test is not evidence for unrelated changes shipping in the same image.
+
 ## Non-negotiable client access invariant
 
 The canonical client data-plane endpoint is

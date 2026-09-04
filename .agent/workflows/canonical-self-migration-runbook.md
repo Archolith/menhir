@@ -27,50 +27,59 @@ parent plan's node-authority, score-bound, and historical-population assumptions
 An unrecognized value falls back to `off` with a warning — a config typo must not enable a
 durable-write-semantics change.
 
+## Risk profile
+
+This is a single-owner, self-hosted service with no external users, one production app writer and
+one Neo4j store. A short interruption is acceptable and the owner can immediately disable a bad
+feature. Rollout should match that reality:
+
+- test the exact release candidate, including every change since the deployed commit;
+- use the provider and model read from the live production configuration, never a stale wrapup or
+  example file;
+- deploy once through the existing mechanically classified release path;
+- run one disposable synthetic canary through the real public path and roll back on failure.
+
+Do not require representative-user cohorts, multi-replica progression, a prolonged observation
+window, or new shadow/canary infrastructure solely for this feature. Those controls add ceremony
+without reducing meaningful risk on this installation. This does **not** relax exact release
+identity, CI, backup freshness, authentication, writer-fence, or rollback requirements: those
+protect the owner's durable data rather than a hypothetical user fleet.
+
 ## Activating
 
-Treat this as a durable-write-semantics change, not an app-only config flip.
+Treat this as a durable-write-semantics change, but use the shortest proof appropriate to the risk
+profile above.
 
-1. **Run `observe` first, long enough to cover representative traffic.** Its verdict is designed to
-   match what `enforce` would do, so the window is only meaningful if you actually read it.
-2. **Read the decision records.** Component `self_binding`, event `canonical_self_decision`:
+1. **Define the real release candidate first.** Compare the immutable deployed Menhir commit with
+   the candidate and review/test the complete delta. Testing only the canonical-self files is not
+   release evidence when unrelated changes will ship in the same image.
+2. **Read the live LLM configuration before testing.** Record the active chat and Graphiti
+   providers and model from the running container. Run the subject-endpoint corpus and public-path
+   persistence E2E against those exact values and the exact candidate image with disposable Neo4j.
+   A different OpenAI model is not production-parity evidence merely because it is a real model.
+3. **Require normal repository CI and mechanical release classification.** Do not invent a lighter
+   class for this feature. If the accumulated delta touches protected configuration, deployment or
+   dependency surfaces, use the resulting `security-config` or `maintenance` path.
+4. **Deploy the exact tested candidate with `enforce`.** There is no required observe-first stage
+   for this installation. Production `observe` deliberately does not inject the endpoint, so it
+   can describe legacy self-like output but cannot predict marker compliance or binding yield.
+5. **Immediately run one disposable-namespace canary through the public API.** Require a `READY`
+   projection, the deterministic canonical UUID, a current-episode relationship and `MENTIONS`
+   provenance, zero reserved marker text in all persisted node/relationship properties, replay
+   idempotence, and merge refusal in both directions.
+6. **Read normal telemetry through one asynchronous processing cycle.** Component `self_binding`,
+   event `canonical_self_decision`, should show the expected `bound` decision for the canary and no
+   `ambiguous` decision. Also check projection failures/retries and the dedup resolution counters.
+   No arbitrary entity names or memory text need to leave the server.
+7. **Stop or roll back on a concrete failure.** Any false bind, marker leakage, ambiguous
+   declaration, failed canary assertion, or repeated binding-attributable projection failure is a
+   release failure. While no consolidation migration has run, restore the prior app/config or set
+   the mode back to `off`; no database restore is required.
 
-   | Field | What it tells you |
-   |---|---|
-   | `outcome` | `bound` / `would_bind` / `not_eligible` / `no_self_candidate` / `self_like_unresolved` / `ambiguous` |
-   | `self_like_unresolved` | self-alias entities in a trusted turn that binding declined for lack of a declared subject. This is an unresolved candidate count, not proof that a node is either the human or a generic user. |
-   | `first_person_unresolved` | the first-person subset. This is an upper bound for provenance work, not a bind forecast: quoted or reported speech may remain non-self. |
-   | `would_bind` (observe) or `bound` (enforce) | a producer has started declaring exact subject-node UUIDs. Find out which, and what it actually proves, BEFORE trusting the count. |
-   | `ambiguous` | an invalid exact-node declaration (missing/duplicated node, episode mismatch, or canonical UUID collision); binding refused and wrote nothing. |
-   | `self_like_without_subject_authority` | self-alias entities that did NOT bind, on any outcome; it makes no disposition claim |
-   | `evidence_kind`, `speaker_role`, `source_kind` | why the decision went that way; `source_kind` is limited to `user`, `manual`, or `other` so caller text cannot enter telemetry |
-
-   Ambiguous refusals are recorded before they raise, and in `observe` they do not fail the
-   episode -- observing must never change ingest success.
-
-3. **The observation population is `self_like_without_subject_authority`.** A persistently
-   non-zero count means extraction is still emitting self-like labels that this subsystem cannot
-   classify. It does not prove those nodes are human-self forks or generic-user entities. Break it
-   down by producer and source, then inspect provenance before making either disposition. Zero
-   known false-positive binds remains an activation requirement, but this count alone cannot meet
-   it.
-4. **Watch the dedup branch counters** (component `graphiti_dedup`, events
-   `deterministic_resolution_branches` and `resolution_outcomes`). `multiple_exact_llm` staying
-   high for a name means that name's candidate window is saturated — the exact condition that
-   fragmented `user` — and `candidate_count_max` pinned at the window limit is the same signal.
-   Per-candidate cosine scores are deliberately absent: graphiti's search ranks by score and then
-   drops it from the returned record, so any reported bound would have been measured from
-   embeddings that are `None` in production. `llm_prompt_*` sizes the dedupe prompt by section
-   (entities, candidates with attributes, episode, previous episodes including timestamps).
-5. **Do not set `enforce` until the subject-endpoint corpus and persistence gates pass.** Enforce
-   now produces an exact declaration only for a byte-identical evidence projection whose complete
-   lineage was approved by the atomic claim query. Menhir supplies a task-local opaque author
-   endpoint, validates it after relationless repair, and only then invokes `declare_self_subject`.
-   Ordinary `source='user'` episodes, agent-written memories, aliases, and first-person grammar do
-   not receive this authority. `enforce` also refuses undeclared extracted nodes carrying canonical
-   identity and removes canonical candidates from ordinary dedup. Real `observe` deliberately does
-   not inject the endpoint because changing its prompt would change persisted behavior; marker
-   compliance requires a separately budgeted discarded shadow extraction before cutover.
+Use `observe` only when diagnosing legacy extractor output. Its
+`self_like_without_subject_authority` and `first_person_unresolved` counts are candidate-population
+signals, not identity decisions and not an activation gate. Do not build a discarded shadow
+extractor unless the production-model corpus or live canary exposes a problem that requires it.
 
 This mode governs Graphiti entity-node resolution. The typed-scalar and event-history pipelines
 have separate existing first-person subject rules; they do not prove that this mode is active and

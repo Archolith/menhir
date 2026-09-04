@@ -2,6 +2,10 @@
 
 ## 2026-09-04 - Make canonical-self authority node-scoped
 
+- Scale the canonical-self and live-VPS rollout playbooks to the actual single-owner, self-hosted,
+  no-external-user deployment: test the complete candidate with the live provider/model, deploy once
+  through the mechanically selected class, run one synthetic canary, and roll back on concrete
+  failure instead of requiring representative-user cohorts or shadow-rollout infrastructure.
 - Replace name-shaped self authority with a trusted declaration naming one exact in-memory
   subject node UUID for the same episode; missing, duplicated, replayed, or colliding declarations
   fail before graph writes.

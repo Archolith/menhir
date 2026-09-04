@@ -656,8 +656,9 @@ That does **not** make `enforce` equivalent to `off`: `enforce` also activates c
 isolation. Even without a declaration, it refuses a searchable extracted node already carrying
 canonical identity and removes canonical UUID/marker candidates from ordinary dedup. This prevents
 an undeclared node from acquiring authority, but may preserve or create an ordinary fork instead.
-`observe` deliberately leaves that resolution unchanged, so activation still requires a measured
-and reviewed cutover.
+`observe` deliberately leaves that resolution unchanged. On this single-owner deployment it is a
+diagnostic mode, not an activation prerequisite: release acceptance uses the exact candidate image,
+the live production provider/model, and a post-deploy disposable canary.
 The production construction surface is pinned by an AST census: two context constructions inside
 the sole factory, one factory call at Graphiti dispatch, and exactly one declaration call in the
 final subject-endpoint validator. `self_like_unresolved` and `first_person_unresolved` in observe
@@ -697,11 +698,13 @@ the rule applies whether canonical self is proposed as survivor or absorbed node
 
 **Rollout.** `canonical_self_binding_mode` (`MENHIR_CANONICAL_SELF_BINDING_MODE`) is
 `off | observe | enforce`, default `off`. Unrecognized values fall back to `off`.
-Observe emits `would_bind`, never `bound`, and carries only a declaration-presence bit rather than
-the opaque producer-supplied node identifier. `off` and `observe` do not apply canonical candidate
-isolation, and real observe extraction does not receive a subject marker because that would change
-its prompt. This preserves exact pre-change behavior and non-mutating observation respectively;
-marker compliance must be measured by a separately budgeted discarded shadow extraction.
+Observe never applies a production declaration and carries only a declaration-presence bit rather
+than the opaque producer-supplied node identifier. `off` and `observe` do not apply canonical
+candidate isolation, and real observe extraction does not receive a subject marker because that
+would change its prompt. This preserves exact pre-change behavior and non-mutating diagnostics,
+but means observe cannot forecast marker compliance. For this single-owner service, activation is
+gated by the production-model corpus against the exact release image plus the post-deploy synthetic
+canary; a discarded shadow extractor is built only if either exposes a concrete need.
 Telemetry emits only the closed source kinds `user`/`manual`; every other caller-controlled source
 string is reported as `other`.
 
