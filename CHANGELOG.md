@@ -6,6 +6,88 @@
   close, while retaining the existing agent OAuth tier and all non-todo denials.
 - Made production startup fail closed when runtime scope/tier configuration cannot satisfy the
   canonical access contract, and added compose plus startup regression coverage.
+## 2026-09-03 - fix three faults found in the live production logs
+
+- **`get_artifact_relationships` had never worked.** The adapter delegated to
+  `_work_artifacts.get_artifact_relationships`; the repository defines the method as
+  `artifact_relationships`. Every other delegation in the adapter matches its
+  repository name, so this was a lone typo raising AttributeError on every call.
+  Checked the remaining eleven delegations mechanically -- this was the only one.
+- **Malformed dedupe output no longer fails the whole episode.** The identity gate
+  reads the raw LLM response before Graphiti validates it, and gpt-4.1-nano returned
+  an `entity_resolutions` entry that was a bare string. The resulting AttributeError
+  propagated out of `add_episode`, leaving the content in the graph with no entities:
+  `add_memory` reported success, retry classification marked it `manual_review`, and
+  recall could never see it. The new guards mirror the fail-safe
+  `PatchedNodeResolutions._drop_degenerate` already applies on the validation path, so
+  both consumers of that output now agree on what malformed means.
+- **`SCHEDULER_TRACE_DISABLED=1` turns off scheduler task tracing.** The scheduler is
+  a developer-workstation service; production has none, so every lifecycle transition
+  paid a 2s timeout to localhost:8082 and logged a WARNING. Tracing is observability
+  only, and both network paths are now gated.
+
+## 2026-09-03 - surface refile lineage where agents actually meet todos
+
+- `list_todos` rows now carry `supersedes_count`, and both renderers that consume
+  them show it: the MCP tool prints "refile of N earlier todo(s)" with a footer
+  pointing at `get_todo`, and the session-start hook appends "(refile of N)".
+- Closes the half of the supersession feature that the earlier fix missed. `get_todo`
+  renders the full lineage, but nothing reaches `get_todo` unless something first says
+  there is a lineage to look up -- and `list_todos` is the pinned discovery tool, the
+  session-start hook, and the bootstrap recall path. A refiled todo appeared in all
+  three as brand-new work, so the prior attempt's context sat behind a uuid no agent
+  had a reason to ask for.
+- A count rather than the uuids: listings are token-sensitive and the marker only has
+  to prompt the drill-down. Predecessors are counted in Python and scoped to the
+  caller's silo, for the same reason the lineage read is.
+
+## 2026-09-03 - fix ten review findings in the todo supersession surface
+
+- **`get_todo` now actually prints the lineage.** The repository attached a
+  `supersession` block and `GetTodoTool` had no branch for it, so the SUPERSEDED_BY
+  edge had no agent-facing reader -- the CF-143 dead-edge shape the feature was
+  built to avoid. The same-day claim that it had a reader was wrong.
+- **Cycles were reachable and are now blocked twice.** `supersede(A,B)` ->
+  `reopen(A)` -> `supersede(B,A)` built A->B->A, because only the OLD todo was
+  guarded against having a successor and `reopen_todo` returned a superseded todo
+  to open without clearing its edge. `supersede_todo` now guards the NEW todo too,
+  and `reopen_todo` refuses a superseded todo outright.
+- **The lineage reader no longer drops data.** Two successors (which concurrent
+  supersessions can still produce) previously became two rows behind an unordered
+  `LIMIT 1`, silently discarding one; `superseded_by` is now a list, and `get_todo`
+  warns when it holds more than one.
+- **Backend-boundary ownership guard.** The four todo ops are reachable through the
+  generic `/api/internal/backend/{operation}` dispatch, which injects a namespace
+  only into methods declaring one -- none of these do. They now call
+  `_require_own_todo` / `_require_own_memory` at the backend, not only in the tools.
+- Lineage reads are scoped to the caller's silo; the relation whitelist has one
+  definition instead of two; refusals name which precondition failed; and both
+  namespace comparisons are coalesced. The inverted namespace rule versus
+  `supersede_artifact` is documented rather than changed.
+
+Verified: 8483 passed, 347 skipped. The Cypher remains unexecuted by tests (stubbed
+driver); the cycle sequence was replayed through the real methods against a
+predicate-evaluating fake to confirm both guards compose.
+
+## 2026-09-03 - todo lifecycle and refile lineage reach the MCP surface
+
+- Added `supersede_todo`: closes a todo and writes a `SUPERSEDED_BY` edge to its
+  replacement in one statement. Menhir has no update path, so editing a todo means
+  closing it and adding a new one; until now that lineage was lost. The edge is the
+  first todo-to-todo relationship and the exception to the inward-only rule is
+  recorded at its definition -- supersession is an identity fact, not a knowledge
+  claim, and a todo still never becomes a semantic object.
+- Exposed `resolve_todo`, `reopen_todo`, and `link_memory_to_todo`, which were
+  written, tested, and unreachable since slice 1: no MCP tool and no caller outside
+  `TodoRepository`. All four run the ownership guard on every uuid they name.
+- `get_todo` now returns a `supersession` block (`superseded_by`, `supersedes`), so
+  the new edge has a reader rather than becoming the next CF-143 dead edge.
+- Updated the production client policy for the four new tools and recomputed its
+  canonical digest to
+  `09ede2c69a145ec551bcd51e037d8f825e6cc7fb211335450c1d736bb616d3b7`.
+  **`MENHIR_CLIENT_POLICY_DIGEST` must be updated on the deployed host before this
+  ships, or startup fails closed. Independent security review and reauthorization of
+  existing grants are still outstanding, per deploy/ACCESS_CONTRACT.md.**
 
 ## 2026-08-30 - position Menhir around provenance and governance
 

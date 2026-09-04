@@ -636,6 +636,24 @@ class MemoryBackend(Protocol):
         """Mark a todo as closed. Returns True if it was open and got closed."""
         ...
 
+    async def supersede_todo(self, old_uuid: str, new_uuid: str) -> dict[str, Any]:
+        """Close one todo and record the todo that replaced it, in one statement."""
+        ...
+
+    async def resolve_todo(self, todo_uuid: str, memory_uuid: str) -> dict[str, Any]:
+        """Close a todo and record the memory that resolved it, in one statement."""
+        ...
+
+    async def reopen_todo(self, todo_uuid: str, memory_uuid: str) -> dict[str, Any]:
+        """Reopen a todo and record the memory that reopened it, in one statement."""
+        ...
+
+    async def link_memory_to_todo(
+        self, memory_uuid: str, todo_uuid: str, relation: str
+    ) -> dict[str, Any]:
+        """Point a memory at a todo with `mentions` or `addresses`."""
+        ...
+
     async def delete_todo(self, uuid: str) -> bool:
         """Hard-delete a todo node regardless of status."""
         ...

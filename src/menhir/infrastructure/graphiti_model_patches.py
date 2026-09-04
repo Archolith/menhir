@@ -816,9 +816,19 @@ def _patch_graphiti_dedup_identity_gate() -> None:
                 if "dedupe_nodes" not in prompt_name:
                     return resp
 
-                # resp is the raw dict the LLM returned; apply the identity gate
-                resolutions = resp.get("entity_resolutions", [])
-                if not resolutions:
+                # resp is the raw dict the LLM returned -- it has NOT been through
+                # PatchedNodeResolutions yet, so nothing has validated its shape. A model
+                # returning `entity_resolutions: ["Alice"]` (bare strings, not objects)
+                # reaches this gate intact and used to raise AttributeError straight up
+                # through add_episode, failing the whole episode: its content lands in the
+                # graph with no entities, add_memory still reports success, and recall can
+                # never see it again. The type guards below mirror the fail-safe already in
+                # PatchedNodeResolutions._drop_degenerate: skip what cannot be read, treat
+                # an uncoercible duplicate_candidate_id as -1 ("no duplicate").
+                if not isinstance(resp, dict):
+                    return resp
+                resolutions = resp.get("entity_resolutions") or []
+                if not isinstance(resolutions, list):
                     return resp
 
                 # Build lookup: extracted node id → name
@@ -836,12 +846,20 @@ def _patch_graphiti_dedup_identity_gate() -> None:
 
                 overrides = []
                 for resolution in resolutions:
-                    dup_id = resolution.get("duplicate_candidate_id", -1)
+                    if not isinstance(resolution, dict):
+                        continue  # unusable entry; leave the LLM's output untouched
+                    try:
+                        dup_id = int(resolution.get("duplicate_candidate_id", -1))
+                    except (TypeError, ValueError):
+                        continue  # fail-safe: "no duplicate", nothing for the gate to veto
                     if dup_id < 0:
                         continue  # already "new entity"
 
-                    ext_id = resolution.get("id")
-                    ext_name = extracted_by_id.get(ext_id, resolution.get("name", ""))
+                    try:
+                        ext_id = int(resolution.get("id"))
+                    except (TypeError, ValueError):
+                        ext_id = None  # unusable index; fall back to the reported name
+                    ext_name = extracted_by_id.get(ext_id, str(resolution.get("name") or ""))
                     cand_name = candidate_by_id.get(dup_id, "")
 
                     veto_reason = ""
