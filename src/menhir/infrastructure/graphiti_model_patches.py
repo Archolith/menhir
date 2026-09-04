@@ -924,6 +924,115 @@ def _patch_graphiti_dedup_identity_gate() -> None:
 # Structural-node isolation and attribute preservation
 # ---------------------------------------------------------------------------
 
+#: Branch labels for one extracted node's deterministic-resolution attempt. These name the
+#: mechanism the RCA identified: with 66 exact-name `user` nodes against a 15-candidate window,
+#: `unique_exact_bind` became arithmetically unreachable and every extraction took
+#: `multiple_exact_llm`, where a `duplicate_candidate_id = -1` mints another fork. Counting the
+#: branches is what makes a recurrence attributable instead of inferred.
+_DEDUP_BRANCHES = (
+    "unique_exact_bind",
+    "multiple_exact_llm",
+    "entropy_guard_skip",
+    "fuzzy_bind",
+    "no_exact_llm",
+    "no_candidates_new",
+)
+
+
+def _classify_dedup_branches(extracted_nodes: Any, indexes: Any, before: set[int], state: Any) -> dict[str, int]:
+    """Classify each node's resolution branch from the resolver's own inputs and outputs.
+
+    Derived by observation rather than by editing graphiti's function: the exact-match count comes
+    from the same index the resolver consults, and resolution is read from the state it wrote.
+    """
+    # The exact-name normalizer lives in node_operations; the entropy/fuzzy helpers live in
+    # dedup_helpers. Importing either from the wrong module silently disables a branch, so both
+    # are taken from where 0.29.3 actually defines them.
+    from graphiti_core.utils.maintenance import dedup_helpers as _dh
+    from graphiti_core.utils.maintenance import node_operations as _no
+
+    counts = {name: 0 for name in _DEDUP_BRANCHES}
+    for idx, node in enumerate(extracted_nodes):
+        try:
+            exact = len(indexes.normalized_existing.get(_no._normalize_string_exact(node.name), []))
+            resolved = state.resolved_nodes[idx] is not None
+            if exact == 1 and resolved:
+                counts["unique_exact_bind"] += 1
+            elif exact > 1:
+                counts["multiple_exact_llm"] += 1
+            elif resolved:
+                counts["fuzzy_bind"] += 1
+            elif not _dh._has_high_entropy(_dh._normalize_name_for_fuzzy(node.name)):
+                counts["entropy_guard_skip"] += 1
+            elif idx in set(state.unresolved_indices) - before:
+                counts["no_exact_llm"] += 1
+            else:
+                counts["no_candidates_new"] += 1
+        except Exception:  # noqa: BLE001 - never let instrumentation break resolution
+            continue
+    return counts
+
+
+def _patch_graphiti_dedup_branch_telemetry() -> None:
+    """Record which deterministic-resolution branch each ordinary node took.
+
+    Wraps `_resolve_with_similarity` without altering its logic: it runs untouched, and the
+    classification is computed from its inputs and the state it produced. Any failure inside the
+    instrumentation is swallowed, because a telemetry defect must never fail an ingest.
+    """
+    try:
+        from graphiti_core.utils.maintenance import node_operations as _no_module
+    except ImportError:
+        logger.warning("Graphiti node_operations unavailable; dedup branch telemetry not applied")
+        return
+
+    if getattr(_no_module._resolve_with_similarity, "_menhir_branch_telemetry", False):
+        return
+
+    _original = _no_module._resolve_with_similarity
+
+    def _instrumented(extracted_nodes, indexes, state):
+        before = set(getattr(state, "unresolved_indices", []) or [])
+        _original(extracted_nodes, indexes, state)
+        try:
+            counts = _classify_dedup_branches(extracted_nodes, indexes, before, state)
+            if not any(counts.values()):
+                return
+            scores = [
+                len(indexes.normalized_existing.get(k, []))
+                for k in getattr(indexes, "normalized_existing", {})
+            ]
+            from menhir.infrastructure.telemetry.recorders import record_lifecycle_event
+
+            record_lifecycle_event(
+                component="graphiti_dedup",
+                event="deterministic_resolution_branches",
+                state="observed",
+                episode_uuid=_current_episode_key(),
+                details={
+                    **counts,
+                    "extracted_node_count": len(extracted_nodes),
+                    "candidate_name_buckets": len(scores),
+                    "max_exact_matches_for_one_name": max(scores) if scores else 0,
+                },
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug("Dedup branch telemetry failed", exc_info=True)
+
+    _instrumented._menhir_branch_telemetry = True  # type: ignore[attr-defined]
+    _no_module._resolve_with_similarity = _instrumented  # type: ignore[assignment]
+
+
+def _current_episode_key() -> str | None:
+    try:
+        from menhir.infrastructure.graphiti_extraction_patches import get_extraction_receipt
+
+        receipt = get_extraction_receipt()
+    except Exception:  # noqa: BLE001
+        return None
+    return getattr(receipt, "episode_key", None) or None if receipt is not None else None
+
+
 def _pre_resolved_self_uuid() -> str | None:
     """The canonical self uuid bound for the current episode, if binding ran and succeeded.
 
