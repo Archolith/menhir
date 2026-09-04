@@ -1,3 +1,23 @@
+## 2026-09-03 - fix three faults found in the live production logs
+
+- **`get_artifact_relationships` had never worked.** The adapter delegated to
+  `_work_artifacts.get_artifact_relationships`; the repository defines the method as
+  `artifact_relationships`. Every other delegation in the adapter matches its
+  repository name, so this was a lone typo raising AttributeError on every call.
+  Checked the remaining eleven delegations mechanically -- this was the only one.
+- **Malformed dedupe output no longer fails the whole episode.** The identity gate
+  reads the raw LLM response before Graphiti validates it, and gpt-4.1-nano returned
+  an `entity_resolutions` entry that was a bare string. The resulting AttributeError
+  propagated out of `add_episode`, leaving the content in the graph with no entities:
+  `add_memory` reported success, retry classification marked it `manual_review`, and
+  recall could never see it. The new guards mirror the fail-safe
+  `PatchedNodeResolutions._drop_degenerate` already applies on the validation path, so
+  both consumers of that output now agree on what malformed means.
+- **`SCHEDULER_TRACE_DISABLED=1` turns off scheduler task tracing.** The scheduler is
+  a developer-workstation service; production has none, so every lifecycle transition
+  paid a 2s timeout to localhost:8082 and logged a WARNING. Tracing is observability
+  only, and both network paths are now gated.
+
 ## 2026-09-03 - surface refile lineage where agents actually meet todos
 
 - `list_todos` rows now carry `supersedes_count`, and both renderers that consume
