@@ -10,6 +10,7 @@ import re
 from time import perf_counter
 from typing import Any, Callable
 
+from menhir.domain.self_identity import SelfIdentityContext
 from menhir.infrastructure.graphiti_helpers import (
     SYNTHETIC_FACT_PREFIX,
     _build_graphiti_failure_details,
@@ -73,6 +74,12 @@ class CombinedExtractionReceipt:
     episode_key: str = ""
     episode_text: str = ""
     source_description: str = ""
+    #: What the ingestion boundary actually PROVED about this episode's author, carried from the
+    #: parent task so the binding seam never has to infer identity from extracted text. ``None``
+    #: means no trusted signal was supplied, which fails closed: no self binding. The logical
+    #: namespace lives here rather than being inferred from ``group_id``, because logical
+    #: ``default`` maps to physical ``""`` and the two must not be conflated.
+    self_identity: "SelfIdentityContext | None" = None
     #: Text Graphiti supplied to the extractor as previous conversational context. Missing edge
     #: endpoints may be closed when grounded here even if the current turn uses a pronoun (for
     #: example, previous "Rachel ..." followed by current "She moved to Chicago.").
@@ -316,13 +323,19 @@ def begin_extraction_receipt(
     *,
     source_description: str = "",
     relationless_repair_context_loader: Callable[[], tuple[str, ...]] | None = None,
+    self_identity: SelfIdentityContext | None = None,
 ) -> CombinedExtractionReceipt:
-    """Create and activate a fresh receipt for the current episode (call in the parent task)."""
+    """Create and activate a fresh receipt for the current episode (call in the parent task).
+
+    ``self_identity`` must be constructed by the caller from the claimed episode's persisted,
+    gate-approved metadata. Omitting it fails closed: extraction proceeds with no self binding.
+    """
     receipt = CombinedExtractionReceipt(
         episode_key=str(episode_key or ""),
         episode_text=str(episode_text or ""),
         source_description=str(source_description or ""),
         relationless_repair_context_loader=relationless_repair_context_loader,
+        self_identity=self_identity,
     )
     _extraction_receipt.set(receipt)
     return receipt

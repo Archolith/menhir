@@ -31,6 +31,7 @@ from uuid import NAMESPACE_URL, uuid5
 from menhir.domain.namespace import normalize_namespace
 
 __all__ = [
+    "GATE_APPROVED_HUMAN_SOURCES",
     "SELF_ALIASES",
     "SelfEvidenceKind",
     "SelfIdentityContext",
@@ -38,6 +39,7 @@ __all__ = [
     "eligible_self_evidence",
     "is_self_alias",
     "normalize_logical_namespace",
+    "self_context_for_pending_episode",
     "self_uuid_for_namespace",
 ]
 
@@ -73,6 +75,23 @@ class SelfEvidenceKind(StrEnum):
 #: Source kinds that are structurally incapable of carrying the human, regardless of what a
 #: caller claims. Project-scan narrative discusses software users; it never speaks as the owner.
 _NEVER_SELF_SOURCE_KINDS = frozenset({"project_scan", "project_ingest", "structure_scan"})
+
+
+#: Persisted ``source`` values that prove the admission gate granted a human-authored turn.
+#:
+#: This set is trustworthy ONLY because of where the value comes from. It is NOT the caller's
+#: requested source. ``ingest_intake.queue_episode_for_enrichment`` runs every ``user``/``manual``
+#: claim through ``evaluate_user_tier_claim``, which requires Menhir-owned turn evidence whose
+#: ``role`` is ``user``, a matching session/namespace, and text actually grounded in that turn.
+#: An ungrounded claim -- or any error evaluating it -- is downgraded to ``agent_inference``
+#: BEFORE persistence. So a *persisted* ``user``/``manual`` source is a gate receipt, not a
+#: caller's assertion.
+#:
+#: **This is load-bearing and fragile.** It holds only while `create_pending_episode` has exactly
+#: one production writer, which is that gated intake. A second writer that persisted a raw
+#: caller-supplied source would turn this back into name-only authority -- the precise defect this
+#: whole change exists to remove. ``test_self_identity`` pins the single-writer invariant.
+GATE_APPROVED_HUMAN_SOURCES = frozenset({"user", "manual"})
 
 
 #: Normalized names that *may* denote the human, consulted ONLY after trusted evidence exists.
@@ -153,6 +172,44 @@ def is_self_alias(name: Any) -> bool:
     if name is None:
         return False
     return " ".join(str(name).strip().lower().split()) in SELF_ALIASES
+
+
+def self_context_for_pending_episode(
+    *,
+    source: Any,
+    namespace: Any,
+    episode_uuid: str | None = None,
+    source_kind: str = "",
+) -> SelfIdentityContext:
+    """Reconstruct the identity context for a claimed pending episode.
+
+    The evidence survives the asynchronous queue in the episode's persisted ``source``, so no new
+    field and no schema change is required -- see :data:`GATE_APPROVED_HUMAN_SOURCES` for why that
+    value is a gate receipt rather than a caller's claim.
+
+    A retry, repair or replay of the same episode reads the same persisted source and therefore
+    reconstructs the same evidence. It cannot infer stronger evidence than the original episode
+    carried, which is the Phase 2 requirement that evidence never strengthens on retry.
+
+    Anything outside the gate-approved set yields ``UNKNOWN`` role and no evidence: agent-authored
+    memories, hook and scanner output, imports, and every other producer are not the human.
+    """
+    normalized_source = str(source or "").strip().lower()
+    if normalized_source in GATE_APPROVED_HUMAN_SOURCES:
+        return SelfIdentityContext(
+            namespace=namespace,
+            speaker_role=SpeakerRole.USER,
+            evidence_kind=SelfEvidenceKind.TRUSTED_USER_TURN,
+            source_kind=source_kind or normalized_source,
+            episode_uuid=episode_uuid,
+        )
+    return SelfIdentityContext(
+        namespace=namespace,
+        speaker_role=SpeakerRole.UNKNOWN,
+        evidence_kind=None,
+        source_kind=source_kind or normalized_source,
+        episode_uuid=episode_uuid,
+    )
 
 
 def eligible_self_evidence(context: SelfIdentityContext | None) -> bool:

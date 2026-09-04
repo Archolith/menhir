@@ -19,6 +19,7 @@ from typing import Any, Callable
 from menhir.services.scheduler_protocols import LifecycleServiceProtocol
 
 from menhir.domain.models import FreshnessState, ProcessingState
+from menhir.domain.self_identity import SelfIdentityContext, self_context_for_pending_episode
 from menhir.domain.utils import source_confidence_for
 from menhir.infrastructure import GraphitiClient, MemoryGraphAdapter
 from menhir.infrastructure.evidence_publication_intents import (
@@ -685,6 +686,11 @@ async def run_graphiti_extraction(
                 timeout_s=ctx.graphiti_add_episode_timeout_s,
                 group_id=group_id,
                 relationless_repair_context_loader=relationless_repair_context_loader,
+                self_identity=self_context_for_pending_episode(
+                    source=ctx.claimed.get("source"),
+                    namespace=namespace,
+                    episode_uuid=ctx.episode_uuid,
+                ),
             )
             if publication_intent is not None:
                 publication_transition = (
@@ -1549,11 +1555,17 @@ async def add_episode_with_timeout(
     timeout_s: float = 300.0,
     group_id: str = "",
     relationless_repair_context_loader: Callable[[], tuple[str, ...]] | None = None,
+    self_identity: SelfIdentityContext | None = None,
 ) -> Any:
     """Bound one Graphiti add_episode call so stuck requests fail back into retry flow.
 
     Takes explicit params (not ctx) because the legacy ``ingest_episode()``
     path also calls this function.
+
+    ``self_identity`` carries the LOGICAL namespace and the trusted author evidence, separately
+    from ``group_id``, which is the physical Graphiti partition. Logical ``default`` maps to
+    physical ``""``, so identity must never be inferred from ``group_id``. Callers that cannot
+    prove an author omit it and no self binding occurs.
     """
 
     record_lifecycle_event(
@@ -1579,6 +1591,7 @@ async def add_episode_with_timeout(
         episode_body,
         source_description=source_description,
         relationless_repair_context_loader=relationless_repair_context_loader,
+        self_identity=self_identity,
     )
     try:
         record_lifecycle_event(

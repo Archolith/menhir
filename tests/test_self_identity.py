@@ -19,6 +19,7 @@ import pytest
 
 from menhir.domain.namespace import namespace_to_group_id
 from menhir.domain.self_identity import (
+    GATE_APPROVED_HUMAN_SOURCES,
     SELF_ALIASES,
     SelfEvidenceKind,
     SelfIdentityContext,
@@ -26,6 +27,7 @@ from menhir.domain.self_identity import (
     eligible_self_evidence,
     is_self_alias,
     normalize_logical_namespace,
+    self_context_for_pending_episode,
     self_uuid_for_namespace,
 )
 
@@ -227,6 +229,139 @@ def test_alias_membership_is_not_evidence():
     ordinary = _ctx(evidence_kind=None, speaker_role=SpeakerRole.UNKNOWN, source_kind="project_scan")
     assert is_self_alias("user") is True
     assert eligible_self_evidence(ordinary) is False
+
+
+# --------------------------------------------------------------------------- evidence from a pending episode
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("source", ["user", "manual", "  USER  ", "Manual"])
+def test_gate_approved_source_reconstructs_a_trusted_human_turn(source):
+    """The persisted source is a gate receipt: `evaluate_user_tier_claim` already required
+    Menhir-owned turn evidence with role=user and downgraded anything ungrounded."""
+    ctx = self_context_for_pending_episode(source=source, namespace="default", episode_uuid="ep-1")
+    assert ctx.speaker_role is SpeakerRole.USER
+    assert ctx.evidence_kind is SelfEvidenceKind.TRUSTED_USER_TURN
+    assert eligible_self_evidence(ctx) is True
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "source",
+    ["agent_inference", "claude-code", "codex", "opencode", "hook", "project_scan", "", None],
+)
+def test_every_other_producer_is_not_the_human(source):
+    """Agent-authored memories are the bulk of production. None of them may bind the human."""
+    ctx = self_context_for_pending_episode(source=source, namespace="default", episode_uuid="ep-1")
+    assert ctx.speaker_role is SpeakerRole.UNKNOWN
+    assert ctx.evidence_kind is None
+    assert eligible_self_evidence(ctx) is False
+
+
+@pytest.mark.unit
+def test_a_downgraded_claim_is_not_the_human():
+    """The gate rewrites an ungrounded user claim to agent_inference BEFORE persistence, so the
+    downgrade is what reaches this function. An ungrounded claim must not bind."""
+    ctx = self_context_for_pending_episode(
+        source="agent_inference", namespace="default", episode_uuid="ep-1"
+    )
+    assert eligible_self_evidence(ctx) is False
+
+
+@pytest.mark.unit
+def test_replay_cannot_strengthen_evidence():
+    """Retry/repair/replay re-reads the same persisted source, so it reconstructs identical
+    evidence. Evidence never grows on a second pass."""
+    first = self_context_for_pending_episode(source="claude-code", namespace="p", episode_uuid="e")
+    replayed = self_context_for_pending_episode(source="claude-code", namespace="p", episode_uuid="e")
+    assert first == replayed
+    assert eligible_self_evidence(replayed) is False
+
+
+@pytest.mark.unit
+def test_pending_episode_has_exactly_one_production_writer():
+    """The trust in `GATE_APPROVED_HUMAN_SOURCES` rests entirely on this.
+
+    A persisted source of `user` is only a gate receipt while the single production writer of
+    `create_pending_episode` is the gated intake. A second writer persisting a raw caller-supplied
+    source would restore name-only authority -- the defect this whole change removes. If this test
+    fails, do NOT relax it: re-derive the evidence contract for the new writer first.
+    """
+    callers = set()
+    for path in _SRC.rglob("*.py"):
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if "create_pending_episode(" not in line or "def create_pending_episode" in line:
+                continue
+            rel = path.relative_to(_SRC).as_posix()
+            # The adapter delegate forwards to the repository; it originates nothing.
+            if rel == "menhir/infrastructure/memory_graph_adapter.py":
+                continue
+            callers.add(rel)
+    assert callers == {"menhir/services/ingest_intake.py"}, (
+        f"unexpected pending-episode writers: {sorted(callers)}"
+    )
+
+
+@pytest.mark.unit
+def test_gate_approved_sources_are_exactly_the_apex_tier():
+    """Keep this set aligned with the admission gate's own `("user", "manual")` branch. Adding a
+    source here without a corresponding gate grants self-authority to an ungated producer."""
+    assert GATE_APPROVED_HUMAN_SOURCES == frozenset({"user", "manual"})
+    gate = (_SRC / "menhir/domain/truth/admission_gate.py").read_text(encoding="utf-8")
+    assert '("user", "manual")' in gate
+
+
+# --------------------------------------------------------------------------- propagation seam
+
+
+@pytest.mark.unit
+def test_receipt_carries_identity_from_the_parent_task():
+    """Phase 2 seam. The receipt is created in the parent task so both the wait_for child and
+    Graphiti's own child task inherit the same object; identity must ride along with it."""
+    from menhir.infrastructure.graphiti_extraction_patches import (
+        begin_extraction_receipt,
+        clear_extraction_receipt,
+        get_extraction_receipt,
+    )
+
+    try:
+        ctx = self_context_for_pending_episode(
+            source="user", namespace="default", episode_uuid="ep-1"
+        )
+        begin_extraction_receipt("ep-1", "body", self_identity=ctx)
+        active = get_extraction_receipt()
+        assert active is not None
+        assert active.self_identity == ctx
+        assert eligible_self_evidence(active.self_identity) is True
+    finally:
+        clear_extraction_receipt()
+
+
+@pytest.mark.unit
+def test_receipt_without_identity_fails_closed():
+    """A producer that supplies no evidence must not become the human by omission."""
+    from menhir.infrastructure.graphiti_extraction_patches import (
+        begin_extraction_receipt,
+        clear_extraction_receipt,
+    )
+
+    try:
+        receipt = begin_extraction_receipt("ep-2", "body")
+        assert receipt.self_identity is None
+        assert eligible_self_evidence(receipt.self_identity) is False
+    finally:
+        clear_extraction_receipt()
+
+
+@pytest.mark.unit
+def test_logical_namespace_is_carried_not_inferred_from_group_id():
+    """D2: logical `default` maps to physical `""`. The receipt must carry the logical value, so
+    the binding seam never has to reverse that mapping -- which is ambiguous."""
+    ctx = self_context_for_pending_episode(source="user", namespace="default", episode_uuid="e")
+    assert ctx.namespace == "default"
+    assert namespace_to_group_id(ctx.namespace) == ""
+    named = self_context_for_pending_episode(source="user", namespace="proj-a", episode_uuid="e")
+    assert named.self_uuid != ctx.self_uuid
 
 
 @pytest.mark.unit
