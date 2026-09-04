@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-08-31 - Add bounded app-image replacement mode
+
+- Add a root-owned app-only classifier and transaction that replaces only the Menhir
+  Compose service, preserves Neo4j, accepts the candidate, and automatically rolls back.
+- Add the workspace PowerShell operator path with immutable bundle hashing, source-diff
+  classification, private upload staging, and exact sudoers commands.
+- Add a policy-bound `menhir-deploy-probe` identity that can only read via
+  `recall_memories`; mint its signed JWT in memory for 60 seconds instead of persisting
+  an acceptance credential.
+- Update the scaffold, production playbook, access contract, architecture, operations
+  runbook, and focused tests for the five-minute deployment path.
+
 ## 2026-08-31 - Correct production backup authority
 
 - Remove the unapproved external object-store/provider requirement from the production plan,

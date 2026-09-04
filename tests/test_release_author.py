@@ -282,6 +282,35 @@ def test_authors_canonical_release_from_clean_exact_inputs(tmp_path: Path) -> No
     ).stdout.strip()
 
 
+def test_accepts_yawn_env_as_digest_without_copying_secret_file(tmp_path: Path) -> None:
+    spec_path, output, spec = _fixture(tmp_path)
+    digest = "d" * 64
+    spec["rendered"]["yawn_env_sha256"] = "sha256:" + digest
+    spec_path.write_text(json.dumps(spec), encoding="utf-8")
+
+    release = _author(spec_path, output)
+
+    assert release["rendered"]["yawn_env_sha256"] == digest
+
+
+def test_refuses_literal_digest_for_nonsecret_rendered_artifact(tmp_path: Path) -> None:
+    spec_path, output, spec = _fixture(tmp_path)
+    spec["rendered"]["caddy_sha256"] = "sha256:" + "d" * 64
+    spec_path.write_text(json.dumps(spec), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="does not permit a literal digest"):
+        _author(spec_path, output)
+
+
+def test_refuses_malformed_yawn_env_literal_digest(tmp_path: Path) -> None:
+    spec_path, output, spec = _fixture(tmp_path)
+    spec["rendered"]["yawn_env_sha256"] = "sha256:not-a-digest"
+    spec_path.write_text(json.dumps(spec), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="literal digest is invalid"):
+        _author(spec_path, output)
+
+
 def test_refuses_production_env_bound_to_raw_policy_file_digest(tmp_path: Path) -> None:
     spec_path, output, spec = _fixture(tmp_path)
     policy = Path(spec["rendered"]["policy_sha256"])
@@ -335,6 +364,10 @@ def test_refuses_digest_valid_policy_with_product_role_drift(tmp_path: Path) -> 
         (
             "/etc/yawn-vps/menhir-oauth-public.pem",
             "oauth_public_key_sha256",
+        ),
+        (
+            "/etc/yawn-vps/menhir-python-runtime.sha256",
+            "python_runtime_digest_sha256",
         ),
     ),
 )

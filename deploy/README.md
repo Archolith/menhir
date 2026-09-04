@@ -6,6 +6,23 @@ For an immutable production release to the live VPS, start with the
 per-client OAuth identity, and ChatGPT/Codex/Claude/OpenCode role invariant is
 in [ACCESS_CONTRACT.md](ACCESS_CONTRACT.md).
 
+Production deployment has two operational paths:
+
+- routine `app-only`: verify the one-time scaffold, pull and replace only the Menhir
+  app image, run authenticated acceptance, and automatically restore the prior image
+  on failure; target completion is five minutes;
+- `maintenance`/`recovery`: use the full backup, restore rehearsal, candidate,
+  writer-fence, route, and promotion transaction.
+
+Do not run the full maintenance transaction merely because application code changed.
+The exact classification and escalation rules are in
+[LIVE_VPS_PLAYBOOK.md](LIVE_VPS_PLAYBOOK.md#deployment-classes).
+
+The installed host scaffold is managed by
+`C:\Users\thron\IdeaProjects\scripts\menhir-scaffold.ps1`: use `-Mode Install` only
+for scaffold changes and `-Mode AppOnly` for routine read-only admission. Neo4j
+Community backups are offline maintenance, not an unattended production timer.
+
 A containerized Menhir for **test deployments** — in particular, validating the
 auth/OAuth surface (including the proxied-deployment guards **CT-001** and
 **RL-001**) behind a real reverse proxy, which cannot be exercised locally.

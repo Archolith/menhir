@@ -83,6 +83,9 @@ PYEOF
 then
     validate_receipt_file "$backup_receipt" backup-local
     schema_py validate-backup-promotion "$backup_receipt"
+    desktop_receipt="${STATUS_DIR}/desktop-archive-receipt.json"
+    require_root_file "$desktop_receipt" "desktop archive receipt"
+    schema_py validate-desktop-archive "$desktop_receipt" "$backup_receipt" "$RELEASE_JSON"
     generation="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["generation"])' "$backup_receipt")"
 
     # Complete an interrupted retirement from its durable exact-identity intent.
@@ -186,12 +189,9 @@ if at_least routed && ! at_least promoted \
 fi
 
 if ! at_least backup; then
-    echo "[1/8] Capturing, backing up, and retiring the exact legacy writer"
-    job_id="release-run-$(date -u +%Y%m%dT%H%M%SZ)"
-    generation="$(MENHIR_OPERATION_JOB_ID="$job_id" MENHIR_SAME_HOST_CUTOVER=1 \
-        "${SCRIPT_DIR}/backup-generation.sh" | sed -n 's/^generation=//p' | tail -n 1)"
-    [ -n "$generation" ] || { echo "backup completed without reporting a generation" >&2; exit 1; }
-    write_stage backup "$generation"; stage=backup
+    echo "release-run requires a completed local backup and verified desktop archive receipt" >&2
+    echo "run the backup operation, archive it from the desktop, then retry release-run" >&2
+    exit 1
 fi
 
 if ! at_least staged; then
@@ -235,20 +235,15 @@ fi
 
 if ! at_least complete; then
     echo "[8/8] Running public production acceptance"
-    base="${MENHIR_PUBLIC_BASE_URL:?MENHIR_PUBLIC_BASE_URL is required}"
-    ready="$(curl -fsS "${base}/readyz")"
-    printf '%s' "$ready" | grep -q '"status":"ready"' \
-        || { echo "public /readyz did not report ready" >&2; exit 1; }
-    printf '%s' "$ready" | grep -q '"mode":"production"' \
-        || { echo "public /readyz did not report production mode" >&2; exit 1; }
-    curl -fsS "${base}/livez" >/dev/null
-    curl -fsS "${base}/.well-known/jwks.json" >/dev/null
-    token_file="${MENHIR_PROD_ROOT}/secrets/menhir/acceptance-token"
-    require_root_file "$token_file" "short-lived production acceptance token"
-    IFS= read -r token < "$token_file"
-    helper="${SCRIPT_DIR}/lib/mcp_acceptance_probe.py"
-    [ -f "$helper" ] || helper="${SCRIPT_DIR}/mcp_acceptance_probe.py"
-    python3 "$helper" "$base" "$token"
+    production_lock="/run/lock/menhir-production.lock"
+    exec 9>"$production_lock"
+    flock -n 9 || { echo "another Menhir production operation is active: $production_lock" >&2; exit 75; }
+    acceptance_probe="${SCRIPT_DIR}/mcp_acceptance_probe.py"
+    client_policy="${MENHIR_ROOT}/policy/client-policy.json"
+    require_root_file "$acceptance_probe" "release-owned production acceptance probe"
+    require_root_file "$client_policy" "production client policy"
+    "${SCRIPT_DIR}/verify-artifacts"
+    python3 "$acceptance_probe" production "$MENHIR_PUBLIC_BASE_URL" "$RELEASE_JSON" "$client_policy"
     write_stage complete "$generation"; stage=complete
 fi
 

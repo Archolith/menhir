@@ -162,11 +162,12 @@ services:
       MENHIR_OAUTH_ISSUER: "${MENHIR_PUBLIC_BASE_URL:?...}"
       MENHIR_OAUTH_JWKS_URI: "${MENHIR_PUBLIC_BASE_URL:?...}/.well-known/jwks.json"
       MENHIR_OAUTH_AUDIENCE: "${MENHIR_PUBLIC_BASE_URL:?...}/mcp-http"
-      # Read/write scopes; admin scope is ABSENT (empty) as required by policy.
-      MENHIR_OAUTH_SCOPES_SUPPORTED: "menhir:read,menhir:write"
+      # Exact production permission surface. The digest-bound client policy decides
+      # which identities receive operator (admin) versus agent (read/write) grants.
+      MENHIR_OAUTH_SCOPES_SUPPORTED: "menhir:read,menhir:write,menhir:admin"
       MENHIR_OAUTH_READ_SCOPES: "menhir:read"
       MENHIR_OAUTH_WRITE_SCOPES: "menhir:write"
-      MENHIR_OAUTH_ADMIN_SCOPES: ""
+      MENHIR_OAUTH_ADMIN_SCOPES: "menhir:admin"
       MENHIR_OAUTH_AS_DIR: /srv/menhir/production/state/oauth
       MENHIR_OAUTH_SIGNING_KEY_PATH: /run/secrets/oauth/oauth_signing_key.json
       MENHIR_OAUTH_REFRESH_RETRY_KEYRING_PATH: /run/secrets/oauth/retry-response-keyring.json

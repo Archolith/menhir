@@ -157,7 +157,10 @@ def test_candidate_prereqs_do_not_open_mutating_oauth_stores(monkeypatch) -> Non
 
     marker = object()
     policy_marker = SimpleNamespace(
-        access_contract=SimpleNamespace(require_primary_endpoint=lambda endpoint: None)
+        access_contract=SimpleNamespace(
+            require_primary_endpoint=lambda endpoint: None,
+            require_oauth_scope_mapping=lambda **kwargs: None,
+        )
     )
     monkeypatch.setattr(
         server_support, "configure_signing_key_readonly", lambda settings: marker
@@ -254,7 +257,7 @@ def _production_settings(**overrides: object) -> MemorySettings:
         "oauth_signing_key_path": str(
             Path(__file__).resolve().parent / "oauth-signing-key.test.json"
         ),
-        "client_policy_digest": "047fd945ea56033036a68a20f03eb9208f0127cff70a0cba59423b7e834420aa",
+        "client_policy_digest": "09ede2c69a145ec551bcd51e037d8f825e6cc7fb211335450c1d736bb616d3b7",
         "api_key": "test-api-key",
     }
     values.update(overrides)
@@ -326,7 +329,7 @@ def test_production_client_policy_is_digest_bound_and_tracks_clients() -> None:
     path = (
         Path(__file__).resolve().parents[1] / "deploy" / "client-policy.production.json"
     )
-    digest = "047fd945ea56033036a68a20f03eb9208f0127cff70a0cba59423b7e834420aa"
+    digest = "09ede2c69a145ec551bcd51e037d8f825e6cc7fb211335450c1d736bb616d3b7"
 
     from menhir.mcp.tools import ALL_TOOLS
 
@@ -396,6 +399,12 @@ def test_production_client_policy_is_digest_bound_and_tracks_clients() -> None:
         product: access.role
         for product, access in authority.access_contract.products.items()
     } == EXPECTED_PRODUCT_ROLES
+    authority.access_contract.require_oauth_scope_mapping(
+        scopes_supported=("menhir:read", "menhir:write", "menhir:admin"),
+        read_scopes=("menhir:read",),
+        write_scopes=("menhir:write",),
+        admin_scopes=("menhir:admin",),
+    )
 
     with pytest.raises(PermissionError, match="scopes do not match"):
         authority.require_authorization(
@@ -450,7 +459,11 @@ def test_production_client_policy_is_digest_bound_and_tracks_clients() -> None:
     agent_base_tools = frozenset(
         {
             "add_memory",
+            "add_todo",
             "build_context",
+            "close_stale_todos",
+            "close_todo",
+            "get_todo",
             "list_todos",
             "query_structure",
             "read_flagged_memories",
@@ -519,6 +532,11 @@ def test_candidate_compose_uses_exact_restored_production_authorities() -> None:
         "source: ${MENHIR_PROD_ROOT:-/srv/menhir/production}/state/oauth" not in compose
     )
     assert 'MENHIR_OAUTH_AS_REFRESH_WITHOUT_OFFLINE_ACCESS_ENABLED: "true"' in compose
+    assert (
+        'MENHIR_OAUTH_SCOPES_SUPPORTED: "menhir:read,menhir:write,menhir:admin"'
+        in compose
+    )
+    assert 'MENHIR_OAUTH_ADMIN_SCOPES: "menhir:admin"' in compose
     assert 'MENHIR_STATE_ROOT="${MENHIR_ROOT}/state"' in release_lib
     assert 'MENHIR_PROD_SECRETS_DIR="${MENHIR_ROOT}/secrets"' in release_lib
     assert 'MENHIR_PROD_POLICY_DIR="${MENHIR_ROOT}/policy"' in release_lib
@@ -541,6 +559,30 @@ def test_candidate_compose_uses_exact_restored_production_authorities() -> None:
         "python3 - neo4j" in release_lib
     )
     assert "toString(" not in release_lib
+
+
+def test_production_startup_refuses_scope_mapping_below_access_contract(
+    monkeypatch,
+) -> None:
+    from menhir.api import server_support
+    from menhir.mcp.tools import ALL_TOOLS
+
+    monkeypatch.setattr(
+        server_support,
+        "configure_signing_key_readonly",
+        lambda settings: object(),
+    )
+    settings = _production_settings(
+        runtime_mode="candidate-readonly",
+        oauth_scopes_supported=("menhir:read", "menhir:write"),
+        oauth_admin_scopes=(),
+    )
+
+    with pytest.raises(ValueError, match="scope mapping"):
+        build_server_prereqs(
+            settings,
+            tool_catalog=frozenset(tool.name for tool in ALL_TOOLS),
+        )
 
 
 def test_production_compose_uses_compose_v5_compatible_pid_limits() -> None:

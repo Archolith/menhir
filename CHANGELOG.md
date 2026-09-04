@@ -1,3 +1,11 @@
+## 2026-09-04 - align production OAuth and agent todo authority
+
+- Restored `menhir:admin` to the production compose authorization-server scope surface so the
+  digest-bound Codex, Claude, and ChatGPT operator grants can be issued.
+- Granted every agent-tier client the complete todo workflow: list, read, add, close, and stale
+  close, while retaining the existing agent OAuth tier and all non-todo denials.
+- Made production startup fail closed when runtime scope/tier configuration cannot satisfy the
+  canonical access contract, and added compose plus startup regression coverage.
 ## 2026-09-03 - fix three faults found in the live production logs
 
 - **`get_artifact_relationships` had never worked.** The adapter delegated to
@@ -76,7 +84,7 @@ predicate-evaluating fake to confirm both guards compose.
   the new edge has a reader rather than becoming the next CF-143 dead edge.
 - Updated the production client policy for the four new tools and recomputed its
   canonical digest to
-  `047fd945ea56033036a68a20f03eb9208f0127cff70a0cba59423b7e834420aa`.
+  `09ede2c69a145ec551bcd51e037d8f825e6cc7fb211335450c1d736bb616d3b7`.
   **`MENHIR_CLIENT_POLICY_DIGEST` must be updated on the deployed host before this
   ships, or startup fails closed. Independent security review and reauthorization of
   existing grants are still outstanding, per deploy/ACCESS_CONTRACT.md.**
