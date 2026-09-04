@@ -63,13 +63,13 @@ _SELF_TURNS = (
         note="The ordinary case: a gate-approved human turn stating a fact about themselves.",
     ),
     CorpusCase(
-        name="first_person_pronoun_aliases",
+        name="single_self_alias_with_third_party",
         category="trusted_user_turn",
         source="user",
-        entity_names=("user", "I", "Rachel"),
+        entity_names=("user", "Rachel"),
         expected=SelfBindOutcome.BOUND,
         expects_self=True,
-        note="Two aliases for one proven human collapse deterministically rather than competing.",
+        note="One self alias beside a named third party is the ordinary shape.",
     ),
     CorpusCase(
         name="manual_semantic_memory",
@@ -94,6 +94,26 @@ _SELF_TURNS = (
 # --------------------------------------------------------------------------- controls
 
 _CONTROLS = (
+    # --- review P1: a trusted turn that also discusses an application user ---
+    CorpusCase(
+        name="human_turn_mentioning_an_application_user",
+        category="ambiguous_subject",
+        source="user",
+        entity_names=("I", "the user", "AuthService"),
+        expected=SelfBindOutcome.AMBIGUOUS,
+        note=(
+            "'I gave the user read access.' Episode-level evidence proves the AUTHOR, not which "
+            "node is the author. Collapsing both would fold an RBAC subject into the human."
+        ),
+    ),
+    CorpusCase(
+        name="human_turn_with_two_self_aliases",
+        category="ambiguous_subject",
+        source="user",
+        entity_names=("user", "myself"),
+        expected=SelfBindOutcome.AMBIGUOUS,
+        note="Even two genuine aliases cannot be PROVEN identical without per-node authority.",
+    ),
     # --- assistant echo ---
     CorpusCase(
         name="assistant_echo_about_the_user",

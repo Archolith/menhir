@@ -110,3 +110,46 @@ def test_patch_is_idempotent_and_preserves_resolution_behavior():
         assert state.uuid_map["extracted-1"] == "existing-1"
     finally:
         no._resolve_with_similarity = original
+
+
+@pytest.mark.unit
+def test_llm_outcomes_are_recorded(monkeypatch):
+    """REVIEW P2. The similarity wrapper cannot see what the LLM decided, so on its own it leaves
+    the exact branch the RCA implicated -- an escalation returning duplicate_candidate_id = -1,
+    which mints another node -- unrecorded."""
+    from menhir.infrastructure.graphiti_model_patches import _record_resolution_outcomes
+
+    recorded: list[dict] = []
+
+    import menhir.infrastructure.telemetry.recorders as recorders
+
+    def _capture(*, component, event, state, episode_uuid=None, details=None, **kw):
+        recorded.append({"event": event, "details": details or {}})
+
+    monkeypatch.setattr(recorders, "record_lifecycle_event", _capture)
+
+    extracted = [_node("Rachel", "e1"), _node("Chicago", "e2"), _node("user", "e3")]
+    # e1 resolved onto an existing candidate; e2 kept its own uuid (a new node); e3 unresolved.
+    resolved = [_node("Rachel", "existing-1"), extracted[1], None]
+    state = _state(resolved, [])
+    _record_resolution_outcomes(
+        SimpleNamespace(embedder=None), extracted, [[object()], [object()], []],
+        [0, 1, 2], state, set(),
+    )
+
+    assert recorded, "no resolution outcome event was recorded"
+    d = recorded[0]["details"]
+    assert d["llm_selected_candidate"] == 1
+    assert d["llm_selected_new"] == 2
+    assert d["escalated_to_llm"] == 3
+    assert d["unresolved_after_llm"] == 1
+    assert d["no_candidates_new"] == 1
+    assert "embedding_dimension" in d and "embedding_model" in d
+
+
+@pytest.mark.unit
+def test_outcome_telemetry_never_raises():
+    """Sits in the dedup hot path for every entity."""
+    from menhir.infrastructure.graphiti_model_patches import _record_resolution_outcomes
+
+    _record_resolution_outcomes(None, [SimpleNamespace()], [None], [0], _state([None], []), set())

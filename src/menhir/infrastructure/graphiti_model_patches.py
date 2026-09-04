@@ -1033,22 +1033,141 @@ def _current_episode_key() -> str | None:
     return getattr(receipt, "episode_key", None) or None if receipt is not None else None
 
 
-async def _existing_canonical_node(clients: Any, extracted: Any) -> Any:
-    """Return the persisted canonical self node, or *extracted* when it does not exist yet.
+def _stamp_canonical_self(node: Any, identity: Any) -> Any:
+    """Put the canonical markers on the node that will be persisted.
 
-    First trusted-self episode in a namespace: nothing is stored, so the extracted node IS the
-    canonical node and creating it is correct. Every episode after that: the stored node carries
-    state the extraction does not have, and must be the object graphiti writes back.
+    Graphiti writes `attributes` into the node's property map, and the generic ingest metadata
+    stamp supplies neither marker. Without this the FIRST canonical node in a namespace is created
+    without `is_self`/`entity_role`, so every reader that identifies the human structurally --
+    fork detection, census, migration disposition -- would not recognize the node this change
+    just created.
     """
     try:
-        from graphiti_core.nodes import EntityNode
+        attributes = getattr(node, "attributes", None)
+        if attributes is None:
+            return node
+        attributes["is_self"] = True
+        attributes["entity_role"] = "self"
+        if identity is not None and getattr(identity, "namespace", ""):
+            attributes["namespace"] = identity.namespace
+    except Exception:  # noqa: BLE001 - never fail resolution on a metadata stamp
+        logger.exception("Could not stamp canonical-self markers")
+    return node
 
-        driver = getattr(clients, "driver", None)
-        if driver is None:
-            return extracted
+
+async def _existing_canonical_node(clients: Any, extracted: Any, identity: Any) -> Any:
+    """Return the persisted canonical self node, or a stamped *extracted* when none exists yet.
+
+    First trusted-self episode in a namespace: nothing is stored, so the extracted node IS the
+    canonical node and creating it is correct -- but it must carry the canonical markers, which
+    is why this is the authoritative persistence boundary for them.
+
+    Every episode after that: the stored node carries state the extraction does not have, and must
+    be the object graphiti writes back.
+
+    **Only a genuinely absent node falls back to the extracted object.** Graphiti persists a
+    resolved node with `SET n = $entity_data`, which REPLACES the property map, so treating a
+    transient driver or database failure as "absent" would let a later successful write erase the
+    canonical node's markers, provenance, flags and accumulated summary. An operational failure
+    must fail the episode, which is retryable, rather than silently degrade to a sparse overwrite.
+    """
+    from graphiti_core.errors import NodeNotFoundError
+    from graphiti_core.nodes import EntityNode
+
+    driver = getattr(clients, "driver", None)
+    if driver is None:
+        return _stamp_canonical_self(extracted, identity)
+    try:
         return await EntityNode.get_by_uuid(driver, extracted.uuid)
-    except Exception:  # noqa: BLE001 - absent node, or any lookup failure, falls back to create
-        return extracted
+    except NodeNotFoundError:
+        return _stamp_canonical_self(extracted, identity)
+
+
+def _record_resolution_outcomes(
+    clients: Any,
+    extracted_nodes: Any,
+    candidates_by_extracted: Any,
+    escalated: list[int],
+    state: Any,
+    pre_resolved_indices: set[int],
+) -> None:
+    """Record the OUTCOME of the full resolution lifecycle, including the LLM paths.
+
+    The deterministic-branch wrapper around `_resolve_with_similarity` cannot see what the LLM
+    decided, so on its own it leaves the exact branch the RCA implicated -- an escalation that
+    returns `duplicate_candidate_id = -1` and mints another node -- unrecorded. This closes that:
+    an escalated node resolved onto a DIFFERENT uuid is `llm_selected_candidate`; one resolved
+    onto itself is `llm_selected_new`, which is the fork-creating outcome.
+    """
+    try:
+        llm_selected_candidate = 0
+        llm_selected_new = 0
+        for idx in escalated:
+            resolved = state.resolved_nodes[idx]
+            if resolved is None:
+                llm_selected_new += 1
+                continue
+            extracted_uuid = str(getattr(extracted_nodes[idx], "uuid", "") or "")
+            resolved_uuid = str(getattr(resolved, "uuid", "") or "")
+            if resolved_uuid and resolved_uuid != extracted_uuid:
+                llm_selected_candidate += 1
+            else:
+                llm_selected_new += 1
+
+        candidate_counts = [len(c or []) for c in candidates_by_extracted]
+        no_candidates_new = sum(
+            1
+            for idx, count in enumerate(candidate_counts)
+            if count == 0 and idx not in pre_resolved_indices
+        )
+
+        # Embedding identity/dimension: what the candidate window was actually built from. A
+        # dimension or model change silently alters which candidates are reachable at all.
+        embedder = getattr(clients, "embedder", None)
+        embedder_config = getattr(embedder, "config", None)
+        embedding_model = str(getattr(embedder_config, "embedding_model", "") or "") or None
+        dimensions = [
+            len(v)
+            for v in (getattr(n, "name_embedding", None) for n in extracted_nodes)
+            if isinstance(v, (list, tuple))
+        ]
+
+        from menhir.infrastructure.telemetry.recorders import record_lifecycle_event
+
+        record_lifecycle_event(
+            component="graphiti_dedup",
+            event="resolution_outcomes",
+            state="observed",
+            episode_uuid=_current_episode_key(),
+            details={
+                "extracted_node_count": len(extracted_nodes),
+                "pre_resolved_self": len(pre_resolved_indices),
+                "escalated_to_llm": len(escalated),
+                "llm_selected_candidate": llm_selected_candidate,
+                "llm_selected_new": llm_selected_new,
+                "no_candidates_new": no_candidates_new,
+                "unresolved_after_llm": sum(
+                    1 for idx in escalated if state.resolved_nodes[idx] is None
+                ),
+                "candidate_count_min": min(candidate_counts) if candidate_counts else 0,
+                "candidate_count_max": max(candidate_counts) if candidate_counts else 0,
+                "embedding_model": embedding_model,
+                "embedding_dimension": max(dimensions) if dimensions else None,
+            },
+        )
+    except Exception:  # noqa: BLE001 - instrumentation must never fail resolution
+        logger.debug("Resolution outcome telemetry failed", exc_info=True)
+
+
+def _active_self_identity() -> Any:
+    """The identity context for the current episode, if binding ran."""
+    try:
+        from menhir.infrastructure.graphiti_extraction_patches import get_extraction_receipt
+
+        receipt = get_extraction_receipt()
+    except Exception:  # noqa: BLE001
+        return None
+    return getattr(receipt, "self_identity", None) if receipt is not None else None
 
 
 def _pre_resolved_self_uuid() -> str | None:
@@ -1255,7 +1374,9 @@ def _patch_graphiti_adaptive_dedupe() -> None:
                 #
                 # This is a direct uuid fetch, not candidate acquisition: no cosine search, no
                 # exact/fuzzy resolution, no dedup LLM, no identity gate. D4 is preserved.
-                state.resolved_nodes[idx] = await _existing_canonical_node(clients, node)
+                state.resolved_nodes[idx] = await _existing_canonical_node(
+                    clients, node, _active_self_identity()
+                )
                 state.uuid_map[node.uuid] = node.uuid
 
             for idx, (node, candidates) in enumerate(
@@ -1339,8 +1460,13 @@ def _patch_graphiti_adaptive_dedupe() -> None:
                 state.uuid_map.update(batch_state.uuid_map)
                 state.duplicate_pairs.extend(batch_state.duplicate_pairs)
 
+            escalated = list(state.unresolved_indices)
             if state.unresolved_indices:
                 await _resolve_batch(list(state.unresolved_indices))
+            _record_resolution_outcomes(
+                clients, extracted_nodes, candidate_nodes_by_extracted, escalated,
+                state, pre_resolved_indices,
+            )
 
             if not state.unresolved_indices and not any(candidate_nodes_by_extracted):
                 logger.debug("No semantic dedup candidates found; keeping all extracted nodes as new")

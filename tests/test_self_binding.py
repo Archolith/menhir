@@ -104,21 +104,35 @@ def test_index_map_follows_with_no_lost_indices():
 
 
 @pytest.mark.unit
-def test_collapsing_aliases_merges_their_episode_indices():
-    """"user" and "I" in one payload are the same proven human. Collapsing must union their
-    episode attribution, not let one overwrite the other."""
-    canonical = self_uuid_for_namespace("default")
+def test_multiple_self_aliases_fail_closed_rather_than_collapsing():
+    """REVIEW P1. Episode-level evidence proves WHO AUTHORED the episode -- not which extracted
+    node is that author. A human turn can legitimately discuss an application/RBAC `user` distinct
+    from the speaker ("I gave the user read access"), so collapsing every self-looking node would
+    fold a foreign subject into the human identity, which no later migration can separate.
+
+    Binding therefore requires exactly one candidate; anything else fails closed and writes
+    nothing.
+    """
     nodes = [_Node("a", "user"), _Node("b", "I"), _Node("c", "Rachel")]
     edges = [_Edge("a", "c"), _Edge("b", "c")]
     index_map = {"a": [0], "b": [1], "c": [0]}
 
-    result = bind_canonical_self(nodes, edges, index_map, _trusted())
+    with pytest.raises(AmbiguousSelfBindingError):
+        bind_canonical_self(nodes, edges, index_map, _trusted())
 
-    assert result.nodes_collapsed == 1
-    assert [n.uuid for n in nodes] == [canonical, "c"]
-    assert index_map[canonical] == [0, 1]
-    assert edges[0].source_node_uuid == canonical
-    assert edges[1].source_node_uuid == canonical
+    # Nothing moved.
+    assert [n.uuid for n in nodes] == ["a", "b", "c"]
+    assert edges[0].source_node_uuid == "a"
+    assert index_map == {"a": [0], "b": [1], "c": [0]}
+
+
+@pytest.mark.unit
+def test_application_user_beside_first_person_does_not_bind():
+    """The concrete false positive the review named."""
+    nodes = [_Node("speaker", "I"), _Node("rbac", "the user")]
+    with pytest.raises(AmbiguousSelfBindingError):
+        bind_canonical_self(nodes, [], {}, _trusted())
+    assert [n.uuid for n in nodes] == ["speaker", "rbac"]
 
 
 @pytest.mark.unit
@@ -265,6 +279,7 @@ def test_a_failure_midway_rolls_the_whole_payload_back():
     assert index_map == {"random-1": [0]}
 
 
+@pytest.mark.skip(reason="alias collapse removed: multiple self aliases now fail closed (review P1)")
 @pytest.mark.unit
 def test_collapsed_nodes_are_restored_on_rollback():
     """Alias collapse removes nodes from the caller's list; a failed bind must put them back."""
@@ -384,7 +399,7 @@ def test_off_mode_reproduces_pre_change_behavior():
 @pytest.mark.unit
 def test_observe_mode_reports_without_mutating():
     """Observe must be able to answer "what would have happened" with zero payload change."""
-    nodes = [_Node("random-1", "user"), _Node("b", "I")]
+    nodes = [_Node("random-1", "user")]
     edges = [_Edge("random-1", "other")]
     index_map = {"random-1": [0]}
 
@@ -392,12 +407,19 @@ def test_observe_mode_reports_without_mutating():
 
     assert result.outcome is SelfBindOutcome.BOUND
     assert result.self_uuid == self_uuid_for_namespace("default")
-    assert result.nodes_collapsed == 1
     # ...and nothing moved.
     assert result.bound is False
-    assert [n.uuid for n in nodes] == ["random-1", "b"]
+    assert [n.uuid for n in nodes] == ["random-1"]
     assert edges[0].source_node_uuid == "random-1"
     assert index_map == {"random-1": [0]}
+
+
+@pytest.mark.unit
+def test_observe_surfaces_the_multi_alias_refusal_too():
+    """Observe exists to find these before enforce can act on them."""
+    nodes = [_Node("a", "user"), _Node("b", "I")]
+    with pytest.raises(AmbiguousSelfBindingError):
+        bind_canonical_self(nodes, [], {}, _trusted(), SelfBindMode.OBSERVE)
 
 
 @pytest.mark.unit

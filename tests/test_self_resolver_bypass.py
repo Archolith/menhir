@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from types import SimpleNamespace
+
 import pytest
 
 from menhir.domain.self_identity import self_context_for_pending_episode, self_uuid_for_namespace
@@ -216,8 +218,10 @@ async def test_first_self_episode_creates_the_canonical_node(monkeypatch):
         nodes = [_node("rand-1", "user")]
         receipt.self_bind_result = bind_canonical_self(nodes, [], {}, ctx)
 
+        from graphiti_core.errors import NodeNotFoundError
+
         async def _missing(driver, uuid):
-            raise LookupError("no such node")
+            raise NodeNotFoundError(uuid)
 
         monkeypatch.setattr(EntityNode, "get_by_uuid", _missing)
 
@@ -234,3 +238,86 @@ async def test_first_self_episode_creates_the_canonical_node(monkeypatch):
         assert resolved[0].uuid == self_uuid_for_namespace("default")
     finally:
         clear_extraction_receipt()
+
+
+@pytest.mark.unit
+async def test_transient_read_failure_does_not_degrade_to_a_sparse_overwrite(monkeypatch):
+    """REVIEW P1. Graphiti replaces the stored property map on save, so treating a driver or
+    database failure as "node absent" would let a later successful write erase the canonical
+    node's markers, provenance, flags and summary. An operational failure must surface -- the
+    episode is retryable; a silent overwrite is not recoverable.
+    """
+    from graphiti_core.nodes import EntityNode
+
+    from menhir.infrastructure.graphiti_model_patches import _existing_canonical_node
+
+    async def _boom(driver, uuid):
+        raise ConnectionError("neo4j unavailable")
+
+    monkeypatch.setattr(EntityNode, "get_by_uuid", _boom)
+
+    with pytest.raises(ConnectionError):
+        await _existing_canonical_node(
+            SimpleNamespace(driver=object()), _node("x", "user"), None
+        )
+
+
+@pytest.mark.unit
+async def test_absent_node_still_falls_back_to_creating_it(monkeypatch):
+    from graphiti_core.errors import NodeNotFoundError
+    from graphiti_core.nodes import EntityNode
+
+    from menhir.infrastructure.graphiti_model_patches import _existing_canonical_node
+
+    async def _missing(driver, uuid):
+        raise NodeNotFoundError(uuid)
+
+    monkeypatch.setattr(EntityNode, "get_by_uuid", _missing)
+
+    extracted = _node("x", "user")
+    got = await _existing_canonical_node(SimpleNamespace(driver=object()), extracted, None)
+    assert got is extracted
+
+
+@pytest.mark.unit
+async def test_first_canonical_node_carries_its_markers(monkeypatch):
+    """REVIEW P2. The generic ingest metadata stamp supplies neither marker, so without this the
+    FIRST canonical node in a namespace is created without is_self/entity_role -- invisible to
+    every reader that identifies the human structurally (fork detection, census, migration)."""
+    from graphiti_core.errors import NodeNotFoundError
+    from graphiti_core.nodes import EntityNode
+
+    from menhir.infrastructure.graphiti_model_patches import _existing_canonical_node
+
+    async def _missing(driver, uuid):
+        raise NodeNotFoundError(uuid)
+
+    monkeypatch.setattr(EntityNode, "get_by_uuid", _missing)
+
+    ctx = self_context_for_pending_episode(source="user", namespace="proj-a", episode_uuid="e")
+    extracted = _node("x", "user")
+    got = await _existing_canonical_node(SimpleNamespace(driver=object()), extracted, ctx)
+
+    assert got.attributes["is_self"] is True
+    assert got.attributes["entity_role"] == "self"
+    assert got.attributes["namespace"] == "proj-a"
+
+
+@pytest.mark.unit
+async def test_existing_node_is_not_restamped(monkeypatch):
+    """A stored node already carries its markers; the bypass must return it untouched."""
+    from graphiti_core.nodes import EntityNode
+
+    from menhir.infrastructure.graphiti_model_patches import _existing_canonical_node
+
+    stored = _node(self_uuid_for_namespace("default"), "user")
+    stored.attributes = {"is_self": True, "entity_role": "self", "user_flagged": True}
+
+    async def _found(driver, uuid):
+        return stored
+
+    monkeypatch.setattr(EntityNode, "get_by_uuid", _found)
+
+    got = await _existing_canonical_node(SimpleNamespace(driver=object()), _node("x", "user"), None)
+    assert got is stored
+    assert got.attributes["user_flagged"] is True

@@ -186,6 +186,23 @@ def bind_canonical_self(
     if not self_nodes:
         return SelfBindResult(SelfBindOutcome.NO_SELF_CANDIDATE, mode=mode)
 
+    # More than one self-looking node cannot be collapsed on episode-level evidence alone. The
+    # trusted signal proves WHO AUTHORED the episode; it says nothing about which extracted node
+    # is that author. A human turn can legitimately discuss an application/RBAC `user` distinct
+    # from the speaker ("I gave the user read access"), and folding both into the human identity
+    # is precisely the false-positive bind this change exists to prevent -- it would corrupt the
+    # canonical identity with a foreign subject, which no later migration can separate.
+    #
+    # Binding therefore requires exactly one candidate. Anything else fails closed and visibly:
+    # the pending episode stays retryable with its raw text intact and nothing is written.
+    # Per-node subject authority would let this collapse safely; it does not exist yet.
+    if len(self_nodes) > 1:
+        raise AmbiguousSelfBindingError(
+            f"{len(self_nodes)} self-alias nodes in one payload for namespace "
+            f"{identity.namespace!r}; episode-level evidence cannot prove they are the same "
+            f"subject, so refusing to bind"
+        )
+
     self_uuids = {_node_uuid(n) for n in self_nodes if _node_uuid(n)}
 
     # A non-self node already sitting on the canonical UUID would be silently absorbed into the
@@ -198,20 +215,17 @@ def bind_canonical_self(
             )
 
     if mode is SelfBindMode.OBSERVE:
-        # Report what enforce would have done, having mutated nothing. The collision check above
-        # still runs, so observe surfaces the ambiguous case before it can matter.
+        # Report what enforce would have done, having mutated nothing. Both refusal checks above
+        # still run, so observe surfaces an ambiguous payload before enforce could act on it.
         return SelfBindResult(
             outcome=SelfBindOutcome.BOUND,
             mode=mode,
             self_uuid=canonical_uuid,
             rewritten_node_uuids=tuple(sorted(self_uuids)),
-            nodes_collapsed=max(0, len(self_nodes) - 1),
         )
 
-    # Several aliases in one payload ("user" and "I") denote the same proven human, so they
-    # collapse deterministically rather than competing. Keep the first in extraction order.
     keeper = self_nodes[0]
-    collapsed = self_nodes[1:]
+    collapsed: list[Any] = []
 
     # The rewrite spans three structures and is only correct as a unit: a node rewritten while
     # its edges still point at the discarded UUID orphans every fact the episode carried. The

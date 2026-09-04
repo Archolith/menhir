@@ -164,3 +164,35 @@ def test_adapter_and_protocol_expose_the_non_destructive_contract():
     assert hasattr(MemoryGraphAdapter, "detect_self_forks")
     assert hasattr(MemoryGraphAdapter, "ensure_self_entity")
     assert hasattr(EventConsolidationGraph, "detect_self_forks")
+
+
+@pytest.mark.unit
+def test_adapter_fork_detection_performs_no_write():
+    """REVIEW P2. detect_self_forks previously obtained the uuid by calling ensure_self_entity,
+    which MERGEs and updates the canonical node -- so a census or pre-migration inventory mutated
+    the graph it was inspecting. Discovery must be separable from consolidation."""
+    from menhir.domain.self_identity import self_uuid_for_namespace
+    from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
+
+    class _Episodes:
+        def __init__(self) -> None:
+            self.ensure_calls = 0
+            self.detect_args: dict | None = None
+
+        def ensure_self_entity(self, namespace):
+            self.ensure_calls += 1
+            return self_uuid_for_namespace(namespace)
+
+        def detect_self_forks(self, *, namespace, self_uuid):
+            self.detect_args = {"namespace": namespace, "self_uuid": self_uuid}
+            return ["fork-a"]
+
+    adapter = MemoryGraphAdapter.__new__(MemoryGraphAdapter)
+    episodes = _Episodes()
+    adapter._episodes = episodes
+
+    forks = adapter.detect_self_forks("ns-1")
+
+    assert forks == ["fork-a"]
+    assert episodes.ensure_calls == 0, "read-only detection called the mutating ensure path"
+    assert episodes.detect_args["self_uuid"] == self_uuid_for_namespace("ns-1")

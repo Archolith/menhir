@@ -11,8 +11,10 @@ import pytest
 
 from menhir.domain.self_identity import self_uuid_for_namespace
 from menhir.infrastructure.self_binding import (
+    AmbiguousSelfBindingError,
     SelfBindMode,
     SelfBindOutcome,
+    SelfBindResult,
     bind_canonical_self,
 )
 
@@ -26,10 +28,15 @@ class _Node:
 
 
 def _replay(case: CorpusCase, mode: SelfBindMode):
+    """Replay one case. A refusal is a RESULT, not a test error: failing closed is the designed
+    behavior for a payload whose subject cannot be proven, so it is classified like any other."""
     nodes = [_Node(f"extracted-{i}", n) for i, n in enumerate(case.entity_names)]
     edges: list[object] = []
     index_map = {n.uuid: [0] for n in nodes}
-    result = bind_canonical_self(nodes, edges, index_map, case.identity(), mode)
+    try:
+        result = bind_canonical_self(nodes, edges, index_map, case.identity(), mode)
+    except AmbiguousSelfBindingError:
+        result = SelfBindResult(SelfBindOutcome.AMBIGUOUS, mode=mode)
     return result, nodes
 
 
@@ -59,6 +66,7 @@ def test_no_false_positive_binds(case: CorpusCase):
 def test_corpus_covers_every_category_the_plan_names():
     """A corpus missing its controls proves only that binding works, never that it is narrow."""
     required = {
+        "ambiguous_subject",
         "trusted_user_turn",
         "assistant_echo",
         "project_scan",

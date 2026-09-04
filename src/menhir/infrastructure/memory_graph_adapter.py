@@ -23,6 +23,7 @@ from menhir.infrastructure.episode_repository import (
     is_context_window_error_text,
     is_recoverable_context_window_error,
 )
+from menhir.domain.self_identity import self_uuid_for_namespace
 from menhir.infrastructure.consolidation_queries import ConsolidationRepository
 from menhir.infrastructure.correlation_queries import CorrelationRepository
 from menhir.infrastructure.neo4j import Neo4jRepository
@@ -608,9 +609,12 @@ class MemoryGraphAdapter:
 
         Discovery is deliberately separate from consolidation: this reports what an operator-only,
         journaled migration would have to consider, and mutates nothing."""
+        # Derive the target uuid, never MERGE it. `ensure_self_entity` writes -- calling it here
+        # would make a census or pre-migration inventory mutate the graph it is inspecting, and
+        # the plan requires discovery to be read-only and separable from consolidation.
         return self._episodes.detect_self_forks(
             namespace=namespace,
-            self_uuid=self._episodes.ensure_self_entity(namespace),
+            self_uuid=self_uuid_for_namespace(namespace),
         )
 
     def stamp_ingest_metadata(
