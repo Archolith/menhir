@@ -1,9 +1,13 @@
 # Canonical-self production observation — 2026-09-04
 
-**Status:** read-only aggregate evidence; **not** a Phase 7 census or disposition manifest  
-**Observed at:** 2026-09-04 13:29:30 UTC  
-**Production host:** `vmi3131796`  
-**Access path:** workspace `scripts/vps-ssh.ps1`  
+**Status:** read-only aggregate evidence; **not** a Phase 7 census or disposition manifest
+
+**Observed at:** 2026-09-04 13:29:30 UTC
+
+**Production host:** `vmi3131796`
+
+**Access path:** workspace `scripts/vps-ssh.ps1`
+
 **Mutations:** none — no deploy, restart, configuration change, graph write, or migration
 
 ## Deployed identity and rollout state
