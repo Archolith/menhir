@@ -511,3 +511,98 @@ async def test_a_missing_driver_is_not_evidence_that_the_node_is_absent():
 
     with pytest.raises(RuntimeError):
         await _existing_canonical_node(SimpleNamespace(driver=None), _node("x", "I"), None)
+
+
+@pytest.mark.online
+async def test_existing_canonical_node_round_trips_through_real_bulk_persistence(test_neo4j_repo):
+    """A second declared episode must survive Graphiti's actual bulk-persistence path."""
+    import os
+
+    import graphiti_core.utils.maintenance.node_operations as node_operations
+    from graphiti_core.driver.neo4j_driver import Neo4jDriver
+    from graphiti_core.utils.bulk_utils import add_nodes_and_edges_bulk
+
+    from menhir.infrastructure.graphiti_model_patches import _patch_graphiti_adaptive_dedupe
+
+    canonical = self_uuid_for_namespace("default")
+    driver = Neo4jDriver(
+        os.getenv("MENHIR_TEST_NEO4J_URI", "bolt://localhost:7688"),
+        os.getenv("MENHIR_TEST_NEO4J_USER", "neo4j"),
+        os.getenv("MENHIR_TEST_NEO4J_PASSWORD", "testpassword"),
+        database=os.getenv("MENHIR_TEST_NEO4J_DATABASE", "neo4j"),
+    )
+
+    # This is the valid shape created by ensure_self_entity: canonical and marked, but with no
+    # name_embedding. The resolver must preserve it, and Graphiti's authoritative bulk writer must
+    # make it save-ready without an extra resolver-side database read.
+    test_neo4j_repo.execute(
+        """
+        MERGE (n:Entity {uuid: $uuid})
+        SET n.name = 'account owner',
+            n.group_id = '',
+            n.created_at = datetime(),
+            n.summary = 'state that must survive replacement persistence',
+            n.is_self = true,
+            n.entity_role = 'self',
+            n.namespace = 'default',
+            n.user_flagged = true
+        """,
+        params={"uuid": canonical},
+    )
+
+    class _Embedder:
+        def __init__(self):
+            self.inputs: list[list[str]] = []
+
+        async def create(self, input_data):
+            self.inputs.append(list(input_data))
+            return [0.25, 0.5, 0.75]
+
+    embedder = _Embedder()
+
+    try:
+        _patch_graphiti_adaptive_dedupe()
+
+        ctx = _declared(episode_uuid="ep-live", subject_node_uuid="fresh-self")
+        extracted = _node("fresh-self", "the account owner")
+        extracted.name_embedding = [0.9, 0.8, 0.7]
+        receipt = begin_extraction_receipt(
+            "ep-live", "body", self_identity=ctx, self_bind_mode=SelfBindMode.ENFORCE
+        )
+        receipt.self_bind_result = bind_canonical_self([extracted], [], {}, ctx)
+
+        resolved, uuid_map, _pairs = await node_operations.resolve_extracted_nodes(
+            SimpleNamespace(llm_client=object(), driver=driver, embedder=embedder), [extracted]
+        )
+        hydrated = resolved[0]
+        assert hydrated is not None
+        assert hydrated.uuid == canonical
+        assert hydrated.summary == "state that must survive replacement persistence"
+        assert hydrated.attributes["user_flagged"] is True
+        assert uuid_map[canonical] == canonical
+
+        await add_nodes_and_edges_bulk(driver, [], [], [hydrated], [], embedder)
+        assert embedder.inputs == [["account owner"]]
+    finally:
+        clear_extraction_receipt()
+        await driver.close()
+
+    rows = test_neo4j_repo.execute(
+        """
+        MATCH (n:Entity {uuid: $uuid})
+        RETURN count(n) AS node_count,
+               n.summary AS summary,
+               n.is_self AS is_self,
+               n.entity_role AS entity_role,
+               n.user_flagged AS user_flagged,
+               n.name_embedding AS name_embedding
+        """,
+        params={"uuid": canonical},
+    )
+    assert len(rows) == 1
+    assert rows[0]["node_count"] == 1
+    assert rows[0]["summary"] == "state that must survive replacement persistence"
+    assert rows[0]["is_self"] is True
+    assert rows[0]["entity_role"] == "self"
+    assert rows[0]["user_flagged"] is True
+    assert list(rows[0]["name_embedding"]) == [0.25, 0.5, 0.75]
