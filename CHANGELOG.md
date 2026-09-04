@@ -26,6 +26,43 @@
   paid a 2s timeout to localhost:8082 and logged a WARNING. Tracing is observability
   only, and both network paths are now gated.
 
+## 2026-09-03 - bind the canonical self deterministically, before graphiti dedup
+
+- Menhir now has one authoritative human-self entity per logical namespace, and no longer asks
+  cosine search or an LLM to decide which node that is. New `domain/self_identity.py` owns the
+  single UUID formula and the evidence contract; `infrastructure/self_binding.py` applies it.
+- The name is never authority. Binding requires trusted metadata the ingestion boundary owns --
+  a `user`/`manual` source that the admission gate GRANTED, meaning it verified Menhir-owned
+  turn evidence with `role == "user"` and text grounded in that turn. An entity called `user`
+  from an agent turn, a project scan or an imported document stays an ordinary semantic entity.
+- Evidence needed no new field: it already survives the async queue in the episode's persisted
+  `source`, because the gate rewrites ungrounded claims to `agent_inference` before persistence.
+- A proven self is withheld from `_collect_candidate_nodes` entirely rather than skipped
+  afterwards. Candidate search IS the mechanism that fragmented the identity: with 66 exact-name
+  `user` nodes against a 15-candidate window, graphiti's deterministic single-match branch was
+  arithmetically unreachable, so every extraction escalated to the LLM and a
+  `duplicate_candidate_id = -1` verdict could mint another fork. Tests assert the calls do not
+  happen, not merely that the resulting uuid is right.
+- Three self-UUID derivations (one writer, two recall readers) now route through one helper, and
+  a static guard fails if a second copy appears. Output is byte-identical to the formula already
+  written into production data.
+- `ensure_self_entity` is non-destructive. `_absorb_self_entity_forks` -- which bulk-rewired and
+  `DETACH DELETE`d every same-named node as a side effect of an ordinary write, dropping
+  fork-to-canonical edges as "split artifacts" -- is removed, not merely unreferenced. Forks are
+  now reported as `SELF_FORKS_REQUIRE_MIGRATION`; consolidating them is an operator-only,
+  journaled migration driven by an approved UUID manifest.
+- Fixes the activation hazard that made the above unsafe: the canonical write stamped
+  `group_id = <logical namespace>`, so a `default` namespace would have created the node in group
+  `"default"` -- a partition holding none of the production data. Detection reads both spellings,
+  since existing forks live under the wrong one.
+- Adds privacy-safe observability: per-decision binding records and per-branch dedup counters
+  (`unique_exact_bind`, `multiple_exact_llm`, `entropy_guard_skip`, ...), carrying enums, counts
+  and UUIDs but never memory text or arbitrary entity names. The RCA could only infer which
+  branch production took; it is now recorded.
+- Ships dormant. `MENHIR_CANONICAL_SELF_BINDING_MODE` is `off | observe | enforce`, default
+  `off`, and an unrecognized value falls back to `off`. Consolidating the existing forks remains
+  blocked on an approved census and a restored-copy rehearsal.
+
 ## 2026-09-03 - surface refile lineage where agents actually meet todos
 
 - `list_todos` rows now carry `supersedes_count`, and both renderers that consume
@@ -157,39 +194,3 @@ predicate-evaluating fake to confirm both guards compose.
 - Kept namespace-wide deletion, host-filesystem ingestion, and client credential administration
   outside hosted connector authority. Bumped the consent-session schema so the scope elevation
   requires fresh operator authorization; old access and refresh tokens fail the exact scope check.
-
-## 2026-08-29 - bind production rights and consent to each OAuth client
-
-- Removed shared Agent Smith consent groups so every hosted and managed client requires an explicit
-  approval and can carry an independent digest-bound tool policy.
-- Kept hosted web clients on the reviewed memory, diagnostics, and structure surface. Narrowed
-  Agent Smith clients to their documented workspace tools, including read-only `list_todos`, while
-  retaining `add_memory_and_track` only for Codex because its generated config explicitly pins it.
-- Rejected legacy or unknown client-policy fields, documented the authority boundary, and added
-  regression coverage for different client rights and non-transitive consent. Versioned consent
-  cookies invalidate the old group-capable format at deployment.
-
-## 2026-08-29 - expose read-only project structure to production agents
-
-- Added `query_structure` to the digest-bound production tool surface for hosted web and
-  Agent Smith OAuth clients so connector sessions can inspect already-ingested repositories.
-- Kept `ingest_project` denied; expanding the production connector does not grant a new graph-write
-  path. Added policy assertions and documented the resulting authority boundary.
-
-## 2026-08-29 - retire Reasonix OAuth authority
-
-- Removed the archived Reasonix client from Agent Smith's published OAuth metadata and
-  digest-bound production policy.
-- Added regression coverage proving the retired client is neither published nor admitted by
-  production policy while the remaining managed-client suite stays intact.
-
-## 2026-08-28 - fix: complete Claude web refresh authorization
-
-- OAuth protocol scopes are now separate from Menhir permission scopes, so
-  `offline_access` can request a refresh token without becoming a new access tier.
-- The dedicated Claude web registration alone declares `offline_access`; ChatGPT and every
-  Agent Smith registration keep their existing exact scope contracts.
-- Startup atomically upgrades the exact legacy Claude registration and refuses unknown or
-  disabled protocol scopes before the service accepts traffic.
-- Consent pages allow only the validated callback origin through CSP `form-action`, so
-  Chromium can follow the authorization POST redirect instead of stranding issued codes.

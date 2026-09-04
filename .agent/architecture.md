@@ -13,6 +13,7 @@ This file is the architectural source of truth. Keep operator runbooks, launcher
 - Need queue / telemetry behavior: read `runtime.ops` and `runtime.storage`
 - Need write-time memory projections: read `runtime.projections` and `data_models.md`
 - Need package ownership: read `runtime.packages`
+- Need who "the user" is / self-entity identity: read `runtime.canonical_self` and `workflows/canonical-self-migration-runbook.md`
 - Need operator commands / readiness checks / logs: use `workflows/operations_runbook.md` and `workflows/logging-and-troubleshooting.md`
 
 ## Overview
@@ -543,6 +544,57 @@ Episode Text
   -> MemoryGraphAdapter.stamp_ingest_metadata() applies policy fields via Cypher
   -> Returns IngestResult(episode_id, status, nodes_touched, edges_touched)
 ```
+
+### Canonical self identity
+
+Concept id: `runtime.canonical_self`
+
+Menhir has exactly one authoritative human-self entity per **logical** namespace, and never asks
+semantic retrieval or an LLM to decide which node that is.
+
+**Why.** Graphiti resolves an extracted entity by cosine candidate search, escalating to an LLM
+when several candidates share a normalized name. That boundary is probabilistic, and for the
+entity named `user` it failed in production: the candidate window (15) saturated with exact-name
+matches, so the deterministic single-match branch became arithmetically unreachable, every
+extraction escalated, and a `duplicate_candidate_id = -1` verdict minted another fork. One
+identity ended up split across dozens of nodes, crowding out real memories in recall.
+
+**The contract.** The literal name is never authority. Binding requires trusted evidence that the
+ingestion boundary owns:
+
+| Layer | Responsibility |
+|---|---|
+| `domain/self_identity.py` | the ONE UUID formula, the evidence contract, the alias set |
+| `services/ingest_intake.py` | admission gate decides whether a `user`/`manual` claim is grounded |
+| `services/enrichment_steps.py` | reconstructs the identity context from the claimed episode |
+| `infrastructure/self_binding.py` | rewrites the proven human across the extraction payload |
+| `infrastructure/graphiti_model_patches.py` | withholds a bound self from candidate search entirely |
+
+Evidence survives the asynchronous queue in the episode's persisted `source`. That value is a
+gate receipt rather than a caller's assertion: `evaluate_user_tier_claim` requires Menhir-owned
+`TurnEvidence` with `role == "user"`, a matching session/namespace, and text grounded in that
+turn, and rewrites anything ungrounded to `agent_inference` **before** persistence. This holds
+only while `create_pending_episode` has exactly one production writer; a test pins that.
+
+**Logical vs physical.** Identity is keyed by the LOGICAL namespace
+(`uuid5(NAMESPACE_URL, "menhir-self:<logical>")`); the Graphiti partition is derived separately by
+`namespace_to_group_id`, where logical `default` maps to physical `""`. The extraction context
+carries the logical name explicitly so nothing has to reverse that mapping, which is ambiguous.
+
+**Binding seam.** After combined extraction has built nodes, edges and the episode index map --
+and after the relationless-repair pass, which replaces all three -- but before Graphiti acquires
+candidates. The rewrite covers the node UUID, both edge endpoint directions and the index map as
+one unit, with rollback: a node rewritten while its edges still point at the discarded UUID would
+orphan the episode's facts.
+
+**Rollout.** `canonical_self_binding_mode` (`MENHIR_CANONICAL_SELF_BINDING_MODE`) is
+`off | observe | enforce`, default `off`. Unrecognized values fall back to `off`.
+
+**Consolidation is not a runtime operation.** `ensure_self_entity` creates or updates only the
+canonical target; pre-existing forks are reported as `SELF_FORKS_REQUIRE_MIGRATION` and never
+absorbed. The former `_absorb_self_entity_forks` bulk-rewired and `DETACH DELETE`d forks as a side
+effect of an ordinary write, and dropped fork-to-canonical edges as "split artifacts"; it has been
+removed, and its Cypher must not be revived as a migration template.
 
 ### Turn-evidence capture (ADR 0001)
 
