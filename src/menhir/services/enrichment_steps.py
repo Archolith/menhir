@@ -20,6 +20,7 @@ from menhir.services.scheduler_protocols import LifecycleServiceProtocol
 
 from menhir.domain.models import FreshnessState, ProcessingState
 from menhir.domain.self_identity import SelfIdentityContext, self_context_for_pending_episode
+from menhir.infrastructure.self_binding import SelfBindMode, resolve_bind_mode
 from menhir.domain.utils import source_confidence_for
 from menhir.infrastructure import GraphitiClient, MemoryGraphAdapter
 from menhir.infrastructure.evidence_publication_intents import (
@@ -113,6 +114,9 @@ class EnrichmentContext:
     # manifest do not exist.  Tests and a future explicit activation hook can inject it without
     # changing the extraction API; absence preserves the currently deployed path.
     evidence_publication_intents: EvidencePublicationIntentRepository | None = None
+    #: Canonical-self binding rollout: "off" (default), "observe" or "enforce". Defaulted so every
+    #: construction site predating this field keeps pre-change behavior.
+    canonical_self_binding_mode: str = "off"
 
 
 # ---------------------------------------------------------------------------
@@ -690,6 +694,9 @@ async def run_graphiti_extraction(
                     source=ctx.claimed.get("source"),
                     namespace=namespace,
                     episode_uuid=ctx.episode_uuid,
+                ),
+                self_bind_mode=resolve_bind_mode(
+                    getattr(ctx, "canonical_self_binding_mode", None)
                 ),
             )
             if publication_intent is not None:
@@ -1556,6 +1563,7 @@ async def add_episode_with_timeout(
     group_id: str = "",
     relationless_repair_context_loader: Callable[[], tuple[str, ...]] | None = None,
     self_identity: SelfIdentityContext | None = None,
+    self_bind_mode: SelfBindMode = SelfBindMode.OFF,
 ) -> Any:
     """Bound one Graphiti add_episode call so stuck requests fail back into retry flow.
 
@@ -1592,6 +1600,7 @@ async def add_episode_with_timeout(
         source_description=source_description,
         relationless_repair_context_loader=relationless_repair_context_loader,
         self_identity=self_identity,
+        self_bind_mode=self_bind_mode,
     )
     try:
         record_lifecycle_event(

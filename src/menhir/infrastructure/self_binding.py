@@ -33,10 +33,37 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "AmbiguousSelfBindingError",
+    "SelfBindMode",
     "SelfBindOutcome",
     "SelfBindResult",
     "bind_canonical_self",
+    "resolve_bind_mode",
 ]
+
+
+class SelfBindMode(StrEnum):
+    """Rollout control. Default ``OFF`` until the plan's acceptance gates pass."""
+
+    #: Pre-change behavior exactly: binding is not evaluated at all.
+    OFF = "off"
+    #: Evaluate and record the decision, but leave the payload untouched.
+    OBSERVE = "observe"
+    #: Evaluate and apply.
+    ENFORCE = "enforce"
+
+
+def resolve_bind_mode(value: Any) -> SelfBindMode:
+    """Parse a configured mode, failing safe to ``OFF`` on anything unrecognized.
+
+    A typo in configuration must not silently enable a durable-write-semantics change.
+    """
+    try:
+        return SelfBindMode(str(value or "").strip().lower())
+    except ValueError:
+        logger.warning(
+            "Unrecognized canonical_self_binding_mode %r; falling back to 'off'", value
+        )
+        return SelfBindMode.OFF
 
 
 class AmbiguousSelfBindingError(RuntimeError):
@@ -62,6 +89,9 @@ class SelfBindResult:
     """Outcome of one binding attempt, safe to log: enums, counts and UUIDs only."""
 
     outcome: SelfBindOutcome
+    #: The mode this decision was made under. ``OBSERVE`` outcomes report what *would* have
+    #: happened; nothing was rewritten and the resolver must not treat them as authoritative.
+    mode: SelfBindMode = SelfBindMode.ENFORCE
     self_uuid: str | None = None
     #: UUIDs the extractor minted for the human, now rewritten to :attr:`self_uuid`.
     rewritten_node_uuids: tuple[str, ...] = ()
@@ -71,7 +101,13 @@ class SelfBindResult:
 
     @property
     def bound(self) -> bool:
-        return self.outcome is SelfBindOutcome.BOUND
+        """True only when the payload was actually rewritten.
+
+        Observe mode never returns True here: the resolver keys its dedup bypass on this, and a
+        node that was not rewritten still carries the extractor's uuid, so bypassing search for
+        it would strand it with no candidates and no resolution.
+        """
+        return self.outcome is SelfBindOutcome.BOUND and self.mode is SelfBindMode.ENFORCE
 
 
 def _node_uuid(node: Any) -> str:
@@ -83,6 +119,7 @@ def bind_canonical_self(
     edges: list[Any],
     index_map: dict[str, list[int]],
     identity: SelfIdentityContext | None,
+    mode: SelfBindMode = SelfBindMode.ENFORCE,
 ) -> SelfBindResult:
     """Rewrite the proven human to its deterministic UUID, in place, across the whole payload.
 
@@ -94,15 +131,18 @@ def bind_canonical_self(
     Returns a :class:`SelfBindResult` describing what happened. Raises
     :class:`AmbiguousSelfBindingError` only when binding would require a guess.
     """
+    if mode is SelfBindMode.OFF:
+        return SelfBindResult(SelfBindOutcome.NOT_ELIGIBLE, mode=mode)
+
     if not eligible_self_evidence(identity):
-        return SelfBindResult(SelfBindOutcome.NOT_ELIGIBLE)
+        return SelfBindResult(SelfBindOutcome.NOT_ELIGIBLE, mode=mode)
 
     assert identity is not None  # narrowed by eligible_self_evidence
     canonical_uuid = identity.self_uuid
 
     self_nodes = [n for n in nodes if is_self_alias(getattr(n, "name", None))]
     if not self_nodes:
-        return SelfBindResult(SelfBindOutcome.NO_SELF_CANDIDATE)
+        return SelfBindResult(SelfBindOutcome.NO_SELF_CANDIDATE, mode=mode)
 
     self_uuids = {_node_uuid(n) for n in self_nodes if _node_uuid(n)}
 
@@ -114,6 +154,17 @@ def bind_canonical_self(
                 f"canonical self uuid {canonical_uuid} is already held by non-self entity "
                 f"in namespace {identity.namespace!r}; refusing to bind"
             )
+
+    if mode is SelfBindMode.OBSERVE:
+        # Report what enforce would have done, having mutated nothing. The collision check above
+        # still runs, so observe surfaces the ambiguous case before it can matter.
+        return SelfBindResult(
+            outcome=SelfBindOutcome.BOUND,
+            mode=mode,
+            self_uuid=canonical_uuid,
+            rewritten_node_uuids=tuple(sorted(self_uuids)),
+            nodes_collapsed=max(0, len(self_nodes) - 1),
+        )
 
     # Several aliases in one payload ("user" and "I") denote the same proven human, so they
     # collapse deterministically rather than competing. Keep the first in extraction order.
@@ -183,6 +234,7 @@ def bind_canonical_self(
 
     result = SelfBindResult(
         outcome=SelfBindOutcome.BOUND,
+        mode=mode,
         self_uuid=canonical_uuid,
         rewritten_node_uuids=tuple(sorted(self_uuids)),
         nodes_collapsed=len(collapsed),

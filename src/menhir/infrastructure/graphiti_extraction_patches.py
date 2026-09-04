@@ -11,6 +11,7 @@ from time import perf_counter
 from typing import Any, Callable
 
 from menhir.domain.self_identity import SelfIdentityContext
+from menhir.infrastructure.self_binding import SelfBindMode, SelfBindResult, bind_canonical_self
 from menhir.infrastructure.graphiti_helpers import (
     SYNTHETIC_FACT_PREFIX,
     _build_graphiti_failure_details,
@@ -80,6 +81,11 @@ class CombinedExtractionReceipt:
     #: namespace lives here rather than being inferred from ``group_id``, because logical
     #: ``default`` maps to physical ``""`` and the two must not be conflated.
     self_identity: "SelfIdentityContext | None" = None
+    #: Rollout control for this episode. ``OFF`` reproduces pre-change behavior exactly.
+    self_bind_mode: "SelfBindMode" = SelfBindMode.OFF
+    #: Outcome of the binding attempt, or ``None`` if binding never ran. Read by the resolver
+    #: partition to know which UUID is already authoritative and must skip candidate search.
+    self_bind_result: "SelfBindResult | None" = None
     #: Text Graphiti supplied to the extractor as previous conversational context. Missing edge
     #: endpoints may be closed when grounded here even if the current turn uses a pronoun (for
     #: example, previous "Rachel ..." followed by current "She moved to Chicago.").
@@ -324,6 +330,7 @@ def begin_extraction_receipt(
     source_description: str = "",
     relationless_repair_context_loader: Callable[[], tuple[str, ...]] | None = None,
     self_identity: SelfIdentityContext | None = None,
+    self_bind_mode: SelfBindMode = SelfBindMode.OFF,
 ) -> CombinedExtractionReceipt:
     """Create and activate a fresh receipt for the current episode (call in the parent task).
 
@@ -336,6 +343,7 @@ def begin_extraction_receipt(
         source_description=str(source_description or ""),
         relationless_repair_context_loader=relationless_repair_context_loader,
         self_identity=self_identity,
+        self_bind_mode=self_bind_mode,
     )
     _extraction_receipt.set(receipt)
     return receipt
@@ -1153,6 +1161,15 @@ async def _run_graphiti_combined_extraction(
             receipt.raw_entity_count,
             receipt.raw_edge_count,
         )
+    # Bind the proven human AFTER the relationless-repair branch above: a repair re-runs
+    # extraction and replaces nodes/edges/index_map wholesale, so binding before it would be
+    # discarded. This is the last point where the payload is final and Graphiti has not yet
+    # acquired candidates.
+    if receipt is not None and receipt.self_identity is not None:
+        receipt.self_bind_result = bind_canonical_self(
+            nodes, edges, index_map, receipt.self_identity, receipt.self_bind_mode
+        )
+
     if receipt is not None:
         receipt.resolved_node_count = len(nodes)
         receipt.resolved_edge_count = len(edges)

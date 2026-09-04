@@ -163,6 +163,7 @@ class IngestWorkerMixin:
             ready_warning_ms=self._ready_warning_ms,
             graphiti_add_episode_timeout_s=self._graphiti_add_episode_timeout_s,
             graphiti_episode_max_estimated_tokens=self._graphiti_episode_max_estimated_tokens,
+            canonical_self_binding_mode=self._canonical_self_binding_mode,
             get_queue_depth=self.get_queue_depth,
             shadow_context_composition=self._shadow_context_composition,
             shadow_composition_timeout_s=self._shadow_composition_timeout_s,

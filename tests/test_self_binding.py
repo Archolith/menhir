@@ -18,8 +18,10 @@ from menhir.domain.self_identity import (
 )
 from menhir.infrastructure.self_binding import (
     AmbiguousSelfBindingError,
+    SelfBindMode,
     SelfBindOutcome,
     bind_canonical_self,
+    resolve_bind_mode,
 )
 
 
@@ -334,3 +336,84 @@ def test_result_carries_only_structured_fields():
     assert "user" not in rendered.replace("self_uuid", "")
     assert result.rewritten_node_uuids == ("random-1",)
     assert result.edge_endpoints_rewritten == 1
+
+
+# --------------------------------------------------------------------------- rollout control
+
+
+@pytest.mark.unit
+def test_default_mode_is_off():
+    """A durable-write-semantics change must not activate merely by deploying."""
+    from menhir.config.settings_model import MemorySettings
+
+    assert MemorySettings().canonical_self_binding_mode == "off"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("off", SelfBindMode.OFF),
+        ("observe", SelfBindMode.OBSERVE),
+        ("enforce", SelfBindMode.ENFORCE),
+        ("  ENFORCE  ", SelfBindMode.ENFORCE),
+        ("typo", SelfBindMode.OFF),
+        ("", SelfBindMode.OFF),
+        (None, SelfBindMode.OFF),
+    ],
+)
+def test_mode_parsing_fails_safe(value, expected):
+    """A configuration typo must not silently enable binding."""
+    assert resolve_bind_mode(value) is expected
+
+
+@pytest.mark.unit
+def test_off_mode_reproduces_pre_change_behavior():
+    nodes = [_Node("random-1", "user")]
+    edges = [_Edge("random-1", "other")]
+    index_map = {"random-1": [0]}
+
+    result = bind_canonical_self(nodes, edges, index_map, _trusted(), SelfBindMode.OFF)
+
+    assert result.bound is False
+    assert nodes[0].uuid == "random-1"
+    assert edges[0].source_node_uuid == "random-1"
+    assert index_map == {"random-1": [0]}
+
+
+@pytest.mark.unit
+def test_observe_mode_reports_without_mutating():
+    """Observe must be able to answer "what would have happened" with zero payload change."""
+    nodes = [_Node("random-1", "user"), _Node("b", "I")]
+    edges = [_Edge("random-1", "other")]
+    index_map = {"random-1": [0]}
+
+    result = bind_canonical_self(nodes, edges, index_map, _trusted(), SelfBindMode.OBSERVE)
+
+    assert result.outcome is SelfBindOutcome.BOUND
+    assert result.self_uuid == self_uuid_for_namespace("default")
+    assert result.nodes_collapsed == 1
+    # ...and nothing moved.
+    assert result.bound is False
+    assert [n.uuid for n in nodes] == ["random-1", "b"]
+    assert edges[0].source_node_uuid == "random-1"
+    assert index_map == {"random-1": [0]}
+
+
+@pytest.mark.unit
+def test_observe_does_not_trigger_the_resolver_bypass():
+    """`bound` gates the dedup bypass. An observe-mode node still carries the extractor's uuid,
+    so bypassing candidate search for it would strand it with no candidates and no resolution."""
+    nodes = [_Node("random-1", "user")]
+    result = bind_canonical_self(nodes, [], {}, _trusted(), SelfBindMode.OBSERVE)
+    assert result.outcome is SelfBindOutcome.BOUND
+    assert result.bound is False
+
+
+@pytest.mark.unit
+def test_observe_still_surfaces_the_ambiguous_case():
+    """Observe exists to find problems before enforce can cause them."""
+    canonical = self_uuid_for_namespace("default")
+    nodes = [_Node("random-1", "user"), _Node(canonical, "Rachel")]
+    with pytest.raises(AmbiguousSelfBindingError):
+        bind_canonical_self(nodes, [], {}, _trusted(), SelfBindMode.OBSERVE)

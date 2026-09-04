@@ -924,6 +924,24 @@ def _patch_graphiti_dedup_identity_gate() -> None:
 # Structural-node isolation and attribute preservation
 # ---------------------------------------------------------------------------
 
+def _pre_resolved_self_uuid() -> str | None:
+    """The canonical self uuid bound for the current episode, if binding ran and succeeded.
+
+    Read from the task-local extraction receipt rather than passed down, because Graphiti owns
+    the call signature between extraction and resolution.
+    """
+    try:
+        from menhir.infrastructure.graphiti_extraction_patches import get_extraction_receipt
+
+        receipt = get_extraction_receipt()
+    except Exception:  # noqa: BLE001 - resolution must never fail on instrumentation
+        return None
+    result = getattr(receipt, "self_bind_result", None) if receipt is not None else None
+    if result is None or not getattr(result, "bound", False):
+        return None
+    return getattr(result, "self_uuid", None)
+
+
 def _is_structural_graphiti_candidate(node: Any) -> bool:
     """Return whether a Graphiti candidate belongs to Menhir's structure graph.
 
@@ -1062,11 +1080,35 @@ def _patch_graphiti_adaptive_dedupe() -> None:
             existing_nodes_override=None,
         ):
             llm_client = clients.llm_client
-            candidate_nodes_by_extracted = await _no_module._collect_candidate_nodes(
+
+            # A node already bound to the deterministic canonical-self uuid is authoritative by
+            # construction: trusted episode metadata proved the author, so there is nothing for
+            # similarity or an LLM to decide. It is withheld from _collect_candidate_nodes
+            # entirely -- not merely skipped afterwards -- because the cosine search IS the
+            # mechanism that fragmented this identity: the `user` candidate window saturates
+            # with exact-name matches, making the deterministic single-match branch unreachable
+            # and routing every extraction to the LLM.
+            pre_resolved_indices: set[int] = set()
+            _bound_uuid = _pre_resolved_self_uuid()
+            if _bound_uuid:
+                pre_resolved_indices = {
+                    idx
+                    for idx, node in enumerate(extracted_nodes)
+                    if str(getattr(node, "uuid", "") or "") == _bound_uuid
+                }
+
+            searchable = [n for i, n in enumerate(extracted_nodes) if i not in pre_resolved_indices]
+            searched = await _no_module._collect_candidate_nodes(
                 clients,
-                extracted_nodes,
+                searchable,
                 existing_nodes_override,
             )
+            # Realign to the full extracted list; pre-resolved nodes get no candidates.
+            _searched_iter = iter(searched)
+            candidate_nodes_by_extracted = [
+                [] if i in pre_resolved_indices else next(_searched_iter)
+                for i in range(len(extracted_nodes))
+            ]
 
             state = DedupResolutionState(
                 resolved_nodes=[None] * len(extracted_nodes),
@@ -1074,10 +1116,15 @@ def _patch_graphiti_adaptive_dedupe() -> None:
                 unresolved_indices=[],
             )
 
+            for idx in pre_resolved_indices:
+                node = extracted_nodes[idx]
+                state.resolved_nodes[idx] = node
+                state.uuid_map[node.uuid] = node.uuid
+
             for idx, (node, candidates) in enumerate(
                 zip(extracted_nodes, candidate_nodes_by_extracted, strict=True)
             ):
-                if not candidates:
+                if idx in pre_resolved_indices or not candidates:
                     continue
 
                 indexes = _no_module._build_candidate_indexes(candidates)
