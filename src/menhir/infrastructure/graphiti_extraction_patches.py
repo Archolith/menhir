@@ -122,6 +122,10 @@ class CombinedExtractionReceipt:
     #: CURRENT MESSAGES. Native previous-episode context improves recall but can prime the model to
     #: copy a preceding claim; this count makes that deterministic precision guard auditable.
     context_unsupported_edges_suppressed: int = 0
+    #: Endpoint-bearing edges rejected because their predicate/fact had no literal support outside
+    #: the endpoint entity names in CURRENT MESSAGES. This stops a fabricated marker edge from
+    #: turning a valid author capability into authority for an invented relation.
+    subject_marker_edges_suppressed: int = 0
     raw_entity_count: int = 0
     raw_edge_count: int = 0
     malformed_entities_dropped: int = 0
@@ -419,7 +423,12 @@ def _normalize_endpoint_name(name: Any) -> str:
 
 def _active_subject_marker(receipt: CombinedExtractionReceipt | None) -> str:
     endpoint = receipt.self_subject_endpoint if receipt is not None else None
-    return endpoint.marker if endpoint is not None else ""
+    if (
+        endpoint is None
+        or not _requires_declared_author_endpoint(receipt.episode_text)
+    ):
+        return ""
+    return endpoint.marker
 
 
 def _is_reserved_subject_marker(value: Any) -> bool:
@@ -723,6 +732,64 @@ def _edge_has_current_message_anchor(edge: dict[str, Any], episode_text: str) ->
     return bool(current_tokens & edge_tokens)
 
 
+def _anchor_token_forms(tokens: set[str]) -> set[str]:
+    """Small literal morphology bridge for current-text grounding (``own``/``owns``)."""
+    forms: set[str] = set()
+    for token in tokens:
+        folded = token.casefold()
+        forms.add(folded)
+        if len(folded) > 3 and folded.endswith("s"):
+            forms.add(folded[:-1])
+        if len(folded) > 4 and folded.endswith("es"):
+            forms.add(folded[:-2])
+        if len(folded) > 4 and folded.endswith("ed"):
+            forms.add(folded[:-2])
+        if len(folded) > 5 and folded.endswith("ing"):
+            forms.add(folded[:-3])
+    return forms
+
+
+def _subject_edge_has_current_predicate_anchor(
+    *, source_name: str, target_name: str, fact: str, marker: str, episode_text: str
+) -> bool:
+    """Require marker-edge content to be supported by one affirmative author clause.
+
+    A shared token is insufficient: questions, negation, and quoted speech can all contain the same
+    predicate as a fabricated positive edge.  Every meaningful non-endpoint fact token must be
+    present in one accepted author clause, and the other endpoint must overlap that same clause.
+    Relation labels remain excluded because they are model output rather than source evidence.
+    """
+    marker_folded = str(marker or "").casefold()
+    source_is_marker = str(source_name or "").casefold() == marker_folded
+    target_is_marker = str(target_name or "").casefold() == marker_folded
+    if source_is_marker == target_is_marker:
+        return False
+    other_endpoint = target_name if source_is_marker else source_name
+    endpoint_tokens = {
+        raw.casefold()
+        for value in (source_name, target_name, marker)
+        for raw in _CURRENT_MESSAGE_TOKEN_RE.findall(str(value or ""))
+    }
+    fact_tokens = {
+        token
+        for token in _current_message_anchor_tokens(fact)
+        if token not in endpoint_tokens
+        and token not in {"author", "current", "message", "speaker", "user", "human"}
+    }
+    other_endpoint_tokens = _anchor_token_forms({
+        token for token in _current_message_anchor_tokens(str(other_endpoint or ""))
+        if token not in {"author", "current", "message", "speaker", "user", "human"}
+    })
+    if not fact_tokens or not other_endpoint_tokens:
+        return False
+    return any(
+        all(_anchor_token_forms({token}) & clause_tokens for token in fact_tokens)
+        and bool(other_endpoint_tokens & clause_tokens)
+        for clause in _author_assertion_clauses(episode_text)
+        if (clause_tokens := _anchor_token_forms(_current_message_anchor_tokens(clause)))
+    )
+
+
 def _sanitize_combined_payload(
     data: Any,
     receipt: CombinedExtractionReceipt | None,
@@ -770,6 +837,7 @@ def _sanitize_combined_payload(
 
     edges: list[dict[str, Any]] = []
     edges_dropped = 0
+    subject_marker_edges_suppressed = 0
     for item in raw_edges:
         norm = _sanitize_combined_edge(item)
         if norm is None:
@@ -782,6 +850,38 @@ def _sanitize_combined_payload(
         ):
             edges_dropped += 1
             continue
+        if _subject_marker_guard_active(receipt):
+            endpoint_uses_marker = any(
+                norm[key] == marker
+                for key in ("source_entity_name", "target_entity_name")
+            )
+            marker_text = " ".join(
+                norm[key] for key in ("relation_type", "fact")
+            )
+            marker_occurs_in_text = (
+                SUBJECT_ENDPOINT_MARKER_PREFIX.casefold() in marker_text.casefold()
+            )
+            active_marker_occurs = bool(
+                marker and marker.casefold() in marker_text.casefold()
+            )
+            if marker_occurs_in_text and (
+                not endpoint_uses_marker or not active_marker_occurs
+            ):
+                # A marker in prose without the exact marker endpoint has no authority path that
+                # can scrub it before persistence. Drop the edge rather than leak a capability.
+                edges_dropped += 1
+                subject_marker_edges_suppressed += 1
+                continue
+            if endpoint_uses_marker and not _subject_edge_has_current_predicate_anchor(
+                source_name=norm["source_entity_name"],
+                target_name=norm["target_entity_name"],
+                fact=norm["fact"],
+                marker=marker,
+                episode_text=episode_text,
+            ):
+                edges_dropped += 1
+                subject_marker_edges_suppressed += 1
+                continue
         edges.append(norm)
 
     context_unsupported_edges = 0
@@ -941,6 +1041,7 @@ def _sanitize_combined_payload(
         receipt.self_echo_edges_suppressed = self_echo_edges
         receipt.list_membership_edges_added = list_edges_added
         receipt.context_unsupported_edges_suppressed = context_unsupported_edges
+        receipt.subject_marker_edges_suppressed = subject_marker_edges_suppressed
         receipt.assistant_self_only_relationless = assistant_self_only_relationless
         # The validator runs once per extraction call and cannot see which pass it is in, so the
         # repair flag -- set by `_run_graphiti_combined_extraction` BEFORE the second call -- is the
@@ -1007,6 +1108,30 @@ MENHIR RELATION COMPLETENESS:
   relationship, omit the entity as well.
 """
 
+
+def _relation_completeness_instructions(
+    endpoint: SelfSubjectEndpointEnvelope | None,
+) -> str:
+    """Render one non-contradictory author endpoint into the first extraction prompt."""
+    if endpoint is None:
+        return _RELATION_COMPLETENESS_INSTRUCTIONS
+    return f"""\
+MENHIR RELATION COMPLETENESS:
+- Do not return an entity without a relationship when CURRENT MESSAGES state what the speaker
+  does, owns, uses, prefers, plans, experiences, believes, or explicitly wants to learn about
+  that entity.
+- In a human-authored first-person statement, represent I/me/my with the exact opaque entity
+  `{endpoint.marker}` and emit the direct speaker-to-target relationship. Include
+  `{endpoint.marker}` in extracted_entities.
+- Explicit first-person informational intent is relationship-bearing. Emit
+  `{endpoint.marker}` -> `WANTS_TO_KNOW_MORE_ABOUT` or `INTERESTED_IN` -> the target.
+- Apply that rule only when CURRENT MESSAGES explicitly state the speaker's informational intent.
+  A bare request or question such as "Can you tell me about X?" does not by itself assert durable
+  interest in X.
+- Do not invent a relationship merely to connect an entity. If the current text truly states no
+  relationship, omit the entity as well.
+"""
+
 _RELATIONLESS_REPAIR_INSTRUCTIONS = """\
 CORRECTIVE RE-EXTRACTION:
 Your previous extraction returned one or more entities but no usable relationship, so every entity
@@ -1020,6 +1145,153 @@ contains no relationship, return both lists empty.
 """
 
 
+def _relationless_repair_instructions(
+    endpoint: SelfSubjectEndpointEnvelope | None,
+) -> str:
+    if endpoint is None:
+        return _RELATIONLESS_REPAIR_INSTRUCTIONS
+    return f"""\
+CORRECTIVE RE-EXTRACTION:
+Your previous extraction returned one or more entities but no usable relationship, so every entity
+would be orphan-pruned and the memory would be lost. Re-read CURRENT MESSAGES and return a complete
+entity-and-edge extraction. For first-person predicates such as "I use...", "I own...", "I
+prefer...", or "I plan...", bind the current human speaker to the exact opaque entity
+`{endpoint.marker}`. Explicit informational intent must emit `WANTS_TO_KNOW_MORE_ABOUT` or
+`INTERESTED_IN`. A bare request or question does not by itself assert durable interest. Do not
+invent facts. If the text truly contains no relationship, return both lists empty.
+"""
+
+
+def _subject_endpoint_correction_instructions(
+    endpoint: SelfSubjectEndpointEnvelope,
+) -> str:
+    return f"""\
+MENHIR INVALID AUTHOR-ENDPOINT CORRECTION:
+- Your previous extraction used a self-like entity without the declared current-author endpoint.
+- Discard that extraction and re-extract CURRENT MESSAGES.
+- For every relationship whose subject or object is I/me/my or the current message's author, use
+  the exact opaque entity name `{endpoint.marker}` as that endpoint.
+- Do not emit `user`, `I`, `me`, or `my` as a substitute for the current author.
+- Keep third-person users, roles, customers, and quoted or reported speakers distinct.
+"""
+
+
+_AUTHOR_ASSERTION_RE = re.compile(
+    r"(?:^\s*(?:[-*+]\s+)?|[.!;]\s+)"
+    r"(?:(?:yes|today|currently|actually|also|personally|now)\s*[,;]\s*)?"
+    r"(?P<subject>i(?:['’](?:m|ve|d|ll))?\b|my\b)"
+    r"(?P<body>[^.!?\r\n]*)(?P<terminal>[.!?]|$)",
+    re.IGNORECASE | re.MULTILINE,
+)
+_AUTHOR_ASSERTION_NEGATION_RE = re.compile(
+    r"\b(?:not|never|no|neither|cannot|cant|don't|dont|doesn't|doesnt|didn't|didnt|"
+    r"won't|wont|wouldn't|wouldnt|isn't|isnt|aren't|arent|wasn't|wasnt|weren't|"
+    r"werent|haven't|havent|hasn't|hasnt|hadn't|hadnt|without)\b",
+    re.IGNORECASE,
+)
+
+
+def _strip_same_delimiter_spans(
+    text: str, delimiter: str, *, ignore_word_internal: bool = False
+) -> str:
+    """Blank paired or unterminated quote/code spans while preserving line boundaries."""
+    chars = list(text)
+    inside = False
+    for index, char in enumerate(text):
+        if char == delimiter:
+            previous = text[index - 1] if index else ""
+            following = text[index + 1] if index + 1 < len(text) else ""
+            if ignore_word_internal and previous.isalnum() and following.isalnum():
+                continue
+            inside = not inside
+            chars[index] = " "
+            continue
+        if inside and char not in "\r\n":
+            chars[index] = " "
+    return "".join(chars)
+
+
+def _strip_distinct_delimiter_spans(text: str, opener: str, closer: str) -> str:
+    """Blank curly-quote spans; an unmatched opener conservatively blanks the remainder."""
+    chars = list(text)
+    inside = False
+    for index, char in enumerate(text):
+        if not inside and char == opener:
+            inside = True
+            chars[index] = " "
+            continue
+        if inside and char == closer:
+            inside = False
+            chars[index] = " "
+            continue
+        if inside and char not in "\r\n":
+            chars[index] = " "
+    return "".join(chars)
+
+
+def _strip_author_quote_spans(text: str) -> str:
+    stripped = _strip_same_delimiter_spans(text, '"')
+    stripped = _strip_distinct_delimiter_spans(stripped, "“", "”")
+    stripped = _strip_distinct_delimiter_spans(stripped, "‘", "’")
+    stripped = _strip_same_delimiter_spans(
+        stripped, "'", ignore_word_internal=True
+    )
+    return _strip_same_delimiter_spans(stripped, "`")
+
+
+def _current_author_surface(episode_text: str) -> str:
+    """Return current-message prose with common quote/code and blockquote spans removed."""
+    current = str(episode_text or "")
+    role, separator, body = current.partition(":")
+    if separator and role.strip().casefold() in {"user", "assistant", "tool", "agent"}:
+        current = body
+    visible_lines: list[str] = []
+    fence_char = ""
+    fence_width = 0
+    for line in current.splitlines():
+        stripped = line.lstrip()
+        fence_match = re.match(r"(`{3,}|~{3,})", stripped)
+        if fence_char:
+            if (
+                fence_match is not None
+                and fence_match.group(1)[0] == fence_char
+                and len(fence_match.group(1)) >= fence_width
+            ):
+                fence_char = ""
+                fence_width = 0
+            continue
+        if fence_match is not None:
+            fence_char = fence_match.group(1)[0]
+            fence_width = len(fence_match.group(1))
+            continue
+        if stripped.startswith(">"):
+            continue
+        visible_lines.append(line)
+    current = "\n".join(visible_lines)
+    return _strip_author_quote_spans(current)
+
+
+def _author_assertion_clauses(episode_text: str) -> tuple[str, ...]:
+    """Conservative affirmative clauses whose grammatical subject is the current author."""
+    clauses: list[str] = []
+    for match in _AUTHOR_ASSERTION_RE.finditer(_current_author_surface(episode_text)):
+        body = str(match.group("body") or "")
+        if match.group("terminal") == "?" or _AUTHOR_ASSERTION_NEGATION_RE.search(body):
+            continue
+        clauses.append(match.group(0).lstrip(".!; \t-*+"))
+    return tuple(clauses)
+
+
+def _requires_declared_author_endpoint(episode_text: str) -> bool:
+    """Conservative evidence that CURRENT MESSAGES assert a relation about their author.
+
+    Affirmative first-person subjects outside common quote/code spans qualify at a sentence/list
+    boundary or after a small set of discourse prefixes. Questions and clauses containing explicit
+    negation do not authorize correction or binding.
+    """
+    return bool(_author_assertion_clauses(episode_text))
+
+
 def _subject_endpoint_instructions(
     endpoint: SelfSubjectEndpointEnvelope | None,
 ) -> str | None:
@@ -1028,9 +1300,8 @@ def _subject_endpoint_instructions(
     return f"""\
 MENHIR VERIFIED CURRENT-MESSAGE AUTHOR ENDPOINT:
 - The exact opaque entity name `{endpoint.marker}` denotes the author of CURRENT MESSAGES only.
-- For this extraction, this instruction supersedes any instruction above that says to represent
-  I/me/my as `user`: use `{endpoint.marker}` as the endpoint for relations asserted by the current
-  message's author.
+- Use `{endpoint.marker}` as the endpoint for every relation asserted by I/me/my or the current
+  message's author. Do not substitute a generic speaker label.
 - Do not use the marker for a person speaking inside quoted or reported speech.
 - Do not replace third-person users, customers, roles, tables, collections, or application actors
   with the marker.
@@ -1210,6 +1481,12 @@ def _declare_subject_endpoint(
     reserved_nodes = [
         node for node in nodes if _is_reserved_subject_marker(getattr(node, "name", None))
     ]
+    if not _requires_declared_author_endpoint(receipt.episode_text):
+        if reserved_nodes:
+            raise InvalidSelfSubjectDeclarationError(
+                "self-subject marker requires an affirmative unquoted current-author assertion"
+            )
+        return
     marker_nodes = [
         node for node in reserved_nodes if getattr(node, "name", None) == endpoint.marker
     ]
@@ -1222,10 +1499,9 @@ def _declare_subject_endpoint(
             "final payload contains more than one self-subject marker node"
         )
     if not marker_nodes:
-        if any(is_self_alias(getattr(node, "name", None)) for node in nodes):
+        if _requires_declared_author_endpoint(receipt.episode_text):
             raise InvalidSelfSubjectDeclarationError(
-                "eligible marked projection emitted a self-like node without using its "
-                "declared author endpoint"
+                "eligible marked projection omitted its required declared author endpoint"
             )
         return
 
@@ -1249,7 +1525,7 @@ def _declare_subject_endpoint(
             "self-subject marker node is not an endpoint of a current-episode edge"
         )
     graphiti_episode_uuid = str(receipt.graphiti_episode_uuid or "").strip()
-    if not graphiti_episode_uuid or not any(
+    if not graphiti_episode_uuid or not all(
         graphiti_episode_uuid
         in {str(value) for value in (getattr(edge, "episodes", None) or [])}
         for edge in marker_edges
@@ -1260,6 +1536,28 @@ def _declare_subject_endpoint(
     if 0 not in index_map.get(marker_uuid, []):
         raise InvalidSelfSubjectDeclarationError(
             "self-subject marker node lacks current-episode index attribution"
+        )
+    node_names = {
+        str(getattr(node, "uuid", "") or "").strip():
+        str(getattr(node, "name", "") or "")
+        for node in nodes
+    }
+    if any(
+        not _subject_edge_has_current_predicate_anchor(
+            source_name=node_names.get(
+                str(getattr(edge, "source_node_uuid", "") or "").strip(), ""
+            ),
+            target_name=node_names.get(
+                str(getattr(edge, "target_node_uuid", "") or "").strip(), ""
+            ),
+            fact=str(getattr(edge, "fact", "") or ""),
+            marker=endpoint.marker,
+            episode_text=receipt.episode_text,
+        )
+        for edge in marker_edges
+    ):
+        raise InvalidSelfSubjectDeclarationError(
+            "self-subject marker edge lacks current-message predicate grounding"
         )
     receipt.self_identity = declare_self_subject(
         identity,
@@ -1357,8 +1655,14 @@ async def _run_graphiti_combined_extraction(
             and content.strip()
         )
 
-    endpoint = receipt.self_subject_endpoint if receipt is not None else None
-    if endpoint is not None:
+    declared_endpoint = receipt.self_subject_endpoint if receipt is not None else None
+    endpoint = (
+        declared_endpoint
+        if declared_endpoint is not None
+        and _requires_declared_author_endpoint(receipt.episode_text)
+        else None
+    )
+    if declared_endpoint is not None:
         # Eligibility is rare and enforce-only.  Pay the bounded graph read up front so a marker
         # collision in repair context is rejected before even the first model dispatch; the same
         # cached context is reused if relationless repair is actually needed.
@@ -1382,7 +1686,7 @@ async def _run_graphiti_combined_extraction(
 
     effective_instructions = _combine_extraction_instructions(
         custom_extraction_instructions,
-        _RELATION_COMPLETENESS_INSTRUCTIONS,
+        _relation_completeness_instructions(endpoint),
         endpoint_instructions,
     )
     nodes, edges, index_map = await extract_nodes_and_edges(
@@ -1402,7 +1706,7 @@ async def _run_graphiti_combined_extraction(
             receipt.relationless_repair_context_texts = _load_relationless_repair_context(
                 receipt
             )
-        if endpoint is not None and any(
+        if declared_endpoint is not None and any(
             SUBJECT_ENDPOINT_MARKER_PREFIX.casefold() in text.casefold()
             for text in receipt.relationless_repair_context_texts
         ):
@@ -1420,14 +1724,12 @@ async def _run_graphiti_combined_extraction(
         )
         repair_instructions = _combine_extraction_instructions(
             effective_instructions,
-            _RELATIONLESS_REPAIR_INSTRUCTIONS,
+            _relationless_repair_instructions(endpoint),
             (
                 _RELATIONLESS_REPAIR_CONTEXT_INSTRUCTIONS
                 if receipt.relationless_repair_context_texts
                 else None
             ),
-            # Repair instructions still mention the legacy `user` endpoint.  Repeat the
-            # episode-scoped instruction last so the receipt-owned marker remains authoritative.
             endpoint_instructions,
         )
         repair_previous_episodes = _relationless_repair_previous_episodes(
@@ -1464,6 +1766,39 @@ async def _run_graphiti_combined_extraction(
             receipt.relationless_repair_succeeded,
             receipt.raw_entity_count,
             receipt.raw_edge_count,
+        )
+    if (
+        endpoint is not None
+        and not any(getattr(node, "name", None) == endpoint.marker for node in nodes)
+        and _requires_declared_author_endpoint(receipt.episode_text if receipt else "")
+    ):
+        # Real models can privilege a familiar `user` convention even when a later instruction
+        # declares a safer opaque endpoint. Do not reinterpret that string as provenance. Give the
+        # model one bounded correction with no conflicting Menhir-authored `user` instruction;
+        # final validation still fails closed if it does not emit the exact marker.
+        assert receipt is not None
+        logger.warning(
+            "Eligible extraction used an undeclared self-like endpoint; running one corrective "
+            "retry episode_id=%s",
+            receipt.episode_key,
+        )
+        correction_instructions = _combine_extraction_instructions(
+            effective_instructions,
+            _subject_endpoint_correction_instructions(endpoint),
+            endpoint_instructions,
+        )
+        correction_previous_episodes = _relationless_repair_previous_episodes(
+            episode,
+            previous_episodes,
+            receipt.relationless_repair_context_texts,
+        )
+        nodes, edges, index_map = await extract_nodes_and_edges(
+            clients,
+            episode,
+            correction_previous_episodes,
+            entity_types=entity_types,
+            excluded_entity_types=excluded_entity_types,
+            custom_extraction_instructions=correction_instructions,
         )
     # Bind the proven human AFTER the relationless-repair branch above: a repair re-runs
     # extraction and replaces nodes/edges/index_map wholesale, so binding before it would be

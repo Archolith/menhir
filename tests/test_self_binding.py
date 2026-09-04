@@ -10,6 +10,7 @@ from __future__ import annotations
 import pytest
 
 from menhir.domain.self_identity import (
+    SUBJECT_ENDPOINT_MARKER_PREFIX,
     SelfEvidenceKind,
     SelfIdentityContext,
     SpeakerRole,
@@ -112,6 +113,33 @@ def test_both_edge_directions_follow_the_rewrite():
     assert edges[0].target_node_uuid == "other"
     assert edges[1].source_node_uuid == "other"
     assert edges[1].target_node_uuid == canonical
+
+
+@pytest.mark.unit
+def test_receipt_endpoint_marker_is_removed_from_persistable_edge_text():
+    marker = f"{SUBJECT_ENDPOINT_MARKER_PREFIX}opaque123"
+    nodes = [_Node("random-1", marker), _Node("other", "postcards")]
+    edge = _Edge("random-1", "other", f"{marker} owns 37 postcards")
+    edge.name = f"{marker.upper()}_OWNS"
+
+    result = bind_canonical_self(nodes, [edge], {}, _declared())
+
+    assert edge.fact == "user owns 37 postcards"
+    assert edge.name == "user_OWNS"
+    assert SUBJECT_ENDPOINT_MARKER_PREFIX not in edge.fact
+    assert SUBJECT_ENDPOINT_MARKER_PREFIX not in edge.name
+    assert result.edge_texts_rewritten == 2
+
+
+@pytest.mark.unit
+def test_non_endpoint_subject_text_is_not_rewritten():
+    nodes = [_Node("random-1", "turn author"), _Node("other", "postcards")]
+    edge = _Edge("random-1", "other", "turn author owns 37 postcards")
+
+    result = bind_canonical_self(nodes, [edge], {}, _declared())
+
+    assert edge.fact == "turn author owns 37 postcards"
+    assert result.edge_texts_rewritten == 0
 
 
 @pytest.mark.unit

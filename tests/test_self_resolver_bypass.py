@@ -189,7 +189,7 @@ async def test_undeclared_node_cannot_reuse_canonical_self_through_ordinary_dedu
 
     canonical = self_uuid_for_namespace("default")
     canonical_candidate = _node(canonical, "user")
-    canonical_candidate.attributes = {"is_self": True, "entity_role": "self"}
+    canonical_candidate.attributes = {"is_self": False, "entity_role": " SELF "}
     ordinary_candidate = _node("ordinary-user", "user")
     seen_candidate_uuids: list[str] = []
 

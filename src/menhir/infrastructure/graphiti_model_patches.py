@@ -1356,7 +1356,8 @@ def _is_canonical_self_candidate(node: Any, identity: Any) -> bool:
     """
     attributes = getattr(node, "attributes", None)
     if isinstance(attributes, dict) and (
-        attributes.get("is_self") is True or attributes.get("entity_role") == "self"
+        attributes.get("is_self") is True
+        or str(attributes.get("entity_role") or "").strip().casefold() == "self"
     ):
         return True
     expected_uuid = str(getattr(identity, "self_uuid", "") or "")
@@ -1518,6 +1519,11 @@ def _patch_graphiti_adaptive_dedupe() -> None:
                     for idx, node in enumerate(extracted_nodes)
                     if str(getattr(node, "uuid", "") or "") == _bound_uuid
                 }
+                logger.info(
+                    "Canonical-self resolver pre-resolved uuid=%s matches=%d",
+                    _bound_uuid,
+                    len(pre_resolved_indices),
+                )
 
             searchable = [n for i, n in enumerate(extracted_nodes) if i not in pre_resolved_indices]
             candidate_filter_enabled = _canonical_self_candidate_filter_enabled()

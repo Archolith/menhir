@@ -21,12 +21,14 @@ verbatim evidence projection. See ``domain/self_identity.proves_self_subject`` f
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
 from menhir.domain.namespace import namespace_to_group_id
 from menhir.domain.self_identity import (
+    SUBJECT_ENDPOINT_MARKER_PREFIX,
     SelfEvidenceKind,
     SelfIdentityContext,
     eligible_self_evidence,
@@ -129,6 +131,9 @@ class SelfBindResult:
     #: the change and a dashboard reading it does not break.
     nodes_collapsed: int = 0
     edge_endpoints_rewritten: int = 0
+    #: Human-readable edge fields in which the receipt-owned opaque endpoint was replaced with
+    #: the stable display name. The marker is an extraction transport, never persisted content.
+    edge_texts_rewritten: int = 0
     index_map_keys_merged: int = 0
     #: Self-alias nodes present in a payload that did NOT bind. This counts candidates requiring
     #: disposition; it does not prove they are self forks, generic users, or recall pollution.
@@ -152,6 +157,7 @@ class SelfBindResult:
             "rewritten_node_count": len(self.rewritten_node_uuids),
             "nodes_collapsed": self.nodes_collapsed,
             "edge_endpoints_rewritten": self.edge_endpoints_rewritten,
+            "edge_texts_rewritten": self.edge_texts_rewritten,
             "index_map_keys_merged": self.index_map_keys_merged,
             "self_like_without_subject_authority": self.self_like_without_subject_authority,
             "first_person_unresolved": self.first_person_unresolved,
@@ -325,6 +331,12 @@ def bind_canonical_self(
         (e, str(getattr(e, "source_node_uuid", "") or ""), str(getattr(e, "target_node_uuid", "") or ""))
         for e in edges
     ]
+    original_edge_text = [
+        (edge, attr, getattr(edge, attr))
+        for edge in edges
+        for attr in ("name", "fact")
+        if hasattr(edge, attr)
+    ]
     original_index_map = {k: list(v) for k, v in index_map.items()}
 
     def _rollback() -> None:
@@ -340,6 +352,11 @@ def bind_canonical_self(
                 edge.target_node_uuid = target
             except Exception:  # noqa: BLE001
                 logger.exception("Self-binding rollback could not restore an edge endpoint")
+        for edge, attr, value in original_edge_text:
+            try:
+                setattr(edge, attr, value)
+            except Exception:  # noqa: BLE001
+                logger.exception("Self-binding rollback could not restore edge text")
         index_map.clear()
         index_map.update(original_index_map)
 
@@ -355,6 +372,35 @@ def bind_canonical_self(
                 if endpoint_uuid in self_uuids and endpoint_uuid != canonical_uuid:
                     setattr(edge, attr, canonical_uuid)
                     endpoints_rewritten += 1
+
+        # The endpoint marker is a one-call transport token, not graph content. Real models often
+        # repeat endpoint names in the prose `fact`; leaving it there leaks the reserved marker
+        # through recall even though the node and endpoint UUIDs were rewritten correctly. Only
+        # the exact receipt-owned marker can reach this branch, and only its literal occurrences
+        # are replaced. Ordinary text containing a similar prefix is never touched.
+        edge_texts_rewritten = 0
+        marker = (
+            str(original_keeper_name)
+            if isinstance(original_keeper_name, str)
+            and original_keeper_name.startswith(SUBJECT_ENDPOINT_MARKER_PREFIX)
+            else ""
+        )
+        if marker:
+            for edge in edges:
+                for attr in ("name", "fact"):
+                    value = getattr(edge, attr, None)
+                    if isinstance(value, str) and marker.casefold() in value.casefold():
+                        setattr(
+                            edge,
+                            attr,
+                            re.sub(
+                                re.escape(marker),
+                                _CANONICAL_SELF_DISPLAY_NAME,
+                                value,
+                                flags=re.IGNORECASE,
+                            ),
+                        )
+                        edge_texts_rewritten += 1
 
         # Episode attribution follows the identity, merged rather than overwritten so no episode
         # index is dropped when two aliases collapse.
@@ -383,17 +429,19 @@ def bind_canonical_self(
         self_uuid=canonical_uuid,
         rewritten_node_uuids=rewritten_uuids,
         edge_endpoints_rewritten=endpoints_rewritten,
+        edge_texts_rewritten=edge_texts_rewritten,
         index_map_keys_merged=keys_merged,
         self_like_without_subject_authority=unresolved_self_like,
     )
     logger.info(
         "Canonical self bound namespace=%s episode=%s uuid=%s collapsed=%d endpoints=%d "
-        "index_keys=%d evidence=%s role=%s",
+        "edge_texts=%d index_keys=%d evidence=%s role=%s",
         identity.namespace,
         identity.episode_uuid,
         canonical_uuid,
         result.nodes_collapsed,
         result.edge_endpoints_rewritten,
+        result.edge_texts_rewritten,
         result.index_map_keys_merged,
         identity.evidence_kind,
         identity.speaker_role,

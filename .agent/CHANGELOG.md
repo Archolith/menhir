@@ -15,6 +15,23 @@
   fallback), and classify arbitrary source-kind strings as `other` before telemetry persistence.
 - Pin the currently inert exact-node binding surface with an AST census that fails on any new
   declaration producer, while preserving observe-mode and resolver-bypass checks.
+- Remove the legacy `user` instruction from endpoint-bearing extraction prompts, require the opaque
+  endpoint only for sentence-initial first-person subjects outside common quote/code spans, and make
+  one bounded corrective extraction when that deterministic signal is present but the endpoint is
+  absent.
+- Reject endpoint-bearing edges unless every meaningful non-endpoint fact token and the other
+  endpoint are supported by one affirmative, unquoted current-author clause. Questions, explicit
+  negation, quoted/reported speech, multiline code fences, and unterminated quote spans cannot
+  activate the marker; marker text without the exact active endpoint is also discarded. Final
+  validation repeats the current-episode, index, and assertion-grounding checks fail-closed.
+- Treat the opaque endpoint as transport only: replace its literal occurrence in relationship fact
+  or name text before persistence, while leaving unrelated text untouched.
+- Make canonical-self nodes merge-immune at both correlation classification and the final
+  mutation-time precondition, in either survivor/absorbed direction and by either structural marker.
+- Verify the public turn-evidence -> memory -> admission -> background projection path against an
+  isolated Docker Neo4j and real `gpt-4o-mini`: READY projection, deterministic self UUID, current
+  Graphiti-episode relationship and MENTIONS provenance, zero persisted endpoint markers, and both
+  merge directions refused.
 
 ## 2026-08-31 - Add bounded app-image replacement mode
 

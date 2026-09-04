@@ -630,11 +630,27 @@ task-local extraction receipt. The marker changes neither the stored episode bod
 entities named `user`; it tells Graphiti which endpoint represents the current message author.
 
 After the final relationless-repair payload exists, Menhir accepts exactly the receipt's marker,
-requires its node to participate in a current-episode edge and index entry, declares that exact
-in-memory UUID, then atomically rewrites the node name to `user`, UUID to canonical self, both edge
-directions, and the episode index map. Any missing authority, duplicate/stale marker, scope mismatch,
-or undeclared self-like fallback refuses before persistence. Off and real observe extraction do not
-receive a marker and retain their previous prompts and behavior.
+requires its node to participate in a current-episode edge and index entry. Marker transport is
+activated only when Menhir finds an affirmative, unquoted current-author clause at a sentence/list
+boundary or after a small accepted discourse prefix. A conservative scanner removes single-line,
+multiline, and unterminated straight/curly quote spans, inline code, blockquotes, and fenced code;
+questions and clauses with explicit negation cannot activate the marker either. Every marker edge
+must have all meaningful non-endpoint fact tokens plus overlap from its other endpoint in that same
+accepted clause. This prevents a model-fabricated positive edge from borrowing one token from a
+question, negation, or quoted speaker to convert the receipt into authority. Marker-shaped prose
+without the exact active endpoint is discarded. Menhir then declares
+that exact in-memory UUID and atomically rewrites the node name to `user`, UUID to canonical self,
+both edge directions, the episode index map, and literal marker occurrences in persisted relationship
+fact/name text.
+
+The first extraction and relationless-repair prompts use the opaque endpoint directly rather than
+first instructing the model to emit `user`. Menhir asks for one bounded corrective extraction only
+when a deterministic, sentence-initial first-person subject occurs outside common quote/code spans
+and the first payload omitted the marker. Third-person users and quoted/reported speakers remain
+ordinary entities. Final validation repeats the current-episode, index, and predicate-grounding
+checks fail-closed. Any missing authority, duplicate/stale marker, scope mismatch, or undeclared
+self-like fallback refuses before persistence. Off and real observe extraction do not receive a
+marker and retain their previous prompts and behavior.
 
 That does **not** make `enforce` equivalent to `off`: `enforce` also activates canonical candidate
 isolation. Even without a declaration, it refuses a searchable extracted node already carrying
@@ -672,6 +688,12 @@ ordinary entity named `user` and Graphiti's unique-exact branch could silently g
 authority despite the binder declining it. Both the declared extracted node and a stored
 canonical node must also match the logical namespace's physical `group_id`; cross-group reuse is
 a retryable failure.
+
+**Canonical merge immunity.** Correlation must not undo a correct resolver result. The shared
+merge-ineligibility predicate treats either `is_self=true` or case-normalized
+`entity_role='self'` as a hard veto, so classifier checks and direct repository callers agree. The
+final mutation statement repeats both marker predicates to close the preflight-to-write race, and
+the rule applies whether canonical self is proposed as survivor or absorbed node.
 
 **Rollout.** `canonical_self_binding_mode` (`MENHIR_CANONICAL_SELF_BINDING_MODE`) is
 `off | observe | enforce`, default `off`. Unrecognized values fall back to `off`.
