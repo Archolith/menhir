@@ -1602,7 +1602,7 @@ class MemoryGraphAdapter:
         )
 
     def get_artifact_relationships(self, artifact_uuid: str) -> dict[str, list[dict[str, Any]]]:
-        return self._work_artifacts.get_artifact_relationships(artifact_uuid)
+        return self._work_artifacts.artifact_relationships(artifact_uuid)
 
     def link_artifacts(
         self, source_uuid: str, target_uuid: str, relation: str
