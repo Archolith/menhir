@@ -13,9 +13,9 @@ prompt, or Menhir's identity gate.
 
 What it is not: a name rule. No property of an extracted entity's NAME -- not the literal string
 ``user``, not first-person grammar -- promotes it to the human, because a name is not provenance.
-Binding requires a declared per-node subject (``EXPLICIT_SELF_SUBJECT``), and since no production
-producer emits one yet, this module is inert in production by construction. See
-``domain/self_identity.proves_self_subject`` for why, and what would change it.
+Binding requires a declared per-node subject (``EXPLICIT_SELF_SUBJECT``). The sole production
+producer is the final-payload validator for a Menhir-owned endpoint on an atomically verified
+verbatim evidence projection. See ``domain/self_identity.proves_self_subject`` for the boundary.
 """
 
 from __future__ import annotations
@@ -36,6 +36,8 @@ from menhir.domain.self_identity import (
 )
 
 logger = logging.getLogger(__name__)
+
+_CANONICAL_SELF_DISPLAY_NAME = "user"
 
 __all__ = [
     "AmbiguousSelfBindingError",
@@ -198,10 +200,10 @@ def bind_canonical_self(
 ) -> SelfBindResult:
     """Rewrite the proven human to its deterministic UUID, in place, across the whole payload.
 
-    Mutates ``nodes``, ``edges`` and ``index_map`` together. Partial application is the failure
-    this guards against: rewriting a node UUID without following both edge directions and the
-    episode index map would orphan the very facts the episode carried, which is worse than the
-    fork it fixes.
+    Mutates the selected node's display name and UUID, ``edges``, and ``index_map`` together.
+    Partial application is the failure this guards against: rewriting a node UUID without
+    following both edge directions and the episode index map would orphan the very facts the
+    episode carried, which is worse than the fork it fixes.
 
     Returns a :class:`SelfBindResult` describing what happened. Raises
     :class:`AmbiguousSelfBindingError` only when binding would require a guess.
@@ -318,6 +320,7 @@ def bind_canonical_self(
     # Snapshot enough to restore, and put the whole application behind one rollback.
     original_nodes = list(nodes)
     original_keeper_uuid = _node_uuid(keeper)
+    original_keeper_name = getattr(keeper, "name", None)
     original_endpoints = [
         (e, str(getattr(e, "source_node_uuid", "") or ""), str(getattr(e, "target_node_uuid", "") or ""))
         for e in edges
@@ -327,8 +330,9 @@ def bind_canonical_self(
     def _rollback() -> None:
         try:
             keeper.uuid = original_keeper_uuid
+            keeper.name = original_keeper_name
         except Exception:  # noqa: BLE001 - best effort; the raise below is what callers act on
-            logger.exception("Self-binding rollback could not restore node uuid")
+            logger.exception("Self-binding rollback could not restore node identity")
         nodes[:] = original_nodes
         for edge, source, target in original_endpoints:
             try:
@@ -340,6 +344,7 @@ def bind_canonical_self(
         index_map.update(original_index_map)
 
     try:
+        keeper.name = _CANONICAL_SELF_DISPLAY_NAME
         keeper.uuid = canonical_uuid
 
         # Both endpoint directions, or an edge survives pointing at a UUID no node carries.

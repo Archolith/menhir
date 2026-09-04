@@ -11,8 +11,11 @@ from time import perf_counter
 from typing import Any, Callable
 
 from menhir.domain.self_identity import (
+    SUBJECT_ENDPOINT_MARKER_PREFIX,
     SelfEvidenceKind,
     SelfIdentityContext,
+    SelfSubjectEndpointEnvelope,
+    declare_self_subject,
     is_self_alias,
 )
 from menhir.infrastructure.self_binding import (
@@ -92,11 +95,17 @@ class CombinedExtractionReceipt:
     #: namespace lives here rather than being inferred from ``group_id``, because logical
     #: ``default`` maps to physical ``""`` and the two must not be conflated.
     self_identity: "SelfIdentityContext | None" = None
+    #: Menhir-created author endpoint for one graph-proven evidence projection.  It is separate
+    #: from identity evidence because authorship alone must never select an extracted node.
+    self_subject_endpoint: "SelfSubjectEndpointEnvelope | None" = None
     #: Rollout control for this episode. ``OFF`` reproduces pre-change behavior exactly.
     self_bind_mode: "SelfBindMode" = SelfBindMode.OFF
     #: Outcome of the binding attempt, or ``None`` if binding never ran. Read by the resolver
     #: partition to know which UUID is already authoritative and must skip candidate search.
     self_bind_result: "SelfBindResult | None" = None
+    #: Graphiti's internally allocated primary episode UUID for this extraction.  It differs from
+    #: the external pending UUID and is required to prove a marker edge belongs to CURRENT MESSAGES.
+    graphiti_episode_uuid: str = ""
     #: Text Graphiti supplied to the extractor as previous conversational context. Missing edge
     #: endpoints may be closed when grounded here even if the current turn uses a pronoun (for
     #: example, previous "Rachel ..." followed by current "She moved to Chicago.").
@@ -341,6 +350,7 @@ def begin_extraction_receipt(
     source_description: str = "",
     relationless_repair_context_loader: Callable[[], tuple[str, ...]] | None = None,
     self_identity: SelfIdentityContext | None = None,
+    self_subject_endpoint: SelfSubjectEndpointEnvelope | None = None,
     self_bind_mode: SelfBindMode = SelfBindMode.OFF,
 ) -> CombinedExtractionReceipt:
     """Create and activate a fresh receipt for the current episode (call in the parent task).
@@ -348,12 +358,37 @@ def begin_extraction_receipt(
     ``self_identity`` must be constructed by the caller from the claimed episode's persisted,
     gate-approved metadata. Omitting it fails closed: extraction proceeds with no self binding.
     """
+    normalized_episode_key = str(episode_key or "")
+    if self_subject_endpoint is not None:
+        if self_bind_mode is not SelfBindMode.ENFORCE:
+            raise InvalidSelfSubjectDeclarationError(
+                "a self-subject endpoint may be activated only in enforce mode"
+            )
+        if (
+            self_identity is None
+            or self_identity.evidence_kind is not SelfEvidenceKind.TRUSTED_USER_TURN
+        ):
+            raise InvalidSelfSubjectDeclarationError(
+                "a self-subject endpoint requires trusted user-turn evidence"
+            )
+        if (
+            self_subject_endpoint.episode_uuid != normalized_episode_key.strip()
+            or self_subject_endpoint.episode_uuid
+            != str(self_identity.episode_uuid or "").strip()
+            or self_subject_endpoint.namespace != self_identity.namespace
+            or self_subject_endpoint.turn_evidence_uuid
+            != str(self_identity.turn_evidence_uuid or "").strip()
+        ):
+            raise InvalidSelfSubjectDeclarationError(
+                "self-subject endpoint scope does not match its extraction receipt"
+            )
     receipt = CombinedExtractionReceipt(
-        episode_key=str(episode_key or ""),
+        episode_key=normalized_episode_key,
         episode_text=str(episode_text or ""),
         source_description=str(source_description or ""),
         relationless_repair_context_loader=relationless_repair_context_loader,
         self_identity=self_identity,
+        self_subject_endpoint=self_subject_endpoint,
         self_bind_mode=self_bind_mode,
     )
     _extraction_receipt.set(receipt)
@@ -380,6 +415,21 @@ def _normalize_endpoint_name(name: Any) -> str:
         import re
 
         return re.sub(r"[\s]+", " ", str(name).lower()).strip()
+
+
+def _active_subject_marker(receipt: CombinedExtractionReceipt | None) -> str:
+    endpoint = receipt.self_subject_endpoint if receipt is not None else None
+    return endpoint.marker if endpoint is not None else ""
+
+
+def _is_reserved_subject_marker(value: Any) -> bool:
+    return str(value or "").casefold().startswith(
+        SUBJECT_ENDPOINT_MARKER_PREFIX.casefold()
+    )
+
+
+def _subject_marker_guard_active(receipt: CombinedExtractionReceipt | None) -> bool:
+    return receipt is not None and receipt.self_bind_mode is SelfBindMode.ENFORCE
 
 
 # Pronoun / role-label endpoints that must never be synthesized as KG identities.
@@ -706,6 +756,16 @@ def _sanitize_combined_payload(
         if norm is None:
             entities_dropped += 1
             continue
+        marker = _active_subject_marker(receipt)
+        if (
+            _subject_marker_guard_active(receipt)
+            and _is_reserved_subject_marker(norm["name"])
+            and norm["name"] != marker
+        ):
+            # A stale, malformed, or model-invented reserved endpoint is never an ordinary entity.
+            # Only the exact capability token on this task's receipt may survive sanitation.
+            entities_dropped += 1
+            continue
         entities.append(norm)
 
     edges: list[dict[str, Any]] = []
@@ -713,6 +773,13 @@ def _sanitize_combined_payload(
     for item in raw_edges:
         norm = _sanitize_combined_edge(item)
         if norm is None:
+            edges_dropped += 1
+            continue
+        marker = _active_subject_marker(receipt)
+        if _subject_marker_guard_active(receipt) and any(
+            _is_reserved_subject_marker(norm[key]) and norm[key] != marker
+            for key in ("source_entity_name", "target_entity_name")
+        ):
             edges_dropped += 1
             continue
         edges.append(norm)
@@ -768,6 +835,15 @@ def _sanitize_combined_payload(
                 edge_is_self_echo = True
                 break
             if norm_key in known:
+                continue
+            marker = _active_subject_marker(receipt)
+            if marker and endpoint_name == marker:
+                # The marker is grounded by the receipt, not by user text.  Materialize it only
+                # when the extractor used it as an endpoint; a standalone marker node is not proof
+                # that the episode asserted anything about its author.
+                entities.append({"name": marker, "entity_type_id": -1})
+                known.add(norm_key)
+                synthesized += 1
                 continue
             if _is_unresolved_self_like_endpoint(norm_key, episode_text):
                 # Normalize the endpoint spelling and materialize it ONCE per payload so Graphiti
@@ -943,6 +1019,24 @@ me about X?" does not by itself assert durable interest. Do not invent facts. If
 contains no relationship, return both lists empty.
 """
 
+
+def _subject_endpoint_instructions(
+    endpoint: SelfSubjectEndpointEnvelope | None,
+) -> str | None:
+    if endpoint is None:
+        return None
+    return f"""\
+MENHIR VERIFIED CURRENT-MESSAGE AUTHOR ENDPOINT:
+- The exact opaque entity name `{endpoint.marker}` denotes the author of CURRENT MESSAGES only.
+- For this extraction, this instruction supersedes any instruction above that says to represent
+  I/me/my as `user`: use `{endpoint.marker}` as the endpoint for relations asserted by the current
+  message's author.
+- Do not use the marker for a person speaking inside quoted or reported speech.
+- Do not replace third-person users, customers, roles, tables, collections, or application actors
+  with the marker.
+- Emit the marker only when at least one extracted edge about the current author uses it.
+"""
+
 _RELATIONLESS_REPAIR_CONTEXT_INSTRUCTIONS = """\
 ADJACENT TRANSCRIPT CONTEXT:
 PREVIOUS MESSAGES are context, not current claims. Use them only to resolve what a pronoun,
@@ -1082,6 +1176,97 @@ def _needs_relationless_repair(
     )
 
 
+def _declare_subject_endpoint(
+    nodes: list[Any],
+    edges: list[Any],
+    index_map: dict[str, list[int]],
+    receipt: CombinedExtractionReceipt,
+) -> None:
+    """Promote the one exact receipt-owned marker after the final extraction payload exists."""
+
+    endpoint = receipt.self_subject_endpoint
+    if endpoint is None:
+        return
+    identity = receipt.self_identity
+    if receipt.self_bind_mode is not SelfBindMode.ENFORCE:
+        raise InvalidSelfSubjectDeclarationError(
+            "self-subject endpoint reached final extraction outside enforce mode"
+        )
+    if identity is None or identity.evidence_kind is not SelfEvidenceKind.TRUSTED_USER_TURN:
+        raise InvalidSelfSubjectDeclarationError(
+            "self-subject endpoint lacks trusted user-turn identity evidence"
+        )
+    if (
+        endpoint.episode_uuid != str(receipt.episode_key or "").strip()
+        or endpoint.episode_uuid != str(identity.episode_uuid or "").strip()
+        or endpoint.namespace != identity.namespace
+        or endpoint.turn_evidence_uuid
+        != str(identity.turn_evidence_uuid or "").strip()
+    ):
+        raise InvalidSelfSubjectDeclarationError(
+            "self-subject endpoint scope does not match the active extraction receipt"
+        )
+
+    reserved_nodes = [
+        node for node in nodes if _is_reserved_subject_marker(getattr(node, "name", None))
+    ]
+    marker_nodes = [
+        node for node in reserved_nodes if getattr(node, "name", None) == endpoint.marker
+    ]
+    if len(reserved_nodes) != len(marker_nodes):
+        raise InvalidSelfSubjectDeclarationError(
+            "final payload contains a stale or malformed self-subject marker"
+        )
+    if len(marker_nodes) > 1:
+        raise InvalidSelfSubjectDeclarationError(
+            "final payload contains more than one self-subject marker node"
+        )
+    if not marker_nodes:
+        if any(is_self_alias(getattr(node, "name", None)) for node in nodes):
+            raise InvalidSelfSubjectDeclarationError(
+                "eligible marked projection emitted a self-like node without using its "
+                "declared author endpoint"
+            )
+        return
+
+    marker_node = marker_nodes[0]
+    marker_uuid = str(getattr(marker_node, "uuid", "") or "").strip()
+    if not marker_uuid:
+        raise InvalidSelfSubjectDeclarationError(
+            "self-subject marker node has no in-memory UUID"
+        )
+    marker_edges = [
+        edge
+        for edge in edges
+        if marker_uuid
+        in {
+            str(getattr(edge, "source_node_uuid", "") or "").strip(),
+            str(getattr(edge, "target_node_uuid", "") or "").strip(),
+        }
+    ]
+    if not marker_edges:
+        raise InvalidSelfSubjectDeclarationError(
+            "self-subject marker node is not an endpoint of a current-episode edge"
+        )
+    graphiti_episode_uuid = str(receipt.graphiti_episode_uuid or "").strip()
+    if not graphiti_episode_uuid or not any(
+        graphiti_episode_uuid
+        in {str(value) for value in (getattr(edge, "episodes", None) or [])}
+        for edge in marker_edges
+    ):
+        raise InvalidSelfSubjectDeclarationError(
+            "self-subject marker has no edge attributed to the current Graphiti episode"
+        )
+    if 0 not in index_map.get(marker_uuid, []):
+        raise InvalidSelfSubjectDeclarationError(
+            "self-subject marker node lacks current-episode index attribution"
+        )
+    receipt.self_identity = declare_self_subject(
+        identity,
+        subject_node_uuid=marker_uuid,
+    )
+
+
 def _record_self_binding(
     nodes: list[Any],
     edges: list[Any],
@@ -1099,6 +1284,8 @@ def _record_self_binding(
     a durable change in ingest success.
     """
     try:
+        if receipt.self_subject_endpoint is not None:
+            _declare_subject_endpoint(nodes, edges, index_map, receipt)
         identity = receipt.self_identity
         if (
             identity is not None
@@ -1162,6 +1349,7 @@ async def _run_graphiti_combined_extraction(
 
     receipt = _extraction_receipt.get()
     if receipt is not None:
+        receipt.graphiti_episode_uuid = str(getattr(episode, "uuid", "") or "").strip()
         receipt.previous_episode_texts = tuple(
             content
             for item in (previous_episodes or [])
@@ -1169,9 +1357,33 @@ async def _run_graphiti_combined_extraction(
             and content.strip()
         )
 
+    endpoint = receipt.self_subject_endpoint if receipt is not None else None
+    if endpoint is not None:
+        # Eligibility is rare and enforce-only.  Pay the bounded graph read up front so a marker
+        # collision in repair context is rejected before even the first model dispatch; the same
+        # cached context is reused if relationless repair is actually needed.
+        if receipt.relationless_repair_context_loader is not None:
+            receipt.relationless_repair_context_texts = _load_relationless_repair_context(
+                receipt
+            )
+        collision_texts = (
+            receipt.episode_text,
+            *receipt.previous_episode_texts,
+            *receipt.relationless_repair_context_texts,
+        )
+        if any(
+            SUBJECT_ENDPOINT_MARKER_PREFIX.casefold() in text.casefold()
+            for text in collision_texts
+        ):
+            raise InvalidSelfSubjectDeclarationError(
+                "reserved self-subject marker prefix occurs in extraction text or context"
+            )
+    endpoint_instructions = _subject_endpoint_instructions(endpoint)
+
     effective_instructions = _combine_extraction_instructions(
         custom_extraction_instructions,
         _RELATION_COMPLETENESS_INSTRUCTIONS,
+        endpoint_instructions,
     )
     nodes, edges, index_map = await extract_nodes_and_edges(
         clients,
@@ -1186,9 +1398,17 @@ async def _run_graphiti_combined_extraction(
         receipt.relationless_repair_attempted = True
         receipt.relationless_initial_entity_count = receipt.raw_entity_count
         receipt.relationless_initial_edge_count = receipt.raw_edge_count
-        receipt.relationless_repair_context_texts = _load_relationless_repair_context(
-            receipt
-        )
+        if not receipt.relationless_repair_context_texts:
+            receipt.relationless_repair_context_texts = _load_relationless_repair_context(
+                receipt
+            )
+        if endpoint is not None and any(
+            SUBJECT_ENDPOINT_MARKER_PREFIX.casefold() in text.casefold()
+            for text in receipt.relationless_repair_context_texts
+        ):
+            raise InvalidSelfSubjectDeclarationError(
+                "reserved self-subject marker prefix occurs in repair context"
+            )
         logger.warning(
             "Relationless combined extraction; running one corrective retry "
             "episode_id=%s raw_entities=%d raw_edges=%d source=%s adjacent_context_turns=%d",
@@ -1206,6 +1426,9 @@ async def _run_graphiti_combined_extraction(
                 if receipt.relationless_repair_context_texts
                 else None
             ),
+            # Repair instructions still mention the legacy `user` endpoint.  Repeat the
+            # episode-scoped instruction last so the receipt-owned marker remains authoritative.
+            endpoint_instructions,
         )
         repair_previous_episodes = _relationless_repair_previous_episodes(
             episode,

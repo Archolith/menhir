@@ -380,6 +380,15 @@ class MemoryGraphAdapter:
             namespace=namespace,
         )
 
+    def find_pending_evidence_projection_uuid(
+        self, *, turn_evidence_uuid: str, namespace: str | None = None
+    ) -> str | None:
+        """Find a durable pending projection so an admission retry can re-enqueue it."""
+        return self._episodes.find_pending_evidence_projection_uuid(
+            turn_evidence_uuid=turn_evidence_uuid,
+            namespace=namespace,
+        )
+
     def list_pending_episode_uuids(
         self, *, max_attempts: int, limit: int = 100
     ) -> list[str]:

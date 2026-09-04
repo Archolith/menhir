@@ -18,9 +18,9 @@ Two rules carry the whole design:
    entity that author is. :func:`eligible_self_evidence` answers the first question and
    :func:`proves_self_subject` the second; binding requires both. No property of the extracted
    NAME -- not the literal string, not its grammatical person -- can answer the second, because
-   the name is not provenance. Only a declaration naming the exact in-memory subject node can;
-   the binding primitive exists, but the queued Graphiti lifecycle has no structured producer or
-   durable declaration transport yet.
+   the name is not provenance. Only a declaration naming the exact in-memory subject node can.
+   The queued Graphiti lifecycle produces one only for its receipt-owned endpoint on an
+   atomically verified, verbatim evidence projection.
 
 The physical Graphiti partition is derived separately by
 :func:`menhir.domain.namespace.namespace_to_group_id`. Logical ``default`` maps to physical
@@ -30,8 +30,10 @@ from ``group_id == ""``.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from enum import StrEnum
+from hashlib import sha256
 from typing import Any
 from uuid import NAMESPACE_URL, uuid5
 
@@ -44,7 +46,9 @@ __all__ = [
     "THIRD_PERSON_SELF_ALIASES",
     "SelfEvidenceKind",
     "SelfIdentityContext",
+    "SelfSubjectEndpointEnvelope",
     "SpeakerRole",
+    "SUBJECT_ENDPOINT_MARKER_PREFIX",
     "declare_self_subject",
     "eligible_self_evidence",
     "is_first_person_alias",
@@ -52,8 +56,13 @@ __all__ = [
     "normalize_logical_namespace",
     "proves_self_subject",
     "self_context_for_pending_episode",
+    "self_subject_endpoint_for_claim",
     "self_uuid_for_namespace",
 ]
+
+
+SUBJECT_ENDPOINT_MARKER_PREFIX = "MenhirCurrentSpeaker_"
+_SUBJECT_ENDPOINT_VERSION = "speaker-endpoint-v1"
 
 
 class SpeakerRole(StrEnum):
@@ -177,12 +186,16 @@ class SelfIdentityContext:
     source_kind: str = ""
     #: The episode this evidence belongs to. Evidence never outlives its episode.
     episode_uuid: str | None = None
+    #: Exact turn-evidence identifier returned by the atomic claim.  Kept separate from the
+    #: subject endpoint so the final declaration boundary can reject a foreign-turn envelope.
+    turn_evidence_uuid: str | None = None
     #: Exact in-memory node identifier selected by a trusted structured assertion. Graphiti types
     #: identifiers as strings (its normal producer uses UUIDs). This is the bridge
     #: from episode authorship to node subjecthood: names, aliases, and grammatical person never
     #: fill it. A caller that already owns the final in-memory payload may set it only by promoting
     #: a TRUSTED_USER_TURN through :func:`declare_self_subject` after constructing the subject
-    #: node/edge. The current queued Graphiti path exposes no such caller.
+    #: node/edge. The queued Graphiti path may set it only after validating its receipt-owned
+    #: endpoint in the final post-repair payload.
     subject_node_uuid: str | None = None
 
     def __post_init__(self) -> None:
@@ -192,6 +205,119 @@ class SelfIdentityContext:
     def self_uuid(self) -> str:
         """The canonical self UUID for this context's logical namespace."""
         return self_uuid_for_namespace(self.namespace)
+
+
+@dataclass(frozen=True, slots=True)
+class SelfSubjectEndpointEnvelope:
+    """Menhir-owned identity for the author endpoint of one exact evidence projection.
+
+    This is not the canonical self UUID and is never accepted from an API caller.  It exists only
+    for one extraction attempt and is re-derived from durable claim facts on every retry.
+    """
+
+    version: str
+    episode_uuid: str
+    turn_evidence_uuid: str
+    namespace: str
+    marker: str
+
+    def __post_init__(self) -> None:
+        version = str(self.version or "").strip()
+        episode_uuid = str(self.episode_uuid or "").strip()
+        turn_uuid = str(self.turn_evidence_uuid or "").strip()
+        namespace = normalize_logical_namespace(self.namespace)
+        marker = str(self.marker or "").strip()
+        if version != _SUBJECT_ENDPOINT_VERSION:
+            raise ValueError("unsupported self-subject endpoint version")
+        if not episode_uuid or not turn_uuid:
+            raise ValueError("self-subject endpoint requires episode and turn identifiers")
+        expected = _subject_endpoint_marker(
+            version=version,
+            episode_uuid=episode_uuid,
+            turn_evidence_uuid=turn_uuid,
+            namespace=namespace,
+        )
+        if marker != expected:
+            raise ValueError("self-subject endpoint marker does not match its authority tuple")
+        object.__setattr__(self, "version", version)
+        object.__setattr__(self, "episode_uuid", episode_uuid)
+        object.__setattr__(self, "turn_evidence_uuid", turn_uuid)
+        object.__setattr__(self, "namespace", namespace)
+        object.__setattr__(self, "marker", marker)
+
+
+def _subject_endpoint_marker(
+    *, version: str, episode_uuid: str, turn_evidence_uuid: str, namespace: str
+) -> str:
+    material = "\0".join(
+        (version, namespace, episode_uuid, turn_evidence_uuid)
+    ).encode("utf-8")
+    return f"{SUBJECT_ENDPOINT_MARKER_PREFIX}{sha256(material).hexdigest()[:24]}"
+
+
+def self_subject_endpoint_for_claim(
+    claimed: Mapping[str, Any],
+) -> SelfSubjectEndpointEnvelope | None:
+    """Build an endpoint only for a graph-proven, verbatim user-turn projection.
+
+    Every input is projected by the same atomic claim query that acquires the episode lease.  A
+    missing or contradictory field therefore fails closed instead of falling back to ``source`` or
+    text-shaped evidence.  Returning ``None`` means ordinary extraction must continue unchanged.
+    """
+
+    if claimed.get("subject_endpoint_eligible") is not True:
+        return None
+    if claimed.get("is_evidence_projection") is not True:
+        return None
+    if str(claimed.get("source") or "").strip().lower() != "user":
+        return None
+    try:
+        evidence_count = int(claimed.get("turn_evidence_count") or 0)
+    except (TypeError, ValueError):
+        return None
+    if evidence_count != 1:
+        return None
+    if str(claimed.get("turn_evidence_role") or "").strip().lower() != "user":
+        return None
+    if str(claimed.get("turn_evidence_declarant") or "").strip().lower() != "user":
+        return None
+
+    episode_uuid = str(claimed.get("uuid") or "").strip()
+    turn_uuid = str(claimed.get("turn_evidence_uuid") or "").strip()
+    projected_turn_uuid = str(claimed.get("evidence_projection_of") or "").strip()
+    if not episode_uuid or not turn_uuid or projected_turn_uuid != turn_uuid:
+        return None
+
+    content = claimed.get("content")
+    turn_text = claimed.get("turn_evidence_text")
+    if not isinstance(content, str) or not isinstance(turn_text, str) or content != turn_text:
+        return None
+    if claimed.get("diff") is not None:
+        return None
+
+    namespace = normalize_logical_namespace(claimed.get("namespace"))
+    turn_namespace = normalize_logical_namespace(claimed.get("turn_evidence_namespace"))
+    if namespace != turn_namespace:
+        return None
+
+    # A user-authored occurrence of the reserved prefix would make model output
+    # indistinguishable from Menhir's capability token.  Refuse the endpoint path entirely.
+    if SUBJECT_ENDPOINT_MARKER_PREFIX.casefold() in content.casefold():
+        return None
+
+    marker = _subject_endpoint_marker(
+        version=_SUBJECT_ENDPOINT_VERSION,
+        episode_uuid=episode_uuid,
+        turn_evidence_uuid=turn_uuid,
+        namespace=namespace,
+    )
+    return SelfSubjectEndpointEnvelope(
+        version=_SUBJECT_ENDPOINT_VERSION,
+        episode_uuid=episode_uuid,
+        turn_evidence_uuid=turn_uuid,
+        namespace=namespace,
+        marker=marker,
+    )
 
 
 def normalize_logical_namespace(value: Any) -> str:
@@ -261,9 +387,9 @@ def declare_self_subject(
     function does not inspect text, names, edge facts, or grammatical person. It binds the
     declaration to the current episode and the exact in-memory node UUID the caller constructed.
 
-    This is a binding primitive, not yet a production transport. Menhir's queued Graphiti path
-    reconstructs only episode-level context before Graphiti allocates node UUIDs, so a future
-    producer also needs a durable structured payload and a post-repair/pre-dedup injection point.
+    This is a binding primitive, not a text classifier. Menhir's queued Graphiti path calls it
+    only after Graphiti allocates the receipt-owned endpoint node and final relationless repair has
+    completed, at the post-repair/pre-dedup injection point.
 
     A normal user turn is deliberately insufficient. Only a trusted user-turn context with an
     episode UUID can be promoted, and the selected node UUID must be non-blank. Invalid inputs fail
@@ -310,10 +436,10 @@ def proves_self_subject(node_uuid: Any, context: SelfIdentityContext | None) -> 
     (``She told me, "I will handle it"``) for the second. By the time binding runs, extraction has
     discarded the quote boundaries, source spans and speaker attribution that would separate them.
 
-    **Consequence, stated where it cannot be missed:** the exact-node binding primitive now exists,
-    but no production producer or durable transport calls it today, so this returns ``False`` for
-    every real Graphiti episode and binding remains inert. Ordinary extracted text cannot supply
-    this declaration.
+    **Production producer:** the only production caller is the final-payload validator for a
+    Menhir-owned endpoint on an atomically verified verbatim evidence projection. Ordinary
+    extracted text still cannot supply this declaration, and the producer census prevents a
+    second call site from appearing without review.
     """
     if not eligible_self_evidence(context):
         return False
@@ -329,6 +455,7 @@ def self_context_for_pending_episode(
     source: Any,
     namespace: Any,
     episode_uuid: str | None = None,
+    turn_evidence_uuid: str | None = None,
     source_kind: str = "",
 ) -> SelfIdentityContext:
     """Reconstruct the identity context for a claimed pending episode.
@@ -352,6 +479,7 @@ def self_context_for_pending_episode(
             evidence_kind=SelfEvidenceKind.TRUSTED_USER_TURN,
             source_kind=source_kind or normalized_source,
             episode_uuid=episode_uuid,
+            turn_evidence_uuid=turn_evidence_uuid,
             subject_node_uuid=None,
         )
     return SelfIdentityContext(
@@ -360,6 +488,7 @@ def self_context_for_pending_episode(
         evidence_kind=None,
         source_kind=source_kind or normalized_source,
         episode_uuid=episode_uuid,
+        turn_evidence_uuid=turn_evidence_uuid,
         subject_node_uuid=None,
     )
 

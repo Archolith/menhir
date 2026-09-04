@@ -622,14 +622,19 @@ can still create a fork through ordinary dedup. Its old “canonical”/“bound
 the code and log now call this `self_like_endpoints_retained` so turn evidence cannot be mistaken
 for node authority again.
 
-**Consequence: exact-node binding is inert in production.** No producer calls
-`declare_self_subject`, so `proves_self_subject` returns false for every real episode and no real
-episode binds today. The exact-node binder is valid only for a caller that already owns the final
-in-memory payload and subject assignment. The current queued Graphiti lifecycle cannot carry one:
-it persists episode-level context before Graphiti allocates node UUIDs. Production binding
-therefore requires a durable structured subject payload plus a post-repair/pre-dedup injection
-point. Free-text extraction instead needs per-node source provenance (including quoted/reported-
-speech attribution), not another alias or grammar rule.
+**Production subject transport is projection-only.** The claim query atomically recognizes an
+evidence projection only when it has exactly one `ADMITTED_ON` user/declarant turn, byte-identical
+content, matching normalized namespace and projection lineage, and no diff. In enforce mode Menhir
+derives an episode-scoped opaque endpoint from those durable identifiers and carries it through the
+task-local extraction receipt. The marker changes neither the stored episode body nor ordinary
+entities named `user`; it tells Graphiti which endpoint represents the current message author.
+
+After the final relationless-repair payload exists, Menhir accepts exactly the receipt's marker,
+requires its node to participate in a current-episode edge and index entry, declares that exact
+in-memory UUID, then atomically rewrites the node name to `user`, UUID to canonical self, both edge
+directions, and the episode index map. Any missing authority, duplicate/stale marker, scope mismatch,
+or undeclared self-like fallback refuses before persistence. Off and real observe extraction do not
+receive a marker and retain their previous prompts and behavior.
 
 That does **not** make `enforce` equivalent to `off`: `enforce` also activates canonical candidate
 isolation. Even without a declaration, it refuses a searchable extracted node already carrying
@@ -638,10 +643,10 @@ an undeclared node from acquiring authority, but may preserve or create an ordin
 `observe` deliberately leaves that resolution unchanged, so activation still requires a measured
 and reviewed cutover.
 The production construction surface is pinned by an AST census: two context constructions inside
-the sole factory, one factory call at Graphiti dispatch, and no production call to the declaration
-helper. `self_like_unresolved` and `first_person_unresolved` in observe mode count the population
-needing classification. They do **not** say which nodes provenance would ultimately bind;
-first-person quoted speech is explicitly part of that upper bound.
+the sole factory, one factory call at Graphiti dispatch, and exactly one declaration call in the
+final subject-endpoint validator. `self_like_unresolved` and `first_person_unresolved` in observe
+mode count the population needing classification. They do **not** say which nodes provenance would
+ultimately bind; first-person quoted speech is explicitly part of that upper bound.
 
 This contract governs Graphiti entity-node resolution only. Typed-scalar and event-history lanes
 already have separate first-person subject binders that write assertions against the canonical
@@ -672,7 +677,9 @@ a retryable failure.
 `off | observe | enforce`, default `off`. Unrecognized values fall back to `off`.
 Observe emits `would_bind`, never `bound`, and carries only a declaration-presence bit rather than
 the opaque producer-supplied node identifier. `off` and `observe` do not apply canonical candidate
-isolation; this preserves exact pre-change behavior and non-mutating observation respectively.
+isolation, and real observe extraction does not receive a subject marker because that would change
+its prompt. This preserves exact pre-change behavior and non-mutating observation respectively;
+marker compliance must be measured by a separately budgeted discarded shadow extraction.
 Telemetry emits only the closed source kinds `user`/`manual`; every other caller-controlled source
 string is reported as `other`.
 

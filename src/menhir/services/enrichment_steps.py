@@ -22,7 +22,10 @@ from menhir.domain.models import FreshnessState, ProcessingState
 from menhir.domain.self_identity import (
     SelfEvidenceKind,
     SelfIdentityContext,
+    SelfSubjectEndpointEnvelope,
+    normalize_logical_namespace,
     self_context_for_pending_episode,
+    self_subject_endpoint_for_claim,
 )
 from menhir.infrastructure.self_binding import (
     InvalidSelfSubjectDeclarationError,
@@ -645,7 +648,7 @@ async def run_graphiti_extraction(
             ).strip()
             relationless_repair_context_loader: Callable[[], tuple[str, ...]] | None = None
             if turn_evidence_uuid:
-                repair_namespace = str(ctx.claimed.get("namespace") or "default")
+                repair_namespace = normalize_logical_namespace(ctx.claimed.get("namespace"))
 
                 def _load_relationless_repair_context() -> tuple[str, ...]:
                     # turn_evidence_uuid is caller-supplied. Scoping the read to THIS episode's
@@ -687,6 +690,26 @@ async def run_graphiti_extraction(
                         f"{publication_intent.status}"
                     )
 
+            self_bind_mode = resolve_bind_mode(
+                getattr(ctx, "canonical_self_binding_mode", None)
+            )
+            self_identity = self_context_for_pending_episode(
+                source=ctx.claimed.get("source"),
+                namespace=namespace,
+                episode_uuid=ctx.episode_uuid,
+                turn_evidence_uuid=str(
+                    ctx.claimed.get("turn_evidence_uuid") or ""
+                ).strip() or None,
+            )
+            # Observe must preserve the real extraction prompt byte-for-byte.  The endpoint is a
+            # behavioral input, so only enforce constructs and transports it; off/observe keep the
+            # established extraction path while the existing decision telemetry remains available.
+            self_subject_endpoint = (
+                self_subject_endpoint_for_claim(ctx.claimed)
+                if self_bind_mode is SelfBindMode.ENFORCE
+                else None
+            )
+
             graphiti_result = await add_episode_with_timeout(
                 ctx.graphiti_client,
                 name=episode_name,
@@ -698,14 +721,9 @@ async def run_graphiti_extraction(
                 timeout_s=ctx.graphiti_add_episode_timeout_s,
                 group_id=group_id,
                 relationless_repair_context_loader=relationless_repair_context_loader,
-                self_identity=self_context_for_pending_episode(
-                    source=ctx.claimed.get("source"),
-                    namespace=namespace,
-                    episode_uuid=ctx.episode_uuid,
-                ),
-                self_bind_mode=resolve_bind_mode(
-                    getattr(ctx, "canonical_self_binding_mode", None)
-                ),
+                self_identity=self_identity,
+                self_subject_endpoint=self_subject_endpoint,
+                self_bind_mode=self_bind_mode,
             )
             if publication_intent is not None:
                 publication_transition = (
@@ -1571,6 +1589,7 @@ async def add_episode_with_timeout(
     group_id: str = "",
     relationless_repair_context_loader: Callable[[], tuple[str, ...]] | None = None,
     self_identity: SelfIdentityContext | None = None,
+    self_subject_endpoint: SelfSubjectEndpointEnvelope | None = None,
     self_bind_mode: SelfBindMode = SelfBindMode.OFF,
 ) -> Any:
     """Bound one Graphiti add_episode call so stuck requests fail back into retry flow.
@@ -1585,6 +1604,25 @@ async def add_episode_with_timeout(
     """
 
     receipt_episode_key = str(episode_uuid or "").strip()
+    if self_subject_endpoint is not None:
+        if self_bind_mode is not SelfBindMode.ENFORCE:
+            raise InvalidSelfSubjectDeclarationError(
+                "a self-subject endpoint may be dispatched only in enforce mode"
+            )
+        if not receipt_episode_key or self_subject_endpoint.episode_uuid != receipt_episode_key:
+            raise InvalidSelfSubjectDeclarationError(
+                "self-subject endpoint does not belong to the active pending episode"
+            )
+        if self_identity is None or self_subject_endpoint.namespace != self_identity.namespace:
+            raise InvalidSelfSubjectDeclarationError(
+                "self-subject endpoint namespace does not match its identity context"
+            )
+        if self_subject_endpoint.turn_evidence_uuid != str(
+            self_identity.turn_evidence_uuid or ""
+        ).strip():
+            raise InvalidSelfSubjectDeclarationError(
+                "self-subject endpoint turn does not match its identity context"
+            )
     if (
         self_identity is not None
         and self_identity.evidence_kind is SelfEvidenceKind.EXPLICIT_SELF_SUBJECT
@@ -1628,6 +1666,7 @@ async def add_episode_with_timeout(
         source_description=source_description,
         relationless_repair_context_loader=relationless_repair_context_loader,
         self_identity=self_identity,
+        self_subject_endpoint=self_subject_endpoint,
         self_bind_mode=self_bind_mode,
     )
     try:

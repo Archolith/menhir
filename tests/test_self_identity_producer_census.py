@@ -1,8 +1,8 @@
 """Structural census for every production path that can create self-identity evidence.
 
 This test is intentionally source-based. Runtime samples cannot prove that another producer did
-not bypass the normal factory, while a direct ``SelfIdentityContext`` construction carrying
-``EXPLICIT_SELF_SUBJECT`` would silently turn the currently inert identity rewrite on.
+not bypass the normal factories, while a direct context or endpoint construction could silently
+create another authority producer outside the reviewed final-payload validator.
 """
 
 from __future__ import annotations
@@ -24,9 +24,13 @@ class _IdentityProducerVisitor(ast.NodeVisitor):
         self.scope: list[str] = []
         self.context_names = {"SelfIdentityContext"}
         self.factory_names = {"self_context_for_pending_episode"}
+        self.endpoint_names = {"SelfSubjectEndpointEnvelope"}
+        self.endpoint_factory_names = {"self_subject_endpoint_for_claim"}
         self.declaration_names = {"declare_self_subject"}
         self.context_calls: Counter[str] = Counter()
         self.factory_calls: Counter[str] = Counter()
+        self.endpoint_calls: Counter[str] = Counter()
+        self.endpoint_factory_calls: Counter[str] = Counter()
         self.declaration_calls: Counter[str] = Counter()
         self.explicit_authority_references: Counter[str] = Counter()
 
@@ -41,6 +45,10 @@ class _IdentityProducerVisitor(ast.NodeVisitor):
                     self.context_names.add(local_name)
                 elif imported.name == "self_context_for_pending_episode":
                     self.factory_names.add(local_name)
+                elif imported.name == "SelfSubjectEndpointEnvelope":
+                    self.endpoint_names.add(local_name)
+                elif imported.name == "self_subject_endpoint_for_claim":
+                    self.endpoint_factory_names.add(local_name)
                 elif imported.name == "declare_self_subject":
                     self.declaration_names.add(local_name)
         self.generic_visit(node)
@@ -70,6 +78,10 @@ class _IdentityProducerVisitor(ast.NodeVisitor):
             self.context_calls[self._site()] += 1
         if called in self.factory_names:
             self.factory_calls[self._site()] += 1
+        if called in self.endpoint_names:
+            self.endpoint_calls[self._site()] += 1
+        if called in self.endpoint_factory_names:
+            self.endpoint_factory_calls[self._site()] += 1
         if (
             called == "getattr"
             and len(node.args) >= 2
@@ -100,10 +112,12 @@ class _IdentityProducerVisitor(ast.NodeVisitor):
 
 
 def _production_identity_census() -> tuple[
-    Counter[str], Counter[str], Counter[str], Counter[str]
+    Counter[str], Counter[str], Counter[str], Counter[str], Counter[str], Counter[str]
 ]:
     constructors: Counter[str] = Counter()
     factories: Counter[str] = Counter()
+    endpoint_constructors: Counter[str] = Counter()
+    endpoint_factories: Counter[str] = Counter()
     declarations: Counter[str] = Counter()
     explicit_authority: Counter[str] = Counter()
     for root in _PRODUCTION_ROOTS:
@@ -113,9 +127,18 @@ def _production_identity_census() -> tuple[
             visitor.visit(ast.parse(path.read_text(encoding="utf-8"), filename=str(path)))
             constructors.update(visitor.context_calls)
             factories.update(visitor.factory_calls)
+            endpoint_constructors.update(visitor.endpoint_calls)
+            endpoint_factories.update(visitor.endpoint_factory_calls)
             declarations.update(visitor.declaration_calls)
             explicit_authority.update(visitor.explicit_authority_references)
-    return constructors, factories, declarations, explicit_authority
+    return (
+        constructors,
+        factories,
+        endpoint_constructors,
+        endpoint_factories,
+        declarations,
+        explicit_authority,
+    )
 
 
 @pytest.mark.unit
@@ -125,12 +148,16 @@ def test_census_recognizes_import_aliases_and_enum_by_value():
 from menhir.domain.self_identity import (
     SelfEvidenceKind,
     SelfIdentityContext as Context,
+    SelfSubjectEndpointEnvelope as Endpoint,
     declare_self_subject as declare_subject,
     self_context_for_pending_episode as make_context,
+    self_subject_endpoint_for_claim as make_endpoint,
 )
 
 def new_writer():
     ctx = make_context(source="user", namespace="default")
+    make_endpoint({})
+    Endpoint(version="v", episode_uuid="e", turn_evidence_uuid="t", namespace="default", marker="m")
     declare_subject(ctx, subject_node_uuid="node-1")
     return Context(
         namespace="default",
@@ -168,6 +195,8 @@ def dynamic_writer():
     assert visitor.factory_calls == Counter(
         {site: 1, qualified_site: 1, rebound_site: 1, dynamic_site: 1}
     )
+    assert visitor.endpoint_calls == Counter({site: 1})
+    assert visitor.endpoint_factory_calls == Counter({site: 1})
     assert visitor.declaration_calls == Counter(
         {site: 1, qualified_site: 1, rebound_site: 1, dynamic_site: 1}
     )
@@ -179,12 +208,18 @@ def test_self_identity_producer_census_is_closed():
     """Any new constructor, factory caller, or explicit-authority reference requires review.
 
     The two context constructions are both inside the one production factory. The only factory
-    caller is the Graphiti dispatch boundary. The declaration helper has no production callers.
-    ``EXPLICIT_SELF_SUBJECT`` appears executably only in its enum declaration, the declaration
-    helper, the binding predicate, and the receipt's episode-scope check. Therefore no production
-    producer can activate binding without changing this census.
+    caller is the Graphiti dispatch boundary. The one declaration producer is the final-payload
+    validator: it can name only the receipt-owned marker node after repair and before resolution.
+    Therefore no second production producer can activate binding without changing this census.
     """
-    constructors, factories, declarations, explicit_authority = _production_identity_census()
+    (
+        constructors,
+        factories,
+        endpoint_constructors,
+        endpoint_factories,
+        declarations,
+        explicit_authority,
+    ) = _production_identity_census()
 
     assert constructors == Counter(
         {"src/menhir/domain/self_identity.py:self_context_for_pending_episode": 2}
@@ -192,7 +227,17 @@ def test_self_identity_producer_census_is_closed():
     assert factories == Counter(
         {"src/menhir/services/enrichment_steps.py:run_graphiti_extraction": 1}
     )
-    assert declarations == Counter()
+    assert endpoint_constructors == Counter(
+        {"src/menhir/domain/self_identity.py:self_subject_endpoint_for_claim": 1}
+    )
+    assert endpoint_factories == Counter(
+        {"src/menhir/services/enrichment_steps.py:run_graphiti_extraction": 1}
+    )
+    assert declarations == Counter(
+        {
+            "src/menhir/infrastructure/graphiti_extraction_patches.py:_declare_subject_endpoint": 1
+        }
+    )
     assert explicit_authority == Counter(
         {
             "src/menhir/domain/self_identity.py:SelfEvidenceKind": 1,

@@ -91,6 +91,15 @@ class TestClaimProjectionCarriesWorldTime:
         "session_id",
         "user_id",
         "namespace",
+        "diff",
+        "is_evidence_projection",
+        "evidence_projection_of",
+        "turn_evidence_count",
+        "turn_evidence_role",
+        "turn_evidence_declarant",
+        "turn_evidence_text",
+        "turn_evidence_namespace",
+        "subject_endpoint_eligible",
         "reference_time",
         "queued_at",
         "turn_evidence_uuid",
@@ -117,6 +126,43 @@ class TestClaimProjectionCarriesWorldTime:
         assert "n.reference_time AS reference_time" in query
         assert "n.queued_at AS queued_at" in query, (
             "queued_at is the intended fallback for live turns and must stay")
+
+    def test_subject_endpoint_eligibility_is_computed_in_the_atomic_claim(self):
+        query = self._claim_query()
+
+        assert "WITH n, [(n)-[:ADMITTED_ON]->(t:TurnEvidence) | t] AS subject_turns" in query
+        assert "size(subject_turns) = 1" in query
+        assert "n.content = subject_turns[0].text" in query
+        assert "n.evidence_projection_of = subject_turns[0].turn_id" in query
+        assert "n.diff IS NULL" in query
+        assert "AS subject_endpoint_eligible" in query
+
+
+def test_finds_pending_projection_for_idempotent_admission_retry():
+    repo = _make_repo([{"uuid": "projection-1"}])
+
+    found = repo.find_pending_evidence_projection_uuid(
+        turn_evidence_uuid="turn-1", namespace="default"
+    )
+
+    assert found == "projection-1"
+    query = repo.neo4j.execute.call_args.args[0]
+    params = repo.neo4j.execute.call_args.kwargs["params"]
+    assert "p.processing_state = 'PENDING'" in query
+    assert "evidence_projection_of: $turn_evidence_uuid" in query
+    assert "coalesce(p.namespace, p.group_id, '') IN $tenant_namespaces" in query
+    assert params == {
+        "turn_evidence_uuid": "turn-1",
+        "tenant_namespaces": ["default", ""],
+    }
+
+
+def test_pending_projection_retry_lookup_returns_none_when_absent():
+    repo = _make_repo()
+
+    assert repo.find_pending_evidence_projection_uuid(
+        turn_evidence_uuid="turn-1", namespace="tenant-a"
+    ) is None
     def test_detects_context_window_markers(self):
         from menhir.infrastructure.episode_lifecycle import is_context_window_error_text
 

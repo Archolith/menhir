@@ -8,7 +8,11 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from menhir.domain.namespace import namespace_to_group_id
+from menhir.domain.namespace import (
+    namespace_to_group_id,
+    tenant_scope_cypher,
+    tenant_scope_params,
+)
 from menhir.domain.self_identity import self_uuid_for_namespace
 from menhir.domain.utils import source_confidence_for
 from menhir.infrastructure.cypher import (
@@ -340,6 +344,30 @@ class EpisodeLifecycleRepository:
         )
         return bool(rows and int(rows[0].get("linked") or 0) > 0)
 
+    def find_pending_evidence_projection_uuid(
+        self, *, turn_evidence_uuid: str, namespace: str | None = None
+    ) -> str | None:
+        """Return the existing pending projection for an idempotent admission retry."""
+
+        rows = self.neo4j.execute(
+            """
+            MATCH (p:Episodic {evidence_projection_of: $turn_evidence_uuid})
+            WHERE coalesce(p.is_evidence_projection, false)
+              AND p.processing_state = 'PENDING'
+              AND """ + tenant_scope_cypher("p") + """
+            RETURN p.uuid AS uuid
+            ORDER BY coalesce(p.queued_at, p.created_at) ASC, p.uuid ASC
+            LIMIT 1
+            """,
+            params={
+                "turn_evidence_uuid": turn_evidence_uuid,
+                **tenant_scope_params(namespace),
+            },
+        )
+        if not rows or not str(rows[0].get("uuid") or "").strip():
+            return None
+        return str(rows[0]["uuid"])
+
     def list_pending_episode_uuids(self, *, max_attempts: int, limit: int = 100) -> list[str]:
         safe_limit = max(1, min(limit, 500))
         query = (
@@ -522,6 +550,9 @@ class EpisodeLifecycleRepository:
                     "n.retry_after = null",
                 )
             )
+            .with_clause(
+                "n, [(n)-[:ADMITTED_ON]->(t:TurnEvidence) | t] AS subject_turns"
+            )
             .return_fields(
                 (),
                 "n.uuid AS uuid",
@@ -532,6 +563,29 @@ class EpisodeLifecycleRepository:
                 "n.user_id AS user_id",
                 "n.user_flagged AS user_flagged",
                 "n.bootstrap_scope AS bootstrap_scope",
+                "n.diff AS diff",
+                # Subject-endpoint eligibility is decided only from facts returned by this same
+                # lease-acquiring query.  Do not reconstruct it later from source='user': that
+                # proves at most episode authorship and loses projection lineage and cardinality.
+                "coalesce(n.is_evidence_projection, false) AS is_evidence_projection",
+                "n.evidence_projection_of AS evidence_projection_of",
+                "size(subject_turns) AS turn_evidence_count",
+                "subject_turns[0].role AS turn_evidence_role",
+                "subject_turns[0].declarant AS turn_evidence_declarant",
+                "subject_turns[0].text AS turn_evidence_text",
+                "subject_turns[0].namespace AS turn_evidence_namespace",
+                "(coalesce(n.is_evidence_projection, false)"
+                " AND size(subject_turns) = 1"
+                " AND subject_turns[0].role = 'user'"
+                " AND subject_turns[0].declarant = 'user'"
+                " AND n.content = subject_turns[0].text"
+                " AND n.evidence_projection_of = subject_turns[0].turn_id"
+                " AND n.diff IS NULL"
+                " AND CASE WHEN trim(coalesce(n.namespace, '')) = '' THEN 'default'"
+                " ELSE trim(n.namespace) END"
+                " = CASE WHEN trim(coalesce(subject_turns[0].namespace, '')) = ''"
+                " THEN 'default' ELSE trim(subject_turns[0].namespace) END)"
+                " AS subject_endpoint_eligible",
                 # Carry the stored namespace so the enrichment worker writes the
                 # extracted entity/edge nodes into the episode's graphiti group_id.
                 # Without this the claim returns no namespace, enrichment defaults to
@@ -558,7 +612,7 @@ class EpisodeLifecycleRepository:
                 # The episode-to-evidence link identifies the current raw transcript turn. A
                 # relationless corrective extraction can use it to retrieve bounded adjacent
                 # dialogue without putting assistant context into the persisted episode body.
-                "head([(n)-[:ADMITTED_ON]->(t:TurnEvidence) | t.turn_id]) AS turn_evidence_uuid",
+                "subject_turns[0].turn_id AS turn_evidence_uuid",
                 "n.processing_attempts AS processing_attempts",
                 "n.processing_owner AS processing_owner",
                 "n.processing_lease_expires_at AS processing_lease_expires_at",

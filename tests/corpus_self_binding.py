@@ -84,7 +84,7 @@ _SELF_TURNS = (
         identity_override=_declared("default", "first_person_fact"),
         note=(
             "The only binding shape there is: a declared subject. Note the source alone would NOT "
-            "produce this context -- no production producer constructs one."
+            "produce this context -- only the verified subject-endpoint producer constructs one."
         ),
     ),
     CorpusCase(

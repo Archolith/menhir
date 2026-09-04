@@ -21,14 +21,17 @@ from menhir.domain.namespace import namespace_to_group_id
 from menhir.domain.self_identity import (
     GATE_APPROVED_HUMAN_SOURCES,
     SELF_ALIASES,
+    SUBJECT_ENDPOINT_MARKER_PREFIX,
     SelfEvidenceKind,
     SelfIdentityContext,
+    SelfSubjectEndpointEnvelope,
     SpeakerRole,
     declare_self_subject,
     eligible_self_evidence,
     is_self_alias,
     normalize_logical_namespace,
     self_context_for_pending_episode,
+    self_subject_endpoint_for_claim,
     self_uuid_for_namespace,
 )
 
@@ -46,6 +49,114 @@ def _ctx(**kw):
     )
     base.update(kw)
     return SelfIdentityContext(**base)
+
+
+def _eligible_projection_claim(**changes):
+    claim = {
+        "uuid": "projection-1",
+        "content": "I own 25 postcards.",
+        "source": "user",
+        "namespace": "default",
+        "diff": None,
+        "subject_endpoint_eligible": True,
+        "is_evidence_projection": True,
+        "evidence_projection_of": "turn-1",
+        "turn_evidence_count": 1,
+        "turn_evidence_uuid": "turn-1",
+        "turn_evidence_role": "user",
+        "turn_evidence_declarant": "user",
+        "turn_evidence_text": "I own 25 postcards.",
+        "turn_evidence_namespace": "default",
+    }
+    claim.update(changes)
+    return claim
+
+
+@pytest.mark.unit
+def test_exact_projection_claim_builds_stable_episode_scoped_subject_endpoint():
+    first = self_subject_endpoint_for_claim(_eligible_projection_claim())
+    second = self_subject_endpoint_for_claim(_eligible_projection_claim())
+
+    assert first is not None
+    assert first == second
+    assert first.marker.startswith(SUBJECT_ENDPOINT_MARKER_PREFIX)
+    assert first.episode_uuid == "projection-1"
+    assert first.turn_evidence_uuid == "turn-1"
+    assert first.namespace == "default"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"is_evidence_projection": False},
+        {"subject_endpoint_eligible": False},
+        {"source": "agent_inference"},
+        {"turn_evidence_count": 0},
+        {"turn_evidence_count": 2},
+        {"turn_evidence_role": "assistant"},
+        {"turn_evidence_declarant": "assistant"},
+        {"evidence_projection_of": "turn-other"},
+        {"turn_evidence_text": "I own 26 postcards."},
+        {"turn_evidence_namespace": "other"},
+        {"diff": "attached"},
+        {"content": "I saw MenhirCurrentSpeaker_in_the_prompt"},
+    ],
+)
+def test_subject_endpoint_claim_contract_fails_closed(changes):
+    assert self_subject_endpoint_for_claim(_eligible_projection_claim(**changes)) is None
+
+
+@pytest.mark.unit
+def test_subject_endpoint_changes_across_episode_turn_and_namespace():
+    base = self_subject_endpoint_for_claim(_eligible_projection_claim())
+    other_episode = self_subject_endpoint_for_claim(
+        _eligible_projection_claim(uuid="projection-2")
+    )
+    other_turn = self_subject_endpoint_for_claim(
+        _eligible_projection_claim(
+            evidence_projection_of="turn-2",
+            turn_evidence_uuid="turn-2",
+        )
+    )
+    other_namespace = self_subject_endpoint_for_claim(
+        _eligible_projection_claim(
+            namespace="other",
+            turn_evidence_namespace="other",
+        )
+    )
+
+    assert base is not None
+    assert len({base.marker, other_episode.marker, other_turn.marker, other_namespace.marker}) == 4
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"version": "speaker-endpoint-v2"},
+        {"episode_uuid": ""},
+        {"episode_uuid": "projection-foreign"},
+        {"turn_evidence_uuid": ""},
+        {"turn_evidence_uuid": "turn-foreign"},
+        {"namespace": "foreign"},
+        {"marker": f"{SUBJECT_ENDPOINT_MARKER_PREFIX}forged"},
+    ],
+)
+def test_subject_endpoint_envelope_rejects_altered_authority_tuple(changes):
+    valid = self_subject_endpoint_for_claim(_eligible_projection_claim())
+    assert valid is not None
+    values = {
+        "version": valid.version,
+        "episode_uuid": valid.episode_uuid,
+        "turn_evidence_uuid": valid.turn_evidence_uuid,
+        "namespace": valid.namespace,
+        "marker": valid.marker,
+    }
+    values.update(changes)
+
+    with pytest.raises(ValueError):
+        SelfSubjectEndpointEnvelope(**values)
 
 
 # --------------------------------------------------------------------------- namespace normalization

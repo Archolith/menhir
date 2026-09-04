@@ -4,8 +4,8 @@ description: Operating the canonical-self identity boundary, and what consolidat
 
 # Canonical self: operations runbook
 
-Covers the **prevention** half, which has landed and ships dormant, and states precisely what the
-**remediation** half still needs. Consolidating the existing forks is not authorized by this
+Covers the **prevention** half, which has landed and remains default-off, and states precisely what
+the **remediation** half still needs. Consolidating the existing forks is not authorized by this
 document and cannot be performed with the tooling in the repository today.
 
 Background: `.agent/plans/menhir-scanner-generic-entity-recall-pollution-rca.md` (accepted RCA) and
@@ -62,14 +62,15 @@ Treat this as a durable-write-semantics change, not an app-only config flip.
    drops it from the returned record, so any reported bound would have been measured from
    embeddings that are `None` in production. `llm_prompt_*` sizes the dedupe prompt by section
    (entities, candidates with attributes, episode, previous episodes including timestamps).
-5. **Do not set `enforce` expecting exact-node binding today.** No production caller invokes
-   `declare_self_subject`; the current queued Graphiti lifecycle has no durable structured payload
-   or post-repair injection point for a caller that owns the final subject node/edge. Free-text
-   extraction needs per-node subject provenance first. `enforce` is nevertheless behaviorally
-   different from `off`: it refuses undeclared extracted nodes carrying canonical identity and
-   removes canonical candidates from ordinary dedup, which can leave an ordinary fork instead of
-   reusing canonical self. `observe` does not apply that fence. Treat enabling `enforce` as a
-   separate cutover decision after measuring and reviewing that population.
+5. **Do not set `enforce` until the subject-endpoint corpus and persistence gates pass.** Enforce
+   now produces an exact declaration only for a byte-identical evidence projection whose complete
+   lineage was approved by the atomic claim query. Menhir supplies a task-local opaque author
+   endpoint, validates it after relationless repair, and only then invokes `declare_self_subject`.
+   Ordinary `source='user'` episodes, agent-written memories, aliases, and first-person grammar do
+   not receive this authority. `enforce` also refuses undeclared extracted nodes carrying canonical
+   identity and removes canonical candidates from ordinary dedup. Real `observe` deliberately does
+   not inject the endpoint because changing its prompt would change persisted behavior; marker
+   compliance requires a separately budgeted discarded shadow extraction before cutover.
 
 This mode governs Graphiti entity-node resolution. The typed-scalar and event-history pipelines
 have separate existing first-person subject rules; they do not prove that this mode is active and
@@ -149,7 +150,9 @@ list contains no `/tmp` path.
    property of the extracted NAME can answer it — not the literal string, not its grammatical
    person — because a name is not provenance.
    A declaration must also carry the nonblank external pending-episode UUID for the active
-   extraction call. The display name is never an identity-key fallback.
+   extraction call. The sole production declaration producer accepts only the receipt-owned
+   endpoint on an atomically verified verbatim projection and requires a final current-episode edge
+   plus index entry. The display name is never an identity-key fallback.
 6. Runtime paths never delete or absorb forks.
 7. Telemetry carries enums, counts and UUIDs — never memory text or arbitrary entity names.
 8. A canonical-node read failure -- or a missing driver -- is an error, never "absent". Falling

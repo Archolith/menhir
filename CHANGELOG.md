@@ -1,3 +1,17 @@
+## 2026-09-04 - add verified subject endpoints for canonical self
+
+- Made the lease-acquiring episode claim atomically certify exact evidence-projection lineage,
+  cardinality, role/declarant, content, namespace, and no-diff requirements.
+- Added an enforce-only, episode-scoped author endpoint carried through Graphiti extraction and
+  relationless repair, with deterministic envelope validation plus final current-episode edge/index
+  validation before the sole production `declare_self_subject` call.
+- Made canonical binding atomically rename the endpoint to `user` while preserving UUID, edge,
+  index-map, and display-name rollback. Post-tool projections are queued immediately, and retries
+  recover a durable pending projection left behind by an earlier queue exception.
+- Added fail-closed unit coverage for malformed authority, retries, mixed RBAC `user` entities,
+  prompt isolation, queue failures, legacy blank/default namespace equivalence, and the
+  declaration-producer census.
+
 ## 2026-09-04 - align production OAuth and agent todo authority
 
 - Restored `menhir:admin` to the production compose authorization-server scope surface so the
@@ -194,36 +208,3 @@ predicate-evaluating fake to confirm both guards compose.
   promotion, rollback, and runtime validation paths.
 - Documented the permanent release gate and recorded the follow-up to replace
   opaque MCP internal errors with actionable subsystem-specific diagnostics.
-
-## 2026-08-29 - close the live operations gateway source blockers
-
-- Updated the live VPS playbook to the implemented fixed topology: local
-  no-shell root-wrapper dispatch, a Docker-bridge-only gateway listener, exact
-  Caddy peer admission, `/ops` TLS routing, and OAuth protected-resource
-  discovery bound to the operations audience.
-- Pinned the external `menhir-proxy` bootstrap command to subnet
-  `172.30.0.0/24` and gateway `172.30.0.1`, matching the fixed host listener.
-- Kept live activation explicitly unproven until the immutable four-repository
-  release is installed and passes backup, candidate, route, authorization, and
-  public negative-path acceptance on the VPS.
-
-## 2026-08-29 - add a guarded live VPS deployment playbook
-
-- Added the canonical ordered workflow for immutable four-repository Menhir
-  releases, one-time host bootstrap, backup/rehearsal/candidate/route/promotion,
-  acceptance, and phase-aware rollback.
-- Documented two real first-bootstrap stop gates in the current operations
-  gateway: its Linux service still dispatches through a Windows-only runner,
-  and no reviewed TLS transport currently reaches its loopback listener.
-- Updated the production environment example to the current digest-bound hosted
-  operator policy and added contract tests to prevent workflow or digest drift.
-- Removed the stale blanket rejection of admin-scoped production authorization.
-  Exact client policy still controls the full scope set, so ChatGPT and Claude
-  can complete their reviewed operator grant while narrower clients remain
-  unable to request admin authority.
-
-## 2026-08-29 - allow hosted operators to ingest documents and projects
-
-- Added `ingest_document` and `ingest_project` to the exact ChatGPT and Claude operator policies.
-  Hosted operators now receive 51 of 54 MCP tools; only `delete_namespace`, `mint_client`, and
-  `revoke_client` remain denied.

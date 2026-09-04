@@ -92,6 +92,7 @@ def test_proven_self_binds_to_the_deterministic_uuid():
     assert result.outcome is SelfBindOutcome.BOUND
     assert result.self_uuid == self_uuid_for_namespace("default")
     assert nodes[0].uuid == self_uuid_for_namespace("default")
+    assert nodes[0].name == "user"
     assert nodes[1].uuid == "random-2"  # untouched
 
 
@@ -434,6 +435,7 @@ def test_a_failure_midway_rolls_the_whole_payload_back():
 
     # Everything restored: node uuid, node list, index map.
     assert nodes[0].uuid == "random-1"
+    assert nodes[0].name == "I"
     assert [n.uuid for n in nodes] == ["random-1", "keep"]
     assert index_map == {"random-1": [0]}
 
