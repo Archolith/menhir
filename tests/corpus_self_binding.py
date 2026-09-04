@@ -19,9 +19,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from menhir.domain.self_identity import (
-    SelfEvidenceKind,
     SelfIdentityContext,
-    SpeakerRole,
+    declare_self_subject,
     self_context_for_pending_episode,
 )
 from menhir.infrastructure.self_binding import SelfBindOutcome
@@ -55,14 +54,20 @@ class CorpusCase:
         )
 
 
-def _declared(namespace: str, name: str) -> SelfIdentityContext:
-    """A declared self subject -- the only evidence that binds anything."""
-    return SelfIdentityContext(
-        namespace=namespace,
-        speaker_role=SpeakerRole.USER,
-        evidence_kind=SelfEvidenceKind.EXPLICIT_SELF_SUBJECT,
-        source_kind="manual",
-        episode_uuid=f"ep-{name}",
+def _declared(
+    namespace: str,
+    name: str,
+    subject_node_uuid: str = "extracted-0",
+) -> SelfIdentityContext:
+    """Promote a trusted user turn onto one exact corpus node."""
+    return declare_self_subject(
+        self_context_for_pending_episode(
+            source="manual",
+            namespace=namespace,
+            source_kind="manual",
+            episode_uuid=f"ep-{name}",
+        ),
+        subject_node_uuid=subject_node_uuid,
     )
 
 
@@ -117,6 +122,16 @@ _SELF_TURNS = (
         ),
     ),
     CorpusCase(
+        name="explicit_self_subject_non_alias",
+        category="explicit_self_subject",
+        source="manual",
+        entity_names=("turn author", "espresso"),
+        expected=SelfBindOutcome.BOUND,
+        expects_self=True,
+        identity_override=_declared("default", "explicit_self_subject_non_alias"),
+        note="The declaration names a UUID; the node name is irrelevant.",
+    ),
+    CorpusCase(
         name="human_turn_about_third_parties_only",
         category="trusted_user_turn",
         source="user",
@@ -166,16 +181,15 @@ _CONTROLS = (
         ),
     ),
     CorpusCase(
-        name="declared_subject_with_two_aliases",
+        name="declared_subject_missing_from_payload",
         category="ambiguous_subject",
         source="manual",
         entity_names=("I", "myself"),
         expected=SelfBindOutcome.AMBIGUOUS,
-        identity_override=_declared("default", "declared_subject_with_two_aliases"),
-        note=(
-            "A declared subject still cannot say WHICH of two aliases is that subject, so the "
-            "payload fails closed and writes nothing."
+        identity_override=_declared(
+            "default", "declared_subject_missing_from_payload", "absent-node"
         ),
+        note="A declaration naming no payload node is a retryable contract failure.",
     ),
     CorpusCase(
         name="reported_speech_quoting_someone_else",

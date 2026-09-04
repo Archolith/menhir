@@ -1085,9 +1085,21 @@ async def _existing_canonical_node(clients: Any, extracted: Any, identity: Any) 
             "extracted node for an unread canonical node"
         )
     try:
-        return await EntityNode.get_by_uuid(driver, extracted.uuid)
+        stored = await EntityNode.get_by_uuid(driver, extracted.uuid)
     except NodeNotFoundError:
         return _stamp_canonical_self(extracted, identity)
+    if identity is not None:
+        from menhir.domain.namespace import namespace_to_group_id
+
+        expected_group = namespace_to_group_id(identity.namespace)
+        actual_group = getattr(stored, "group_id", None)
+        if actual_group is None or str(actual_group) != expected_group:
+            raise RuntimeError(
+                f"stored canonical-self node {extracted.uuid!r} belongs to physical group "
+                f"{actual_group!r}, expected {expected_group!r} for logical namespace "
+                f"{identity.namespace!r}; refusing cross-namespace resolution"
+            )
+    return stored
 
 
 def _measure_prompt_sections(
@@ -1315,6 +1327,42 @@ def _pre_resolved_self_uuid() -> str | None:
     return getattr(result, "self_uuid", None)
 
 
+def _canonical_self_candidate_filter_enabled() -> bool:
+    """Candidate isolation mutates resolution, so it belongs to ENFORCE only.
+
+    OFF must reproduce the old resolver and OBSERVE must measure without changing ingest. The
+    receipt stores a StrEnum, but compare its string form so this helper stays decoupled from the
+    binding module and fails closed when no receipt exists.
+    """
+    try:
+        from menhir.infrastructure.graphiti_extraction_patches import get_extraction_receipt
+
+        receipt = get_extraction_receipt()
+    except Exception:  # noqa: BLE001
+        return False
+    return bool(
+        receipt is not None
+        and str(getattr(receipt, "self_bind_mode", "") or "") == "enforce"
+    )
+
+
+def _is_canonical_self_candidate(node: Any, identity: Any) -> bool:
+    """Protect canonical self from every ordinary Graphiti resolution path.
+
+    A declaration-bound node is removed from candidate search entirely. Every node that remains
+    searchable is therefore unproven and must not reach canonical self through exact-name,
+    similarity, an LLM choice, or ``existing_nodes_override``. Markers cover canonical nodes from
+    any namespace; the deterministic UUID covers an incompletely stamped node in this namespace.
+    """
+    attributes = getattr(node, "attributes", None)
+    if isinstance(attributes, dict) and (
+        attributes.get("is_self") is True or attributes.get("entity_role") == "self"
+    ):
+        return True
+    expected_uuid = str(getattr(identity, "self_uuid", "") or "")
+    return bool(expected_uuid) and str(getattr(node, "uuid", "") or "") == expected_uuid
+
+
 def _is_structural_graphiti_candidate(node: Any) -> bool:
     """Return whether a Graphiti candidate belongs to Menhir's structure graph.
 
@@ -1472,11 +1520,45 @@ def _patch_graphiti_adaptive_dedupe() -> None:
                 }
 
             searchable = [n for i, n in enumerate(extracted_nodes) if i not in pre_resolved_indices]
+            candidate_filter_enabled = _canonical_self_candidate_filter_enabled()
+            identity = _active_self_identity() if candidate_filter_enabled else None
+            if candidate_filter_enabled:
+                undeclared_canonical_nodes = [
+                    node
+                    for node in searchable
+                    if _is_canonical_self_candidate(node, identity)
+                ]
+                if undeclared_canonical_nodes:
+                    raise RuntimeError(
+                        "undeclared extracted node carries canonical-self identity in enforce "
+                        "mode; refusing ordinary Graphiti resolution"
+                    )
             searched = await _no_module._collect_candidate_nodes(
                 clients,
                 searchable,
                 existing_nodes_override,
             )
+            # The declaration-bound node never enters search. Conversely, an ordinary searchable
+            # node must never acquire the canonical UUID through Graphiti's name/similarity/LLM
+            # path. Endpoint closure can retain an ordinary node named `user`; without this filter
+            # a unique exact match would silently turn that name back into identity authority.
+            if candidate_filter_enabled:
+                canonical_candidates_excluded = 0
+                protected_search_results: list[list[Any]] = []
+                for candidates in searched:
+                    eligible = [
+                        candidate
+                        for candidate in candidates
+                        if not _is_canonical_self_candidate(candidate, identity)
+                    ]
+                    canonical_candidates_excluded += len(candidates) - len(eligible)
+                    protected_search_results.append(eligible)
+                searched = protected_search_results
+                if canonical_candidates_excluded:
+                    logger.info(
+                        "Excluded %d canonical-self candidate(s) from undeclared Graphiti dedup",
+                        canonical_candidates_excluded,
+                    )
             # Realign to the full extracted list; pre-resolved nodes get no candidates.
             _searched_iter = iter(searched)
             candidate_nodes_by_extracted = [

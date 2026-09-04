@@ -25,7 +25,9 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
+from menhir.domain.namespace import namespace_to_group_id
 from menhir.domain.self_identity import (
+    SelfEvidenceKind,
     SelfIdentityContext,
     eligible_self_evidence,
     is_first_person_alias,
@@ -37,6 +39,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "AmbiguousSelfBindingError",
+    "InvalidSelfSubjectDeclarationError",
     "SelfBindMode",
     "SelfBindOutcome",
     "SelfBindResult",
@@ -79,10 +82,21 @@ class AmbiguousSelfBindingError(RuntimeError):
     """
 
 
+class InvalidSelfSubjectDeclarationError(AmbiguousSelfBindingError):
+    """The declared subject UUID is absent from the extraction payload.
+
+    Subclassed from the existing retryable refusal so extraction records the same safe outcome and
+    writes nothing. A structured producer declaring a node that it did not actually construct is a
+    contract failure, never evidence that the payload simply had no self candidate.
+    """
+
+
 class SelfBindOutcome(StrEnum):
     """Why a payload did or did not bind. Recorded for observability; no free text."""
 
     BOUND = "bound"
+    #: Observation proved a declaration would bind, but deliberately changed no payload state.
+    WOULD_BIND = "would_bind"
     NOT_ELIGIBLE = "not_eligible"
     NO_SELF_CANDIDATE = "no_self_candidate"
     AMBIGUOUS = "ambiguous"
@@ -141,12 +155,21 @@ class SelfBindResult:
             "first_person_unresolved": self.first_person_unresolved,
         }
         if identity is not None:
+            source_kind = str(identity.source_kind or "").strip().lower()
             details.update(
                 {
                     "namespace": identity.namespace,
                     "speaker_role": str(identity.speaker_role),
                     "evidence_kind": str(identity.evidence_kind or ""),
-                    "source_kind": identity.source_kind,
+                    # Source kinds are caller-controlled strings. Keep only the two closed values
+                    # that can represent gate-approved human evidence; arbitrary values may contain
+                    # episode data or identifiers and must not bypass scoped-event redaction.
+                    "source_kind": (
+                        source_kind if source_kind in {"user", "manual"} else "other"
+                    ),
+                    # Graphiti identifiers are opaque strings. A defective future producer could
+                    # put user data here, so operations gets only the presence bit.
+                    "subject_node_declared": bool(identity.subject_node_uuid),
                 }
             )
         return details
@@ -203,16 +226,24 @@ def bind_canonical_self(
     canonical_uuid = identity.self_uuid
 
     # Two questions, deliberately separated. `self_like` is "could this be the human" -- a name
-    # test, never authority. `self_nodes` is "does THIS NODE carry subject authority", which is
-    # what binding requires and which only a declared subject can answer. The trusted episode
-    # signal proves who AUTHORED the episode and nothing more, so no name shape promotes a node:
+    # test used only for observation. `self_nodes` is "does THIS NODE carry subject authority",
+    # which is answered only by an exact UUID selected by a structured declaration. The trusted
+    # episode signal proves who AUTHORED the episode and nothing more, so no name shape promotes a node:
     # a third-person `user` may be an RBAC role or a `users` table, and a first-person `I` may be
     # reported speech quoting someone else. Rewriting either to the canonical UUID would fold a
     # foreign subject into the human identity -- the false-positive bind this module exists to
     # prevent, and the one no later migration can separate again.
     self_like = [n for n in nodes if is_self_alias(getattr(n, "name", None))]
-    self_nodes = [n for n in nodes if proves_self_subject(getattr(n, "name", None), identity)]
+    self_nodes = [n for n in nodes if proves_self_subject(_node_uuid(n), identity)]
     if not self_nodes:
+        if (
+            identity.evidence_kind is SelfEvidenceKind.EXPLICIT_SELF_SUBJECT
+            and str(identity.subject_node_uuid or "").strip()
+        ):
+            raise InvalidSelfSubjectDeclarationError(
+                f"declared self subject node {identity.subject_node_uuid!r} is absent from the "
+                f"extraction payload for episode {identity.episode_uuid!r}; refusing to bind"
+            )
         # Self-like names present but none proving: this subsystem leaves them unresolved. Both
         # counts describe the candidate population only; neither says which nodes provenance would
         # ultimately classify as self (reported speech is the obvious counterexample).
@@ -238,12 +269,28 @@ def bind_canonical_self(
         )
 
     self_uuids = {_node_uuid(n) for n in self_nodes if _node_uuid(n)}
+    rewritten_uuids = tuple(sorted(uuid for uuid in self_uuids if uuid != canonical_uuid))
+
+    # The declaration belongs to one logical namespace and the selected node must inhabit its
+    # corresponding physical Graphiti partition. UUID equality cannot prove this: a caller can
+    # hand us a node from another group, and rewriting it to this namespace's canonical UUID would
+    # cross the tenancy boundary before candidate isolation gets a chance to help.
+    expected_group = namespace_to_group_id(identity.namespace)
+    for node in self_nodes:
+        actual_group = getattr(node, "group_id", None)
+        if actual_group is None or str(actual_group) != expected_group:
+            raise InvalidSelfSubjectDeclarationError(
+                f"declared self subject node {_node_uuid(node)!r} belongs to physical group "
+                f"{actual_group!r}, expected {expected_group!r} for logical namespace "
+                f"{identity.namespace!r}; refusing to bind"
+            )
 
     # Any node OTHER than the proving one already sitting on the canonical UUID would be
     # silently absorbed into the human by the rewrite below. Identity by name is not enough to
     # excuse that: a third-person `user` holding the canonical uuid is exactly the fork this
     # change exists to stop being created.
     proving = {id(n) for n in self_nodes}
+    unresolved_self_like = sum(1 for node in self_like if id(node) not in proving)
     for node in nodes:
         if _node_uuid(node) == canonical_uuid and id(node) not in proving:
             raise AmbiguousSelfBindingError(
@@ -255,11 +302,11 @@ def bind_canonical_self(
         # Report what enforce would have done, having mutated nothing. Both refusal checks above
         # still run, so observe surfaces an ambiguous payload before enforce could act on it.
         return SelfBindResult(
-            outcome=SelfBindOutcome.BOUND,
+            outcome=SelfBindOutcome.WOULD_BIND,
             mode=mode,
             self_uuid=canonical_uuid,
-            rewritten_node_uuids=tuple(sorted(self_uuids)),
-            self_like_without_subject_authority=len(self_like) - len(self_nodes),
+            rewritten_node_uuids=rewritten_uuids,
+            self_like_without_subject_authority=unresolved_self_like,
         )
 
     # Exactly one, guaranteed by the authority check above.
@@ -299,7 +346,8 @@ def bind_canonical_self(
         endpoints_rewritten = 0
         for edge in edges:
             for attr in ("source_node_uuid", "target_node_uuid"):
-                if str(getattr(edge, attr, "") or "") in self_uuids:
+                endpoint_uuid = str(getattr(edge, attr, "") or "")
+                if endpoint_uuid in self_uuids and endpoint_uuid != canonical_uuid:
                     setattr(edge, attr, canonical_uuid)
                     endpoints_rewritten += 1
 
@@ -328,10 +376,10 @@ def bind_canonical_self(
         outcome=SelfBindOutcome.BOUND,
         mode=mode,
         self_uuid=canonical_uuid,
-        rewritten_node_uuids=tuple(sorted(self_uuids)),
+        rewritten_node_uuids=rewritten_uuids,
         edge_endpoints_rewritten=endpoints_rewritten,
         index_map_keys_merged=keys_merged,
-        self_like_without_subject_authority=len(self_like) - len(self_nodes),
+        self_like_without_subject_authority=unresolved_self_like,
     )
     logger.info(
         "Canonical self bound namespace=%s episode=%s uuid=%s collapsed=%d endpoints=%d "

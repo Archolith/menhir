@@ -22,7 +22,7 @@ parent plan's node-authority, score-bound, and historical-population assumptions
 |---|---|
 | `off` | Pre-change behavior exactly. Binding is not evaluated. |
 | `observe` | Evaluates and records the decision. Rewrites nothing. |
-| `enforce` | Rewrites a proven human to the deterministic UUID before dedup. |
+| `enforce` | Rewrites a declared subject before dedup and isolates canonical self from every undeclared ordinary-resolution path. |
 
 An unrecognized value falls back to `off` with a warning — a config typo must not enable a
 durable-write-semantics change.
@@ -37,13 +37,13 @@ Treat this as a durable-write-semantics change, not an app-only config flip.
 
    | Field | What it tells you |
    |---|---|
-   | `outcome` | `bound` / `not_eligible` / `no_self_candidate` / `self_like_unresolved` / `ambiguous` |
+   | `outcome` | `bound` / `would_bind` / `not_eligible` / `no_self_candidate` / `self_like_unresolved` / `ambiguous` |
    | `self_like_unresolved` | self-alias entities in a trusted turn that binding declined for lack of a declared subject. This is an unresolved candidate count, not proof that a node is either the human or a generic user. |
    | `first_person_unresolved` | the first-person subset. This is an upper bound for provenance work, not a bind forecast: quoted or reported speech may remain non-self. |
-   | `bound` (non-zero) | a producer has started declaring self subjects. Find out which, and what it actually proves, BEFORE trusting the count. |
-   | `ambiguous` | two declared aliases in one payload; binding refused and wrote nothing. |
+   | `would_bind` (observe) or `bound` (enforce) | a producer has started declaring exact subject-node UUIDs. Find out which, and what it actually proves, BEFORE trusting the count. |
+   | `ambiguous` | an invalid exact-node declaration (missing/duplicated node, episode mismatch, or canonical UUID collision); binding refused and wrote nothing. |
    | `self_like_without_subject_authority` | self-alias entities that did NOT bind, on any outcome; it makes no disposition claim |
-   | `evidence_kind`, `speaker_role`, `source_kind` | why the decision went that way |
+   | `evidence_kind`, `speaker_role`, `source_kind` | why the decision went that way; `source_kind` is limited to `user`, `manual`, or `other` so caller text cannot enter telemetry |
 
    Ambiguous refusals are recorded before they raise, and in `observe` they do not fail the
    episode -- observing must never change ingest success.
@@ -62,10 +62,18 @@ Treat this as a durable-write-semantics change, not an app-only config flip.
    drops it from the returned record, so any reported bound would have been measured from
    embeddings that are `None` in production. `llm_prompt_*` sizes the dedupe prompt by section
    (entities, candidates with attributes, episode, previous episodes including timestamps).
-5. **Do not set `enforce` expecting it to prevent forks today.** With no `EXPLICIT_SELF_SUBJECT`
-   producer, `enforce` and `off` are behaviorally identical — the flag is ready for a mechanism
-   whose evidence source does not exist yet. Build per-node subject provenance first; until then
-   `observe` is the only mode worth running, and only to size that work.
+5. **Do not set `enforce` expecting exact-node binding today.** No production caller invokes
+   `declare_self_subject`; the current queued Graphiti lifecycle has no durable structured payload
+   or post-repair injection point for a caller that owns the final subject node/edge. Free-text
+   extraction needs per-node subject provenance first. `enforce` is nevertheless behaviorally
+   different from `off`: it refuses undeclared extracted nodes carrying canonical identity and
+   removes canonical candidates from ordinary dedup, which can leave an ordinary fork instead of
+   reusing canonical self. `observe` does not apply that fence. Treat enabling `enforce` as a
+   separate cutover decision after measuring and reviewing that population.
+
+This mode governs Graphiti entity-node resolution. The typed-scalar and event-history pipelines
+have separate existing first-person subject rules; they do not prove that this mode is active and
+are outside this runbook's activation decision.
 
 ### Rollback asymmetry
 
@@ -132,14 +140,23 @@ list contains no `/tmp` path.
 2. One UUID formula: `self_uuid_for_namespace()`. A static test fails on a second copy.
 3. One logical→physical mapping: `namespace_to_group_id()`.
 4. A proven self causes zero candidate searches and zero dedup-LLM calls.
+   In `enforce`, an undeclared node also cannot acquire canonical self through ordinary candidate
+   resolution: pre-stamped inputs are refused, and canonical UUID/marker candidates are excluded
+   from exact, similarity, LLM, and override paths. `off` and `observe` preserve legacy resolution.
 5. Ambiguous evidence fails visibly and retryably, never by picking one. Proving who authored an
    episode never proves which extracted node is that author: that is a separate, node-level
    question (`proves_self_subject`), and without an answer to it the payload does not bind. No
    property of the extracted NAME can answer it — not the literal string, not its grammatical
    person — because a name is not provenance.
+   A declaration must also carry the nonblank external pending-episode UUID for the active
+   extraction call. The display name is never an identity-key fallback.
 6. Runtime paths never delete or absorb forks.
 7. Telemetry carries enums, counts and UUIDs — never memory text or arbitrary entity names.
 8. A canonical-node read failure -- or a missing driver -- is an error, never "absent". Falling
    back on either would let graphiti's replacing save erase the stored node.
+   Extracted and stored canonical nodes must match the logical namespace's physical group.
 9. The producer census is structural, not sample-based. Any new context constructor, factory
-   caller, or executable `EXPLICIT_SELF_SUBJECT` reference requires an explicit contract review.
+   caller, declaration-helper reference (direct, qualified, rebound, or `getattr`), or executable
+   `EXPLICIT_SELF_SUBJECT` reference requires an explicit contract review.
+10. Observe records `would_bind`, never `bound`, and telemetry does not expose the opaque declared
+    node identifier.

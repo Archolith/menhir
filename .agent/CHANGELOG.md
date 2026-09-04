@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-09-04 - Make canonical-self authority node-scoped
+
+- Replace name-shaped self authority with a trusted declaration naming one exact in-memory
+  subject node UUID for the same episode; missing, duplicated, replayed, or colliding declarations
+  fail before graph writes.
+- Keep Graphiti's legacy self-like endpoint closure explicitly non-authoritative: it may retain an
+  ordinary `user` entity to avoid extraction collapse, but it cannot grant the canonical UUID.
+- In `enforce`, refuse undeclared pre-stamped canonical nodes, exclude canonical self from every
+  undeclared exact/similarity/LLM/override candidate path, and require declared and stored nodes to
+  match the namespace's physical group; leave `off` and `observe` resolution unchanged.
+- Record observation success as `would_bind` and redact the opaque declared node identifier.
+- Require a nonblank external pending-episode UUID for declarations (never the display-name
+  fallback), and classify arbitrary source-kind strings as `other` before telemetry persistence.
+- Pin the currently inert exact-node binding surface with an AST census that fails on any new
+  declaration producer, while preserving observe-mode and resolver-bypass checks.
+
 ## 2026-08-31 - Add bounded app-image replacement mode
 
 - Add a root-owned app-only classifier and transaction that replaces only the Menhir

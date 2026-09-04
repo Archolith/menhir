@@ -19,8 +19,16 @@ from typing import Any, Callable
 from menhir.services.scheduler_protocols import LifecycleServiceProtocol
 
 from menhir.domain.models import FreshnessState, ProcessingState
-from menhir.domain.self_identity import SelfIdentityContext, self_context_for_pending_episode
-from menhir.infrastructure.self_binding import SelfBindMode, resolve_bind_mode
+from menhir.domain.self_identity import (
+    SelfEvidenceKind,
+    SelfIdentityContext,
+    self_context_for_pending_episode,
+)
+from menhir.infrastructure.self_binding import (
+    InvalidSelfSubjectDeclarationError,
+    SelfBindMode,
+    resolve_bind_mode,
+)
 from menhir.domain.utils import source_confidence_for
 from menhir.infrastructure import GraphitiClient, MemoryGraphAdapter
 from menhir.infrastructure.evidence_publication_intents import (
@@ -1576,6 +1584,26 @@ async def add_episode_with_timeout(
     prove an author omit it and no self binding occurs.
     """
 
+    receipt_episode_key = str(episode_uuid or "").strip()
+    if (
+        self_identity is not None
+        and self_identity.evidence_kind is SelfEvidenceKind.EXPLICIT_SELF_SUBJECT
+    ):
+        # ``name`` is a display/reconciliation anchor, not an episode identifier. Allowing it to
+        # stand in here lets a declaration scoped to one pending episode authorize an unrelated
+        # Graphiti request that happens to reuse the same name. A structured declaration therefore
+        # requires the external pending-episode UUID that owns this exact extraction invocation.
+        if not receipt_episode_key:
+            raise InvalidSelfSubjectDeclarationError(
+                "an exact self-subject declaration requires the pending episode UUID; "
+                "the episode name is not identity scope"
+            )
+        if str(self_identity.episode_uuid or "").strip() != receipt_episode_key:
+            raise InvalidSelfSubjectDeclarationError(
+                f"declared self subject belongs to episode {self_identity.episode_uuid!r}, not "
+                f"pending episode {episode_uuid!r}; refusing Graphiti dispatch"
+            )
+
     record_lifecycle_event(
         component="ingest_worker",
         event="entered_add_episode_timeout_wrapper",
@@ -1595,7 +1623,7 @@ async def add_episode_with_timeout(
     # mutate it in place, which the parent then reads. (episode_body is the current-
     # episode text used to gate endpoint synthesis.)
     begin_extraction_receipt(
-        episode_uuid or name,
+        receipt_episode_key or name,
         episode_body,
         source_description=source_description,
         relationless_repair_context_loader=relationless_repair_context_loader,

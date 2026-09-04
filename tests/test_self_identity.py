@@ -24,6 +24,7 @@ from menhir.domain.self_identity import (
     SelfEvidenceKind,
     SelfIdentityContext,
     SpeakerRole,
+    declare_self_subject,
     eligible_self_evidence,
     is_self_alias,
     normalize_logical_namespace,
@@ -167,14 +168,42 @@ def test_trusted_user_turn_establishes_the_human():
 
 
 @pytest.mark.unit
-def test_explicit_self_subject_is_admissible_without_a_known_role():
-    """A trusted internal caller vouches for the subject, so UNKNOWN role is not fatal here --
-    but a positively non-human role still is (covered below)."""
+def test_episode_wide_explicit_subject_without_node_or_role_is_not_admissible():
+    """An enum value alone must not recreate the old episode-wide authority shortcut."""
     ctx = _ctx(
         evidence_kind=SelfEvidenceKind.EXPLICIT_SELF_SUBJECT,
         speaker_role=SpeakerRole.UNKNOWN,
     )
-    assert eligible_self_evidence(ctx) is True
+    assert eligible_self_evidence(ctx) is False
+
+
+@pytest.mark.unit
+def test_trusted_turn_can_be_promoted_to_one_exact_subject_node():
+    base = self_context_for_pending_episode(
+        source="manual", namespace="default", episode_uuid="ep-1"
+    )
+    declared = declare_self_subject(base, subject_node_uuid="node-1")
+
+    assert declared.evidence_kind is SelfEvidenceKind.EXPLICIT_SELF_SUBJECT
+    assert declared.subject_node_uuid == "node-1"
+    assert declared.episode_uuid == "ep-1"
+    assert eligible_self_evidence(declared) is True
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "base,subject_uuid",
+    [
+        (self_context_for_pending_episode(source="claude-code", namespace="default", episode_uuid="e"), "n"),
+        (self_context_for_pending_episode(source="manual", namespace="default", episode_uuid=None), "n"),
+        (self_context_for_pending_episode(source="manual", namespace="default", episode_uuid="e"), ""),
+        (self_context_for_pending_episode(source="manual", namespace="default", episode_uuid="e"), "x\nsecret"),
+        (self_context_for_pending_episode(source="manual", namespace="default", episode_uuid="e"), "x" * 257),
+    ],
+)
+def test_subject_declaration_rejects_untrusted_incomplete_inputs(base, subject_uuid):
+    with pytest.raises(ValueError):
+        declare_self_subject(base, subject_node_uuid=subject_uuid)
 
 
 @pytest.mark.unit

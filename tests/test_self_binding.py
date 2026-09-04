@@ -13,6 +13,7 @@ from menhir.domain.self_identity import (
     SelfEvidenceKind,
     SelfIdentityContext,
     SpeakerRole,
+    declare_self_subject,
     self_context_for_pending_episode,
     self_uuid_for_namespace,
 )
@@ -28,9 +29,10 @@ from menhir.infrastructure.self_binding import (
 class _Node:
     """Duck-typed stand-in for graphiti's EntityNode (uuid + name is all binding touches)."""
 
-    def __init__(self, uuid: str, name: str) -> None:
+    def __init__(self, uuid: str, name: str, group_id: str = "") -> None:
         self.uuid = uuid
         self.name = name
+        self.group_id = group_id
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
         return f"_Node({self.uuid!r}, {self.name!r})"
@@ -49,18 +51,24 @@ def _trusted(namespace: str = "default") -> SelfIdentityContext:
     )
 
 
-def _declared(namespace: str = "default") -> SelfIdentityContext:
-    """A trusted internal caller declaring that this episode's subject IS the owner.
+def _declared(
+    namespace: str = "default",
+    subject_node_uuid: str = "random-1",
+    episode_uuid: str = "ep-1",
+) -> SelfIdentityContext:
+    """A trusted turn promoted onto one exact in-memory subject node.
 
     The only evidence that binds. No production producer emits it yet -- see
     `test_self_identity_producer_census`, which pins the production construction surface.
     """
-    return SelfIdentityContext(
-        namespace=namespace,
-        speaker_role=SpeakerRole.USER,
-        evidence_kind=SelfEvidenceKind.EXPLICIT_SELF_SUBJECT,
-        source_kind="manual",
-        episode_uuid="ep-1",
+    return declare_self_subject(
+        self_context_for_pending_episode(
+            source="manual",
+            namespace=namespace,
+            source_kind="manual",
+            episode_uuid=episode_uuid,
+        ),
+        subject_node_uuid=subject_node_uuid,
     )
 
 
@@ -119,20 +127,20 @@ def test_index_map_follows_with_no_lost_indices():
 
 
 @pytest.mark.unit
-def test_two_first_person_nodes_fail_closed_rather_than_guessing():
-    """Node-level authority still cannot say WHICH of two first-person nodes is the author, so
-    the payload fails closed and writes nothing."""
+def test_exact_declaration_selects_one_of_two_first_person_nodes():
+    """The structured declaration answers WHICH node is the author without reading either name."""
     nodes = [_Node("a", "I"), _Node("b", "me"), _Node("c", "Rachel")]
     edges = [_Edge("a", "c"), _Edge("b", "c")]
     index_map = {"a": [0], "b": [1], "c": [0]}
 
-    with pytest.raises(AmbiguousSelfBindingError):
-        bind_canonical_self(nodes, edges, index_map, _declared())
+    result = bind_canonical_self(nodes, edges, index_map, _declared(subject_node_uuid="a"))
 
-    # Nothing moved.
-    assert [n.uuid for n in nodes] == ["a", "b", "c"]
-    assert edges[0].source_node_uuid == "a"
-    assert index_map == {"a": [0], "b": [1], "c": [0]}
+    canonical = self_uuid_for_namespace("default")
+    assert result.outcome is SelfBindOutcome.BOUND
+    assert [n.uuid for n in nodes] == [canonical, "b", "c"]
+    assert edges[0].source_node_uuid == canonical
+    assert edges[1].source_node_uuid == "b"
+    assert index_map == {canonical: [0], "b": [1], "c": [0]}
 
 
 @pytest.mark.unit
@@ -204,14 +212,58 @@ def test_explicit_self_subject_admits_a_third_person_reference():
     """The declared extension point: a trusted internal caller vouching that the episode's
     subject IS the owner supplies the node-level authority a bare human turn cannot."""
     nodes = [_Node("n1", "the user")]
-    result = bind_canonical_self(nodes, [], {}, _declared())
+    result = bind_canonical_self(nodes, [], {}, _declared(subject_node_uuid="n1"))
     assert result.outcome is SelfBindOutcome.BOUND
     assert nodes[0].uuid == self_uuid_for_namespace("default")
 
 
 @pytest.mark.unit
+def test_structured_declaration_binds_without_a_self_shaped_name():
+    """The caller owns the subject assignment; the extracted string is not consulted."""
+    nodes = [_Node("subject-1", "turn author"), _Node("quoted", "I"), _Node("city", "Chicago")]
+    edges = [_Edge("subject-1", "city"), _Edge("quoted", "city")]
+    index_map = {"subject-1": [0], "quoted": [0], "city": [0]}
+
+    result = bind_canonical_self(
+        nodes,
+        edges,
+        index_map,
+        _declared(subject_node_uuid="subject-1"),
+    )
+
+    canonical = self_uuid_for_namespace("default")
+    assert nodes[0].uuid == canonical
+    assert nodes[1].uuid == "quoted"
+    assert edges[0].source_node_uuid == canonical
+    assert edges[1].source_node_uuid == "quoted"
+    assert result.self_like_without_subject_authority == 1
+
+
+@pytest.mark.unit
+def test_pre_stamped_canonical_subject_is_pre_resolved_without_fake_rewrite_counts():
+    """A structured writer may construct the canonical node and its edge before Graphiti runs."""
+    canonical = self_uuid_for_namespace("default")
+    nodes = [_Node(canonical, "turn author"), _Node("city", "Chicago")]
+    edges = [_Edge(canonical, "city")]
+    index_map = {canonical: [0], "city": [0]}
+
+    result = bind_canonical_self(
+        nodes,
+        edges,
+        index_map,
+        _declared(subject_node_uuid=canonical),
+    )
+
+    assert result.outcome is SelfBindOutcome.BOUND
+    assert result.bound is True
+    assert result.rewritten_node_uuids == ()
+    assert result.edge_endpoints_rewritten == 0
+    assert edges[0].source_node_uuid == canonical
+
+
+@pytest.mark.unit
 def test_named_namespace_binds_to_its_own_identity():
-    nodes = [_Node("random-1", "I")]
+    nodes = [_Node("random-1", "I", group_id="proj-a")]
     bind_canonical_self(nodes, [], {}, _declared("proj-a"))
     assert nodes[0].uuid == self_uuid_for_namespace("proj-a")
     assert nodes[0].uuid != self_uuid_for_namespace("default")
@@ -290,6 +342,39 @@ def test_lookalike_names_are_not_self(name):
 
 
 # --------------------------------------------------------------------------- fail closed, visibly
+
+
+@pytest.mark.unit
+def test_declared_subject_missing_from_payload_is_retryable_refusal():
+    nodes = [_Node("actual", "I")]
+    with pytest.raises(AmbiguousSelfBindingError, match="absent from the extraction payload"):
+        bind_canonical_self(
+            nodes,
+            [],
+            {},
+            _declared(subject_node_uuid="missing"),
+        )
+    assert nodes[0].uuid == "actual"
+
+
+@pytest.mark.unit
+def test_duplicate_nodes_claiming_the_declared_uuid_are_refused():
+    nodes = [_Node("same", "I"), _Node("same", "quoted I")]
+    with pytest.raises(AmbiguousSelfBindingError, match="2 nodes claim"):
+        bind_canonical_self(
+            nodes,
+            [],
+            {},
+            _declared(subject_node_uuid="same"),
+        )
+
+
+@pytest.mark.unit
+def test_declared_subject_from_another_physical_group_is_refused():
+    nodes = [_Node("random-1", "turn author", group_id="proj-b")]
+    with pytest.raises(AmbiguousSelfBindingError, match="physical group"):
+        bind_canonical_self(nodes, [], {}, _declared("proj-a"))
+    assert nodes[0].uuid == "random-1"
 
 
 @pytest.mark.unit
@@ -379,7 +464,9 @@ def test_binding_works_against_real_graphiti_models():
     nodes = [human, other]
     index_map = {"rand-1": [0], "rand-2": [0]}
 
-    result = bind_canonical_self(nodes, [edge], index_map, _declared())
+    result = bind_canonical_self(
+        nodes, [edge], index_map, _declared(subject_node_uuid="rand-1")
+    )
 
     assert result.outcome is SelfBindOutcome.BOUND
     assert human.uuid == canonical
@@ -452,7 +539,7 @@ def test_observe_mode_reports_without_mutating():
 
     result = bind_canonical_self(nodes, edges, index_map, _declared(), SelfBindMode.OBSERVE)
 
-    assert result.outcome is SelfBindOutcome.BOUND
+    assert result.outcome is SelfBindOutcome.WOULD_BIND
     assert result.self_uuid == self_uuid_for_namespace("default")
     # ...and nothing moved.
     assert result.bound is False
@@ -462,11 +549,19 @@ def test_observe_mode_reports_without_mutating():
 
 
 @pytest.mark.unit
-def test_observe_surfaces_the_multi_alias_refusal_too():
-    """Observe exists to find these before enforce can act on them."""
+def test_observe_uses_the_exact_declaration_among_multiple_aliases():
+    """Observation reports the UUID-scoped decision and still mutates nothing."""
     nodes = [_Node("a", "me"), _Node("b", "I")]
-    with pytest.raises(AmbiguousSelfBindingError):
-        bind_canonical_self(nodes, [], {}, _declared(), SelfBindMode.OBSERVE)
+    result = bind_canonical_self(
+        nodes,
+        [],
+        {},
+        _declared(subject_node_uuid="a"),
+        SelfBindMode.OBSERVE,
+    )
+    assert result.outcome is SelfBindOutcome.WOULD_BIND
+    assert [node.uuid for node in nodes] == ["a", "b"]
+    assert result.self_like_without_subject_authority == 1
 
 
 @pytest.mark.unit
@@ -475,8 +570,22 @@ def test_observe_does_not_trigger_the_resolver_bypass():
     so bypassing candidate search for it would strand it with no candidates and no resolution."""
     nodes = [_Node("random-1", "I")]
     result = bind_canonical_self(nodes, [], {}, _declared(), SelfBindMode.OBSERVE)
-    assert result.outcome is SelfBindOutcome.BOUND
+    assert result.outcome is SelfBindOutcome.WOULD_BIND
     assert result.bound is False
+
+
+@pytest.mark.unit
+def test_observe_records_would_bind_not_bound(monkeypatch):
+    result, recorded = _recording_binder(
+        monkeypatch,
+        [_Node("random-1", "turn author")],
+        SelfBindMode.OBSERVE,
+        identity=_declared(episode_uuid="ep"),
+    )
+
+    assert result.outcome is SelfBindOutcome.WOULD_BIND
+    assert recorded[0]["state"] == "would_bind"
+    assert recorded[0]["details"]["mode"] == "observe"
 
 
 @pytest.mark.unit
@@ -507,9 +616,30 @@ def test_telemetry_carries_no_content_or_entity_names():
     assert details["outcome"] == "bound"
     assert details["namespace"] == "default"
     assert details["evidence_kind"] == "explicit_self_subject"
+    assert details["subject_node_declared"] is True
+    assert "random-1" not in blob
     assert details["rewritten_node_count"] == 1
     # The bound uuid is deterministic and derivable from the namespace, so it discloses nothing.
     assert details["self_uuid"] == self_uuid_for_namespace("default")
+
+
+@pytest.mark.unit
+def test_telemetry_classifies_arbitrary_source_kind_instead_of_persisting_it():
+    context = declare_self_subject(
+        self_context_for_pending_episode(
+            source="manual",
+            namespace="default",
+            source_kind="ticket:alice@example.com",
+            episode_uuid="ep-1",
+        ),
+        subject_node_uuid="random-1",
+    )
+    details = bind_canonical_self([_Node("random-1", "author")], [], {}, context).telemetry_details(
+        context
+    )
+
+    assert details["source_kind"] == "other"
+    assert "alice@example.com" not in repr(details)
 
 
 @pytest.mark.unit
@@ -568,7 +698,7 @@ def _recording_binder(monkeypatch, nodes, mode, identity=None):
 
 
 @pytest.mark.unit
-def test_an_ambiguous_refusal_is_recorded_before_it_raises(monkeypatch):
+def test_an_invalid_declaration_refusal_is_recorded_before_it_raises(monkeypatch):
     """REVIEW P2. A refusal is a DECISION. Raising before recording makes the one outcome an
     operator most needs during an observation window the only invisible one."""
     nodes = [_Node("a", "I"), _Node("b", "me")]
@@ -584,7 +714,10 @@ def test_an_ambiguous_refusal_is_recorded_before_it_raises(monkeypatch):
     monkeypatch.setattr(recorders, "record_lifecycle_event", lambda **kw: recorded.append(kw))
     try:
         receipt = begin_extraction_receipt(
-            "ep", "body", self_identity=_declared(), self_bind_mode=SelfBindMode.ENFORCE
+            "ep",
+            "body",
+            self_identity=_declared(subject_node_uuid="missing"),
+            self_bind_mode=SelfBindMode.ENFORCE,
         )
         with pytest.raises(AmbiguousSelfBindingError):
             _record_self_binding(nodes, [], {}, receipt)
@@ -592,6 +725,35 @@ def test_an_ambiguous_refusal_is_recorded_before_it_raises(monkeypatch):
         clear_extraction_receipt()
 
     assert recorded, "the refusal raised without recording the decision"
+    assert recorded[0]["details"]["outcome"] == "ambiguous"
+
+
+@pytest.mark.unit
+def test_declaration_cannot_be_replayed_into_another_episode(monkeypatch):
+    """Node authority is episode-scoped; reusing it on another receipt must write nothing."""
+    import menhir.infrastructure.telemetry.recorders as recorders
+    from menhir.infrastructure.graphiti_extraction_patches import (
+        _record_self_binding,
+        begin_extraction_receipt,
+        clear_extraction_receipt,
+    )
+
+    nodes = [_Node("random-1", "turn author")]
+    recorded: list[dict] = []
+    monkeypatch.setattr(recorders, "record_lifecycle_event", lambda **kw: recorded.append(kw))
+    try:
+        receipt = begin_extraction_receipt(
+            "ep-current",
+            "body",
+            self_identity=_declared(episode_uuid="ep-other"),
+            self_bind_mode=SelfBindMode.ENFORCE,
+        )
+        with pytest.raises(AmbiguousSelfBindingError, match="not active episode"):
+            _record_self_binding(nodes, [], {}, receipt)
+    finally:
+        clear_extraction_receipt()
+
+    assert nodes[0].uuid == "random-1"
     assert recorded[0]["details"]["outcome"] == "ambiguous"
 
 

@@ -24,8 +24,10 @@ class _IdentityProducerVisitor(ast.NodeVisitor):
         self.scope: list[str] = []
         self.context_names = {"SelfIdentityContext"}
         self.factory_names = {"self_context_for_pending_episode"}
+        self.declaration_names = {"declare_self_subject"}
         self.context_calls: Counter[str] = Counter()
         self.factory_calls: Counter[str] = Counter()
+        self.declaration_calls: Counter[str] = Counter()
         self.explicit_authority_references: Counter[str] = Counter()
 
     def _site(self) -> str:
@@ -39,6 +41,8 @@ class _IdentityProducerVisitor(ast.NodeVisitor):
                     self.context_names.add(local_name)
                 elif imported.name == "self_context_for_pending_episode":
                     self.factory_names.add(local_name)
+                elif imported.name == "declare_self_subject":
+                    self.declaration_names.add(local_name)
         self.generic_visit(node)
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:  # noqa: N802
@@ -66,9 +70,25 @@ class _IdentityProducerVisitor(ast.NodeVisitor):
             self.context_calls[self._site()] += 1
         if called in self.factory_names:
             self.factory_calls[self._site()] += 1
+        if (
+            called == "getattr"
+            and len(node.args) >= 2
+            and isinstance(node.args[1], ast.Constant)
+            and node.args[1].value == "declare_self_subject"
+        ):
+            self.declaration_calls[self._site()] += 1
+        self.generic_visit(node)
+
+    def visit_Name(self, node: ast.Name) -> None:  # noqa: N802
+        # Count every executable reference, not just a direct call. This catches assigning an
+        # imported helper to a differently named local and invoking that alias later.
+        if isinstance(node.ctx, ast.Load) and node.id in self.declaration_names:
+            self.declaration_calls[self._site()] += 1
         self.generic_visit(node)
 
     def visit_Attribute(self, node: ast.Attribute) -> None:  # noqa: N802
+        if isinstance(node.ctx, ast.Load) and node.attr == "declare_self_subject":
+            self.declaration_calls[self._site()] += 1
         if node.attr == "EXPLICIT_SELF_SUBJECT":
             self.explicit_authority_references[self._site()] += 1
         self.generic_visit(node)
@@ -79,9 +99,12 @@ class _IdentityProducerVisitor(ast.NodeVisitor):
             self.explicit_authority_references[self._site()] += 1
 
 
-def _production_identity_census() -> tuple[Counter[str], Counter[str], Counter[str]]:
+def _production_identity_census() -> tuple[
+    Counter[str], Counter[str], Counter[str], Counter[str]
+]:
     constructors: Counter[str] = Counter()
     factories: Counter[str] = Counter()
+    declarations: Counter[str] = Counter()
     explicit_authority: Counter[str] = Counter()
     for root in _PRODUCTION_ROOTS:
         for path in root.rglob("*.py"):
@@ -90,8 +113,9 @@ def _production_identity_census() -> tuple[Counter[str], Counter[str], Counter[s
             visitor.visit(ast.parse(path.read_text(encoding="utf-8"), filename=str(path)))
             constructors.update(visitor.context_calls)
             factories.update(visitor.factory_calls)
+            declarations.update(visitor.declaration_calls)
             explicit_authority.update(visitor.explicit_authority_references)
-    return constructors, factories, explicit_authority
+    return constructors, factories, declarations, explicit_authority
 
 
 @pytest.mark.unit
@@ -101,23 +125,53 @@ def test_census_recognizes_import_aliases_and_enum_by_value():
 from menhir.domain.self_identity import (
     SelfEvidenceKind,
     SelfIdentityContext as Context,
+    declare_self_subject as declare_subject,
     self_context_for_pending_episode as make_context,
 )
 
 def new_writer():
-    make_context(source="user", namespace="default")
+    ctx = make_context(source="user", namespace="default")
+    declare_subject(ctx, subject_node_uuid="node-1")
     return Context(
         namespace="default",
         evidence_kind=SelfEvidenceKind("explicit_self_subject"),
     )
+
+import menhir.domain.self_identity as identity_module
+
+def qualified_writer():
+    ctx = identity_module.self_context_for_pending_episode(
+        source="user", namespace="default"
+    )
+    identity_module.declare_self_subject(ctx, subject_node_uuid="node-2")
+    return identity_module.SelfIdentityContext(
+        namespace="default",
+        evidence_kind=identity_module.SelfEvidenceKind.EXPLICIT_SELF_SUBJECT,
+    )
+
+def rebound_writer():
+    declare = identity_module.declare_self_subject
+    return declare(make_context(source="user", namespace="default"), subject_node_uuid="node-3")
+
+def dynamic_writer():
+    declare = getattr(identity_module, "declare_self_subject")
+    return declare(make_context(source="user", namespace="default"), subject_node_uuid="node-4")
 """
     visitor = _IdentityProducerVisitor("src/menhir/services/new_writer.py")
     visitor.visit(ast.parse(source))
 
     site = "src/menhir/services/new_writer.py:new_writer"
-    assert visitor.context_calls == Counter({site: 1})
-    assert visitor.factory_calls == Counter({site: 1})
-    assert visitor.explicit_authority_references == Counter({site: 1})
+    qualified_site = "src/menhir/services/new_writer.py:qualified_writer"
+    rebound_site = "src/menhir/services/new_writer.py:rebound_writer"
+    dynamic_site = "src/menhir/services/new_writer.py:dynamic_writer"
+    assert visitor.context_calls == Counter({site: 1, qualified_site: 1})
+    assert visitor.factory_calls == Counter(
+        {site: 1, qualified_site: 1, rebound_site: 1, dynamic_site: 1}
+    )
+    assert visitor.declaration_calls == Counter(
+        {site: 1, qualified_site: 1, rebound_site: 1, dynamic_site: 1}
+    )
+    assert visitor.explicit_authority_references == Counter({site: 1, qualified_site: 1})
 
 
 @pytest.mark.unit
@@ -125,11 +179,12 @@ def test_self_identity_producer_census_is_closed():
     """Any new constructor, factory caller, or explicit-authority reference requires review.
 
     The two context constructions are both inside the one production factory. The only factory
-    caller is the Graphiti dispatch boundary. ``EXPLICIT_SELF_SUBJECT`` appears executably only in
-    its enum declaration and in the binding predicate that rejects every other evidence kind.
-    Therefore no production producer can activate binding without changing this census.
+    caller is the Graphiti dispatch boundary. The declaration helper has no production callers.
+    ``EXPLICIT_SELF_SUBJECT`` appears executably only in its enum declaration, the declaration
+    helper, the binding predicate, and the receipt's episode-scope check. Therefore no production
+    producer can activate binding without changing this census.
     """
-    constructors, factories, explicit_authority = _production_identity_census()
+    constructors, factories, declarations, explicit_authority = _production_identity_census()
 
     assert constructors == Counter(
         {"src/menhir/domain/self_identity.py:self_context_for_pending_episode": 2}
@@ -137,9 +192,14 @@ def test_self_identity_producer_census_is_closed():
     assert factories == Counter(
         {"src/menhir/services/enrichment_steps.py:run_graphiti_extraction": 1}
     )
+    assert declarations == Counter()
     assert explicit_authority == Counter(
         {
             "src/menhir/domain/self_identity.py:SelfEvidenceKind": 1,
+            "src/menhir/domain/self_identity.py:declare_self_subject": 1,
             "src/menhir/domain/self_identity.py:proves_self_subject": 1,
+            "src/menhir/infrastructure/graphiti_extraction_patches.py:_record_self_binding": 1,
+            "src/menhir/infrastructure/self_binding.py:bind_canonical_self": 1,
+            "src/menhir/services/enrichment_steps.py:add_episode_with_timeout": 1,
         }
     )

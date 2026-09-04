@@ -189,13 +189,8 @@ class TestFetchEpisodeProcessingNoDuplicateColumns:
         assert len(aliases) == len(set(aliases)), f"duplicate RETURN aliases: {aliases}"
 
 
-class TestEnsureSelfEntityAbsorbsForks:
-    """One self identity per namespace, even though two independent creators mint it.
-
-    `ensure_self_entity` writes the canonical uuid5 node; combined-extraction now names the self
-    endpoint so a first-person edge survives, which mints a second `user` :Entity. Both fire in any
-    namespace where scalar consolidation runs, so the fork is deterministic, not a dedup race.
-    """
+class TestEnsureSelfEntityReportsForksWithoutMutation:
+    """Runtime ensure creates the target and reports forks; migration owns consolidation."""
 
     @staticmethod
     def _statements(repo):
@@ -207,34 +202,27 @@ class TestEnsureSelfEntityAbsorbsForks:
         repo.ensure_self_entity("ns-1")
         assert not any("DETACH DELETE" in s for s in self._statements(repo))
 
-    def test_fork_is_rewired_then_deleted(self):
+    def test_fork_is_reported_without_rewire_or_delete(self):
         repo = _make_repo([{"uuid": "fork-1"}])
         repo.ensure_self_entity("ns-1")
         joined = "\n".join(self._statements(repo))
-        assert "MERGE (c)-[r2:RELATES_TO {uuid: r.uuid}]->(m)" in joined
-        assert "MERGE (m)-[r2:RELATES_TO {uuid: r.uuid}]->(c)" in joined
-        assert "MERGE (e)-[:MENTIONS]->(c)" in joined
-        assert "DETACH DELETE f" in joined
+        assert "RETURN f.uuid AS uuid" in joined
+        assert "RELATES_TO" not in joined
+        assert "MENTIONS" not in joined
+        assert "DETACH DELETE" not in joined
 
-    def test_entity_edge_payload_is_carried_across(self):
-        """`SET r2 = properties(r)` — a rewire that drops the payload keeps the graph's shape and
-        loses the fact the edge carried (fact, fact_embedding, episodes, valid_at)."""
+    def test_runtime_ensure_never_touches_entity_edge_payload(self):
         repo = _make_repo([{"uuid": "fork-1"}])
         repo.ensure_self_entity("ns-1")
         rewires = [s for s in self._statements(repo) if "RELATES_TO" in s]
-        assert rewires
-        assert all("SET r2 = properties(r)" in s for s in rewires)
+        assert rewires == []
 
-    def test_embedding_is_carried_before_the_fork_dies(self):
-        """The canonical node is raw-Cypher written and has no name_embedding, so it is invisible to
-        semantic search. Folding an embedded node into it without the vector would move every stated
-        fact onto a node recall cannot find — strictly worse than the fork."""
+    def test_runtime_ensure_never_copies_embedding_or_deletes_fork(self):
         repo = _make_repo([{"uuid": "fork-1"}])
         repo.ensure_self_entity("ns-1")
-        statements = self._statements(repo)
-        carry = [i for i, s in enumerate(statements) if "c.name_embedding = coalesce(" in s]
-        delete = [i for i, s in enumerate(statements) if "DETACH DELETE" in s]
-        assert carry and delete and carry[0] < delete[0]
+        joined = "\n".join(self._statements(repo))
+        assert "c.name_embedding = coalesce(" not in joined
+        assert "DETACH DELETE" not in joined
 
     def test_views_are_never_absorbed(self):
         """A View is a projection of the subject; absorbing one would fold a derived answer into the
@@ -246,9 +234,8 @@ class TestEnsureSelfEntityAbsorbsForks:
         assert "NOT coalesce(f.is_quantstate, false)" in find
         assert "f.view_kind IS NULL" in find
 
-    def test_absorbed_summary_survives_a_later_ensure(self):
-        """The canned self summary is ON CREATE only. Setting it unconditionally would overwrite the
-        richer absorbed summary on the very next consolidation pass."""
+    def test_existing_summary_survives_a_later_ensure(self):
+        """The canned self summary is ON CREATE only; ordinary ensure never overwrites it."""
         repo = _make_repo([])
         repo.ensure_self_entity("ns-1")
         merge = self._statements(repo)[0]
@@ -256,15 +243,14 @@ class TestEnsureSelfEntityAbsorbsForks:
         assert "SET n.name = $name" in merge
         assert "n.summary = $summary," not in merge
 
-    def test_self_loops_are_not_rewired(self):
-        """An edge from the twin back to the canonical node is an artifact of the split, not a fact."""
+    def test_no_relationship_rewire_query_exists(self):
         repo = _make_repo([{"uuid": "fork-1"}])
         repo.ensure_self_entity("ns-1")
         rewires = [s for s in self._statements(repo) if "RELATES_TO" in s]
-        assert all("m.uuid <> $self_uuid" in s for s in rewires)
+        assert rewires == []
 
     def test_returns_the_deterministic_uuid_unchanged(self):
-        """Recall computes uuid5("menhir-self:<ns>") with no DB read, so absorbing must not move it."""
+        """Recall computes uuid5("menhir-self:<ns>") with no DB read; ensure never moves it."""
         import uuid as _uuid
         repo = _make_repo([{"uuid": "fork-1"}])
         got = repo.ensure_self_entity("ns-1")

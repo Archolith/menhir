@@ -10,9 +10,14 @@ import re
 from time import perf_counter
 from typing import Any, Callable
 
-from menhir.domain.self_identity import SelfIdentityContext, is_self_alias
+from menhir.domain.self_identity import (
+    SelfEvidenceKind,
+    SelfIdentityContext,
+    is_self_alias,
+)
 from menhir.infrastructure.self_binding import (
     AmbiguousSelfBindingError,
+    InvalidSelfSubjectDeclarationError,
     SelfBindMode,
     SelfBindOutcome,
     SelfBindResult,
@@ -423,8 +428,8 @@ def _episode_role(episode_text: str) -> str:
     return "unknown"
 
 
-def _is_self_endpoint(normalized_name: str, episode_text: str) -> bool:
-    """True when this endpoint denotes the HUMAN and may bind to the canonical self entity.
+def _is_unresolved_self_like_endpoint(normalized_name: str, episode_text: str) -> bool:
+    """True when endpoint closure may retain this as an ORDINARY self-like entity.
 
     WHY THIS EXISTS: gpt-4o-mini emits the speaker as the literal token ``user`` and never as
     ``I``. ``user`` is in `_NON_SYNTHESIZABLE_ENDPOINTS`, so every edge it anchors was dropped for
@@ -433,9 +438,10 @@ def _is_self_endpoint(normalized_name: str, episode_text: str) -> bool:
     the cc5ded98 smoke: 5 of 6 USER turns collapsed this way -- the refusal was destroying
     precisely the user's own facts, which is the opposite of what it was protecting.
 
-    Binding to ONE canonical ``user`` node per namespace is the intended identity, not the
-    fragmentation the original guard feared: graphiti dedups by normalized name within `group_id`,
-    so repeated turns converge on the same node.
+    This helper does **not** establish identity and does **not** assign the canonical UUID. It only
+    rewrites equivalent endpoint spellings to the display name ``user`` and lets ordinary Graphiti
+    resolution decide where that node goes. That can still create or reuse a fork. Canonical binding
+    happens later and requires an exact node declaration; turn role plus this name shape is not one.
 
     ASSISTANT TURNS ARE EXCLUDED. A ``user -> X`` edge on an assistant turn is the model restating
     what the human already said in their own turn, so binding it mints a DUPLICATE of a fact that
@@ -453,8 +459,9 @@ def _is_self_endpoint(normalized_name: str, episode_text: str) -> bool:
     dropped. An assistant turn whose edges are ALL `user -> X` will therefore still collapse; that
     turn carried nothing but echo, so the loss is intended rather than a defect.
 
-    Unknown role (no ``user:``/``assistant:`` prefix) binds, so content outside the benchmark's
-    prefixed format keeps the collapse fix rather than silently regressing.
+    Unknown role (no ``user:``/``assistant:`` prefix) is retained by this endpoint-closure rule, so
+    content outside the benchmark's prefixed format keeps the collapse fix. It gains no canonical
+    subject authority.
     """
     if _episode_role(episode_text) == "assistant":
         return False
@@ -740,7 +747,7 @@ def _sanitize_combined_payload(
     )
     assistant_self_only_relationless = bool(is_assistant_turn and _all_self_labels)
     synthesized = 0
-    self_bound = 0
+    self_like_endpoints_retained = 0
     self_echo_edges = 0
     surviving_edges: list[dict[str, Any]] = []
     for edge in edges:
@@ -762,16 +769,16 @@ def _sanitize_combined_payload(
                 break
             if norm_key in known:
                 continue
-            if _is_self_endpoint(norm_key, episode_text):
-                # Rewrite to the canonical self display and materialize it ONCE per payload, so
-                # every self-anchored edge in this episode converges on a single node instead of
-                # being dropped for a missing endpoint. See `_is_self_endpoint` for why this is
-                # the intended identity rather than the fragmentation the old guard feared.
+            if _is_unresolved_self_like_endpoint(norm_key, episode_text):
+                # Normalize the endpoint spelling and materialize it ONCE per payload so Graphiti
+                # does not drop the edge. This is availability recovery, not identity resolution:
+                # the node remains an ordinary candidate unless a separate structured producer
+                # declares its exact UUID after extraction.
                 edge[endpoint_key] = _SELF_ENTITY_NAME
                 if self_key not in known:
                     entities.append({"name": _SELF_ENTITY_NAME, "entity_type_id": -1})
                     known.add(self_key)
-                self_bound += 1
+                self_like_endpoints_retained += 1
                 continue
             previous_episode_texts = (
                 (
@@ -791,8 +798,8 @@ def _sanitize_combined_payload(
                 synthesized += 1
             # Otherwise leave it missing. NOTE: graphiti drops this one edge during resolution --
             # true locally, but if it was the LAST edge every node it would have connected is then
-            # orphan-pruned and the whole episode collapses. That cascade is why self endpoints are
-            # bound above instead of refused.
+            # orphan-pruned and the whole episode collapses. The self-like case above is retained
+            # only to avoid that cascade; it is deliberately not promoted to canonical self.
         if edge_is_self_echo:
             self_echo_edges += 1
             continue
@@ -873,20 +880,21 @@ def _sanitize_combined_payload(
         entities_dropped
         or edges_dropped
         or synthesized
-        or self_bound
+        or self_like_endpoints_retained
         or self_echo_edges
         or list_edges_added
         or context_unsupported_edges
     ):
         logger.info(
             "Combined-extraction sanitation: entities_dropped=%d edges_dropped=%d "
-            "endpoints_synthesized=%d self_endpoints_bound=%d self_echo_edges_suppressed=%d "
+            "endpoints_synthesized=%d self_like_endpoints_retained=%d "
+            "self_echo_edges_suppressed=%d "
             "list_membership_edges_added=%d context_unsupported_edges_suppressed=%d "
             "(raw entities=%d edges=%d)",
             entities_dropped,
             edges_dropped,
             synthesized,
-            self_bound,
+            self_like_endpoints_retained,
             self_echo_edges,
             list_edges_added,
             context_unsupported_edges,
@@ -1091,8 +1099,19 @@ def _record_self_binding(
     a durable change in ingest success.
     """
     try:
+        identity = receipt.self_identity
+        if (
+            identity is not None
+            and identity.evidence_kind is SelfEvidenceKind.EXPLICIT_SELF_SUBJECT
+            and str(identity.episode_uuid or "").strip()
+            != str(receipt.episode_key or "").strip()
+        ):
+            raise InvalidSelfSubjectDeclarationError(
+                f"declared self subject belongs to episode {identity.episode_uuid!r}, not active "
+                f"episode {receipt.episode_key!r}; refusing to bind"
+            )
         result = bind_canonical_self(
-            nodes, edges, index_map, receipt.self_identity, receipt.self_bind_mode
+            nodes, edges, index_map, identity, receipt.self_bind_mode
         )
     except AmbiguousSelfBindingError:
         result = SelfBindResult(

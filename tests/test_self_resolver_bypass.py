@@ -17,13 +17,18 @@ from types import SimpleNamespace
 
 import pytest
 
-from menhir.domain.self_identity import self_context_for_pending_episode, self_uuid_for_namespace
+from menhir.domain.self_identity import (
+    declare_self_subject,
+    self_context_for_pending_episode,
+    self_uuid_for_namespace,
+)
 from menhir.infrastructure.graphiti_extraction_patches import (
     begin_extraction_receipt,
     clear_extraction_receipt,
     get_extraction_receipt,
 )
 from menhir.infrastructure.self_binding import bind_canonical_self
+from menhir.infrastructure.self_binding import SelfBindMode
 
 
 def _node(uuid: str, name: str):
@@ -58,21 +63,20 @@ def test_bound_self_is_visible_to_the_resolver(receipt_with_bound_self):
 
 
 
-def _declared(namespace: str = "default", episode_uuid: str = "ep"):
-    """A declared self subject: the only evidence that binds, so the only way to exercise the
-    resolver bypass at all."""
-    from menhir.domain.self_identity import (
-        SelfEvidenceKind,
-        SelfIdentityContext,
-        SpeakerRole,
-    )
-
-    return SelfIdentityContext(
-        namespace=namespace,
-        speaker_role=SpeakerRole.USER,
-        evidence_kind=SelfEvidenceKind.EXPLICIT_SELF_SUBJECT,
-        source_kind="manual",
-        episode_uuid=episode_uuid,
+def _declared(
+    namespace: str = "default",
+    episode_uuid: str = "ep",
+    subject_node_uuid: str = "rand-1",
+):
+    """Promote trusted turn evidence onto the exact in-memory subject node."""
+    return declare_self_subject(
+        self_context_for_pending_episode(
+            source="manual",
+            namespace=namespace,
+            source_kind="manual",
+            episode_uuid=episode_uuid,
+        ),
+        subject_node_uuid=subject_node_uuid,
     )
 
 
@@ -174,6 +178,131 @@ async def test_ordinary_entities_still_reach_candidate_search(monkeypatch):
         assert sorted(searched[0]) == ["Rachel", "user"]
     finally:
         clear_extraction_receipt()
+
+
+@pytest.mark.unit
+async def test_undeclared_node_cannot_reuse_canonical_self_through_ordinary_dedup(monkeypatch):
+    """A retained name-shaped `user` node is not allowed to regain authority as a candidate."""
+    import graphiti_core.utils.maintenance.node_operations as node_operations
+
+    from menhir.infrastructure.graphiti_model_patches import _patch_graphiti_adaptive_dedupe
+
+    canonical = self_uuid_for_namespace("default")
+    canonical_candidate = _node(canonical, "user")
+    canonical_candidate.attributes = {"is_self": True, "entity_role": "self"}
+    ordinary_candidate = _node("ordinary-user", "user")
+    seen_candidate_uuids: list[str] = []
+
+    async def _collect(clients, extracted_nodes, existing_nodes_override=None):
+        return [[canonical_candidate, ordinary_candidate] for _ in extracted_nodes]
+
+    original_build_indexes = node_operations._build_candidate_indexes
+
+    def _capture_indexes(candidates):
+        seen_candidate_uuids.extend(str(candidate.uuid) for candidate in candidates)
+        return original_build_indexes(candidates)
+
+    monkeypatch.setattr(node_operations, "_collect_candidate_nodes", _collect)
+    monkeypatch.setattr(node_operations, "_build_candidate_indexes", _capture_indexes)
+    _patch_graphiti_adaptive_dedupe()
+
+    identity = self_context_for_pending_episode(
+        source="manual", namespace="default", episode_uuid="ep"
+    )
+    try:
+        begin_extraction_receipt(
+            "ep", "body", self_identity=identity, self_bind_mode=SelfBindMode.ENFORCE
+        )
+        resolved, uuid_map, _pairs = await node_operations.resolve_extracted_nodes(
+            SimpleNamespace(llm_client=object(), driver=object()),
+            [_node("extracted-user", "user")],
+        )
+    finally:
+        clear_extraction_receipt()
+
+    assert canonical not in seen_candidate_uuids
+    assert "ordinary-user" in seen_candidate_uuids
+    assert all(getattr(node, "uuid", None) != canonical for node in resolved if node is not None)
+    assert canonical not in uuid_map.values()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("mode", [SelfBindMode.OFF, SelfBindMode.OBSERVE])
+async def test_non_enforce_modes_do_not_filter_canonical_candidates(monkeypatch, mode):
+    """OFF preserves old resolution and OBSERVE measures without changing ingest."""
+    import graphiti_core.utils.maintenance.node_operations as node_operations
+
+    from menhir.infrastructure.graphiti_model_patches import _patch_graphiti_adaptive_dedupe
+
+    canonical = self_uuid_for_namespace("default")
+    canonical_candidate = _node(canonical, "user")
+    canonical_candidate.attributes = {"is_self": True, "entity_role": "self"}
+    seen_candidate_uuids: list[str] = []
+
+    async def _collect(clients, extracted_nodes, existing_nodes_override=None):
+        return [[canonical_candidate] for _ in extracted_nodes]
+
+    original_build_indexes = node_operations._build_candidate_indexes
+
+    def _capture_indexes(candidates):
+        seen_candidate_uuids.extend(str(candidate.uuid) for candidate in candidates)
+        return original_build_indexes(candidates)
+
+    monkeypatch.setattr(node_operations, "_collect_candidate_nodes", _collect)
+    monkeypatch.setattr(node_operations, "_build_candidate_indexes", _capture_indexes)
+    _patch_graphiti_adaptive_dedupe()
+
+    identity = self_context_for_pending_episode(
+        source="manual", namespace="default", episode_uuid="ep"
+    )
+    try:
+        begin_extraction_receipt("ep", "body", self_identity=identity, self_bind_mode=mode)
+        await node_operations.resolve_extracted_nodes(
+            SimpleNamespace(llm_client=object(), driver=object()),
+            [_node("extracted-user", "user")],
+        )
+    finally:
+        clear_extraction_receipt()
+
+    assert canonical in seen_candidate_uuids
+
+
+@pytest.mark.unit
+async def test_enforce_refuses_undeclared_extracted_node_with_canonical_identity(monkeypatch):
+    """A producer cannot bypass the declaration contract by pre-stamping the node itself."""
+    import graphiti_core.utils.maintenance.node_operations as node_operations
+
+    from menhir.infrastructure.graphiti_model_patches import _patch_graphiti_adaptive_dedupe
+
+    canonical = self_uuid_for_namespace("default")
+    extracted = _node(canonical, "user")
+    extracted.attributes = {"is_self": True, "entity_role": "self"}
+    candidate_search_called = False
+
+    async def _collect(clients, extracted_nodes, existing_nodes_override=None):
+        nonlocal candidate_search_called
+        candidate_search_called = True
+        return [[] for _ in extracted_nodes]
+
+    monkeypatch.setattr(node_operations, "_collect_candidate_nodes", _collect)
+    _patch_graphiti_adaptive_dedupe()
+
+    identity = self_context_for_pending_episode(
+        source="manual", namespace="default", episode_uuid="ep"
+    )
+    try:
+        begin_extraction_receipt(
+            "ep", "body", self_identity=identity, self_bind_mode=SelfBindMode.ENFORCE
+        )
+        with pytest.raises(RuntimeError, match="undeclared extracted node"):
+            await node_operations.resolve_extracted_nodes(
+                SimpleNamespace(llm_client=object(), driver=object()),
+                [extracted],
+            )
+    finally:
+        clear_extraction_receipt()
+
+    assert candidate_search_called is False
 
 
 @pytest.mark.unit
@@ -349,6 +478,26 @@ async def test_existing_node_is_not_restamped(monkeypatch):
     got = await _existing_canonical_node(SimpleNamespace(driver=object()), _node("x", "user"), None)
     assert got is stored
     assert got.attributes["user_flagged"] is True
+
+
+@pytest.mark.unit
+async def test_existing_canonical_node_from_another_group_is_refused(monkeypatch):
+    from graphiti_core.nodes import EntityNode
+
+    from menhir.infrastructure.graphiti_model_patches import _existing_canonical_node
+
+    stored = _node(self_uuid_for_namespace("proj-a"), "user")
+    stored.group_id = "proj-b"
+
+    async def _found(driver, uuid):
+        return stored
+
+    monkeypatch.setattr(EntityNode, "get_by_uuid", _found)
+
+    with pytest.raises(RuntimeError, match="cross-namespace resolution"):
+        await _existing_canonical_node(
+            SimpleNamespace(driver=object()), stored, _declared("proj-a", "e")
+        )
 
 
 @pytest.mark.unit

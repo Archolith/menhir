@@ -18,7 +18,9 @@ Two rules carry the whole design:
    entity that author is. :func:`eligible_self_evidence` answers the first question and
    :func:`proves_self_subject` the second; binding requires both. No property of the extracted
    NAME -- not the literal string, not its grammatical person -- can answer the second, because
-   the name is not provenance. Only a declared subject can, and nothing declares one yet.
+   the name is not provenance. Only a declaration naming the exact in-memory subject node can;
+   the binding primitive exists, but the queued Graphiti lifecycle has no structured producer or
+   durable declaration transport yet.
 
 The physical Graphiti partition is derived separately by
 :func:`menhir.domain.namespace.namespace_to_group_id`. Logical ``default`` maps to physical
@@ -28,7 +30,7 @@ from ``group_id == ""``.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Any
 from uuid import NAMESPACE_URL, uuid5
@@ -43,6 +45,7 @@ __all__ = [
     "SelfEvidenceKind",
     "SelfIdentityContext",
     "SpeakerRole",
+    "declare_self_subject",
     "eligible_self_evidence",
     "is_first_person_alias",
     "is_self_alias",
@@ -77,7 +80,7 @@ class SelfEvidenceKind(StrEnum):
 
     #: Role came from Menhir-owned turn/admission metadata, not from parsing episode text.
     TRUSTED_USER_TURN = "trusted_user_turn"
-    #: A trusted internal caller declares that this episode records a fact about the owner.
+    #: A trusted internal caller declares one exact in-memory node as the turn's human subject.
     EXPLICIT_SELF_SUBJECT = "explicit_self_subject"
 
 
@@ -174,6 +177,13 @@ class SelfIdentityContext:
     source_kind: str = ""
     #: The episode this evidence belongs to. Evidence never outlives its episode.
     episode_uuid: str | None = None
+    #: Exact in-memory node identifier selected by a trusted structured assertion. Graphiti types
+    #: identifiers as strings (its normal producer uses UUIDs). This is the bridge
+    #: from episode authorship to node subjecthood: names, aliases, and grammatical person never
+    #: fill it. A caller that already owns the final in-memory payload may set it only by promoting
+    #: a TRUSTED_USER_TURN through :func:`declare_self_subject` after constructing the subject
+    #: node/edge. The current queued Graphiti path exposes no such caller.
+    subject_node_uuid: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "namespace", normalize_logical_namespace(self.namespace))
@@ -226,8 +236,8 @@ def is_first_person_alias(name: Any) -> bool:
     """Whether *name* is a first-person self alias.
 
     **Not authority** -- see :func:`proves_self_subject`. This exists only so binding can COUNT
-    the first-person nodes it declines, which is the measurement that says how much a per-node
-    provenance signal would actually buy.
+    the first-person nodes it declines. That count is an upper bound on what richer per-node
+    provenance might resolve, because quoted or reported speech can still be non-self.
     """
     return _normalize_alias(name) in FIRST_PERSON_SELF_ALIASES
 
@@ -239,8 +249,48 @@ def _normalize_alias(name: Any) -> str:
     return " ".join(str(name).strip().lower().split())
 
 
-def proves_self_subject(name: Any, context: SelfIdentityContext | None) -> bool:
-    """Whether *name*, in an episode with *context*, proves THIS NODE is the owning human.
+def declare_self_subject(
+    context: SelfIdentityContext,
+    *,
+    subject_node_uuid: Any,
+) -> SelfIdentityContext:
+    """Promote trusted turn evidence to an exact, node-scoped self declaration.
+
+    The caller must already own the final payload and subject assignment: for example, a structured
+    memory writer that constructed an ``EntityEdge`` with the turn author as its source. This
+    function does not inspect text, names, edge facts, or grammatical person. It binds the
+    declaration to the current episode and the exact in-memory node UUID the caller constructed.
+
+    This is a binding primitive, not yet a production transport. Menhir's queued Graphiti path
+    reconstructs only episode-level context before Graphiti allocates node UUIDs, so a future
+    producer also needs a durable structured payload and a post-repair/pre-dedup injection point.
+
+    A normal user turn is deliberately insufficient. Only a trusted user-turn context with an
+    episode UUID can be promoted, and the selected node UUID must be non-blank. Invalid inputs fail
+    before extraction or graph mutation.
+    """
+    selected = str(subject_node_uuid or "").strip()
+    if context.evidence_kind is not SelfEvidenceKind.TRUSTED_USER_TURN:
+        raise ValueError("self subject declaration requires trusted user-turn evidence")
+    if context.speaker_role is not SpeakerRole.USER:
+        raise ValueError("self subject declaration requires the trusted user role")
+    if not str(context.episode_uuid or "").strip():
+        raise ValueError("self subject declaration requires an episode UUID")
+    if not selected:
+        raise ValueError("self subject declaration requires a non-blank node UUID")
+    if len(selected) > 256 or not selected.isprintable():
+        raise ValueError("self subject declaration requires a bounded printable node UUID")
+    if _fold_source_kind(context.source_kind) in _NEVER_SELF_SOURCE_KINDS:
+        raise ValueError("self subject declaration refuses a structurally non-self source")
+    return replace(
+        context,
+        evidence_kind=SelfEvidenceKind.EXPLICIT_SELF_SUBJECT,
+        subject_node_uuid=selected,
+    )
+
+
+def proves_self_subject(node_uuid: Any, context: SelfIdentityContext | None) -> bool:
+    """Whether *node_uuid*, in an episode with *context*, proves THIS NODE is the owning human.
 
     This is the node-level half of the contract, and it exists because the episode-level half is
     not sufficient. :func:`eligible_self_evidence` proves who AUTHORED an episode; it says nothing
@@ -249,9 +299,9 @@ def proves_self_subject(name: Any, context: SelfIdentityContext | None) -> bool:
     a support turn is about -- into the canonical human identity, which no later migration can
     separate again.
 
-    Exactly one thing proves it: :attr:`SelfEvidenceKind.EXPLICIT_SELF_SUBJECT`, where a trusted
-    internal caller declares that this episode's subject IS the owner. That declaration is the
-    authority; nothing here infers it from text.
+    Exactly one thing proves it: :attr:`SelfEvidenceKind.EXPLICIT_SELF_SUBJECT` naming this exact
+    in-memory node UUID, produced by :func:`declare_self_subject` from trusted user-turn evidence.
+    The declaration is the authority; nothing here infers it from text.
 
     **No name shape qualifies, first-person included.** Two successive revisions tried to promote
     one: first the literal name ``user``, then first-person grammar. Both are properties of the
@@ -260,17 +310,18 @@ def proves_self_subject(name: Any, context: SelfIdentityContext | None) -> bool:
     (``She told me, "I will handle it"``) for the second. By the time binding runs, extraction has
     discarded the quote boundaries, source spans and speaker attribution that would separate them.
 
-    **Consequence, stated where it cannot be missed:** no production producer emits
-    ``EXPLICIT_SELF_SUBJECT`` today, so this returns ``False`` for every real episode and binding
-    is inert. Making the prevention path do anything requires per-node subject provenance from
-    extraction first. That is a plan-level gap, not a tuning question.
+    **Consequence, stated where it cannot be missed:** the exact-node binding primitive now exists,
+    but no production producer or durable transport calls it today, so this returns ``False`` for
+    every real Graphiti episode and binding remains inert. Ordinary extracted text cannot supply
+    this declaration.
     """
     if not eligible_self_evidence(context):
         return False
     assert context is not None  # narrowed by eligible_self_evidence
     if context.evidence_kind is not SelfEvidenceKind.EXPLICIT_SELF_SUBJECT:
         return False
-    return _normalize_alias(name) in SELF_ALIASES
+    selected = str(context.subject_node_uuid or "").strip()
+    return bool(selected) and str(node_uuid or "").strip() == selected
 
 
 def self_context_for_pending_episode(
@@ -301,6 +352,7 @@ def self_context_for_pending_episode(
             evidence_kind=SelfEvidenceKind.TRUSTED_USER_TURN,
             source_kind=source_kind or normalized_source,
             episode_uuid=episode_uuid,
+            subject_node_uuid=None,
         )
     return SelfIdentityContext(
         namespace=namespace,
@@ -308,6 +360,7 @@ def self_context_for_pending_episode(
         evidence_kind=None,
         source_kind=source_kind or normalized_source,
         episode_uuid=episode_uuid,
+        subject_node_uuid=None,
     )
 
 
@@ -327,6 +380,11 @@ def eligible_self_evidence(context: SelfIdentityContext | None) -> bool:
     if context.evidence_kind is SelfEvidenceKind.TRUSTED_USER_TURN:
         # The evidence IS the trusted role, so the role must actually be the human.
         return context.speaker_role is SpeakerRole.USER
-    # EXPLICIT_SELF_SUBJECT: a trusted internal caller vouches for the subject, so an
-    # unknown-role episode is admissible -- but a non-human role above already disqualified it.
-    return True
+    # EXPLICIT_SELF_SUBJECT is valid only as the node-scoped promotion of a trusted human turn.
+    # Requiring the episode and exact node UUID prevents an episode-wide declaration from falling
+    # back to the same name-shaped inference this contract exists to remove.
+    return bool(
+        context.speaker_role is SpeakerRole.USER
+        and str(context.episode_uuid or "").strip()
+        and str(context.subject_node_uuid or "").strip()
+    )

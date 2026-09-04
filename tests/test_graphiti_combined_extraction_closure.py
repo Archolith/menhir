@@ -23,6 +23,14 @@ import graphiti_core.utils.maintenance.combined_extraction as ce  # noqa: E402
 import menhir.infrastructure.graphiti_extraction_patches as extraction_patches  # noqa: E402
 import menhir.infrastructure.graphiti_patches as patches  # noqa: E402
 import menhir.services.enrichment_steps as steps  # noqa: E402
+from menhir.domain.self_identity import (  # noqa: E402
+    declare_self_subject,
+    self_context_for_pending_episode,
+)
+from menhir.infrastructure.self_binding import (  # noqa: E402
+    InvalidSelfSubjectDeclarationError,
+    SelfBindMode,
+)
 from menhir.services.enrichment_failures import classify_enrichment_failure  # noqa: E402
 
 
@@ -155,8 +163,8 @@ def test_ambiguous_pronoun_endpoints_are_not_synthesized(pronoun: str) -> None:
 
 
 @pytest.mark.parametrize("label", ["user", "the user", "I", "me", "my"])
-def test_self_endpoints_bind_to_the_canonical_self_entity(label: str) -> None:
-    """Self labels on a USER turn resolve to one canonical `user` node instead of being refused.
+def test_self_like_endpoints_are_retained_as_ordinary_user_entities(label: str) -> None:
+    """Self-like labels survive endpoint closure but gain no canonical identity authority.
 
     This REPLACES the half of the old acceptance #5 that also refused these. Refusing them was
     destroying the user's own facts: gpt-4o-mini emits the speaker as the literal token `user` on
@@ -166,7 +174,7 @@ def test_self_endpoints_bind_to_the_canonical_self_entity(label: str) -> None:
     """
     obj = _one_edge_from(label, f"user: {label} own 37 coins.")
     names = {e.name.lower() for e in obj.extracted_entities}
-    assert "user" in names, f"{label!r} should bind to the canonical self entity"
+    assert "user" in names, f"{label!r} should be retained as an ordinary user entity"
     edge = obj.edges[0]
     assert edge.source_entity_name.lower() == "user", "the edge endpoint must be rewritten too"
 
@@ -175,8 +183,8 @@ def test_self_endpoints_bind_to_the_canonical_self_entity(label: str) -> None:
 def test_first_person_on_an_assistant_turn_is_not_bound_to_the_user(label: str) -> None:
     """On an assistant turn `I` is the MODEL, so binding it to the human would misattribute.
 
-    `user`/`the user` still bind on an assistant turn (the model narrating the human); only
-    first-person is role-gated.
+    No self-like endpoint is retained on an assistant turn; those edges are handled by the
+    self-echo suppression policy below.
     """
     obj = _one_edge_from(label, f"assistant: {label} am an AI trained on data.")
     assert all(e.name.lower() != "user" for e in obj.extracted_entities)
@@ -1123,6 +1131,34 @@ async def test_receipt_survives_the_waitfor_task_boundary() -> None:
     assert receipt.raw_entity_count == 3
     assert receipt.raw_edge_count == 2
     patches.clear_extraction_receipt()
+
+
+@pytest.mark.asyncio
+async def test_declared_subject_requires_external_episode_uuid_not_name_fallback() -> None:
+    """A display name cannot scope node authority to the active extraction request."""
+    called = False
+
+    class FakeClient:
+        async def add_episode(self, **kwargs) -> str:
+            nonlocal called
+            called = True
+            return "graphiti-result"
+
+    kwargs = _add_episode_kwargs()
+    kwargs["episode_uuid"] = None
+    kwargs["self_bind_mode"] = SelfBindMode.ENFORCE
+    kwargs["self_identity"] = declare_self_subject(
+        self_context_for_pending_episode(
+            source="manual", namespace="default", episode_uuid="ep"
+        ),
+        subject_node_uuid="node-1",
+    )
+
+    with pytest.raises(InvalidSelfSubjectDeclarationError, match="episode name is not identity"):
+        await steps.add_episode_with_timeout(FakeClient(), timeout_s=5.0, **kwargs)
+
+    assert called is False
+    assert patches.get_extraction_receipt() is None
 
 
 @pytest.mark.asyncio

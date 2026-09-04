@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import pytest
 
+from menhir.domain.namespace import namespace_to_group_id
 from menhir.domain.self_identity import self_uuid_for_namespace
 from menhir.infrastructure.self_binding import (
     AmbiguousSelfBindingError,
@@ -22,15 +23,17 @@ from tests.corpus_self_binding import CORPUS, NEGATIVE_CASES, CorpusCase
 
 
 class _Node:
-    def __init__(self, uuid: str, name: str) -> None:
+    def __init__(self, uuid: str, name: str, group_id: str = "") -> None:
         self.uuid = uuid
         self.name = name
+        self.group_id = group_id
 
 
 def _replay(case: CorpusCase, mode: SelfBindMode):
     """Replay one case. A refusal is a RESULT, not a test error: failing closed is the designed
     behavior for a payload whose subject cannot be proven, so it is classified like any other."""
-    nodes = [_Node(f"extracted-{i}", n) for i, n in enumerate(case.entity_names)]
+    group_id = namespace_to_group_id(case.namespace)
+    nodes = [_Node(f"extracted-{i}", n, group_id) for i, n in enumerate(case.entity_names)]
     edges: list[object] = []
     index_map = {n.uuid: [0] for n in nodes}
     try:
@@ -96,7 +99,12 @@ def test_observe_mode_agrees_with_enforce_and_mutates_nothing(case: CorpusCase):
     observed, observed_nodes = _replay(case, SelfBindMode.OBSERVE)
     enforced, _ = _replay(case, SelfBindMode.ENFORCE)
 
-    assert observed.outcome is enforced.outcome
+    expected_observed = (
+        SelfBindOutcome.WOULD_BIND
+        if enforced.outcome is SelfBindOutcome.BOUND
+        else enforced.outcome
+    )
+    assert observed.outcome is expected_observed
     assert observed.self_uuid == enforced.self_uuid
     # ...while having rewritten nothing.
     assert all(n.uuid.startswith("extracted-") for n in observed_nodes)
