@@ -193,6 +193,12 @@ services:
       NEO4J_USER: neo4j
       NEO4J_DATABASE: neo4j
       MENHIR_MCP_TELEMETRY_DB: /srv/menhir/state/telemetry/mcp_telemetry.db
+      # Scheduler task tracing targets a developer-workstation service
+      # (cth.mcp.scheduler on :8082) that no deployed host runs, so it defaults to
+      # off here: otherwise every lifecycle transition pays a 2s connect timeout and
+      # logs a WARNING. Set to 0 only where a scheduler is actually reachable, and
+      # set SCHEDULER_URL alongside it.
+      SCHEDULER_TRACE_DISABLED: "${SCHEDULER_TRACE_DISABLED:-1}"
       # --- Provider selection + models. API keys come from secret files via the
       # image entrypoint, never from this file. ---
       LLM_CHAT_PROVIDER: "${LLM_CHAT_PROVIDER:?LLM_CHAT_PROVIDER is required}"
