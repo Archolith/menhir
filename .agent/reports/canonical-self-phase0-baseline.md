@@ -234,3 +234,68 @@ above. It must not be cited as a baseline.
 4. **Second wrong-partition site:** besides `ensure_self_entity` writing `n.group_id = $namespace`
    (`:882`), the fork-detection query at `:1034` uses the same equality. Both need the namespace
    SSOT, and only after the destructive path is gone.
+
+---
+
+# Phase 2 — producer inventory and evidence disposition
+
+Required by the plan's Phase 2 first task. Derived by direct search on this branch:
+
+```bash
+grep -rn "queue_episode(" --include=*.py src/
+grep -rn "queue_episode_for_enrichment(" --include=*.py src/
+grep -rn "create_pending_episode" --include=*.py src/ scripts/
+```
+
+## The trust boundary already existed
+
+Every producer funnels through `ingest_intake.queue_episode_for_enrichment`, which is the only
+production writer of `create_pending_episode`. That function runs every `user`/`manual` claim
+through `evaluate_user_tier_claim`, requiring Menhir-owned `TurnEvidence` with `role == "user"`,
+a matching session/namespace, and text grounded in that turn. Ungrounded claims, and any error
+evaluating one, are rewritten to `agent_inference` **before persistence**.
+
+So the persisted `source` is a gate receipt, and the evidence survives the asynchronous queue with
+no new field and no schema change.
+
+**The trap.** `evaluate_user_tier_claim` also returns `granted=True` for the passthrough case
+(`reason="passthrough (not user/manual)"`). Keying self-evidence on `verdict.granted` would make
+every producer self-eligible, project scans included. The signal is the effective source after the
+gate, never `granted`.
+
+**The fragility.** This holds only while `create_pending_episode` has exactly one production
+writer. `test_pending_episode_has_exactly_one_production_writer` pins it; if a second writer
+appears, re-derive the evidence contract before relaxing that test.
+
+## Disposition table
+
+| Producer | Trusted role source | Self eligible? | Status |
+|---|---|---|---|
+| `add_memory` (`source='user'`/`'manual'`) | admission gate over `TurnEvidence.role` | **yes, on grant only** | `TRUSTED_USER_TURN` reconstructed from persisted source |
+| `add_memory` (any other source) | none — caller string, ungated | no | `UNKNOWN`, no evidence |
+| `add_memory` (`user` claim, gate denied) | gate downgraded to `agent_inference` pre-persistence | no | indistinguishable from agent source by design |
+| `add_memory_and_track` | same gated intake | same as `add_memory` | inherits the gate |
+| API `routes.py:366` (`body.source`) | same gated intake | same as `add_memory` | inherits the gate |
+| legacy `ingest_episode` (`ingest_intake.py:355`) | same gated intake | same as `add_memory` | inherits the gate |
+| `ingest_document` | writes `source="document-ingest"` | no | never self; also in the never-self set |
+| `project_ingest` | writes `source="project-scan"` | no | never self; also in the never-self set |
+| retry / repair / replay | re-reads the same persisted source | same as original | cannot strengthen; pinned by test |
+| any producer supplying no context | none | no | fails closed — `self_identity=None` |
+
+### Defect found by building this table
+
+`_NEVER_SELF_SOURCE_KINDS` was first written with underscore spellings (`project_scan`) while
+production writes hyphens (`project-scan`, `document-ingest`), which made that guard decorative.
+Now pinned to the literal strings, compared with `-`/`_` folded, and covered by a test that reads
+the producers' own source literals. The guard remains defense in depth: these sources never reach
+`GATE_APPROVED_HUMAN_SOURCES`, so they already failed closed.
+
+## Phase 2 status
+
+Complete: evidence derivation, receipt field, parent-task propagation into extraction, producer
+inventory, and the disposition of every producer.
+
+**Not complete:** observe-only telemetry for self-like extractions lacking trusted evidence, and
+the `off | observe | enforce` bind mode. Both are required before Phase 2's exit gate is met. The
+bind mode is most naturally added with Phase 3's binding seam, since there is nothing to gate
+until binding exists.

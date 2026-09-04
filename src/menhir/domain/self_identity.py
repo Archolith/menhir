@@ -74,7 +74,21 @@ class SelfEvidenceKind(StrEnum):
 
 #: Source kinds that are structurally incapable of carrying the human, regardless of what a
 #: caller claims. Project-scan narrative discusses software users; it never speaks as the owner.
-_NEVER_SELF_SOURCE_KINDS = frozenset({"project_scan", "project_ingest", "structure_scan"})
+#:
+#: Spellings are the literal values production writes -- ``project-scan``
+#: (``project_ingest.py``) and ``document-ingest`` (``ingest_document.py``). Compared after
+#: folding ``-``/``_`` so a renamed producer cannot slip past on punctuation alone.
+#:
+#: This is defense in depth, not the primary control: none of these reach
+#: :data:`GATE_APPROVED_HUMAN_SOURCES`, so they already fail closed. It exists to stop a caller
+#: that hand-builds a context with evidence attached to scan narrative.
+_NEVER_SELF_SOURCE_KINDS = frozenset(
+    {"project-scan", "project-ingest", "structure-scan", "document-ingest"}
+)
+
+
+def _fold_source_kind(value: str) -> str:
+    return value.strip().lower().replace("_", "-")
 
 
 #: Persisted ``source`` values that prove the admission gate granted a human-authored turn.
@@ -221,7 +235,7 @@ def eligible_self_evidence(context: SelfIdentityContext | None) -> bool:
     """
     if context is None or context.evidence_kind is None:
         return False
-    if context.source_kind.strip().lower() in _NEVER_SELF_SOURCE_KINDS:
+    if _fold_source_kind(context.source_kind) in _NEVER_SELF_SOURCE_KINDS:
         return False
     if context.speaker_role in _NON_HUMAN_ROLES:
         return False

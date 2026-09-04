@@ -200,11 +200,33 @@ def test_non_human_roles_fail_closed_under_every_evidence_kind(role, kind):
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("source", ["project_scan", "project_ingest", "structure_scan", "PROJECT_SCAN"])
+@pytest.mark.parametrize(
+    "source",
+    [
+        "project-scan",       # the literal value project_ingest.py writes
+        "document-ingest",    # the literal value ingest_document.py writes
+        "project_scan",       # punctuation variant must not slip past
+        "PROJECT-SCAN",
+        "  project-scan  ",
+        "structure-scan",
+    ],
+)
 def test_project_scan_narrative_is_never_the_human(source):
     """Scan narrative discusses software users; it never speaks as the owner. Fails closed even
     when a caller wrongly attaches trusted evidence."""
     assert eligible_self_evidence(_ctx(source_kind=source)) is False
+
+
+@pytest.mark.unit
+def test_never_self_source_kinds_match_what_producers_actually_write():
+    """The guard was originally written with underscore spellings while production writes
+    hyphens, which made it decorative. Pin it to the real strings."""
+    scan = (_SRC / "menhir/services/project_ingest.py").read_text(encoding="utf-8")
+    doc = (_SRC / "menhir/mcp/tools/ingest/ingest_document.py").read_text(encoding="utf-8")
+    assert 'source="project-scan"' in scan
+    assert 'source="document-ingest"' in doc
+    for literal in ("project-scan", "document-ingest"):
+        assert eligible_self_evidence(_ctx(source_kind=literal)) is False
 
 
 # --------------------------------------------------------------------------- the name is not authority
