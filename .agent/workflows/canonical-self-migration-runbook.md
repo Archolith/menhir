@@ -34,10 +34,14 @@ Treat this as a durable-write-semantics change, not an app-only config flip.
 
    | Field | What it tells you |
    |---|---|
-   | `outcome` | `bound` / `not_eligible` / `no_self_candidate` / `ambiguous` |
-   | `ambiguous` (repeatedly) | the payload held more than one self alias, so binding refused. Frequent `ambiguous` means real traffic needs per-node subject authority before `enforce` is useful. |
-   | `self_like_without_evidence` | self-alias entities that did NOT bind |
+   | `outcome` | `bound` / `not_eligible` / `no_self_candidate` / `ordinary_user_entity` / `ambiguous` |
+   | `ordinary_user_entity` (repeatedly) | trusted turns are producing third-person `user` entities that binding declines to claim. This is the count that decides whether per-node authority for third-person references is worth building -- and, since the existing fork population is third-person, whether `enforce` prevents anything worth the change. |
+   | `ambiguous` | two nodes both carried subject authority; binding refused and wrote nothing. |
+   | `self_like_without_evidence` | self-alias entities that did NOT bind, on any outcome |
    | `evidence_kind`, `speaker_role`, `source_kind` | why the decision went that way |
+
+   Ambiguous refusals are recorded before they raise, and in `observe` they do not fail the
+   episode -- observing must never change ingest success.
 
 3. **The gate is `self_like_without_evidence`.** A persistently non-zero count means self-like
    entities are still being minted outside the trusted path and are still fragmenting recall.
@@ -113,10 +117,10 @@ list contains no `/tmp` path.
 2. One UUID formula: `self_uuid_for_namespace()`. A static test fails on a second copy.
 3. One logical→physical mapping: `namespace_to_group_id()`.
 4. A proven self causes zero candidate searches and zero dedup-LLM calls.
-5. Ambiguous evidence fails visibly and retryably, never by picking one. More than one self alias
-   in a payload is ambiguous by definition -- episode-level evidence cannot prove two extracted
-   nodes are the same subject.
+5. Ambiguous evidence fails visibly and retryably, never by picking one. Proving who authored an
+   episode never proves which extracted node is that author: that is a separate, node-level
+   question (`proves_self_subject`), and without an answer to it the payload does not bind.
 6. Runtime paths never delete or absorb forks.
 7. Telemetry carries enums, counts and UUIDs — never memory text or arbitrary entity names.
-8. A canonical-node read failure is an error, never "absent". Falling back on a transient failure
-   would let graphiti's replacing save erase the stored node.
+8. A canonical-node read failure -- or a missing driver -- is an error, never "absent". Falling
+   back on either would let graphiti's replacing save erase the stored node.

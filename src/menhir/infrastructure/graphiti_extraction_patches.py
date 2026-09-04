@@ -10,8 +10,14 @@ import re
 from time import perf_counter
 from typing import Any, Callable
 
-from menhir.domain.self_identity import SelfIdentityContext
-from menhir.infrastructure.self_binding import SelfBindMode, SelfBindResult, bind_canonical_self
+from menhir.domain.self_identity import SelfIdentityContext, is_self_alias
+from menhir.infrastructure.self_binding import (
+    AmbiguousSelfBindingError,
+    SelfBindMode,
+    SelfBindOutcome,
+    SelfBindResult,
+    bind_canonical_self,
+)
 from menhir.infrastructure.graphiti_helpers import (
     SYNTHETIC_FACT_PREFIX,
     _build_graphiti_failure_details,
@@ -1074,10 +1080,39 @@ def _record_self_binding(
     index_map: dict[str, list[int]],
     receipt: CombinedExtractionReceipt,
 ) -> SelfBindResult:
-    """Run the binding decision and record it, without letting telemetry break extraction."""
-    result = bind_canonical_self(
-        nodes, edges, index_map, receipt.self_identity, receipt.self_bind_mode
-    )
+    """Run the binding decision and record it, without letting telemetry break extraction.
+
+    A refusal is a DECISION, not an absence of one, so it is recorded on the same event as every
+    other outcome. Recording it after the raise -- or not at all -- would make the one outcome an
+    operator most needs to see during an observation window the only invisible one.
+
+    Observe mode must also not fail the episode. Its entire purpose is to measure what enforce
+    would do without changing behavior; propagating the refusal there would make merely observing
+    a durable change in ingest success.
+    """
+    try:
+        result = bind_canonical_self(
+            nodes, edges, index_map, receipt.self_identity, receipt.self_bind_mode
+        )
+    except AmbiguousSelfBindingError:
+        result = SelfBindResult(
+            outcome=SelfBindOutcome.AMBIGUOUS,
+            mode=receipt.self_bind_mode,
+            self_like_without_evidence=sum(
+                1 for n in nodes if is_self_alias(getattr(n, "name", None))
+            ),
+        )
+        _record_self_binding_decision(result, receipt)
+        if receipt.self_bind_mode is SelfBindMode.OBSERVE:
+            return result
+        raise
+    _record_self_binding_decision(result, receipt)
+    return result
+
+
+def _record_self_binding_decision(
+    result: SelfBindResult, receipt: CombinedExtractionReceipt
+) -> None:
     try:
         from menhir.infrastructure.telemetry.recorders import record_lifecycle_event
 
@@ -1090,7 +1125,6 @@ def _record_self_binding(
         )
     except Exception:  # noqa: BLE001 - observability must never fail an ingest
         logger.exception("Failed to record canonical-self binding telemetry")
-    return result
 
 
 async def _run_graphiti_combined_extraction(

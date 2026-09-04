@@ -43,7 +43,7 @@ def receipt_with_bound_self():
             source="user", namespace="default", episode_uuid="ep-1"
         )
         receipt = begin_extraction_receipt("ep-1", "body", self_identity=ctx)
-        nodes = [_node("rand-1", "user")]
+        nodes = [_node("rand-1", "I")]
         receipt.self_bind_result = bind_canonical_self(nodes, [], {}, ctx)
         yield receipt, nodes
     finally:
@@ -103,8 +103,19 @@ async def _resolve(monkeypatch, nodes) -> tuple[list[list[str]], list[object], o
     monkeypatch.setattr(node_operations, "_collect_candidate_nodes", _collect)
     monkeypatch.setattr(node_operations, "_resolve_with_llm", _resolve_with_llm)
 
+    # A driver that reports the canonical node as absent: this is the first self episode in the
+    # namespace. The resolver refuses to run without one, because an unreadable canonical node is
+    # never evidence that it does not exist.
+    from graphiti_core.errors import NodeNotFoundError
+    from graphiti_core.nodes import EntityNode
+
+    async def _get_by_uuid(driver, uuid):
+        raise NodeNotFoundError(uuid)
+
+    monkeypatch.setattr(EntityNode, "get_by_uuid", staticmethod(_get_by_uuid))
+
     resolved, uuid_map, _pairs = await node_operations.resolve_extracted_nodes(
-        SimpleNamespace(llm_client=object()), nodes
+        SimpleNamespace(llm_client=object(), driver=object()), nodes
     )
     return searched, llm_calls, (resolved, uuid_map)
 
@@ -116,14 +127,14 @@ async def test_proven_self_triggers_no_candidate_search_and_no_dedup_llm(monkeyp
     ctx = self_context_for_pending_episode(source="user", namespace="default", episode_uuid="ep")
     try:
         receipt = begin_extraction_receipt("ep", "body", self_identity=ctx)
-        nodes = [_node("rand-1", "user"), _node("rand-2", "Rachel")]
+        nodes = [_node("rand-1", "I"), _node("rand-2", "Rachel")]
         receipt.self_bind_result = bind_canonical_self(nodes, [], {}, ctx)
         assert receipt.self_bind_result.bound
 
         searched, llm_calls, (resolved, uuid_map) = await _resolve(monkeypatch, nodes)
 
         assert searched, "candidate collection was never invoked at all"
-        assert "user" not in searched[0], "the proven self was submitted to candidate search"
+        assert "I" not in searched[0], "the proven self was submitted to candidate search"
         assert "Rachel" in searched[0], "the ordinary entity must still be searched"
         assert llm_calls == [], "an LLM was asked to decide the human's identity"
 
@@ -169,10 +180,10 @@ async def test_existing_canonical_node_is_preserved_not_overwritten(monkeypatch)
     canonical = self_uuid_for_namespace("default")
     try:
         receipt = begin_extraction_receipt("ep", "body", self_identity=ctx)
-        nodes = [_node("rand-1", "user")]
+        nodes = [_node("rand-1", "I")]
         receipt.self_bind_result = bind_canonical_self(nodes, [], {}, ctx)
 
-        stored = _node(canonical, "user")
+        stored = _node(canonical, "I")
         stored.summary = "accumulated summary the extraction does not have"
         stored.attributes = {"is_self": True, "entity_role": "self", "user_flagged": True}
 
@@ -215,7 +226,7 @@ async def test_first_self_episode_creates_the_canonical_node(monkeypatch):
     ctx = self_context_for_pending_episode(source="user", namespace="default", episode_uuid="ep")
     try:
         receipt = begin_extraction_receipt("ep", "body", self_identity=ctx)
-        nodes = [_node("rand-1", "user")]
+        nodes = [_node("rand-1", "I")]
         receipt.self_bind_result = bind_canonical_self(nodes, [], {}, ctx)
 
         from graphiti_core.errors import NodeNotFoundError
@@ -321,3 +332,16 @@ async def test_existing_node_is_not_restamped(monkeypatch):
     got = await _existing_canonical_node(SimpleNamespace(driver=object()), _node("x", "user"), None)
     assert got is stored
     assert got.attributes["user_flagged"] is True
+
+
+@pytest.mark.unit
+async def test_a_missing_driver_is_not_evidence_that_the_node_is_absent():
+    """REVIEW P2. An absent driver is an operational invariant failure. Substituting the sparse
+    extracted node would let graphiti's replacing save erase the stored canonical node -- the same
+    defect as swallowing a transient read error, reached through a different door."""
+    from types import SimpleNamespace
+
+    from menhir.infrastructure.graphiti_model_patches import _existing_canonical_node
+
+    with pytest.raises(RuntimeError):
+        await _existing_canonical_node(SimpleNamespace(driver=None), _node("x", "I"), None)

@@ -60,8 +60,8 @@ def _untrusted(namespace: str = "default") -> SelfIdentityContext:
 
 @pytest.mark.unit
 def test_proven_self_binds_to_the_deterministic_uuid():
-    nodes = [_Node("random-1", "user"), _Node("random-2", "Rachel")]
-    edges = [_Edge("random-1", "random-2", "user knows Rachel")]
+    nodes = [_Node("random-1", "I"), _Node("random-2", "Rachel")]
+    edges = [_Edge("random-1", "random-2", "I know Rachel")]
     index_map = {"random-1": [0], "random-2": [0]}
 
     result = bind_canonical_self(nodes, edges, index_map, _trusted())
@@ -77,7 +77,7 @@ def test_both_edge_directions_follow_the_rewrite():
     """An edge left pointing at the extractor's discarded UUID references a node that no longer
     exists -- the fact is silently lost."""
     canonical = self_uuid_for_namespace("default")
-    nodes = [_Node("random-1", "user"), _Node("other", "Rachel")]
+    nodes = [_Node("random-1", "I"), _Node("other", "Rachel")]
     edges = [
         _Edge("random-1", "other", "outgoing"),
         _Edge("other", "random-1", "incoming"),
@@ -93,7 +93,7 @@ def test_both_edge_directions_follow_the_rewrite():
 @pytest.mark.unit
 def test_index_map_follows_with_no_lost_indices():
     canonical = self_uuid_for_namespace("default")
-    nodes = [_Node("random-1", "user")]
+    nodes = [_Node("random-1", "I")]
     index_map = {"random-1": [0, 2], "unrelated": [1]}
 
     bind_canonical_self(nodes, [], index_map, _trusted())
@@ -104,16 +104,10 @@ def test_index_map_follows_with_no_lost_indices():
 
 
 @pytest.mark.unit
-def test_multiple_self_aliases_fail_closed_rather_than_collapsing():
-    """REVIEW P1. Episode-level evidence proves WHO AUTHORED the episode -- not which extracted
-    node is that author. A human turn can legitimately discuss an application/RBAC `user` distinct
-    from the speaker ("I gave the user read access"), so collapsing every self-looking node would
-    fold a foreign subject into the human identity, which no later migration can separate.
-
-    Binding therefore requires exactly one candidate; anything else fails closed and writes
-    nothing.
-    """
-    nodes = [_Node("a", "user"), _Node("b", "I"), _Node("c", "Rachel")]
+def test_two_first_person_nodes_fail_closed_rather_than_guessing():
+    """Node-level authority still cannot say WHICH of two first-person nodes is the author, so
+    the payload fails closed and writes nothing."""
+    nodes = [_Node("a", "I"), _Node("b", "me"), _Node("c", "Rachel")]
     edges = [_Edge("a", "c"), _Edge("b", "c")]
     index_map = {"a": [0], "b": [1], "c": [0]}
 
@@ -127,17 +121,59 @@ def test_multiple_self_aliases_fail_closed_rather_than_collapsing():
 
 
 @pytest.mark.unit
-def test_application_user_beside_first_person_does_not_bind():
-    """The concrete false positive the review named."""
+def test_application_user_beside_first_person_is_left_alone():
+    """REVIEW P1, the concrete probe. "I gave the user read access": the first person is the
+    author and binds; the application/RBAC `user` is a foreign subject and must keep its own
+    uuid. Authorship proves who wrote the turn, never which entity they wrote about."""
+    canonical = self_uuid_for_namespace("default")
     nodes = [_Node("speaker", "I"), _Node("rbac", "the user")]
-    with pytest.raises(AmbiguousSelfBindingError):
-        bind_canonical_self(nodes, [], {}, _trusted())
-    assert [n.uuid for n in nodes] == ["speaker", "rbac"]
+
+    result = bind_canonical_self(nodes, [], {}, _trusted())
+
+    assert result.outcome is SelfBindOutcome.BOUND
+    assert nodes[0].uuid == canonical
+    assert nodes[1].uuid == "rbac"
+    assert result.self_like_without_evidence == 1
+
+
+@pytest.mark.unit
+def test_lone_generic_user_in_a_trusted_turn_does_not_bind():
+    """REVIEW P1 (round 2). A single self-LIKE node is not thereby the author: a trusted turn
+    saying "the user table has 3 rows" extracts one node named `user` that is not a person.
+    Episode authorship never promotes it, and the outcome is recorded as an ordinary entity."""
+    nodes = [_Node("rbac", "user")]
+    edges = [_Edge("rbac", "other")]
+    index_map = {"rbac": [0]}
+
+    result = bind_canonical_self(nodes, edges, index_map, _trusted())
+
+    assert result.outcome is SelfBindOutcome.ORDINARY_USER_ENTITY
+    assert result.bound is False
+    assert result.self_like_without_evidence == 1
+    assert nodes[0].uuid == "rbac"
+    assert edges[0].source_node_uuid == "rbac"
+    assert index_map == {"rbac": [0]}
+
+
+@pytest.mark.unit
+def test_explicit_self_subject_admits_a_third_person_reference():
+    """The declared extension point: a trusted internal caller vouching that the episode's
+    subject IS the owner supplies the node-level authority a bare human turn cannot."""
+    ctx = SelfIdentityContext(
+        namespace="default",
+        speaker_role=SpeakerRole.USER,
+        evidence_kind=SelfEvidenceKind.EXPLICIT_SELF_SUBJECT,
+        source_kind="manual",
+    )
+    nodes = [_Node("n1", "the user")]
+    result = bind_canonical_self(nodes, [], {}, ctx)
+    assert result.outcome is SelfBindOutcome.BOUND
+    assert nodes[0].uuid == self_uuid_for_namespace("default")
 
 
 @pytest.mark.unit
 def test_named_namespace_binds_to_its_own_identity():
-    nodes = [_Node("random-1", "user")]
+    nodes = [_Node("random-1", "I")]
     bind_canonical_self(nodes, [], {}, _trusted("proj-a"))
     assert nodes[0].uuid == self_uuid_for_namespace("proj-a")
     assert nodes[0].uuid != self_uuid_for_namespace("default")
@@ -223,7 +259,7 @@ def test_canonical_uuid_held_by_a_non_self_entity_is_refused():
     """Rewriting here would silently absorb an unrelated entity into the human. Fail visibly and
     leave the episode retryable instead of guessing."""
     canonical = self_uuid_for_namespace("default")
-    nodes = [_Node("random-1", "user"), _Node(canonical, "Rachel")]
+    nodes = [_Node("random-1", "I"), _Node(canonical, "Rachel")]
 
     with pytest.raises(AmbiguousSelfBindingError):
         bind_canonical_self(nodes, [], {}, _trusted())
@@ -233,7 +269,7 @@ def test_canonical_uuid_held_by_a_non_self_entity_is_refused():
 def test_refusal_leaves_the_payload_unwritten():
     """The failure path must not half-apply: no graph write comes from a raised bind."""
     canonical = self_uuid_for_namespace("default")
-    nodes = [_Node(canonical, "Rachel"), _Node("random-1", "user")]
+    nodes = [_Node(canonical, "Rachel"), _Node("random-1", "I")]
     edges = [_Edge("random-1", canonical)]
     index_map = {"random-1": [0]}
 
@@ -267,7 +303,7 @@ def test_a_failure_midway_rolls_the_whole_payload_back():
             raise ValueError("immutable endpoint")
 
     edge = _FrozenTargetEdge("other", "random-1")
-    nodes = [_Node("random-1", "user"), _Node("keep", "Rachel")]
+    nodes = [_Node("random-1", "I"), _Node("keep", "Rachel")]
     index_map = {"random-1": [0]}
 
     with pytest.raises(AmbiguousSelfBindingError):
@@ -277,33 +313,6 @@ def test_a_failure_midway_rolls_the_whole_payload_back():
     assert nodes[0].uuid == "random-1"
     assert [n.uuid for n in nodes] == ["random-1", "keep"]
     assert index_map == {"random-1": [0]}
-
-
-@pytest.mark.skip(reason="alias collapse removed: multiple self aliases now fail closed (review P1)")
-@pytest.mark.unit
-def test_collapsed_nodes_are_restored_on_rollback():
-    """Alias collapse removes nodes from the caller's list; a failed bind must put them back."""
-
-    class _FrozenSourceEdge:
-        def __init__(self, source: str, target: str) -> None:
-            self._source = source
-            self.target_node_uuid = target
-
-        @property
-        def source_node_uuid(self) -> str:
-            return self._source
-
-        @source_node_uuid.setter
-        def source_node_uuid(self, value: str) -> None:
-            raise ValueError("immutable endpoint")
-
-    edge = _FrozenSourceEdge("a", "c")
-    nodes = [_Node("a", "user"), _Node("b", "I"), _Node("c", "Rachel")]
-
-    with pytest.raises(AmbiguousSelfBindingError):
-        bind_canonical_self(nodes, [edge], {"a": [0], "b": [1]}, _trusted())
-
-    assert [n.uuid for n in nodes] == ["a", "b", "c"]
 
 
 @pytest.mark.unit
@@ -317,14 +326,14 @@ def test_binding_works_against_real_graphiti_models():
 
     now = datetime.now(timezone.utc)
     canonical = self_uuid_for_namespace("default")
-    human = EntityNode(uuid="rand-1", name="user", group_id="", labels=["Entity"], created_at=now)
+    human = EntityNode(uuid="rand-1", name="I", group_id="", labels=["Entity"], created_at=now)
     other = EntityNode(uuid="rand-2", name="Rachel", group_id="", labels=["Entity"], created_at=now)
     edge = EntityEdge(
         uuid="e1",
         source_node_uuid="rand-1",
         target_node_uuid="rand-2",
         name="knows",
-        fact="user knows Rachel",
+        fact="I know Rachel",
         group_id="",
         created_at=now,
         episodes=[],
@@ -345,7 +354,7 @@ def test_binding_works_against_real_graphiti_models():
 @pytest.mark.unit
 def test_result_carries_only_structured_fields():
     """Instrumentation must not leak memory content or arbitrary entity names."""
-    nodes = [_Node("random-1", "user")]
+    nodes = [_Node("random-1", "I")]
     result = bind_canonical_self(nodes, [_Edge("random-1", "x")], {"random-1": [0]}, _trusted())
     rendered = repr(result)
     assert "user" not in rendered.replace("self_uuid", "")
@@ -384,7 +393,7 @@ def test_mode_parsing_fails_safe(value, expected):
 
 @pytest.mark.unit
 def test_off_mode_reproduces_pre_change_behavior():
-    nodes = [_Node("random-1", "user")]
+    nodes = [_Node("random-1", "I")]
     edges = [_Edge("random-1", "other")]
     index_map = {"random-1": [0]}
 
@@ -399,7 +408,7 @@ def test_off_mode_reproduces_pre_change_behavior():
 @pytest.mark.unit
 def test_observe_mode_reports_without_mutating():
     """Observe must be able to answer "what would have happened" with zero payload change."""
-    nodes = [_Node("random-1", "user")]
+    nodes = [_Node("random-1", "I")]
     edges = [_Edge("random-1", "other")]
     index_map = {"random-1": [0]}
 
@@ -417,7 +426,7 @@ def test_observe_mode_reports_without_mutating():
 @pytest.mark.unit
 def test_observe_surfaces_the_multi_alias_refusal_too():
     """Observe exists to find these before enforce can act on them."""
-    nodes = [_Node("a", "user"), _Node("b", "I")]
+    nodes = [_Node("a", "me"), _Node("b", "I")]
     with pytest.raises(AmbiguousSelfBindingError):
         bind_canonical_self(nodes, [], {}, _trusted(), SelfBindMode.OBSERVE)
 
@@ -426,7 +435,7 @@ def test_observe_surfaces_the_multi_alias_refusal_too():
 def test_observe_does_not_trigger_the_resolver_bypass():
     """`bound` gates the dedup bypass. An observe-mode node still carries the extractor's uuid,
     so bypassing candidate search for it would strand it with no candidates and no resolution."""
-    nodes = [_Node("random-1", "user")]
+    nodes = [_Node("random-1", "I")]
     result = bind_canonical_self(nodes, [], {}, _trusted(), SelfBindMode.OBSERVE)
     assert result.outcome is SelfBindOutcome.BOUND
     assert result.bound is False
@@ -436,7 +445,7 @@ def test_observe_does_not_trigger_the_resolver_bypass():
 def test_observe_still_surfaces_the_ambiguous_case():
     """Observe exists to find problems before enforce can cause them."""
     canonical = self_uuid_for_namespace("default")
-    nodes = [_Node("random-1", "user"), _Node(canonical, "Rachel")]
+    nodes = [_Node("random-1", "I"), _Node(canonical, "Rachel")]
     with pytest.raises(AmbiguousSelfBindingError):
         bind_canonical_self(nodes, [], {}, _trusted(), SelfBindMode.OBSERVE)
 
@@ -448,7 +457,7 @@ def test_observe_still_surfaces_the_ambiguous_case():
 def test_telemetry_carries_no_content_or_entity_names():
     """Instrumentation must never leak memory text or arbitrary entity names -- the names in
     question are exactly the ones a user typed. Enums, counts, UUIDs and namespace only."""
-    nodes = [_Node("random-1", "user"), _Node("secret", "Rachel's divorce lawyer")]
+    nodes = [_Node("random-1", "I"), _Node("secret", "Rachel's divorce lawyer")]
     ctx = _trusted()
     result = bind_canonical_self(nodes, [], {}, ctx)
 
@@ -491,3 +500,85 @@ def test_telemetry_without_identity_still_renders():
     details = result.telemetry_details(None)
     assert details["outcome"] == "not_eligible"
     assert "namespace" not in details
+
+
+# --------------------------------------------------------------------------- refusal is recorded
+
+
+def _recording_binder(monkeypatch, nodes, mode):
+    """Drive the production wrapper and capture what it recorded."""
+    import menhir.infrastructure.telemetry.recorders as recorders
+    from menhir.infrastructure.graphiti_extraction_patches import (
+        _record_self_binding,
+        begin_extraction_receipt,
+        clear_extraction_receipt,
+    )
+
+    recorded: list[dict] = []
+    monkeypatch.setattr(
+        recorders,
+        "record_lifecycle_event",
+        lambda **kw: recorded.append(kw),
+    )
+    try:
+        receipt = begin_extraction_receipt(
+            "ep", "body", self_identity=_trusted(), self_bind_mode=mode
+        )
+        return _record_self_binding(nodes, [], {}, receipt), recorded
+    finally:
+        clear_extraction_receipt()
+
+
+@pytest.mark.unit
+def test_an_ambiguous_refusal_is_recorded_before_it_raises(monkeypatch):
+    """REVIEW P2. A refusal is a DECISION. Raising before recording makes the one outcome an
+    operator most needs during an observation window the only invisible one."""
+    nodes = [_Node("a", "I"), _Node("b", "me")]
+    recorded: list[dict] = []
+
+    import menhir.infrastructure.telemetry.recorders as recorders
+    from menhir.infrastructure.graphiti_extraction_patches import (
+        _record_self_binding,
+        begin_extraction_receipt,
+        clear_extraction_receipt,
+    )
+
+    monkeypatch.setattr(recorders, "record_lifecycle_event", lambda **kw: recorded.append(kw))
+    try:
+        receipt = begin_extraction_receipt(
+            "ep", "body", self_identity=_trusted(), self_bind_mode=SelfBindMode.ENFORCE
+        )
+        with pytest.raises(AmbiguousSelfBindingError):
+            _record_self_binding(nodes, [], {}, receipt)
+    finally:
+        clear_extraction_receipt()
+
+    assert recorded, "the refusal raised without recording the decision"
+    assert recorded[0]["details"]["outcome"] == "ambiguous"
+
+
+@pytest.mark.unit
+def test_observe_records_the_refusal_and_does_not_fail_the_episode(monkeypatch):
+    """Observe exists to measure what enforce would do WITHOUT changing behavior. Propagating the
+    refusal there would make merely observing a durable change in ingest success."""
+    nodes = [_Node("a", "I"), _Node("b", "me")]
+
+    result, recorded = _recording_binder(monkeypatch, nodes, SelfBindMode.OBSERVE)
+
+    assert result.outcome is SelfBindOutcome.AMBIGUOUS
+    assert [n.uuid for n in nodes] == ["a", "b"]
+    assert recorded, "the refusal produced no telemetry"
+    details = recorded[0]["details"]
+    assert details["outcome"] == "ambiguous"
+    assert details["self_like_without_evidence"] == 2
+
+
+@pytest.mark.unit
+def test_ordinary_user_entity_is_recorded_as_its_own_outcome(monkeypatch):
+    """The count that says how often a trusted turn mentions a `user` binding declines to claim."""
+    result, recorded = _recording_binder(
+        monkeypatch, [_Node("rbac", "user")], SelfBindMode.ENFORCE
+    )
+
+    assert result.outcome is SelfBindOutcome.ORDINARY_USER_ENTITY
+    assert recorded[0]["details"]["outcome"] == "ordinary_user_entity"

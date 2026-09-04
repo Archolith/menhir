@@ -14,6 +14,9 @@ Two rules carry the whole design:
 2. **One formula.** :func:`self_uuid_for_namespace` is the only permitted derivation of the
    canonical self UUID. Copies are how a split identity gets created; see the RCA at
    ``.agent/plans/menhir-scanner-generic-entity-recall-pollution-rca.md``.
+3. **Authorship is not subjecthood.** Proving who wrote an episode does not prove which extracted
+   entity that author is. :func:`eligible_self_evidence` answers the first question and
+   :func:`proves_self_subject` the second; binding requires both.
 
 The physical Graphiti partition is derived separately by
 :func:`menhir.domain.namespace.namespace_to_group_id`. Logical ``default`` maps to physical
@@ -31,14 +34,17 @@ from uuid import NAMESPACE_URL, uuid5
 from menhir.domain.namespace import normalize_namespace
 
 __all__ = [
+    "FIRST_PERSON_SELF_ALIASES",
     "GATE_APPROVED_HUMAN_SOURCES",
     "SELF_ALIASES",
+    "THIRD_PERSON_SELF_ALIASES",
     "SelfEvidenceKind",
     "SelfIdentityContext",
     "SpeakerRole",
     "eligible_self_evidence",
     "is_self_alias",
     "normalize_logical_namespace",
+    "proves_self_subject",
     "self_context_for_pending_episode",
     "self_uuid_for_namespace",
 ]
@@ -124,7 +130,18 @@ GATE_APPROVED_HUMAN_SOURCES = frozenset({"user", "manual"})
 #:   that producer emits; admitting it here would bind an entity named "speaker" to the human.
 #:
 #: Do not merge them.
-SELF_ALIASES = frozenset({"user", "the user", "i", "me", "my", "mine", "myself"})
+#: First-person references. Inside an episode whose author is proven, one of these names the
+#: AUTHOR by grammar -- that is a fact about the node, not about the episode.
+FIRST_PERSON_SELF_ALIASES = frozenset({"i", "me", "my", "mine", "myself"})
+
+#: Third-person labels for the human. These are self-LIKE and never self-PROVING on their own: a
+#: human turn can discuss an application or RBAC ``user`` distinct from the speaker ("I gave the
+#: user read access"), and an entity named ``user`` in a scan is ordinary software vocabulary.
+#: They bind only under :attr:`SelfEvidenceKind.EXPLICIT_SELF_SUBJECT`, where a trusted internal
+#: caller has vouched that the episode's subject IS the owner.
+THIRD_PERSON_SELF_ALIASES = frozenset({"user", "the user"})
+
+SELF_ALIASES = FIRST_PERSON_SELF_ALIASES | THIRD_PERSON_SELF_ALIASES
 
 
 @dataclass(frozen=True, slots=True)
@@ -190,9 +207,46 @@ def is_self_alias(name: Any) -> bool:
     Callers must establish :func:`eligible_self_evidence` first; a node passing this check
     without trusted evidence stays an ordinary semantic entity.
     """
+    return _normalize_alias(name) in SELF_ALIASES
+
+
+def _normalize_alias(name: Any) -> str:
+    """Fold an extracted entity name for alias comparison. ``""`` for anything unusable."""
     if name is None:
+        return ""
+    return " ".join(str(name).strip().lower().split())
+
+
+def proves_self_subject(name: Any, context: SelfIdentityContext | None) -> bool:
+    """Whether *name*, in an episode with *context*, proves THIS NODE is the owning human.
+
+    This is the node-level half of the contract, and it exists because the episode-level half is
+    not sufficient. :func:`eligible_self_evidence` proves who AUTHORED an episode; it says nothing
+    about which extracted entity is that author. Treating authorship as node-level authority binds
+    whatever self-like entity happens to appear -- an RBAC ``user``, a `users` table, the customer
+    a support turn is about -- into the canonical human identity, which no later migration can
+    separate again.
+
+    Two combinations prove a subject, and no others:
+
+    * a FIRST-PERSON name in a :attr:`SelfEvidenceKind.TRUSTED_USER_TURN`. The author is speaking,
+      and "I" in the author's own words is the author.
+    * any self alias under :attr:`SelfEvidenceKind.EXPLICIT_SELF_SUBJECT`, where a trusted
+      internal caller has declared the episode's subject to be the owner. That declaration is the
+      per-node authority; nothing infers it from text.
+
+    A third-person ``user`` in an ordinary human turn is therefore NOT the human here. It is
+    counted as a self-like emission and takes the ordinary entity path.
+    """
+    if not eligible_self_evidence(context):
         return False
-    return " ".join(str(name).strip().lower().split()) in SELF_ALIASES
+    assert context is not None  # narrowed by eligible_self_evidence
+    normalized = _normalize_alias(name)
+    if not normalized:
+        return False
+    if context.evidence_kind is SelfEvidenceKind.EXPLICIT_SELF_SUBJECT:
+        return normalized in SELF_ALIASES
+    return normalized in FIRST_PERSON_SELF_ALIASES
 
 
 def self_context_for_pending_episode(

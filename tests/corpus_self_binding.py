@@ -18,7 +18,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from menhir.domain.self_identity import SelfIdentityContext, self_context_for_pending_episode
+from menhir.domain.self_identity import (
+    SelfEvidenceKind,
+    SelfIdentityContext,
+    SpeakerRole,
+    self_context_for_pending_episode,
+)
 from menhir.infrastructure.self_binding import SelfBindOutcome
 
 
@@ -57,16 +62,19 @@ _SELF_TURNS = (
         name="first_person_fact",
         category="trusted_user_turn",
         source="user",
-        entity_names=("user", "Chicago"),
+        entity_names=("I", "Chicago"),
         expected=SelfBindOutcome.BOUND,
         expects_self=True,
-        note="The ordinary case: a gate-approved human turn stating a fact about themselves.",
+        note=(
+            "The ordinary case: a gate-approved human turn stating a fact about themselves in "
+            "the first person, which is what makes THIS NODE the author."
+        ),
     ),
     CorpusCase(
         name="single_self_alias_with_third_party",
         category="trusted_user_turn",
         source="user",
-        entity_names=("user", "Rachel"),
+        entity_names=("me", "Rachel"),
         expected=SelfBindOutcome.BOUND,
         expects_self=True,
         note="One self alias beside a named third party is the ordinary shape.",
@@ -75,10 +83,30 @@ _SELF_TURNS = (
         name="manual_semantic_memory",
         category="manual_memory",
         source="manual",
-        entity_names=("user", "espresso"),
+        entity_names=("I", "espresso"),
         expected=SelfBindOutcome.BOUND,
         expects_self=True,
         note="`manual` is apex-tier and gated identically to `user`; a granted claim is the human.",
+    ),
+    CorpusCase(
+        name="explicit_self_subject_third_person",
+        category="explicit_self_subject",
+        source="manual",
+        entity_names=("the user", "espresso"),
+        expected=SelfBindOutcome.BOUND,
+        expects_self=True,
+        identity_override=SelfIdentityContext(
+            namespace="default",
+            speaker_role=SpeakerRole.USER,
+            evidence_kind=SelfEvidenceKind.EXPLICIT_SELF_SUBJECT,
+            source_kind="manual",
+            episode_uuid="ep-explicit_self_subject_third_person",
+        ),
+        note=(
+            "The only way a third-person reference binds: a trusted internal caller declares the "
+            "episode's subject IS the owner, which is node-level authority the text cannot give. "
+            "No production producer emits this today."
+        ),
     ),
     CorpusCase(
         name="human_turn_about_third_parties_only",
@@ -97,22 +125,35 @@ _CONTROLS = (
     # --- review P1: a trusted turn that also discusses an application user ---
     CorpusCase(
         name="human_turn_mentioning_an_application_user",
-        category="ambiguous_subject",
+        category="mixed_subject",
         source="user",
         entity_names=("I", "the user", "AuthService"),
-        expected=SelfBindOutcome.AMBIGUOUS,
+        expected=SelfBindOutcome.BOUND,
+        expects_self=True,
         note=(
-            "'I gave the user read access.' Episode-level evidence proves the AUTHOR, not which "
-            "node is the author. Collapsing both would fold an RBAC subject into the human."
+            "'I gave the user read access.' The first person is the author and binds; the RBAC "
+            "`user` beside it keeps its own uuid, and is counted as a self-like non-bind."
         ),
     ),
     CorpusCase(
-        name="human_turn_with_two_self_aliases",
+        name="lone_generic_user_in_a_human_turn",
+        category="generic_account_user",
+        source="user",
+        entity_names=("user", "permissions table"),
+        expected=SelfBindOutcome.ORDINARY_USER_ENTITY,
+        note=(
+            "REVIEW P1 round 2. A trusted author does not make a lone third-person `user` the "
+            "author. This is the exact shape production fragments on, and declining it is why "
+            "enforce prevents fewer forks than the plan first assumed."
+        ),
+    ),
+    CorpusCase(
+        name="human_turn_with_two_first_person_nodes",
         category="ambiguous_subject",
         source="user",
-        entity_names=("user", "myself"),
+        entity_names=("I", "myself"),
         expected=SelfBindOutcome.AMBIGUOUS,
-        note="Even two genuine aliases cannot be PROVEN identical without per-node authority.",
+        note="Both carry subject authority; nothing proves they are one node. Fail closed.",
     ),
     # --- assistant echo ---
     CorpusCase(
@@ -206,7 +247,7 @@ _CONTROLS = (
         name="relationless_repair_of_user_turn",
         category="retry_repair",
         source="user",
-        entity_names=("user", "Rachel"),
+        entity_names=("I", "Rachel"),
         expected=SelfBindOutcome.BOUND,
         expects_self=True,
         note=(

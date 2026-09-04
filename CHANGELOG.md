@@ -28,15 +28,19 @@
 
 ## 2026-09-04 - close six review findings on the canonical-self prevention path
 
-- **Binding now requires exactly one self-alias candidate.** The previous implementation selected
-  every self-looking node and collapsed them unconditionally, so a trusted human turn containing
-  both `I` and a distinct application/RBAC `user` rewrote BOTH to the human uuid. Trusted evidence
-  proves who AUTHORED an episode, not which extracted node is that author. More than one candidate
-  now raises `AmbiguousSelfBindingError` and writes nothing, leaving the episode retryable.
-  This removes a capability: multi-alias self episodes will not bind until per-node subject
-  authority exists. Folding a foreign subject into the canonical identity is the one outcome no
-  later migration can separate, so failing closed is the correct trade.
-- **A canonical-node read failure is no longer treated as "absent".** Graphiti saves with
+- **Binding now requires node-level subject authority, not just a proven author.** Trusted
+  evidence proves who AUTHORED an episode; it never proves which extracted entity that author is.
+  A first-person name (`I`, `me`, `my`) in a trusted human turn does prove it, by grammar. A
+  third-person `user` does not -- it is as likely to be an RBAC role, a `users` table, or the
+  person a support turn is about -- so it now stays an ordinary entity and is counted under the
+  new `ordinary_user_entity` outcome. Two proving nodes in one payload raise
+  `AmbiguousSelfBindingError` and write nothing, leaving the episode retryable.
+  This narrows the mechanism: third-person `user` extractions, which are most of the existing
+  fork population, are no longer prevented at write time. Folding a foreign subject into the
+  canonical identity is the one outcome no later migration can separate, so declining is the
+  correct trade -- and `EXPLICIT_SELF_SUBJECT` is the declared extension point for a producer that
+  can vouch for a third-person subject.
+- **A missing driver or a failed canonical-node read is no longer treated as "absent".** Graphiti saves with
   `SET n = $entity_data`, which replaces the property map, so falling back to the sparse extracted
   node on a transient driver error would let a later write erase the stored node's markers,
   provenance, flags and summary. Only `NodeNotFoundError` falls back now.
@@ -45,8 +49,13 @@
   supplies neither, so no structural reader would have recognized the node just created.
 - **Resolution telemetry now covers the LLM outcomes**, not only deterministic similarity:
   `llm_selected_candidate`, `llm_selected_new`, `no_candidates_new`, unresolved count,
-  candidate-count bounds, embedding model and dimension. Per-candidate cosine scores stay
-  unavailable because graphiti's candidate search does not return them.
+  candidate-count bounds, embedding model and dimension. Candidate cosine bounds are now
+  MEASURED from the two name embeddings, since graphiti's search discards the score it ranked by,
+  and the event reports how many pairs were measurable. Dedupe-prompt section sizes are recorded
+  per batch.
+- **An ambiguous refusal is now recorded before it raises**, and observe mode no longer fails
+  the episode: the outcome an operator most needs during an observation window was the only one
+  producing no telemetry.
 - **`detect_self_forks` no longer writes.** It obtained its uuid by calling `ensure_self_entity`,
   which MERGEs, so a census mutated the graph it was inspecting.
 

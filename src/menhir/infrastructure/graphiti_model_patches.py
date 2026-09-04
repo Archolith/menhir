@@ -1076,11 +1076,80 @@ async def _existing_canonical_node(clients: Any, extracted: Any, identity: Any) 
 
     driver = getattr(clients, "driver", None)
     if driver is None:
-        return _stamp_canonical_self(extracted, identity)
+        # An absent driver is an operational invariant failure, not evidence that the canonical
+        # node does not exist. Falling back here would commit the sparse extracted node and let
+        # graphiti's replacing save erase the stored one -- the same defect as swallowing a
+        # transient read error, reached by a different door.
+        raise RuntimeError(
+            "canonical-self resolution requires a graph driver; refusing to substitute the "
+            "extracted node for an unread canonical node"
+        )
     try:
         return await EntityNode.get_by_uuid(driver, extracted.uuid)
     except NodeNotFoundError:
         return _stamp_canonical_self(extracted, identity)
+
+
+def _cosine(a: Any, b: Any) -> float | None:
+    """Cosine similarity of two embedding vectors, or ``None`` when either is unusable."""
+    try:
+        if not a or not b or len(a) != len(b):
+            return None
+        dot = sum(float(x) * float(y) for x, y in zip(a, b, strict=True))
+        na = sum(float(x) * float(x) for x in a) ** 0.5
+        nb = sum(float(y) * float(y) for y in b) ** 0.5
+        if na == 0.0 or nb == 0.0:
+            return None
+        return dot / (na * nb)
+    except Exception:  # noqa: BLE001 - measurement only
+        return None
+
+
+def _candidate_score_bounds(
+    extracted_nodes: Any, candidates_by_extracted: Any
+) -> tuple[float | None, float | None, int]:
+    """Measured cosine bounds over the candidate window, and how many pairs were measurable.
+
+    Graphiti's candidate search returns nodes, not scores -- `node_similarity_search` discards the
+    similarity it ranked by -- so the bound is MEASURED here from the two name embeddings rather
+    than read back. Candidates hydrated without `name_embedding` are therefore unmeasurable, and
+    the pair count says so instead of a zero implying a low score. The RCA's mechanism is a window
+    saturated at cosine 1.0; a max pinned at 1.0 with a full window is that signature.
+    """
+    scores: list[float] = []
+    measurable = 0
+    for node, candidates in zip(extracted_nodes, candidates_by_extracted, strict=False):
+        query_vector = getattr(node, "name_embedding", None)
+        for candidate in candidates or []:
+            score = _cosine(query_vector, getattr(candidate, "name_embedding", None))
+            if score is None:
+                continue
+            measurable += 1
+            scores.append(score)
+    if not scores:
+        return None, None, 0
+    return min(scores), max(scores), measurable
+
+
+def _measure_prompt_sections(batch_nodes: Any, candidate_nodes: Any) -> dict[str, int]:
+    """Size the two sections of the dedupe prompt, in the fields graphiti actually serializes.
+
+    Not an estimate of the rendered prompt: it measures the same inputs
+    (`extracted_nodes_context` name/labels, `existing_nodes_context` name plus the 120-character
+    summary slice) that `_resolve_with_llm` builds, so a growing candidate section is attributable
+    to the window rather than to prompt boilerplate.
+    """
+    def _chars(values: Any) -> int:
+        return sum(len(str(v or "")) for v in values)
+
+    return {
+        "entity_count": len(batch_nodes),
+        "entity_chars": _chars(getattr(n, "name", "") for n in batch_nodes)
+        + _chars(",".join(getattr(n, "labels", []) or []) for n in batch_nodes),
+        "candidate_count": len(candidate_nodes),
+        "candidate_chars": _chars(getattr(c, "name", "") for c in candidate_nodes)
+        + _chars((getattr(c, "summary", "") or "")[:120] for c in candidate_nodes),
+    }
 
 
 def _record_resolution_outcomes(
@@ -1090,6 +1159,7 @@ def _record_resolution_outcomes(
     escalated: list[int],
     state: Any,
     pre_resolved_indices: set[int],
+    prompt_sections: list[dict[str, int]] | None = None,
 ) -> None:
     """Record the OUTCOME of the full resolution lifecycle, including the LLM paths.
 
@@ -1123,6 +1193,11 @@ def _record_resolution_outcomes(
 
         # Embedding identity/dimension: what the candidate window was actually built from. A
         # dimension or model change silently alters which candidates are reachable at all.
+        score_min, score_max, scores_measured = _candidate_score_bounds(
+            extracted_nodes, candidates_by_extracted
+        )
+        sections = list(prompt_sections or [])
+
         embedder = getattr(clients, "embedder", None)
         embedder_config = getattr(embedder, "config", None)
         embedding_model = str(getattr(embedder_config, "embedding_model", "") or "") or None
@@ -1151,6 +1226,19 @@ def _record_resolution_outcomes(
                 ),
                 "candidate_count_min": min(candidate_counts) if candidate_counts else 0,
                 "candidate_count_max": max(candidate_counts) if candidate_counts else 0,
+                "candidate_score_min": score_min,
+                "candidate_score_max": score_max,
+                "candidate_scores_measured": scores_measured,
+                "llm_prompt_batches": len(sections),
+                "llm_prompt_entity_chars_max": (
+                    max((s["entity_chars"] for s in sections), default=0)
+                ),
+                "llm_prompt_candidate_chars_max": (
+                    max((s["candidate_chars"] for s in sections), default=0)
+                ),
+                "llm_prompt_candidate_count_max": (
+                    max((s["candidate_count"] for s in sections), default=0)
+                ),
                 "embedding_model": embedding_model,
                 "embedding_dimension": max(dimensions) if dimensions else None,
             },
@@ -1334,6 +1422,7 @@ def _patch_graphiti_adaptive_dedupe() -> None:
             # mechanism that fragmented this identity: the `user` candidate window saturates
             # with exact-name matches, making the deterministic single-match branch unreachable
             # and routing every extraction to the LLM.
+            prompt_sections: list[dict[str, int]] = []
             pre_resolved_indices: set[int] = set()
             _bound_uuid = _pre_resolved_self_uuid()
             if _bound_uuid:
@@ -1416,6 +1505,14 @@ def _patch_graphiti_adaptive_dedupe() -> None:
                     uuid_map={},
                     unresolved_indices=list(indices),
                 )
+                try:
+                    prompt_sections.append(
+                        _measure_prompt_sections(
+                            [extracted_nodes[i] for i in indices], candidate_nodes
+                        )
+                    )
+                except Exception:  # noqa: BLE001 - instrumentation only
+                    logger.debug("Prompt-section measurement failed", exc_info=True)
 
                 try:
                     await _no_module._resolve_with_llm(
@@ -1465,7 +1562,7 @@ def _patch_graphiti_adaptive_dedupe() -> None:
                 await _resolve_batch(list(state.unresolved_indices))
             _record_resolution_outcomes(
                 clients, extracted_nodes, candidate_nodes_by_extracted, escalated,
-                state, pre_resolved_indices,
+                state, pre_resolved_indices, prompt_sections,
             )
 
             if not state.unresolved_indices and not any(candidate_nodes_by_extracted):

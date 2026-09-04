@@ -27,6 +27,7 @@ from menhir.domain.self_identity import (
     SelfIdentityContext,
     eligible_self_evidence,
     is_self_alias,
+    proves_self_subject,
 )
 
 logger = logging.getLogger(__name__)
@@ -82,6 +83,12 @@ class SelfBindOutcome(StrEnum):
     NOT_ELIGIBLE = "not_eligible"
     NO_SELF_CANDIDATE = "no_self_candidate"
     AMBIGUOUS = "ambiguous"
+    #: The payload held self-LIKE entities, the episode's author was proven, and none of those
+    #: entities carried node-level subject authority -- so they are ordinary entities and take the
+    #: ordinary Graphiti path. Distinct from NO_SELF_CANDIDATE, which saw no self-like name at
+    #: all: this is the count that says how often a trusted turn mentions a third-person `user`
+    #: that binding deliberately declines to claim.
+    ORDINARY_USER_ENTITY = "ordinary_user_entity"
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,6 +102,8 @@ class SelfBindResult:
     self_uuid: str | None = None
     #: UUIDs the extractor minted for the human, now rewritten to :attr:`self_uuid`.
     rewritten_node_uuids: tuple[str, ...] = ()
+    #: Always 0 since alias collapse was removed; kept so the telemetry schema is stable across
+    #: the change and a dashboard reading it does not break.
     nodes_collapsed: int = 0
     edge_endpoints_rewritten: int = 0
     index_map_keys_merged: int = 0
@@ -182,36 +191,49 @@ def bind_canonical_self(
     assert identity is not None  # narrowed by eligible_self_evidence
     canonical_uuid = identity.self_uuid
 
-    self_nodes = [n for n in nodes if is_self_alias(getattr(n, "name", None))]
+    # Two questions, deliberately separated. `self_like` is "could this be the human" -- a name
+    # test, never authority. `self_nodes` is "does THIS NODE carry subject authority", which is
+    # what binding requires. The trusted episode signal proves who AUTHORED the episode and
+    # nothing more; a lone third-person `user` in a human turn is an ordinary entity (an RBAC
+    # role, a `users` table, the customer the turn is about), and rewriting it to the canonical
+    # UUID would fold a foreign subject into the human identity -- the false-positive bind this
+    # module exists to prevent, and the one no later migration can separate again.
+    self_like = [n for n in nodes if is_self_alias(getattr(n, "name", None))]
+    self_nodes = [n for n in nodes if proves_self_subject(getattr(n, "name", None), identity)]
     if not self_nodes:
+        # Self-like names present but none proving: they stay ordinary entities. Counted, because
+        # a persistently high count is what says whether per-node subject authority for
+        # third-person references is worth building.
+        if self_like:
+            return SelfBindResult(
+                SelfBindOutcome.ORDINARY_USER_ENTITY,
+                mode=mode,
+                self_like_without_evidence=len(self_like),
+            )
         return SelfBindResult(SelfBindOutcome.NO_SELF_CANDIDATE, mode=mode)
 
-    # More than one self-looking node cannot be collapsed on episode-level evidence alone. The
-    # trusted signal proves WHO AUTHORED the episode; it says nothing about which extracted node
-    # is that author. A human turn can legitimately discuss an application/RBAC `user` distinct
-    # from the speaker ("I gave the user read access"), and folding both into the human identity
-    # is precisely the false-positive bind this change exists to prevent -- it would corrupt the
-    # canonical identity with a foreign subject, which no later migration can separate.
-    #
-    # Binding therefore requires exactly one candidate. Anything else fails closed and visibly:
-    # the pending episode stays retryable with its raw text intact and nothing is written.
-    # Per-node subject authority would let this collapse safely; it does not exist yet.
+    # Even with node-level authority, two proving nodes cannot both be the author, and episode
+    # evidence cannot say which. Fail closed and visibly: the pending episode stays retryable
+    # with its raw text intact and nothing is written.
     if len(self_nodes) > 1:
         raise AmbiguousSelfBindingError(
-            f"{len(self_nodes)} self-alias nodes in one payload for namespace "
+            f"{len(self_nodes)} nodes claim self-subject authority in one payload for namespace "
             f"{identity.namespace!r}; episode-level evidence cannot prove they are the same "
             f"subject, so refusing to bind"
         )
 
     self_uuids = {_node_uuid(n) for n in self_nodes if _node_uuid(n)}
 
-    # A non-self node already sitting on the canonical UUID would be silently absorbed into the
-    # human by the rewrite below. That is a real contradiction, not an alias collapse.
+    # Any node OTHER than the proving one already sitting on the canonical UUID would be
+    # silently absorbed into the human by the rewrite below. Identity by name is not enough to
+    # excuse that: a third-person `user` holding the canonical uuid is exactly the fork this
+    # change exists to stop being created.
+    proving = {id(n) for n in self_nodes}
     for node in nodes:
-        if _node_uuid(node) == canonical_uuid and not is_self_alias(getattr(node, "name", None)):
+        if _node_uuid(node) == canonical_uuid and id(node) not in proving:
             raise AmbiguousSelfBindingError(
-                f"canonical self uuid {canonical_uuid} is already held by non-self entity "
-                f"in namespace {identity.namespace!r}; refusing to bind"
+                f"canonical self uuid {canonical_uuid} is already held by an entity with no "
+                f"subject authority in namespace {identity.namespace!r}; refusing to bind"
             )
 
     if mode is SelfBindMode.OBSERVE:
@@ -222,10 +244,11 @@ def bind_canonical_self(
             mode=mode,
             self_uuid=canonical_uuid,
             rewritten_node_uuids=tuple(sorted(self_uuids)),
+            self_like_without_evidence=len(self_like) - len(self_nodes),
         )
 
+    # Exactly one, guaranteed by the authority check above.
     keeper = self_nodes[0]
-    collapsed: list[Any] = []
 
     # The rewrite spans three structures and is only correct as a unit: a node rewritten while
     # its edges still point at the discarded UUID orphans every fact the episode carried. The
@@ -256,8 +279,6 @@ def bind_canonical_self(
 
     try:
         keeper.uuid = canonical_uuid
-        for node in collapsed:
-            nodes.remove(node)
 
         # Both endpoint directions, or an edge survives pointing at a UUID no node carries.
         endpoints_rewritten = 0
@@ -293,9 +314,9 @@ def bind_canonical_self(
         mode=mode,
         self_uuid=canonical_uuid,
         rewritten_node_uuids=tuple(sorted(self_uuids)),
-        nodes_collapsed=len(collapsed),
         edge_endpoints_rewritten=endpoints_rewritten,
         index_map_keys_merged=keys_merged,
+        self_like_without_evidence=len(self_like) - len(self_nodes),
     )
     logger.info(
         "Canonical self bound namespace=%s episode=%s uuid=%s collapsed=%d endpoints=%d "

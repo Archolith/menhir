@@ -564,7 +564,7 @@ ingestion boundary owns:
 
 | Layer | Responsibility |
 |---|---|
-| `domain/self_identity.py` | the ONE UUID formula, the evidence contract, the alias set |
+| `domain/self_identity.py` | the ONE UUID formula, the evidence contract, node-level subject authority |
 | `services/ingest_intake.py` | admission gate decides whether a `user`/`manual` claim is grounded |
 | `services/enrichment_steps.py` | reconstructs the identity context from the claimed episode |
 | `infrastructure/self_binding.py` | rewrites the proven human across the extraction payload |
@@ -587,19 +587,37 @@ candidates. The rewrite covers the node UUID, both edge endpoint directions and 
 one unit, with rollback: a node rewritten while its edges still point at the discarded UUID would
 orphan the episode's facts.
 
-**Exactly one candidate, or nothing.** Trusted evidence proves who AUTHORED the episode; it does
-not say which extracted node is that author. A human turn can legitimately discuss an
-application/RBAC `user` distinct from the speaker ("I gave the user read access"), so a payload
-containing more than one self alias raises `AmbiguousSelfBindingError` and writes nothing. The
-episode stays retryable with its text intact. This is deliberately conservative: binding a foreign
-subject into the canonical identity is the one outcome no later migration can separate. Collapsing
-multiple aliases safely would require per-node subject authority, which does not exist yet.
+**Authorship is not subjecthood.** Two separate questions, and binding needs both answered:
+
+| Question | Answered by | Evidence |
+|---|---|---|
+| Who wrote this episode? | `eligible_self_evidence` | gate-approved persisted `source` |
+| Which extracted node IS that author? | `proves_self_subject` | the node's grammatical person |
+
+A first-person node (`I`, `me`, `my`, `mine`, `myself`) inside a turn whose author is proven names
+that author by grammar. A third-person `user` / `the user` does not: a human turn can legitimately
+discuss an application/RBAC `user`, a `users` table, or the person a support ticket is about. Those
+stay ordinary entities, take the ordinary Graphiti path, and are recorded under the
+`ordinary_user_entity` outcome. Third-person references bind only under `EXPLICIT_SELF_SUBJECT`,
+where a trusted internal caller vouches for the subject -- the declared extension point, which no
+production producer emits today.
+
+Two nodes carrying subject authority still cannot both be the author, so that payload raises
+`AmbiguousSelfBindingError` and writes nothing; the episode stays retryable with its text intact.
+
+**What this costs, stated plainly.** The existing fork population is named `user`, in the third
+person. Declining those means enforce mode prevents materially fewer new forks than the plan first
+assumed -- it prevents the first-person path and nothing else. That is the deliberate trade:
+binding a foreign subject into the canonical identity is the one outcome no later migration can
+separate. Whether it is worth building per-node authority for third-person references is an
+observe-mode question, answered by the `ordinary_user_entity` count.
 
 **Persisting the canonical node.** Graphiti saves a resolved node with `SET n = $entity_data`,
 which REPLACES the property map. The bypass therefore commits the STORED canonical node when one
-exists, and only falls back to the extracted node on a genuine `NodeNotFoundError` -- a transient
-driver error must fail the (retryable) episode rather than degrade into a sparse overwrite that
-erases markers, provenance, flags and summary. On creation the extracted node is stamped with
+exists, and only falls back to the extracted node on a genuine `NodeNotFoundError`. A transient
+driver error -- or a missing driver, which is the same failure through a different door -- must
+fail the (retryable) episode rather than degrade into a sparse overwrite that erases markers,
+provenance, flags and summary. On creation the extracted node is stamped with
 `is_self`, `entity_role` and the logical namespace, because the generic ingest metadata stamp
 supplies none of them.
 
