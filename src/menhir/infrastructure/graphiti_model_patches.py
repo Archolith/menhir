@@ -1033,6 +1033,24 @@ def _current_episode_key() -> str | None:
     return getattr(receipt, "episode_key", None) or None if receipt is not None else None
 
 
+async def _existing_canonical_node(clients: Any, extracted: Any) -> Any:
+    """Return the persisted canonical self node, or *extracted* when it does not exist yet.
+
+    First trusted-self episode in a namespace: nothing is stored, so the extracted node IS the
+    canonical node and creating it is correct. Every episode after that: the stored node carries
+    state the extraction does not have, and must be the object graphiti writes back.
+    """
+    try:
+        from graphiti_core.nodes import EntityNode
+
+        driver = getattr(clients, "driver", None)
+        if driver is None:
+            return extracted
+        return await EntityNode.get_by_uuid(driver, extracted.uuid)
+    except Exception:  # noqa: BLE001 - absent node, or any lookup failure, falls back to create
+        return extracted
+
+
 def _pre_resolved_self_uuid() -> str | None:
     """The canonical self uuid bound for the current episode, if binding ran and succeeded.
 
@@ -1227,7 +1245,17 @@ def _patch_graphiti_adaptive_dedupe() -> None:
 
             for idx in pre_resolved_indices:
                 node = extracted_nodes[idx]
-                state.resolved_nodes[idx] = node
+                # Commit the EXISTING canonical node when there is one, not the freshly extracted
+                # object. Graphiti persists a resolved node with `SET n = $entity_data`, which
+                # REPLACES the property map rather than merging it, so committing the extraction
+                # would wipe the canonical node's `is_self`, `entity_role`, `namespace`,
+                # `user_flagged`, provenance and accumulated summary on every subsequent self
+                # episode. The ordinary path avoids this precisely because `_promote_resolved_node`
+                # returns the hydrated database node; the bypass has to do the same.
+                #
+                # This is a direct uuid fetch, not candidate acquisition: no cosine search, no
+                # exact/fuzzy resolution, no dedup LLM, no identity gate. D4 is preserved.
+                state.resolved_nodes[idx] = await _existing_canonical_node(clients, node)
                 state.uuid_map[node.uuid] = node.uuid
 
             for idx, (node, candidates) in enumerate(

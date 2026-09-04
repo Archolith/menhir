@@ -144,3 +144,93 @@ async def test_ordinary_entities_still_reach_candidate_search(monkeypatch):
         assert sorted(searched[0]) == ["Rachel", "user"]
     finally:
         clear_extraction_receipt()
+
+
+@pytest.mark.unit
+async def test_existing_canonical_node_is_preserved_not_overwritten(monkeypatch):
+    """Graphiti persists a resolved node with `SET n = $entity_data`, which REPLACES the property
+    map. Committing the freshly extracted object would wipe the canonical node's is_self,
+    entity_role, namespace, user_flagged, provenance and accumulated summary on every subsequent
+    self episode -- silently destroying the identity this change exists to protect.
+
+    The ordinary graphiti path avoids this because _promote_resolved_node returns the hydrated
+    database node. The bypass must do the same.
+    """
+    from types import SimpleNamespace
+
+    import graphiti_core.utils.maintenance.node_operations as node_operations
+    from graphiti_core.nodes import EntityNode
+
+    from menhir.infrastructure.graphiti_model_patches import _patch_graphiti_adaptive_dedupe
+
+    ctx = self_context_for_pending_episode(source="user", namespace="default", episode_uuid="ep")
+    canonical = self_uuid_for_namespace("default")
+    try:
+        receipt = begin_extraction_receipt("ep", "body", self_identity=ctx)
+        nodes = [_node("rand-1", "user")]
+        receipt.self_bind_result = bind_canonical_self(nodes, [], {}, ctx)
+
+        stored = _node(canonical, "user")
+        stored.summary = "accumulated summary the extraction does not have"
+        stored.attributes = {"is_self": True, "entity_role": "self", "user_flagged": True}
+
+        async def _get_by_uuid(driver, uuid):
+            assert uuid == canonical
+            return stored
+
+        monkeypatch.setattr(EntityNode, "get_by_uuid", _get_by_uuid)
+
+        async def _collect(clients, extracted_nodes, existing_nodes_override=None):
+            return [[] for _ in extracted_nodes]
+
+        monkeypatch.setattr(node_operations, "_collect_candidate_nodes", _collect)
+        _patch_graphiti_adaptive_dedupe()
+
+        resolved, uuid_map, _pairs = await node_operations.resolve_extracted_nodes(
+            SimpleNamespace(llm_client=object(), driver=object()), nodes
+        )
+
+        committed = resolved[0]
+        assert committed is stored, "the bypass committed the extraction over the stored node"
+        assert committed.attributes["is_self"] is True
+        assert committed.attributes["user_flagged"] is True
+        assert committed.summary.startswith("accumulated")
+        assert uuid_map[canonical] == canonical
+    finally:
+        clear_extraction_receipt()
+
+
+@pytest.mark.unit
+async def test_first_self_episode_creates_the_canonical_node(monkeypatch):
+    """With nothing stored yet, the extracted node IS the canonical node and must be created."""
+    from types import SimpleNamespace
+
+    import graphiti_core.utils.maintenance.node_operations as node_operations
+    from graphiti_core.nodes import EntityNode
+
+    from menhir.infrastructure.graphiti_model_patches import _patch_graphiti_adaptive_dedupe
+
+    ctx = self_context_for_pending_episode(source="user", namespace="default", episode_uuid="ep")
+    try:
+        receipt = begin_extraction_receipt("ep", "body", self_identity=ctx)
+        nodes = [_node("rand-1", "user")]
+        receipt.self_bind_result = bind_canonical_self(nodes, [], {}, ctx)
+
+        async def _missing(driver, uuid):
+            raise LookupError("no such node")
+
+        monkeypatch.setattr(EntityNode, "get_by_uuid", _missing)
+
+        async def _collect(clients, extracted_nodes, existing_nodes_override=None):
+            return [[] for _ in extracted_nodes]
+
+        monkeypatch.setattr(node_operations, "_collect_candidate_nodes", _collect)
+        _patch_graphiti_adaptive_dedupe()
+
+        resolved, _uuid_map, _pairs = await node_operations.resolve_extracted_nodes(
+            SimpleNamespace(llm_client=object(), driver=object()), nodes
+        )
+        assert resolved[0] is nodes[0]
+        assert resolved[0].uuid == self_uuid_for_namespace("default")
+    finally:
+        clear_extraction_receipt()
