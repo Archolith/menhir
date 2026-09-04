@@ -26,6 +26,30 @@
   paid a 2s timeout to localhost:8082 and logged a WARNING. Tracing is observability
   only, and both network paths are now gated.
 
+## 2026-09-04 - close six review findings on the canonical-self prevention path
+
+- **Binding now requires exactly one self-alias candidate.** The previous implementation selected
+  every self-looking node and collapsed them unconditionally, so a trusted human turn containing
+  both `I` and a distinct application/RBAC `user` rewrote BOTH to the human uuid. Trusted evidence
+  proves who AUTHORED an episode, not which extracted node is that author. More than one candidate
+  now raises `AmbiguousSelfBindingError` and writes nothing, leaving the episode retryable.
+  This removes a capability: multi-alias self episodes will not bind until per-node subject
+  authority exists. Folding a foreign subject into the canonical identity is the one outcome no
+  later migration can separate, so failing closed is the correct trade.
+- **A canonical-node read failure is no longer treated as "absent".** Graphiti saves with
+  `SET n = $entity_data`, which replaces the property map, so falling back to the sparse extracted
+  node on a transient driver error would let a later write erase the stored node's markers,
+  provenance, flags and summary. Only `NodeNotFoundError` falls back now.
+- **The first canonical node in a namespace is stamped** with `is_self`, `entity_role` and the
+  logical namespace. It was previously created without them, and the generic ingest metadata stamp
+  supplies neither, so no structural reader would have recognized the node just created.
+- **Resolution telemetry now covers the LLM outcomes**, not only deterministic similarity:
+  `llm_selected_candidate`, `llm_selected_new`, `no_candidates_new`, unresolved count,
+  candidate-count bounds, embedding model and dimension. Per-candidate cosine scores stay
+  unavailable because graphiti's candidate search does not return them.
+- **`detect_self_forks` no longer writes.** It obtained its uuid by calling `ensure_self_entity`,
+  which MERGEs, so a census mutated the graph it was inspecting.
+
 ## 2026-09-03 - bind the canonical self deterministically, before graphiti dedup
 
 - Menhir now has one authoritative human-self entity per logical namespace, and no longer asks
@@ -185,12 +209,3 @@ predicate-evaluating fake to confirm both guards compose.
 - Added `ingest_document` and `ingest_project` to the exact ChatGPT and Claude operator policies.
   Hosted operators now receive 51 of 54 MCP tools; only `delete_namespace`, `mint_client`, and
   `revoke_client` remain denied.
-
-## 2026-08-29 - promote hosted web clients to operator authority
-
-- Promoted the separate ChatGPT and Claude OAuth clients to exact operator-tier grants with
-  read, write, and admin scopes. Each receives 49 of the 54 MCP tools, including artifact,
-  todo, conflict, scheduler, and scoped memory-administration operations.
-- Kept namespace-wide deletion, host-filesystem ingestion, and client credential administration
-  outside hosted connector authority. Bumped the consent-session schema so the scope elevation
-  requires fresh operator authorization; old access and refresh tokens fail the exact scope check.

@@ -35,6 +35,7 @@ Treat this as a durable-write-semantics change, not an app-only config flip.
    | Field | What it tells you |
    |---|---|
    | `outcome` | `bound` / `not_eligible` / `no_self_candidate` / `ambiguous` |
+   | `ambiguous` (repeatedly) | the payload held more than one self alias, so binding refused. Frequent `ambiguous` means real traffic needs per-node subject authority before `enforce` is useful. |
    | `self_like_without_evidence` | self-alias entities that did NOT bind |
    | `evidence_kind`, `speaker_role`, `source_kind` | why the decision went that way |
 
@@ -112,6 +113,10 @@ list contains no `/tmp` path.
 2. One UUID formula: `self_uuid_for_namespace()`. A static test fails on a second copy.
 3. One logical→physical mapping: `namespace_to_group_id()`.
 4. A proven self causes zero candidate searches and zero dedup-LLM calls.
-5. Ambiguous evidence fails visibly and retryably, never by picking one.
+5. Ambiguous evidence fails visibly and retryably, never by picking one. More than one self alias
+   in a payload is ambiguous by definition -- episode-level evidence cannot prove two extracted
+   nodes are the same subject.
 6. Runtime paths never delete or absorb forks.
 7. Telemetry carries enums, counts and UUIDs — never memory text or arbitrary entity names.
+8. A canonical-node read failure is an error, never "absent". Falling back on a transient failure
+   would let graphiti's replacing save erase the stored node.

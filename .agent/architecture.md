@@ -587,6 +587,22 @@ candidates. The rewrite covers the node UUID, both edge endpoint directions and 
 one unit, with rollback: a node rewritten while its edges still point at the discarded UUID would
 orphan the episode's facts.
 
+**Exactly one candidate, or nothing.** Trusted evidence proves who AUTHORED the episode; it does
+not say which extracted node is that author. A human turn can legitimately discuss an
+application/RBAC `user` distinct from the speaker ("I gave the user read access"), so a payload
+containing more than one self alias raises `AmbiguousSelfBindingError` and writes nothing. The
+episode stays retryable with its text intact. This is deliberately conservative: binding a foreign
+subject into the canonical identity is the one outcome no later migration can separate. Collapsing
+multiple aliases safely would require per-node subject authority, which does not exist yet.
+
+**Persisting the canonical node.** Graphiti saves a resolved node with `SET n = $entity_data`,
+which REPLACES the property map. The bypass therefore commits the STORED canonical node when one
+exists, and only falls back to the extracted node on a genuine `NodeNotFoundError` -- a transient
+driver error must fail the (retryable) episode rather than degrade into a sparse overwrite that
+erases markers, provenance, flags and summary. On creation the extracted node is stamped with
+`is_self`, `entity_role` and the logical namespace, because the generic ingest metadata stamp
+supplies none of them.
+
 **Rollout.** `canonical_self_binding_mode` (`MENHIR_CANONICAL_SELF_BINDING_MODE`) is
 `off | observe | enforce`, default `off`. Unrecognized values fall back to `off`.
 
