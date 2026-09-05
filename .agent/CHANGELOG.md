@@ -2,6 +2,11 @@
 
 ## 2026-09-04 - Make canonical-self authority node-scoped
 
+- Add an executable production-release plan for the complete accumulated candidate: close the
+  production-model/image and feature-mode wiring gaps, bind the maintenance class and changed-path
+  evidence into release authority, exercise changed client policy, use the fixed release
+  transaction, run one bounded synthetic canary, and prepare an immutable `off` bundle for fast
+  feature rollback.
 - Scale the canonical-self and live-VPS rollout playbooks to the actual single-owner, self-hosted,
   no-external-user deployment: test the complete candidate with the live provider/model, deploy once
   through the mechanically selected class, run one synthetic canary, and roll back on concrete
