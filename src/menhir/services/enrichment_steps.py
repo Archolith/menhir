@@ -27,11 +27,13 @@ from menhir.domain.self_identity import (
     self_context_for_pending_episode,
     self_subject_endpoint_for_claim,
 )
+from menhir.domain.self_authority import SELF_ASSERTION_POLICY_VERSION
 from menhir.infrastructure.self_binding import (
     InvalidSelfSubjectDeclarationError,
     SelfBindMode,
     resolve_bind_mode,
 )
+from menhir.infrastructure.self_authority import FileSelfAssertionAuthorizer
 from menhir.domain.utils import source_confidence_for
 from menhir.infrastructure import GraphitiClient, MemoryGraphAdapter
 from menhir.infrastructure.evidence_publication_intents import (
@@ -128,6 +130,11 @@ class EnrichmentContext:
     #: Canonical-self binding rollout: "off" (default), "observe" or "enforce". Defaulted so every
     #: construction site predating this field keeps pre-change behavior.
     canonical_self_binding_mode: str = "off"
+    #: Read-only owner-confirmation configuration. All three are required in enforce mode; any
+    #: absent or mismatched value leaves semantic self assertions as proposals only.
+    canonical_self_confirmation_public_key_path: str = ""
+    canonical_self_confirmation_public_key_sha256: str = ""
+    canonical_self_confirmation_directory: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -700,6 +707,7 @@ async def run_graphiti_extraction(
                 turn_evidence_uuid=str(
                     ctx.claimed.get("turn_evidence_uuid") or ""
                 ).strip() or None,
+                principal_id=str(ctx.claimed.get("user_id") or "").strip() or None,
             )
             # Observe must preserve the real extraction prompt byte-for-byte.  The endpoint is a
             # behavioral input, so only enforce constructs and transports it; off/observe keep the
@@ -709,6 +717,21 @@ async def run_graphiti_extraction(
                 if self_bind_mode is SelfBindMode.ENFORCE
                 else None
             )
+            self_assertion_authorizer = None
+            if self_subject_endpoint is not None:
+                # Structural identity is established from the trusted claim, independently of
+                # extracted prose. This does not authorize any semantic edge; the final-payload
+                # verifier below still requires an exact owner signature for each assertion.
+                ensured_self_uuid = str(ctx.graph_adapter.ensure_self_entity(namespace) or "")
+                if ensured_self_uuid != self_identity.self_uuid:
+                    raise InvalidSelfSubjectDeclarationError(
+                        "canonical self repository returned an unexpected namespace identity"
+                    )
+                self_assertion_authorizer = FileSelfAssertionAuthorizer(
+                    public_key_path=ctx.canonical_self_confirmation_public_key_path,
+                    public_key_sha256=ctx.canonical_self_confirmation_public_key_sha256,
+                    confirmation_directory=ctx.canonical_self_confirmation_directory,
+                )
 
             graphiti_result = await add_episode_with_timeout(
                 ctx.graphiti_client,
@@ -724,6 +747,7 @@ async def run_graphiti_extraction(
                 self_identity=self_identity,
                 self_subject_endpoint=self_subject_endpoint,
                 self_bind_mode=self_bind_mode,
+                self_assertion_authorizer=self_assertion_authorizer,
             )
             if publication_intent is not None:
                 publication_transition = (
@@ -1118,6 +1142,28 @@ async def stamp_and_finalize(
             ctx.worker_id,
         )
         return
+
+    if (
+        receipt is not None
+        and receipt.episode_key == ctx.episode_uuid
+        and receipt.self_subject_endpoint is not None
+        and receipt.self_bind_mode is SelfBindMode.ENFORCE
+    ):
+        proposals_recorded = ctx.graph_adapter.record_self_assertion_proposals(
+            ctx.episode_uuid,
+            worker_id=ctx.worker_id,
+            proposals=list(receipt.self_assertion_proposals or []),
+            authorized_count=receipt.self_assertions_authorized,
+            policy_version=SELF_ASSERTION_POLICY_VERSION,
+        )
+        if not proposals_recorded:
+            logger.info(
+                "Skipping enrichment completion after self-proposal receipt lost ownership "
+                "episode_id=%s worker=%s",
+                ctx.episode_uuid,
+                ctx.worker_id,
+            )
+            return
 
     if not extracted_nodes and not extracted_edges:
         if raw_extraction_nonempty and is_policy_empty_extraction(receipt):
@@ -1591,6 +1637,7 @@ async def add_episode_with_timeout(
     self_identity: SelfIdentityContext | None = None,
     self_subject_endpoint: SelfSubjectEndpointEnvelope | None = None,
     self_bind_mode: SelfBindMode = SelfBindMode.OFF,
+    self_assertion_authorizer: Any | None = None,
 ) -> Any:
     """Bound one Graphiti add_episode call so stuck requests fail back into retry flow.
 
@@ -1668,6 +1715,7 @@ async def add_episode_with_timeout(
         self_identity=self_identity,
         self_subject_endpoint=self_subject_endpoint,
         self_bind_mode=self_bind_mode,
+        self_assertion_authorizer=self_assertion_authorizer,
     )
     try:
         record_lifecycle_event(

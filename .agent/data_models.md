@@ -265,7 +265,7 @@ Each node represents a memory unit stored in Neo4j. Labels: `Entity` or `Episodi
 | `last_merge_op_id` | string | Op id of the most recent journaled merge into this survivor. Idempotency breadcrumb for saga replay; NOT a correctness gate. |
 | `ttl_expires` | datetime | Set once (coalesced) when a SESSION node is demoted; the TTL sweep deletes it after this passes. Cleared by promotion. |
 | `restored_from_merge` / `restored_by_op` / `restored_at` | string / string / datetime | Stamped on a node recreated by an unmerge (survivor uuid, unmerge op id, time). |
-| `is_self` / `entity_role` | boolean / string | Marks the ONE canonical human-self entity for a namespace (`entity_role='self'`). Its `uuid` is deterministic -- `uuid5(NAMESPACE_URL, "menhir-self:<logical namespace>")` via `domain/self_identity.self_uuid_for_namespace` -- so recall resolves a first-person subject with no database read, and replay can never fork a second self node. **Never infer self from the name.** An entity called `user` carries these markers only when the ingestion boundary proved the episode's author (see `runtime.canonical_self` in architecture.md); a software/application `user` is an ordinary entity with neither field. `group_id` comes from `namespace_to_group_id`, so logical `default` writes physical `""` -- writing the logical name here targets a partition holding none of the production data. |
+| `is_self` / `entity_role` | boolean / string | Marks the ONE structural human-self entity for a namespace (`entity_role='self'`). Its `uuid` is deterministic -- `uuid5(NAMESPACE_URL, "menhir-self:<logical namespace>")` via `domain/self_identity.self_uuid_for_namespace` -- so replay cannot fork a second canonical target. **These markers identify an endpoint; they do not authorize semantic facts. Never infer self from the name.** A software/application `user` is an ordinary entity with neither field. `group_id` comes from `namespace_to_group_id`, so logical `default` writes physical `""` -- writing the logical name here targets a partition holding none of the production data. |
 
 ### Node: Episode
 
@@ -284,6 +284,22 @@ Episode nodes are provenance anchors created by each ingestion call. Label: `Epi
 | `user_flagged` | boolean | Defaults to `false` |
 | `bootstrap_scope` | string or null | Requested startup selector carried through enrichment only when `user_flagged=true`; null means retention-only. |
 | `created_at` | timestamp | When the episode node was written |
+| `self_assertion_proposals_json` | string (JSON array) | Bounded, lease-guarded receipts for exact self-assertion proposals and verifier outcomes. Stored only on `:Episodic`; never an `:Entity` or authoritative relation. Contains no signature or private key. |
+| `self_assertion_proposal_count` | int | Number of exact proposal receipts retained for this run (maximum 256). |
+| `self_assertion_authorized_count` | int | Count of proposal edges whose exact owner signature was verified for this run. |
+| `self_assertion_policy_version` | string | Policy version used to construct and verify the proposal payload. |
+| `self_assertion_proposals_recorded_at` | timestamp | Time the lease-owning enrichment worker recorded the bounded proposal receipt. |
+
+An authorized Graphiti `RELATES_TO` edge incident to canonical self carries
+`menhir_self_authority_payload_json`, the canonical JSON object signed out of band. It includes the
+principal, namespace, episode/turn evidence lineage, evidence digest, assertion, direction,
+polarity, temporal scope, revision, schema and policy plus its derived claim digest. Menhir stores
+neither the signature nor a private key. The final Graphiti resolver and `enforce` fact-edge recall
+both require the relationship's actual source/target direction, resolved counterpart name and
+labels, `name`, `fact`, `valid_at`, `invalid_at` and `expired_at` to equal that payload and recheck the current read-only confirmation
+file. Missing, changed, malformed, revoked or mismatched records are excluded; final-resolution
+drift fails the episode before persistence.
+
 | `content` | string | Original episode text |
 | `processing_state` | string | `PENDING`, `ENRICHING`, `READY`, `FAILED` |
 | `processing_stage` | string | Coarse stage label (`queued`, `graphiti_extracting`, `stamping`, `rehydrating`, `finalizing`, etc.) |

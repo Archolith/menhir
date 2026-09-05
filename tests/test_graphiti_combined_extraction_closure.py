@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
+import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -30,6 +31,12 @@ from menhir.domain.self_identity import (  # noqa: E402
     self_context_for_pending_episode,
     self_subject_endpoint_for_claim,
     self_uuid_for_namespace,
+)
+from menhir.domain.self_authority import (  # noqa: E402
+    SELF_ASSERTION_EDGE_PAYLOAD_PROPERTY,
+    SelfAuthorizationDecision,
+    canonical_json_bytes,
+    make_self_assertion_proposal,
 )
 from menhir.infrastructure.self_binding import (  # noqa: E402
     InvalidSelfSubjectDeclarationError,
@@ -71,7 +78,170 @@ def _subject_endpoint_claim(**changes) -> dict[str, object]:
     return claim
 
 
-def _begin_subject_endpoint_receipt():
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_signed_edge_payload_and_temporal_scope_survive_graphiti_resolution() -> None:
+    proposal = make_self_assertion_proposal(
+        principal_id="owner-1",
+        namespace="default",
+        episode_uuid="episode-1",
+        turn_evidence_uuid="turn-1",
+        evidence_text="I own 25 postcards.",
+        lane="graphiti_edge",
+        direction="self_to_entity",
+        polarity="affirmed",
+        assertion={
+            "counterpart": {"labels": [], "name": "postcards"},
+            "fact": "user owns 25 postcards",
+            "predicate": "OWNS",
+        },
+        temporal_scope={"valid_at": None, "invalid_at": None, "expired_at": None},
+    )
+    payload_json = canonical_json_bytes(proposal.confirmation_payload()).decode("utf-8")
+    edge = SimpleNamespace(
+        source_node_uuid=self_uuid_for_namespace("default"),
+        target_node_uuid="postcards",
+        name="OWNS",
+        fact="user owns 25 postcards",
+        group_id="default",
+        attributes={SELF_ASSERTION_EDGE_PAYLOAD_PROPERTY: payload_json},
+        valid_at=None,
+        invalid_at=None,
+        expired_at=None,
+    )
+    receipt = patches.begin_extraction_receipt(
+        "episode-1",
+        "I own 25 postcards.",
+        self_identity=SimpleNamespace(namespace="default"),
+        self_bind_mode=SelfBindMode.ENFORCE,
+        self_assertion_authorizer=_OwnerAuthorizer(),
+    )
+    receipt.self_assertion_authorized_edge_ids.add(id(edge))
+    receipt.self_assertion_counterpart_by_edge_id[id(edge)] = "postcards"
+    receipt.resolved_node_identity_by_extracted_uuid["postcards"] = (
+        "postcards",
+        "postcards",
+        (),
+    )
+    observed = {}
+
+    async def mutating_resolver(
+        llm_client, extracted_edge, related_edges, existing_edges, episode,
+        edge_type_candidates=None,
+    ):
+        observed["related"] = related_edges
+        observed["existing"] = existing_edges
+        extracted_edge.attributes = {}
+        extracted_edge.valid_at = datetime(2030, 1, 1, tzinfo=timezone.utc)
+        extracted_edge.name = "BORROWS"
+        extracted_edge.fact = "user borrows postcards"
+        return extracted_edge, [SimpleNamespace(uuid="invalidated")], []
+
+    wrapped = extraction_patches._wrap_self_authority_edge_resolver(mutating_resolver)
+    resolved, invalidated, duplicates = await wrapped(
+        object(),
+        edge,
+        [SimpleNamespace(source_node_uuid="x")],
+        [SimpleNamespace(source_node_uuid="y")],
+        SimpleNamespace(uuid="graphiti-episode"),
+        None,
+    )
+
+    assert observed == {"related": [], "existing": []}
+    assert resolved.attributes == {SELF_ASSERTION_EDGE_PAYLOAD_PROPERTY: payload_json}
+    assert resolved.valid_at is None
+    assert resolved.name == "OWNS"
+    assert resolved.fact == "user owns 25 postcards"
+    assert invalidated == [] and duplicates == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_signed_edge_resolution_reuses_only_exact_existing_edge() -> None:
+    proposal = make_self_assertion_proposal(
+        principal_id="owner-1",
+        namespace="default",
+        episode_uuid="episode-1",
+        turn_evidence_uuid="turn-1",
+        evidence_text="I own 25 postcards.",
+        lane="graphiti_edge",
+        direction="self_to_entity",
+        polarity="affirmed",
+        assertion={
+            "counterpart": {"labels": [], "name": "postcards"},
+            "fact": "user owns 25 postcards",
+            "predicate": "OWNS",
+        },
+        temporal_scope={"valid_at": None, "invalid_at": None, "expired_at": None},
+    )
+    payload_json = canonical_json_bytes(proposal.confirmation_payload()).decode("utf-8")
+    edge = SimpleNamespace(
+        source_node_uuid=self_uuid_for_namespace("default"),
+        target_node_uuid="postcards",
+        name="OWNS",
+        fact="user owns 25 postcards",
+        group_id="default",
+        attributes={SELF_ASSERTION_EDGE_PAYLOAD_PROPERTY: payload_json},
+        valid_at=None,
+        invalid_at=None,
+        expired_at=None,
+    )
+    existing = SimpleNamespace(
+        source_node_uuid=edge.source_node_uuid,
+        target_node_uuid=edge.target_node_uuid,
+        name=edge.name,
+        fact=edge.fact,
+        group_id=edge.group_id,
+        attributes={"legacy": "unsafe"},
+        valid_at=None,
+        invalid_at=None,
+        expired_at=None,
+        episodes=[],
+    )
+    receipt = patches.begin_extraction_receipt(
+        "episode-1",
+        "I own 25 postcards.",
+        self_identity=SimpleNamespace(namespace="default"),
+        self_bind_mode=SelfBindMode.ENFORCE,
+        self_assertion_authorizer=_OwnerAuthorizer(),
+    )
+    receipt.self_assertion_authorized_edge_ids.add(id(edge))
+    receipt.self_assertion_counterpart_by_edge_id[id(edge)] = "postcards"
+    receipt.resolved_node_identity_by_extracted_uuid["postcards"] = (
+        "postcards",
+        "postcards",
+        (),
+    )
+
+    async def should_not_run(*args, **kwargs):
+        raise AssertionError("exact authorized replay should not invoke Graphiti edge resolution")
+
+    wrapped = extraction_patches._wrap_self_authority_edge_resolver(should_not_run)
+    resolved, invalidated, duplicates = await wrapped(
+        object(), edge, [existing], [], SimpleNamespace(uuid="graphiti-episode"), None
+    )
+
+    assert resolved is existing
+    assert existing.attributes == {SELF_ASSERTION_EDGE_PAYLOAD_PROPERTY: payload_json}
+    assert existing.episodes == ["graphiti-episode"]
+    assert invalidated == [] and duplicates == []
+
+
+class _OwnerAuthorizer:
+    def __init__(self, authorized: bool = True) -> None:
+        self.authorized = authorized
+        self.proposals = []
+
+    def authorize(self, proposal):
+        self.proposals.append(proposal)
+        return SelfAuthorizationDecision(
+            self.authorized,
+            "owner_signature_verified" if self.authorized else "confirmation_no_exact_match",
+            "ed25519:test-owner",
+        )
+
+
+def _begin_subject_endpoint_receipt(*, authorized: bool = True):
     claim = _subject_endpoint_claim()
     endpoint = self_subject_endpoint_for_claim(claim)
     assert endpoint is not None
@@ -80,7 +250,9 @@ def _begin_subject_endpoint_receipt():
         namespace="default",
         episode_uuid="projection-1",
         turn_evidence_uuid="turn-1",
+        principal_id="owner-1",
     )
+    authorizer = _OwnerAuthorizer(authorized)
     patches.begin_extraction_receipt(
         "projection-1",
         str(claim["content"]),
@@ -88,6 +260,7 @@ def _begin_subject_endpoint_receipt():
         self_identity=identity,
         self_subject_endpoint=endpoint,
         self_bind_mode=SelfBindMode.ENFORCE,
+        self_assertion_authorizer=authorizer,
     )
     return endpoint
 
@@ -1333,6 +1506,97 @@ async def test_receipt_owned_subject_endpoint_binds_before_resolution(
     assert receipt is not None
     assert receipt.self_identity.evidence_kind is SelfEvidenceKind.EXPLICIT_SELF_SUBJECT
     assert receipt.self_bind_result.bound is True
+    assert receipt.self_assertions_authorized == 1
+    assert receipt.self_assertion_proposals[0]["authorization"]["authorized"] is True
+    persisted_payload = json.loads(
+        edges[0].attributes[SELF_ASSERTION_EDGE_PAYLOAD_PROPERTY]
+    )
+    assert persisted_payload["claim_digest"] == receipt.self_assertion_proposals[0]["claim_digest"]
+
+
+@pytest.mark.asyncio
+async def test_unconfirmed_subject_edge_is_proposal_only_before_resolution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    endpoint = _begin_subject_endpoint_receipt(authorized=False)
+    marker_node = SimpleNamespace(
+        uuid="marker-node", name=endpoint.marker, group_id="", labels=[]
+    )
+    postcards = SimpleNamespace(
+        uuid="postcards-node", name="postcards", group_id="", labels=[]
+    )
+    edge = SimpleNamespace(
+        source_node_uuid="marker-node",
+        target_node_uuid="postcards-node",
+        name="OWNS",
+        fact="The current speaker owns 25 postcards.",
+        episodes=["projection-1"],
+    )
+
+    async def fake_extract_nodes_and_edges(*args, **kwargs):
+        return [marker_node, postcards], [edge], {
+            "marker-node": [0],
+            "postcards-node": [0],
+        }
+
+    monkeypatch.setattr(ce, "extract_nodes_and_edges", fake_extract_nodes_and_edges)
+    nodes, edges, index_map = await extraction_patches._run_graphiti_combined_extraction(
+        clients=object(),
+        episode=SimpleNamespace(uuid="projection-1"),
+        previous_episodes=[],
+        entity_types=None,
+        excluded_entity_types=None,
+        custom_extraction_instructions=None,
+    )
+
+    receipt = patches.get_extraction_receipt()
+    assert [node.uuid for node in nodes] == ["postcards-node"]
+    assert edges == []
+    assert "marker-node" not in index_map
+    assert receipt.self_identity.evidence_kind is SelfEvidenceKind.TRUSTED_USER_TURN
+    assert receipt.self_bind_result.bound is False
+    assert receipt.self_assertions_authorized == 0
+    assert receipt.self_assertion_proposals[0]["authorization"] == {
+        "authorized": False,
+        "authority_key_id": "ed25519:test-owner",
+        "reason": "confirmation_no_exact_match",
+    }
+
+
+def test_multiline_reported_speech_cannot_gain_authority_from_marker_or_model() -> None:
+    """Regression: the legacy scanner accepts the second line, so the signature gate must hold."""
+
+    endpoint = _begin_subject_endpoint_receipt(authorized=False)
+    receipt = patches.get_extraction_receipt()
+    assert receipt is not None
+    receipt.episode_text = "She said:\nI will handle the deployment."
+    receipt.graphiti_episode_uuid = "projection-1"
+    marker_node = SimpleNamespace(
+        uuid="marker", name=endpoint.marker, group_id="", labels=[]
+    )
+    deployment = SimpleNamespace(
+        uuid="deployment", name="deployment", group_id="", labels=[]
+    )
+    edge = SimpleNamespace(
+        source_node_uuid="marker",
+        target_node_uuid="deployment",
+        name="WILL_HANDLE",
+        fact=f"{endpoint.marker} will handle the deployment.",
+        episodes=["projection-1"],
+    )
+    nodes = [marker_node, deployment]
+    edges = [edge]
+    index_map = {"marker": [0], "deployment": [0]}
+
+    assert extraction_patches._requires_declared_author_endpoint(receipt.episode_text) is True
+    extraction_patches._declare_subject_endpoint(nodes, edges, index_map, receipt)
+
+    assert [node.uuid for node in nodes] == ["deployment"]
+    assert edges == []
+    assert receipt.self_identity.evidence_kind is SelfEvidenceKind.TRUSTED_USER_TURN
+    assert receipt.self_assertion_proposals[0]["assertion"]["fact"] == (
+        "user will handle the deployment."
+    )
 
 
 @pytest.mark.asyncio

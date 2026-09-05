@@ -14,13 +14,15 @@ Two rules carry the whole design:
 2. **One formula.** :func:`self_uuid_for_namespace` is the only permitted derivation of the
    canonical self UUID. Copies are how a split identity gets created; see the RCA at
    ``.agent/plans/menhir-scanner-generic-entity-recall-pollution-rca.md``.
-3. **Authorship is not subjecthood.** Proving who wrote an episode does not prove which extracted
-   entity that author is. :func:`eligible_self_evidence` answers the first question and
+3. **Authorship is not subjecthood or assertion authority.** Proving who wrote an episode does not
+   prove which extracted entity that author is. :func:`eligible_self_evidence` answers the first question and
    :func:`proves_self_subject` the second; binding requires both. No property of the extracted
    NAME -- not the literal string, not its grammatical person -- can answer the second, because
    the name is not provenance. Only a declaration naming the exact in-memory subject node can.
    The queued Graphiti lifecycle produces one only for its receipt-owned endpoint on an
-   atomically verified, verbatim evidence projection.
+   atomically verified, verbatim evidence projection after the exact edge has independent owner
+   confirmation. The declaration establishes structural node identity; it does not certify world
+   truth or authorize a different edge.
 
 The physical Graphiti partition is derived separately by
 :func:`menhir.domain.namespace.namespace_to_group_id`. Logical ``default`` maps to physical
@@ -189,6 +191,10 @@ class SelfIdentityContext:
     #: Exact turn-evidence identifier returned by the atomic claim.  Kept separate from the
     #: subject endpoint so the final declaration boundary can reject a foreign-turn envelope.
     turn_evidence_uuid: str | None = None
+    #: Stable owner principal projected from the claimed episode. It is not identity authority by
+    #: itself, but an exact self-assertion confirmation must bind this principal so a signature for
+    #: one owner cannot be replayed into another owner's namespace.
+    principal_id: str | None = None
     #: Exact in-memory node identifier selected by a trusted structured assertion. Graphiti types
     #: identifiers as strings (its normal producer uses UUIDs). This is the bridge
     #: from episode authorship to node subjecthood: names, aliases, and grammatical person never
@@ -427,7 +433,8 @@ def proves_self_subject(node_uuid: Any, context: SelfIdentityContext | None) -> 
 
     Exactly one thing proves it: :attr:`SelfEvidenceKind.EXPLICIT_SELF_SUBJECT` naming this exact
     in-memory node UUID, produced by :func:`declare_self_subject` from trusted user-turn evidence.
-    The declaration is the authority; nothing here infers it from text.
+    The declaration is structural node authority; nothing here infers it from text. Semantic edge
+    authority is separate and must already have been verified before this declaration is produced.
 
     **No name shape qualifies, first-person included.** Two successive revisions tried to promote
     one: first the literal name ``user``, then first-person grammar. Both are properties of the
@@ -456,6 +463,7 @@ def self_context_for_pending_episode(
     namespace: Any,
     episode_uuid: str | None = None,
     turn_evidence_uuid: str | None = None,
+    principal_id: str | None = None,
     source_kind: str = "",
 ) -> SelfIdentityContext:
     """Reconstruct the identity context for a claimed pending episode.
@@ -480,6 +488,7 @@ def self_context_for_pending_episode(
             source_kind=source_kind or normalized_source,
             episode_uuid=episode_uuid,
             turn_evidence_uuid=turn_evidence_uuid,
+            principal_id=principal_id,
             subject_node_uuid=None,
         )
     return SelfIdentityContext(
@@ -489,6 +498,7 @@ def self_context_for_pending_episode(
         source_kind=source_kind or normalized_source,
         episode_uuid=episode_uuid,
         turn_evidence_uuid=turn_evidence_uuid,
+        principal_id=principal_id,
         subject_node_uuid=None,
     )
 

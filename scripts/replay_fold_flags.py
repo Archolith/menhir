@@ -232,7 +232,10 @@ def main() -> int:
                     remapped.append(dataclasses.replace(
                         d, proposal=dataclasses.replace(d.proposal, episode_uuid=fresh)))
 
-                self_uuid = adapter.ensure_self_entity(namespace)
+                # Replay input is model output plus benchmark fixtures, not an owner-signed exact
+                # assertion. It may exercise vote/fold behavior, but it must not mint semantic
+                # authority for canonical self. Self-like decisions therefore persist through the
+                # ordinary advisory path and produce no authoritative self View.
                 bind_and_persist_typed_scalars(
                     remapped,
                     linked_entities_for_episode=adapter.fetch_linked_entities_for_episode,
@@ -243,7 +246,6 @@ def main() -> int:
                     namespace=namespace, perceiver_version="fold-flags-v1",
                     now=lambda: datetime.now(timezone.utc).isoformat(),
                     mark_projection_complete=adapter.mark_projection_complete,
-                    resolve_self_subject=lambda _ns: (self_uuid, "user"),
                 )
 
                 views = repo.execute(

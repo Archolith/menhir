@@ -97,6 +97,9 @@ class IngestService(IngestQueueMixin, IngestWorkerMixin, IngestIntakeMixin):
         default=12000, init=False, repr=False
     )
     _canonical_self_binding_mode: str = field(default="off", init=False, repr=False)
+    _canonical_self_confirmation_public_key_path: str = field(default="", init=False, repr=False)
+    _canonical_self_confirmation_public_key_sha256: str = field(default="", init=False, repr=False)
+    _canonical_self_confirmation_directory: str = field(default="", init=False, repr=False)
     _scheduler_http_client: httpx.AsyncClient | None = field(
         default=None, init=False, repr=False
     )

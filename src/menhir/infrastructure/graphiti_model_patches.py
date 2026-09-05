@@ -22,6 +22,7 @@ from menhir.infrastructure.graphiti_helpers import (
 from menhir.infrastructure.graphiti_extraction_patches import (
     _combined_extraction_cache,
     _extract_edges_from_combined_cache,
+    get_extraction_receipt,
 )
 from menhir.infrastructure.graphiti_llm_patches import GraphitiRequestTooLargeError
 
@@ -1703,6 +1704,21 @@ def _patch_graphiti_adaptive_dedupe() -> None:
                 if state.resolved_nodes[idx] is None:
                     state.resolved_nodes[idx] = node
                     state.uuid_map[node.uuid] = node.uuid
+
+            receipt = get_extraction_receipt()
+            if receipt is not None:
+                for extracted_node, resolved_node in zip(
+                    extracted_nodes, state.resolved_nodes, strict=True
+                ):
+                    if resolved_node is None:
+                        continue
+                    receipt.resolved_node_identity_by_extracted_uuid[
+                        str(extracted_node.uuid)
+                    ] = (
+                        str(resolved_node.uuid),
+                        str(resolved_node.name or ""),
+                        tuple(sorted(str(label) for label in (resolved_node.labels or []))),
+                    )
 
             logger.debug(
                 "Resolved nodes with adaptive dedupe: %s",

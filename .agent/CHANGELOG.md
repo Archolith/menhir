@@ -1,5 +1,33 @@
 # Changelog
 
+## 2026-09-05 - Separate canonical identity from assertion authority
+
+- Keep canonical self as a deterministic structural endpoint while requiring an exact offline
+  Ed25519 owner confirmation before any extracted Graphiti assertion attaches to it in `enforce`.
+- Bind each confirmation to principal, namespace, assertion digest/revision, evidence lineage,
+  policy, direction, polarity and temporal scope; pin the raw public-key fingerprint and reject
+  malformed, stale, replayed or partially matching records.
+- Retain unconfirmed assertions as bounded, lease-guarded episode proposal receipts, with no signer,
+  private key, signature or agent-callable approval surface stored by Menhir; allow the existing
+  operator-only re-enrichment seam to reopen only a `READY` episode with still-pending proposals so
+  an offline signature can be consumed on a second pass.
+- Close typed-scalar, event-history, View, replay, repair and direct-repository bypasses, and exclude
+  legacy unconfirmed self nodes, Views, scalar state and event authority from default recall while
+  `enforce` is active.
+- Fence correlation/lifecycle bridges, merge/unmerge, detach-delete and synthetic edge-fact repair
+  so maintenance cannot create, erase or rewrite canonical-self semantics without the same
+  authority; reject misspelled rollout modes during runtime construction and verify View subjects
+  from durable structural markers rather than trusting a caller-supplied namespace.
+- Recheck external confirmation during fact-edge recall so deletion or change revokes that edge from
+  authoritative recall; compare the relationship's actual direction, predicate, fact and temporal
+  tuple with the signed payload, preserve it through Graphiti's final resolver, and fail closed on
+  post-authorization drift or revocation.
+- Withhold unconfirmed self-edge temporal enrichment and render affected counterpart summaries
+  name-only; remove canonical self from generic adjacency context because that lane cannot verify
+  relationship authority. Preserve legacy behavior in `off` and `observe`; keep the feature
+  default-off with no database migration, Docker/live-provider test, deployment or production
+  activation in this change.
+
 ## 2026-09-04 - Make canonical-self authority node-scoped
 
 - Complete deployment Phase 1 discovery: distinguish the installed `0.2.0-8` maintenance

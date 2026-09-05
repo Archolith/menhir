@@ -46,7 +46,9 @@ from dataclasses import dataclass
 
 from menhir.domain.facet_derivation import derive_facets
 from menhir.domain.namespace import namespace_to_group_id, namespace_to_group_ids
+from menhir.domain.self_identity import self_uuid_for_namespace
 from menhir.domain.temporal import FactTemporal, TemporalQuery, matches_query
+from menhir.infrastructure.self_binding import SelfBindMode, resolve_bind_mode
 
 logger = logging.getLogger(__name__)
 
@@ -255,6 +257,12 @@ async def snapshot_candidate_facts(
 
     candidates: list[ShadowCandidateFact] = []
     seen_fact_uuids: set[str] = set()
+    protect_self = (
+        resolve_bind_mode(getattr(graph_adapter, "canonical_self_binding_mode", "off"))
+        is SelfBindMode.ENFORCE
+    )
+    canonical_self_uuid = self_uuid_for_namespace(namespace) if protect_self else ""
+    verifier = getattr(graphiti_client, "canonical_self_payload_is_authorized", None)
     for row in rows:
         fact_uuid = str(row.get("fact_uuid") or "").strip()
         if not fact_uuid or fact_uuid in seen_fact_uuids:
@@ -266,9 +274,34 @@ async def snapshot_candidate_facts(
             continue
         if len(candidates) >= _MAX_CANDIDATE_FACTS:
             break
-        seen_fact_uuids.add(fact_uuid)
         source_uuid = str(row.get("source_uuid") or "")
         target_uuid = str(row.get("target_uuid") or "")
+        if canonical_self_uuid in {source_uuid, target_uuid} and not (
+            callable(verifier)
+            and verifier(
+                row.get("self_authority_payload_json"),
+                expected_self_uuid=canonical_self_uuid,
+                source_node_uuid=row.get("edge_source_uuid"),
+                target_node_uuid=row.get("edge_target_uuid"),
+                counterpart_name=(
+                    row.get("edge_target_name")
+                    if row.get("edge_source_uuid") == canonical_self_uuid
+                    else row.get("edge_source_name")
+                ),
+                counterpart_labels=(
+                    row.get("edge_target_labels")
+                    if row.get("edge_source_uuid") == canonical_self_uuid
+                    else row.get("edge_source_labels")
+                ),
+                predicate=row.get("predicate"),
+                fact=row.get("fact_text"),
+                valid_at=row.get("valid_at"),
+                invalid_at=row.get("invalid_at"),
+                expired_at=row.get("expired_at"),
+            )
+        ):
+            continue
+        seen_fact_uuids.add(fact_uuid)
         # Union whichever side(s) were actually matched -- a fact-edge is very often
         # only matched via ONE endpoint (e.g. "Rachel" hit the literal-name lookup, but
         # "Chicago" as the other endpoint never did), so .get() on the unmatched side

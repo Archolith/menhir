@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import json
 import re
 import uuid
 from datetime import datetime
@@ -712,6 +713,56 @@ class EpisodeLifecycleRepository:
                 "resolved_episode_uuid": resolved_episode_uuid,
                 "nodes_touched": nodes_touched,
                 "edges_touched": edges_touched,
+            },
+        )
+        return bool(rows and int(rows[0].get("updated", 0)) > 0)
+
+    def record_self_assertion_proposals(
+        self,
+        episode_uuid: str,
+        *,
+        worker_id: str,
+        proposals: list[dict[str, Any]],
+        authorized_count: int,
+        policy_version: str,
+    ) -> bool:
+        """Atomically retain exact self proposals on their non-recallable evidence episode.
+
+        The write is lease-guarded like finalization. Unauthorized proposals never become
+        ``:Entity`` or fact edges, so ordinary semantic recall cannot surface them; an operator can
+        export this bounded JSON, obtain an offline owner signature, and explicitly reprocess the
+        same episode. Menhir stores no signature or private key here.
+        """
+
+        if len(proposals) > 256:
+            raise ValueError("too many canonical-self proposals for one episode")
+        serialized = json.dumps(
+            proposals,
+            ensure_ascii=False,
+            allow_nan=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        if len(serialized.encode("utf-8")) > 1_048_576:
+            raise ValueError("canonical-self proposal receipt exceeds one MiB")
+        rows = self.neo4j.execute(
+            """
+            MATCH (n:Episodic {uuid: $episode_uuid})
+            WHERE n.processing_state = 'ENRICHING' AND n.processing_owner = $worker_id
+            SET n.self_assertion_policy_version = $policy_version,
+                n.self_assertion_proposals_json = $proposals_json,
+                n.self_assertion_proposal_count = $proposal_count,
+                n.self_assertion_authorized_count = $authorized_count,
+                n.self_assertion_proposals_recorded_at = datetime()
+            RETURN count(n) AS updated
+            """,
+            params={
+                "episode_uuid": episode_uuid,
+                "worker_id": worker_id,
+                "policy_version": str(policy_version),
+                "proposals_json": serialized,
+                "proposal_count": len(proposals),
+                "authorized_count": max(0, int(authorized_count)),
             },
         )
         return bool(rows and int(rows[0].get("updated", 0)) > 0)

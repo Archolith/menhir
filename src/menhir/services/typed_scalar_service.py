@@ -42,6 +42,7 @@ from menhir.services.typed_scalar_rules import (
     extract_typed_scalars_once,
     gate_typed_scalars,
 )
+from menhir.infrastructure.self_binding import SelfBindMode, resolve_bind_mode
 from menhir.services.structural_scalar_composer import (
     STRUCTURAL_COMPOSER_VERSION,
     STRUCTURAL_REASON_CODES,
@@ -659,6 +660,9 @@ class TypedScalarPerceptionService:
         self._deterministic_shadow_enabled = deterministic_shadow_enabled
         self._deterministic_router_enabled = deterministic_router_enabled
         self._deterministic_router_promoted_classes = tuple(deterministic_router_promoted_classes)
+        self._canonical_self_binding_mode = resolve_bind_mode(
+            getattr(adapter, "canonical_self_binding_mode", "off")
+        )
 
     def ensure_activated(self) -> None:
         """Run the activation gate exactly once per service instance, before any record. Raises
@@ -668,13 +672,9 @@ class TypedScalarPerceptionService:
             ensure_scalar_state_activated(self._adapter)
             self._activated = True
 
-    def _make_self_seam(self) -> ResolveSelfSubject:
-        """Build the canonical-self resolver seam for one job run. First-person subjects bind to the
-        namespace's ONE stable self :Entity via `adapter.ensure_self_entity` (idempotent MERGE). The
-        per-run cache collapses N per-decision lookups to one MERGE per namespace WITHOUT outliving a
-        namespace wipe (a fresh seam per call). Fail-closed: any ensure failure skips self-binding for
-        that namespace (the subject falls through to ordinary binding -> advisory), never crashing
-        perception."""
+    def _make_legacy_self_seam(self) -> ResolveSelfSubject:
+        """Build the pre-authority-boundary resolver used outside active enforcement."""
+
         cache: dict[str, str] = {}
 
         def _seam(ns: str | None) -> "tuple[str, str] | None":
@@ -687,12 +687,21 @@ class TypedScalarPerceptionService:
                 except Exception:
                     logger.warning(
                         "ensure_self_entity failed for namespace=%s; self-binding skipped this run",
-                        ns, exc_info=True)
+                        ns,
+                        exc_info=True,
+                    )
                     uuid = ""
                 cache[ns] = uuid
             return (uuid, SELF_SUBJECT_DISPLAY) if uuid else None
 
         return _seam
+
+    def _self_resolver_for_rollout(self) -> ResolveSelfSubject | None:
+        """Preserve behavior in off/observe; only enforce withholds unconfirmed promotion."""
+
+        if self._canonical_self_binding_mode is SelfBindMode.ENFORCE:
+            return None
+        return self._make_legacy_self_seam()
 
     def perceive_and_persist(
         self, episodes: list[Any], llm_complete: LlmComplete, *, k: int = 3,
@@ -913,7 +922,7 @@ class TypedScalarPerceptionService:
             episode_reference_time=episode_reference_time,
             namespace=namespace, perceiver_version=self._perceiver_version,
             mark_projection_complete=lambda ids: self._adapter.mark_projection_complete(ids),
-            resolve_self_subject=self._make_self_seam(),
+            resolve_self_subject=self._self_resolver_for_rollout(),
             lookup_namespace_entities=getattr(
                 self._adapter, "lookup_entities_by_normalized_names", None),
             embed=self._embed, embed_version=self._embed_version,
@@ -1041,7 +1050,7 @@ class TypedScalarPerceptionService:
             mark_attempted=lambda ids: self._adapter.mark_binding_repair_attempted(ids, at=now),
             mark_projection_complete=lambda ids: self._adapter.mark_projection_complete(ids),
             allowed_namespaces=allow,
-            resolve_self_subject=self._make_self_seam(),
+            resolve_self_subject=self._self_resolver_for_rollout(),
             lookup_namespace_entities=getattr(
                 self._adapter, "lookup_entities_by_normalized_names", None),
         )

@@ -100,6 +100,20 @@ class MemoryGraphAdapter:
         self._typed_assertions = TypedAssertionRepository(self.neo4j)
         from menhir.infrastructure.typed_event_repository import TypedEventAssertionRepository
         self._typed_event_assertions = TypedEventAssertionRepository(self.neo4j)
+        self.canonical_self_binding_mode = "off"
+
+    def configure_canonical_self_binding_mode(self, value: Any) -> None:
+        """Apply one rollout mode to every canonical-self semantic write low point."""
+
+        from menhir.infrastructure.self_binding import resolve_bind_mode
+
+        mode = resolve_bind_mode(value, strict=True)
+        self.canonical_self_binding_mode = str(mode)
+        self._correlation.configure_canonical_self_binding_mode(mode)
+        self._consolidation.configure_canonical_self_binding_mode(mode)
+        self._typed_assertions.configure_canonical_self_binding_mode(mode)
+        self._typed_event_assertions.configure_canonical_self_binding_mode(mode)
+        self._views.configure_canonical_self_binding_mode(mode)
 
     # -------------------------------------------------------------------------
     # Schema bootstrap (stays here — uses SHOW INDEXES admin query)
@@ -449,6 +463,23 @@ class MemoryGraphAdapter:
             resolved_episode_uuid=resolved_episode_uuid,
             nodes_touched=nodes_touched,
             edges_touched=edges_touched,
+        )
+
+    def record_self_assertion_proposals(
+        self,
+        episode_uuid: str,
+        *,
+        worker_id: str,
+        proposals: list[dict[str, Any]],
+        authorized_count: int,
+        policy_version: str,
+    ) -> bool:
+        return self._episodes.record_self_assertion_proposals(
+            episode_uuid,
+            worker_id=worker_id,
+            proposals=proposals,
+            authorized_count=authorized_count,
+            policy_version=policy_version,
         )
 
     def mark_episode_failed(

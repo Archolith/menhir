@@ -318,7 +318,10 @@ ENTITY_METADATA_FIELDS = (
     "n.conflict_group_id AS conflict_group_id",
     "n.conflict_status AS conflict_status",
     "CASE WHEN n.target_date IS NOT NULL AND date(n.target_date) < date() THEN true ELSE false END AS target_date_passed",
-    "coalesce(n.namespace, 'default') AS namespace",
+    "coalesce(n.namespace, n.group_id, 'default') AS namespace",
+    "n.group_id AS group_id",
+    "coalesce(n.is_self, false) AS is_self",
+    "n.entity_role AS entity_role",
     # View(kind) supersession: view_current is false only on superseded View versions; unset on
     # every normal memory. Recall uses it to keep stale Views from competing with current state.
     "n.view_current AS view_current",
@@ -326,6 +329,10 @@ ENTITY_METADATA_FIELDS = (
     "n.view_class AS view_class",
     "n.view_subtype AS view_subtype",
     "n.view_audience AS view_audience",
+    # Required by the canonical-self authority reader gate. Without this field, production recall
+    # cannot distinguish a legacy View derived from canonical self even though the View node has a
+    # different UUID; test doubles that supplied it would mask the omission.
+    "n.view_subject_uuid AS view_subject_uuid",
     "coalesce(n.retired, false) AS retired",
     "coalesce(n.is_view, false) AS is_view",
     "n.episode_uuids AS episode_uuids",
@@ -341,6 +348,17 @@ ENTITY_METADATA_FIELDS = (
 # Bi-temporal fact-edge fields for recall enrichment.
 FACT_TEMPORAL_FIELDS = (
     "n.uuid AS node_uuid",
+    "m.uuid AS other_node_uuid",
+    "startNode(r).uuid AS edge_source_uuid",
+    "endNode(r).uuid AS edge_target_uuid",
+    "startNode(r).name AS edge_source_name",
+    "endNode(r).name AS edge_target_name",
+    "labels(startNode(r)) AS edge_source_labels",
+    "labels(endNode(r)) AS edge_target_labels",
+    "r.uuid AS fact_uuid",
+    "r.group_id AS group_id",
+    "r.menhir_self_authority_payload_json AS self_authority_payload_json",
+    "r.name AS predicate",
     "r.fact AS fact",
     "toString(r.valid_at) AS valid_at",
     "toString(r.invalid_at) AS invalid_at",
@@ -361,6 +379,15 @@ SHADOW_CANDIDATE_FACT_EDGE_FIELDS = (
     "n.name AS source_name",
     "m.uuid AS target_uuid",
     "m.name AS target_name",
+    "startNode(r).uuid AS edge_source_uuid",
+    "endNode(r).uuid AS edge_target_uuid",
+    "startNode(r).name AS edge_source_name",
+    "endNode(r).name AS edge_target_name",
+    "labels(startNode(r)) AS edge_source_labels",
+    "labels(endNode(r)) AS edge_target_labels",
+    "r.group_id AS group_id",
+    "r.menhir_self_authority_payload_json AS self_authority_payload_json",
+    "r.name AS predicate",
     "toString(r.valid_at) AS valid_at",
     "toString(r.invalid_at) AS invalid_at",
     "toString(r.created_at) AS created_at",

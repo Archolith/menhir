@@ -8,13 +8,18 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
 from menhir.domain.recall import adjacency_edge_pattern
 from menhir.infrastructure.cypher import Cypher, non_derived_view_cypher
 from menhir.infrastructure.neo4j import SAGA_MUTATION_TIMEOUT_S, Neo4jRepository
+from menhir.infrastructure.self_binding import (
+    SelfBindMode,
+    resolve_bind_mode,
+    structural_self_cypher,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +65,35 @@ class ConsolidationRepository:
     """Encapsulates Entity decay, session promotion, and conflict resolution."""
 
     neo4j: Neo4jRepository
+    _canonical_self_binding_mode: SelfBindMode = field(
+        init=False,
+        default=SelfBindMode.OFF,
+        repr=False,
+    )
+
+    def configure_canonical_self_binding_mode(self, value: Any) -> None:
+        self._canonical_self_binding_mode = resolve_bind_mode(value, strict=True)
+
+    @property
+    def _allow_canonical_self(self) -> bool:
+        return self._canonical_self_binding_mode is not SelfBindMode.ENFORCE
+
+    @staticmethod
+    def _self_safe_lifecycle_cypher(variable: str) -> str:
+        """Refuse mutation of self or a node whose detach would erase a self assertion."""
+
+        return (
+            "($allow_canonical_self OR ("
+            f"NOT {structural_self_cypher(variable)} AND "
+            "NOT EXISTS { "
+            f"MATCH ({variable})-[]-(self_neighbor:Entity) "
+            f"WHERE {structural_self_cypher('self_neighbor')} "
+            "}))"
+        )
+
+    @staticmethod
+    def _ordinary_bridge_neighbor_cypher(variable: str) -> str:
+        return f"($allow_canonical_self OR NOT {structural_self_cypher(variable)})"
 
     # -------------------------------------------------------------------------
     # Graph maintenance
@@ -172,12 +206,22 @@ class ConsolidationRepository:
         rows = self.neo4j.execute(
             """
             UNWIND $updates AS update
-            MATCH ()-[r]->()
+            MATCH (start)-[r]->(end)
             WHERE r.uuid = update.uuid
+              AND ($allow_canonical_self OR (
+                  NOT __SELF_START__
+                  AND NOT __SELF_END__
+                  AND r.menhir_self_authority_payload_json IS NULL
+              ))
             SET r.fact = update.fact, r.fact_source = update.fact_source
             RETURN count(r) AS updated
-            """,
-            params={"updates": updates},
+            """
+            .replace("__SELF_START__", structural_self_cypher("start"))
+            .replace("__SELF_END__", structural_self_cypher("end")),
+            params={
+                "updates": updates,
+                "allow_canonical_self": self._allow_canonical_self,
+            },
         )
         return int(rows[0].get("updated", 0)) if rows else 0
 
@@ -303,14 +347,16 @@ class ConsolidationRepository:
         so cross-domain anchor links don't create spurious semantic bridges.
         """
 
-        query = """
+        query = ("""
             MATCH (n:Entity {uuid: $node_uuid})
             WHERE __NON_DERIVED_VIEW__
+              AND __SELF_SAFE_LIFECYCLE__
             CALL {
                 WITH n
                 OPTIONAL MATCH (n)-[r]-(neighbor:Entity)
                 WHERE NOT type(r) = 'ANCHORED_TO'
                   AND neighbor.structure_role IS NULL
+                  AND __ORDINARY_BRIDGE_NEIGHBOR__
                 WITH collect(DISTINCT neighbor) AS neighbors
                 UNWIND neighbors AS a
                 UNWIND neighbors AS b
@@ -328,10 +374,19 @@ class ConsolidationRepository:
             WITH n, coalesce(edges_bridged, 0) AS edges_bridged
             DETACH DELETE n
             RETURN edges_bridged AS edges_bridged, 1 AS deleted
-            """.replace("__NON_DERIVED_VIEW__", automatic_lifecycle_protection_cypher("n"))
+            """
+            .replace("__NON_DERIVED_VIEW__", automatic_lifecycle_protection_cypher("n"))
+            .replace("__SELF_SAFE_LIFECYCLE__", self._self_safe_lifecycle_cypher("n"))
+            .replace(
+                "__ORDINARY_BRIDGE_NEIGHBOR__",
+                self._ordinary_bridge_neighbor_cypher("neighbor"),
+            ))
         rows = self.neo4j.execute(
             query,
-            params={"node_uuid": node_uuid},
+            params={
+                "node_uuid": node_uuid,
+                "allow_canonical_self": self._allow_canonical_self,
+            },
         )
         if not rows:
             return {"edges_bridged": 0, "deleted": 0}
@@ -443,11 +498,18 @@ class ConsolidationRepository:
         query = (Cypher()
             .match("(n:Entity)")
             .where("n.uuid IN $uuids", "n.scope = 'SESSION'",
-                   automatic_lifecycle_protection_cypher("n"))
+                   automatic_lifecycle_protection_cypher("n"),
+                   self._self_safe_lifecycle_cypher("n"))
             .detach_delete("n")
             .return_raw("count(n) AS deleted")
             .build())
-        rows = self.neo4j.execute(query, params={"uuids": node_uuids})
+        rows = self.neo4j.execute(
+            query,
+            params={
+                "uuids": node_uuids,
+                "allow_canonical_self": self._allow_canonical_self,
+            },
+        )
         return int(rows[0].get("deleted", 0)) if rows else 0
 
     def delete_entities_returning_uuids(
@@ -464,7 +526,10 @@ class ConsolidationRepository:
         if not node_uuids:
             return []
         scope_clause = "AND n.scope = $scope" if require_scope else ""
-        params: dict[str, Any] = {"uuids": node_uuids}
+        params: dict[str, Any] = {
+            "uuids": node_uuids,
+            "allow_canonical_self": self._allow_canonical_self,
+        }
         if require_scope:
             params["scope"] = require_scope
         rows = self.neo4j.execute(
@@ -472,6 +537,7 @@ class ConsolidationRepository:
             MATCH (n:Entity)
             WHERE n.uuid IN $uuids {scope_clause}
               AND {automatic_lifecycle_protection_cypher("n")}
+              AND {self._self_safe_lifecycle_cypher("n")}
             WITH collect(n) AS doomed, collect(n.uuid) AS deleted_uuids
             FOREACH (d IN doomed | DETACH DELETE d)
             RETURN deleted_uuids
@@ -794,15 +860,17 @@ class ConsolidationRepository:
 
         Excludes ANCHORED_TO edges and structural neighbors from bridging.
         """
-        query = """
+        query = ("""
             MATCH (n:Entity {uuid: $node_uuid})
             WHERE n.freshness = 'GONE'
               AND __AUTOMATIC_LIFECYCLE_PROTECTION__
+              AND __SELF_SAFE_LIFECYCLE__
             CALL {
                 WITH n
                 OPTIONAL MATCH (n)-[r]-(neighbor:Entity)
                 WHERE NOT type(r) = 'ANCHORED_TO'
                   AND neighbor.structure_role IS NULL
+                  AND __ORDINARY_BRIDGE_NEIGHBOR__
                 WITH collect(DISTINCT neighbor) AS neighbors
                 UNWIND neighbors AS a
                 UNWIND neighbors AS b
@@ -821,10 +889,19 @@ class ConsolidationRepository:
             """.replace(
                 "__AUTOMATIC_LIFECYCLE_PROTECTION__",
                 automatic_lifecycle_protection_cypher("n"),
-            )
+            ).replace(
+                "__SELF_SAFE_LIFECYCLE__",
+                self._self_safe_lifecycle_cypher("n"),
+            ).replace(
+                "__ORDINARY_BRIDGE_NEIGHBOR__",
+                self._ordinary_bridge_neighbor_cypher("neighbor"),
+            ))
         rows = self.neo4j.execute(
             query,
-            params={"node_uuid": node_uuid},
+            params={
+                "node_uuid": node_uuid,
+                "allow_canonical_self": self._allow_canonical_self,
+            },
         )
         return int(rows[0].get("edges_bridged", 0)) if rows else 0
 
@@ -840,16 +917,18 @@ class ConsolidationRepository:
         if not node_uuids:
             return 0
 
-        query = """
+        query = ("""
             UNWIND $node_uuids AS node_uuid
             MATCH (n:Entity {uuid: node_uuid})
             WHERE n.freshness = 'GONE'
               AND __AUTOMATIC_LIFECYCLE_PROTECTION__
+              AND __SELF_SAFE_LIFECYCLE__
             CALL {
                 WITH n, node_uuid
                 OPTIONAL MATCH (n)-[r]-(neighbor:Entity)
                 WHERE NOT type(r) = 'ANCHORED_TO'
                   AND neighbor.structure_role IS NULL
+                  AND __ORDINARY_BRIDGE_NEIGHBOR__
                 WITH node_uuid, collect(DISTINCT neighbor) AS neighbors
                 UNWIND neighbors AS a
                 UNWIND neighbors AS b
@@ -868,10 +947,19 @@ class ConsolidationRepository:
             """.replace(
                 "__AUTOMATIC_LIFECYCLE_PROTECTION__",
                 automatic_lifecycle_protection_cypher("n"),
-            )
+            ).replace(
+                "__SELF_SAFE_LIFECYCLE__",
+                self._self_safe_lifecycle_cypher("n"),
+            ).replace(
+                "__ORDINARY_BRIDGE_NEIGHBOR__",
+                self._ordinary_bridge_neighbor_cypher("neighbor"),
+            ))
         rows = self.neo4j.execute(
             query,
-            params={"node_uuids": node_uuids},
+            params={
+                "node_uuids": node_uuids,
+                "allow_canonical_self": self._allow_canonical_self,
+            },
         )
         return int(rows[0].get("total_edges_bridged", 0)) if rows else 0
 

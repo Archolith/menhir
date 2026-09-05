@@ -4,7 +4,7 @@ First-person subjects ("user"/"I"/"me"/...) bind to the namespace's ONE stable s
 injected `resolve_self_subject` seam — never via lexical name-match and never as a per-episode node.
 Named third parties never reach the self path (SELF_TOKENS is an exact allowlist), so they can never
 bind to self. Covers: the pure classifier, `_resolve_subject` precedence, both binders (perceive +
-repair) under the seam, the service wiring through `ensure_self_entity`, and the repo MERGE's
+repair) under an explicitly injected seam, production-service abstention, and the repo MERGE's
 determinism + per-namespace isolation. No live Neo4j — every seam is a fake.
 """
 
@@ -229,13 +229,15 @@ class _SelfFakeService:
 
 
 class _SelfFakeAdapter:
-    """Fake whose record treats any non-sentinel uuid as bound (models the real store matching an
-    :Entity by uuid), and whose ensure_self_entity returns a deterministic per-namespace uuid."""
+    """Fake that exposes self creation so production-service tests can prove it is never called."""
 
     def __init__(self):
+        self.canonical_self_binding_mode = "enforce"
         self.calls: list[str] = []
         self.recorded: list = []
         self.ensured: list[str] = []
+        self.pending_rows: list[dict] = []
+        self.attempted: list[str] = []
 
     def activate_scalar_state(self):
         self.calls.append("activate")
@@ -258,6 +260,18 @@ class _SelfFakeAdapter:
         pending = assertion.subject_uuid.startswith("unbound:")
         return {"assertion_id": f"a{len(self.recorded)}", "binding_pending": pending, "created": True}
 
+    def pending_advisory_assertions(self, *, namespaces=None, limit=200):
+        self.calls.append("pending")
+        rows = self.pending_rows
+        if namespaces is not None:
+            rows = [row for row in rows if row["namespace"] in namespaces]
+        return rows[:limit]
+
+    def mark_binding_repair_attempted(self, assertion_ids, *, at):
+        self.calls.append("mark_attempted")
+        self.attempted.extend(assertion_ids)
+        return len(assertion_ids)
+
     def mark_projection_complete(self, assertion_ids):
         self.calls.append("mark_projection_complete")
         return len(assertion_ids)
@@ -278,7 +292,8 @@ def _llm(rows):
 
 
 @pytest.mark.unit
-def test_service_perceive_binds_first_person_via_ensure_self_entity():
+@pytest.mark.parametrize("canonical_self", [False, True])
+def test_service_perceive_keeps_model_self_proposal_advisory(canonical_self):
     adapter = _SelfFakeAdapter()
     svc = _SelfFakeService()
     coord = TypedScalarPerceptionService(adapter, svc)
@@ -286,11 +301,62 @@ def test_service_perceive_binds_first_person_via_ensure_self_entity():
     row = dict(episode=0, subject="user", attribute="wake", scope="", value_kind="clock_time",
                unit="", operation="absolute", value="07:30", when="2026-07-01",
                stated_span="I wake at 07:30")
-    out = coord.perceive_and_persist(eps, _llm([row]), k=1, threshold=1.0, namespace="ns-A")
-    assert out["bound"] == 1                                  # self-bound despite no linked entity
-    assert adapter.ensured == ["ns-A"]                        # resolved through ensure_self_entity
-    assert svc.rebuilt == ["self::ns-A"]
+    out = coord.perceive_and_persist(
+        eps, _llm([row]), k=1, threshold=1.0, namespace="ns-A",
+        canonical_self=canonical_self,
+    )
+    assert out["bound"] == 0 and out["advisory"] == 1
+    assert out["decisions"] == 1 and out["committed"] == 1
+    assert adapter.ensured == []
+    assert svc.rebuilt == []
+    assertion = adapter.recorded[0]
+    assert assertion.subject_uuid == advisory_subject_uuid(assertion.source_key)
+    assert assertion.stated_span == "I wake at 07:30"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("mode", ["off", "observe"])
+def test_service_non_enforcing_modes_preserve_legacy_self_binding(mode) -> None:
+    adapter = _SelfFakeAdapter()
+    adapter.canonical_self_binding_mode = mode
+    svc = _SelfFakeService()
+    coord = TypedScalarPerceptionService(adapter, svc)
+    eps = [type("E", (), {"uuid": "ep-1", "content": "I wake at 07:30"})()]
+    row = dict(
+        episode=0, subject="user", attribute="wake", scope="", value_kind="clock_time",
+        unit="", operation="absolute", value="07:30", when="2026-07-01",
+        stated_span="I wake at 07:30",
+    )
+
+    out = coord.perceive_and_persist(
+        eps, _llm([row]), k=1, threshold=1.0, namespace="ns-A"
+    )
+
+    assert out["bound"] == 1 and out["advisory"] == 0
+    assert adapter.ensured == ["ns-A"]
     assert adapter.recorded[0].subject_uuid == "self::ns-A"
+
+
+@pytest.mark.unit
+def test_service_repair_keeps_self_advisory_without_owner_confirmation():
+    adapter = _SelfFakeAdapter()
+    adapter.pending_rows = [dict(
+        assertion_id="a-sk-1", source_key="sk-1", subject_uuid="unbound:sk-1",
+        subject_display="user", binding_pending=True, projection_pending=False,
+        attribute="wake", scope="", value_kind="clock_time", unit="", operation="absolute",
+        value="07:30", stated_span="I wake at 07:30", episode_uuid="ep-1", span_start=0,
+        span_end=15, claim_ordinal=0, valid_at="2026-07-01T00:00:00+00:00",
+        learned_at="2026-07-01T00:00:00+00:00", time_basis="explicit",
+        perceiver_version="v1", namespace="ns-A",
+    )]
+    svc = _SelfFakeService()
+    coord = TypedScalarPerceptionService(adapter, svc)
+
+    out = coord.repair_pending_bindings(namespaces=["ns-A"])
+
+    assert out["repaired"] == 0 and out["still_pending"] == 1
+    assert adapter.ensured == []
+    assert svc.rebuilt == []
 
 
 # --------------------------------------------------------------------------- repo MERGE (determinism)

@@ -12,6 +12,7 @@ from menhir.infrastructure.typed_assertion_models import (
     ScalarStateActivationError,
     _RECORD_CYPHER,
 )
+from menhir.infrastructure.self_binding import SelfBindMode
 
 class TypedAssertionReconciliationMixin:
     def rebind_assertions(
@@ -34,8 +35,18 @@ class TypedAssertionReconciliationMixin:
         if absorbed_uuid.strip() == survivor_uuid.strip():
             return {"rebound": 0, "source_keys": []}
         ns_pred = " AND a.namespace = $namespace" if namespace is not None else ""
+        allow_canonical_self = (
+            getattr(self, "_canonical_self_binding_mode", SelfBindMode.OFF)
+            is not SelfBindMode.ENFORCE
+        )
         rows = self._neo4j.execute(
             f"""
+            MATCH (s:Entity {{uuid: $survivor}})
+            WHERE $allow_canonical_self OR (
+              NOT coalesce(s.is_self, false)
+              AND toLower(trim(coalesce(s.entity_role, ''))) <> 'self'
+            )
+            WITH s
             MATCH (a:TypedAssertion {{subject_uuid: $absorbed}})
             WHERE true{ns_pred}
             // journal the per-op lineage entry (DB-unique on rebind_key = op + assertion_id); persist
@@ -46,9 +57,8 @@ class TypedAssertionReconciliationMixin:
                             r.source_key = a.source_key, r.namespace = a.namespace,
                             r.rebound_at = datetime()
             SET a.subject_uuid = $survivor, a.rebound_at = datetime()
-            WITH collect(a) AS moved, collect(DISTINCT a.source_key) AS source_keys
-            OPTIONAL MATCH (s:Entity {{uuid: $survivor}})
-            FOREACH (a IN CASE WHEN s IS NULL THEN [] ELSE moved END |
+            WITH s, collect(a) AS moved, collect(DISTINCT a.source_key) AS source_keys
+            FOREACH (a IN moved |
                 MERGE (s)-[:HAS_ASSERTION]->(a))
             // scope head moves to EXACTLY the moved assertions' source_keys (the head identity)
             WITH moved, source_keys
@@ -58,7 +68,8 @@ class TypedAssertionReconciliationMixin:
             RETURN size(moved) AS rebound, source_keys
             """,
             params={"absorbed": absorbed_uuid.strip(), "survivor": survivor_uuid.strip(),
-                    "op": merge_op_id.strip(), "namespace": namespace},
+                    "op": merge_op_id.strip(), "namespace": namespace,
+                    "allow_canonical_self": allow_canonical_self},
         )
         if not rows:
             return {"rebound": 0, "source_keys": []}
@@ -78,20 +89,26 @@ class TypedAssertionReconciliationMixin:
         if not merge_op_id.strip():
             raise ValueError("restore_rebound_assertions requires a merge_op_id")
         ns_pred = " AND r.namespace = $namespace" if namespace is not None else ""
+        allow_canonical_self = (
+            getattr(self, "_canonical_self_binding_mode", SelfBindMode.OFF)
+            is not SelfBindMode.ENFORCE
+        )
         rows = self._neo4j.execute(
             f"""
             MATCH (r:AssertionRebind {{merge_op_id: $op}})
             WHERE true{ns_pred}
             MATCH (a:TypedAssertion {{assertion_id: r.assertion_id}})
             WITH a, r, r.from_uuid AS from_uuid, r.to_uuid AS to_uuid, r.source_key AS sk
+            MATCH (b:Entity {{uuid: from_uuid}})
+            WHERE $allow_canonical_self OR (
+              NOT coalesce(b.is_self, false)
+              AND toLower(trim(coalesce(b.entity_role, ''))) <> 'self'
+            )
             // unlink the current (to) owner's HAS_ASSERTION, move back to from_uuid, re-link it
             OPTIONAL MATCH (:Entity {{uuid: to_uuid}})-[rel:HAS_ASSERTION]->(a)
             DELETE rel
             SET a.subject_uuid = from_uuid
-            WITH a, r, from_uuid, sk
-            OPTIONAL MATCH (b:Entity {{uuid: from_uuid}})
-            FOREACH (_ IN CASE WHEN b IS NULL THEN [] ELSE [1] END |
-                MERGE (b)-[:HAS_ASSERTION]->(a))
+            MERGE (b)-[:HAS_ASSERTION]->(a)
             // move the head for this exact source_key back to from_uuid
             WITH a, r, from_uuid, sk
             OPTIONAL MATCH (h:TypedAssertionHead {{source_key: sk}})
@@ -101,7 +118,8 @@ class TypedAssertionReconciliationMixin:
             FOREACH (r IN records | DELETE r)
             RETURN size(moved) AS restored, source_keys, from_uuids
             """,
-            params={"op": merge_op_id.strip(), "namespace": namespace},
+            params={"op": merge_op_id.strip(), "namespace": namespace,
+                    "allow_canonical_self": allow_canonical_self},
         )
         if not rows:
             return {"restored": 0, "source_keys": [], "from_uuids": []}

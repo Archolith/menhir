@@ -164,6 +164,15 @@ class IngestWorkerMixin:
             graphiti_add_episode_timeout_s=self._graphiti_add_episode_timeout_s,
             graphiti_episode_max_estimated_tokens=self._graphiti_episode_max_estimated_tokens,
             canonical_self_binding_mode=self._canonical_self_binding_mode,
+            canonical_self_confirmation_public_key_path=(
+                self._canonical_self_confirmation_public_key_path
+            ),
+            canonical_self_confirmation_public_key_sha256=(
+                self._canonical_self_confirmation_public_key_sha256
+            ),
+            canonical_self_confirmation_directory=(
+                self._canonical_self_confirmation_directory
+            ),
             get_queue_depth=self.get_queue_depth,
             shadow_context_composition=self._shadow_context_composition,
             shadow_composition_timeout_s=self._shadow_composition_timeout_s,

@@ -4,9 +4,10 @@ description: Operating the canonical-self identity boundary, and what consolidat
 
 # Canonical self: operations runbook
 
-Covers the **prevention** half, which has landed and remains default-off, and states precisely what
-the **remediation** half still needs. Consolidating the existing forks is not authorized by this
-document and cannot be performed with the tooling in the repository today.
+Covers the default-off **prevention** candidate and states precisely what the **remediation** half
+still needs. This branch is implementation evidence, not proof of deployment or activation.
+Consolidating the existing forks is not authorized by this document and cannot be performed with
+the tooling in the repository today.
 
 Background: `.agent/plans/menhir-scanner-generic-entity-recall-pollution-rca.md` (accepted RCA) and
 `.agent/plans/menhir-canonical-self-remediation-plan.md` in the workspace meta-repo.
@@ -14,18 +15,106 @@ The 2026-09-04 observation corrections are in
 `.agent/plans/menhir-canonical-self-observation-correction-2026-09-04.md`; they supersede the
 parent plan's node-authority, score-bound, and historical-population assumptions.
 
-## What is live
+## Candidate code contract (not deployed by this branch)
 
 `MENHIR_CANONICAL_SELF_BINDING_MODE` — `off` (default) | `observe` | `enforce`.
 
 | Mode | Behavior |
 |---|---|
 | `off` | Pre-change behavior exactly. Binding is not evaluated. |
-| `observe` | Evaluates and records the decision. Rewrites nothing. |
-| `enforce` | Rewrites a declared subject before dedup and isolates canonical self from every undeclared ordinary-resolution path. |
+| `observe` | Preserves legacy writes and recall while evaluating/recording legacy decisions. Rewrites nothing. |
+| `enforce` | Constructs canonical self as a structural endpoint, admits only exact owner-confirmed Graphiti assertions, retains unconfirmed proposals on their episode, blocks alternate self writers, and excludes legacy unconfirmed self material from default authoritative recall. |
 
-An unrecognized value falls back to `off` with a warning — a config typo must not enable a
-durable-write-semantics change.
+Runtime startup rejects an explicitly configured unrecognized value. This is deliberate: a typo in
+an intended `enforce` activation must not silently run the service in unprotected `off` mode. The
+default remains `off` when the variable is absent.
+
+This repository change does not activate any mode in production. `enforce` is fail-closed: if any
+confirmation setting is blank, unreadable or inconsistent, semantic self assertions remain
+proposal-only.
+
+## Owner-confirmation contract
+
+Menhir verifies but never creates owner authority. There is no signing endpoint, agent tool,
+private-key setting or signature field in the graph. Configure all three values:
+
+```text
+MENHIR_CANONICAL_SELF_CONFIRMATION_PUBLIC_KEY_PATH=/run/secrets/menhir/canonical-self/owner-public.pem
+MENHIR_CANONICAL_SELF_CONFIRMATION_PUBLIC_KEY_SHA256=<sha256 of raw 32-byte Ed25519 public key>
+MENHIR_CANONICAL_SELF_CONFIRMATION_DIRECTORY=/run/secrets/menhir/canonical-self/confirmations
+```
+
+The fingerprint is 64 lowercase hexadecimal characters; an optional `sha256:` prefix is accepted.
+The public key must be PEM-encoded Ed25519. Mount both the key and confirmation directory read-only.
+
+For episode UUID `E`, the confirmation filename is
+`sha256(UTF-8(E)).hexdigest() + ".json"`. The recommended document shape is:
+
+```json
+{
+  "confirmations": [
+    {
+      "payload": {
+        "assertion": {
+          "counterpart": {"labels": ["Entity"], "name": "Chicago"},
+          "fact": "user lives in Chicago",
+          "predicate": "LIVES_IN",
+          "subject": {"kind": "canonical_self"}
+        },
+        "claim_digest": "...",
+        "claim_revision": 1,
+        "direction": "self_to_entity",
+        "episode_uuid": "...",
+        "evidence_sha256": "...",
+        "lane": "graphiti_edge",
+        "namespace": "default",
+        "policy_version": "menhir-canonical-self-authority-v1",
+        "polarity": "affirmed",
+        "principal_id": "...",
+        "schema_version": 1,
+        "temporal_scope": {
+          "expired_at": null,
+          "invalid_at": null,
+          "valid_at": null
+        },
+        "turn_evidence_uuid": "..."
+      },
+      "signature": "<base64 Ed25519 signature>"
+    }
+  ]
+}
+```
+
+Sign the compact, key-sorted, UTF-8 JSON bytes of `payload` with no ASCII escaping and no NaN
+values. The payload is exact: principal, namespace, episode and turn lineage, evidence SHA-256,
+lane, endpoint direction, polarity, structured assertion, temporal scope, claim revision, schema,
+policy and derived claim digest must all match. Extra, omitted, retyped, stale or replayed fields do
+not authorize the edge. One file may contain at most 256 records and one MiB.
+
+Menhir keeps the exact authorized payload on the Graphiti relationship and re-verifies the current
+read-only confirmation during final edge resolution and fact-edge recall. It also requires the
+actual persisted endpoint direction, resolved counterpart name and labels, predicate, fact and
+three temporal fields to equal the signed payload. Graphiti cannot infer a timestamp, choose a merely similar duplicate, invalidate another
+edge or discard the server-owned payload after approval. Deleting or changing the confirmation
+therefore blocks an in-flight final write and revokes an existing relationship from default
+authoritative recall. The relationship remains available to explicit operator graph inspection
+until a separately approved reconciliation removes it.
+Unconfirmed proposals are bounded, lease-guarded JSON receipts on their `:Episodic` evidence node;
+they have no authoritative entity edge and do not enter ordinary recall.
+
+In `enforce`, post-extraction maintenance is fenced too. Correlation and lifecycle bridge writers
+cannot create unsigned `RELATES_TO` edges involving structural self; merge, unmerge, decay and direct
+delete paths refuse operations that would consume or recreate an incident self relationship; and
+synthetic fact repair cannot rewrite a signed or self-incident edge. These refusals preserve the
+assertion boundary rather than treating maintenance credentials as owner confirmation.
+
+The offline promotion loop is deliberately two-pass: let the first enforce pass finish `READY`,
+export and inspect its proposal payload, sign that exact payload outside Menhir, place the record in
+the read-only confirmation directory, then use the operator-only `force_reenrich` tool for the same
+episode UUID. That tool may reopen a `READY` episode only when its last receipt contains more
+proposals than verified confirmations; it cannot reopen arbitrary completed work. The second pass
+still performs full extraction, evidence binding and signature verification and fails closed if the
+payload changes. Operator access to reprocess is not authority to sign.
 
 ## Risk profile
 
@@ -60,13 +149,16 @@ profile above.
 3. **Require normal repository CI and mechanical release classification.** Do not invent a lighter
    class for this feature. If the accumulated delta touches protected configuration, deployment or
    dependency surfaces, use the resulting `security-config` or `maintenance` path.
-4. **Deploy the exact tested candidate with `enforce`.** There is no required observe-first stage
-   for this installation. Production `observe` deliberately does not inject the endpoint, so it
-   can describe legacy self-like output but cannot predict marker compliance or binding yield.
+4. **Deploy the exact tested candidate with `enforce` only after provisioning owner authority.**
+   Hash and record the exact read-only Ed25519 public key, create the per-episode confirmation
+   directory outside Menhir, verify all three settings in the immutable candidate, and prove that
+   missing/mismatched configuration remains proposal-only. There is no required observe-first stage
+   for this installation; `observe` preserves legacy behavior and cannot predict confirmed yield.
 5. **Immediately run one disposable-namespace canary through the public API.** Require a `READY`
-   projection, the deterministic canonical UUID, a current-episode relationship and `MENTIONS`
-   provenance, zero reserved marker text in all persisted node/relationship properties, replay
-   idempotence, and merge refusal in both directions.
+   projection, the deterministic canonical UUID, one current-episode relationship carrying the
+   exact verified payload and `MENTIONS` provenance, zero reserved marker text in all persisted
+   node/relationship properties, replay idempotence, revocation on confirmation removal, and merge
+   refusal in both directions. An unsigned twin must remain proposal-only.
 6. **Read normal telemetry through one asynchronous processing cycle.** Component `self_binding`,
    event `canonical_self_decision`, should show the expected `bound` decision for the canary and no
    `ambiguous` decision. Also check projection failures/retries and the dedup resolution counters.
@@ -81,9 +173,25 @@ Use `observe` only when diagnosing legacy extractor output. Its
 signals, not identity decisions and not an activation gate. Do not build a discarded shadow
 extractor unless the production-model corpus or live canary exposes a problem that requires it.
 
-This mode governs Graphiti entity-node resolution. The typed-scalar and event-history pipelines
-have separate existing first-person subject rules; they do not prove that this mode is active and
-are outside this runbook's activation decision.
+This mode now governs the complete canonical-self semantic boundary, not only Graphiti resolution.
+In `enforce`, typed-scalar and event-history lanes have no signed promotion path and remain
+proposal/advisory-only for canonical self; direct typed repositories reject canonical-self writes;
+self-anchored Views are rejected; rebind/restore paths cannot attach assertions to canonical self;
+and default recall excludes legacy canonical-self nodes, Views, scalar states/history and event
+authority. `off` and `observe` preserve those legacy paths for compatibility.
+
+### Residuals before activation
+
+- Confirmation files are external to Neo4j, so their read and the relationship save cannot share a
+  transaction. Menhir re-verifies at final resolution and again on every authoritative recall. A
+  confirmation revoked in the remaining narrow interval can leave a stored edge, but that edge
+  fails the next recall and is not authoritative.
+- A stale ordinary-node summary left behind after a historical self edge was already deleted or
+  transformed has no current relationship to identify its origin. Current-edge filtering cannot
+  discover that text. Do not claim the historical graph is clean until the separately approved
+  read-only census and journaled remediation classify it.
+- This branch contains no production database evidence. Docker, live-provider, deployment,
+  activation and historical remediation remain separate approval gates.
 
 ### Rollback asymmetry
 
@@ -153,15 +261,14 @@ list contains no `/tmp` path.
    In `enforce`, an undeclared node also cannot acquire canonical self through ordinary candidate
    resolution: pre-stamped inputs are refused, and canonical UUID/marker candidates are excluded
    from exact, similarity, LLM, and override paths. `off` and `observe` preserve legacy resolution.
-5. Ambiguous evidence fails visibly and retryably, never by picking one. Proving who authored an
-   episode never proves which extracted node is that author: that is a separate, node-level
-   question (`proves_self_subject`), and without an answer to it the payload does not bind. No
-   property of the extracted NAME can answer it — not the literal string, not its grammatical
-   person — because a name is not provenance.
-   A declaration must also carry the nonblank external pending-episode UUID for the active
-   extraction call. The sole production declaration producer accepts only the receipt-owned
-   endpoint on an atomically verified verbatim projection and requires a final current-episode edge
-   plus index entry. The display name is never an identity-key fallback.
+5. Ambiguous evidence fails visibly and retryably, never by picking one. Trusted turn authorship
+   permits Menhir to construct the structural endpoint; it never authorizes a semantic edge. Each
+   semantic attachment requires an exact owner signature over its principal, namespace, episode,
+   turn evidence, evidence digest, lane, direction, polarity, assertion, temporal scope, revision,
+   schema, policy and claim digest. A classifier or model-selected marker may solicit that proposal
+   but can never grant authority. The display name is never an identity-key fallback.
+   Graphiti's final resolver rechecks the external confirmation and exact persisted semantic tuple;
+   losing the in-memory authorization capability or changing any signed field fails the episode.
 6. Runtime paths never delete or absorb forks.
 7. Telemetry carries enums, counts and UUIDs — never memory text or arbitrary entity names.
 8. A canonical-node read failure -- or a missing driver -- is an error, never "absent". Falling

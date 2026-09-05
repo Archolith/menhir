@@ -18,7 +18,7 @@ reported-speech attribution defect. The older release-plan listing is not sign-o
 
 | Document | Current ownership |
 |---|---|
-| [`menhir-production-release-2026-09-04.md`](menhir-production-release-2026-09-04.md) | Prepare and deploy the complete accumulated Menhir candidate with production-model/image parity, mechanically classified maintenance controls, canonical-self enforcement, one public synthetic canary, and pre-authored rollback. |
+| [`menhir-production-release-2026-09-04.md`](menhir-production-release-2026-09-04.md) | **Superseded:** historical release proposal based on model-selected canonical-self endpoint authority; do not execute. Replaced by the exact owner-confirmation boundary below. |
 | [`menhir-contabo-full-production-migration-2026-08-25.md`](menhir-contabo-full-production-migration-2026-08-25.md) | Move the complete OAuth/MCP/runtime/Neo4j stack to Contabo through an isolated Menhir Compose project, a transactional shared-Caddy integration, immutable releases, bounded VPS operations, verified state transfer, and rollback-safe graph/OAuth authority. |
 | [`menhir-research-execution-ladder.md`](menhir-research-execution-ladder.md) | Dependency-ordered research → code → bench sequence. Read-side rungs are closed; Track W6 is the remaining write-side rung. |
 | [`menhir-work-artifact-reconciliation-2026-08-11.md`](menhir-work-artifact-reconciliation-2026-08-11.md) | Add read-only corpus parity auditing, hash/Git-backed source reconciliation, bounded move detectors, and a separately approved live-graph repair. |
@@ -43,7 +43,7 @@ reported-speech attribution defect. The older release-plan listing is not sign-o
 
 | Document | Decision |
 |---|---|
-| [`menhir-canonical-self-authority-boundary-2026-09-05.md`](menhir-canonical-self-authority-boundary-2026-09-05.md) | Choose the canonical-self attribution contract; proposed hybrid separates model-extracted proposals from owner-confirmed self facts. Implementation, database writes, deployment and historical remediation are not approved by plan authoring. |
+| [`menhir-canonical-self-authority-boundary-2026-09-05.md`](menhir-canonical-self-authority-boundary-2026-09-05.md) | Implement the approved hybrid that separates structural identity and model-extracted proposals from exact owner-confirmed self facts. Database writes, deployment, activation and historical remediation remain separately gated. |
 | [`menhir-context-composition-production-integration.md`](menhir-context-composition-production-integration.md) | Decide whether Stages 2–4 remain wanted after Stage 1's negative result and the later independent fix of the motivating extraction failure. |
 
 ## Maintenance rule

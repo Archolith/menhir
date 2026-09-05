@@ -12,7 +12,16 @@ from enum import Enum
 from typing import Any
 from uuid import uuid4
 
+from menhir.domain.self_authority import (
+    UnconfirmedSelfAssertionError,
+    is_canonical_self_subject,
+)
 from menhir.infrastructure.neo4j import SAGA_MUTATION_TIMEOUT_S
+from menhir.infrastructure.self_binding import (
+    SelfBindMode,
+    resolve_bind_mode,
+    structural_self_cypher,
+)
 
 try:  # neo4j is a hard runtime dep; guard the import so unit imports without the driver still load.
     from neo4j.exceptions import ConstraintError as _Neo4jConstraintError
@@ -67,6 +76,23 @@ class ViewWriteRepositoryMixin:
 
     def __init__(self, neo4j: Any) -> None:
         self.neo4j = neo4j
+        self._canonical_self_binding_mode = SelfBindMode.OFF
+
+    def configure_canonical_self_binding_mode(self, value: Any) -> None:
+        self._canonical_self_binding_mode = resolve_bind_mode(value, strict=True)
+
+    def _subject_is_structural_self(self, subject_uuid: str) -> bool:
+        """Resolve the durable subject marker instead of trusting the caller's namespace."""
+
+        rows = self.neo4j.execute(
+            """
+            MATCH (subject:Entity {uuid: $subject_uuid})
+            RETURN __STRUCTURAL_SELF__ AS is_self
+            LIMIT 1
+            """.replace("__STRUCTURAL_SELF__", structural_self_cypher("subject")),
+            {"subject_uuid": subject_uuid},
+        )
+        return bool(rows and rows[0].get("is_self", False))
 
     # ------------------------------------------------------------------ keys / surfaces (compat)
 
@@ -116,6 +142,17 @@ class ViewWriteRepositoryMixin:
         `audit_props` are provenance-only node properties (e.g. the perception gate's agreement/k/
         reason) — stamped onto the node but kept OUT of the signature (never trigger supersession)
         and OUT of the embedding/surface (never rank). A receipt, not a confidence signal."""
+        if self._canonical_self_binding_mode is SelfBindMode.ENFORCE and subject_uuid is not None:
+            if (
+                is_canonical_self_subject(subject_uuid, namespace)
+                or self._subject_is_structural_self(subject_uuid)
+            ):
+                # Views are derived authority, not an alternate promotion channel. The structural
+                # database check prevents a caller from pairing canonical UUID A with namespace B
+                # to evade the deterministic UUID formula check.
+                raise UnconfirmedSelfAssertionError(
+                    "View cannot attach to canonical self without exact owner confirmation"
+                )
         kind = self.KINDS[kind_name]
         key = self._key(namespace, subject, kind.key_discriminator(payload), subject_uuid=subject_uuid)
         # Normalize provenance ONCE, before the surface is rendered, so the supporting-event count
@@ -348,8 +385,10 @@ class ViewWriteRepositoryMixin:
             OPTIONAL MATCH (actual:{label})
             WHERE (actual.view_key = $key OR actual.qs_key = $key)
               AND coalesce(actual.view_current, actual.qs_current, true)
-            WITH f, actual
-            WHERE ($old IS NULL AND actual IS NULL) OR actual.uuid = $old
+            OPTIONAL MATCH (subject_entity:Entity {{uuid: $subject_uuid}})
+            WITH f, actual, subject_entity
+            WHERE (($old IS NULL AND actual IS NULL) OR actual.uuid = $old)
+              AND ($allow_canonical_self OR subject_entity IS NULL OR NOT __STRUCTURAL_SELF__)
             CALL {{
                 UNWIND CASE WHEN size($eps) = 0 THEN [null] ELSE $eps END AS eid
                 OPTIONAL MATCH (e)
@@ -390,14 +429,17 @@ class ViewWriteRepositoryMixin:
                 MERGE (n)-[:SUPERSEDES]->(o))
             FOREACH (e IN evidence | MERGE (e)-[:MENTIONS]->(n))
             RETURN n.uuid AS uuid
-            """
+            """.replace("__STRUCTURAL_SELF__", structural_self_cypher("subject_entity"))
         params = {"uuid": new_uuid, "name": name[:300], "summary": summary[:1000],
                   "ns": (namespace or ""), "ns_stamped": ns_stamped,
                   "namespace_key": namespace_key, **tenant_scope_params(namespace_key),
                   "operation_id": new_uuid, "key": key, "eps": eps,
                   "source": source, "sc": float(source_confidence),
                   "valid_at": valid_at, "now": now, "extra": extra, "emb": name_embedding,
-                  "old": old_uuid}
+                  "old": old_uuid, "subject_uuid": subject_uuid,
+                  "allow_canonical_self": (
+                      self._canonical_self_binding_mode is not SelfBindMode.ENFORCE
+                  )}
         if kind == "scalar_state":
             try:
                 write_rows = self.neo4j.execute(
@@ -433,6 +475,14 @@ class ViewWriteRepositoryMixin:
                 create_and_supersede, params, timeout_s=SAGA_MUTATION_TIMEOUT_S
             )
         if not write_rows:
+            if (
+                self._canonical_self_binding_mode is SelfBindMode.ENFORCE
+                and subject_uuid is not None
+                and self._subject_is_structural_self(subject_uuid)
+            ):
+                raise UnconfirmedSelfAssertionError(
+                    "View cannot attach to canonical self without exact owner confirmation"
+                )
             raise ValueError(
                 "FACT View write refused: every declared contributor UUID must resolve to live "
                 ":Episodic or :TurnEvidence evidence"

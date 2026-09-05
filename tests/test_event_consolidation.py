@@ -2,8 +2,8 @@
 
 No external calls and no benchmark-derived IDs/content. These cover the Phase-3 event-history
 backfill runner: target selection, the fail-closed page spine (persist -> lane rebuild -> cursor
-advance), self-subject admission + canonicalization, structural fail-closed, budget gating, and
-full-page pagination under a shared LLM call count.
+advance), unconfirmed self-subject isolation, structural fail-closed, budget gating, and full-page
+pagination under a shared LLM call count.
 """
 
 from __future__ import annotations
@@ -62,6 +62,7 @@ class FakeGraph:
     """Fake EventConsolidationGraph driving a queue of batch pages plus recording seams."""
 
     def __init__(self, pages: list[list[dict]] | None = None) -> None:
+        self.canonical_self_binding_mode = "enforce"
         self.pages = list(pages or [])
         self.discovered = ["discovered-a", "discovered-b"]
         self.discovery_calls: list[tuple[str, int]] = []
@@ -69,6 +70,7 @@ class FakeGraph:
         self.advances: list[tuple[str, str, str, str, str]] = []
         self.activated = 0
         self.self_uuid = "self-entity-uuid"
+        self.self_ensure_calls: list[str] = []
         self.records: list = []
         self.record_result: dict | None = None
         self.rebuild_complete = True
@@ -112,6 +114,7 @@ class FakeGraph:
         return {"activated": True}
 
     def ensure_self_entity(self, namespace: str) -> str:
+        self.self_ensure_calls.append(namespace)
         return self.self_uuid
 
     def record_typed_event_assertion(self, assertion):
@@ -160,7 +163,7 @@ def test_select_event_targets_explicit_vs_discovered():
     assert graph.discovery_calls == [("v1", 10)]
 
 
-# --------------------------------------------------------------------------- success path
+# --------------------------------------------------------------------------- proposal-only success path
 
 
 def _two_row_success_response() -> str:
@@ -199,7 +202,7 @@ def _two_row_success_response() -> str:
 
 
 @pytest.mark.unit
-def test_success_persists_rebuilds_advances_canonical_self_and_reference_time():
+def test_unconfirmed_self_proposals_are_counted_dropped_and_page_advances():
     t1 = _row(
         "t1",
         "I bought a notebook on 2026-07-18.",
@@ -224,24 +227,18 @@ def test_success_persists_rebuilds_advances_canonical_self_and_reference_time():
     )
 
     assert graph.activated == 1
-    # both assertions persisted and created
-    assert len(graph.records) == 2
-    assert metrics["event_assertions_recorded"] == 2
-    assert metrics["event_assertions_created"] == 2
-    # canonical self subject, domain forced to None, exact turn-evidence identity
-    for assertion in graph.records:
-        assert assertion.subject_display == "user"
-        assert assertion.domain is None
-    assert graph.records[0].turn_evidence_uuid == "t1"
-    assert graph.records[1].turn_evidence_uuid == "t2"
-    # explicit when vs episode-reference (row valid_at) time basis
-    assert graph.records[0].time_basis == "explicit"
-    assert "2026-07-18" in graph.records[0].valid_at
-    assert graph.records[1].time_basis == "episode_reference"
-    assert graph.records[1].valid_at == "2026-07-02T00:00:00Z"
-    # lane rebuild ran complete; cursor advanced to the FINAL row of the page
-    assert graph.rebuilt_lanes and graph.rebuilt_lanes[0]
-    assert metrics["event_views_rebuilt"] >= 1
+    assert metrics["event_proposals"] == 2
+    assert metrics["event_drop_reasons"] == {
+        "owner_confirmation_not_configured": 2
+    }
+    assert graph.self_ensure_calls == []
+    assert graph.records == []
+    assert graph.rebuilt_lanes == []
+    assert metrics["event_assertions_recorded"] == 0
+    assert metrics["event_assertions_created"] == 0
+    assert metrics["event_views_rebuilt"] == 0
+    # The raw evidence and proposal telemetry remain, so this structurally valid page advances to
+    # the FINAL row even though no semantic assertion was authorized.
     assert graph.advances[-1] == (
         "ns1",
         "2026-07-06T00:00:00Z",
@@ -253,6 +250,47 @@ def test_success_persists_rebuilds_advances_canonical_self_and_reference_time():
     assert metrics["event_namespaces_failed"] == 0
     assert metrics["event_llm_calls"] == llm.calls == 1
     assert metrics["event_namespaces_dirty"] == 1
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("mode", ["off", "observe"])
+def test_non_enforcing_modes_preserve_legacy_event_self_binding(mode):
+    graph = FakeGraph(
+        pages=[[
+            _row(
+                "t1",
+                "I bought a notebook on 2026-07-18.",
+                valid_at="2026-07-01T00:00:00Z",
+                cursor_at="2026-07-05T00:00:00Z",
+            )
+        ]]
+    )
+    graph.canonical_self_binding_mode = mode
+    llm = FakeLlm(responses=[json.dumps([{
+        "episode": 0,
+        "events": [{
+            "subject": "I",
+            "predicate": "bought",
+            "object": "notebook",
+            "domain": "",
+            "when": "2026-07-18",
+            "stated_span": "I bought a notebook on 2026-07-18.",
+        }],
+    }])])
+
+    metrics = run_event_consolidation(
+        graph,
+        event_targets=["ns1"],
+        counting_llm=llm,
+        call_budget=10,
+        config=_default_config(),
+    )
+
+    assert graph.self_ensure_calls == ["ns1"]
+    assert len(graph.records) == 1
+    assert metrics["event_assertions_recorded"] == 1
+    assert graph.rebuilt_lanes
+    assert len(graph.advances) == 1
 
 
 @pytest.mark.unit
@@ -331,7 +369,7 @@ def test_structurally_invalid_response_does_not_advance(response):
     )  # the page was attempted, not advanced
 
 
-# --------------------------------------------------------------------------- self-subject admission
+# --------------------------------------------------------------------------- self-subject isolation
 
 
 @pytest.mark.unit
@@ -390,7 +428,9 @@ def test_non_self_subject_rejected_but_structurally_valid_page_advances():
 @pytest.mark.parametrize(
     "subject", ["user", "the user", "I", "me", "myself", "speaker"]
 )
-def test_all_self_tokens_are_admitted_and_canonicalized(subject):
+def test_all_self_tokens_remain_unconfirmed_proposals_without_side_effects(
+    subject,
+):
     graph = FakeGraph(
         pages=[
             [
@@ -434,37 +474,37 @@ def test_all_self_tokens_are_admitted_and_canonicalized(subject):
         config=_default_config(),
     )
 
-    assert len(graph.records) == 1
-    assert graph.records[0].subject_display == "user"  # canonicalized
-    assert graph.records[0].domain is None
-    assert graph.records[0].namespace == "ns1"
-    assert metrics["event_drop_reasons"].get("non_self_subject", 0) == 0
+    assert metrics["event_proposals"] == 1
+    assert metrics["event_drop_reasons"] == {
+        "owner_confirmation_not_configured": 1
+    }
+    assert graph.self_ensure_calls == []
+    assert graph.records == []
+    assert graph.rebuilt_lanes == []
+    assert metrics["event_namespaces_failed"] == 0
+    assert len(graph.advances) == 1
 
 
-# --------------------------------------------------------------------------- persist / rebuild fail-closed
+# --------------------------------------------------------------------------- claimed confirmation is not authority
 
 
 @pytest.mark.unit
-def test_binding_pending_does_not_advance():
-    graph = FakeGraph(
-        pages=[
-            [
-                _row(
-                    "t1",
-                    "I bought a notebook on 2026-07-18.",
-                    valid_at="2026-07-01T00:00:00Z",
-                    cursor_at="2026-07-05T00:00:00Z",
-                ),
-            ]
-        ]
+def test_model_and_caller_confirmation_claims_do_not_authorize_self_subject():
+    row = _row(
+        "t1",
+        "I bought a notebook on 2026-07-18.",
+        valid_at="2026-07-01T00:00:00Z",
+        cursor_at="2026-07-05T00:00:00Z",
     )
-    graph.record_result = {
-        "assertion_id": "aid-x",
-        "created": True,
-        "superseded_prior": False,
-        "binding_pending": True,
-        "binding_mismatch": False,
-    }
+    # These are caller-controlled row fields, not a server-verified owner confirmation.
+    row.update(
+        owner_confirmed=True,
+        confirmation_digest="model-supplied",
+        evidence_tier="owner",
+    )
+    graph = FakeGraph(
+        pages=[[row]]
+    )
     llm = FakeLlm(
         responses=[
             json.dumps(
@@ -480,6 +520,11 @@ def test_binding_pending_does_not_advance():
                                 "domain": "",
                                 "when": "2026-07-18",
                                 "stated_span": "I bought a notebook on 2026-07-18.",
+                                # Extra model fields are ignored by the structural proposal parser
+                                # and can never stand in for a signed owner confirmation.
+                                "owner_confirmed": True,
+                                "confidence": 1.0,
+                                "second_model_confirmed": True,
                             }
                         ],
                     }
@@ -496,13 +541,19 @@ def test_binding_pending_does_not_advance():
         config=_default_config(),
     )
 
-    assert graph.advances == []
-    assert metrics["event_namespaces_failed"] == 1
-    assert metrics["event_errors"].get("persist_rejected", 0) >= 1
+    assert metrics["event_proposals"] == 1
+    assert metrics["event_drop_reasons"] == {
+        "owner_confirmation_not_configured": 1
+    }
+    assert graph.self_ensure_calls == []
+    assert graph.records == []
+    assert graph.rebuilt_lanes == []
+    assert metrics["event_namespaces_failed"] == 0
+    assert len(graph.advances) == 1
 
 
 @pytest.mark.unit
-def test_incomplete_rebuild_does_not_advance():
+def test_unconfirmed_self_never_reaches_rebuild_even_if_rebuild_would_fail():
     graph = FakeGraph(
         pages=[
             [
@@ -547,11 +598,15 @@ def test_incomplete_rebuild_does_not_advance():
         config=_default_config(),
     )
 
-    # the assertion WAS persisted, but the incomplete rebuild leaves the cursor dirty
-    assert len(graph.records) == 1
-    assert graph.advances == []
-    assert metrics["event_namespaces_failed"] == 1
-    assert metrics["event_errors"].get("rebuild_incomplete", 0) >= 1
+    assert graph.self_ensure_calls == []
+    assert graph.records == []
+    assert graph.rebuilt_lanes == []
+    assert metrics["event_views_rebuilt"] == 0
+    assert metrics["event_drop_reasons"] == {
+        "owner_confirmation_not_configured": 1
+    }
+    assert metrics["event_namespaces_failed"] == 0
+    assert len(graph.advances) == 1
 
 
 # --------------------------------------------------------------------------- budget + pagination

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 from dataclasses import dataclass, field
 from functools import partial
@@ -35,6 +36,12 @@ else:
     _GRAPHITI_IMPORT_ERROR = None
 
 from menhir.config import MemorySettings
+from menhir.domain.self_authority import (
+    SELF_ASSERTION_EDGE_PAYLOAD_PROPERTY,
+    proposal_from_confirmation_payload,
+    proposal_matches_persisted_edge,
+)
+from menhir.domain.self_identity import self_uuid_for_namespace
 from menhir.infrastructure.circuit_breaker import CircuitBreaker
 from menhir.infrastructure.embedding_cache import get_embedding_cache
 from menhir.infrastructure.embedding_dimensions import expected_graphiti_embedding_dimension
@@ -46,6 +53,8 @@ from menhir.infrastructure.llama_endpoint import (
 )
 from menhir.infrastructure.observability import build_async_openai_client
 from menhir.infrastructure.providers import ProviderConfig, reset_client_cache
+from menhir.infrastructure.self_authority import FileSelfAssertionAuthorizer
+from menhir.infrastructure.self_binding import SelfBindMode, resolve_bind_mode
 from menhir.infrastructure.scheduler_trace import (
     build_episode_child_details,
     build_episode_scheduler_task,
@@ -58,6 +67,7 @@ from menhir.infrastructure.graphiti_patches import (  # noqa: E402
     _patch_graphiti_dedup_branch_telemetry,
     _patch_graphiti_combined_extraction,
     _patch_graphiti_combined_extraction_models,
+    _patch_graphiti_self_authority_edge_resolution,
     _patch_graphiti_dedupe_resolutions,
     _patch_graphiti_dedup_identity_gate,
     _patch_graphiti_dedup_prompt,
@@ -148,11 +158,79 @@ class GraphitiClient:
     _reranker_breaker: CircuitBreaker = field(default=None, init=False, repr=False)  # type: ignore[assignment]
     _scheduler_status_client: httpx.AsyncClient | None = field(default=None, init=False, repr=False)
     _pending_client_closes: list[asyncio.Task] = field(default_factory=list, init=False, repr=False)
+    _self_assertion_authorizer: FileSelfAssertionAuthorizer | None = field(
+        default=None, init=False, repr=False
+    )
 
     def __post_init__(self) -> None:
         self._llm_breaker = CircuitBreaker(name=f"llm:{self.llm_base_url or 'default'}")
         self._embed_breaker = CircuitBreaker(name=f"embed:{self.embed_base_url or 'default'}")
         self._reranker_breaker = CircuitBreaker(name=f"reranker:{self.reranker_base_url or 'default'}")
+
+    def canonical_self_payload_is_authorized(
+        self,
+        payload_json: Any,
+        *,
+        expected_self_uuid: str,
+        source_node_uuid: Any,
+        target_node_uuid: Any,
+        counterpart_name: Any,
+        counterpart_labels: Any,
+        predicate: Any,
+        fact: Any,
+        valid_at: Any,
+        invalid_at: Any,
+        expired_at: Any,
+    ) -> bool:
+        """Freshly verify one persisted edge payload against the pinned owner authority.
+
+        The verifier object caches only the immutable public key. Its ``authorize`` call re-reads
+        the episode confirmation file every time, so removal or replacement revokes recall without
+        restarting Menhir.
+        """
+
+        expected = str(expected_self_uuid or "").strip()
+        if not expected:
+            return False
+        try:
+            payload = json.loads(payload_json) if isinstance(payload_json, str) else None
+            proposal = proposal_from_confirmation_payload(payload)
+            if not proposal_matches_persisted_edge(
+                proposal,
+                expected_self_uuid=expected,
+                source_node_uuid=source_node_uuid,
+                target_node_uuid=target_node_uuid,
+                counterpart_name=counterpart_name,
+                counterpart_labels=counterpart_labels,
+                predicate=predicate,
+                fact=fact,
+                valid_at=valid_at,
+                invalid_at=invalid_at,
+                expired_at=expired_at,
+            ):
+                return False
+        except (TypeError, ValueError):
+            return False
+        if self._self_assertion_authorizer is None:
+            settings = self.scheduler_settings
+            if settings is None:
+                return False
+            self._self_assertion_authorizer = FileSelfAssertionAuthorizer(
+                public_key_path=getattr(
+                    settings, "canonical_self_confirmation_public_key_path", ""
+                ),
+                public_key_sha256=getattr(
+                    settings, "canonical_self_confirmation_public_key_sha256", ""
+                ),
+                confirmation_directory=getattr(
+                    settings, "canonical_self_confirmation_directory", ""
+                ),
+            )
+        try:
+            return self._self_assertion_authorizer.authorize(proposal).authorized
+        except Exception:  # noqa: BLE001 - persisted authority is always fail-closed
+            logger.exception("Canonical-self persisted owner confirmation check failed")
+            return False
 
     def _referenced_clients(self) -> list[Any]:
         """Clients still held by live llm/embed/reranker refs, for close-safety checks."""
@@ -218,6 +296,17 @@ class GraphitiClient:
         _patch_graphiti_prompt_json()
         _patch_graphiti_combined_extraction()
         _patch_graphiti_combined_extraction_models()
+        authority_edge_patch_ready = _patch_graphiti_self_authority_edge_resolution()
+        if (
+            resolve_bind_mode(
+                getattr(settings, "canonical_self_binding_mode", "off"), strict=True
+            )
+            is SelfBindMode.ENFORCE
+            and not authority_edge_patch_ready
+        ):
+            raise RuntimeError(
+                "canonical-self enforce mode requires the exact Graphiti edge-resolution gate"
+            )
         _patch_graphiti_entity_extraction()
         _patch_graphiti_dedupe_resolutions()
         _patch_graphiti_dedup_prompt()
@@ -1218,6 +1307,8 @@ class GraphitiClient:
         *,
         num_results: int = 20,
         group_ids: list[str] | None = None,
+        canonical_self_uuid: str | None = None,
+        enforce_canonical_self_authority: bool = False,
     ) -> list[dict[str, Any]]:
         """Hybrid search over RELATES_TO fact EDGES, returning dated facts with scores.
 
@@ -1234,8 +1325,11 @@ class GraphitiClient:
         (ISO-8601 strings or ``None``). Those anchors are the edge's advantage
         over entity nodes — the TemporalOracle scores on them — so the recall
         path threads them into the oracle metadata. Edges with an empty ``fact``
-        are skipped. Mirrors :meth:`search_scored`'s BM25-only fallback on a
-        vector-dimension mismatch.
+        are skipped. When canonical-self authority is enforced, every edge incident to the scoped
+        endpoint (or to the endpoint derived from an unscoped hit's Graphiti group) must also carry
+        a current exact owner confirmation. Missing, malformed, revoked, or unreadable authority is
+        excluded fail-closed. Mirrors :meth:`search_scored`'s BM25-only fallback on a vector-
+        dimension mismatch.
         """
         await self._ensure_graphiti_endpoints_alive(task="memory: graphiti search_edges_scored")
         from graphiti_core.search.search_config import (
@@ -1276,11 +1370,121 @@ class GraphitiClient:
         def _iso(dt: Any) -> str | None:
             return dt.isoformat() if dt is not None else None
 
+        authority_guard_requested = bool(
+            enforce_canonical_self_authority or canonical_self_uuid
+        )
+        endpoint_identities: dict[str, tuple[str, tuple[str, ...], str, tuple[str, ...]]] = {}
+        if authority_guard_requested:
+            unresolved_edge_uuids: list[str] = []
+            for edge in results.edges:
+                edge_uuid = str(getattr(edge, "uuid", "") or "").strip()
+                source_name = str(getattr(edge, "source_node_name", "") or "").strip()
+                target_name = str(getattr(edge, "target_node_name", "") or "").strip()
+                source_labels = getattr(edge, "source_node_labels", None)
+                target_labels = getattr(edge, "target_node_labels", None)
+                if (
+                    edge_uuid
+                    and source_name
+                    and target_name
+                    and isinstance(source_labels, (list, tuple))
+                    and isinstance(target_labels, (list, tuple))
+                ):
+                    endpoint_identities[edge_uuid] = (
+                        source_name,
+                        tuple(sorted(str(label) for label in source_labels)),
+                        target_name,
+                        tuple(sorted(str(label) for label in target_labels)),
+                    )
+                elif edge_uuid:
+                    unresolved_edge_uuids.append(edge_uuid)
+            driver = getattr(getattr(self.client, "clients", None), "driver", None)
+            if unresolved_edge_uuids and driver is not None:
+                try:
+                    records, _, _ = await driver.execute_query(
+                        """
+                        MATCH (source:Entity)-[edge]->(target:Entity)
+                        WHERE edge.uuid IN $edge_uuids
+                        RETURN edge.uuid AS edge_uuid,
+                               source.name AS source_name,
+                               labels(source) AS source_labels,
+                               target.name AS target_name,
+                               labels(target) AS target_labels
+                        """,
+                        edge_uuids=unresolved_edge_uuids,
+                        routing_="r",
+                    )
+                    for record in records:
+                        edge_uuid = str(record.get("edge_uuid") or "").strip()
+                        source_name = str(record.get("source_name") or "").strip()
+                        target_name = str(record.get("target_name") or "").strip()
+                        source_labels = record.get("source_labels")
+                        target_labels = record.get("target_labels")
+                        if (
+                            edge_uuid
+                            and source_name
+                            and target_name
+                            and isinstance(source_labels, (list, tuple))
+                            and isinstance(target_labels, (list, tuple))
+                        ):
+                            endpoint_identities[edge_uuid] = (
+                                source_name,
+                                tuple(sorted(str(label) for label in source_labels)),
+                                target_name,
+                                tuple(sorted(str(label) for label in target_labels)),
+                            )
+                except Exception:  # noqa: BLE001 - missing endpoint identity fails each edge closed
+                    logger.exception(
+                        "Canonical-self fact-edge endpoint identity lookup failed"
+                    )
         scored: list[dict[str, Any]] = []
         for edge, score in zip(results.edges, results.edge_reranker_scores):
             fact = (getattr(edge, "fact", None) or "").strip()
             if not fact:
                 continue
+            source_node_uuid = str(getattr(edge, "source_node_uuid", None) or "").strip()
+            target_node_uuid = str(getattr(edge, "target_node_uuid", None) or "").strip()
+            edge_self_uuid = canonical_self_uuid
+            if authority_guard_requested and not edge_self_uuid:
+                edge_self_uuid = self_uuid_for_namespace(
+                    getattr(edge, "group_id", None)
+                )
+            canonical_self_authorized = False
+            if edge_self_uuid and edge_self_uuid in {
+                source_node_uuid,
+                target_node_uuid,
+            }:
+                edge_uuid = str(getattr(edge, "uuid", "") or "").strip()
+                endpoint_identity = endpoint_identities.get(edge_uuid)
+                counterpart_name = None
+                counterpart_labels = None
+                if endpoint_identity is not None:
+                    if source_node_uuid == edge_self_uuid:
+                        counterpart_name = endpoint_identity[2]
+                        counterpart_labels = endpoint_identity[3]
+                    else:
+                        counterpart_name = endpoint_identity[0]
+                        counterpart_labels = endpoint_identity[1]
+                attributes = getattr(edge, "attributes", None)
+                payload_json = (
+                    attributes.get(SELF_ASSERTION_EDGE_PAYLOAD_PROPERTY)
+                    if isinstance(attributes, dict)
+                    else None
+                )
+                if not self.canonical_self_payload_is_authorized(
+                    payload_json,
+                    expected_self_uuid=edge_self_uuid,
+                    source_node_uuid=source_node_uuid,
+                    target_node_uuid=target_node_uuid,
+                    counterpart_name=counterpart_name,
+                    counterpart_labels=counterpart_labels,
+                    predicate=getattr(edge, "name", None),
+                    fact=getattr(edge, "fact", None),
+                    valid_at=getattr(edge, "valid_at", None),
+                    invalid_at=getattr(edge, "invalid_at", None),
+                    expired_at=getattr(edge, "expired_at", None),
+                ):
+                    continue
+                canonical_self_authorized = True
             scored.append(
                 {
                     "uuid": edge.uuid,
@@ -1295,8 +1499,11 @@ class GraphitiClient:
                     # node summaries carry the answer with surrounding context). Used by
                     # the "pointer" fact-edge mode to hydrate node context instead of
                     # injecting the terse fact as a standalone (context-shredding) answer.
-                    "source_node_uuid": getattr(edge, "source_node_uuid", None),
-                    "target_node_uuid": getattr(edge, "target_node_uuid", None),
+                    "source_node_uuid": source_node_uuid or None,
+                    "target_node_uuid": target_node_uuid or None,
+                    # Signed self edges are always rendered from their exact fact text. Pointer
+                    # hydration would substitute mutable endpoint summaries for that assertion.
+                    "canonical_self_authorized": canonical_self_authorized,
                 }
             )
 

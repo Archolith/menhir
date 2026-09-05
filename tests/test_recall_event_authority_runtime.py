@@ -129,6 +129,22 @@ async def test_flag_off_returns_original_and_makes_no_call(monkeypatch) -> None:
     assert adapter.calls == []
 
 
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_enforce_mode_excludes_legacy_unconfirmed_event_authority(monkeypatch) -> None:
+    adapter = _StubAdapter([_make(object_key="legacy-notebook")])
+    adapter.canonical_self_binding_mode = "enforce"
+    svc, original = _service(monkeypatch, adapter, enabled=True)
+
+    result = await svc.recall(
+        "which notebook did I buy most recently?", namespace="alice"
+    )
+
+    assert result is original
+    assert result.event_authority_layer is None
+    assert adapter.calls == []
+
+
 # --------------------------------------------------------------------------- namespace-none
 
 

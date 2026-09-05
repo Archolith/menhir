@@ -6,18 +6,27 @@ import json
 from typing import Any, Callable
 
 from menhir.domain.typed_assertion import IDENTITY_VERSION, TypedAssertion, normalize_scalar
+from menhir.domain.self_authority import (
+    UnconfirmedSelfAssertionError,
+    is_canonical_self_subject,
+)
 from menhir.infrastructure.schema import get_scalar_state_activation_queries
 
 from menhir.infrastructure.typed_assertion_models import (
     ScalarStateActivationError,
     _RECORD_CYPHER,
 )
+from menhir.infrastructure.self_binding import SelfBindMode, resolve_bind_mode
 
 class TypedAssertionWriteMixin:
     """Write and query durable `:TypedAssertion` nodes. Direct Neo4j CRUD, no View writes."""
 
     def __init__(self, neo4j: Any) -> None:
         self._neo4j = neo4j
+        self._canonical_self_binding_mode = SelfBindMode.OFF
+
+    def configure_canonical_self_binding_mode(self, value: Any) -> None:
+        self._canonical_self_binding_mode = resolve_bind_mode(value)
 
     # ---- write -------------------------------------------------------------------------------
 
@@ -31,7 +40,20 @@ class TypedAssertionWriteMixin:
         head and ONE current assertion; there is no read-before-write preflight to race. Both
         ``source_key`` (head identity) and ``assertion_key`` (exact interpreted identity) omit
         subject_uuid, so re-perception after a rebind is idempotent and lands on the same head."""
-        rows = self._neo4j.execute(_RECORD_CYPHER, params=self._to_params(assertion))
+        protects_self = self._canonical_self_binding_mode is SelfBindMode.ENFORCE
+        if protects_self and is_canonical_self_subject(
+            assertion.subject_uuid, assertion.namespace
+        ):
+            # This low point has no pinned-key verifier and metadata is caller-controlled. Reject
+            # even an "owner_confirmed" flag: scalar model output remains a durable advisory until
+            # an exact confirmation object is verified by a future trusted promotion seam.
+            raise UnconfirmedSelfAssertionError(
+                "typed scalar assertion cannot attach to canonical self without exact "
+                "owner confirmation"
+            )
+        params = self._to_params(assertion)
+        params["allow_canonical_self"] = not protects_self
+        rows = self._neo4j.execute(_RECORD_CYPHER, params=params)
         row = rows[0] if rows else {}
         return {
             "assertion_id": str(row.get("assertion_id") or ""),

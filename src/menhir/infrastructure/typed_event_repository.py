@@ -35,8 +35,13 @@ from datetime import datetime, timezone
 from typing import Any, Iterable
 
 from menhir.domain.event_history import EventLane, TypedEventAssertion
+from menhir.domain.self_authority import (
+    UnconfirmedSelfAssertionError,
+    is_canonical_self_subject,
+)
 from menhir.domain.temporal import parse_iso8601
 from menhir.domain.typed_assertion import evidence_rank, perceiver_rank
+from menhir.infrastructure.self_binding import SelfBindMode, resolve_bind_mode
 
 #: identity-contract version stamped on every head + assertion at ON CREATE. Fresh-only contract;
 #: bump only on a real identity change. Deliberately independent of the scalar
@@ -149,6 +154,10 @@ WITH h, a, will_supersede, binding_mismatch
 OPTIONAL MATCH (e:Episodic {uuid: $episode_uuid})
 OPTIONAL MATCH (te:TurnEvidence {turn_id: $turn_evidence_uuid})
 OPTIONAL MATCH (n:Entity {uuid: $subject_uuid})
+  WHERE $allow_canonical_self OR (
+    NOT coalesce(n.is_self, false)
+    AND toLower(trim(coalesce(n.entity_role, ''))) <> 'self'
+  )
 OPTIONAL MATCH (obj:Entity {uuid: $object_uuid})
 WITH h, a, will_supersede, binding_mismatch, e, te, n, obj,
      ((e IS NOT NULL OR te IS NOT NULL) AND n IS NOT NULL) AS fully_bound,
@@ -186,6 +195,10 @@ class TypedEventAssertionRepository:
 
     def __init__(self, neo4j: Any) -> None:
         self._neo4j = neo4j
+        self._canonical_self_binding_mode = SelfBindMode.OFF
+
+    def configure_canonical_self_binding_mode(self, value: Any) -> None:
+        self._canonical_self_binding_mode = resolve_bind_mode(value)
 
     # ---- write -------------------------------------------------------------------------------
 
@@ -193,6 +206,17 @@ class TypedEventAssertionRepository:
         """Persist one assertion in ONE atomic statement (head lock + mismatch guard + supersede +
         provenance + binding_pending). Returns exactly ``{assertion_id, created, superseded_prior,
         binding_pending, binding_mismatch}``."""
+        protects_self = self._canonical_self_binding_mode is SelfBindMode.ENFORCE
+        if protects_self and is_canonical_self_subject(
+            assertion.subject_uuid, assertion.namespace
+        ):
+            # Event metadata and evidence tiers are writable by ordinary callers and models. This
+            # repository has no pinned owner-key verifier, so none of those fields can authorize a
+            # semantic edge to canonical self.
+            raise UnconfirmedSelfAssertionError(
+                "typed event assertion cannot attach to canonical self without exact "
+                "owner confirmation"
+            )
         rows = self._neo4j.execute(_RECORD_CYPHER, params=self._to_params(assertion))
         row = rows[0] if rows else {}
         return {
@@ -235,6 +259,9 @@ class TypedEventAssertionRepository:
             "perceiver_version": assertion.perceiver_version,
             "perceiver_rank": perceiver_rank(assertion.perceiver_version),
             "metadata_json": json.dumps(assertion.metadata, sort_keys=True, default=str),
+            "allow_canonical_self": (
+                self._canonical_self_binding_mode is not SelfBindMode.ENFORCE
+            ),
         }
 
     # ---- read --------------------------------------------------------------------------------

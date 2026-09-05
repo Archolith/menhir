@@ -138,6 +138,10 @@ WITH h, a, will_supersede, binding_mismatch
 OPTIONAL MATCH (e:Episodic {uuid: $episode_uuid})
 OPTIONAL MATCH (te:TurnEvidence {turn_id: $episode_uuid})
 OPTIONAL MATCH (n:Entity {uuid: $subject_uuid})
+  WHERE $allow_canonical_self OR (
+    NOT coalesce(n.is_self, false)
+    AND toLower(trim(coalesce(n.entity_role, ''))) <> 'self'
+  )
 WITH h, a, will_supersede, binding_mismatch, e, te, n,
      ((e IS NOT NULL OR te IS NOT NULL) AND n IS NOT NULL) AS fully_bound,
      coalesce(a.binding_pending, true) AS was_pending

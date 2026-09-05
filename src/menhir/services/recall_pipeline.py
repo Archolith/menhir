@@ -43,6 +43,7 @@ from menhir.domain.retrieval_trace_models import (
     ViewReachability,
 )
 from menhir.infrastructure.graphiti_client import GraphitiClient
+from menhir.infrastructure.self_binding import SelfBindMode, resolve_bind_mode
 from menhir.services.hybrid_retrieval import FusionLane, hybrid_search, weighted_rrf_multi
 
 if TYPE_CHECKING:
@@ -98,6 +99,70 @@ def _projection_is_recall_eligible(view: dict[str, Any]) -> bool:
     return view.get("recall_eligible") is True
 
 
+def _filter_authorized_canonical_self_fact_rows(
+    service: Any,
+    rows: list[dict[str, object]],
+    *,
+    authority_enforced: bool,
+    scoped_self_uuid: str | None,
+) -> tuple[list[dict[str, object]], set[str]]:
+    """Remove unconfirmed self edges and identify node summaries they may have contaminated.
+
+    Graphiti folds relationship language into endpoint summaries. Merely removing canonical self
+    from the node candidate set is therefore insufficient: a revoked legacy edge can still surface
+    through its ordinary counterpart's summary or temporal-fact enrichment. This gate uses the
+    exact persisted payload and fresh owner confirmation for every incident edge. Callers render
+    affected counterpart nodes name-only, retaining ordinary entity recall without repeating the
+    unconfirmed relation.
+    """
+
+    if not authority_enforced:
+        return rows, set()
+    filtered: list[dict[str, object]] = []
+    unsafe_summary_uuids: set[str] = set()
+    verifier = getattr(service.graphiti_client, "canonical_self_payload_is_authorized", None)
+    for row in rows:
+        node_uuid = str(row.get("node_uuid") or "").strip()
+        other_uuid = str(row.get("other_node_uuid") or "").strip()
+        expected_self_uuid = scoped_self_uuid or self_uuid_for_namespace(
+            row.get("group_id")
+        )
+        if expected_self_uuid not in {node_uuid, other_uuid}:
+            filtered.append(row)
+            continue
+        authorized = bool(
+            callable(verifier)
+            and verifier(
+                row.get("self_authority_payload_json"),
+                expected_self_uuid=expected_self_uuid,
+                source_node_uuid=row.get("edge_source_uuid"),
+                target_node_uuid=row.get("edge_target_uuid"),
+                counterpart_name=(
+                    row.get("edge_target_name")
+                    if row.get("edge_source_uuid") == expected_self_uuid
+                    else row.get("edge_source_name")
+                ),
+                counterpart_labels=(
+                    row.get("edge_target_labels")
+                    if row.get("edge_source_uuid") == expected_self_uuid
+                    else row.get("edge_source_labels")
+                ),
+                predicate=row.get("predicate"),
+                fact=row.get("fact"),
+                valid_at=row.get("valid_at"),
+                invalid_at=row.get("invalid_at"),
+                expired_at=row.get("expired_at"),
+            )
+        )
+        if authorized:
+            filtered.append(row)
+            continue
+        unsafe_summary_uuids.update(
+            uuid for uuid in (node_uuid, other_uuid) if uuid and uuid != expected_self_uuid
+        )
+    return filtered, unsafe_summary_uuids
+
+
 async def run_recall(
     service: Any,
     query: str,
@@ -125,6 +190,19 @@ async def run_recall(
     _t_phases: dict[str, int] = {}
     tuning = tuning or RetrievalTuningConfig()
     authority_layer: list[ScalarAuthorityVerdict] = []
+    self_bind_mode = resolve_bind_mode(
+        getattr(
+            getattr(service, "graph_adapter", None),
+            "canonical_self_binding_mode",
+            "off",
+        )
+    )
+    self_authority_enforced = self_bind_mode is SelfBindMode.ENFORCE
+    guarded_self_uuid = (
+        self_uuid_for_namespace(namespace)
+        if self_authority_enforced and namespace is not None
+        else None
+    )
 
     # --- Pending episode wait ---
     visible_pending_rows: list[dict[str, object]] = []
@@ -403,8 +481,19 @@ async def run_recall(
         for uuid, _name, _score in search_results:
             score_kind_map[uuid] = RetrievalScoreKind.WEIGHTED_RRF_NORMALIZED
 
+    # Fact-edge search is an independent candidate lane. It must still run when node search has no
+    # hits; otherwise an exact signed self fact can never be recalled unless an unrelated entity
+    # candidate happens to survive first.
+    _pointer_active = (
+        tuning.enable_fact_edges
+        and tuning.fact_edge_mode == "pointer"
+        and _query_wants_history(query)
+    )
+    _run_edge_search = tuning.enable_fact_edges and (
+        tuning.fact_edge_mode == "standalone" or _pointer_active
+    )
     if not search_results:
-        if visible_pending_rows:
+        if visible_pending_rows and not _run_edge_search:
             return RecallResult(
                 query=query,
                 preset=preset.value,
@@ -418,7 +507,7 @@ async def run_recall(
                 ),
                 search_error=search_error,
             )
-        if not pending_entity_uuids:
+        if not pending_entity_uuids and not _run_edge_search:
             return RecallResult(
                 query=query,
                 preset=preset.value,
@@ -432,7 +521,11 @@ async def run_recall(
                 ),
                 search_error=search_error,
             )
-        search_results = [(uuid, uuid, PENDING_ENTITY_SIMILARITY) for uuid in pending_entity_uuids]
+        if pending_entity_uuids:
+            search_results = [
+                (uuid, uuid, PENDING_ENTITY_SIMILARITY)
+                for uuid in pending_entity_uuids
+            ]
 
     candidate_uuids = list(dict.fromkeys(pending_entity_uuids + [uuid for uuid, _, _ in search_results]))
     similarity_map = {uuid: score for uuid, _, score in search_results}
@@ -481,19 +574,19 @@ async def run_recall(
     # Pointer hydration is lens-gated (episodic/history queries only); standalone (the
     # rejected comparison arm) still runs unconditionally. Skip the edge round-trip when
     # pointer mode is on but the query isn't history-wanting.
-    _pointer_active = (
-        tuning.enable_fact_edges
-        and tuning.fact_edge_mode == "pointer"
-        and _query_wants_history(query)
-    )
-    _run_edge_search = tuning.enable_fact_edges and (
-        tuning.fact_edge_mode == "standalone" or _pointer_active
-    )
     if _run_edge_search:
         _t = perf_counter()
         try:
+            edge_search_kwargs: dict[str, Any] = {
+                "num_results": tuning.fact_edge_k,
+                "group_ids": group_ids,
+            }
+            if self_authority_enforced:
+                edge_search_kwargs["enforce_canonical_self_authority"] = True
+            if guarded_self_uuid is not None:
+                edge_search_kwargs["canonical_self_uuid"] = guarded_self_uuid
             edge_hits = await service.graphiti_client.search_edges_scored(
-                query, num_results=tuning.fact_edge_k, group_ids=group_ids
+                query, **edge_search_kwargs
             )
         except Exception as exc:
             logger.error(
@@ -514,6 +607,11 @@ async def run_recall(
             pointer_added = 0
             for hit in edge_hits:
                 try:
+                    if hit.get("canonical_self_authorized") is True:
+                        # The owner signed the exact edge fact, not either mutable endpoint
+                        # summary. It is injected below as a standalone authoritative fact even
+                        # when ordinary fact-edge mode is pointer.
+                        continue
                     escore = float(hit["score"])
                     if not math.isfinite(escore):
                         raise ValueError("fact-edge score is not finite")
@@ -558,7 +656,52 @@ async def run_recall(
                 sorted(str(key) for key in row),
             )
             continue
+        # The canonical endpoint is structural identity, not a coarse semantic assertion. In
+        # enforce mode, signed per-edge recall below is the only Graphiti self-fact reader.
+        row_self_uuid = (
+            self_uuid_for_namespace(row.get("namespace"))
+            if self_authority_enforced
+            else None
+        )
+        structurally_self = self_authority_enforced and (
+            bool(row.get("is_self"))
+            or str(row.get("entity_role") or "").strip().casefold() == "self"
+        )
+        if row_self_uuid is not None and (uuid == row_self_uuid or structurally_self):
+            continue
+        if (
+            row_self_uuid is not None
+            and str(row.get("view_subject_uuid") or "").strip() == row_self_uuid
+        ):
+            # Scalar/event Views are derived from lanes that do not yet accept owner signatures.
+            # Keep legacy projections available to inspection APIs, never default recall.
+            continue
         metadata_by_uuid[uuid] = row
+
+    authority_fact_rows: list[dict[str, object]] | None = None
+    unsafe_self_summary_uuids: set[str] = set()
+    if self_authority_enforced and metadata_by_uuid:
+        try:
+            raw_authority_fact_rows = await asyncio.to_thread(
+                service.graph_adapter.fetch_temporal_facts,
+                list(metadata_by_uuid),
+            )
+            authority_fact_rows, unsafe_self_summary_uuids = (
+                _filter_authorized_canonical_self_fact_rows(
+                    service,
+                    raw_authority_fact_rows,
+                    authority_enforced=True,
+                    scoped_self_uuid=guarded_self_uuid,
+                )
+            )
+        except Exception:
+            # If the graph cannot prove which summaries were influenced by self edges, keep entity
+            # names but withhold every semantic summary and temporal fact in enforce mode.
+            logger.exception(
+                "Canonical-self authority prefetch failed; using name-only candidates"
+            )
+            authority_fact_rows = []
+            unsafe_self_summary_uuids = set(metadata_by_uuid)
 
     candidate_inputs: list[dict[str, object]] = []
     for uuid in candidate_uuids:
@@ -620,7 +763,11 @@ async def run_recall(
                 {
                     "uuid": uuid,
                     "name": str(meta.get("name") or uuid),
-                    "content": _select_candidate_content(meta, preset=preset),
+                    "content": (
+                        str(meta.get("name") or uuid)
+                        if uuid in unsafe_self_summary_uuids
+                        else _select_candidate_content(meta, preset=preset)
+                    ),
                     "scope": scope,
                     "memory_type": str(meta.get("type") or "SEMANTIC"),
                     "similarity": similarity,
@@ -701,6 +848,10 @@ async def run_recall(
                     if not aid or not span or cos is None or not math.isfinite(float(cos)):
                         continue
                     _subj = str(hit.get("subject_uuid") or "")
+                    if guarded_self_uuid is not None and _subj == guarded_self_uuid:
+                        # Typed scalar has no owner-signed promotion path yet. Legacy rows stay
+                        # inspectable through direct/operator APIs but cannot enter default recall.
+                        continue
                     _attr = str(hit.get("attribute") or "")
                     _scope = str(hit.get("scope") or "")
                     _value_kind = str(hit.get("value_kind") or "")
@@ -1274,7 +1425,21 @@ async def run_recall(
             )
         _t_phases["view_authority"] = int((perf_counter() - _t) * 1000)
 
-    if not candidate_inputs:
+    standalone_edge_hits_pending = bool(
+        tuning.enable_fact_edges
+        and edge_hits
+        and (
+            tuning.fact_edge_mode == "standalone"
+            or (
+                _pointer_active
+                and any(
+                    hit.get("canonical_self_authorized") is True
+                    for hit in edge_hits
+                )
+            )
+        )
+    )
+    if not candidate_inputs and not standalone_edge_hits_pending:
         if visible_pending_rows:
             return RecallResult(
                 query=query,
@@ -1306,10 +1471,38 @@ async def run_recall(
         )
 
     # --- Adjacency ---
+    # The generic adjacency query returns only endpoints/weights, so it cannot prove whether an
+    # incident canonical-self edge carries an exact current confirmation. Canonical self is never
+    # a safe context anchor for that lane in enforce mode: remove structural self IDs first and let
+    # the separately verified fact-edge path provide confirmed personal relationships.
+    adjacency_context_node_ids = context_node_ids
+    if self_authority_enforced and context_node_ids:
+        try:
+            context_metadata = await asyncio.to_thread(
+                service.graph_adapter.fetch_candidate_metadata,
+                list(dict.fromkeys(context_node_ids)),
+            )
+            ordinary_context_uuids = {
+                str(row.get("uuid") or "").strip()
+                for row in context_metadata
+                if str(row.get("uuid") or "").strip()
+                and not bool(row.get("is_self"))
+                and str(row.get("entity_role") or "").strip().casefold() != "self"
+                and str(row.get("uuid") or "").strip()
+                != self_uuid_for_namespace(row.get("namespace"))
+            }
+            adjacency_context_node_ids = [
+                uuid for uuid in context_node_ids if uuid in ordinary_context_uuids
+            ]
+        except Exception:
+            logger.exception(
+                "Canonical-self context classification failed; disabling adjacency context"
+            )
+            adjacency_context_node_ids = []
     _t = perf_counter()
     eligible_uuids = [str(c["uuid"]) for c in candidate_inputs]
     adjacency_map, edge_index = await service._compute_adjacency(
-        eligible_uuids, context_node_ids, namespace,
+        eligible_uuids, adjacency_context_node_ids, namespace,
     )
     _t_phases["adjacency"] = int((perf_counter() - _t) * 1000)
 
@@ -1358,11 +1551,18 @@ async def run_recall(
     # measured net-NEGATIVE at N=30 (rung A′) because terse facts crowd out richer nodes and
     # collapse context — the "pointer" mode (hydrating endpoint nodes, above) is preferred.
     # Reuses edge_hits already fetched above; only runs in standalone mode.
-    if tuning.enable_fact_edges and tuning.fact_edge_mode == "standalone":
+    if tuning.enable_fact_edges and (
+        tuning.fact_edge_mode == "standalone" or _pointer_active
+    ):
         existing_uuids = {c.uuid for c in candidates}
         edges_added = 0
         for hit in edge_hits:
             try:
+                if (
+                    tuning.fact_edge_mode != "standalone"
+                    and hit.get("canonical_self_authorized") is not True
+                ):
+                    continue
                 edge_uuid = str(hit.get("uuid") or "").strip()
                 score = float(hit["score"])
                 fact = str(hit.get("fact") or "").strip()
@@ -1430,9 +1630,11 @@ async def run_recall(
         await service._attach_frontier_metadata(eligible_uuids, metadata_by_uuid)
         if tuning.enable_belief_gate:
             try:
-                fact_rows = await asyncio.to_thread(
-                    service.graph_adapter.fetch_temporal_facts, eligible_uuids
-                )
+                fact_rows = authority_fact_rows
+                if fact_rows is None:
+                    fact_rows = await asyncio.to_thread(
+                        service.graph_adapter.fetch_temporal_facts, eligible_uuids
+                    )
                 for uuid, marks in _belief_markers_from_facts(fact_rows).items():
                     metadata_by_uuid.setdefault(uuid, {}).update(marks)
             except Exception:
@@ -1505,9 +1707,17 @@ async def run_recall(
             r.uuid for r in top_results if r.memory_type != "EPISODIC_PENDING"
         ]
         if result_uuids_for_facts:
-            fact_rows = await asyncio.to_thread(
-                service.graph_adapter.fetch_temporal_facts, result_uuids_for_facts
-            )
+            if authority_fact_rows is None:
+                fact_rows = await asyncio.to_thread(
+                    service.graph_adapter.fetch_temporal_facts, result_uuids_for_facts
+                )
+            else:
+                result_uuid_set = set(result_uuids_for_facts)
+                fact_rows = [
+                    row
+                    for row in authority_fact_rows
+                    if str(row.get("node_uuid") or "") in result_uuid_set
+                ]
             if not include_invalidated:
                 fact_rows = _filter_to_current_beliefs(fact_rows)
             facts_by_uuid = _build_temporal_facts(fact_rows)
@@ -1793,6 +2003,12 @@ async def apply_event_history_authority_layer(
     which that module explicitly documents itself as never doing.
     """
     if not service.event_history_authority_enabled or namespace is None:
+        return result
+    if resolve_bind_mode(
+        getattr(service.graph_adapter, "canonical_self_binding_mode", "off")
+    ) is SelfBindMode.ENFORCE:
+        # Typed events are proposal-only under enforce until they carry the same exact signed
+        # assertion contract as Graphiti edges. Existing rows remain available to inspection APIs.
         return result
     try:
         stamped = stamped_namespace(namespace)

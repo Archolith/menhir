@@ -17,14 +17,14 @@ async def force_reenrich(
     poll_interval_s: float = 2.0,
     namespace: str = "",
 ) -> str:
-    """Force a failed episode back into enrichment and track it live.
+    """Force a failed or confirmation-pending episode back into enrichment and track it live.
 
     Resets processing_attempts and processing_error, pushes the episode
     to the front of the enrichment queue, then polls until READY/FAILED
     or timeout.
 
     Args:
-        episode_uuid: UUID of the failed episode to re-enrich.
+        episode_uuid: UUID of a failed episode or a READY canonical-self proposal to re-enrich.
         wait: If true (default), poll until enrichment completes or times out.
         timeout_s: Max seconds to wait when wait=true (default: 300).
         poll_interval_s: Poll interval in seconds (default: 2).
@@ -53,7 +53,10 @@ class ForceReenrichTool(BaseTextTool):
     read_only_hint = False
     destructive_hint = False
     open_world_hint = True
-    description = "Force a failed episode back into enrichment."
+    description = (
+        "Force a failed episode, or a READY canonical-self proposal awaiting an offline owner "
+        "confirmation, back into enrichment."
+    )
 
     def timeout_for(
         self,
@@ -96,7 +99,11 @@ class ForceReenrichTool(BaseTextTool):
 
         reset_ok = await backend.force_reset_failed_episode(normalized_uuid)
         if not reset_ok:
-            return f"episode_uuid: {normalized_uuid}\nresult: NOT_FOUND — no FAILED/PENDING episode with that UUID"
+            return (
+                f"episode_uuid: {normalized_uuid}\n"
+                "result: NOT_FOUND — no FAILED/PENDING episode or confirmation-pending "
+                "READY self proposal with that UUID"
+            )
 
         queued = await backend.enqueue_pending_episode(normalized_uuid)
 

@@ -14,6 +14,7 @@ import json
 
 import pytest
 
+from menhir.domain.self_identity import self_uuid_for_namespace
 from menhir.services.shadow_context_composition import (
     ShadowCandidateFact,
     ShadowCandidateLabels,
@@ -174,6 +175,59 @@ class TestSnapshotCandidateFacts:
         assert len(candidates) == 1
         assert candidates[0].fact_uuid == "f1"
         assert "literal_name" in candidates[0].retrieval_sources
+
+    @pytest.mark.asyncio
+    async def test_enforce_excludes_unconfirmed_self_fact_from_shadow_context(self):
+        class FakeRecords:
+            records = [{"uuid": "chicago-uuid", "name": "Chicago"}]
+
+        class FakeDriver:
+            async def execute_query(self, *_args, **_kwargs):
+                return FakeRecords()
+
+        class FakeClients:
+            driver = FakeDriver()
+
+        class FakeGraphitiClient:
+            client = type("C", (), {"clients": FakeClients()})()
+            search_scored = None
+
+            def canonical_self_payload_is_authorized(
+                self, payload, **kwargs
+            ):
+                return False
+
+        class EnforcingGraphAdapter:
+            canonical_self_binding_mode = "enforce"
+
+            def fetch_candidate_fact_edges(self, uuids):
+                return [{
+                    "fact_uuid": "f-self",
+                    "fact_text": "user lives in Chicago",
+                    "source_uuid": self_uuid_for_namespace("ns"),
+                    "source_name": "user",
+                    "target_uuid": "chicago-uuid",
+                    "target_name": "Chicago",
+                    "edge_source_uuid": self_uuid_for_namespace("ns"),
+                    "edge_target_uuid": "chicago-uuid",
+                    "edge_source_name": "user",
+                    "edge_target_name": "Chicago",
+                    "predicate": "LIVES_IN",
+                    "self_authority_payload_json": None,
+                    "valid_at": None,
+                    "invalid_at": None,
+                    "created_at": None,
+                    "expired_at": None,
+                }]
+
+        candidates, error = await snapshot_candidate_facts(
+            FakeGraphitiClient(),
+            EnforcingGraphAdapter(),
+            namespace="ns",
+            episode_body="Chicago",
+        )
+        assert error is None
+        assert candidates == []
 
 
 # ---------------------------------------------------------------------------

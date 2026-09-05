@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from menhir.domain.recall import QueryPreset, RecallResult
+from menhir.domain.self_identity import self_uuid_for_namespace
 from menhir.domain.retrieval_tuning import (
     CandidateSource,
     RetrievalScoreKind,
@@ -502,6 +503,88 @@ async def test_recall_passes_context_node_ids_for_adjacency(
 
     # The service should still run without error with context node ids
     # (adjacency pairs are empty in stub, which is fine)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_enforce_mode_removes_canonical_self_from_adjacency_context(
+    stub_graphiti_client, stub_memory_graph_adapter
+) -> None:
+    namespace = "tenant-a"
+    canonical_uuid = self_uuid_for_namespace(namespace)
+    _setup_search_and_metadata(stub_graphiti_client, stub_memory_graph_adapter)
+    candidate_rows = list(stub_memory_graph_adapter.candidate_metadata)
+    for row in candidate_rows:
+        row["namespace"] = namespace
+    context_rows = [
+        {
+            **_meta(canonical_uuid, "user"),
+            "namespace": namespace,
+            "is_self": True,
+            "entity_role": "self",
+        },
+        {**_meta("ctx-ordinary", "Project"), "namespace": namespace},
+    ]
+
+    def metadata_for(node_uuids):
+        return context_rows if canonical_uuid in node_uuids else candidate_rows
+
+    stub_memory_graph_adapter.fetch_candidate_metadata = metadata_for
+    stub_memory_graph_adapter.canonical_self_binding_mode = "enforce"
+    svc = _build_recall_service(stub_graphiti_client, stub_memory_graph_adapter)
+
+    await svc.recall(
+        "test query",
+        namespace=namespace,
+        context_node_ids=[canonical_uuid, "ctx-ordinary"],
+    )
+
+    assert stub_memory_graph_adapter.adjacency_calls[-1]["context_uuids"] == [
+        "ctx-ordinary"
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_confirmed_self_edge_uses_exact_fact_in_pointer_mode(
+    stub_graphiti_client, stub_memory_graph_adapter
+) -> None:
+    edge_calls = []
+
+    async def search_edges_scored(query, **kwargs):
+        edge_calls.append((query, kwargs))
+        return [{
+            "uuid": "signed-edge",
+            "fact": "user owns 25 postcards",
+            "score": 2.0,
+            "source_node_uuid": self_uuid_for_namespace("tenant-a"),
+            "target_node_uuid": "postcards",
+            "canonical_self_authorized": True,
+            "created_at": None,
+            "valid_at": None,
+            "invalid_at": None,
+            "expired_at": None,
+        }]
+
+    stub_graphiti_client.search_edges_scored = search_edges_scored
+    stub_memory_graph_adapter.canonical_self_binding_mode = "enforce"
+    svc = _build_recall_service(stub_graphiti_client, stub_memory_graph_adapter)
+    tuning = RetrievalTuningConfig(
+        enable_fact_edges=True,
+        fact_edge_mode="pointer",
+        fact_edge_k=10,
+    )
+
+    result = await svc.recall(
+        "what did I own previously?",
+        namespace="tenant-a",
+        tuning=tuning,
+    )
+
+    assert edge_calls
+    assert result.candidates_evaluated == 1
+    assert [row.uuid for row in result.results] == ["signed-edge"]
+    assert result.results[0].content == "user owns 25 postcards"
 
 
 @pytest.mark.unit
@@ -1799,6 +1882,155 @@ async def test_observation_lane_injects_candidate_when_flag_on(
 
     assert "I own 20 rare coins" in [r.name for r in res.results]   # the observation was injected
     assert len(calls) == 1 and calls[0]["namespaces"] == ["proj"]   # lane searched, namespace-scoped
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_enforce_mode_excludes_legacy_canonical_self_node(
+    stub_graphiti_client, stub_memory_graph_adapter
+) -> None:
+    namespace = "proj"
+    canonical_uuid = self_uuid_for_namespace(namespace)
+    stub_graphiti_client.search_scored_results = [
+        (canonical_uuid, "user", 0.99),
+    ]
+    canonical_meta = _meta(canonical_uuid, "user")
+    canonical_meta["namespace"] = namespace
+    stub_memory_graph_adapter.candidate_metadata = [canonical_meta]
+    stub_memory_graph_adapter.canonical_self_binding_mode = "enforce"
+    svc = _build_recall_service(stub_graphiti_client, stub_memory_graph_adapter)
+
+    result = await svc.recall("what do I know about myself", namespace=namespace)
+
+    assert result.results == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_enforce_mode_excludes_legacy_canonical_self_view(
+    stub_graphiti_client, stub_memory_graph_adapter
+) -> None:
+    namespace = "proj"
+    canonical_uuid = self_uuid_for_namespace(namespace)
+    stub_graphiti_client.search_scored_results = [("view-1", "legacy self view", 0.99)]
+    view_meta = _meta("view-1", "legacy self view")
+    view_meta["namespace"] = namespace
+    view_meta["view_subject_uuid"] = canonical_uuid
+    stub_memory_graph_adapter.candidate_metadata = [view_meta]
+    stub_memory_graph_adapter.canonical_self_binding_mode = "enforce"
+    svc = _build_recall_service(stub_graphiti_client, stub_memory_graph_adapter)
+
+    result = await svc.recall("what do I know about myself", namespace=namespace)
+
+    assert result.results == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_enforce_mode_excludes_unscoped_canonical_self_view(
+    stub_graphiti_client, stub_memory_graph_adapter
+) -> None:
+    namespace = "tenant-a"
+    stub_graphiti_client.search_scored_results = [("view-1", "legacy self view", 0.99)]
+    view_meta = _meta("view-1", "legacy self view")
+    view_meta["namespace"] = namespace
+    view_meta["view_subject_uuid"] = self_uuid_for_namespace(namespace)
+    stub_memory_graph_adapter.candidate_metadata = [view_meta]
+    stub_memory_graph_adapter.canonical_self_binding_mode = "enforce"
+    svc = _build_recall_service(stub_graphiti_client, stub_memory_graph_adapter)
+
+    result = await svc.recall("what do I know about myself")
+
+    assert result.results == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_enforce_mode_excludes_structurally_marked_self_even_with_wrong_uuid(
+    stub_graphiti_client, stub_memory_graph_adapter
+) -> None:
+    stub_graphiti_client.search_scored_results = [("legacy-wrong-uuid", "user", 0.99)]
+    meta = _meta("legacy-wrong-uuid", "user")
+    meta["namespace"] = "tenant-a"
+    meta["is_self"] = True
+    stub_memory_graph_adapter.candidate_metadata = [meta]
+    stub_memory_graph_adapter.canonical_self_binding_mode = "enforce"
+    svc = _build_recall_service(stub_graphiti_client, stub_memory_graph_adapter)
+
+    result = await svc.recall("what do I know about myself")
+
+    assert result.results == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_enforce_mode_withholds_unconfirmed_self_fact_from_counterpart_summary(
+    stub_graphiti_client, stub_memory_graph_adapter
+) -> None:
+    namespace = "tenant-a"
+    city_uuid = "city-1"
+    stub_graphiti_client.search_scored_results = [(city_uuid, "Chicago", 0.99)]
+    meta = _meta(city_uuid, "Chicago")
+    meta["namespace"] = namespace
+    meta["content"] = "Chicago is where the user lives"
+    stub_memory_graph_adapter.candidate_metadata = [meta]
+    stub_memory_graph_adapter.temporal_fact_rows = [{
+        "node_uuid": city_uuid,
+        "other_node_uuid": self_uuid_for_namespace(namespace),
+        "edge_source_uuid": self_uuid_for_namespace(namespace),
+        "edge_target_uuid": city_uuid,
+        "edge_source_name": "user",
+        "edge_target_name": "Chicago",
+        "fact_uuid": "legacy-self-edge",
+        "group_id": namespace,
+        "self_authority_payload_json": None,
+        "predicate": "LIVES_IN",
+        "fact": "user lives in Chicago",
+        "valid_at": None,
+        "invalid_at": None,
+        "created_at": None,
+        "expired_at": None,
+    }]
+    stub_graphiti_client.canonical_self_payload_is_authorized = (
+        lambda payload, **kwargs: False
+    )
+    stub_memory_graph_adapter.canonical_self_binding_mode = "enforce"
+    svc = _build_recall_service(stub_graphiti_client, stub_memory_graph_adapter)
+
+    result = await svc.recall("Chicago", namespace=namespace)
+
+    assert [row.name for row in result.results] == ["Chicago"]
+    assert result.results[0].content == "Chicago"
+    assert result.results[0].temporal_facts == ()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_enforce_mode_excludes_legacy_canonical_self_scalar_observation(
+    stub_graphiti_client, stub_memory_graph_adapter
+) -> None:
+    namespace = "proj"
+    _setup_search_and_metadata(stub_graphiti_client, stub_memory_graph_adapter)
+    hit = dict(_one_observation_hit()[0])
+    hit["subject_uuid"] = self_uuid_for_namespace(namespace)
+    stub_memory_graph_adapter.search_assertion_embeddings = (
+        lambda vec, *, limit, namespaces: [hit]
+    )
+    view_calls: list[dict] = []
+    stub_memory_graph_adapter.fetch_current_scalar_view_for_slot = (
+        lambda **kwargs: view_calls.append(kwargs) or None
+    )
+    stub_memory_graph_adapter.canonical_self_binding_mode = "enforce"
+    svc = _build_recall_service(
+        stub_graphiti_client,
+        stub_memory_graph_adapter,
+        scalar_view_authority_enabled=True,
+    )
+
+    result = await svc.recall("how many rare coins", namespace=namespace)
+
+    assert "I own 20 rare coins" not in [row.name for row in result.results]
+    assert view_calls == []
 
 
 @pytest.mark.unit

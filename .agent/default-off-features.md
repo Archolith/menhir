@@ -36,7 +36,7 @@ mapped into `RetrievalTuningConfig` at the recall entry via `retrieval_tuning()`
 | Event History Phase 3 Consolidation | `personal_memory_event_history_enabled` / `MENHIR_EVENT_HISTORY_ENABLED` | backfill :TurnEvidence -> assertions via independent watermark cursor | production-capable but default-off; Phase 1-5 complete | `menhir-event-history-plan.md` + commits 048b8d9..51c11cf |
 | Event History Phase 4 Recall Authority | `personal_memory_event_history_authority_enabled` / `MENHIR_EVENT_HISTORY_AUTHORITY_ENABLED` | conditional first-person event route probed only when enabled and namespace present | production-capable but default-off; independent of scalar authority | commits 048b8d9..51c11cf |
 | Brief builder (append temporal Timeline in build_context) | `frontier_brief_builder` | `build_context` stage (not recall tuning) | safe/neutral on LME (append +0.03); pending lift at larger N | brief-builder work |
-| Deterministic canonical-self binding | `canonical_self_binding_mode` / `MENHIR_CANONICAL_SELF_BINDING_MODE` (`off`/`observe`/`enforce`) | atomic projection claim plus `_run_graphiti_combined_extraction`, after relationless repair and before graphiti candidate acquisition | verified evidence projections have an exact subject-endpoint producer; default remains off pending repeated real-model corpus and persistence acceptance | `menhir-canonical-self-remediation-plan.md`; runbook `workflows/canonical-self-migration-runbook.md` |
+| Canonical-self identity and assertion-authority boundary | `canonical_self_binding_mode` / `MENHIR_CANONICAL_SELF_BINDING_MODE` (`off`/`observe`/`enforce`) plus the three `MENHIR_CANONICAL_SELF_CONFIRMATION_*` verifier settings | structural endpoint construction; per-edge Ed25519 verification; Graphiti, typed-scalar, event, View, repair and default-recall gates | code-complete candidate; default remains off. `enforce` without the exact key fingerprint, public key and confirmation directory is deliberately proposal-only. Docker, live-provider and production activation remain unrun/unapproved | `plans/menhir-canonical-self-authority-boundary-2026-09-05.md`; runbook `workflows/canonical-self-migration-runbook.md` |
 
 ## Activated (moved on default-on)
 
@@ -44,5 +44,5 @@ _(none yet — add rows here with the activation date when a flag flips `True` o
 
 ---
 
-**Last reconciled:** 2026-08-07; event history (Phase 3 consolidation + Phase 4 recall authority)
-added against `src/menhir/config/settings_model.py` and commits 048b8d9..51c11cf.
+**Last reconciled:** 2026-09-05; canonical-self assertion authority added against
+`src/menhir/config/settings_model.py`. Event history remains as previously recorded.

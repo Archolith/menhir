@@ -107,10 +107,25 @@ class EpisodeMaintenanceRepository:
         return int(rows[0].get("failed", 0)) if rows else 0
 
     def force_reset_failed_episode(self, episode_uuid: str) -> bool:
+        """Reset retryable work, including a completed self-proposal awaiting confirmation.
+
+        A first enforce pass must finish normally so its bounded proposal receipt is durable. Once
+        the owner has signed one of those exact payloads out of band, the operator needs a narrow
+        way to run the same episode again. A READY row is eligible only while it has at least one
+        proposal that was not authorized on its last pass; arbitrary completed episodes remain
+        immutable through this maintenance seam.
+        """
+
         query = (
             Cypher()
             .match("(n:Episodic {uuid: $uuid})")
-            .where("n.processing_state IN ['FAILED', 'PENDING']")
+            .where(
+                "(n.processing_state IN ['FAILED', 'PENDING']"
+                " OR (n.processing_state = 'READY'"
+                " AND coalesce(n.self_assertion_proposal_count, 0) > 0"
+                " AND coalesce(n.self_assertion_authorized_count, 0)"
+                " < n.self_assertion_proposal_count))"
+            )
             .set(
                 (
                     "n.processing_state = 'PENDING'",

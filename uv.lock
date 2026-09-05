@@ -66,6 +66,7 @@ source = { editable = "." }
 dependencies = [
     { name = "archolith-mcp-framework" },
     { name = "archolith-oauth" },
+    { name = "cryptography" },
     { name = "fastapi" },
     { name = "fastmcp" },
     { name = "graphiti-core" },
@@ -93,6 +94,7 @@ dev = [
 requires-dist = [
     { name = "archolith-mcp-framework", git = "https://github.com/Archolith/archolith-mcp-framework.git?rev=0a7c300cf50d724a2d5a8e8c1e664c7e8a5fa2eb" },
     { name = "archolith-oauth", git = "https://github.com/Archolith/archolith_oauth.git?rev=f77e2dbc7c7c85199aa05986b8d2126b54d1b056" },
+    { name = "cryptography", specifier = "==50.0.1" },
     { name = "fastapi", specifier = ">=0.115,<1" },
     { name = "fastmcp", specifier = ">=3.2.4,<4" },
     { name = "graphiti-core", specifier = "==0.29.3" },

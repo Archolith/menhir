@@ -48,7 +48,7 @@ def test_production_env_selects_openrouter_luna_for_chat_and_graphiti() -> None:
         "LOCAL_LLM_BASE_URL=https://openrouter.ai/api/v1",
         "LOCAL_LLM_CHAT_MODEL=openai/gpt-5.6-luna",
         "OPENAI_EMBED_MODEL=text-embedding-3-small",
-        "MENHIR_CANONICAL_SELF_BINDING_MODE=enforce",
+        "MENHIR_CANONICAL_SELF_BINDING_MODE=off",
     ):
         assert required in source.splitlines()
 

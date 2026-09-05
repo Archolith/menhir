@@ -7,6 +7,7 @@ from menhir.infrastructure.graphiti_extraction_patches import (
     _extract_nodes_combined_for_add_episode,
     _patch_graphiti_combined_extraction,
     _patch_graphiti_combined_extraction_models,
+    _patch_graphiti_self_authority_edge_resolution,
     begin_extraction_receipt,
     clear_extraction_receipt,
     get_extraction_receipt,

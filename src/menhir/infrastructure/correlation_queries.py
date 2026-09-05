@@ -16,6 +16,11 @@ if TYPE_CHECKING:
 from menhir.domain import merge_delta as md
 from menhir.infrastructure.cypher import non_derived_view_cypher
 from menhir.infrastructure.neo4j import SAGA_MUTATION_TIMEOUT_S
+from menhir.infrastructure.self_binding import (
+    SelfBindMode,
+    resolve_bind_mode,
+    structural_self_cypher,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +76,14 @@ class CorrelationRepository:
 
     def __init__(self, neo4j: Any) -> None:
         self._neo4j = neo4j
+        self._canonical_self_binding_mode = SelfBindMode.OFF
+
+    def configure_canonical_self_binding_mode(self, value: Any) -> None:
+        self._canonical_self_binding_mode = resolve_bind_mode(value, strict=True)
+
+    @property
+    def _allow_canonical_self(self) -> bool:
+        return self._canonical_self_binding_mode is not SelfBindMode.ENFORCE
 
     # ------------------------------------------------------------------
     # RELATES_TO edge creation
@@ -93,6 +106,9 @@ class CorrelationRepository:
             """
             MATCH (a:Entity {uuid: $source_uuid})
             MATCH (b:Entity {uuid: $target_uuid})
+            WHERE $allow_canonical_self OR (
+                NOT __SELF_A__ AND NOT __SELF_B__
+            )
             MERGE (a)-[r:RELATES_TO]->(b)
             ON CREATE SET
                 r.type = 'correlation',
@@ -113,15 +129,53 @@ class CorrelationRepository:
                 END,
                 r.last_traversed = datetime()
             RETURN r.type AS edge_type
-            """,
+            """
+            .replace("__SELF_A__", structural_self_cypher("a"))
+            .replace("__SELF_B__", structural_self_cypher("b")),
             params={
                 "source_uuid": source_uuid,
                 "target_uuid": target_uuid,
                 "similarity": similarity,
                 "source": source,
+                "allow_canonical_self": self._allow_canonical_self,
             },
         )
         return bool(rows)
+
+    def _has_canonical_self_adjacency(self, *node_uuids: str) -> bool:
+        """Recheck whether a merge/delete would consume an authoritative self relationship."""
+
+        rows = self._neo4j.execute(
+            """
+            MATCH (n:Entity)
+            WHERE n.uuid IN $uuids
+              AND (
+                __SELF_NODE__ OR
+                EXISTS {
+                    MATCH (n)-[]-(self_neighbor:Entity)
+                    WHERE __SELF_NEIGHBOR__
+                }
+              )
+            RETURN count(n) AS protected_count
+            """
+            .replace("__SELF_NODE__", structural_self_cypher("n"))
+            .replace("__SELF_NEIGHBOR__", structural_self_cypher("self_neighbor")),
+            params={"uuids": list(node_uuids)},
+        )
+        return bool(rows and int(rows[0].get("protected_count", 0) or 0) > 0)
+
+    def _contains_structural_self(self, node_uuids: list[str]) -> bool:
+        if not node_uuids:
+            return False
+        rows = self._neo4j.execute(
+            """
+            MATCH (n:Entity)
+            WHERE n.uuid IN $uuids AND __STRUCTURAL_SELF__
+            RETURN count(n) AS protected_count
+            """.replace("__STRUCTURAL_SELF__", structural_self_cypher("n")),
+            params={"uuids": list(dict.fromkeys(node_uuids))},
+        )
+        return bool(rows and int(rows[0].get("protected_count", 0) or 0) > 0)
 
     # ------------------------------------------------------------------
     # Entity merge (near-duplicate absorption)
@@ -298,9 +352,38 @@ class CorrelationRepository:
         Callers must have already verified that every referenced peer exists -- this query does not
         fabricate peers, and a missing one must abstain upstream, not silently drop an edge.
         """
+        peer_uuids = [
+            str(rel.get("peer_uuid") or "").strip()
+            for rel in [*out_rels, *in_rels]
+            if str(rel.get("peer_uuid") or "").strip()
+        ]
+        absorbed_is_self = (
+            bool(absorbed_properties.get("is_self", False))
+            or str(absorbed_properties.get("entity_role") or "").strip().casefold() == "self"
+        )
+        if (
+            self._canonical_self_binding_mode is SelfBindMode.ENFORCE
+            and (
+                absorbed_is_self
+                or self._contains_structural_self([survivor_uuid, *peer_uuids])
+            )
+        ):
+            return {
+                "restored": 0,
+                "reason": "CANONICAL_SELF_RELATIONSHIP_RESTORE_REQUIRES_AUTHORITY",
+            }
+
         rows = self._neo4j.execute(
             """
             MATCH (s:Entity {uuid: $survivor})
+            WHERE $allow_canonical_self OR (
+                NOT __SELF_SURVIVOR__
+                AND NOT $absorbed_is_self
+                AND NOT EXISTS {
+                    MATCH (self_peer:Entity)
+                    WHERE self_peer.uuid IN $peer_uuids AND __SELF_PEER__
+                }
+            )
             CREATE (a:$($absorbed_labels))
             SET a = $absorbed_properties,
                 a.restored_from_merge = $survivor,
@@ -351,7 +434,9 @@ class CorrelationRepository:
                 s.merge_audit = [x IN coalesce(s.merge_audit, [])
                                  WHERE NOT x CONTAINS $absorbed_audit_marker]
             RETURN out_restored, in_restored, bridges_removed, mentions_removed
-            """,
+            """
+            .replace("__SELF_SURVIVOR__", structural_self_cypher("s"))
+            .replace("__SELF_PEER__", structural_self_cypher("self_peer")),
             params={
                 "survivor": survivor_uuid,
                 "absorbed": absorbed_uuid,
@@ -364,6 +449,9 @@ class CorrelationRepository:
                 "survivor_properties": survivor_properties,
                 "rebound_episodes": rebound_episodes,
                 "operation_id": operation_id,
+                "peer_uuids": list(dict.fromkeys(peer_uuids)),
+                "absorbed_is_self": absorbed_is_self,
+                "allow_canonical_self": self._allow_canonical_self,
             },
             timeout_s=SAGA_MUTATION_TIMEOUT_S,  # bounded for ownership ageing (CF-211)
         )
@@ -472,6 +560,20 @@ class CorrelationRepository:
             return {
                 "merged": 0, "edges_bridged": 0, "episodes_rebound": 0, "deleted": 0,
                 "reason": eligibility.reason_code,
+            }
+
+        if (
+            self._canonical_self_binding_mode is SelfBindMode.ENFORCE
+            and self._has_canonical_self_adjacency(survivor_uuid, absorbed_uuid)
+        ):
+            logger.info(
+                "merge_entity ABSTAIN %s <- %s: canonical-self adjacency requires authority",
+                survivor_uuid,
+                absorbed_uuid,
+            )
+            return {
+                "merged": 0, "edges_bridged": 0, "episodes_rebound": 0, "deleted": 0,
+                "reason": "CANONICAL_SELF_ADJACENCY_REQUIRES_AUTHORITY",
             }
 
         # Phase 1 (read-only): snapshot the absorbed node's properties and relationships for the
@@ -598,6 +700,18 @@ class CorrelationRepository:
             WHERE """
             + me.mutable_eligibility_cypher()
             + """
+              AND ($allow_canonical_self OR (
+                  NOT __SELF_SURVIVOR__
+                  AND NOT __SELF_ABSORBED__
+                  AND NOT EXISTS {
+                      MATCH (survivor)-[]-(survivor_self_neighbor:Entity)
+                      WHERE __SELF_SURVIVOR_NEIGHBOR__
+                  }
+                  AND NOT EXISTS {
+                      MATCH (absorbed)-[]-(absorbed_self_neighbor:Entity)
+                      WHERE __SELF_ABSORBED_NEIGHBOR__
+                  }
+              ))
               // Provenance was read in Phase 1 and derived in Python; if another writer changed ANY
               // of it in the window, the derived values are stale and writing them would silently
               // discard the concurrent writer's work. Guarding `source` alone is not enough: a
@@ -654,6 +768,7 @@ class CorrelationRepository:
             WHERE NOT type(r) = 'ANCHORED_TO'
             AND neighbor.structure_role IS NULL
             AND neighbor.uuid <> survivor.uuid
+            AND ($allow_canonical_self OR NOT __SELF_BRIDGE_NEIGHBOR__)
             WITH survivor, absorbed, collect(DISTINCT neighbor) AS neighbors
             FOREACH (n IN neighbors |
                 MERGE (survivor)-[bridge:RELATES_TO]->(n)
@@ -680,7 +795,18 @@ class CorrelationRepository:
             DETACH DELETE absorbed
             RETURN edges_bridged, episodes_rebound, 1 AS deleted,
                    coalesce(survivor.namespace, survivor.group_id, 'default') AS merge_namespace
-            """,
+            """
+            .replace("__SELF_SURVIVOR__", structural_self_cypher("survivor"))
+            .replace("__SELF_ABSORBED__", structural_self_cypher("absorbed"))
+            .replace(
+                "__SELF_SURVIVOR_NEIGHBOR__",
+                structural_self_cypher("survivor_self_neighbor"),
+            )
+            .replace(
+                "__SELF_ABSORBED_NEIGHBOR__",
+                structural_self_cypher("absorbed_self_neighbor"),
+            )
+            .replace("__SELF_BRIDGE_NEIGHBOR__", structural_self_cypher("neighbor")),
             params={
                 # CF-47: the mutable predicates in the WHERE above are emitted by
                 # `domain.merge_eligibility`, and these are the values they bind. They come from
@@ -695,6 +821,7 @@ class CorrelationRepository:
                 "corroboration": provenance["corroboration"],
                 "authority": provenance["source_confidence"],
                 "primary_source": provenance["source"],
+                "allow_canonical_self": self._allow_canonical_self,
                 # Fail closed if EITHER node's provenance changed between Phase 1 and Phase 2: the
                 # values above were derived from what Phase 1 read, so writing them over a
                 # concurrently-changed input would silently discard the other writer's work.

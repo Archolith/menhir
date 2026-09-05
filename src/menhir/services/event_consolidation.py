@@ -1,8 +1,9 @@
 """Event-history consolidation runner — backfill grounded categorical occurrences from :TurnEvidence.
 
-This is the Phase-3 event-history backfill boundary. It turns canonical user :TurnEvidence rows into
-durable ``TypedEventAssertion``s via the existing event-history perception seam, then rebuilds the
-affected event-lane timeline Views through the deterministic ``EventHistoryService``.
+This is the Phase-3 event-history backfill boundary. It extracts grounded proposals from canonical
+user :TurnEvidence rows. Only an exactly owner-confirmed self proposal may enter the durable
+``TypedEventAssertion`` and event-lane View path. The current page contract carries no such
+confirmation, so self proposals remain raw evidence plus bounded drop telemetry.
 
 It wires up NOTHING: no settings/flag, no runtime/scheduler/endpoint, and no repository/View writes
 beyond the persistence + lane-rebuild delegates it drives. It is deliberately generic and
@@ -20,8 +21,8 @@ A page only advances the :EventConsolidationWatermark cursor when the WHOLE page
 * a page with no orderable ``cursor_at`` fails and does not advance.
 
 A structurally valid page with zero admitted events is successful and advances. Exact replay is okay.
-Only self-subject events are admitted (exact normalized tokens); the LLM's free-text domain is
-deliberately ignored this lane to avoid lane fragmentation.
+Non-self subjects stay outside this self-only lane. Self-subject proposals are recognized by exact
+normalized token, but are not admitted without exact owner confirmation.
 """
 
 from __future__ import annotations
@@ -34,6 +35,7 @@ from datetime import datetime, timezone
 from typing import Any, Protocol
 
 from menhir.domain.event_history import EventLane
+from menhir.infrastructure.self_binding import SelfBindMode, resolve_bind_mode
 from menhir.services import perception
 from menhir.services.event_history_perception import (
     build_event_assertion,
@@ -100,12 +102,18 @@ class EventConsolidationConfig:
     batch_size: int = 500
 
 
-#: Exact, normalized self-subject tokens admitted as the speaker (the single canonical subject).
+#: Exact, normalized tokens recognized as proposed references to the canonical speaker.
 #: DOMAIN: event-proposal subject. Carries "speaker", which the event producer emits and the other
 #: two sets do not -- adding it to the extraction set would bind an entity literally named "speaker"
 #: to the human. Deliberately distinct from ``typed_scalar_rules.SELF_TOKENS`` and
 #: ``domain/self_identity.SELF_ALIASES``; do not merge them.
 _SELF_TOKENS = frozenset({"user", "the user", "i", "me", "myself", "speaker"})
+
+#: Event consolidation currently receives model proposals and raw TurnEvidence, but no
+#: server-verifiable owner-confirmation record or owner principal. Neither input can authorize a
+#: semantic assertion about canonical self. Keep the reason aligned with the guarded Graphiti path
+#: so proposal telemetry has one stable meaning across producers.
+_SELF_OWNER_CONFIRMATION_DROP = "owner_confirmation_not_configured"
 
 #: Structural model-output defects that invalidate the ENTIRE page (never advance the cursor).
 _STRUCTURAL_DROPS = frozenset(
@@ -162,6 +170,9 @@ def run_event_consolidation(
     persist, rebuild, cursor, or activation). On activation/service-creation failure no namespace is
     processed, so ``event_namespaces_failed`` reflects ALL supplied ``event_targets``."""
     start_calls = counting_llm.calls
+    self_bind_mode = resolve_bind_mode(
+        getattr(graph_adapter, "canonical_self_binding_mode", "off")
+    )
 
     event_namespaces_processed = 0
     event_namespaces_failed = 0
@@ -219,7 +230,7 @@ def run_event_consolidation(
                 # Build episodes from raw trimmed user content ONLY (no date prefix); preserve the
                 # exact source text for quote grounding. Collapse exact duplicates by (body,
                 # valid_at) — first wins — but still advance over the ORIGINAL row page after success.
-                episodes, valid_at_by_uuid = _build_episodes(rows)
+                episodes, _valid_at_by_uuid = _build_episodes(rows)
                 page_ok = True
                 page_drops: Counter[str] = Counter()
 
@@ -245,17 +256,23 @@ def run_event_consolidation(
                     event_errors["structural_output"] += 1
 
                 if page_ok:
-                    # Admit only exact normalized self-subject tokens; canonicalize to 'user' and
-                    # drop the LLM's free-text domain this lane (avoid lane fragmentation).
+                    # The event page contract has no trusted owner-confirmation verifier or owner
+                    # principal. A self token, exact source span, confidence, caller flag, or another
+                    # model therefore remains proposal evidence only. In particular, do not resolve
+                    # canonical self, construct a bound TypedEventAssertion, or rebuild its View.
+                    # Non-self subjects remain outside this self-only lane as before.
                     admitted: list[Any] = []
                     for prop in proposals:
                         subject = (
                             str(getattr(prop, "subject_text", "") or "").strip().lower()
                         )
                         if subject in _SELF_TOKENS:
-                            admitted.append(
-                                replace(prop, subject_text="user", domain=None)
-                            )
+                            if self_bind_mode is not SelfBindMode.ENFORCE:
+                                admitted.append(
+                                    replace(prop, subject_text="user", domain=None)
+                                )
+                            else:
+                                _record_drop(_SELF_OWNER_CONFIRMATION_DROP)
                         else:
                             _record_drop("non_self_subject")
 
@@ -283,7 +300,7 @@ def run_event_consolidation(
                                 subject_uuid=self_uuid or "",
                                 namespace=namespace,
                                 learned_at=_now_utc(),
-                                episode_reference_time=valid_at_by_uuid.get(
+                                episode_reference_time=_valid_at_by_uuid.get(
                                     prop.episode_uuid
                                 ),
                                 turn_evidence_uuid=prop.episode_uuid,

@@ -49,6 +49,7 @@ __all__ = [
     "SelfBindResult",
     "bind_canonical_self",
     "resolve_bind_mode",
+    "structural_self_cypher",
 ]
 
 
@@ -63,18 +64,33 @@ class SelfBindMode(StrEnum):
     ENFORCE = "enforce"
 
 
-def resolve_bind_mode(value: Any) -> SelfBindMode:
-    """Parse a configured mode, failing safe to ``OFF`` on anything unrecognized.
+def resolve_bind_mode(value: Any, *, strict: bool = False) -> SelfBindMode:
+    """Parse a configured mode.
 
-    A typo in configuration must not silently enable a durable-write-semantics change.
+    Compatibility callers may retain the historical fail-safe ``OFF`` fallback.  Runtime wiring
+    uses ``strict=True`` so an operator who intended ``enforce`` cannot silently run unprotected
+    because of a misspelling.
     """
     try:
         return SelfBindMode(str(value or "").strip().lower())
-    except ValueError:
+    except ValueError as exc:
+        if strict:
+            raise ValueError(
+                "canonical_self_binding_mode must be one of: off, observe, enforce"
+            ) from exc
         logger.warning(
             "Unrecognized canonical_self_binding_mode %r; falling back to 'off'", value
         )
         return SelfBindMode.OFF
+
+
+def structural_self_cypher(variable: str) -> str:
+    """Return the shared database predicate for a structurally marked self entity."""
+
+    return (
+        f"(coalesce({variable}.is_self, false) OR "
+        f"toLower(trim(coalesce({variable}.entity_role, ''))) = 'self')"
+    )
 
 
 class AmbiguousSelfBindingError(RuntimeError):

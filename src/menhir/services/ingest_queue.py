@@ -73,6 +73,9 @@ class IngestQueueMixin:
         graphiti_add_episode_timeout_s: float | None = None,
         graphiti_episode_max_estimated_tokens: int | None = None,
         canonical_self_binding_mode: str | None = None,
+        canonical_self_confirmation_public_key_path: str | None = None,
+        canonical_self_confirmation_public_key_sha256: str | None = None,
+        canonical_self_confirmation_directory: str | None = None,
         max_llm_calls_per_session_window: int | None = None,
         llm_session_window_seconds: int | None = None,
         max_llm_calls_per_enrichment_job: int | None = None,
@@ -90,6 +93,18 @@ class IngestQueueMixin:
             )
         if canonical_self_binding_mode is not None:
             self._canonical_self_binding_mode = str(canonical_self_binding_mode)
+        if canonical_self_confirmation_public_key_path is not None:
+            self._canonical_self_confirmation_public_key_path = str(
+                canonical_self_confirmation_public_key_path
+            ).strip()
+        if canonical_self_confirmation_public_key_sha256 is not None:
+            self._canonical_self_confirmation_public_key_sha256 = str(
+                canonical_self_confirmation_public_key_sha256
+            ).strip()
+        if canonical_self_confirmation_directory is not None:
+            self._canonical_self_confirmation_directory = str(
+                canonical_self_confirmation_directory
+            ).strip()
         if graphiti_episode_max_estimated_tokens is not None:
             self._graphiti_episode_max_estimated_tokens = max(
                 0, int(graphiti_episode_max_estimated_tokens)

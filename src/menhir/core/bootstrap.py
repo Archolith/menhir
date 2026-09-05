@@ -197,6 +197,14 @@ def build_memory_services(
     else:
         llm = UnavailableLLMAdapter(llm_reason)
     graph_adapter = MemoryGraphAdapter(neo4j=neo4j)
+    self_binding_mode = getattr(settings, "canonical_self_binding_mode", "off")
+    configure_self_binding = getattr(
+        graph_adapter, "configure_canonical_self_binding_mode", None
+    )
+    if callable(configure_self_binding):
+        configure_self_binding(self_binding_mode)
+    else:
+        graph_adapter.canonical_self_binding_mode = self_binding_mode
     scoring_service = ScoringService()
     lifecycle_service = LifecycleService(
         graph_adapter=graph_adapter,
@@ -214,6 +222,15 @@ def build_memory_services(
         graphiti_add_episode_timeout_s=float(settings.graphiti_add_episode_timeout_seconds),
         graphiti_episode_max_estimated_tokens=int(settings.graphiti_episode_max_estimated_tokens),
         canonical_self_binding_mode=str(getattr(settings, "canonical_self_binding_mode", "off")),
+        canonical_self_confirmation_public_key_path=str(
+            getattr(settings, "canonical_self_confirmation_public_key_path", "")
+        ),
+        canonical_self_confirmation_public_key_sha256=str(
+            getattr(settings, "canonical_self_confirmation_public_key_sha256", "")
+        ),
+        canonical_self_confirmation_directory=str(
+            getattr(settings, "canonical_self_confirmation_directory", "")
+        ),
         max_llm_calls_per_session_window=settings.max_llm_calls_per_session_window,
         llm_session_window_seconds=settings.llm_session_window_seconds,
         max_llm_calls_per_enrichment_job=settings.max_llm_calls_per_enrichment_job,

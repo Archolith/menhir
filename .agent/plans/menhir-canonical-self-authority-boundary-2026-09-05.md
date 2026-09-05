@@ -2,12 +2,12 @@
 artifact_schema: 1
 artifact_uuid: 6c32dbb8-30b6-49df-a31e-491d424051aa
 artifact_type: plan
-artifact_status: PROPOSED
+artifact_status: IMPLEMENTING
 ---
 
 # Canonical self: structural identity and verified attribution
 
-Date: 2026-09-05. Owner: Charlie. Status: proposed; contract decision pending.
+Date: 2026-09-05. Owner: Charlie. Status: implementing; default-off; activation not authorized.
 Base: `Archolith/menhir`, `feat/canonical-self-subject-endpoint-20260904`,
 `a9d74bf0547a37499f4bebec6b263a054ae02bd4`.
 
@@ -16,10 +16,10 @@ AI-extracted self facts as non-authoritative proposals until the owner explicitl
 exact assertion through a trusted mechanism. Never turn language interpretation into identity
 or assertion authority. This protects attribution; it does not certify real-world truth.
 
-**Authorization:** this document authorizes no implementation, deployment, database write, or
-historical remediation. The owner requested repository plan authoring only. Obtain the contract
-decision before code changes and separate approval before any database write, including disposable
-Docker tests. Never infer production approval from approval of the design or local tests.
+**Authorization:** on 2026-09-05 the owner approved the recommended hybrid contract and requested
+repository implementation. That approval covers code, documentation and local unit tests only. It
+does not authorize deployment, production activation, a database write, disposable Docker tests,
+live-provider tests or historical remediation. Each remains a separate approval gate.
 
 ## Why
 
@@ -95,10 +95,27 @@ verification that the asserted fact is true.
 | Verified facts only | Smallest strict attribution surface | Most ordinary personal statements remain unbound; confirmation burden |
 | Hybrid, recommended | Preserves extraction and evidence while protecting authoritative facts | Proposal lifecycle and reader isolation add complexity; no model-only promotion |
 
-**Owner decision required:** approve the hybrid contract and its confirmation/recall behavior, or
-select an alternative and revise this plan before implementation. Do not silently downgrade the
-stronger guarantee. Under the hybrid, default authoritative recall excludes proposals; an explicit
-proposal view may show them as uncertain evidence, never as settled facts about the owner.
+**Approved decision:** implement the hybrid contract. Default authoritative recall excludes
+proposals; an operator may inspect the episode-local receipt as uncertain evidence, never as a
+settled fact about the owner. Do not silently downgrade this guarantee.
+
+### Phase 0 implementation decision
+
+- Menhir verifies offline Ed25519 owner confirmations and never exposes a signer or stores a
+  private key. The verifier pins the SHA-256 fingerprint of the raw 32-byte public key.
+- A confirmation signs canonical compact, sorted UTF-8 JSON for one exact assertion payload:
+  principal, namespace, episode and turn lineage, evidence digest, lane, endpoint direction,
+  polarity, assertion text, temporal scope, claim revision, schema and policy version, plus the
+  derived claim digest. Unknown, missing or mismatched fields fail closed.
+- Confirmation documents live in a read-only directory under a filename derived from the episode
+  UUID. Menhir records only bounded proposal/verifier receipts on `:Episodic` and an authorized
+  payload on the Graphiti relationship; it stores neither signature nor private key.
+- Revocation is immediate for default fact-edge recall: deleting or changing the confirmation makes
+  the edge fail fresh verification. Structural canonical identity remains separate.
+- `off` and `observe` preserve legacy writer/reader behavior. In `enforce`, unconfirmed Graphiti
+  edges remain proposals, typed-scalar/event self writes are proposal-only, direct self-anchored
+  View writes are rejected, and legacy self-derived canonical nodes, Views, scalars and event
+  authority are excluded from default recall.
 
 ## Implementation Sequence
 
@@ -202,7 +219,7 @@ backup, exact-image/config evidence and rollback controls. Historical-fork work 
 approved, journaled, reversible migration beginning with a fresh read-only census after prevention
 is proven. This plan does not authorize either operation.
 
-Authoring verification: draft metadata, UUIDv4, headings and Markdown-fence checks passed. The
-full repository artifact validator and runtime/unit/Docker suites were not run: this remote
-authoring environment has no Menhir checkout/CLI. Re-run repository validation locally before
-implementation; draft checks are not a full-corpus validation result.
+Implementation verification is recorded in the review wrapup. Focused local unit suites pass on
+the implementation branch. Repository artifact validation and the full serial unit suite remain
+required before this plan is marked implemented. Docker, live-provider, deployment, production
+activation and historical migration checks remain intentionally unrun without separate approval.

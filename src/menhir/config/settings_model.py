@@ -218,11 +218,16 @@ class MemorySettings:
     verifier_sync_enabled: bool = False
     verifier_sync_interval_s: float = 300.0
 
-    # Deterministic canonical-self binding rollout. "off" preserves pre-change behavior exactly;
-    # "observe" evaluates and records the decision without rewriting the payload; "enforce" binds.
-    # Default off until the plan's acceptance gates pass -- a proven self bypasses graphiti dedup
-    # entirely, which is a durable-write-semantics change.
+    # Canonical-self identity/authority rollout. "off" preserves pre-change behavior exactly;
+    # "observe" evaluates without changing writes or recall; "enforce" constructs the structural
+    # endpoint but attaches semantics only with exact owner confirmation. Default off because this
+    # changes durable write and read behavior.
     canonical_self_binding_mode: str = "off"
+    # Nondelegated self-assertion authority. Menhir verifies signatures but never signs. All three
+    # values are required for promotion; empty defaults make enforce proposal-only and fail closed.
+    canonical_self_confirmation_public_key_path: str = ""
+    canonical_self_confirmation_public_key_sha256: str = ""
+    canonical_self_confirmation_directory: str = ""
 
     # Personal-memory consolidation job (gated perception -> count/amount Views from user turns).
     # Short interval + dirty-namespace filter keeps it cheap; all bias guards pinned on. Default off.
@@ -807,6 +812,18 @@ class MemorySettings:
                 env_var="MENHIR_VERIFIER_SYNC_INTERVAL_S",
             ),
             canonical_self_binding_mode=_getenv("MENHIR_CANONICAL_SELF_BINDING_MODE", default=cls.canonical_self_binding_mode),
+            canonical_self_confirmation_public_key_path=_getenv(
+                "MENHIR_CANONICAL_SELF_CONFIRMATION_PUBLIC_KEY_PATH",
+                default=cls.canonical_self_confirmation_public_key_path,
+            ),
+            canonical_self_confirmation_public_key_sha256=_getenv(
+                "MENHIR_CANONICAL_SELF_CONFIRMATION_PUBLIC_KEY_SHA256",
+                default=cls.canonical_self_confirmation_public_key_sha256,
+            ),
+            canonical_self_confirmation_directory=_getenv(
+                "MENHIR_CANONICAL_SELF_CONFIRMATION_DIRECTORY",
+                default=cls.canonical_self_confirmation_directory,
+            ),
             personal_memory_consolidation_enabled=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_CONSOLIDATION_ENABLED", default=str(cls.personal_memory_consolidation_enabled))),
             personal_memory_consolidation_interval_s=_parse_float(
                 _getenv("MENHIR_PERSONAL_MEMORY_CONSOLIDATION_INTERVAL_S", default=str(cls.personal_memory_consolidation_interval_s)),

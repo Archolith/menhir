@@ -2,10 +2,17 @@
 artifact_schema: 1
 artifact_uuid: 7e14721a-2902-4eab-85ce-32381dd4d522
 artifact_type: plan
-artifact_status: PROPOSED
+artifact_status: SUPERSEDED
 ---
 
 # Menhir production release — canonical self and accumulated candidate
+
+**Superseded on 2026-09-05 by**
+[`menhir-canonical-self-authority-boundary-2026-09-05.md`](menhir-canonical-self-authority-boundary-2026-09-05.md).
+Its model-selected endpoint contract is not release authority. The replacement keeps production
+activation unapproved and the production template at `off` until exact owner-confirmation,
+candidate-image, backup, rollback and independent review gates receive separate approval. The
+remaining text below is retained as historical proposal context and must not be executed.
 
 ## Decision
 
