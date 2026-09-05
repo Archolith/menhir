@@ -2,6 +2,9 @@
 
 ## 2026-09-04 - Make canonical-self authority node-scoped
 
+- Complete deployment Phase 1 discovery: distinguish the installed `0.2.0-8` maintenance
+  authority from the running TODO hotfix image, merge the 14 otherwise-absent production release
+  fixes into the candidate lineage, and record both release-delta baselines.
 - Add an executable production-release plan for the complete accumulated candidate: close the
   production-model/image and feature-mode wiring gaps, bind the maintenance class and changed-path
   evidence into release authority, exercise changed client policy, use the fixed release

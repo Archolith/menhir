@@ -32,17 +32,45 @@ These are observations, not permanent release identifiers. Re-read them at execu
 
 | Item | Observed 2026-09-04 | Release requirement |
 |---|---|---|
-| Live release | `menhir-prod-hotfix-agent-todos-20260904` | Read again with `verify-artifacts` and `release.json` before preparing the bundle. |
-| Live Menhir commit | `613ff7866c75b44cb3703233f301ce4f90336fbc` | Use the live release authority as the diff base; never infer it from Git history. |
+| Installed maintenance authority | `menhir-prod-0.2.0-8`; Menhir commit `d8bcd6f58aaeb48a801be4a7656d8fcae50b8d54`; image `sha256:af970091…` | This is the immutable `release.json` and maintenance-journal base. Read it again before preparing the bundle. |
+| Running application override | `menhir-prod-hotfix-agent-todos-20260904`; source commit `613ff7866c75b44cb3703233f301ce4f90336fbc`; image `sha256:c406c621…` | This is the actual application behavior base. The durable override is outside the older maintenance manifest, so both lineages must remain in the candidate. |
 | Live chat/provider configuration | OpenAI for chat, Graphiti LLM, and embeddings; `OPENAI_CHAT_MODEL=gpt-4.1-nano` | Test with these exact values unless the live read changes. |
 | Live canonical-self mode | unset, therefore `off` | Candidate production environment must explicitly set `MENHIR_CANONICAL_SELF_BINDING_MODE=enforce`. |
-| Code candidate | branch `feat/canonical-self-subject-endpoint-20260904`; reviewed code/docs tip `6ce209d6e0c8ff1da5abfce43301e54cd447b9ce` | The release binds the final merged commit, not this provisional tip. |
-| Pre-plan delta | 37 commits; 78 files, 9,668 insertions, 318 deletions from the observed live commit to `6ce209d6` | Recompute after all release fixes and review every changed surface. |
+| Phase 1 candidate | branch `feat/canonical-self-subject-endpoint-20260904`; production-lineage merge `4fdb27a787a79b89e53d7fed4c87a9f22c35960d` | Contains current `origin/main`, the running hotfix lineage, and the installed maintenance-authority lineage. The release binds the later final Phase 4 commit. |
+| Phase 1 release delta | Installed authority → candidate: 41 commits and 82 files. Running app source → candidate: 60 commits and 95 files. | Preserve both comparisons: one protects deployment authority; the other describes application behavior changing from what is actually running. Recompute after every release fix. |
 | Expected class | `maintenance` | The classifier is authoritative. `deploy/`, configuration, dependency lock, and startup surfaces already rule out `app-only`. |
 
 The previous `gpt-4o-mini` endpoint E2E and source-based local server run remain useful development
 evidence. They are not production-parity release evidence because production uses `gpt-4.1-nano`
 and the final deployable object is an image digest.
+
+### Phase 1 checkpoint — 2026-09-04
+
+The first production read exposed two divergent authorities rather than one deployed commit. The
+maintenance manifest/journal is complete for `d8bcd6f5`, while a durable Compose override selects
+the later TODO-policy application image at `613ff786`. The feature branch originally contained the
+hotfix lineage but omitted 14 non-merge release fixes from the installed maintenance lineage.
+Commit `4fdb27a7` merged that installed lineage into the separate candidate branch. The only conflict
+was additive test coverage in `tests/test_production_runtime_surface.py`; both test groups were kept.
+The affected deployment-contract set passed with 145 tests and 3 skips.
+
+The 82-file installed-authority delta is assigned as follows, with no unowned path:
+
+| Owner surface | Files |
+|---|---:|
+| Release authority, production configuration, dependencies, and startup | 11 |
+| Canonical-self authority and tests | 22 |
+| Turn evidence, episode admission, ingest, and lifecycle | 13 |
+| Todo domain/repository/MCP work | 9 |
+| Scheduler tracing | 2 |
+| API, MCP, backend protocol, and recall | 8 |
+| Architecture, plans, reports, and changelogs | 11 |
+| Shared adapter/CLI/taxonomy and cross-surface tests | 6 |
+
+The production-lineage merge changed only deployment scripts/contracts and their tests; the reviewed
+canonical-self source and tests are byte-identical to the pre-merge candidate. Production remained
+healthy and was not mutated. GitHub PR state could not be read because the workstation's `gh` CLI
+is not authenticated; final PR creation and CI remain a Phase 4 gate.
 
 ## Scope
 
@@ -304,11 +332,12 @@ Also verify:
 - disk/memory headroom satisfies the existing maintenance policy;
 - the candidate release's pre-fence gate will reject any Compose `config_files` path under `/tmp`.
 
-The currently known `/tmp/menhir-operator-scope-hotfix.yml` overlay must be promoted to a durable,
-root-owned, hashed release input before any restart, and the rendered candidate must preserve the
-operator/admin scope contract. Add the no-`/tmp` check to the fixed runner before its writer fence;
-documentation alone is not enforcement. The promotion itself is a production mutation and belongs
-after approval, inside the fixed preparation/deployment procedure—not in this read-only phase.
+The running hotfix overlay is already durable at
+`/var/lib/menhir-production/hotfix/agent-todos-20260904/override.yml`; the active Compose
+`config_files` list contains no `/tmp` entry. The new release must absorb that override's image,
+policy, and OAuth-scope effects into the immutable maintenance authority rather than continue the
+out-of-band layer. Add the no-`/tmp` check to the fixed runner before its writer fence;
+documentation alone is not enforcement.
 
 Present one go/no-go packet to the owner:
 
@@ -334,7 +363,8 @@ After approval:
 2. Finish authoring and validating the enforce and off bundles against that immutable image. Verify
    their authority digests match the approved package specifications. Retain the prior production
    bundle/image.
-3. Promote and hash the temporary scope overlay as the approved durable release input.
+3. Replace the durable hotfix override with equivalent values inside the approved maintenance
+   authority; do not carry the overlay forward as a third configuration source.
 4. Use the existing desktop wrapper with the reviewed primary bundle:
 
 ```powershell
@@ -429,7 +459,7 @@ Response:
 | Final PR CI | No final pull-request result for this candidate | Block until all required jobs are green on the final commit. |
 | Full release review | Pre-plan delta spans 78 files and protected surfaces | Block until every final changed file has test/review ownership. |
 | Mechanical release bundle | Not yet prepared for the final merge commit | Block owner approval until classification, scan, provenance, and security review pass; block deployment until post-approval publication and bundle validation preserve the approved digests. |
-| Temporary production overlay | Active scope overlay is under `/tmp`; the current prohibition is documented but not enforced by release scripts | Block restart until it is a durable, hashed release input and the runner hard-refuses any `/tmp` config reference before fencing. |
+| Out-of-band hotfix overlay | The live overlay is durable and not under `/tmp`, but its image/policy/scope authority is outside the older maintenance manifest; the no-`/tmp` prohibition is still not enforced by release scripts | Block restart until the candidate absorbs the hotfix effects, drops the extra overlay, and the runner hard-refuses any `/tmp` config reference before fencing. |
 
 The existing self-like/fork population is not a release blocker because this release performs no
 historical consolidation and does not claim to repair existing data. It remains separate owner
@@ -440,10 +470,10 @@ work under the canonical-self remediation runbook.
 Fill this section during implementation; do not replace evidence with prose.
 
 ```text
-Live release / Menhir commit / image:
-Final candidate commit / image digest:
-Complete diff reviewed:
-Live providers / chat model / embedding model:
+Live release / Menhir commit / image: authority menhir-prod-0.2.0-8 / d8bcd6f5 / sha256:af970091…; running override menhir-prod-hotfix-agent-todos-20260904 / 613ff786 / sha256:c406c621…
+Final candidate commit / image digest: Phase 1 lineage merge 4fdb27a7; final Phase 4 commit and image TBD
+Complete diff reviewed: 82-file authority census assigned with zero unowned paths; semantic acceptance remains in Phases 2–4
+Live providers / chat model / embedding model: openai/openai/openai; gpt-4.1-nano; text-embedding-3-small
 Canonical mode in rendered candidate:
 Full suite / focused suite:
 Exact-model exact-image E2E receipt:
