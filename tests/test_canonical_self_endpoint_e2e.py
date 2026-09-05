@@ -29,6 +29,99 @@ from scripts.dev import test_server
 
 pytestmark = [pytest.mark.online, pytest.mark.timeout(420)]
 
+_RELEASE_TEST_FLAG = "MENHIR_RELEASE_TEST"
+_RELEASE_TEST_MODEL = "MENHIR_RELEASE_TEST_MODEL"
+
+
+def _configured_value(name: str, file_env: dict[str, str]) -> str:
+    return str(os.environ.get(name) or file_env.get(name) or "").strip()
+
+
+def _release_llm_environment(repo_root: Path) -> tuple[dict[str, str], dict[str, str]]:
+    file_env = {
+        str(key): str(value)
+        for key, value in dotenv_values(repo_root / ".env").items()
+        if value
+    }
+    release_mode = _configured_value(_RELEASE_TEST_FLAG, file_env).casefold() in {
+        "1", "true", "yes", "on",
+    }
+    chat_provider = _configured_value("LLM_CHAT_PROVIDER", file_env)
+    graphiti_provider = _configured_value("GRAPHITI_LLM_PROVIDER", file_env)
+    embed_provider = _configured_value("GRAPHITI_EMBED_PROVIDER", file_env)
+    release_model = _configured_value(_RELEASE_TEST_MODEL, file_env)
+
+    if release_mode:
+        missing = [
+            name for name, value in (
+                ("LLM_CHAT_PROVIDER", chat_provider),
+                ("GRAPHITI_LLM_PROVIDER", graphiti_provider),
+                ("GRAPHITI_EMBED_PROVIDER", embed_provider),
+                (_RELEASE_TEST_MODEL, release_model),
+            ) if not value
+        ]
+        if missing:
+            pytest.fail(
+                "release E2E requires explicit provider/model settings: "
+                + ", ".join(missing)
+            )
+
+    chat_provider = chat_provider or "openai"
+    graphiti_provider = graphiti_provider or chat_provider
+    embed_provider = embed_provider or graphiti_provider
+    if chat_provider not in {"local", "openai"} or graphiti_provider not in {
+        "local", "openai",
+    }:
+        pytest.fail("canonical-self E2E requires OpenAI-compatible chat providers")
+
+    model_env = "LOCAL_LLM_CHAT_MODEL" if chat_provider == "local" else "OPENAI_CHAT_MODEL"
+    model = release_model or _configured_value(model_env, file_env)
+    if not model and not release_mode:
+        model = "gpt-4o-mini"
+    if not model:
+        pytest.fail(f"{model_env} is required for the configured release provider")
+
+    allowed_llm = {
+        "OPENAI_API_KEY", "OPENAI_CHAT_MODEL", "OPENAI_EMBED_MODEL",
+        "LOCAL_LLM_BASE_URL", "LOCAL_LLM_API_KEY", "LOCAL_LLM_CHAT_MODEL",
+        "LLM_CHAT_PROVIDER", "GRAPHITI_LLM_PROVIDER", "GRAPHITI_EMBED_PROVIDER",
+        "GRAPHITI_RERANKER_PROVIDER", "GRAPHITI_EPISODE_MAX_ESTIMATED_TOKENS",
+        "GRAPHITI_REQUEST_MAX_ESTIMATED_TOKENS", "LLM_MAX_TOKENS",
+    }
+    llm_env = {
+        key: _configured_value(key, file_env)
+        for key in allowed_llm
+        if _configured_value(key, file_env)
+    }
+    llm_env["LLM_CHAT_PROVIDER"] = chat_provider
+    llm_env["GRAPHITI_LLM_PROVIDER"] = graphiti_provider
+    llm_env["GRAPHITI_EMBED_PROVIDER"] = embed_provider
+    llm_env[model_env] = model
+
+    selected_providers = {chat_provider, graphiti_provider, embed_provider}
+    required_credentials = []
+    if "local" in selected_providers:
+        required_credentials.extend(("LOCAL_LLM_BASE_URL", "LOCAL_LLM_API_KEY"))
+    if "openai" in selected_providers:
+        required_credentials.append("OPENAI_API_KEY")
+    missing_credentials = [name for name in required_credentials if not llm_env.get(name)]
+    if missing_credentials:
+        message = "real-model E2E requires: " + ", ".join(missing_credentials)
+        if release_mode:
+            pytest.fail(message)
+        pytest.skip(message)
+
+    evidence = {
+        "chat_provider": chat_provider,
+        "graphiti_provider": graphiti_provider,
+        "embed_provider": embed_provider,
+        "chat_model": model,
+        "embed_model": llm_env.get("OPENAI_EMBED_MODEL", ""),
+        "base_url": llm_env.get("LOCAL_LLM_BASE_URL", "https://api.openai.com/v1"),
+        "release_mode": str(release_mode).lower(),
+    }
+    return llm_env, evidence
+
 
 def _request(base_url: str, method: str, path: str, payload: dict[str, Any] | None = None):
     request = urllib.request.Request(
@@ -67,38 +160,20 @@ def _contains_reserved_marker(value: Any) -> bool:
     return SUBJECT_ENDPOINT_MARKER_PREFIX.casefold() in str(value or "").casefold()
 
 
-def test_declared_self_survives_public_ingest_and_cannot_be_merged(monkeypatch) -> None:
+def test_declared_self_survives_public_ingest_and_cannot_be_merged(
+    monkeypatch, record_property,
+) -> None:
     repo_root = Path(__file__).resolve().parents[1]
-    file_env = {
-        str(key): str(value)
-        for key, value in dotenv_values(repo_root / ".env").items()
-        if value
-    }
-    api_key = os.environ.get("OPENAI_API_KEY") or file_env.get("OPENAI_API_KEY")
-    if not api_key:
-        pytest.skip("OPENAI_API_KEY is required for the real-model E2E")
-
-    allowed_llm = {
-        "OPENAI_API_KEY", "OPENAI_CHAT_MODEL", "OPENAI_EMBED_MODEL", "OPENAI_BASE_URL",
-        "LLM_CHAT_PROVIDER", "GRAPHITI_LLM_PROVIDER", "GRAPHITI_EMBED_PROVIDER",
-        "GRAPHITI_RERANKER_PROVIDER", "GRAPHITI_EPISODE_MAX_ESTIMATED_TOKENS",
-        "GRAPHITI_REQUEST_MAX_ESTIMATED_TOKENS", "LLM_MAX_TOKENS",
-    }
-    llm_env = {
-        key: os.environ.get(key) or file_env.get(key, "")
-        for key in allowed_llm
-        if os.environ.get(key) or file_env.get(key)
-    }
+    llm_env, llm_evidence = _release_llm_environment(repo_root)
+    for key, value in llm_evidence.items():
+        record_property(f"release_llm_{key}", value)
+    print("canonical-self E2E LLM: " + json.dumps(llm_evidence, sort_keys=True))
     original_shape_env = test_server._shape_env
 
     def _shape_env(*args, **kwargs):
         env = original_shape_env(*args, **kwargs)
         env.update(llm_env)
         env["PYTHONPATH"] = str(repo_root / "src")
-        env["OPENAI_CHAT_MODEL"] = "gpt-4o-mini"
-        env["LLM_CHAT_PROVIDER"] = "openai"
-        env["GRAPHITI_LLM_PROVIDER"] = "openai"
-        env["GRAPHITI_EMBED_PROVIDER"] = "openai"
         env["MENHIR_CANONICAL_SELF_BINDING_MODE"] = "enforce"
         env["MENHIR_MAX_INGEST_WORKERS"] = "1"
         env["SCHEDULER_TRACE_DISABLED"] = "1"
@@ -147,6 +222,7 @@ def test_declared_self_survives_public_ingest_and_cannot_be_merged(monkeypatch) 
         try:
             deadline = time.monotonic() + 300
             state = ""
+            processing_error = ""
             while time.monotonic() < deadline:
                 with driver.session() as session:
                     record = session.run(
@@ -157,9 +233,24 @@ def test_declared_self_survives_public_ingest_and_cannot_be_merged(monkeypatch) 
                 if state in {"READY", "FAILED", "MANUAL_REVIEW"}:
                     break
                 time.sleep(2)
-            assert state == "READY"
+            if state == "FAILED":
+                with driver.session() as session:
+                    failed = session.run(
+                        "MATCH (p:Episodic {uuid:$uuid}) "
+                        "RETURN p.processing_error AS processing_error",
+                        uuid=projection_uuid,
+                    ).single()
+                processing_error = str(
+                    failed["processing_error"]
+                    if failed and failed["processing_error"] else ""
+                )
+            assert state == "READY", (
+                f"projection state={state!r}, processing_error={processing_error!r}\n"
+                f"isolated server log:\n{server.tail_log()}"
+            )
 
             canonical_uuid = self_uuid_for_namespace(namespace)
+            ordinary_uuid = f"ordinary-{uuid4()}"
             with driver.session() as session:
                 canonical = session.run(
                     "MATCH (s:Entity {uuid:$uuid}) RETURN s.name AS name, s.group_id AS group_id",
@@ -191,11 +282,11 @@ def test_declared_self_survives_public_ingest_and_cannot_be_merged(monkeypatch) 
                         "MATCH ()-[r]->() RETURN properties(r) AS props"
                     )
                 ]
-                ordinary = session.run(
-                    "MATCH (n:Entity {group_id:$group}) WHERE n.uuid <> $self_uuid "
-                    "AND toLower(trim(n.name)) = 'user' RETURN n.uuid AS uuid LIMIT 1",
-                    group=namespace, self_uuid=canonical_uuid,
-                ).single()
+                session.run(
+                    "CREATE (:Entity {uuid:$uuid, name:'ordinary merge target', "
+                    "group_id:$group, scope:'PERSISTENT', freshness:'ACTIVE'})",
+                    uuid=ordinary_uuid, group=namespace,
+                ).consume()
 
             assert canonical and canonical["name"] == "user"
             assert canonical["group_id"] == namespace
@@ -204,15 +295,12 @@ def test_declared_self_survives_public_ingest_and_cannot_be_merged(monkeypatch) 
             assert not any(
                 _contains_reserved_marker(item) for item in persisted_properties
             )
-            assert ordinary is not None
-
             repository = Neo4jRepository(
                 uri=server.neo4j_uri, database="neo4j",
                 user=server.neo4j_user, password=server.neo4j_password,
             )
             try:
                 correlation = CorrelationRepository(repository)
-                ordinary_uuid = str(ordinary["uuid"])
                 refusals = (
                     correlation.merge_entity(ordinary_uuid, canonical_uuid, similarity=0.999),
                     correlation.merge_entity(canonical_uuid, ordinary_uuid, similarity=0.999),

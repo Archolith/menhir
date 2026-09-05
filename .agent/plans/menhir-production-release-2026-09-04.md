@@ -10,13 +10,15 @@ artifact_status: PROPOSED
 ## Decision
 
 Release the complete Menhir candidate through the existing production release machinery, with
-canonical-self endpoint binding enabled in `enforce` mode. Treat the release as the whole delta
+canonical-self endpoint binding enabled in `enforce` mode and chat plus Graphiti extraction routed
+through OpenRouter to `openai/gpt-5.6-luna`. Keep embeddings on OpenAI
+`text-embedding-3-small`. Treat the release as the whole delta
 from the immutable deployed Menhir commit to the final merged candidate—not as a canonical-self-only
 patch.
 
 Use the risk profile of the actual installation: one owner, no external users, one Menhir writer,
 one Neo4j store, and an owner who can immediately intervene. Prove the exact candidate locally with
-Docker Desktop and the provider/model read from production, run normal CI and the mechanically
+Docker Desktop and the provider/model selected for this release, run normal CI and the mechanically
 selected release class, deploy once, and exercise one disposable synthetic canary through the public
 API. Do not add an observe-first stage, representative-user cohort, multi-day soak, or separate
 shadow stack unless the exact-model test or canary exposes a concrete need.
@@ -34,14 +36,15 @@ These are observations, not permanent release identifiers. Re-read them at execu
 |---|---|---|
 | Installed maintenance authority | `menhir-prod-0.2.0-8`; Menhir commit `d8bcd6f58aaeb48a801be4a7656d8fcae50b8d54`; image `sha256:af970091…` | This is the immutable `release.json` and maintenance-journal base. Read it again before preparing the bundle. |
 | Running application override | `menhir-prod-hotfix-agent-todos-20260904`; source commit `613ff7866c75b44cb3703233f301ce4f90336fbc`; image `sha256:c406c621…` | This is the actual application behavior base. The durable override is outside the older maintenance manifest, so both lineages must remain in the candidate. |
-| Live chat/provider configuration | OpenAI for chat, Graphiti LLM, and embeddings; `OPENAI_CHAT_MODEL=gpt-4.1-nano` | Test with these exact values unless the live read changes. |
+| Live chat/provider configuration | OpenAI for chat, Graphiti LLM, and embeddings; `OPENAI_CHAT_MODEL=gpt-4.1-nano` | This is the rollback baseline. The candidate deliberately changes chat and Graphiti extraction to OpenRouter Luna while retaining OpenAI embeddings. |
+| Candidate chat/provider configuration | `local` OpenAI-compatible provider for chat and Graphiti LLM; `LOCAL_LLM_BASE_URL=https://openrouter.ai/api/v1`; `LOCAL_LLM_CHAT_MODEL=openai/gpt-5.6-luna`; OpenAI embeddings | Exact-model and exact-image tests must use these values. Production requires a non-empty `local-llm-api-key` secret before deployment. |
 | Live canonical-self mode | unset, therefore `off` | Candidate production environment must explicitly set `MENHIR_CANONICAL_SELF_BINDING_MODE=enforce`. |
 | Phase 1 candidate | branch `feat/canonical-self-subject-endpoint-20260904`; production-lineage merge `4fdb27a787a79b89e53d7fed4c87a9f22c35960d` | Contains current `origin/main`, the running hotfix lineage, and the installed maintenance-authority lineage. The release binds the later final Phase 4 commit. |
 | Phase 1 release delta | Installed authority → candidate: 41 commits and 82 files. Running app source → candidate: 60 commits and 95 files. | Preserve both comparisons: one protects deployment authority; the other describes application behavior changing from what is actually running. Recompute after every release fix. |
 | Expected class | `maintenance` | The classifier is authoritative. `deploy/`, configuration, dependency lock, and startup surfaces already rule out `app-only`. |
 
 The previous `gpt-4o-mini` endpoint E2E and source-based local server run remain useful development
-evidence. They are not production-parity release evidence because production uses `gpt-4.1-nano`
+evidence. They are not release evidence because this candidate deliberately selects OpenRouter Luna
 and the final deployable object is an image digest.
 
 ### Phase 1 checkpoint — 2026-09-04
@@ -91,7 +94,7 @@ Out of scope:
 - consolidating or deleting the existing exact-name/self-like graph population;
 - treating a node's spelling, pronouns, or turn authorship as proof of node identity;
 - introducing a production shadow extractor or a prolonged observation program;
-- changing the LLM provider/model as part of this release;
+- changing the embedding provider/model;
 - ad-hoc SSH, Compose, database, policy, or release-state edits that bypass the fixed scripts;
 - unrelated feature work discovered during release preparation. A release-blocking defect may be
   fixed narrowly; other work is recorded separately.
@@ -172,8 +175,11 @@ Remove the hard-coded `gpt-4o-mini` assignment from
 model and report the model used. In release mode it must refuse to run when the model is absent;
 developer runs may keep a documented default only when they are not presented as release evidence.
 
-For this release, the acceptance invocation must name the value freshly read from production,
-currently `gpt-4.1-nano`, and the three live OpenAI provider selections.
+For this release, the acceptance invocation must set `MENHIR_RELEASE_TEST=1`, name
+`MENHIR_RELEASE_TEST_MODEL=openai/gpt-5.6-luna`, select the OpenAI-compatible `local` provider for
+chat and Graphiti extraction, use `https://openrouter.ai/api/v1`, and retain the OpenAI embedding
+provider with `text-embedding-3-small`. Missing explicit release provider/model input is a refusal,
+not a skip or fallback.
 
 ### 2.2 Wire the feature mode into the production authority
 
@@ -247,8 +253,9 @@ Use Docker Desktop and the test Menhir setup. The VPS is not a test environment;
 only to read the live configuration and later to execute the approved deployment.
 
 1. Build the candidate image once from the final clean commit and record its immutable digest.
-2. Start that image with disposable local Neo4j and test state, the production provider selections,
-   the exact live chat and embedding models, and canonical-self mode `enforce`. Inject credentials
+2. Start that image with disposable local Neo4j and test state, the candidate provider selections,
+   OpenRouter Luna for chat/extraction, OpenAI `text-embedding-3-small`, and canonical-self mode
+   `enforce`. Inject credentials
    through the existing secret mechanism; never copy production state or expose keys in command
    output.
 3. Run the full repository test suite from a clean environment. The prior run with one concurrency
@@ -291,9 +298,9 @@ Exit evidence:
 3. Build the SBOM, vulnerability scan, provenance, source-history bundle, rendered production
    Compose/environment/policy, and rollback anchors required by `release-author.py`. Keep the image
    and package local until the owner gate; record the content digest that publication must preserve.
-4. Confirm the rendered production environment keeps the live OpenAI provider/model choices and
-   explicitly sets canonical-self `enforce`. Confirm its mode and image digest agree with the local
-   E2E receipt.
+4. Confirm the rendered production environment routes chat and Graphiti extraction through
+   OpenRouter Luna, keeps embeddings on OpenAI, and explicitly sets canonical-self `enforce`.
+   Confirm its provider/model values, mode, and image digest agree with the local E2E receipt.
 5. Generate the independent security-review request from the exact release spec. A different
    reviewer must approve the complete proposed authority digest with no unresolved critical/high
    finding. Publication may not change any reviewed byte or digest.
@@ -382,7 +389,8 @@ During the transaction:
 - promote/hash the temporary scope overlay before the first restart and prove no active
   `config_files` entry points into `/tmp`;
 - verify the candidate container reports the exact release ID, image digest,
-  `OPENAI_CHAT_MODEL`, provider values, and `MENHIR_CANONICAL_SELF_BINDING_MODE=enforce`;
+  `LOCAL_LLM_BASE_URL`, `LOCAL_LLM_CHAT_MODEL`, provider values, and
+  `MENHIR_CANONICAL_SELF_BINDING_MODE=enforce`;
 - preserve the single-writer fence and do not start a second writable Menhir or Neo4j;
 - stop at the first failed stage and follow `release-run.json`; do not erase the journal or force a
   different release over it.
@@ -449,7 +457,8 @@ Response:
 
 | Item | Current state | Blocking condition |
 |---|---|---|
-| Explicit production-model E2E | Hard-coded to `gpt-4o-mini` | Block until the durable test runs and reports the freshly observed live model. |
+| Explicit release-model E2E | Hard-coded to `gpt-4o-mini` before this phase | Block until the durable test runs in release mode and reports OpenRouter Luna with OpenAI embeddings. |
+| OpenRouter production secret | Workstation key exists; VPS `local-llm-api-key` is absent | Block production deployment until the fixed secret path contains the key with the enforced owner/mode and verification passes. |
 | Exact-image E2E | Prior pass used a source-launched local server | Block until the final image digest passes against disposable Docker Neo4j. |
 | Production mode wiring | Compose does not currently pass `MENHIR_CANONICAL_SELF_BINDING_MODE` | Block until rendered candidate environment proves `enforce`. |
 | Release authority for mode | Release authoring validates the policy digest but not the canonical mode enum/effective runtime value | Block until authoring, schema, runner, and acceptance bind and verify it. |
@@ -474,6 +483,7 @@ Live release / Menhir commit / image: authority menhir-prod-0.2.0-8 / d8bcd6f5 /
 Final candidate commit / image digest: Phase 1 lineage merge 4fdb27a7; final Phase 4 commit and image TBD
 Complete diff reviewed: 82-file authority census assigned with zero unowned paths; semantic acceptance remains in Phases 2–4
 Live providers / chat model / embedding model: openai/openai/openai; gpt-4.1-nano; text-embedding-3-small
+Candidate providers / chat model / embedding model: local/local/openai; openai/gpt-5.6-luna via https://openrouter.ai/api/v1; text-embedding-3-small
 Canonical mode in rendered candidate:
 Full suite / focused suite:
 Exact-model exact-image E2E receipt:
