@@ -1078,6 +1078,44 @@ def test_compose_parser_resolves_authority_memory_limit_to_four_gibibytes():
     assert int(config["services"]["menhir"]["mem_limit"]) == 4 * 1024**3
 
 
+def test_compose_parser_forwards_openrouter_luna_settings():
+    if shutil.which("docker") is None:
+        pytest.skip("docker CLI unavailable")
+    env = {
+        **os.environ,
+        "MENHIR_IMAGE": "example.invalid/menhir@sha256:" + "1" * 64,
+        "NEO4J_IMAGE": "example.invalid/neo4j@sha256:" + "2" * 64,
+        "MENHIR_RUNTIME_MODE": "candidate-readonly",
+        "MENHIR_INSTANCE_ID": "parser-test",
+        "MENHIR_RELEASE_ID": "parser-test",
+        "MENHIR_PUBLIC_BASE_URL": "https://memory.example",
+        "MENHIR_CLIENT_POLICY_DIGEST": "3" * 64,
+        "LLM_CHAT_PROVIDER": "local",
+        "GRAPHITI_LLM_PROVIDER": "local",
+        "GRAPHITI_EMBED_PROVIDER": "openai",
+        "LOCAL_LLM_BASE_URL": "https://openrouter.ai/api/v1",
+        "LOCAL_LLM_CHAT_MODEL": "openai/gpt-5.6-luna",
+    }
+    completed = subprocess.run(
+        [
+            "docker", "compose", "--file",
+            str(REPO_ROOT / "deploy" / "docker-compose.production.yml"),
+            "config", "--format", "json",
+        ],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    service_env = json.loads(completed.stdout)["services"]["menhir"]["environment"]
+    assert service_env["LLM_CHAT_PROVIDER"] == "local"
+    assert service_env["GRAPHITI_LLM_PROVIDER"] == "local"
+    assert service_env["GRAPHITI_EMBED_PROVIDER"] == "openai"
+    assert service_env["LOCAL_LLM_BASE_URL"] == "https://openrouter.ai/api/v1"
+    assert service_env["LOCAL_LLM_CHAT_MODEL"] == "openai/gpt-5.6-luna"
+
+
 def test_candidate_shell_functions_do_not_require_ambient_generation(tmp_path):
     def bash_path(path: Path) -> str:
         resolved = path.resolve()
