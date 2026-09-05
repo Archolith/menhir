@@ -555,8 +555,13 @@ def test_candidate_compose_uses_exact_restored_production_authorities() -> None:
     assert "SHOW ROLES WITH USERS" in authority_digest
     assert "SHOW PRIVILEGES" in authority_digest
     assert (
-        'candidate_compose "$generation" run --rm --no-deps -T menhir '
+        'MENHIR_APP_MEMORY_LIMIT=4g candidate_compose "$generation" run '
+        '--rm --no-deps -T menhir '
         "python3 - neo4j" in release_lib
+    )
+    assert (
+        'MENHIR_APP_MEMORY_LIMIT=4g candidate_compose "$generation" config --quiet'
+        in release_lib
     )
     assert "toString(" not in release_lib
 
@@ -583,6 +588,32 @@ def test_production_startup_refuses_scope_mapping_below_access_contract(
             settings,
             tool_catalog=frozenset(tool.name for tool in ALL_TOOLS),
         )
+
+
+def test_release_schema_helpers_support_installed_flat_layout() -> None:
+    root = Path(__file__).resolve().parents[1]
+    release_lib = (root / "deploy" / "release-lib.sh").read_text(encoding="utf-8")
+    release_validate = (root / "deploy" / "release-validate.sh").read_text(
+        encoding="utf-8"
+    )
+    release_run = (root / "deploy" / "release-run.sh").read_text(encoding="utf-8")
+
+    assert '[ -f "$schema" ] || schema="${helper_dir}/menhir_schema.py"' in release_lib
+    assert '[ -f "$SCHEMA" ] || SCHEMA="${SCRIPT_DIR}/menhir_schema.py"' in release_validate
+    assert (
+        '[ -f "$same_host_helper" ] || '
+        'same_host_helper="${SCRIPT_DIR}/same_host_fence.py"'
+    ) in release_run
+    assert 'python3 "${SCRIPT_DIR}/lib/same_host_fence.py"' not in release_run
+
+
+def test_secret_mode_verifier_normalizes_shell_octal_notation() -> None:
+    source = (
+        Path(__file__).resolve().parents[1] / "deploy" / "secrets-map.sh"
+    ).read_text(encoding="utf-8")
+
+    assert 'normalized_mode="${m#0}"' in source
+    assert '[ "$am" = "$normalized_mode" ]' in source
 
 
 def test_production_compose_uses_compose_v5_compatible_pid_limits() -> None:

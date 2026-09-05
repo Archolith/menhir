@@ -55,6 +55,7 @@ from menhir.infrastructure.telemetry import record_lifecycle_event
 
 from menhir.infrastructure.graphiti_patches import (  # noqa: E402
     _patch_graphiti_adaptive_dedupe,
+    _patch_graphiti_dedup_branch_telemetry,
     _patch_graphiti_combined_extraction,
     _patch_graphiti_combined_extraction_models,
     _patch_graphiti_dedupe_resolutions,
@@ -223,6 +224,7 @@ class GraphitiClient:
         _patch_graphiti_dedup_identity_gate()
         _patch_graphiti_structural_candidate_isolation()
         _patch_graphiti_untyped_attribute_preservation()
+        _patch_graphiti_dedup_branch_telemetry()
         _patch_graphiti_adaptive_dedupe()
         _patch_graphiti_openai_generic_client(
             max_request_estimated_tokens=int(settings.graphiti_request_max_estimated_tokens)

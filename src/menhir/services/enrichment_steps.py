@@ -19,6 +19,19 @@ from typing import Any, Callable
 from menhir.services.scheduler_protocols import LifecycleServiceProtocol
 
 from menhir.domain.models import FreshnessState, ProcessingState
+from menhir.domain.self_identity import (
+    SelfEvidenceKind,
+    SelfIdentityContext,
+    SelfSubjectEndpointEnvelope,
+    normalize_logical_namespace,
+    self_context_for_pending_episode,
+    self_subject_endpoint_for_claim,
+)
+from menhir.infrastructure.self_binding import (
+    InvalidSelfSubjectDeclarationError,
+    SelfBindMode,
+    resolve_bind_mode,
+)
 from menhir.domain.utils import source_confidence_for
 from menhir.infrastructure import GraphitiClient, MemoryGraphAdapter
 from menhir.infrastructure.evidence_publication_intents import (
@@ -112,6 +125,9 @@ class EnrichmentContext:
     # manifest do not exist.  Tests and a future explicit activation hook can inject it without
     # changing the extraction API; absence preserves the currently deployed path.
     evidence_publication_intents: EvidencePublicationIntentRepository | None = None
+    #: Canonical-self binding rollout: "off" (default), "observe" or "enforce". Defaulted so every
+    #: construction site predating this field keeps pre-change behavior.
+    canonical_self_binding_mode: str = "off"
 
 
 # ---------------------------------------------------------------------------
@@ -632,7 +648,7 @@ async def run_graphiti_extraction(
             ).strip()
             relationless_repair_context_loader: Callable[[], tuple[str, ...]] | None = None
             if turn_evidence_uuid:
-                repair_namespace = str(ctx.claimed.get("namespace") or "default")
+                repair_namespace = normalize_logical_namespace(ctx.claimed.get("namespace"))
 
                 def _load_relationless_repair_context() -> tuple[str, ...]:
                     # turn_evidence_uuid is caller-supplied. Scoping the read to THIS episode's
@@ -674,6 +690,26 @@ async def run_graphiti_extraction(
                         f"{publication_intent.status}"
                     )
 
+            self_bind_mode = resolve_bind_mode(
+                getattr(ctx, "canonical_self_binding_mode", None)
+            )
+            self_identity = self_context_for_pending_episode(
+                source=ctx.claimed.get("source"),
+                namespace=namespace,
+                episode_uuid=ctx.episode_uuid,
+                turn_evidence_uuid=str(
+                    ctx.claimed.get("turn_evidence_uuid") or ""
+                ).strip() or None,
+            )
+            # Observe must preserve the real extraction prompt byte-for-byte.  The endpoint is a
+            # behavioral input, so only enforce constructs and transports it; off/observe keep the
+            # established extraction path while the existing decision telemetry remains available.
+            self_subject_endpoint = (
+                self_subject_endpoint_for_claim(ctx.claimed)
+                if self_bind_mode is SelfBindMode.ENFORCE
+                else None
+            )
+
             graphiti_result = await add_episode_with_timeout(
                 ctx.graphiti_client,
                 name=episode_name,
@@ -685,6 +721,9 @@ async def run_graphiti_extraction(
                 timeout_s=ctx.graphiti_add_episode_timeout_s,
                 group_id=group_id,
                 relationless_repair_context_loader=relationless_repair_context_loader,
+                self_identity=self_identity,
+                self_subject_endpoint=self_subject_endpoint,
+                self_bind_mode=self_bind_mode,
             )
             if publication_intent is not None:
                 publication_transition = (
@@ -1549,12 +1588,59 @@ async def add_episode_with_timeout(
     timeout_s: float = 300.0,
     group_id: str = "",
     relationless_repair_context_loader: Callable[[], tuple[str, ...]] | None = None,
+    self_identity: SelfIdentityContext | None = None,
+    self_subject_endpoint: SelfSubjectEndpointEnvelope | None = None,
+    self_bind_mode: SelfBindMode = SelfBindMode.OFF,
 ) -> Any:
     """Bound one Graphiti add_episode call so stuck requests fail back into retry flow.
 
     Takes explicit params (not ctx) because the legacy ``ingest_episode()``
     path also calls this function.
+
+    ``self_identity`` carries the LOGICAL namespace and the trusted author evidence, separately
+    from ``group_id``, which is the physical Graphiti partition. Logical ``default`` maps to
+    physical ``""``, so identity must never be inferred from ``group_id``. Callers that cannot
+    prove an author omit it and no self binding occurs.
     """
+
+    receipt_episode_key = str(episode_uuid or "").strip()
+    if self_subject_endpoint is not None:
+        if self_bind_mode is not SelfBindMode.ENFORCE:
+            raise InvalidSelfSubjectDeclarationError(
+                "a self-subject endpoint may be dispatched only in enforce mode"
+            )
+        if not receipt_episode_key or self_subject_endpoint.episode_uuid != receipt_episode_key:
+            raise InvalidSelfSubjectDeclarationError(
+                "self-subject endpoint does not belong to the active pending episode"
+            )
+        if self_identity is None or self_subject_endpoint.namespace != self_identity.namespace:
+            raise InvalidSelfSubjectDeclarationError(
+                "self-subject endpoint namespace does not match its identity context"
+            )
+        if self_subject_endpoint.turn_evidence_uuid != str(
+            self_identity.turn_evidence_uuid or ""
+        ).strip():
+            raise InvalidSelfSubjectDeclarationError(
+                "self-subject endpoint turn does not match its identity context"
+            )
+    if (
+        self_identity is not None
+        and self_identity.evidence_kind is SelfEvidenceKind.EXPLICIT_SELF_SUBJECT
+    ):
+        # ``name`` is a display/reconciliation anchor, not an episode identifier. Allowing it to
+        # stand in here lets a declaration scoped to one pending episode authorize an unrelated
+        # Graphiti request that happens to reuse the same name. A structured declaration therefore
+        # requires the external pending-episode UUID that owns this exact extraction invocation.
+        if not receipt_episode_key:
+            raise InvalidSelfSubjectDeclarationError(
+                "an exact self-subject declaration requires the pending episode UUID; "
+                "the episode name is not identity scope"
+            )
+        if str(self_identity.episode_uuid or "").strip() != receipt_episode_key:
+            raise InvalidSelfSubjectDeclarationError(
+                f"declared self subject belongs to episode {self_identity.episode_uuid!r}, not "
+                f"pending episode {episode_uuid!r}; refusing Graphiti dispatch"
+            )
 
     record_lifecycle_event(
         component="ingest_worker",
@@ -1575,10 +1661,13 @@ async def add_episode_with_timeout(
     # mutate it in place, which the parent then reads. (episode_body is the current-
     # episode text used to gate endpoint synthesis.)
     begin_extraction_receipt(
-        episode_uuid or name,
+        receipt_episode_key or name,
         episode_body,
         source_description=source_description,
         relationless_repair_context_loader=relationless_repair_context_loader,
+        self_identity=self_identity,
+        self_subject_endpoint=self_subject_endpoint,
+        self_bind_mode=self_bind_mode,
     )
     try:
         record_lifecycle_event(

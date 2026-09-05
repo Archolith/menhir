@@ -1,5 +1,50 @@
 # Changelog
 
+## 2026-09-04 - Make canonical-self authority node-scoped
+
+- Complete deployment Phase 1 discovery: distinguish the installed `0.2.0-8` maintenance
+  authority from the running TODO hotfix image, merge the 14 otherwise-absent production release
+  fixes into the candidate lineage, and record both release-delta baselines.
+- Add an executable production-release plan for the complete accumulated candidate: close the
+  production-model/image and feature-mode wiring gaps, bind the maintenance class and changed-path
+  evidence into release authority, exercise changed client policy, use the fixed release
+  transaction, run one bounded synthetic canary, and prepare an immutable `off` bundle for fast
+  feature rollback.
+- Scale the canonical-self and live-VPS rollout playbooks to the actual single-owner, self-hosted,
+  no-external-user deployment: test the complete candidate with the live provider/model, deploy once
+  through the mechanically selected class, run one synthetic canary, and roll back on concrete
+  failure instead of requiring representative-user cohorts or shadow-rollout infrastructure.
+- Replace name-shaped self authority with a trusted declaration naming one exact in-memory
+  subject node UUID for the same episode; missing, duplicated, replayed, or colliding declarations
+  fail before graph writes.
+- Keep Graphiti's legacy self-like endpoint closure explicitly non-authoritative: it may retain an
+  ordinary `user` entity to avoid extraction collapse, but it cannot grant the canonical UUID.
+- In `enforce`, refuse undeclared pre-stamped canonical nodes, exclude canonical self from every
+  undeclared exact/similarity/LLM/override candidate path, and require declared and stored nodes to
+  match the namespace's physical group; leave `off` and `observe` resolution unchanged.
+- Record observation success as `would_bind` and redact the opaque declared node identifier.
+- Require a nonblank external pending-episode UUID for declarations (never the display-name
+  fallback), and classify arbitrary source-kind strings as `other` before telemetry persistence.
+- Pin the currently inert exact-node binding surface with an AST census that fails on any new
+  declaration producer, while preserving observe-mode and resolver-bypass checks.
+- Remove the legacy `user` instruction from endpoint-bearing extraction prompts, require the opaque
+  endpoint only for sentence-initial first-person subjects outside common quote/code spans, and make
+  one bounded corrective extraction when that deterministic signal is present but the endpoint is
+  absent.
+- Reject endpoint-bearing edges unless every meaningful non-endpoint fact token and the other
+  endpoint are supported by one affirmative, unquoted current-author clause. Questions, explicit
+  negation, quoted/reported speech, multiline code fences, and unterminated quote spans cannot
+  activate the marker; marker text without the exact active endpoint is also discarded. Final
+  validation repeats the current-episode, index, and assertion-grounding checks fail-closed.
+- Treat the opaque endpoint as transport only: replace its literal occurrence in relationship fact
+  or name text before persistence, while leaving unrelated text untouched.
+- Make canonical-self nodes merge-immune at both correlation classification and the final
+  mutation-time precondition, in either survivor/absorbed direction and by either structural marker.
+- Verify the public turn-evidence -> memory -> admission -> background projection path against an
+  isolated Docker Neo4j and real `gpt-4o-mini`: READY projection, deterministic self UUID, current
+  Graphiti-episode relationship and MENTIONS provenance, zero persisted endpoint markers, and both
+  merge directions refused.
+
 ## 2026-08-31 - Add bounded app-image replacement mode
 
 - Add a root-owned app-only classifier and transaction that replaces only the Menhir

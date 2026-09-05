@@ -16,6 +16,7 @@ import uuid as uuidlib
 
 import pytest
 
+from menhir.domain.self_identity import self_subject_endpoint_for_claim
 from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
 from menhir.infrastructure.turn_evidence_repository import TurnEvidenceRepository
 
@@ -73,6 +74,65 @@ def test_the_projection_is_linked_to_its_turn(test_neo4j_repo):
         "MATCH (p:Episodic {uuid: $u})-[:ADMITTED_ON]->(t:TurnEvidence) RETURN t.turn_id AS tid",
         params={"u": puid})
     assert [r["tid"] for r in rows] == [tid]
+
+
+@pytest.mark.online
+def test_atomic_claim_authorizes_exact_projection_once(test_neo4j_repo):
+    ns = f"ns-{uuidlib.uuid4().hex[:8]}"
+    text = "I have 25 postcards"
+    tid = _seed_turn(test_neo4j_repo, ns=ns, text=text)
+    puid = _project(test_neo4j_repo, tid, ns=ns)
+    adapter = MemoryGraphAdapter(neo4j=test_neo4j_repo)
+
+    claimed = adapter.claim_pending_episode(
+        puid,
+        max_attempts=3,
+        worker_id="worker-a",
+        lease_seconds=60,
+    )
+
+    assert claimed is not None
+    assert claimed["subject_endpoint_eligible"] is True
+    assert claimed["turn_evidence_count"] == 1
+    assert claimed["turn_evidence_text"] == text
+    endpoint = self_subject_endpoint_for_claim(claimed)
+    assert endpoint is not None
+    assert endpoint.episode_uuid == puid
+    assert endpoint.turn_evidence_uuid == tid
+
+    # The eligibility receipt and lease are one statement. A concurrent/stale worker cannot
+    # independently claim the same projection and obtain a second authority decision.
+    assert adapter.claim_pending_episode(
+        puid,
+        max_attempts=3,
+        worker_id="worker-b",
+        lease_seconds=60,
+    ) is None
+
+
+@pytest.mark.online
+def test_atomic_claim_refuses_projection_with_multiple_turn_links(test_neo4j_repo):
+    ns = f"ns-{uuidlib.uuid4().hex[:8]}"
+    tid = _seed_turn(test_neo4j_repo, ns=ns, text="I have 25 postcards")
+    other_tid = _seed_turn(test_neo4j_repo, ns=ns, text="I have 26 postcards")
+    puid = _project(test_neo4j_repo, tid, ns=ns)
+    test_neo4j_repo.execute(
+        "MATCH (p:Episodic {uuid: $p}), (t:TurnEvidence {turn_id: $t}) "
+        "MERGE (p)-[:ADMITTED_ON]->(t)",
+        params={"p": puid, "t": other_tid},
+    )
+
+    claimed = MemoryGraphAdapter(neo4j=test_neo4j_repo).claim_pending_episode(
+        puid,
+        max_attempts=3,
+        worker_id="worker-a",
+        lease_seconds=60,
+    )
+
+    assert claimed is not None
+    assert claimed["turn_evidence_count"] == 2
+    assert claimed["subject_endpoint_eligible"] is False
+    assert self_subject_endpoint_for_claim(claimed) is None
 
 
 @pytest.mark.online

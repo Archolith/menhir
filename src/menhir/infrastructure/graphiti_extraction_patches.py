@@ -10,6 +10,22 @@ import re
 from time import perf_counter
 from typing import Any, Callable
 
+from menhir.domain.self_identity import (
+    SUBJECT_ENDPOINT_MARKER_PREFIX,
+    SelfEvidenceKind,
+    SelfIdentityContext,
+    SelfSubjectEndpointEnvelope,
+    declare_self_subject,
+    is_self_alias,
+)
+from menhir.infrastructure.self_binding import (
+    AmbiguousSelfBindingError,
+    InvalidSelfSubjectDeclarationError,
+    SelfBindMode,
+    SelfBindOutcome,
+    SelfBindResult,
+    bind_canonical_self,
+)
 from menhir.infrastructure.graphiti_helpers import (
     SYNTHETIC_FACT_PREFIX,
     _build_graphiti_failure_details,
@@ -73,6 +89,23 @@ class CombinedExtractionReceipt:
     episode_key: str = ""
     episode_text: str = ""
     source_description: str = ""
+    #: What the ingestion boundary actually PROVED about this episode's author, carried from the
+    #: parent task so the binding seam never has to infer identity from extracted text. ``None``
+    #: means no trusted signal was supplied, which fails closed: no self binding. The logical
+    #: namespace lives here rather than being inferred from ``group_id``, because logical
+    #: ``default`` maps to physical ``""`` and the two must not be conflated.
+    self_identity: "SelfIdentityContext | None" = None
+    #: Menhir-created author endpoint for one graph-proven evidence projection.  It is separate
+    #: from identity evidence because authorship alone must never select an extracted node.
+    self_subject_endpoint: "SelfSubjectEndpointEnvelope | None" = None
+    #: Rollout control for this episode. ``OFF`` reproduces pre-change behavior exactly.
+    self_bind_mode: "SelfBindMode" = SelfBindMode.OFF
+    #: Outcome of the binding attempt, or ``None`` if binding never ran. Read by the resolver
+    #: partition to know which UUID is already authoritative and must skip candidate search.
+    self_bind_result: "SelfBindResult | None" = None
+    #: Graphiti's internally allocated primary episode UUID for this extraction.  It differs from
+    #: the external pending UUID and is required to prove a marker edge belongs to CURRENT MESSAGES.
+    graphiti_episode_uuid: str = ""
     #: Text Graphiti supplied to the extractor as previous conversational context. Missing edge
     #: endpoints may be closed when grounded here even if the current turn uses a pronoun (for
     #: example, previous "Rachel ..." followed by current "She moved to Chicago.").
@@ -89,6 +122,10 @@ class CombinedExtractionReceipt:
     #: CURRENT MESSAGES. Native previous-episode context improves recall but can prime the model to
     #: copy a preceding claim; this count makes that deterministic precision guard auditable.
     context_unsupported_edges_suppressed: int = 0
+    #: Endpoint-bearing edges rejected because their predicate/fact had no literal support outside
+    #: the endpoint entity names in CURRENT MESSAGES. This stops a fabricated marker edge from
+    #: turning a valid author capability into authority for an invented relation.
+    subject_marker_edges_suppressed: int = 0
     raw_entity_count: int = 0
     raw_edge_count: int = 0
     malformed_entities_dropped: int = 0
@@ -316,13 +353,47 @@ def begin_extraction_receipt(
     *,
     source_description: str = "",
     relationless_repair_context_loader: Callable[[], tuple[str, ...]] | None = None,
+    self_identity: SelfIdentityContext | None = None,
+    self_subject_endpoint: SelfSubjectEndpointEnvelope | None = None,
+    self_bind_mode: SelfBindMode = SelfBindMode.OFF,
 ) -> CombinedExtractionReceipt:
-    """Create and activate a fresh receipt for the current episode (call in the parent task)."""
+    """Create and activate a fresh receipt for the current episode (call in the parent task).
+
+    ``self_identity`` must be constructed by the caller from the claimed episode's persisted,
+    gate-approved metadata. Omitting it fails closed: extraction proceeds with no self binding.
+    """
+    normalized_episode_key = str(episode_key or "")
+    if self_subject_endpoint is not None:
+        if self_bind_mode is not SelfBindMode.ENFORCE:
+            raise InvalidSelfSubjectDeclarationError(
+                "a self-subject endpoint may be activated only in enforce mode"
+            )
+        if (
+            self_identity is None
+            or self_identity.evidence_kind is not SelfEvidenceKind.TRUSTED_USER_TURN
+        ):
+            raise InvalidSelfSubjectDeclarationError(
+                "a self-subject endpoint requires trusted user-turn evidence"
+            )
+        if (
+            self_subject_endpoint.episode_uuid != normalized_episode_key.strip()
+            or self_subject_endpoint.episode_uuid
+            != str(self_identity.episode_uuid or "").strip()
+            or self_subject_endpoint.namespace != self_identity.namespace
+            or self_subject_endpoint.turn_evidence_uuid
+            != str(self_identity.turn_evidence_uuid or "").strip()
+        ):
+            raise InvalidSelfSubjectDeclarationError(
+                "self-subject endpoint scope does not match its extraction receipt"
+            )
     receipt = CombinedExtractionReceipt(
-        episode_key=str(episode_key or ""),
+        episode_key=normalized_episode_key,
         episode_text=str(episode_text or ""),
         source_description=str(source_description or ""),
         relationless_repair_context_loader=relationless_repair_context_loader,
+        self_identity=self_identity,
+        self_subject_endpoint=self_subject_endpoint,
+        self_bind_mode=self_bind_mode,
     )
     _extraction_receipt.set(receipt)
     return receipt
@@ -348,6 +419,26 @@ def _normalize_endpoint_name(name: Any) -> str:
         import re
 
         return re.sub(r"[\s]+", " ", str(name).lower()).strip()
+
+
+def _active_subject_marker(receipt: CombinedExtractionReceipt | None) -> str:
+    endpoint = receipt.self_subject_endpoint if receipt is not None else None
+    if (
+        endpoint is None
+        or not _requires_declared_author_endpoint(receipt.episode_text)
+    ):
+        return ""
+    return endpoint.marker
+
+
+def _is_reserved_subject_marker(value: Any) -> bool:
+    return str(value or "").casefold().startswith(
+        SUBJECT_ENDPOINT_MARKER_PREFIX.casefold()
+    )
+
+
+def _subject_marker_guard_active(receipt: CombinedExtractionReceipt | None) -> bool:
+    return receipt is not None and receipt.self_bind_mode is SelfBindMode.ENFORCE
 
 
 # Pronoun / role-label endpoints that must never be synthesized as KG identities.
@@ -378,6 +469,9 @@ _SELF_ENTITY_NAME = "user"
 
 #: Labels denoting the HUMAN. Third-person ("user") is how gpt-4o-mini actually writes the speaker;
 #: first-person is included for extractors that phrase it that way.
+#: DOMAIN: extracted entity NAMES. Includes "my"/"mine" because an extractor can emit them as an
+#: endpoint name; the scalar and event subject allowlists deliberately exclude them. Three sets, three
+#: questions -- see ``domain/self_identity.SELF_ALIASES`` before changing any of them.
 _SELF_THIRD_PERSON = frozenset({"user", "the user"})
 _SELF_FIRST_PERSON = frozenset({"i", "me", "my", "mine", "myself"})
 _ASSISTANT_POLICY_SELF_LABELS = _SELF_THIRD_PERSON | _SELF_FIRST_PERSON
@@ -393,8 +487,8 @@ def _episode_role(episode_text: str) -> str:
     return "unknown"
 
 
-def _is_self_endpoint(normalized_name: str, episode_text: str) -> bool:
-    """True when this endpoint denotes the HUMAN and may bind to the canonical self entity.
+def _is_unresolved_self_like_endpoint(normalized_name: str, episode_text: str) -> bool:
+    """True when endpoint closure may retain this as an ORDINARY self-like entity.
 
     WHY THIS EXISTS: gpt-4o-mini emits the speaker as the literal token ``user`` and never as
     ``I``. ``user`` is in `_NON_SYNTHESIZABLE_ENDPOINTS`, so every edge it anchors was dropped for
@@ -403,9 +497,10 @@ def _is_self_endpoint(normalized_name: str, episode_text: str) -> bool:
     the cc5ded98 smoke: 5 of 6 USER turns collapsed this way -- the refusal was destroying
     precisely the user's own facts, which is the opposite of what it was protecting.
 
-    Binding to ONE canonical ``user`` node per namespace is the intended identity, not the
-    fragmentation the original guard feared: graphiti dedups by normalized name within `group_id`,
-    so repeated turns converge on the same node.
+    This helper does **not** establish identity and does **not** assign the canonical UUID. It only
+    rewrites equivalent endpoint spellings to the display name ``user`` and lets ordinary Graphiti
+    resolution decide where that node goes. That can still create or reuse a fork. Canonical binding
+    happens later and requires an exact node declaration; turn role plus this name shape is not one.
 
     ASSISTANT TURNS ARE EXCLUDED. A ``user -> X`` edge on an assistant turn is the model restating
     what the human already said in their own turn, so binding it mints a DUPLICATE of a fact that
@@ -423,8 +518,9 @@ def _is_self_endpoint(normalized_name: str, episode_text: str) -> bool:
     dropped. An assistant turn whose edges are ALL `user -> X` will therefore still collapse; that
     turn carried nothing but echo, so the loss is intended rather than a defect.
 
-    Unknown role (no ``user:``/``assistant:`` prefix) binds, so content outside the benchmark's
-    prefixed format keeps the collapse fix rather than silently regressing.
+    Unknown role (no ``user:``/``assistant:`` prefix) is retained by this endpoint-closure rule, so
+    content outside the benchmark's prefixed format keeps the collapse fix. It gains no canonical
+    subject authority.
     """
     if _episode_role(episode_text) == "assistant":
         return False
@@ -636,6 +732,64 @@ def _edge_has_current_message_anchor(edge: dict[str, Any], episode_text: str) ->
     return bool(current_tokens & edge_tokens)
 
 
+def _anchor_token_forms(tokens: set[str]) -> set[str]:
+    """Small literal morphology bridge for current-text grounding (``own``/``owns``)."""
+    forms: set[str] = set()
+    for token in tokens:
+        folded = token.casefold()
+        forms.add(folded)
+        if len(folded) > 3 and folded.endswith("s"):
+            forms.add(folded[:-1])
+        if len(folded) > 4 and folded.endswith("es"):
+            forms.add(folded[:-2])
+        if len(folded) > 4 and folded.endswith("ed"):
+            forms.add(folded[:-2])
+        if len(folded) > 5 and folded.endswith("ing"):
+            forms.add(folded[:-3])
+    return forms
+
+
+def _subject_edge_has_current_predicate_anchor(
+    *, source_name: str, target_name: str, fact: str, marker: str, episode_text: str
+) -> bool:
+    """Require marker-edge content to be supported by one affirmative author clause.
+
+    A shared token is insufficient: questions, negation, and quoted speech can all contain the same
+    predicate as a fabricated positive edge.  Every meaningful non-endpoint fact token must be
+    present in one accepted author clause, and the other endpoint must overlap that same clause.
+    Relation labels remain excluded because they are model output rather than source evidence.
+    """
+    marker_folded = str(marker or "").casefold()
+    source_is_marker = str(source_name or "").casefold() == marker_folded
+    target_is_marker = str(target_name or "").casefold() == marker_folded
+    if source_is_marker == target_is_marker:
+        return False
+    other_endpoint = target_name if source_is_marker else source_name
+    endpoint_tokens = {
+        raw.casefold()
+        for value in (source_name, target_name, marker)
+        for raw in _CURRENT_MESSAGE_TOKEN_RE.findall(str(value or ""))
+    }
+    fact_tokens = {
+        token
+        for token in _current_message_anchor_tokens(fact)
+        if token not in endpoint_tokens
+        and token not in {"author", "current", "message", "speaker", "user", "human"}
+    }
+    other_endpoint_tokens = _anchor_token_forms({
+        token for token in _current_message_anchor_tokens(str(other_endpoint or ""))
+        if token not in {"author", "current", "message", "speaker", "user", "human"}
+    })
+    if not fact_tokens or not other_endpoint_tokens:
+        return False
+    return any(
+        all(_anchor_token_forms({token}) & clause_tokens for token in fact_tokens)
+        and bool(other_endpoint_tokens & clause_tokens)
+        for clause in _author_assertion_clauses(episode_text)
+        if (clause_tokens := _anchor_token_forms(_current_message_anchor_tokens(clause)))
+    )
+
+
 def _sanitize_combined_payload(
     data: Any,
     receipt: CombinedExtractionReceipt | None,
@@ -669,15 +823,65 @@ def _sanitize_combined_payload(
         if norm is None:
             entities_dropped += 1
             continue
+        marker = _active_subject_marker(receipt)
+        if (
+            _subject_marker_guard_active(receipt)
+            and _is_reserved_subject_marker(norm["name"])
+            and norm["name"] != marker
+        ):
+            # A stale, malformed, or model-invented reserved endpoint is never an ordinary entity.
+            # Only the exact capability token on this task's receipt may survive sanitation.
+            entities_dropped += 1
+            continue
         entities.append(norm)
 
     edges: list[dict[str, Any]] = []
     edges_dropped = 0
+    subject_marker_edges_suppressed = 0
     for item in raw_edges:
         norm = _sanitize_combined_edge(item)
         if norm is None:
             edges_dropped += 1
             continue
+        marker = _active_subject_marker(receipt)
+        if _subject_marker_guard_active(receipt) and any(
+            _is_reserved_subject_marker(norm[key]) and norm[key] != marker
+            for key in ("source_entity_name", "target_entity_name")
+        ):
+            edges_dropped += 1
+            continue
+        if _subject_marker_guard_active(receipt):
+            endpoint_uses_marker = any(
+                norm[key] == marker
+                for key in ("source_entity_name", "target_entity_name")
+            )
+            marker_text = " ".join(
+                norm[key] for key in ("relation_type", "fact")
+            )
+            marker_occurs_in_text = (
+                SUBJECT_ENDPOINT_MARKER_PREFIX.casefold() in marker_text.casefold()
+            )
+            active_marker_occurs = bool(
+                marker and marker.casefold() in marker_text.casefold()
+            )
+            if marker_occurs_in_text and (
+                not endpoint_uses_marker or not active_marker_occurs
+            ):
+                # A marker in prose without the exact marker endpoint has no authority path that
+                # can scrub it before persistence. Drop the edge rather than leak a capability.
+                edges_dropped += 1
+                subject_marker_edges_suppressed += 1
+                continue
+            if endpoint_uses_marker and not _subject_edge_has_current_predicate_anchor(
+                source_name=norm["source_entity_name"],
+                target_name=norm["target_entity_name"],
+                fact=norm["fact"],
+                marker=marker,
+                episode_text=episode_text,
+            ):
+                edges_dropped += 1
+                subject_marker_edges_suppressed += 1
+                continue
         edges.append(norm)
 
     context_unsupported_edges = 0
@@ -710,7 +914,7 @@ def _sanitize_combined_payload(
     )
     assistant_self_only_relationless = bool(is_assistant_turn and _all_self_labels)
     synthesized = 0
-    self_bound = 0
+    self_like_endpoints_retained = 0
     self_echo_edges = 0
     surviving_edges: list[dict[str, Any]] = []
     for edge in edges:
@@ -732,16 +936,25 @@ def _sanitize_combined_payload(
                 break
             if norm_key in known:
                 continue
-            if _is_self_endpoint(norm_key, episode_text):
-                # Rewrite to the canonical self display and materialize it ONCE per payload, so
-                # every self-anchored edge in this episode converges on a single node instead of
-                # being dropped for a missing endpoint. See `_is_self_endpoint` for why this is
-                # the intended identity rather than the fragmentation the old guard feared.
+            marker = _active_subject_marker(receipt)
+            if marker and endpoint_name == marker:
+                # The marker is grounded by the receipt, not by user text.  Materialize it only
+                # when the extractor used it as an endpoint; a standalone marker node is not proof
+                # that the episode asserted anything about its author.
+                entities.append({"name": marker, "entity_type_id": -1})
+                known.add(norm_key)
+                synthesized += 1
+                continue
+            if _is_unresolved_self_like_endpoint(norm_key, episode_text):
+                # Normalize the endpoint spelling and materialize it ONCE per payload so Graphiti
+                # does not drop the edge. This is availability recovery, not identity resolution:
+                # the node remains an ordinary candidate unless a separate structured producer
+                # declares its exact UUID after extraction.
                 edge[endpoint_key] = _SELF_ENTITY_NAME
                 if self_key not in known:
                     entities.append({"name": _SELF_ENTITY_NAME, "entity_type_id": -1})
                     known.add(self_key)
-                self_bound += 1
+                self_like_endpoints_retained += 1
                 continue
             previous_episode_texts = (
                 (
@@ -761,8 +974,8 @@ def _sanitize_combined_payload(
                 synthesized += 1
             # Otherwise leave it missing. NOTE: graphiti drops this one edge during resolution --
             # true locally, but if it was the LAST edge every node it would have connected is then
-            # orphan-pruned and the whole episode collapses. That cascade is why self endpoints are
-            # bound above instead of refused.
+            # orphan-pruned and the whole episode collapses. The self-like case above is retained
+            # only to avoid that cascade; it is deliberately not promoted to canonical self.
         if edge_is_self_echo:
             self_echo_edges += 1
             continue
@@ -828,6 +1041,7 @@ def _sanitize_combined_payload(
         receipt.self_echo_edges_suppressed = self_echo_edges
         receipt.list_membership_edges_added = list_edges_added
         receipt.context_unsupported_edges_suppressed = context_unsupported_edges
+        receipt.subject_marker_edges_suppressed = subject_marker_edges_suppressed
         receipt.assistant_self_only_relationless = assistant_self_only_relationless
         # The validator runs once per extraction call and cannot see which pass it is in, so the
         # repair flag -- set by `_run_graphiti_combined_extraction` BEFORE the second call -- is the
@@ -843,20 +1057,21 @@ def _sanitize_combined_payload(
         entities_dropped
         or edges_dropped
         or synthesized
-        or self_bound
+        or self_like_endpoints_retained
         or self_echo_edges
         or list_edges_added
         or context_unsupported_edges
     ):
         logger.info(
             "Combined-extraction sanitation: entities_dropped=%d edges_dropped=%d "
-            "endpoints_synthesized=%d self_endpoints_bound=%d self_echo_edges_suppressed=%d "
+            "endpoints_synthesized=%d self_like_endpoints_retained=%d "
+            "self_echo_edges_suppressed=%d "
             "list_membership_edges_added=%d context_unsupported_edges_suppressed=%d "
             "(raw entities=%d edges=%d)",
             entities_dropped,
             edges_dropped,
             synthesized,
-            self_bound,
+            self_like_endpoints_retained,
             self_echo_edges,
             list_edges_added,
             context_unsupported_edges,
@@ -893,6 +1108,30 @@ MENHIR RELATION COMPLETENESS:
   relationship, omit the entity as well.
 """
 
+
+def _relation_completeness_instructions(
+    endpoint: SelfSubjectEndpointEnvelope | None,
+) -> str:
+    """Render one non-contradictory author endpoint into the first extraction prompt."""
+    if endpoint is None:
+        return _RELATION_COMPLETENESS_INSTRUCTIONS
+    return f"""\
+MENHIR RELATION COMPLETENESS:
+- Do not return an entity without a relationship when CURRENT MESSAGES state what the speaker
+  does, owns, uses, prefers, plans, experiences, believes, or explicitly wants to learn about
+  that entity.
+- In a human-authored first-person statement, represent I/me/my with the exact opaque entity
+  `{endpoint.marker}` and emit the direct speaker-to-target relationship. Include
+  `{endpoint.marker}` in extracted_entities.
+- Explicit first-person informational intent is relationship-bearing. Emit
+  `{endpoint.marker}` -> `WANTS_TO_KNOW_MORE_ABOUT` or `INTERESTED_IN` -> the target.
+- Apply that rule only when CURRENT MESSAGES explicitly state the speaker's informational intent.
+  A bare request or question such as "Can you tell me about X?" does not by itself assert durable
+  interest in X.
+- Do not invent a relationship merely to connect an entity. If the current text truly states no
+  relationship, omit the entity as well.
+"""
+
 _RELATIONLESS_REPAIR_INSTRUCTIONS = """\
 CORRECTIVE RE-EXTRACTION:
 Your previous extraction returned one or more entities but no usable relationship, so every entity
@@ -903,6 +1142,170 @@ understanding X"; bind a human first-person speaker to `user`. Explicit informat
 emit `WANTS_TO_KNOW_MORE_ABOUT` or `INTERESTED_IN`. A bare request or question such as "Can you tell
 me about X?" does not by itself assert durable interest. Do not invent facts. If the text truly
 contains no relationship, return both lists empty.
+"""
+
+
+def _relationless_repair_instructions(
+    endpoint: SelfSubjectEndpointEnvelope | None,
+) -> str:
+    if endpoint is None:
+        return _RELATIONLESS_REPAIR_INSTRUCTIONS
+    return f"""\
+CORRECTIVE RE-EXTRACTION:
+Your previous extraction returned one or more entities but no usable relationship, so every entity
+would be orphan-pruned and the memory would be lost. Re-read CURRENT MESSAGES and return a complete
+entity-and-edge extraction. For first-person predicates such as "I use...", "I own...", "I
+prefer...", or "I plan...", bind the current human speaker to the exact opaque entity
+`{endpoint.marker}`. Explicit informational intent must emit `WANTS_TO_KNOW_MORE_ABOUT` or
+`INTERESTED_IN`. A bare request or question does not by itself assert durable interest. Do not
+invent facts. If the text truly contains no relationship, return both lists empty.
+"""
+
+
+def _subject_endpoint_correction_instructions(
+    endpoint: SelfSubjectEndpointEnvelope,
+) -> str:
+    return f"""\
+MENHIR INVALID AUTHOR-ENDPOINT CORRECTION:
+- Your previous extraction used a self-like entity without the declared current-author endpoint.
+- Discard that extraction and re-extract CURRENT MESSAGES.
+- For every relationship whose subject or object is I/me/my or the current message's author, use
+  the exact opaque entity name `{endpoint.marker}` as that endpoint.
+- Do not emit `user`, `I`, `me`, or `my` as a substitute for the current author.
+- Keep third-person users, roles, customers, and quoted or reported speakers distinct.
+"""
+
+
+_AUTHOR_ASSERTION_RE = re.compile(
+    r"(?:^\s*(?:[-*+]\s+)?|[.!;]\s+)"
+    r"(?:(?:yes|today|currently|actually|also|personally|now)\s*[,;]\s*)?"
+    r"(?P<subject>i(?:['’](?:m|ve|d|ll))?\b|my\b)"
+    r"(?P<body>[^.!?\r\n]*)(?P<terminal>[.!?]|$)",
+    re.IGNORECASE | re.MULTILINE,
+)
+_AUTHOR_ASSERTION_NEGATION_RE = re.compile(
+    r"\b(?:not|never|no|neither|cannot|cant|don't|dont|doesn't|doesnt|didn't|didnt|"
+    r"won't|wont|wouldn't|wouldnt|isn't|isnt|aren't|arent|wasn't|wasnt|weren't|"
+    r"werent|haven't|havent|hasn't|hasnt|hadn't|hadnt|without)\b",
+    re.IGNORECASE,
+)
+
+
+def _strip_same_delimiter_spans(
+    text: str, delimiter: str, *, ignore_word_internal: bool = False
+) -> str:
+    """Blank paired or unterminated quote/code spans while preserving line boundaries."""
+    chars = list(text)
+    inside = False
+    for index, char in enumerate(text):
+        if char == delimiter:
+            previous = text[index - 1] if index else ""
+            following = text[index + 1] if index + 1 < len(text) else ""
+            if ignore_word_internal and previous.isalnum() and following.isalnum():
+                continue
+            inside = not inside
+            chars[index] = " "
+            continue
+        if inside and char not in "\r\n":
+            chars[index] = " "
+    return "".join(chars)
+
+
+def _strip_distinct_delimiter_spans(text: str, opener: str, closer: str) -> str:
+    """Blank curly-quote spans; an unmatched opener conservatively blanks the remainder."""
+    chars = list(text)
+    inside = False
+    for index, char in enumerate(text):
+        if not inside and char == opener:
+            inside = True
+            chars[index] = " "
+            continue
+        if inside and char == closer:
+            inside = False
+            chars[index] = " "
+            continue
+        if inside and char not in "\r\n":
+            chars[index] = " "
+    return "".join(chars)
+
+
+def _strip_author_quote_spans(text: str) -> str:
+    stripped = _strip_same_delimiter_spans(text, '"')
+    stripped = _strip_distinct_delimiter_spans(stripped, "“", "”")
+    stripped = _strip_distinct_delimiter_spans(stripped, "‘", "’")
+    stripped = _strip_same_delimiter_spans(
+        stripped, "'", ignore_word_internal=True
+    )
+    return _strip_same_delimiter_spans(stripped, "`")
+
+
+def _current_author_surface(episode_text: str) -> str:
+    """Return current-message prose with common quote/code and blockquote spans removed."""
+    current = str(episode_text or "")
+    role, separator, body = current.partition(":")
+    if separator and role.strip().casefold() in {"user", "assistant", "tool", "agent"}:
+        current = body
+    visible_lines: list[str] = []
+    fence_char = ""
+    fence_width = 0
+    for line in current.splitlines():
+        stripped = line.lstrip()
+        fence_match = re.match(r"(`{3,}|~{3,})", stripped)
+        if fence_char:
+            if (
+                fence_match is not None
+                and fence_match.group(1)[0] == fence_char
+                and len(fence_match.group(1)) >= fence_width
+            ):
+                fence_char = ""
+                fence_width = 0
+            continue
+        if fence_match is not None:
+            fence_char = fence_match.group(1)[0]
+            fence_width = len(fence_match.group(1))
+            continue
+        if stripped.startswith(">"):
+            continue
+        visible_lines.append(line)
+    current = "\n".join(visible_lines)
+    return _strip_author_quote_spans(current)
+
+
+def _author_assertion_clauses(episode_text: str) -> tuple[str, ...]:
+    """Conservative affirmative clauses whose grammatical subject is the current author."""
+    clauses: list[str] = []
+    for match in _AUTHOR_ASSERTION_RE.finditer(_current_author_surface(episode_text)):
+        body = str(match.group("body") or "")
+        if match.group("terminal") == "?" or _AUTHOR_ASSERTION_NEGATION_RE.search(body):
+            continue
+        clauses.append(match.group(0).lstrip(".!; \t-*+"))
+    return tuple(clauses)
+
+
+def _requires_declared_author_endpoint(episode_text: str) -> bool:
+    """Conservative evidence that CURRENT MESSAGES assert a relation about their author.
+
+    Affirmative first-person subjects outside common quote/code spans qualify at a sentence/list
+    boundary or after a small set of discourse prefixes. Questions and clauses containing explicit
+    negation do not authorize correction or binding.
+    """
+    return bool(_author_assertion_clauses(episode_text))
+
+
+def _subject_endpoint_instructions(
+    endpoint: SelfSubjectEndpointEnvelope | None,
+) -> str | None:
+    if endpoint is None:
+        return None
+    return f"""\
+MENHIR VERIFIED CURRENT-MESSAGE AUTHOR ENDPOINT:
+- The exact opaque entity name `{endpoint.marker}` denotes the author of CURRENT MESSAGES only.
+- Use `{endpoint.marker}` as the endpoint for every relation asserted by I/me/my or the current
+  message's author. Do not substitute a generic speaker label.
+- Do not use the marker for a person speaking inside quoted or reported speech.
+- Do not replace third-person users, customers, roles, tables, collections, or application actors
+  with the marker.
+- Emit the marker only when at least one extracted edge about the current author uses it.
 """
 
 _RELATIONLESS_REPAIR_CONTEXT_INSTRUCTIONS = """\
@@ -1044,6 +1447,190 @@ def _needs_relationless_repair(
     )
 
 
+def _declare_subject_endpoint(
+    nodes: list[Any],
+    edges: list[Any],
+    index_map: dict[str, list[int]],
+    receipt: CombinedExtractionReceipt,
+) -> None:
+    """Promote the one exact receipt-owned marker after the final extraction payload exists."""
+
+    endpoint = receipt.self_subject_endpoint
+    if endpoint is None:
+        return
+    identity = receipt.self_identity
+    if receipt.self_bind_mode is not SelfBindMode.ENFORCE:
+        raise InvalidSelfSubjectDeclarationError(
+            "self-subject endpoint reached final extraction outside enforce mode"
+        )
+    if identity is None or identity.evidence_kind is not SelfEvidenceKind.TRUSTED_USER_TURN:
+        raise InvalidSelfSubjectDeclarationError(
+            "self-subject endpoint lacks trusted user-turn identity evidence"
+        )
+    if (
+        endpoint.episode_uuid != str(receipt.episode_key or "").strip()
+        or endpoint.episode_uuid != str(identity.episode_uuid or "").strip()
+        or endpoint.namespace != identity.namespace
+        or endpoint.turn_evidence_uuid
+        != str(identity.turn_evidence_uuid or "").strip()
+    ):
+        raise InvalidSelfSubjectDeclarationError(
+            "self-subject endpoint scope does not match the active extraction receipt"
+        )
+
+    reserved_nodes = [
+        node for node in nodes if _is_reserved_subject_marker(getattr(node, "name", None))
+    ]
+    if not _requires_declared_author_endpoint(receipt.episode_text):
+        if reserved_nodes:
+            raise InvalidSelfSubjectDeclarationError(
+                "self-subject marker requires an affirmative unquoted current-author assertion"
+            )
+        return
+    marker_nodes = [
+        node for node in reserved_nodes if getattr(node, "name", None) == endpoint.marker
+    ]
+    if len(reserved_nodes) != len(marker_nodes):
+        raise InvalidSelfSubjectDeclarationError(
+            "final payload contains a stale or malformed self-subject marker"
+        )
+    if len(marker_nodes) > 1:
+        raise InvalidSelfSubjectDeclarationError(
+            "final payload contains more than one self-subject marker node"
+        )
+    if not marker_nodes:
+        if _requires_declared_author_endpoint(receipt.episode_text):
+            raise InvalidSelfSubjectDeclarationError(
+                "eligible marked projection omitted its required declared author endpoint"
+            )
+        return
+
+    marker_node = marker_nodes[0]
+    marker_uuid = str(getattr(marker_node, "uuid", "") or "").strip()
+    if not marker_uuid:
+        raise InvalidSelfSubjectDeclarationError(
+            "self-subject marker node has no in-memory UUID"
+        )
+    marker_edges = [
+        edge
+        for edge in edges
+        if marker_uuid
+        in {
+            str(getattr(edge, "source_node_uuid", "") or "").strip(),
+            str(getattr(edge, "target_node_uuid", "") or "").strip(),
+        }
+    ]
+    if not marker_edges:
+        raise InvalidSelfSubjectDeclarationError(
+            "self-subject marker node is not an endpoint of a current-episode edge"
+        )
+    graphiti_episode_uuid = str(receipt.graphiti_episode_uuid or "").strip()
+    if not graphiti_episode_uuid or not all(
+        graphiti_episode_uuid
+        in {str(value) for value in (getattr(edge, "episodes", None) or [])}
+        for edge in marker_edges
+    ):
+        raise InvalidSelfSubjectDeclarationError(
+            "self-subject marker has no edge attributed to the current Graphiti episode"
+        )
+    if 0 not in index_map.get(marker_uuid, []):
+        raise InvalidSelfSubjectDeclarationError(
+            "self-subject marker node lacks current-episode index attribution"
+        )
+    node_names = {
+        str(getattr(node, "uuid", "") or "").strip():
+        str(getattr(node, "name", "") or "")
+        for node in nodes
+    }
+    if any(
+        not _subject_edge_has_current_predicate_anchor(
+            source_name=node_names.get(
+                str(getattr(edge, "source_node_uuid", "") or "").strip(), ""
+            ),
+            target_name=node_names.get(
+                str(getattr(edge, "target_node_uuid", "") or "").strip(), ""
+            ),
+            fact=str(getattr(edge, "fact", "") or ""),
+            marker=endpoint.marker,
+            episode_text=receipt.episode_text,
+        )
+        for edge in marker_edges
+    ):
+        raise InvalidSelfSubjectDeclarationError(
+            "self-subject marker edge lacks current-message predicate grounding"
+        )
+    receipt.self_identity = declare_self_subject(
+        identity,
+        subject_node_uuid=marker_uuid,
+    )
+
+
+def _record_self_binding(
+    nodes: list[Any],
+    edges: list[Any],
+    index_map: dict[str, list[int]],
+    receipt: CombinedExtractionReceipt,
+) -> SelfBindResult:
+    """Run the binding decision and record it, without letting telemetry break extraction.
+
+    A refusal is a DECISION, not an absence of one, so it is recorded on the same event as every
+    other outcome. Recording it after the raise -- or not at all -- would make the one outcome an
+    operator most needs to see during an observation window the only invisible one.
+
+    Observe mode must also not fail the episode. Its entire purpose is to measure what enforce
+    would do without changing behavior; propagating the refusal there would make merely observing
+    a durable change in ingest success.
+    """
+    try:
+        if receipt.self_subject_endpoint is not None:
+            _declare_subject_endpoint(nodes, edges, index_map, receipt)
+        identity = receipt.self_identity
+        if (
+            identity is not None
+            and identity.evidence_kind is SelfEvidenceKind.EXPLICIT_SELF_SUBJECT
+            and str(identity.episode_uuid or "").strip()
+            != str(receipt.episode_key or "").strip()
+        ):
+            raise InvalidSelfSubjectDeclarationError(
+                f"declared self subject belongs to episode {identity.episode_uuid!r}, not active "
+                f"episode {receipt.episode_key!r}; refusing to bind"
+            )
+        result = bind_canonical_self(
+            nodes, edges, index_map, identity, receipt.self_bind_mode
+        )
+    except AmbiguousSelfBindingError:
+        result = SelfBindResult(
+            outcome=SelfBindOutcome.AMBIGUOUS,
+            mode=receipt.self_bind_mode,
+            self_like_without_subject_authority=sum(
+                1 for n in nodes if is_self_alias(getattr(n, "name", None))
+            ),
+        )
+        _record_self_binding_decision(result, receipt)
+        if receipt.self_bind_mode is SelfBindMode.OBSERVE:
+            return result
+        raise
+    _record_self_binding_decision(result, receipt)
+    return result
+
+
+def _record_self_binding_decision(
+    result: SelfBindResult, receipt: CombinedExtractionReceipt
+) -> None:
+    try:
+        from menhir.infrastructure.telemetry.recorders import record_lifecycle_event
+
+        record_lifecycle_event(
+            component="self_binding",
+            event="canonical_self_decision",
+            state=str(result.outcome),
+            episode_uuid=receipt.episode_key or None,
+            details=result.telemetry_details(receipt.self_identity),
+        )
+    except Exception:  # noqa: BLE001 - observability must never fail an ingest
+        logger.exception("Failed to record canonical-self binding telemetry")
+
+
 async def _run_graphiti_combined_extraction(
     clients: Any,
     episode: Any,
@@ -1060,6 +1647,7 @@ async def _run_graphiti_combined_extraction(
 
     receipt = _extraction_receipt.get()
     if receipt is not None:
+        receipt.graphiti_episode_uuid = str(getattr(episode, "uuid", "") or "").strip()
         receipt.previous_episode_texts = tuple(
             content
             for item in (previous_episodes or [])
@@ -1067,9 +1655,39 @@ async def _run_graphiti_combined_extraction(
             and content.strip()
         )
 
+    declared_endpoint = receipt.self_subject_endpoint if receipt is not None else None
+    endpoint = (
+        declared_endpoint
+        if declared_endpoint is not None
+        and _requires_declared_author_endpoint(receipt.episode_text)
+        else None
+    )
+    if declared_endpoint is not None:
+        # Eligibility is rare and enforce-only.  Pay the bounded graph read up front so a marker
+        # collision in repair context is rejected before even the first model dispatch; the same
+        # cached context is reused if relationless repair is actually needed.
+        if receipt.relationless_repair_context_loader is not None:
+            receipt.relationless_repair_context_texts = _load_relationless_repair_context(
+                receipt
+            )
+        collision_texts = (
+            receipt.episode_text,
+            *receipt.previous_episode_texts,
+            *receipt.relationless_repair_context_texts,
+        )
+        if any(
+            SUBJECT_ENDPOINT_MARKER_PREFIX.casefold() in text.casefold()
+            for text in collision_texts
+        ):
+            raise InvalidSelfSubjectDeclarationError(
+                "reserved self-subject marker prefix occurs in extraction text or context"
+            )
+    endpoint_instructions = _subject_endpoint_instructions(endpoint)
+
     effective_instructions = _combine_extraction_instructions(
         custom_extraction_instructions,
-        _RELATION_COMPLETENESS_INSTRUCTIONS,
+        _relation_completeness_instructions(endpoint),
+        endpoint_instructions,
     )
     nodes, edges, index_map = await extract_nodes_and_edges(
         clients,
@@ -1084,9 +1702,17 @@ async def _run_graphiti_combined_extraction(
         receipt.relationless_repair_attempted = True
         receipt.relationless_initial_entity_count = receipt.raw_entity_count
         receipt.relationless_initial_edge_count = receipt.raw_edge_count
-        receipt.relationless_repair_context_texts = _load_relationless_repair_context(
-            receipt
-        )
+        if not receipt.relationless_repair_context_texts:
+            receipt.relationless_repair_context_texts = _load_relationless_repair_context(
+                receipt
+            )
+        if declared_endpoint is not None and any(
+            SUBJECT_ENDPOINT_MARKER_PREFIX.casefold() in text.casefold()
+            for text in receipt.relationless_repair_context_texts
+        ):
+            raise InvalidSelfSubjectDeclarationError(
+                "reserved self-subject marker prefix occurs in repair context"
+            )
         logger.warning(
             "Relationless combined extraction; running one corrective retry "
             "episode_id=%s raw_entities=%d raw_edges=%d source=%s adjacent_context_turns=%d",
@@ -1098,12 +1724,13 @@ async def _run_graphiti_combined_extraction(
         )
         repair_instructions = _combine_extraction_instructions(
             effective_instructions,
-            _RELATIONLESS_REPAIR_INSTRUCTIONS,
+            _relationless_repair_instructions(endpoint),
             (
                 _RELATIONLESS_REPAIR_CONTEXT_INSTRUCTIONS
                 if receipt.relationless_repair_context_texts
                 else None
             ),
+            endpoint_instructions,
         )
         repair_previous_episodes = _relationless_repair_previous_episodes(
             episode,
@@ -1140,6 +1767,48 @@ async def _run_graphiti_combined_extraction(
             receipt.raw_entity_count,
             receipt.raw_edge_count,
         )
+    if (
+        endpoint is not None
+        and not any(getattr(node, "name", None) == endpoint.marker for node in nodes)
+        and _requires_declared_author_endpoint(receipt.episode_text if receipt else "")
+    ):
+        # Real models can privilege a familiar `user` convention even when a later instruction
+        # declares a safer opaque endpoint. Do not reinterpret that string as provenance. Give the
+        # model one bounded correction with no conflicting Menhir-authored `user` instruction;
+        # final validation still fails closed if it does not emit the exact marker.
+        assert receipt is not None
+        logger.warning(
+            "Eligible extraction used an undeclared self-like endpoint; running one corrective "
+            "retry episode_id=%s",
+            receipt.episode_key,
+        )
+        correction_instructions = _combine_extraction_instructions(
+            effective_instructions,
+            _subject_endpoint_correction_instructions(endpoint),
+            endpoint_instructions,
+        )
+        correction_previous_episodes = _relationless_repair_previous_episodes(
+            episode,
+            previous_episodes,
+            receipt.relationless_repair_context_texts,
+        )
+        nodes, edges, index_map = await extract_nodes_and_edges(
+            clients,
+            episode,
+            correction_previous_episodes,
+            entity_types=entity_types,
+            excluded_entity_types=excluded_entity_types,
+            custom_extraction_instructions=correction_instructions,
+        )
+    # Bind the proven human AFTER the relationless-repair branch above: a repair re-runs
+    # extraction and replaces nodes/edges/index_map wholesale, so binding before it would be
+    # discarded. This is the last point where the payload is final and Graphiti has not yet
+    # acquired candidates.
+    if receipt is not None and receipt.self_identity is not None:
+        receipt.self_bind_result = _record_self_binding(
+            nodes, edges, index_map, receipt
+        )
+
     if receipt is not None:
         receipt.resolved_node_count = len(nodes)
         receipt.resolved_edge_count = len(edges)

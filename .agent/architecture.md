@@ -13,6 +13,7 @@ This file is the architectural source of truth. Keep operator runbooks, launcher
 - Need queue / telemetry behavior: read `runtime.ops` and `runtime.storage`
 - Need write-time memory projections: read `runtime.projections` and `data_models.md`
 - Need package ownership: read `runtime.packages`
+- Need who "the user" is / self-entity identity: read `runtime.canonical_self` and `workflows/canonical-self-migration-runbook.md`
 - Need operator commands / readiness checks / logs: use `workflows/operations_runbook.md` and `workflows/logging-and-troubleshooting.md`
 
 ## Overview
@@ -543,6 +544,175 @@ Episode Text
   -> MemoryGraphAdapter.stamp_ingest_metadata() applies policy fields via Cypher
   -> Returns IngestResult(episode_id, status, nodes_touched, edges_touched)
 ```
+
+### Canonical self identity
+
+Concept id: `runtime.canonical_self`
+
+Menhir defines exactly one authoritative human-self target per **logical** namespace. In
+`enforce`, only an exact node declaration may reach that target; ordinary semantic retrieval and
+the dedup LLM are fenced away from it. The default `off` mode preserves the legacy resolver.
+
+**Why.** Graphiti resolves an extracted entity by cosine candidate search, escalating to an LLM
+when several candidates share a normalized name. That boundary is probabilistic, and for the
+entity named `user` it failed in production: the candidate window (15) saturated with exact-name
+matches, so the deterministic single-match branch became arithmetically unreachable, every
+extraction escalated, and a `duplicate_candidate_id = -1` verdict minted another fork. One
+identity ended up split across dozens of nodes, crowding out real memories in recall.
+
+**The contract.** The literal name is never authority. Binding requires trusted evidence that the
+ingestion boundary owns:
+
+| Layer | Responsibility |
+|---|---|
+| `domain/self_identity.py` | the ONE UUID formula, the evidence contract, node-level subject authority |
+| `services/ingest_intake.py` | admission gate decides whether a `user`/`manual` claim is grounded |
+| `services/enrichment_steps.py` | reconstructs the identity context from the claimed episode |
+| `infrastructure/self_binding.py` | rewrites the proven human across the extraction payload |
+| `infrastructure/graphiti_model_patches.py` | withholds a bound self and, in `enforce`, isolates canonical self from ordinary resolution |
+
+Evidence survives the asynchronous queue in the episode's persisted `source`. That value is a
+gate receipt rather than a caller's assertion: `evaluate_user_tier_claim` requires Menhir-owned
+`TurnEvidence` with `role == "user"`, a matching session/namespace, and text grounded in that
+turn, and rewrites anything ungrounded to `agent_inference` **before** persistence. This holds
+only while `create_pending_episode` has exactly one production writer; a test pins that.
+
+**Logical vs physical.** Identity is keyed by the LOGICAL namespace
+(`uuid5(NAMESPACE_URL, "menhir-self:<logical>")`); the Graphiti partition is derived separately by
+`namespace_to_group_id`, where logical `default` maps to physical `""`. The extraction context
+carries the logical name explicitly so nothing has to reverse that mapping, which is ambiguous.
+
+**Binding seam.** After combined extraction has built nodes, edges and the episode index map --
+and after the relationless-repair pass, which replaces all three -- but before Graphiti acquires
+candidates. The rewrite covers the node UUID, both edge endpoint directions and the index map as
+one unit, with rollback: a node rewritten while its edges still point at the discarded UUID would
+orphan the episode's facts.
+
+**Authorship is not subjecthood.** Two separate questions, and binding needs both answered:
+
+| Question | Answered by | Evidence |
+|---|---|---|
+| Who wrote this episode? | `eligible_self_evidence` | gate-approved persisted `source` |
+| Which extracted node IS that author? | `proves_self_subject` | an exact DECLARED node UUID, and nothing else |
+
+**No property of the extracted name answers the second question.** Three revisions tried to make
+one answer it, and each had a counterexample inside a perfectly valid human turn:
+
+| Attempted rule | Counterexample |
+|---|---|
+| the literal name `user` | an RBAC role, a `users` table, the customer a support turn is about |
+| more than one self alias is ambiguous, one is proof | a lone RBAC `user`, unaccompanied |
+| first-person grammar proves the author | reported speech: `She told me, "I will handle it"` |
+
+The common error is treating a property of the extracted STRING as a fact about its PROVENANCE. By
+the time binding runs, extraction has discarded the quote boundaries, source spans and speaker
+attribution that would separate these cases, so no name-shaped rule can be sound. Only
+`EXPLICIT_SELF_SUBJECT` -- a trusted internal caller naming the exact in-memory node UUID it
+constructed as the subject -- carries node-level authority. A missing declared UUID, two payload
+nodes carrying it, or a different node already carrying the canonical UUID raises a retryable
+refusal and writes nothing. The declaration is scoped to the nonblank external pending-episode
+UUID that owns the active extraction invocation; the human-readable episode name is never accepted
+as a fallback identity key. Graphiti generates its own stored episode UUID internally, so the
+external UUID plus the task-local receipt binds authority to the request before that value exists.
+
+The older combined-extraction endpoint-closure helper is deliberately **not** this resolver. It
+may normalize a missing `I`/`me`/`user` edge endpoint to an ordinary entity named `user` so
+Graphiti does not drop the edge and collapse the whole episode. It assigns no canonical UUID and
+can still create a fork through ordinary dedup. Its old “canonical”/“bound” terminology was wrong;
+the code and log now call this `self_like_endpoints_retained` so turn evidence cannot be mistaken
+for node authority again.
+
+**Production subject transport is projection-only.** The claim query atomically recognizes an
+evidence projection only when it has exactly one `ADMITTED_ON` user/declarant turn, byte-identical
+content, matching normalized namespace and projection lineage, and no diff. In enforce mode Menhir
+derives an episode-scoped opaque endpoint from those durable identifiers and carries it through the
+task-local extraction receipt. The marker changes neither the stored episode body nor ordinary
+entities named `user`; it tells Graphiti which endpoint represents the current message author.
+
+After the final relationless-repair payload exists, Menhir accepts exactly the receipt's marker,
+requires its node to participate in a current-episode edge and index entry. Marker transport is
+activated only when Menhir finds an affirmative, unquoted current-author clause at a sentence/list
+boundary or after a small accepted discourse prefix. A conservative scanner removes single-line,
+multiline, and unterminated straight/curly quote spans, inline code, blockquotes, and fenced code;
+questions and clauses with explicit negation cannot activate the marker either. Every marker edge
+must have all meaningful non-endpoint fact tokens plus overlap from its other endpoint in that same
+accepted clause. This prevents a model-fabricated positive edge from borrowing one token from a
+question, negation, or quoted speaker to convert the receipt into authority. Marker-shaped prose
+without the exact active endpoint is discarded. Menhir then declares
+that exact in-memory UUID and atomically rewrites the node name to `user`, UUID to canonical self,
+both edge directions, the episode index map, and literal marker occurrences in persisted relationship
+fact/name text.
+
+The first extraction and relationless-repair prompts use the opaque endpoint directly rather than
+first instructing the model to emit `user`. Menhir asks for one bounded corrective extraction only
+when a deterministic, sentence-initial first-person subject occurs outside common quote/code spans
+and the first payload omitted the marker. Third-person users and quoted/reported speakers remain
+ordinary entities. Final validation repeats the current-episode, index, and predicate-grounding
+checks fail-closed. Any missing authority, duplicate/stale marker, scope mismatch, or undeclared
+self-like fallback refuses before persistence. Off and real observe extraction do not receive a
+marker and retain their previous prompts and behavior.
+
+That does **not** make `enforce` equivalent to `off`: `enforce` also activates canonical candidate
+isolation. Even without a declaration, it refuses a searchable extracted node already carrying
+canonical identity and removes canonical UUID/marker candidates from ordinary dedup. This prevents
+an undeclared node from acquiring authority, but may preserve or create an ordinary fork instead.
+`observe` deliberately leaves that resolution unchanged. On this single-owner deployment it is a
+diagnostic mode, not an activation prerequisite: release acceptance uses the exact candidate image,
+the live production provider/model, and a post-deploy disposable canary.
+The production construction surface is pinned by an AST census: two context constructions inside
+the sole factory, one factory call at Graphiti dispatch, and exactly one declaration call in the
+final subject-endpoint validator. `self_like_unresolved` and `first_person_unresolved` in observe
+mode count the population needing classification. They do **not** say which nodes provenance would
+ultimately bind; first-person quoted speech is explicitly part of that upper bound.
+
+This contract governs Graphiti entity-node resolution only. Typed-scalar and event-history lanes
+already have separate first-person subject binders that write assertions against the canonical
+UUID from `subject_text`; they do not select or merge an extracted Graphiti entity node and are not
+changed here. Their natural-language authority is a separate existing invariant/risk and must not
+be cited as evidence that this Graphiti resolver is active or safe.
+
+**Persisting the canonical node.** Graphiti saves a resolved node with `SET n = $entity_data`,
+which REPLACES the property map. The bypass therefore commits the STORED canonical node when one
+exists, and only falls back to the extracted node on a genuine `NodeNotFoundError`. A transient
+driver error -- or a missing driver, which is the same failure through a different door -- must
+fail the (retryable) episode rather than degrade into a sparse overwrite that erases markers,
+provenance, flags and summary. On creation the extracted node is stamped with
+`is_self`, `entity_role` and the logical namespace, because the generic ingest metadata stamp
+supplies none of them.
+
+**Canonical candidate isolation.** In `enforce`, an undeclared node cannot reach canonical self
+through the ordinary resolver either. A searchable extracted node already carrying canonical
+UUID/markers is refused before search. Candidate lists are then filtered (including
+`existing_nodes_override`) to remove the active namespace's deterministic self UUID and every
+structurally marked self node. Without that second fence, endpoint closure could retain an
+ordinary entity named `user` and Graphiti's unique-exact branch could silently grant it canonical
+authority despite the binder declining it. Both the declared extracted node and a stored
+canonical node must also match the logical namespace's physical `group_id`; cross-group reuse is
+a retryable failure.
+
+**Canonical merge immunity.** Correlation must not undo a correct resolver result. The shared
+merge-ineligibility predicate treats either `is_self=true` or case-normalized
+`entity_role='self'` as a hard veto, so classifier checks and direct repository callers agree. The
+final mutation statement repeats both marker predicates to close the preflight-to-write race, and
+the rule applies whether canonical self is proposed as survivor or absorbed node.
+
+**Rollout.** `canonical_self_binding_mode` (`MENHIR_CANONICAL_SELF_BINDING_MODE`) is
+`off | observe | enforce`, default `off`. Unrecognized values fall back to `off`.
+Observe never applies a production declaration and carries only a declaration-presence bit rather
+than the opaque producer-supplied node identifier. `off` and `observe` do not apply canonical
+candidate isolation, and real observe extraction does not receive a subject marker because that
+would change its prompt. This preserves exact pre-change behavior and non-mutating diagnostics,
+but means observe cannot forecast marker compliance. For this single-owner service, activation is
+gated by the production-model corpus against the exact release image plus the post-deploy synthetic
+canary; a discarded shadow extractor is built only if either exposes a concrete need.
+Telemetry emits only the closed source kinds `user`/`manual`; every other caller-controlled source
+string is reported as `other`.
+
+**Consolidation is not a runtime operation.** `ensure_self_entity` creates or updates only the
+canonical target; pre-existing forks are reported as `SELF_FORKS_REQUIRE_MIGRATION` and never
+absorbed. The former `_absorb_self_entity_forks` bulk-rewired and `DETACH DELETE`d forks as a side
+effect of an ordinary write, and dropped fork-to-canonical edges as "split artifacts"; it has been
+removed, and its Cypher must not be revived as a migration template.
 
 ### Turn-evidence capture (ADR 0001)
 
