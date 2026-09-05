@@ -66,7 +66,11 @@ def _proposal(**changes):
         "direction": "self_to_entity",
         "polarity": "affirmed",
         "assertion": {
-            "counterpart": {"labels": ["Entity"], "name": "Chicago"},
+            "counterpart": {
+                "labels": ["Entity"],
+                "name": "Chicago",
+                "uuid": "chicago",
+            },
             "fact": "I live in Chicago.",
             "predicate": "LIVES_IN",
             "subject": {"kind": "canonical_self", "marker": "opaque-marker"},
@@ -128,6 +132,12 @@ def test_exact_owner_signature_authorizes(tmp_path) -> None:
         {"polarity": "negated"},
         {"evidence_text": "I might live in Chicago."},
         {"claim_revision": 2},
+        {"assertion": {
+            "counterpart": {"labels": ["Entity"], "name": "Chicago", "uuid": "chicago-b"},
+            "fact": "I live in Chicago.",
+            "predicate": "LIVES_IN",
+            "subject": {"kind": "canonical_self", "marker": "opaque-marker"},
+        }},
         {"assertion": {"predicate": "LIVES_IN", "fact": "I live in Boston."}},
         {"temporal_scope": {"valid_at": "2027-01-01T00:00:00Z"}},
     ],
@@ -220,6 +230,7 @@ def test_persisted_edge_must_match_signed_direction_semantics_and_time() -> None
         {"source_node_uuid": "chicago", "target_node_uuid": canonical_uuid},
         {"counterpart_name": "Boston"},
         {"counterpart_labels": ["Location"]},
+        {"target_node_uuid": "chicago-lookalike"},
         {"group_id": "other"},
         {"group_id": None},
         {"episode_uuids": ["other-graphiti-episode"]},

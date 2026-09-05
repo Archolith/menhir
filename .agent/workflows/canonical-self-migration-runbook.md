@@ -60,7 +60,7 @@ For episode UUID `E`, the confirmation filename is
     {
       "payload": {
         "assertion": {
-          "counterpart": {"labels": ["Entity"], "name": "Chicago"},
+          "counterpart": {"labels": ["Entity"], "name": "Chicago", "uuid": "<persistent-entity-uuid>"},
           "fact": "user lives in Chicago",
           "predicate": "LIVES_IN",
           "subject": {"kind": "canonical_self"}
@@ -72,10 +72,10 @@ For episode UUID `E`, the confirmation filename is
         "evidence_sha256": "...",
         "lane": "graphiti_edge",
         "namespace": "default",
-        "policy_version": "menhir-canonical-self-authority-v1",
+        "policy_version": "menhir-canonical-self-authority-v2",
         "polarity": "affirmed",
         "principal_id": "...",
-        "schema_version": 1,
+        "schema_version": 2,
         "temporal_scope": {
           "expired_at": null,
           "invalid_at": null,
@@ -92,19 +92,27 @@ For episode UUID `E`, the confirmation filename is
 Sign the compact, key-sorted, UTF-8 JSON bytes of `payload` with no ASCII escaping and no NaN
 values. The payload is exact: principal, namespace, episode and turn lineage, evidence SHA-256,
 lane, endpoint direction, polarity, structured assertion, temporal scope, claim revision, schema,
-policy and derived claim digest must all match. Extra, omitted, retyped, stale or replayed fields do
-not authorize the edge. One file may contain at most 256 records and one MiB.
+policy and derived claim digest must all match. `assertion.counterpart.uuid` is the persistent UUID
+selected before confirmation; do not sign Graphiti's temporary extraction UUID or infer this value
+from a name. Extra, omitted, retyped, stale or replayed fields do not authorize the edge. One file
+may contain at most 256 records and one MiB. Schema-v1 confirmations are intentionally rejected and
+must be recreated from a newly emitted v2 proposal; never backfill the UUID by name.
 
 Menhir keeps the exact authorized payload on the Graphiti relationship and re-verifies the current
 read-only confirmation during final edge resolution and fact-edge recall. It also requires the
-actual persisted endpoint direction, resolved counterpart name and labels, predicate, fact and
-three temporal fields to equal the signed payload. Graphiti cannot infer a timestamp, choose a merely similar duplicate, invalidate another
+actual persisted endpoint direction, stable counterpart UUID, resolved counterpart name and labels,
+predicate, fact and three temporal fields to equal the signed payload. Graphiti cannot infer a
+timestamp, choose a merely similar duplicate, invalidate another
 edge or discard the server-owned payload after approval. Deleting or changing the confirmation
 therefore blocks an in-flight final write and revokes an existing relationship from default
 authoritative recall. The relationship remains available to explicit operator graph inspection
 until a separately approved reconciliation removes it.
 Unconfirmed proposals are bounded, lease-guarded JSON receipts on their `:Episodic` evidence node;
-they have no authoritative entity edge and do not enter ordinary recall.
+they have no authoritative entity edge and do not enter ordinary recall. A rejected self-proposal
+episode also skips free-form Graphiti node-summary and attribute hydration, preventing its text from
+reappearing through an ordinary counterpart summary. Confirmed self facts use a dedicated verified
+recall lane in `enforce`; general fact-edge feature flags and history-query classification do not
+disable it.
 
 In `enforce`, post-extraction maintenance is fenced too. Correlation and lifecycle bridge writers
 cannot create unsigned `RELATES_TO` edges involving structural self; merge, unmerge, decay and direct

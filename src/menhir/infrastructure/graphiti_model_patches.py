@@ -22,6 +22,7 @@ from menhir.infrastructure.graphiti_helpers import (
 from menhir.infrastructure.graphiti_extraction_patches import (
     _combined_extraction_cache,
     _extract_edges_from_combined_cache,
+    finalize_self_assertion_authority_after_node_resolution,
     get_extraction_receipt,
 )
 from menhir.infrastructure.graphiti_llm_patches import GraphitiRequestTooLargeError
@@ -1473,6 +1474,44 @@ def _patch_graphiti_untyped_attribute_preservation() -> None:
         logger.warning("Failed to patch Graphiti untyped attribute preservation: %s", exc)
 
 
+def _wrap_self_authority_node_hydration(original: Any, embed_nodes: Any) -> Any:
+    """Return a hydration guard whose authority branch performs embeddings only."""
+
+    async def _authority_safe_hydration(clients, nodes, *args, **kwargs):
+        receipt = get_extraction_receipt()
+        if receipt is None or not receipt.suppress_node_semantic_hydration:
+            return await original(clients, nodes, *args, **kwargs)
+        # Attribute and summary prompts receive the entire episode, so filtering only the
+        # rejected relationship is insufficient: the model can restate that relationship in
+        # any surviving node. Preserve already-resolved node state and generate only the name
+        # embedding Graphiti requires for persistence/search.
+        await embed_nodes(clients.embedder, nodes)
+        return nodes
+
+    return _authority_safe_hydration
+
+
+def _patch_graphiti_self_authority_node_hydration() -> bool:
+    """Keep free-form node hydration from becoming an unsigned self-fact write path."""
+
+    try:
+        import graphiti_core.graphiti as _graphiti_module
+        import graphiti_core.utils.maintenance.node_operations as _no_module
+
+        if getattr(_graphiti_module, "_menhir_self_authority_hydration_patched", False):
+            return True
+        _graphiti_module.extract_attributes_from_nodes = _wrap_self_authority_node_hydration(
+            _graphiti_module.extract_attributes_from_nodes,
+            _no_module.create_entity_node_embeddings,
+        )
+        _graphiti_module._menhir_self_authority_hydration_patched = True
+        logger.debug("Graphiti canonical-self node hydration guard applied")
+        return True
+    except (ImportError, AttributeError) as exc:
+        logger.warning("Failed to patch Graphiti canonical-self node hydration: %s", exc)
+        return False
+
+
 def _patch_graphiti_adaptive_dedupe() -> bool:
     """Split oversized node-deduplication requests without reducing candidate quality.
 
@@ -1709,18 +1748,27 @@ def _patch_graphiti_adaptive_dedupe() -> bool:
 
             receipt = get_extraction_receipt()
             if receipt is not None:
-                for extracted_node, resolved_node in zip(
+                for index, (extracted_node, resolved_node) in enumerate(zip(
                     extracted_nodes, state.resolved_nodes, strict=True
-                ):
+                )):
                     if resolved_node is None:
                         continue
-                    receipt.resolved_node_identity_by_extracted_uuid[
-                        str(extracted_node.uuid)
-                    ] = (
+                    extracted_uuid = str(extracted_node.uuid)
+                    receipt.resolved_node_identity_by_extracted_uuid[extracted_uuid] = (
                         str(resolved_node.uuid),
                         str(resolved_node.name or ""),
                         tuple(sorted(str(label) for label in (resolved_node.labels or []))),
                     )
+                    receipt.resolved_node_was_persistent_by_extracted_uuid[extracted_uuid] = (
+                        index in pre_resolved_indices or resolved_node is not extracted_node
+                    )
+                prunable_extracted_uuids = (
+                    finalize_self_assertion_authority_after_node_resolution(receipt)
+                )
+                if prunable_extracted_uuids:
+                    for index, extracted_node in enumerate(extracted_nodes):
+                        if str(extracted_node.uuid) in prunable_extracted_uuids:
+                            state.resolved_nodes[index] = None
 
             logger.debug(
                 "Resolved nodes with adaptive dedupe: %s",

@@ -17,8 +17,8 @@ from typing import Any, Mapping
 from menhir.domain.namespace import namespace_to_group_id
 from menhir.domain.self_identity import normalize_logical_namespace, self_uuid_for_namespace
 
-SELF_ASSERTION_SCHEMA_VERSION = 1
-SELF_ASSERTION_POLICY_VERSION = "menhir-canonical-self-authority-v1"
+SELF_ASSERTION_SCHEMA_VERSION = 2
+SELF_ASSERTION_POLICY_VERSION = "menhir-canonical-self-authority-v2"
 SELF_ASSERTION_EDGE_PAYLOAD_PROPERTY = "menhir_self_authority_payload_json"
 SELF_ASSERTION_EDGE_EPISODE_PROPERTY = "menhir_self_authority_episode_uuid"
 SELF_ASSERTION_EDGE_GRAPHITI_EPISODE_PROPERTY = "menhir_self_authority_graphiti_episode_uuid"
@@ -324,9 +324,11 @@ def proposal_matches_persisted_edge(
     if proposal.direction == "self_to_entity":
         if source != expected or target == expected:
             return False
+        actual_counterpart_uuid = target
     elif proposal.direction == "entity_to_self":
         if target != expected or source == expected:
             return False
+        actual_counterpart_uuid = source
     else:
         return False
     assertion = json.loads(proposal.assertion_json)
@@ -340,6 +342,7 @@ def proposal_matches_persisted_edge(
         or actual_labels is None
         or any(not isinstance(label, str) for label in actual_labels)
         or tuple(sorted(signed_labels)) != tuple(sorted(actual_labels))
+        or str(counterpart.get("uuid") or "").strip() != actual_counterpart_uuid
         or str(counterpart.get("name") or "").strip().casefold()
         != str(counterpart_name or "").strip().casefold()
     ):

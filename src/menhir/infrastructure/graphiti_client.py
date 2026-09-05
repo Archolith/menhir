@@ -81,6 +81,7 @@ from menhir.infrastructure.graphiti_patches import (  # noqa: E402
     _patch_graphiti_openai_generic_client as _patch_graphiti_openai_generic_client_impl,
     _patch_graphiti_prompt_json,
     _patch_graphiti_structural_candidate_isolation,
+    _patch_graphiti_self_authority_node_hydration,
     _patch_graphiti_summarize,
     _patch_graphiti_untyped_attribute_preservation,
     _safe_to_prompt_json,  # re-exported for test compatibility
@@ -318,6 +319,7 @@ class GraphitiClient:
         _patch_graphiti_untyped_attribute_preservation()
         _patch_graphiti_dedup_branch_telemetry()
         authority_dedupe_patch_ready = _patch_graphiti_adaptive_dedupe()
+        authority_hydration_patch_ready = _patch_graphiti_self_authority_node_hydration()
         if self_bind_mode is SelfBindMode.ENFORCE:
             missing_authority_patches = [
                 name
@@ -326,6 +328,7 @@ class GraphitiClient:
                     ("exact edge resolution", authority_edge_patch_ready),
                     ("candidate isolation", candidate_isolation_patch_ready),
                     ("canonical dedupe", authority_dedupe_patch_ready),
+                    ("node hydration", authority_hydration_patch_ready),
                 )
                 if not ready
             ]

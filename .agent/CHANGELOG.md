@@ -2,6 +2,14 @@
 
 ## 2026-09-05 - Separate canonical identity from assertion authority
 
+- Close review gaps by transporting the structural author endpoint independently of grammar,
+  quarantining unmarked author fallbacks, and preventing rejected self-proposal text from entering
+  free-form node summaries or attributes.
+- Bind schema-v2 confirmation to the exact persistent counterpart UUID selected before approval;
+  reject new extraction UUIDs and same-name candidate changes, including replay.
+- Make verified canonical-self facts recallable in `enforce` independently of general fact-edge
+  feature flags and history-query classification; replace the public-path acceptance case with an
+  unsigned -> confirmed -> revoked lifecycle.
 - Keep canonical self as a deterministic structural endpoint while requiring an exact offline
   Ed25519 owner confirmation before any extracted Graphiti assertion attaches to it in `enforce`.
 - Bind each confirmation to principal, namespace, assertion digest/revision, evidence lineage,

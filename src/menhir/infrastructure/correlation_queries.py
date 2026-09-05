@@ -197,7 +197,9 @@ class CorrelationRepository:
     #: and absorbing it into an ordinary ``user`` node destroys the deterministic identity after
     #: an otherwise correct extraction.
     _INELIGIBLE_ROLE_PREDICATE = (
-        f"(n.structure_role IS NOT NULL) OR NOT ({non_derived_view_cypher('n')}) OR "
+        "(n.structure_role IS NOT NULL) OR NOT ("
+        + non_derived_view_cypher("n")
+        + ") OR "
         "coalesce(n.is_self, false) OR "
         "toLower(trim(coalesce(n.entity_role, ''))) = 'self' OR "
         r"(n.name =~ '(?i).*([\\/]|\\.(py|md|txt|json|ya?ml|ps1|sh|java|ts|tsx|js|sql|env|toml|"
@@ -686,7 +688,8 @@ class CorrelationRepository:
         # bridges over the (possibly empty) neighbor list without gating the row, so the merge always
         # reaches DETACH DELETE and RETURN even when the absorbed node had no bridgeable neighbors.
         rows = self._neo4j.execute(
-            """
+            (
+                """
             MATCH (survivor:Entity {uuid: $survivor_uuid})
             MATCH (absorbed:Entity {uuid: $absorbed_uuid})
             // Defense in depth (plan Phase 3): repeat the MUTABLE material predicates inside the
@@ -795,7 +798,8 @@ class CorrelationRepository:
             DETACH DELETE absorbed
             RETURN edges_bridged, episodes_rebound, 1 AS deleted,
                    coalesce(survivor.namespace, survivor.group_id, 'default') AS merge_namespace
-            """
+                """
+            )
             .replace("__SELF_SURVIVOR__", structural_self_cypher("survivor"))
             .replace("__SELF_ABSORBED__", structural_self_cypher("absorbed"))
             .replace(

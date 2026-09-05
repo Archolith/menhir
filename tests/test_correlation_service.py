@@ -1128,6 +1128,30 @@ class TestMergeProvenanceContract:
         ):
             assert expr in read, f"Phase 1 does not read {expr}"
 
+    def test_mutation_expands_every_canonical_self_guard_placeholder(self) -> None:
+        """The database must receive executable predicates, never template identifiers."""
+
+        neo4j = _GuardEnforcingNeo4j(
+            {"source": "codex", "sources": ["codex"], "source_confidence": 0.5},
+            {"source": "claude-code", "sources": ["claude-code"], "source_confidence": 0.7},
+        )
+        captured: list[str] = []
+        original = neo4j.execute
+
+        def _spy(query, params=None, **kwargs):
+            captured.append(query)
+            return original(query, params, **kwargs)
+
+        neo4j.execute = _spy  # type: ignore[method-assign]
+        assert CorrelationRepository(neo4j).merge_entity(
+            "survivor-1", "absorbed-2", similarity=0.96
+        )["merged"] == 1
+
+        mutation = next(query for query in captured if "DETACH DELETE absorbed" in query)
+        assert "__SELF_" not in mutation
+        assert "coalesce(survivor.is_self, false)" in mutation
+        assert "coalesce(absorbed.is_self, false)" in mutation
+
     def test_an_absorbed_nodes_prior_contributors_are_not_dropped(self) -> None:
         """Defect: the absorbed node's `sources` was never read, so absorbing an already-merged node
         kept only its lowest-tier `source` and lost every other writer."""

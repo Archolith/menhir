@@ -496,9 +496,13 @@ async def run_recall(
         and tuning.fact_edge_mode == "pointer"
         and _query_wants_history(query)
     )
-    _run_edge_search = tuning.enable_fact_edges and (
+    _general_fact_edge_search = tuning.enable_fact_edges and (
         tuning.fact_edge_mode == "standalone" or _pointer_active
     )
+    # Verified self facts are a required authority lane in ENFORCE, not an experimental retrieval
+    # feature. Search them even with default tuning and for non-history wording; the Graphiti client
+    # independently re-verifies the exact persisted payload and current owner signature.
+    _run_edge_search = self_authority_enforced or _general_fact_edge_search
     if not search_results:
         if visible_pending_rows and not _run_edge_search:
             return RecallResult(
@@ -1443,10 +1447,16 @@ async def run_recall(
         _t_phases["view_authority"] = int((perf_counter() - _t) * 1000)
 
     standalone_edge_hits_pending = bool(
-        tuning.enable_fact_edges
-        and edge_hits
+        edge_hits
         and (
-            tuning.fact_edge_mode == "standalone"
+            (tuning.enable_fact_edges and tuning.fact_edge_mode == "standalone")
+            or (
+                self_authority_enforced
+                and any(
+                    hit.get("canonical_self_authorized") is True
+                    for hit in edge_hits
+                )
+            )
             or (
                 _pointer_active
                 and any(
@@ -1568,17 +1578,15 @@ async def run_recall(
     # measured net-NEGATIVE at N=30 (rung A′) because terse facts crowd out richer nodes and
     # collapse context — the "pointer" mode (hydrating endpoint nodes, above) is preferred.
     # Reuses edge_hits already fetched above; only runs in standalone mode.
-    if tuning.enable_fact_edges and (
-        tuning.fact_edge_mode == "standalone" or _pointer_active
-    ):
+    if _general_fact_edge_search or self_authority_enforced:
         existing_uuids = {c.uuid for c in candidates}
         edges_added = 0
         for hit in edge_hits:
             try:
-                if (
-                    tuning.fact_edge_mode != "standalone"
-                    and hit.get("canonical_self_authorized") is not True
-                ):
+                inject_general_edge = bool(
+                    tuning.enable_fact_edges and tuning.fact_edge_mode == "standalone"
+                )
+                if not inject_general_edge and hit.get("canonical_self_authorized") is not True:
                     continue
                 edge_uuid = str(hit.get("uuid") or "").strip()
                 score = float(hit["score"])

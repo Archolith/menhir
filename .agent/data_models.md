@@ -296,13 +296,17 @@ properties: `menhir_self_authority_payload_json` (the canonical JSON object sign
 `menhir_self_authority_graphiti_episode_uuid` (the internal Graphiti episode that must also appear
 in the relationship's `episodes` list). The signed object includes the
 principal, namespace, episode/turn evidence lineage, evidence digest, assertion, direction,
-polarity, temporal scope, revision, schema and policy plus its derived claim digest. Menhir stores
-neither the signature nor a private key. The final Graphiti resolver and `enforce` fact-edge recall
-both require the relationship's actual source/target direction, resolved counterpart name and
+polarity, temporal scope, revision, schema and policy plus its derived claim digest. Schema v2
+requires `assertion.counterpart.uuid` to be the stable, already-persistent identity selected by
+ordinary resolution; a new extraction UUID cannot be approved. Menhir stores neither the signature
+nor a private key. The final Graphiti resolver and `enforce` fact-edge recall both require the
+relationship's actual source/target direction, counterpart UUID, resolved counterpart name and
 labels, physical `group_id`, stamped/actual episode attribution, `name`, `fact`, `valid_at`,
 `invalid_at` and `expired_at` to equal that authority tuple and recheck the current read-only confirmation
 file. Missing, changed, malformed, revoked or mismatched records are excluded; final-resolution
-drift fails the episode before persistence.
+drift fails the episode before persistence. Rejected self proposals cannot seed new counterpart
+summaries or attributes: Graphiti's free-form node hydration is skipped for that episode while name
+embeddings and existing persistent node state are preserved.
 
 | `content` | string | Original episode text |
 | `processing_state` | string | `PENDING`, `ENRICHING`, `READY`, `FAILED` |

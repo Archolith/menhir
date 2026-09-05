@@ -589,6 +589,41 @@ async def test_confirmed_self_edge_uses_exact_fact_in_pointer_mode(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_confirmed_self_edge_is_recalled_with_default_tuning_and_no_node_hits(
+    stub_graphiti_client, stub_memory_graph_adapter
+) -> None:
+    edge_calls = []
+
+    async def search_edges_scored(query, **kwargs):
+        edge_calls.append((query, kwargs))
+        return [{
+            "uuid": "signed-edge",
+            "fact": "user owns 25 postcards",
+            "score": 2.0,
+            "source_node_uuid": self_uuid_for_namespace("tenant-a"),
+            "target_node_uuid": "postcards",
+            "canonical_self_authorized": True,
+            "created_at": None,
+            "valid_at": None,
+            "invalid_at": None,
+            "expired_at": None,
+        }]
+
+    stub_graphiti_client.search_scored_results = []
+    stub_graphiti_client.search_edges_scored = search_edges_scored
+    stub_memory_graph_adapter.canonical_self_binding_mode = "enforce"
+    svc = _build_recall_service(stub_graphiti_client, stub_memory_graph_adapter)
+
+    result = await svc.recall("what do I own?", namespace="tenant-a")
+
+    assert edge_calls[0][1]["enforce_canonical_self_authority"] is True
+    assert edge_calls[0][1]["canonical_self_uuid"] == self_uuid_for_namespace("tenant-a")
+    assert [row.uuid for row in result.results] == ["signed-edge"]
+    assert result.results[0].content == "user owns 25 postcards"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_recall_empty_search_returns_empty_result(
     stub_graphiti_client, stub_memory_graph_adapter
 ) -> None:

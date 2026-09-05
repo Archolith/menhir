@@ -219,10 +219,15 @@ backup, exact-image/config evidence and rollback controls. Historical-fork work 
 approved, journaled, reversible migration beginning with a fresh read-only census after prevention
 is proven. This plan does not authorize either operation.
 
-Implementation verification is recorded in the review wrapup. The focused authority suites and
-the full serial unit suite pass on the implementation branch (`5809 passed, 10 skipped`). Offline
-dependency-lock validation and compilation also pass. Repository artifact validation still reports
-22 inherited findings, none in files changed by this plan; that unrelated corpus debt was not folded
-into this authority change. The plan remains `IMPLEMENTING` because disposable Docker,
-live-provider, deployment, production activation and historical migration checks remain
-intentionally unrun without separate approval.
+Implementation verification is recorded in the review wrapup. After review remediation, the
+focused authority/correlation suites pass (`341 passed`) and the exact offline CI selection passes
+serially (`8970 passed, 358 skipped`). Both configured Ruff gates, compilation, and diff checks pass.
+The remediation makes author-endpoint transport grammar-independent, binds approval to an
+already-persistent counterpart UUID, blocks unsigned summary hydration, and gives verified self
+facts an enforcement-only recall lane independent of experimental fact-edge/history gates. The
+online lifecycle acceptance test now specifies unsigned -> confirmed -> revoked behavior but was
+only collected locally because disposable Docker/Neo4j and live-provider execution require separate
+approval. Repository artifact validation still reports 22 inherited findings, none in files changed
+by this plan; that unrelated corpus debt was not folded into this authority change. The plan remains
+`IMPLEMENTING` because disposable database, live-provider, deployment, production activation and
+historical migration checks remain intentionally unrun without separate approval.

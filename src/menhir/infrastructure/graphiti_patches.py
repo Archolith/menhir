@@ -38,6 +38,7 @@ from menhir.infrastructure.graphiti_model_patches import (
     _patch_graphiti_none_replace,
     _patch_graphiti_prompt_json,
     _patch_graphiti_structural_candidate_isolation,
+    _patch_graphiti_self_authority_node_hydration,
     _patch_graphiti_summarize,
     _patch_graphiti_untyped_attribute_preservation,
     _safe_to_prompt_json,

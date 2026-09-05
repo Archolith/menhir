@@ -696,12 +696,17 @@ class TypedScalarPerceptionService:
 
         return _seam
 
+    def _make_self_seam(self) -> ResolveSelfSubject:
+        """Compatibility seam retained for isolated callers and test doubles."""
+
+        return self._make_legacy_self_seam()
+
     def _self_resolver_for_rollout(self) -> ResolveSelfSubject | None:
         """Preserve behavior in off/observe; only enforce withholds unconfirmed promotion."""
 
-        if self._canonical_self_binding_mode is SelfBindMode.ENFORCE:
+        if getattr(self, "_canonical_self_binding_mode", SelfBindMode.OFF) is SelfBindMode.ENFORCE:
             return None
-        return self._make_legacy_self_seam()
+        return self._make_self_seam()
 
     def perceive_and_persist(
         self, episodes: list[Any], llm_complete: LlmComplete, *, k: int = 3,

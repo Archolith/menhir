@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextvars import ContextVar
 from dataclasses import dataclass, field
+from hashlib import sha256
 import json
 import logging
 import re
@@ -23,6 +24,7 @@ from menhir.domain.self_authority import (
     SELF_ASSERTION_EDGE_EPISODE_PROPERTY,
     SELF_ASSERTION_EDGE_GRAPHITI_EPISODE_PROPERTY,
     SELF_ASSERTION_EDGE_PAYLOAD_PROPERTY,
+    SELF_ASSERTION_POLICY_VERSION,
     SelfAssertionProposal,
     SelfAuthorizationDecision,
     canonical_json_bytes,
@@ -127,15 +129,23 @@ class CombinedExtractionReceipt:
     #: Object identities of edges authorized by this receipt. This in-memory capability prevents a
     #: model-authored lookalike attribute from activating the resolver preservation patch below.
     self_assertion_authorized_edge_ids: set[int] = field(default_factory=set)
-    #: Original counterpart UUID for each authorized edge plus the node resolver's chosen UUID/name.
-    #: Together these bind the signed structured counterpart to ordinary object dedup without
-    #: signing Graphiti's unstable pre-resolution UUID.
+    #: Marker edges remain proposal-local until ordinary node resolution has selected a persistent
+    #: counterpart identity.  Only then can the exact UUID enter the owner-signed payload.
+    self_assertion_pending_edges: list[Any] = field(default_factory=list)
+    self_assertion_edge_buffer: list[Any] | None = None
     self_assertion_counterpart_by_edge_id: dict[int, str] = field(default_factory=dict)
     resolved_node_identity_by_extracted_uuid: dict[
         str, tuple[str, str, tuple[str, ...]]
     ] = field(
         default_factory=dict
     )
+    resolved_node_was_persistent_by_extracted_uuid: dict[str, bool] = field(
+        default_factory=dict
+    )
+    #: A self proposal makes the full episode unsafe input for free-form node attribute/summary
+    #: generation. Exact signed facts are recalled from edges; node hydration is skipped.
+    suppress_node_semantic_hydration: bool = False
+    self_assertion_finalized: bool = False
     #: Graphiti's internally allocated primary episode UUID for this extraction.  It differs from
     #: the external pending UUID and is required to prove a marker edge belongs to CURRENT MESSAGES.
     graphiti_episode_uuid: str = ""
@@ -463,12 +473,7 @@ def _normalize_endpoint_name(name: Any) -> str:
 
 def _active_subject_marker(receipt: CombinedExtractionReceipt | None) -> str:
     endpoint = receipt.self_subject_endpoint if receipt is not None else None
-    if (
-        endpoint is None
-        or not _requires_declared_author_endpoint(receipt.episode_text)
-    ):
-        return ""
-    return endpoint.marker
+    return endpoint.marker if endpoint is not None else ""
 
 
 def _is_reserved_subject_marker(value: Any) -> bool:
@@ -912,16 +917,6 @@ def _sanitize_combined_payload(
                 edges_dropped += 1
                 subject_marker_edges_suppressed += 1
                 continue
-            if endpoint_uses_marker and not _subject_edge_has_current_predicate_anchor(
-                source_name=norm["source_entity_name"],
-                target_name=norm["target_entity_name"],
-                fact=norm["fact"],
-                marker=marker,
-                episode_text=episode_text,
-            ):
-                edges_dropped += 1
-                subject_marker_edges_suppressed += 1
-                continue
         edges.append(norm)
 
     context_unsupported_edges = 0
@@ -1311,6 +1306,23 @@ def _current_author_surface(episode_text: str) -> str:
     return _strip_author_quote_spans(current)
 
 
+_CURRENT_AUTHOR_REFERENCE_RE = re.compile(
+    r"\b(?:i|me|my|mine|myself)(?:['’](?:m|ve|d|ll))?\b",
+    re.IGNORECASE,
+)
+
+
+def _current_message_mentions_author(episode_text: str) -> bool:
+    """Detect an author reference without deciding grammar, polarity, or truth.
+
+    This is a refusal-only fallback for an extractor that ignores the opaque endpoint.  It never
+    grants identity or assertion authority; questions and negated/adverb-prefixed statements are
+    intentionally included so they cannot fall back to an ordinary ``user`` identity.
+    """
+
+    return bool(_CURRENT_AUTHOR_REFERENCE_RE.search(_current_author_surface(episode_text)))
+
+
 def _author_assertion_clauses(episode_text: str) -> tuple[str, ...]:
     """Conservative affirmative clauses whose grammatical subject is the current author."""
     clauses: list[str] = []
@@ -1500,6 +1512,7 @@ def _self_assertion_proposal_for_edge(
     edge: Any,
     node_names: dict[str, str],
     node_labels: dict[str, list[str]],
+    resolved_counterpart_uuid: str | None = None,
     receipt: CombinedExtractionReceipt,
 ) -> SelfAssertionProposal:
     """Freeze one final-payload marker edge into the exact owner-signable contract."""
@@ -1540,6 +1553,7 @@ def _self_assertion_proposal_for_edge(
             "counterpart": {
                 "labels": node_labels.get(counterpart_uuid, []),
                 "name": node_names.get(counterpart_uuid, ""),
+                "uuid": str(resolved_counterpart_uuid or counterpart_uuid),
             },
             "fact": _canonical_self_edge_text(getattr(edge, "fact", ""), marker),
             "predicate": _canonical_self_edge_text(getattr(edge, "name", ""), marker),
@@ -1553,18 +1567,95 @@ def _self_assertion_proposal_for_edge(
     )
 
 
+def _quarantine_unmarked_author_fallbacks(
+    nodes: list[Any],
+    edges: list[Any],
+    index_map: dict[str, list[int]],
+    receipt: CombinedExtractionReceipt,
+) -> None:
+    """Fail closed when a current-author reference ignored the structural marker.
+
+    An ordinary third-person application/RBAC entity named ``user`` remains ordinary when the
+    current message does not refer to its author.  When it does, an unmarked self-like endpoint is
+    ambiguous and therefore cannot enter durable entity resolution.  The raw turn plus a bounded
+    refusal receipt remain available for an operator/retry.
+    """
+
+    if not _current_message_mentions_author(receipt.episode_text):
+        return
+    unsafe_node_uuids = {
+        str(getattr(node, "uuid", "") or "").strip()
+        for node in nodes
+        if is_self_alias(getattr(node, "name", None))
+    }
+    unsafe_node_uuids.discard("")
+    if not unsafe_node_uuids:
+        return
+    rejected_edges = [
+        edge
+        for edge in edges
+        if unsafe_node_uuids
+        & {
+            str(getattr(edge, "source_node_uuid", "") or "").strip(),
+            str(getattr(edge, "target_node_uuid", "") or "").strip(),
+        }
+    ]
+    if not rejected_edges:
+        return
+    rejected_ids = {id(edge) for edge in rejected_edges}
+    rejected_endpoints = {
+        endpoint
+        for edge in rejected_edges
+        for endpoint in (
+            str(getattr(edge, "source_node_uuid", "") or "").strip(),
+            str(getattr(edge, "target_node_uuid", "") or "").strip(),
+        )
+        if endpoint
+    }
+    edges[:] = [edge for edge in edges if id(edge) not in rejected_ids]
+    surviving_endpoints = {
+        endpoint
+        for edge in edges
+        for endpoint in (
+            str(getattr(edge, "source_node_uuid", "") or "").strip(),
+            str(getattr(edge, "target_node_uuid", "") or "").strip(),
+        )
+        if endpoint
+    }
+    pruned_uuids = rejected_endpoints - surviving_endpoints
+    nodes[:] = [
+        node
+        for node in nodes
+        if str(getattr(node, "uuid", "") or "").strip() not in pruned_uuids
+    ]
+    for uuid in pruned_uuids:
+        index_map.pop(uuid, None)
+    receipt.subject_marker_edges_suppressed += len(rejected_edges)
+    receipt.suppress_node_semantic_hydration = True
+    if receipt.self_assertion_proposals is None:
+        receipt.self_assertion_proposals = []
+    receipt.self_assertion_proposals.append(
+        {
+            "authorization": {
+                "authorized": False,
+                "authority_key_id": "",
+                "reason": "unmarked_author_reference_quarantined",
+            },
+            "episode_uuid": receipt.episode_key,
+            "evidence_sha256": sha256(receipt.episode_text.encode("utf-8")).hexdigest(),
+            "kind": "unresolved_author_reference",
+            "policy_version": SELF_ASSERTION_POLICY_VERSION,
+        }
+    )
+
+
 def _declare_subject_endpoint(
     nodes: list[Any],
     edges: list[Any],
     index_map: dict[str, list[int]],
     receipt: CombinedExtractionReceipt,
 ) -> None:
-    """Promote only owner-signed marker edges after the final extraction payload exists.
-
-    The linguistic endpoint machinery may solicit and ground a proposal. It is never authority.
-    This function freezes each edge into an exact structured payload, asks the read-only signature
-    verifier, and removes every unauthorized edge before Graphiti candidate resolution or writes.
-    """
+    """Declare structural self and hold its semantic edges pending ordinary node resolution."""
 
     endpoint = receipt.self_subject_endpoint
     if endpoint is None:
@@ -1592,12 +1683,6 @@ def _declare_subject_endpoint(
     reserved_nodes = [
         node for node in nodes if _is_reserved_subject_marker(getattr(node, "name", None))
     ]
-    if not _requires_declared_author_endpoint(receipt.episode_text):
-        if reserved_nodes:
-            raise InvalidSelfSubjectDeclarationError(
-                "self-subject marker requires an affirmative unquoted current-author assertion"
-            )
-        return
     marker_nodes = [
         node for node in reserved_nodes if getattr(node, "name", None) == endpoint.marker
     ]
@@ -1610,10 +1695,7 @@ def _declare_subject_endpoint(
             "final payload contains more than one self-subject marker node"
         )
     if not marker_nodes:
-        if _requires_declared_author_endpoint(receipt.episode_text):
-            raise InvalidSelfSubjectDeclarationError(
-                "eligible marked projection omitted its required declared author endpoint"
-            )
+        _quarantine_unmarked_author_fallbacks(nodes, edges, index_map, receipt)
         return
 
     marker_node = marker_nodes[0]
@@ -1648,40 +1730,6 @@ def _declare_subject_endpoint(
         raise InvalidSelfSubjectDeclarationError(
             "self-subject marker node lacks current-episode index attribution"
         )
-    node_names = {
-        str(getattr(node, "uuid", "") or "").strip():
-        str(getattr(node, "name", "") or "")
-        for node in nodes
-    }
-    node_labels = {
-        str(getattr(node, "uuid", "") or "").strip(): sorted(
-            str(label) for label in (getattr(node, "labels", None) or [])
-        )
-        for node in nodes
-    }
-    if any(
-        not _subject_edge_has_current_predicate_anchor(
-            source_name=node_names.get(
-                str(getattr(edge, "source_node_uuid", "") or "").strip(), ""
-            ),
-            target_name=node_names.get(
-                str(getattr(edge, "target_node_uuid", "") or "").strip(), ""
-            ),
-            fact=str(getattr(edge, "fact", "") or ""),
-            marker=endpoint.marker,
-            episode_text=receipt.episode_text,
-        )
-        for edge in marker_edges
-    ):
-        raise InvalidSelfSubjectDeclarationError(
-            "self-subject marker edge lacks current-message predicate grounding"
-        )
-
-    authorized_edge_ids: set[int] = set()
-    proposal_records = receipt.self_assertion_proposals
-    if proposal_records is None:
-        proposal_records = []
-        receipt.self_assertion_proposals = proposal_records
     for edge in marker_edges:
         attributes = getattr(edge, "attributes", None)
         if not isinstance(attributes, dict):
@@ -1692,74 +1740,185 @@ def _declare_subject_endpoint(
         attributes.pop(SELF_ASSERTION_EDGE_PAYLOAD_PROPERTY, None)
         attributes.pop(SELF_ASSERTION_EDGE_EPISODE_PROPERTY, None)
         attributes.pop(SELF_ASSERTION_EDGE_GRAPHITI_EPISODE_PROPERTY, None)
-        try:
-            proposal = _self_assertion_proposal_for_edge(
-                marker_uuid=marker_uuid,
-                marker=endpoint.marker,
-                edge=edge,
-                node_names=node_names,
-                node_labels=node_labels,
-                receipt=receipt,
-            )
-        except (TypeError, ValueError) as exc:
-            # Missing principal/evidence fields mean the assertion cannot be bound to an owner.
-            # The raw episode remains durable evidence; fail closed before any semantic write.
-            logger.warning(
-                "Canonical-self proposal was not authorizable episode_id=%s reason=%s",
-                receipt.episode_key,
-                exc,
-            )
-            continue
-        authorizer = receipt.self_assertion_authorizer
-        if authorizer is None:
-            decision = SelfAuthorizationDecision(False, "owner_confirmation_not_configured")
-        else:
-            try:
-                decision = authorizer.authorize(proposal)
-            except Exception:  # noqa: BLE001 - authority errors always fail closed
-                logger.exception(
-                    "Canonical-self owner confirmation check failed episode_id=%s",
-                    receipt.episode_key,
-                )
-                decision = SelfAuthorizationDecision(False, "owner_confirmation_check_failed")
-        proposal_records.append(proposal.audit_record(decision))
-        if decision.authorized:
-            authorized_edge_ids.add(id(edge))
-            receipt.self_assertion_authorized_edge_ids.add(id(edge))
-            source_uuid = str(getattr(edge, "source_node_uuid", "") or "").strip()
-            target_uuid = str(getattr(edge, "target_node_uuid", "") or "").strip()
-            receipt.self_assertion_counterpart_by_edge_id[id(edge)] = (
-                target_uuid if source_uuid == marker_uuid else source_uuid
-            )
-            # No model-produced relationship attributes survive beside the exact signed payload
-            # and the two server-owned stamps that bind it to persisted episode attribution.
-            edge.attributes = {
-                SELF_ASSERTION_EDGE_EPISODE_PROPERTY: proposal.episode_uuid,
-                SELF_ASSERTION_EDGE_GRAPHITI_EPISODE_PROPERTY: graphiti_episode_uuid,
-                SELF_ASSERTION_EDGE_PAYLOAD_PROPERTY: canonical_json_bytes(
-                    proposal.confirmation_payload()
-                ).decode("utf-8")
-            }
-
-    unauthorized_count = sum(1 for edge in marker_edges if id(edge) not in authorized_edge_ids)
-    if unauthorized_count:
-        marker_edge_ids = {id(edge) for edge in marker_edges}
-        edges[:] = [
-            edge
-            for edge in edges
-            if id(edge) not in marker_edge_ids or id(edge) in authorized_edge_ids
-        ]
-        receipt.subject_marker_edges_suppressed += unauthorized_count
-    receipt.self_assertions_authorized += len(authorized_edge_ids)
-    if not authorized_edge_ids:
-        nodes[:] = [node for node in nodes if node is not marker_node]
-        index_map.pop(marker_uuid, None)
-        return
+        source_uuid = str(getattr(edge, "source_node_uuid", "") or "").strip()
+        target_uuid = str(getattr(edge, "target_node_uuid", "") or "").strip()
+        receipt.self_assertion_counterpart_by_edge_id[id(edge)] = (
+            target_uuid if source_uuid == marker_uuid else source_uuid
+        )
+    receipt.self_assertion_pending_edges.extend(marker_edges)
+    receipt.self_assertion_edge_buffer = edges
+    receipt.suppress_node_semantic_hydration = True
 
     receipt.self_identity = declare_self_subject(
         identity,
         subject_node_uuid=marker_uuid,
     )
+
+
+def _record_unresolved_self_assertion(
+    receipt: CombinedExtractionReceipt,
+    *,
+    reason: str,
+    extracted_counterpart_uuid: str,
+) -> None:
+    """Retain a bounded refusal when a signable counterpart cannot be constructed."""
+
+    if receipt.self_assertion_proposals is None:
+        receipt.self_assertion_proposals = []
+    record: dict[str, Any] = {
+        "authorization": {
+            "authorized": False,
+            "authority_key_id": "",
+            "reason": reason,
+        },
+        "episode_uuid": receipt.episode_key,
+        "evidence_sha256": sha256(receipt.episode_text.encode("utf-8")).hexdigest(),
+        "kind": "unresolved_self_assertion",
+        "policy_version": SELF_ASSERTION_POLICY_VERSION,
+    }
+    if extracted_counterpart_uuid:
+        record["extracted_counterpart_uuid"] = extracted_counterpart_uuid[:512]
+    receipt.self_assertion_proposals.append(record)
+
+
+def finalize_self_assertion_authority_after_node_resolution(
+    receipt: CombinedExtractionReceipt,
+) -> set[str]:
+    """Authorize pending marker edges against their resolved persistent counterpart UUID.
+
+    Returns extracted node UUIDs supported only by rejected self edges.  The node-resolution patch
+    removes those rows before Graphiti can hydrate or persist them.
+    """
+
+    if receipt.self_assertion_finalized:
+        return set()
+    receipt.self_assertion_finalized = True
+    pending_edges = list(receipt.self_assertion_pending_edges)
+    if not pending_edges:
+        return set()
+    edge_buffer = receipt.self_assertion_edge_buffer
+    if edge_buffer is None:
+        raise InvalidSelfSubjectDeclarationError(
+            "canonical-self proposal lost its extraction edge buffer"
+        )
+    identity = receipt.self_identity
+    endpoint = receipt.self_subject_endpoint
+    if identity is None or endpoint is None:
+        raise InvalidSelfSubjectDeclarationError(
+            "canonical-self proposal lost its structural identity context"
+        )
+    marker_uuid = self_uuid_for_namespace(identity.namespace)
+    proposal_records = receipt.self_assertion_proposals
+    if proposal_records is None:
+        proposal_records = []
+        receipt.self_assertion_proposals = proposal_records
+    authorized_ids: set[int] = set()
+    rejected_counterparts: set[str] = set()
+
+    for edge in pending_edges:
+        edge_id = id(edge)
+        original_counterpart_uuid = receipt.self_assertion_counterpart_by_edge_id.get(
+            edge_id, ""
+        )
+        resolved_counterpart = receipt.resolved_node_identity_by_extracted_uuid.get(
+            original_counterpart_uuid
+        )
+        if resolved_counterpart is None:
+            _record_unresolved_self_assertion(
+                receipt,
+                reason="counterpart_identity_not_resolved",
+                extracted_counterpart_uuid=original_counterpart_uuid,
+            )
+            rejected_counterparts.add(original_counterpart_uuid)
+            continue
+        resolved_uuid, resolved_name, resolved_labels = resolved_counterpart
+        try:
+            proposal = _self_assertion_proposal_for_edge(
+                marker_uuid=marker_uuid,
+                marker=endpoint.marker,
+                edge=edge,
+                node_names={original_counterpart_uuid: resolved_name},
+                node_labels={original_counterpart_uuid: list(resolved_labels)},
+                resolved_counterpart_uuid=resolved_uuid,
+                receipt=receipt,
+            )
+        except (TypeError, ValueError) as exc:
+            logger.warning(
+                "Canonical-self proposal was not authorizable episode_id=%s reason=%s",
+                receipt.episode_key,
+                exc,
+            )
+            _record_unresolved_self_assertion(
+                receipt,
+                reason="counterpart_proposal_invalid",
+                extracted_counterpart_uuid=original_counterpart_uuid,
+            )
+            rejected_counterparts.add(original_counterpart_uuid)
+            continue
+
+        if not receipt.resolved_node_was_persistent_by_extracted_uuid.get(
+            original_counterpart_uuid, False
+        ):
+            decision = SelfAuthorizationDecision(
+                False, "counterpart_identity_not_persistent"
+            )
+        else:
+            authorizer = receipt.self_assertion_authorizer
+            if authorizer is None:
+                decision = SelfAuthorizationDecision(
+                    False, "owner_confirmation_not_configured"
+                )
+            else:
+                try:
+                    decision = authorizer.authorize(proposal)
+                except Exception:  # noqa: BLE001 - authority errors always fail closed
+                    logger.exception(
+                        "Canonical-self owner confirmation check failed episode_id=%s",
+                        receipt.episode_key,
+                    )
+                    decision = SelfAuthorizationDecision(
+                        False, "owner_confirmation_check_failed"
+                    )
+        proposal_records.append(proposal.audit_record(decision))
+        if not decision.authorized:
+            rejected_counterparts.add(original_counterpart_uuid)
+            continue
+
+        authorized_ids.add(edge_id)
+        receipt.self_assertion_authorized_edge_ids.add(edge_id)
+        edge.attributes = {
+            SELF_ASSERTION_EDGE_EPISODE_PROPERTY: proposal.episode_uuid,
+            SELF_ASSERTION_EDGE_GRAPHITI_EPISODE_PROPERTY: receipt.graphiti_episode_uuid,
+            SELF_ASSERTION_EDGE_PAYLOAD_PROPERTY: canonical_json_bytes(
+                proposal.confirmation_payload()
+            ).decode("utf-8"),
+        }
+
+    pending_ids = {id(edge) for edge in pending_edges}
+    edge_buffer[:] = [
+        edge
+        for edge in edge_buffer
+        if id(edge) not in pending_ids or id(edge) in authorized_ids
+    ]
+    rejected_count = len(pending_edges) - len(authorized_ids)
+    receipt.subject_marker_edges_suppressed += rejected_count
+    receipt.self_assertions_authorized += len(authorized_ids)
+    receipt.self_assertion_pending_edges.clear()
+
+    surviving_endpoints = {
+        endpoint_uuid
+        for edge in edge_buffer
+        for endpoint_uuid in (
+            str(getattr(edge, "source_node_uuid", "") or "").strip(),
+            str(getattr(edge, "target_node_uuid", "") or "").strip(),
+        )
+        if endpoint_uuid
+    }
+    return {
+        uuid
+        for uuid in rejected_counterparts
+        if uuid and uuid not in surviving_endpoints
+    }
 
 
 def _wrap_self_authority_edge_resolver(original: Any) -> Any:
@@ -2102,12 +2261,9 @@ async def _run_graphiti_combined_extraction(
         )
 
     declared_endpoint = receipt.self_subject_endpoint if receipt is not None else None
-    endpoint = (
-        declared_endpoint
-        if declared_endpoint is not None
-        and _requires_declared_author_endpoint(receipt.episode_text)
-        else None
-    )
+    # The endpoint is trusted transport metadata, not a grammatical conclusion.  Every enforce
+    # projection receives it; text only tells the extractor whether an edge should use it.
+    endpoint = declared_endpoint
     if declared_endpoint is not None:
         # Eligibility is rare and enforce-only.  Pay the bounded graph read up front so a marker
         # collision in repair context is rejected before even the first model dispatch; the same
@@ -2216,7 +2372,8 @@ async def _run_graphiti_combined_extraction(
     if (
         endpoint is not None
         and not any(getattr(node, "name", None) == endpoint.marker for node in nodes)
-        and _requires_declared_author_endpoint(receipt.episode_text if receipt else "")
+        and _current_message_mentions_author(receipt.episode_text if receipt else "")
+        and any(is_self_alias(getattr(node, "name", None)) for node in nodes)
     ):
         # Real models can privilege a familiar `user` convention even when a later instruction
         # declares a safer opaque endpoint. Do not reinterpret that string as provenance. Give the

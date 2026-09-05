@@ -22,6 +22,7 @@ pytest.importorskip("graphiti_core")
 
 import graphiti_core.utils.maintenance.combined_extraction as ce  # noqa: E402
 import menhir.infrastructure.graphiti_extraction_patches as extraction_patches  # noqa: E402
+import menhir.infrastructure.graphiti_model_patches as model_patches  # noqa: E402
 import menhir.infrastructure.graphiti_patches as patches  # noqa: E402
 import menhir.services.enrichment_steps as steps  # noqa: E402
 from menhir.domain.self_identity import (  # noqa: E402
@@ -93,7 +94,7 @@ async def test_signed_edge_payload_and_temporal_scope_survive_graphiti_resolutio
         direction="self_to_entity",
         polarity="affirmed",
         assertion={
-            "counterpart": {"labels": [], "name": "postcards"},
+            "counterpart": {"labels": [], "name": "postcards", "uuid": "postcards"},
             "fact": "user owns 25 postcards",
             "predicate": "OWNS",
         },
@@ -178,7 +179,7 @@ async def test_signed_edge_resolution_reuses_only_exact_existing_edge() -> None:
         direction="self_to_entity",
         polarity="affirmed",
         assertion={
-            "counterpart": {"labels": [], "name": "postcards"},
+            "counterpart": {"labels": [], "name": "postcards", "uuid": "postcards"},
             "fact": "user owns 25 postcards",
             "predicate": "OWNS",
         },
@@ -1523,6 +1524,16 @@ async def test_receipt_owned_subject_endpoint_binds_before_resolution(
     assert receipt is not None
     assert receipt.self_identity.evidence_kind is SelfEvidenceKind.EXPLICIT_SELF_SUBJECT
     assert receipt.self_bind_result.bound is True
+    receipt.resolved_node_identity_by_extracted_uuid["postcards-node"] = (
+        "postcards-persistent",
+        "postcards",
+        (),
+    )
+    receipt.resolved_node_was_persistent_by_extracted_uuid["postcards-node"] = True
+    pruned = extraction_patches.finalize_self_assertion_authority_after_node_resolution(
+        receipt
+    )
+    assert pruned == set()
     assert receipt.self_assertions_authorized == 1
     assert receipt.self_assertion_proposals[0]["authorization"]["authorized"] is True
     persisted_payload = json.loads(
@@ -1567,17 +1578,243 @@ async def test_unconfirmed_subject_edge_is_proposal_only_before_resolution(
     )
 
     receipt = patches.get_extraction_receipt()
-    assert [node.uuid for node in nodes] == ["postcards-node"]
+    assert [node.uuid for node in nodes] == [self_uuid_for_namespace("default"), "postcards-node"]
+    assert len(edges) == 1
+    assert self_uuid_for_namespace("default") in index_map
+    assert receipt.self_identity.evidence_kind is SelfEvidenceKind.EXPLICIT_SELF_SUBJECT
+    assert receipt.self_bind_result.bound is True
+    receipt.resolved_node_identity_by_extracted_uuid["postcards-node"] = (
+        "postcards-persistent",
+        "postcards",
+        (),
+    )
+    receipt.resolved_node_was_persistent_by_extracted_uuid["postcards-node"] = True
+    pruned = extraction_patches.finalize_self_assertion_authority_after_node_resolution(
+        receipt
+    )
+    assert pruned == {"postcards-node"}
     assert edges == []
-    assert "marker-node" not in index_map
-    assert receipt.self_identity.evidence_kind is SelfEvidenceKind.TRUSTED_USER_TURN
-    assert receipt.self_bind_result.bound is False
     assert receipt.self_assertions_authorized == 0
     assert receipt.self_assertion_proposals[0]["authorization"] == {
         "authorized": False,
         "authority_key_id": "ed25519:test-owner",
         "reason": "confirmation_no_exact_match",
     }
+
+
+@pytest.mark.asyncio
+async def test_new_extraction_uuid_cannot_become_owner_approved_counterpart(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    endpoint = _begin_subject_endpoint_receipt(authorized=True)
+    marker = SimpleNamespace(uuid="marker", name=endpoint.marker, group_id="", labels=[])
+    alex = SimpleNamespace(uuid="alex-extracted", name="Alex", group_id="", labels=[])
+    edge = SimpleNamespace(
+        source_node_uuid="marker",
+        target_node_uuid="alex-extracted",
+        name="KNOWS",
+        fact=f"{endpoint.marker} knows Alex.",
+        episodes=["projection-1"],
+    )
+
+    async def fake_extract_nodes_and_edges(*args, **kwargs):
+        return [marker, alex], [edge], {"marker": [0], "alex-extracted": [0]}
+
+    monkeypatch.setattr(ce, "extract_nodes_and_edges", fake_extract_nodes_and_edges)
+    _, edges, _ = await extraction_patches._run_graphiti_combined_extraction(
+        clients=object(), episode=SimpleNamespace(uuid="projection-1"),
+        previous_episodes=[], entity_types=None, excluded_entity_types=None,
+        custom_extraction_instructions=None,
+    )
+    receipt = patches.get_extraction_receipt()
+    assert receipt is not None
+    receipt.resolved_node_identity_by_extracted_uuid["alex-extracted"] = (
+        "alex-extracted", "Alex", ()
+    )
+    receipt.resolved_node_was_persistent_by_extracted_uuid["alex-extracted"] = False
+
+    assert extraction_patches.finalize_self_assertion_authority_after_node_resolution(
+        receipt
+    ) == {"alex-extracted"}
+    assert edges == []
+    assert receipt.self_assertion_proposals[0]["authorization"]["reason"] == (
+        "counterpart_identity_not_persistent"
+    )
+    assert receipt.self_assertion_authorizer.proposals == []
+
+
+@pytest.mark.asyncio
+async def test_missing_counterpart_resolution_retains_a_refusal_proposal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    endpoint = _begin_subject_endpoint_receipt(authorized=True)
+    marker = SimpleNamespace(uuid="marker", name=endpoint.marker, group_id="", labels=[])
+    bicycle = SimpleNamespace(uuid="bicycle-extracted", name="bicycle", group_id="", labels=[])
+    edge = SimpleNamespace(
+        source_node_uuid="marker",
+        target_node_uuid="bicycle-extracted",
+        name="OWNS",
+        fact=f"{endpoint.marker} owns a bicycle.",
+        episodes=["projection-1"],
+    )
+
+    async def fake_extract_nodes_and_edges(*args, **kwargs):
+        return [marker, bicycle], [edge], {
+            "marker": [0], "bicycle-extracted": [0]
+        }
+
+    monkeypatch.setattr(ce, "extract_nodes_and_edges", fake_extract_nodes_and_edges)
+    _, edges, _ = await extraction_patches._run_graphiti_combined_extraction(
+        clients=object(), episode=SimpleNamespace(uuid="projection-1"),
+        previous_episodes=[], entity_types=None, excluded_entity_types=None,
+        custom_extraction_instructions=None,
+    )
+    receipt = patches.get_extraction_receipt()
+    assert receipt is not None
+
+    assert extraction_patches.finalize_self_assertion_authority_after_node_resolution(
+        receipt
+    ) == {"bicycle-extracted"}
+    assert edges == []
+    assert receipt.self_assertion_proposals == [{
+        "authorization": {
+            "authorized": False,
+            "authority_key_id": "",
+            "reason": "counterpart_identity_not_resolved",
+        },
+        "episode_uuid": "projection-1",
+        "evidence_sha256": receipt.self_assertion_proposals[0]["evidence_sha256"],
+        "extracted_counterpart_uuid": "bicycle-extracted",
+        "kind": "unresolved_self_assertion",
+        "policy_version": receipt.self_assertion_proposals[0]["policy_version"],
+    }]
+    assert receipt.self_assertion_authorizer.proposals == []
+
+
+@pytest.mark.asyncio
+async def test_changed_same_name_candidate_cannot_reuse_counterpart_approval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    endpoint = _begin_subject_endpoint_receipt(authorized=True)
+    marker = SimpleNamespace(uuid="marker", name=endpoint.marker, group_id="", labels=[])
+    alex = SimpleNamespace(uuid="alex-extracted", name="Alex", group_id="", labels=["Person"])
+    edge = SimpleNamespace(
+        source_node_uuid="marker",
+        target_node_uuid="alex-extracted",
+        name="KNOWS",
+        fact=f"{endpoint.marker} knows Alex.",
+        episodes=["projection-1"],
+    )
+
+    async def fake_extract_nodes_and_edges(*args, **kwargs):
+        return [marker, alex], [edge], {"marker": [0], "alex-extracted": [0]}
+
+    class ApprovesOnlyAlexA:
+        def __init__(self) -> None:
+            self.proposals = []
+
+        def authorize(self, proposal):
+            self.proposals.append(proposal)
+            counterpart = json.loads(proposal.assertion_json)["counterpart"]
+            authorized = counterpart["uuid"] == "alex-A"
+            return SelfAuthorizationDecision(
+                authorized,
+                "owner_signature_verified" if authorized else "confirmation_no_exact_match",
+                "ed25519:test-owner",
+            )
+
+    monkeypatch.setattr(ce, "extract_nodes_and_edges", fake_extract_nodes_and_edges)
+    _, edges, _ = await extraction_patches._run_graphiti_combined_extraction(
+        clients=object(), episode=SimpleNamespace(uuid="projection-1"),
+        previous_episodes=[], entity_types=None, excluded_entity_types=None,
+        custom_extraction_instructions=None,
+    )
+    receipt = patches.get_extraction_receipt()
+    assert receipt is not None
+    authorizer = ApprovesOnlyAlexA()
+    receipt.self_assertion_authorizer = authorizer
+    receipt.resolved_node_identity_by_extracted_uuid["alex-extracted"] = (
+        "alex-B", "Alex", ("Person",)
+    )
+    receipt.resolved_node_was_persistent_by_extracted_uuid["alex-extracted"] = True
+
+    assert extraction_patches.finalize_self_assertion_authority_after_node_resolution(
+        receipt
+    ) == {"alex-extracted"}
+    assert edges == []
+    assert len(authorizer.proposals) == 1
+    assert json.loads(authorizer.proposals[0].assertion_json)["counterpart"] == {
+        "labels": ["Person"], "name": "Alex", "uuid": "alex-B"
+    }
+    assert receipt.self_assertion_proposals[0]["authorization"]["reason"] == (
+        "confirmation_no_exact_match"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "episode_text",
+    ["Yesterday I bought a bicycle.", "I do not own a car."],
+)
+async def test_unmarked_author_fallback_never_creates_an_ordinary_self(
+    monkeypatch: pytest.MonkeyPatch, episode_text: str
+) -> None:
+    _begin_subject_endpoint_receipt(authorized=False)
+    receipt = patches.get_extraction_receipt()
+    assert receipt is not None
+    receipt.episode_text = episode_text
+    ordinary_user = SimpleNamespace(uuid="ordinary-user", name="user", group_id="")
+    counterpart = SimpleNamespace(uuid="counterpart", name="counterpart", group_id="")
+    edge = SimpleNamespace(
+        source_node_uuid="ordinary-user",
+        target_node_uuid="counterpart",
+        name="OWNS",
+        fact="user owns the counterpart",
+        episodes=["projection-1"],
+    )
+
+    async def fake_extract_nodes_and_edges(*args, **kwargs):
+        return [ordinary_user, counterpart], [edge], {
+            "ordinary-user": [0], "counterpart": [0]
+        }
+
+    monkeypatch.setattr(ce, "extract_nodes_and_edges", fake_extract_nodes_and_edges)
+    nodes, edges, _ = await extraction_patches._run_graphiti_combined_extraction(
+        clients=object(), episode=SimpleNamespace(uuid="projection-1"),
+        previous_episodes=[], entity_types=None, excluded_entity_types=None,
+        custom_extraction_instructions=None,
+    )
+
+    assert nodes == []
+    assert edges == []
+    assert receipt.self_assertion_proposals[0]["kind"] == "unresolved_author_reference"
+    assert receipt.self_assertions_authorized == 0
+
+
+@pytest.mark.asyncio
+async def test_self_proposal_episode_cannot_hydrate_unsigned_node_summary() -> None:
+    receipt = patches.begin_extraction_receipt(
+        "projection-1", "I own 37 postcards.", self_bind_mode=SelfBindMode.ENFORCE
+    )
+    receipt.suppress_node_semantic_hydration = True
+    node = SimpleNamespace(uuid="postcards", summary="existing", attributes={"safe": True})
+    embedded = []
+
+    async def unexpected_hydration(*args, **kwargs):
+        raise AssertionError("unsigned episode reached free-form node hydration")
+
+    async def embed_nodes(embedder, nodes):
+        embedded.extend(nodes)
+
+    wrapped = model_patches._wrap_self_authority_node_hydration(
+        unexpected_hydration, embed_nodes
+    )
+    result = await wrapped(SimpleNamespace(embedder=object()), [node], object())
+
+    assert result == [node]
+    assert embedded == [node]
+    assert node.summary == "existing"
+    assert node.attributes == {"safe": True}
 
 
 def test_multiline_reported_speech_cannot_gain_authority_from_marker_or_model() -> None:
@@ -1606,11 +1843,22 @@ def test_multiline_reported_speech_cannot_gain_authority_from_marker_or_model() 
     index_map = {"marker": [0], "deployment": [0]}
 
     assert extraction_patches._requires_declared_author_endpoint(receipt.episode_text) is True
-    extraction_patches._declare_subject_endpoint(nodes, edges, index_map, receipt)
+    receipt.self_bind_result = extraction_patches._record_self_binding(
+        nodes, edges, index_map, receipt
+    )
+    receipt.resolved_node_identity_by_extracted_uuid["deployment"] = (
+        "deployment-persistent",
+        "deployment",
+        (),
+    )
+    receipt.resolved_node_was_persistent_by_extracted_uuid["deployment"] = True
+    assert extraction_patches.finalize_self_assertion_authority_after_node_resolution(
+        receipt
+    ) == {"deployment"}
 
-    assert [node.uuid for node in nodes] == ["deployment"]
+    assert nodes[0].uuid == self_uuid_for_namespace("default")
     assert edges == []
-    assert receipt.self_identity.evidence_kind is SelfEvidenceKind.TRUSTED_USER_TURN
+    assert receipt.self_identity.evidence_kind is SelfEvidenceKind.EXPLICIT_SELF_SUBJECT
     assert receipt.self_assertion_proposals[0]["assertion"]["fact"] == (
         "user will handle the deployment."
     )
@@ -1666,7 +1914,7 @@ async def test_subject_endpoint_corrective_retry_replaces_model_user_fallback(
 
 
 @pytest.mark.asyncio
-async def test_marked_first_person_projection_refuses_missing_marker_after_correction(
+async def test_marked_first_person_projection_quarantines_missing_marker_after_correction(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _begin_subject_endpoint_receipt()
@@ -1682,15 +1930,21 @@ async def test_marked_first_person_projection_refuses_missing_marker_after_corre
         return [ordinary, target], [edge], {}
 
     monkeypatch.setattr(ce, "extract_nodes_and_edges", fake_extract_nodes_and_edges)
-    with pytest.raises(InvalidSelfSubjectDeclarationError, match="omitted its required"):
-        await extraction_patches._run_graphiti_combined_extraction(
-            clients=object(),
-            episode=SimpleNamespace(uuid="projection-1"),
-            previous_episodes=[],
-            entity_types=None,
-            excluded_entity_types=None,
-            custom_extraction_instructions=None,
-        )
+    nodes, edges, _ = await extraction_patches._run_graphiti_combined_extraction(
+        clients=object(),
+        episode=SimpleNamespace(uuid="projection-1"),
+        previous_episodes=[],
+        entity_types=None,
+        excluded_entity_types=None,
+        custom_extraction_instructions=None,
+    )
+    receipt = patches.get_extraction_receipt()
+    assert nodes == []
+    assert edges == []
+    assert receipt is not None
+    assert receipt.self_assertion_proposals[0]["authorization"]["reason"] == (
+        "unmarked_author_reference_quarantined"
+    )
 
 
 @pytest.mark.asyncio
@@ -1835,7 +2089,7 @@ def test_marker_text_without_marker_endpoint_is_dropped_before_persistence() -> 
     assert receipt.subject_marker_edges_suppressed == 1
 
 
-def test_marker_edge_requires_predicate_support_beyond_shared_target() -> None:
+def test_marker_edge_is_only_a_proposal_without_owner_authority() -> None:
     endpoint = _begin_subject_endpoint_receipt()
     receipt = patches.get_extraction_receipt()
     payload = extraction_patches._sanitize_combined_payload(
@@ -1853,9 +2107,9 @@ def test_marker_edge_requires_predicate_support_beyond_shared_target() -> None:
         "Can you tell me about Kubernetes?",
     )
 
-    assert payload["edges"] == []
+    assert len(payload["edges"]) == 1
     assert receipt is not None
-    assert receipt.subject_marker_edges_suppressed == 1
+    assert receipt.self_assertions_authorized == 0
 
 
 @pytest.mark.parametrize(
@@ -1870,7 +2124,7 @@ def test_marker_edge_requires_predicate_support_beyond_shared_target() -> None:
         "Mara said:\n```text\nI own Kubernetes.\n```",
     ],
 )
-def test_non_assertive_first_person_text_cannot_activate_subject_marker(
+def test_structural_marker_transport_is_independent_of_grammar(
     episode_text: str,
 ) -> None:
     endpoint = _begin_subject_endpoint_receipt()
@@ -1895,8 +2149,9 @@ def test_non_assertive_first_person_text_cannot_activate_subject_marker(
         episode_text,
     )
 
-    assert endpoint.marker not in {row["name"] for row in payload["extracted_entities"]}
-    assert payload["edges"] == []
+    assert endpoint.marker in {row["name"] for row in payload["extracted_entities"]}
+    assert len(payload["edges"]) == 1
+    assert receipt.self_assertions_authorized == 0
 
 
 @pytest.mark.parametrize(
@@ -1913,7 +2168,7 @@ def test_prefixed_first_person_assertions_require_declared_endpoint(
     assert extraction_patches._requires_declared_author_endpoint(episode_text) is True
 
 
-def test_marker_fact_must_be_supported_by_one_affirmative_author_clause() -> None:
+def test_marker_fact_reaches_only_the_post_resolution_signature_gate() -> None:
     endpoint = _begin_subject_endpoint_receipt()
     receipt = patches.get_extraction_receipt()
     assert receipt is not None
@@ -1928,10 +2183,14 @@ def test_marker_fact_must_be_supported_by_one_affirmative_author_clause() -> Non
         episodes=["projection-1"],
     )
 
-    with pytest.raises(InvalidSelfSubjectDeclarationError, match="predicate grounding"):
-        extraction_patches._declare_subject_endpoint(
-            [marker_node, target], [edge], {"marker": [0]}, receipt
-        )
+    nodes = [marker_node, target]
+    edges = [edge]
+    extraction_patches._declare_subject_endpoint(
+        nodes, edges, {"marker": [0]}, receipt
+    )
+    assert edges == [edge]
+    assert receipt.self_assertion_pending_edges == [edge]
+    assert receipt.self_assertions_authorized == 0
 
 
 @pytest.mark.parametrize("mode", [SelfBindMode.OFF, SelfBindMode.OBSERVE])
@@ -2122,7 +2381,7 @@ def test_context_only_marker_edge_cannot_authorize_current_subject() -> None:
         )
 
 
-def test_current_episode_marker_edge_requires_current_predicate_grounding() -> None:
+def test_current_episode_marker_edge_still_requires_owner_authority() -> None:
     endpoint = _begin_subject_endpoint_receipt()
     marker_node = SimpleNamespace(uuid="marker", name=endpoint.marker, group_id="")
     target = SimpleNamespace(uuid="k8s", name="Kubernetes", group_id="")
@@ -2137,10 +2396,11 @@ def test_current_episode_marker_edge_requires_current_predicate_grounding() -> N
     receipt.episode_text = "Can you tell me about Kubernetes?"
     receipt.graphiti_episode_uuid = "projection-1"
 
-    with pytest.raises(InvalidSelfSubjectDeclarationError, match="affirmative unquoted"):
-        extraction_patches._declare_subject_endpoint(
-            [marker_node, target], [edge], {"marker": [0]}, receipt
-        )
+    extraction_patches._declare_subject_endpoint(
+        [marker_node, target], [edge], {"marker": [0]}, receipt
+    )
+    assert receipt.self_assertion_pending_edges == [edge]
+    assert receipt.self_assertions_authorized == 0
 
 
 @pytest.mark.asyncio
