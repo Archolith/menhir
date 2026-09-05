@@ -450,7 +450,11 @@ class EpisodeLifecycleRepository:
             return None
 
         resolved_episode_uuid = str(rows[0].get("resolved_episode_uuid") or "")
-        entity_uuids = [str(uuid) for uuid in (rows[0].get("entity_uuids") or []) if str(uuid)]
+        entity_uuids = [
+            str(entity_uuid)
+            for entity_uuid in (rows[0].get("entity_uuids") or [])
+            if str(entity_uuid)
+        ]
         if not resolved_episode_uuid or not entity_uuids:
             return None
 
