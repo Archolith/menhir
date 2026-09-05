@@ -461,3 +461,26 @@ Canonical canary namespace / receipt / cleanup outcome:
 Final running release / image / mode:
 Remaining assumptions:
 ```
+
+## Follow-up: remediate the existing 66-user population
+
+After this release passes its production canary, open the historical-fork remediation as the next
+separate work item. Its authorities are:
+
+- [Canonical-self operations runbook](../workflows/canonical-self-migration-runbook.md), especially
+  **Remediating existing data**;
+- workspace plan
+  `C:\Users\thron\IdeaProjects\.agent\plans\menhir-canonical-self-remediation-plan.md`;
+- workspace corrections
+  `C:\Users\thron\IdeaProjects\.agent\plans\menhir-canonical-self-observation-correction-2026-09-04.md`,
+  which supersede the earlier name-, arity-, and grammar-based authority assumptions.
+
+The previously measured 66 nodes are a planning baseline, not an immutable target list. Start with
+a fresh read-only production recount, classify each candidate from episode and relationship
+provenance, and obtain owner approval of the exact manifest. Apply only through a journaled,
+reversible migration whose inverse bundle and restore/reapply behavior have been proven on a restored
+production copy. Ambiguous nodes remain quarantined; no node is selected or merged by the name
+`user` alone.
+
+This deployment plan neither executes nor authorizes that migration. It establishes prevention
+first so the historical population does not keep growing while remediation is prepared.
