@@ -181,6 +181,13 @@ chat and Graphiti extraction, use `https://openrouter.ai/api/v1`, and retain the
 provider with `text-embedding-3-small`. Missing explicit release provider/model input is a refusal,
 not a skip or fallback.
 
+Exact-image evidence must additionally set `MENHIR_RELEASE_TEST_IMAGE` and
+`MENHIR_RELEASE_TEST_COMMIT`. The launcher resolves the image tag once, refuses a revision-label
+mismatch, and runs the immutable local image ID with `--pull=never`; its throwaway secrets are
+mounted as files and are not copied into the container environment. This is a packaged full-surface
+E2E, not a production-ingress claim: the production route surface intentionally excludes the two
+internal evidence/admission REST endpoints used to assemble the chain.
+
 ### 2.2 Wire the feature mode into the production authority
 
 Add `MENHIR_CANONICAL_SELF_BINDING_MODE` to the Menhir service environment in

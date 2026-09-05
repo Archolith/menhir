@@ -31,6 +31,8 @@ pytestmark = [pytest.mark.online, pytest.mark.timeout(420)]
 
 _RELEASE_TEST_FLAG = "MENHIR_RELEASE_TEST"
 _RELEASE_TEST_MODEL = "MENHIR_RELEASE_TEST_MODEL"
+_RELEASE_TEST_IMAGE = "MENHIR_RELEASE_TEST_IMAGE"
+_RELEASE_TEST_COMMIT = "MENHIR_RELEASE_TEST_COMMIT"
 
 
 def _configured_value(name: str, file_env: dict[str, str]) -> str:
@@ -50,6 +52,8 @@ def _release_llm_environment(repo_root: Path) -> tuple[dict[str, str], dict[str,
     graphiti_provider = _configured_value("GRAPHITI_LLM_PROVIDER", file_env)
     embed_provider = _configured_value("GRAPHITI_EMBED_PROVIDER", file_env)
     release_model = _configured_value(_RELEASE_TEST_MODEL, file_env)
+    release_image = _configured_value(_RELEASE_TEST_IMAGE, file_env)
+    release_commit = _configured_value(_RELEASE_TEST_COMMIT, file_env)
 
     if release_mode:
         missing = [
@@ -65,6 +69,8 @@ def _release_llm_environment(repo_root: Path) -> tuple[dict[str, str], dict[str,
                 "release E2E requires explicit provider/model settings: "
                 + ", ".join(missing)
             )
+        if release_image and not release_commit:
+            pytest.fail(f"{_RELEASE_TEST_COMMIT} is required with {_RELEASE_TEST_IMAGE}")
 
     chat_provider = chat_provider or "openai"
     graphiti_provider = graphiti_provider or chat_provider
@@ -119,6 +125,8 @@ def _release_llm_environment(repo_root: Path) -> tuple[dict[str, str], dict[str,
         "embed_model": llm_env.get("OPENAI_EMBED_MODEL", ""),
         "base_url": llm_env.get("LOCAL_LLM_BASE_URL", "https://api.openai.com/v1"),
         "release_mode": str(release_mode).lower(),
+        "image": release_image or "source",
+        "image_commit": release_commit,
     }
     return llm_env, evidence
 
@@ -165,6 +173,17 @@ def test_declared_self_survives_public_ingest_and_cannot_be_merged(
 ) -> None:
     repo_root = Path(__file__).resolve().parents[1]
     llm_env, llm_evidence = _release_llm_environment(repo_root)
+    release_image = llm_evidence["image"]
+    container_image = None
+    if release_image != "source":
+        try:
+            container_image, revision = test_server.resolve_container_image(
+                release_image, expected_revision=llm_evidence["image_commit"],
+            )
+        except RuntimeError as exc:
+            pytest.fail(str(exc))
+        llm_evidence["image_id"] = container_image
+        llm_evidence["image_revision"] = revision
     for key, value in llm_evidence.items():
         record_property(f"release_llm_{key}", value)
     print("canonical-self E2E LLM: " + json.dumps(llm_evidence, sort_keys=True))
@@ -173,7 +192,8 @@ def test_declared_self_survives_public_ingest_and_cannot_be_merged(
     def _shape_env(*args, **kwargs):
         env = original_shape_env(*args, **kwargs)
         env.update(llm_env)
-        env["PYTHONPATH"] = str(repo_root / "src")
+        if release_image == "source":
+            env["PYTHONPATH"] = str(repo_root / "src")
         env["MENHIR_CANONICAL_SELF_BINDING_MODE"] = "enforce"
         env["MENHIR_MAX_INGEST_WORKERS"] = "1"
         env["SCHEDULER_TRACE_DISABLED"] = "1"
@@ -184,7 +204,9 @@ def test_declared_self_survives_public_ingest_and_cannot_be_merged(
     turn_text = "I own exactly 37 cobalt postcards in the north cabinet."
 
     with test_server.launch(
-        "static", backend="neo4j", python_executable=sys.executable,
+        "static", backend="neo4j",
+        python_executable=sys.executable if release_image == "source" else None,
+        container_image=container_image,
         health_timeout_s=180, quiet=True,
     ) as server:
         _wait_ready(server.base_url)
@@ -252,6 +274,17 @@ def test_declared_self_survives_public_ingest_and_cannot_be_merged(
             canonical_uuid = self_uuid_for_namespace(namespace)
             ordinary_uuid = f"ordinary-{uuid4()}"
             with driver.session() as session:
+                provenance = session.run(
+                    "MATCH (m:Episodic {uuid:$memory})-[a:ADMITTED_ON]->"
+                    "(t:TurnEvidence {turn_id:$turn}) "
+                    "MATCH (p:Episodic {uuid:$projection}) "
+                    "RETURN count(a) AS admission_count, p.content AS content, "
+                    "p.evidence_projection_of AS projection_of, "
+                    "p.is_evidence_projection AS is_projection, "
+                    "p.resolved_episode_uuid AS resolved_episode_uuid",
+                    memory=str(memory["episode_id"]), turn=turn_id,
+                    projection=projection_uuid,
+                ).single()
                 canonical = session.run(
                     "MATCH (s:Entity {uuid:$uuid}) RETURN s.name AS name, s.group_id AS group_id",
                     uuid=canonical_uuid,
@@ -290,6 +323,12 @@ def test_declared_self_survives_public_ingest_and_cannot_be_merged(
 
             assert canonical and canonical["name"] == "user"
             assert canonical["group_id"] == namespace
+            assert provenance is not None
+            assert int(provenance["admission_count"]) == 1
+            assert provenance["content"] == turn_text
+            assert provenance["projection_of"] == turn_id
+            assert provenance["is_projection"] is True
+            assert provenance["resolved_episode_uuid"] == graphiti_episode_uuid
             assert int(relation_count) >= 1
             assert int(mention_count) == 1
             assert not any(

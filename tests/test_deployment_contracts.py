@@ -1060,6 +1060,7 @@ def test_compose_parser_resolves_authority_memory_limit_to_four_gibibytes():
         "LLM_CHAT_PROVIDER": "openai",
         "GRAPHITI_LLM_PROVIDER": "openai",
         "GRAPHITI_EMBED_PROVIDER": "openai",
+        "MENHIR_CANONICAL_SELF_BINDING_MODE": "enforce",
         "MENHIR_APP_MEMORY_LIMIT": "4g",
     }
     completed = subprocess.run(
@@ -1095,6 +1096,7 @@ def test_compose_parser_forwards_openrouter_luna_settings():
         "GRAPHITI_EMBED_PROVIDER": "openai",
         "LOCAL_LLM_BASE_URL": "https://openrouter.ai/api/v1",
         "LOCAL_LLM_CHAT_MODEL": "openai/gpt-5.6-luna",
+        "MENHIR_CANONICAL_SELF_BINDING_MODE": "enforce",
     }
     completed = subprocess.run(
         [
@@ -1114,6 +1116,7 @@ def test_compose_parser_forwards_openrouter_luna_settings():
     assert service_env["GRAPHITI_EMBED_PROVIDER"] == "openai"
     assert service_env["LOCAL_LLM_BASE_URL"] == "https://openrouter.ai/api/v1"
     assert service_env["LOCAL_LLM_CHAT_MODEL"] == "openai/gpt-5.6-luna"
+    assert service_env["MENHIR_CANONICAL_SELF_BINDING_MODE"] == "enforce"
 
 
 def test_candidate_shell_functions_do_not_require_ambient_generation(tmp_path):
