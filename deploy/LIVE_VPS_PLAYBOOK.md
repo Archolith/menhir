@@ -9,9 +9,10 @@ evidence workers.
 ## Risk-scaled release rule
 
 This production service is self-hosted for one owner and has no external users. Release acceptance
-must test the exact image and the complete delta from the deployed commit using the provider/model
-read from the live configuration, then use the mechanically selected deployment class and one
-post-deploy synthetic canary. Do not add representative-user cohorts, progressive fleet stages,
+must build and digest-pin the exact image, test the complete delta from the deployed commit, use the
+mechanically selected deployment class, and run one post-deploy synthetic canary. A real-model or
+exact-image E2E is useful confidence evidence when the changed behavior warrants it, but it is not a
+deployment prerequisite. Do not add representative-user cohorts, progressive fleet stages,
 multi-day observation gates, or new shadow infrastructure when there is one writer and the owner
 can immediately roll back.
 

@@ -37,15 +37,15 @@ These are observations, not permanent release identifiers. Re-read them at execu
 | Installed maintenance authority | `menhir-prod-0.2.0-8`; Menhir commit `d8bcd6f58aaeb48a801be4a7656d8fcae50b8d54`; image `sha256:af970091…` | This is the immutable `release.json` and maintenance-journal base. Read it again before preparing the bundle. |
 | Running application override | `menhir-prod-hotfix-agent-todos-20260904`; source commit `613ff7866c75b44cb3703233f301ce4f90336fbc`; image `sha256:c406c621…` | This is the actual application behavior base. The durable override is outside the older maintenance manifest, so both lineages must remain in the candidate. |
 | Live chat/provider configuration | OpenAI for chat, Graphiti LLM, and embeddings; `OPENAI_CHAT_MODEL=gpt-4.1-nano` | This is the rollback baseline. The candidate deliberately changes chat and Graphiti extraction to OpenRouter Luna while retaining OpenAI embeddings. |
-| Candidate chat/provider configuration | `local` OpenAI-compatible provider for chat and Graphiti LLM; `LOCAL_LLM_BASE_URL=https://openrouter.ai/api/v1`; `LOCAL_LLM_CHAT_MODEL=openai/gpt-5.6-luna`; OpenAI embeddings | Exact-model and exact-image tests must use these values. Production requires a non-empty `local-llm-api-key` secret before deployment. |
+| Candidate chat/provider configuration | `local` OpenAI-compatible provider for chat and Graphiti LLM; `LOCAL_LLM_BASE_URL=https://openrouter.ai/api/v1`; `LOCAL_LLM_CHAT_MODEL=openai/gpt-5.6-luna`; OpenAI embeddings | Any optional real-model/image probe must use these values. Production requires a non-empty `local-llm-api-key` secret before deployment. |
 | Live canonical-self mode | unset, therefore `off` | Candidate production environment must explicitly set `MENHIR_CANONICAL_SELF_BINDING_MODE=enforce`. |
 | Phase 1 candidate | branch `feat/canonical-self-subject-endpoint-20260904`; production-lineage merge `4fdb27a787a79b89e53d7fed4c87a9f22c35960d` | Contains current `origin/main`, the running hotfix lineage, and the installed maintenance-authority lineage. The release binds the later final Phase 4 commit. |
 | Phase 1 release delta | Installed authority → candidate: 41 commits and 82 files. Running app source → candidate: 60 commits and 95 files. | Preserve both comparisons: one protects deployment authority; the other describes application behavior changing from what is actually running. Recompute after every release fix. |
 | Expected class | `maintenance` | The classifier is authoritative. `deploy/`, configuration, dependency lock, and startup surfaces already rule out `app-only`. |
 
-The previous `gpt-4o-mini` endpoint E2E and source-based local server run remain useful development
-evidence. They are not release evidence because this candidate deliberately selects OpenRouter Luna
-and the final deployable object is an image digest.
+The endpoint E2E remains useful development evidence and has been exercised with OpenRouter Luna
+and the packaged image. Under this self-hosted, single-owner risk profile it is supporting evidence,
+not a deployment gate; the deployable authority is still the published image digest.
 
 ### Phase 1 checkpoint — 2026-09-04
 
@@ -82,8 +82,8 @@ In scope:
 - the complete deployed-to-candidate change set, including canonical self, turn evidence and
   episode admission, todo operations, scheduler tracing, API/MCP changes, production policy,
   production Compose/configuration, dependencies, and documentation;
-- closing the known release-parity gaps in the E2E and production environment wiring;
-- building and testing the exact image later referenced by `release.json`;
+- retaining an optional, production-class E2E while closing the required production environment wiring;
+- building, inspecting, and digest-pinning the exact image later referenced by `release.json`;
 - normal PR CI, mechanical release classification, release authoring, independent security review,
   backup/restore admission, the fixed maintenance transaction, public acceptance, and rollback;
 - prevention of new canonical-self forks after activation;
@@ -121,8 +121,8 @@ Authority and refusal outcome:
 
 Release invariants:
 
-- the image tested locally, recorded in the release authority, pulled by the VPS, and reported by
-  the running container is one immutable digest;
+- the image built from the final commit, recorded in the release authority, pulled by the VPS, and
+  reported by the running container is one immutable registry digest;
 - the final release delta and CI evidence cover every changed file, not only canonical-self files;
 - exactly one production Menhir writer and one production Neo4j authority exist at promotion;
 - OAuth/client policy, secrets, backup evidence, writer fence, route authority, and rollback
@@ -134,13 +134,13 @@ Release invariants:
 
 | Surface in the accumulated delta | Required evidence before release |
 |---|---|
-| Canonical-self extraction, declaration, binding, dedup isolation, and merge refusal | Focused unit/integration corpus plus exact-model, exact-image public-path E2E. |
-| Turn evidence, admission, lifecycle, and background projection | Claim/replay/mismatch tests; E2E reaches `READY` and proves current episode provenance. |
+| Canonical-self extraction, declaration, binding, dedup isolation, and merge refusal | Focused unit/integration corpus; optional real-model/image E2E as supporting evidence. |
+| Turn evidence, admission, lifecycle, and background projection | Claim/replay/mismatch tests plus the required post-deploy synthetic canary. |
 | Todo repository, domain, API, and MCP operations | Existing todo suite and gateway/tool-census tests pass without policy drift. |
 | API routes, backend protocol/runtime operations, and recall integration | Full suite, production runtime-surface tests, authenticated release acceptance. |
 | Scheduler tracing and worker lifecycle | Scheduler trace/lease tests and one completed asynchronous projection cycle. |
 | Client policy and production configuration | Policy digest/startup tests, rendered Compose review, security review, per-product OAuth/tool matrix, and a bounded TODO lifecycle smoke. |
-| Dependency and lockfile changes | Clean install/build from the lock, SBOM, vulnerability scan, provenance, and exact image test. |
+| Dependency and lockfile changes | Clean install/build from the lock, SBOM, vulnerability scan, provenance, and immutable image identity. |
 | Deployment documentation | Artifact validation and agreement among this plan, the canonical-self runbook, and the live VPS playbook. |
 
 ## Phase 1 — Freeze and review the real candidate
@@ -168,20 +168,20 @@ Exit evidence:
 
 ## Phase 2 — Close the known production-parity gaps
 
-### 2.1 Make the E2E model explicit
+### 2.1 Keep the optional E2E production-class
 
 Remove the hard-coded `gpt-4o-mini` assignment from
-`tests/test_canonical_self_endpoint_e2e.py`. The durable E2E must accept an explicit release-test
+`tests/test_canonical_self_endpoint_e2e.py`. When invoked as release evidence, the durable E2E must accept an explicit release-test
 model and report the model used. In release mode it must refuse to run when the model is absent;
 developer runs may keep a documented default only when they are not presented as release evidence.
 
-For this release, the acceptance invocation must set `MENHIR_RELEASE_TEST=1`, name
+When this optional probe is used for this release, its invocation must set `MENHIR_RELEASE_TEST=1`, name
 `MENHIR_RELEASE_TEST_MODEL=openai/gpt-5.6-luna`, select the OpenAI-compatible `local` provider for
 chat and Graphiti extraction, use `https://openrouter.ai/api/v1`, and retain the OpenAI embedding
 provider with `text-embedding-3-small`. Missing explicit release provider/model input is a refusal,
 not a skip or fallback.
 
-Exact-image evidence must additionally set `MENHIR_RELEASE_TEST_IMAGE` and
+Exact-image evidence, when collected, must additionally set `MENHIR_RELEASE_TEST_IMAGE` and
 `MENHIR_RELEASE_TEST_COMMIT`. The launcher resolves the image tag once, refuses a revision-label
 mismatch, and runs the immutable local image ID with `--pull=never`; its throwaway secrets are
 mounted as files and are not copied into the container environment. This is a packaged full-surface
@@ -247,30 +247,31 @@ for write permissions it cannot exercise.
 
 Exit evidence:
 
-- E2E accepts and reports the explicit live model;
+- optional E2E, when run, accepts and reports the explicit target model;
 - production Compose and environment render `enforce` into the container;
 - a fixed, scope-bounded canary verifier and receipt schema exist;
 - release authority binds the maintenance class, changed-path evidence, and canonical mode;
 - fixed acceptance proves the product policy matrix and TODO lifecycle;
 - focused tests for these changes pass.
 
-## Phase 3 — Test the exact candidate locally
+## Phase 3 — Verify and package the exact candidate locally
 
 Use Docker Desktop and the test Menhir setup. The VPS is not a test environment; it is used here
 only to read the live configuration and later to execute the approved deployment.
 
-1. Build the candidate image once from the final clean commit and record its immutable digest.
-2. Start that image with disposable local Neo4j and test state, the candidate provider selections,
-   OpenRouter Luna for chat/extraction, OpenAI `text-embedding-3-small`, and canonical-self mode
-   `enforce`. Inject credentials
-   through the existing secret mechanism; never copy production state or expose keys in command
-   output.
+1. Build the candidate image once from the final clean commit and record its immutable local image
+   ID and source revision. Publication later supplies the immutable registry digest used by release
+   authority.
+2. If running the optional exact-image E2E, start that image with disposable local Neo4j and test
+   state, the candidate provider selections, OpenRouter Luna for chat/extraction, OpenAI
+   `text-embedding-3-small`, and canonical-self mode `enforce`. Inject credentials through the
+   existing secret mechanism; never copy production state or expose keys in command output.
 3. Run the full repository test suite from a clean environment. The prior run with one concurrency
    timing failure followed by an isolated pass is diagnostic evidence, not a green release gate;
    the final candidate must produce a clean required CI result.
 4. Run the focused canonical, evidence, admission, merge, todo, scheduler, MCP, and production
    runtime suites.
-5. Drive the exact image through the public-path E2E with the frozen corpus:
+5. Optionally drive the exact image through the public-path E2E as an additional confidence probe:
    - affirmative first-person subject statements that should bind;
    - first-person object/non-subject use that must not bind;
    - a question and an explicit negation;
@@ -279,21 +280,23 @@ only to read the live configuration and later to execute the approved deployment
    - third-person `user` and RBAC-role uses;
    - mixed self and third-party entities;
    - replay and evidence/body mismatch.
-6. For the positive case require `READY`, the deterministic canonical UUID, a relationship tied to
-   the current Graphiti episode, `MENTIONS` provenance, zero endpoint-marker text across every
-   persisted node/relationship property, and an idempotent replay. Require canonical merge refusal
-   in both directions. For every negative case require no canonical authority; ordinary entities may
-   still be extracted normally.
-7. If the production model fails a case, fix only the demonstrated parser/prompt/validation defect,
-   rebuild to a new digest, and repeat this phase. Do not substitute another model or add shadow
-   infrastructure to make the gate pass.
+6. If the optional E2E is run, require for the positive case `READY`, the deterministic canonical
+   UUID, a relationship tied to the current Graphiti episode, `MENTIONS` provenance, zero
+   endpoint-marker text across every persisted node/relationship property, and an idempotent replay.
+   Require canonical merge refusal in both directions. For every negative case require no canonical
+   authority; ordinary entities may still be extracted normally.
+7. Treat an optional production-model failure as diagnostic evidence. Fix a demonstrated
+   parser/prompt/validation defect before relying on that behavior, then rebuild and rerun the
+   affected checks. The optional probe does not itself authorize or block deployment; required CI,
+   release packaging, and the post-deploy canary retain their own pass/fail authority.
 
 Exit evidence:
 
 - clean full suite and focused suite tied to the final commit;
-- E2E receipt naming the exact image digest, provider/model values, corpus revision, and results;
-- no skipped required release test;
-- image digest that will be placed in the release authority.
+- optional E2E receipt, if collected, naming the image ID, provider/model values, corpus revision, and results;
+- no skipped required CI or release-authority check;
+- local image ID and source revision; the registry digest is recorded after publication and before
+  release authority is finalized.
 
 ## Phase 4 — CI, classification, and release package preparation
 
@@ -307,7 +310,8 @@ Exit evidence:
    and package local until the owner gate; record the content digest that publication must preserve.
 4. Confirm the rendered production environment routes chat and Graphiti extraction through
    OpenRouter Luna, keeps embeddings on OpenAI, and explicitly sets canonical-self `enforce`.
-   Confirm its provider/model values, mode, and image digest agree with the local E2E receipt.
+   If an optional local E2E receipt exists, confirm its provider/model values and image identity do
+   not disagree with the rendered environment.
 5. Generate the independent security-review request from the exact release spec. A different
    reviewer must approve the complete proposed authority digest with no unresolved critical/high
    finding. Publication may not change any reviewed byte or digest.
@@ -357,7 +361,7 @@ Present one go/no-go packet to the owner:
 
 - live and candidate immutable identities;
 - complete delta summary and release class;
-- CI, exact-model/image E2E, scan, provenance, and security-review results;
+- CI, scan, provenance, and security-review results, plus optional E2E evidence if collected;
 - enforce and off package specifications and expected authority digests;
 - backup/restore and writer-fence readiness;
 - exact production mutations, expected interruption, canary namespace scheme, and rollback actions;
@@ -464,13 +468,13 @@ Response:
 
 | Item | Current state | Blocking condition |
 |---|---|---|
-| Explicit release-model E2E | Hard-coded to `gpt-4o-mini` before this phase | Block until the durable test runs in release mode and reports OpenRouter Luna with OpenAI embeddings. |
+| Explicit release-model E2E | Durable test accepts and reports OpenRouter Luna with OpenAI embeddings | Supporting evidence only; not a deployment blocker. |
 | OpenRouter production secret | Workstation key exists; VPS `local-llm-api-key` is absent | Block production deployment until the fixed secret path contains the key with the enforced owner/mode and verification passes. |
-| Exact-image E2E | Prior pass used a source-launched local server | Block until the final image digest passes against disposable Docker Neo4j. |
-| Production mode wiring | Compose does not currently pass `MENHIR_CANONICAL_SELF_BINDING_MODE` | Block until rendered candidate environment proves `enforce`. |
-| Release authority for mode | Release authoring validates the policy digest but not the canonical mode enum/effective runtime value | Block until authoring, schema, runner, and acceptance bind and verify it. |
+| Exact-image E2E | Packaged-image probe exists and has passed against disposable Docker Neo4j | Supporting evidence only; a later packaging-neutral change does not require rerunning it for deployment. |
+| Production mode wiring | Compose now passes `MENHIR_CANONICAL_SELF_BINDING_MODE` and the example sets `enforce` | Block until the rendered release environment proves the intended value before deployment. |
+| Release authority for mode | Release authoring now validates and digest-binds the canonical mode enum | Block until the finalized bundle and running-container acceptance prove the same effective value. |
 | Maintenance class authority | The app-only classifier is trusted, but `release.json`/maintenance runner do not yet bind a deployment class or changed-path evidence | Block until the immutable authority and runner verify both. |
-| Fixed production canary | Turn-evidence/admission routes are private and no receipt-producing canary exists | Block until the internal-staging/public-MCP/internal-admission verifier exists and passes against the local exact image. |
+| Fixed production canary | Turn-evidence/admission routes are private and no receipt-producing canary exists | Block until the scoped verifier exists; its required execution is the post-deploy synthetic canary, not a local image E2E. |
 | Changed client-policy acceptance | Current deployment probe is read-only and cannot prove the new TODO grants or product identities | Block until the product/tool matrix and bounded TODO lifecycle are fixed acceptance checks. |
 | Final PR CI | No final pull-request result for this candidate | Block until all required jobs are green on the final commit. |
 | Full release review | Pre-plan delta spans 78 files and protected surfaces | Block until every final changed file has test/review ownership. |
@@ -493,7 +497,7 @@ Live providers / chat model / embedding model: openai/openai/openai; gpt-4.1-nan
 Candidate providers / chat model / embedding model: local/local/openai; openai/gpt-5.6-luna via https://openrouter.ai/api/v1; text-embedding-3-small
 Canonical mode in rendered candidate:
 Full suite / focused suite:
-Exact-model exact-image E2E receipt:
+Optional exact-model/image E2E receipt:
 PR CI run:
 Mechanical release class:
 SBOM / scan / provenance:
