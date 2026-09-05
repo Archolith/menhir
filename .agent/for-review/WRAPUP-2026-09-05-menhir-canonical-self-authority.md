@@ -4,12 +4,12 @@
 **Agent:** Codex
 **Model:** GPT-5
 **Session:** Not exposed by harness
-**Status:** READY FOR REVIEW
+**Status:** PARTIAL
 **Plan / Ticket:** `C:\Users\thron\Documents\Codex\2026-09-05\fihnd-x20\work\menhir-canonical-self-authority\.agent\plans\menhir-canonical-self-authority-boundary-2026-09-05.md`
 **Worktree:** `C:\Users\thron\Documents\Codex\2026-09-05\fihnd-x20\work\menhir-canonical-self-authority`
 **Branch:** `feat/canonical-self-authority-boundary-20260905`
-**Commits:** `36925c342f9b03a745d02c97bdb229c217325784`, `e0dd6da0fba466c2a5cdce94aa35180d028b77e7`
-**Verification Scope:** committed diff from plan commit `9a016bfa7800b1b736618c13dcb0b5fc726d2e63` through `e0dd6da0fba466c2a5cdce94aa35180d028b77e7`; wrapup checked in the current worktree
+**Commits:** `36925c342f9b03a745d02c97bdb229c217325784`, `e0dd6da0fba466c2a5cdce94aa35180d028b77e7`, `a7a967c2fa6bf094407004c1266c7576149c3348`
+**Verification Scope:** committed diff from plan commit `9a016bfa7800b1b736618c13dcb0b5fc726d2e63` through review-remediation commit `a7a967c2fa6bf094407004c1266c7576149c3348`; wrapup checked in the current worktree
 **Docs Updated:** `C:\Users\thron\Documents\Codex\2026-09-05\fihnd-x20\work\menhir-canonical-self-authority\.agent\architecture.md`, `C:\Users\thron\Documents\Codex\2026-09-05\fihnd-x20\work\menhir-canonical-self-authority\.agent\data_models.md`, `C:\Users\thron\Documents\Codex\2026-09-05\fihnd-x20\work\menhir-canonical-self-authority\.agent\default-off-features.md`, `C:\Users\thron\Documents\Codex\2026-09-05\fihnd-x20\work\menhir-canonical-self-authority\.agent\plans\README.md`, `C:\Users\thron\Documents\Codex\2026-09-05\fihnd-x20\work\menhir-canonical-self-authority\.agent\plans\menhir-canonical-self-authority-boundary-2026-09-05.md`, `C:\Users\thron\Documents\Codex\2026-09-05\fihnd-x20\work\menhir-canonical-self-authority\.agent\plans\menhir-production-release-2026-09-04.md`, `C:\Users\thron\Documents\Codex\2026-09-05\fihnd-x20\work\menhir-canonical-self-authority\.agent\workflows\canonical-self-migration-runbook.md`, `C:\Users\thron\Documents\Codex\2026-09-05\fihnd-x20\work\menhir-canonical-self-authority\.env.example`, `C:\Users\thron\Documents\Codex\2026-09-05\fihnd-x20\work\menhir-canonical-self-authority\deploy\production.env.example`
 **Changelog Updated:** `C:\Users\thron\Documents\Codex\2026-09-05\fihnd-x20\work\menhir-canonical-self-authority\.agent\CHANGELOG.md`
 
@@ -20,11 +20,14 @@
 The plan was traced backward from its end state: no semantic assertion may attach to canonical self
 without exact nondelegated owner confirmation; every alternate writer and reader must fail closed;
 `off` and `observe` must retain compatibility; and activation must remain separately gated. That
-trace exposed four final implementation gaps during independent review: the outer service builder
+trace exposed four initial implementation gaps during independent review: the outer service builder
 could degrade after an authority-patch startup failure, combined extraction did not report required
 patch readiness, historical UUID-less self-alias Views could enter generic/ordinary recall, and the
-flagged-bootstrap cache fingerprint did not share the row filter. All four are closed and were
-re-audited clean. The authorized repository implementation is complete. Disposable database,
+flagged-bootstrap cache fingerprint did not share the row filter. A later PR review found three
+more: grammar-dependent endpoint transport and ordinary-self fallback, approval without a stable
+counterpart UUID, and verified-self recall hidden behind experimental fact-edge settings. That
+review also identified unsigned summary hydration and an obsolete online expectation. The
+repository implementation closes those paths and adds the requested regressions. Disposable database,
 live-provider, deployment, activation, and historical remediation steps remain unrun because the
 plan explicitly requires separate approval for them.
 
@@ -33,16 +36,19 @@ plan explicitly requires separate approval for them.
 ## Summary
 
 Menhir now separates canonical structural identity from authority to assert facts about that
-identity. In `enforce`, an exact Ed25519 owner confirmation is bound to the full assertion and
-evidence lineage before Graphiti can persist a self edge. The final resolver and every authoritative
-reader recheck direction, namespace, counterpart, semantics, temporal values, external episode,
+identity. In `enforce`, an exact Ed25519 owner confirmation is bound to the full assertion, evidence
+lineage, and already-persistent counterpart UUID before Graphiti can persist a self edge. The final
+resolver and every authoritative reader recheck direction, namespace, counterpart identity,
+semantics, temporal values, external episode,
 internal Graphiti episode, and actual edge attribution. Confirmation capability is task-local;
 unconfirmed material remains a bounded non-recallable proposal.
 
 Alternate typed, event, View, replay, repair, merge, lifecycle, summary, and generic-context paths
 are fenced. Historical self nodes and Views are withheld from default recall, while ordinary
-entities merely named `user` remain eligible. `enforce` startup now aborts unless Graphiti-backed
-reads and every authority-critical patch are available. Configuration remains default-off, and no
+entities merely named `user` remain eligible. Unmarked author fallbacks are quarantined, rejected
+self-proposal episodes cannot hydrate free-form node summaries, and verified self facts use an
+enforcement-only recall lane independent of general fact-edge/history gates. `enforce` startup now
+aborts unless Graphiti-backed reads and every authority-critical patch are available. Configuration remains default-off, and no
 database, live provider, deployment, production setting, or historical graph was changed.
 
 ## Files Changed
@@ -77,7 +83,7 @@ database, live provider, deployment, production setting, or historical graph was
 | `C:\Users\thron\Documents\Codex\2026-09-05\fihnd-x20\work\menhir-canonical-self-authority\src\menhir\infrastructure\episode_maintenance.py` | Preserve proposal/authority behavior during episode maintenance. |
 | `C:\Users\thron\Documents\Codex\2026-09-05\fihnd-x20\work\menhir-canonical-self-authority\src\menhir\infrastructure\graphiti_client.py` | Verify confirmations on read and require all authority-critical patches at startup. |
 | `C:\Users\thron\Documents\Codex\2026-09-05\fihnd-x20\work\menhir-canonical-self-authority\src\menhir\infrastructure\graphiti_extraction_patches.py` | Transport opaque endpoints, authorize exact edges, stamp lineage, and preserve signed values through final resolution. |
-| `C:\Users\thron\Documents\Codex\2026-09-05\fihnd-x20\work\menhir-canonical-self-authority\src\menhir\infrastructure\graphiti_model_patches.py` | Isolate canonical self from ordinary candidate resolution. |
+| `C:\Users\thron\Documents\Codex\2026-09-05\fihnd-x20\work\menhir-canonical-self-authority\src\menhir\infrastructure\graphiti_model_patches.py` | Isolate canonical self from ordinary candidate resolution, finalize authority after counterpart resolution, and bypass free-form hydration for self-proposal episodes. |
 | `C:\Users\thron\Documents\Codex\2026-09-05\fihnd-x20\work\menhir-canonical-self-authority\src\menhir\infrastructure\graphiti_patches.py` | Re-export the authority patch family through the shared patch surface. |
 | `C:\Users\thron\Documents\Codex\2026-09-05\fihnd-x20\work\menhir-canonical-self-authority\src\menhir\infrastructure\memory_graph_adapter.py` | Propagate strict mode to all low-level repositories. |
 | `C:\Users\thron\Documents\Codex\2026-09-05\fihnd-x20\work\menhir-canonical-self-authority\src\menhir\infrastructure\memory_queries.py` | Exclude unverifiable self context, including normalized historical Views, from generic readers and cache fingerprints. |
@@ -99,7 +105,9 @@ database, live provider, deployment, production setting, or historical graph was
 | `C:\Users\thron\Documents\Codex\2026-09-05\fihnd-x20\work\menhir-canonical-self-authority\src\menhir\services\shadow_context_composition.py` | Apply the same signed-edge checks to shadow context. |
 | `C:\Users\thron\Documents\Codex\2026-09-05\fihnd-x20\work\menhir-canonical-self-authority\src\menhir\services\typed_scalar_service.py` | Make self-shaped scalar extraction proposal-only in enforcement. |
 | `C:\Users\thron\Documents\Codex\2026-09-05\fihnd-x20\work\menhir-canonical-self-authority\tests\test_event_consolidation.py` | Cover event-lane authority gating. |
-| `C:\Users\thron\Documents\Codex\2026-09-05\fihnd-x20\work\menhir-canonical-self-authority\tests\test_graphiti_combined_extraction_closure.py` | Cover exact signed-edge lineage and resolver preservation. |
+| `C:\Users\thron\Documents\Codex\2026-09-05\fihnd-x20\work\menhir-canonical-self-authority\tests\test_canonical_self_endpoint_e2e.py` | Specify the public unsigned -> confirmed -> revoked lifecycle with disposable owner keys and an exact persistent counterpart. |
+| `C:\Users\thron\Documents\Codex\2026-09-05\fihnd-x20\work\menhir-canonical-self-authority\tests\test_correlation_service.py` | Pin executable expansion of canonical-self guards in the merge mutation query. |
+| `C:\Users\thron\Documents\Codex\2026-09-05\fihnd-x20\work\menhir-canonical-self-authority\tests\test_graphiti_combined_extraction_closure.py` | Cover grammar-independent transport, fallback quarantine, stable counterpart resolution, unsigned hydration containment, and exact resolver preservation. |
 | `C:\Users\thron\Documents\Codex\2026-09-05\fihnd-x20\work\menhir-canonical-self-authority\tests\test_live_vps_playbook.py` | Keep deployment-playbook contracts aligned without executing them. |
 | `C:\Users\thron\Documents\Codex\2026-09-05\fihnd-x20\work\menhir-canonical-self-authority\tests\test_recall_event_authority_runtime.py` | Cover event-authority exclusion from runtime recall. |
 | `C:\Users\thron\Documents\Codex\2026-09-05\fihnd-x20\work\menhir-canonical-self-authority\tests\test_recall_service.py` | Cover canonical nodes, historical Views, ordinary `user` entities, summaries, and scalar observations. |
@@ -111,13 +119,16 @@ database, live provider, deployment, production setting, or historical graph was
 
 ## Verification
 
-- `C:\Users\thron\IdeaProjects\projects\archolith\menhir\.venv\Scripts\python.exe -m pytest -q -n 0 tests/test_self_identity.py tests/test_recall_service.py -m unit` — `PASS` — exit 0; 188 passed, 1 known dependency warning.
-- `C:\Users\thron\IdeaProjects\projects\archolith\menhir\.venv\Scripts\python.exe -m pytest -q -m unit -n 0` — `PASS` — exit 0; 5,809 passed, 10 skipped, 3,500 deselected, 3 known warnings in 329.55 seconds.
+- `C:\Users\thron\IdeaProjects\projects\archolith\menhir\.venv\Scripts\python.exe -m pytest -q tests/test_correlation_service.py tests/test_graphiti_combined_extraction_closure.py tests/test_self_authority.py tests/test_recall_service.py` — `PASS` — exit 0; 341 passed, 1 dependency warning in 16.35 seconds.
+- `C:\Users\thron\IdeaProjects\projects\archolith\menhir\.venv\Scripts\python.exe -m pytest -q` — `PASS` — exit 0; exact offline CI selection completed with 8,970 passed, 358 skipped, 8 warnings in 627.82 seconds.
+- `ruff check --select F811 --output-format concise .` — `PASS` — exit 0; all checks passed.
+- `ruff check --select F821,ASYNC --output-format concise src` — `PASS` — exit 0; all checks passed.
 - `C:\Users\thron\IdeaProjects\projects\archolith\menhir\.venv\Scripts\python.exe -m compileall -q src tests` — `PASS` — exit 0 with no output.
-- `git diff --check 9a016bfa7800b1b736618c13dcb0b5fc726d2e63..e0dd6da0fba466c2a5cdce94aa35180d028b77e7` — `PASS` — exit 0 with no output.
-- `uv lock --check --offline` — `PASS` — exit 0; resolved 102 packages in 2 ms.
-- `menhir artifacts validate . --repository menhir` — `FAIL` — exit 1; validated 216 records (including this wrapup) and reported 22 inherited findings. None names a file changed by this plan; the findings are one archived-plan status mismatch, six unindexed plans, one unindexed PDF, and fourteen reference records without declared types.
-- Independent blocker re-audit by two read-only reviewers — `PASS` — both reported no remaining Critical, High, or Medium finding after the four blocker fixes and whitespace-normalization correction.
+- `C:\Users\thron\IdeaProjects\projects\archolith\menhir\.venv\Scripts\python.exe -m pytest --collect-only -q tests/test_canonical_self_endpoint_e2e.py` — `PASS` — exit 0; the rewritten online lifecycle test collected without executing its Docker/Neo4j/provider path.
+- `git diff --check ab72c9a34a974515d815c6926b4441d3b39ec6d9..a7a967c2fa6bf094407004c1266c7576149c3348` — `PASS` — exit 0 with no output.
+- `uv lock --check --offline` — `PASS` — exit 0; resolved 102 packages in 18 ms against the review-remediation checkout.
+- `menhir artifacts validate . --repository menhir` — `FAIL` — exit 1; validated 216 records and reported the same 22 inherited corpus findings: one archived-plan status mismatch, six unindexed plans, one unindexed PDF, and fourteen reference records without declared types. None names a file changed by this plan.
+- `artifact_validate(artifact_type="wrapups", filename="WRAPUP-2026-09-05-menhir-canonical-self-authority.md")` — `NOT RUN` — the required wrapup validator tool is unavailable in this harness, so this wrapup remains `PARTIAL`.
 - Disposable Neo4j/Docker uniqueness, concurrency, rollback, and schema checks — `NOT RUN` — require separate approval and isolated storage under the plan.
 - Live production-provider/model extraction and disposable canary — `NOT RUN` — require separate approval and exact candidate image/config.
 - Deployment, production activation, and historical graph census/remediation — `NOT RUN` — explicitly outside this implementation authorization.
@@ -134,7 +145,7 @@ database, live provider, deployment, production setting, or historical graph was
 - Plan / acceptance criteria completed: `partial` — the authorized repository implementation and offline acceptance criteria are complete; separately approved database/live/deployment/activation gates remain open.
 - Docs updated as required: `yes`
 - Changelog updated as required: `yes`
-- Work committed: `yes`
+- Work committed: `yes` — implementation is anchored at `a7a967c2fa6bf094407004c1266c7576149c3348`; this wrapup update is the only closeout change pending its own commit.
 
 ## Assumptions
 
@@ -147,11 +158,12 @@ database, live provider, deployment, production setting, or historical graph was
 1. Confirmation-file reads and Neo4j relationship persistence cannot share one transaction. Final resolution and every authoritative recall reverify the signature, but a narrow external-file/database race can leave a stored edge that is withheld on subsequent recall.
 2. A stale summary whose historical self edge was already deleted has no surviving structural lineage to classify. Prevention is implemented; graph cleanliness still requires a separately approved read-only census and journaled remediation.
 3. Database uniqueness, concurrent first-write behavior, rollback, real-provider extraction, exact-image canary, and production activation remain unverified because those operations were not authorized.
-4. Repository artifact validation remains red on 22 inherited corpus findings unrelated to this plan.
+4. The required `artifact_validate` wrapup tool is unavailable in this harness, so the closeout cannot honestly be marked `READY FOR REVIEW`; the separate repository CLI validator still reports 22 inherited corpus findings unrelated to this plan.
+5. The online lifecycle test is collect-checked only. Its second real-model extraction intentionally fails closed if the exact proposal drifts, but that live behavior remains unverified until separately authorized.
 
 ## Follow-Up Tasks
 
-1. Review commits `36925c342f9b03a745d02c97bdb229c217325784` and `e0dd6da0fba466c2a5cdce94aa35180d028b77e7` against the linked plan.
+1. Review commits `36925c342f9b03a745d02c97bdb229c217325784`, `e0dd6da0fba466c2a5cdce94aa35180d028b77e7`, and `a7a967c2fa6bf094407004c1266c7576149c3348` against the linked plan and the PR findings.
 2. If approved, run the disposable Neo4j/Docker concurrency, uniqueness, rollback, and schema gates against this exact candidate.
 3. If those pass, build the exact release image, run the approved live-provider/model canary, and make a separate activation decision with backup and rollback controls.
 4. After prevention is proven, authorize a fresh read-only historical census before considering any journaled remediation.
@@ -159,4 +171,4 @@ database, live provider, deployment, production setting, or historical graph was
 ## Notes
 
 - No Docker container, database, live provider, deployment target, production setting, or historical graph was changed during this implementation.
-- The plan correctly remains `IMPLEMENTING`; `READY FOR REVIEW` here means the committed repository implementation is reviewable, not that production activation is complete.
+- The plan correctly remains `IMPLEMENTING`. This wrapup remains `PARTIAL` solely because the required mechanical wrapup validator is unavailable and the separately gated database/live checks remain unrun; the committed repository implementation is ready for human review, not production activation.
