@@ -42,6 +42,9 @@ def build_hook_services(settings: MemorySettings | None = None) -> HookServices:
         password=settings.neo4j_password,
     )
     graph_adapter = MemoryGraphAdapter(neo4j=neo4j)
+    graph_adapter.configure_canonical_self_binding_mode(
+        getattr(settings, "canonical_self_binding_mode", "off")
+    )
 
     # Attempt full path for context recall.
     # Always prefer the direct Graphiti path — the hook is designed to bypass HTTP.

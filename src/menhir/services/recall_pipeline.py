@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 from menhir.domain.models import FreshnessState, NodeScope, ProcessingState
 from menhir.domain.truth.kinds import DIVERSITY_FAMILY as _FRONTIER_DIVERSITY_FAMILY
 from menhir.domain.namespace import namespace_to_group_ids, stamped_namespace
+from menhir.domain.self_identity import is_self_alias
 from menhir.domain.self_identity import self_uuid_for_namespace
 from menhir.domain.recall import (
     CandidateData,
@@ -146,6 +147,12 @@ def _filter_authorized_canonical_self_fact_rows(
                     row.get("edge_target_labels")
                     if row.get("edge_source_uuid") == expected_self_uuid
                     else row.get("edge_source_labels")
+                ),
+                group_id=row.get("group_id"),
+                episode_uuids=row.get("edge_episode_uuids"),
+                authority_episode_uuid=row.get("self_authority_episode_uuid"),
+                authority_graphiti_episode_uuid=row.get(
+                    "self_authority_graphiti_episode_uuid"
                 ),
                 predicate=row.get("predicate"),
                 fact=row.get("fact"),
@@ -675,6 +682,16 @@ async def run_recall(
         ):
             # Scalar/event Views are derived from lanes that do not yet accept owner signatures.
             # Keep legacy projections available to inspection APIs, never default recall.
+            continue
+        if (
+            self_authority_enforced
+            and bool(row.get("is_view"))
+            and not str(row.get("view_subject_uuid") or "").strip()
+            and is_self_alias(row.get("view_subject"))
+        ):
+            # Older Views were keyed by display text and have no durable subject UUID. Isolate
+            # only those View rows whose stored subject is a self alias; an ordinary Entity named
+            # "user" remains recallable because it is not a View.
             continue
         metadata_by_uuid[uuid] = row
 

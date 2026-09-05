@@ -290,13 +290,17 @@ Episode nodes are provenance anchors created by each ingestion call. Label: `Epi
 | `self_assertion_policy_version` | string | Policy version used to construct and verify the proposal payload. |
 | `self_assertion_proposals_recorded_at` | timestamp | Time the lease-owning enrichment worker recorded the bounded proposal receipt. |
 
-An authorized Graphiti `RELATES_TO` edge incident to canonical self carries
-`menhir_self_authority_payload_json`, the canonical JSON object signed out of band. It includes the
+An authorized Graphiti `RELATES_TO` edge incident to canonical self carries three server-owned
+properties: `menhir_self_authority_payload_json` (the canonical JSON object signed out of band),
+`menhir_self_authority_episode_uuid` (the external Menhir episode in that signed payload), and
+`menhir_self_authority_graphiti_episode_uuid` (the internal Graphiti episode that must also appear
+in the relationship's `episodes` list). The signed object includes the
 principal, namespace, episode/turn evidence lineage, evidence digest, assertion, direction,
 polarity, temporal scope, revision, schema and policy plus its derived claim digest. Menhir stores
 neither the signature nor a private key. The final Graphiti resolver and `enforce` fact-edge recall
 both require the relationship's actual source/target direction, resolved counterpart name and
-labels, `name`, `fact`, `valid_at`, `invalid_at` and `expired_at` to equal that payload and recheck the current read-only confirmation
+labels, physical `group_id`, stamped/actual episode attribution, `name`, `fact`, `valid_at`,
+`invalid_at` and `expired_at` to equal that authority tuple and recheck the current read-only confirmation
 file. Missing, changed, malformed, revoked or mismatched records are excluded; final-resolution
 drift fails the episode before persistence.
 

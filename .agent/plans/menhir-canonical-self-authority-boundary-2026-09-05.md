@@ -219,7 +219,10 @@ backup, exact-image/config evidence and rollback controls. Historical-fork work 
 approved, journaled, reversible migration beginning with a fresh read-only census after prevention
 is proven. This plan does not authorize either operation.
 
-Implementation verification is recorded in the review wrapup. Focused local unit suites pass on
-the implementation branch. Repository artifact validation and the full serial unit suite remain
-required before this plan is marked implemented. Docker, live-provider, deployment, production
-activation and historical migration checks remain intentionally unrun without separate approval.
+Implementation verification is recorded in the review wrapup. The focused authority suites and
+the full serial unit suite pass on the implementation branch (`5809 passed, 10 skipped`). Offline
+dependency-lock validation and compilation also pass. Repository artifact validation still reports
+22 inherited findings, none in files changed by this plan; that unrelated corpus debt was not folded
+into this authority change. The plan remains `IMPLEMENTING` because disposable Docker,
+live-provider, deployment, production activation and historical migration checks remain
+intentionally unrun without separate approval.

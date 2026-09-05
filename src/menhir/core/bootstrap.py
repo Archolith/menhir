@@ -9,6 +9,7 @@ from typing import Any
 from menhir.config import MemorySettings
 from menhir.core.runtime_preflight import RuntimeCapabilities
 from menhir.infrastructure import GraphitiClient, LLMAdapter, MemoryGraphAdapter, Neo4jRepository
+from menhir.infrastructure.self_binding import SelfBindMode, resolve_bind_mode
 from menhir.services import CandidateService, ContextBuilderService, IngestService, RecallService, ScoringService, LifecycleService
 
 
@@ -164,6 +165,9 @@ def build_memory_services(
 ) -> BuildArtifacts:
     """Build collaborators for the v1 memory pipeline."""
     settings = settings or MemorySettings.from_env()
+    self_binding_mode = resolve_bind_mode(
+        getattr(settings, "canonical_self_binding_mode", "off"), strict=True
+    )
     neo4j = Neo4jRepository(
         uri=settings.neo4j_uri,
         database=settings.neo4j_database,
@@ -174,6 +178,14 @@ def build_memory_services(
     llm_reason = "LLM-backed features are unavailable in the current startup mode."
     graphiti_client: GraphitiClient | UnavailableGraphitiClient
     llm: LLMAdapter | UnavailableLLMAdapter
+    if (
+        self_binding_mode is SelfBindMode.ENFORCE
+        and capabilities is not None
+        and not capabilities.reads_ready
+    ):
+        raise RuntimeError(
+            "canonical-self enforce mode requires Graphiti-backed reads at startup"
+        )
     if capabilities is None or capabilities.reads_ready:
         try:
             graphiti_client = GraphitiClient.from_settings_with_capabilities(
@@ -182,6 +194,12 @@ def build_memory_services(
                 reranker_enabled=(capabilities.reranker_ready if capabilities is not None else True),
             )
         except Exception as exc:
+            if self_binding_mode is SelfBindMode.ENFORCE:
+                # ENFORCE is an authority promise, not a best-effort feature flag. In
+                # particular, GraphitiClient raises here when any authority-critical patch
+                # is unavailable. Substituting the degraded sentinel would let the process
+                # advertise enforcement without installing its write/read boundary.
+                raise
             import logging
             logging.getLogger(__name__).warning("Graphiti client creation failed, degrading: %s", exc)
             graphiti_client = UnavailableGraphitiClient(f"{graphiti_reason} ({exc})")
@@ -197,14 +215,13 @@ def build_memory_services(
     else:
         llm = UnavailableLLMAdapter(llm_reason)
     graph_adapter = MemoryGraphAdapter(neo4j=neo4j)
-    self_binding_mode = getattr(settings, "canonical_self_binding_mode", "off")
     configure_self_binding = getattr(
         graph_adapter, "configure_canonical_self_binding_mode", None
     )
     if callable(configure_self_binding):
-        configure_self_binding(self_binding_mode)
+        configure_self_binding(self_binding_mode.value)
     else:
-        graph_adapter.canonical_self_binding_mode = self_binding_mode
+        graph_adapter.canonical_self_binding_mode = self_binding_mode.value
     scoring_service = ScoringService()
     lifecycle_service = LifecycleService(
         graph_adapter=graph_adapter,

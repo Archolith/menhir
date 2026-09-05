@@ -109,6 +109,7 @@ class MemoryGraphAdapter:
 
         mode = resolve_bind_mode(value, strict=True)
         self.canonical_self_binding_mode = str(mode)
+        self._memory_queries.configure_canonical_self_binding_mode(mode)
         self._correlation.configure_canonical_self_binding_mode(mode)
         self._consolidation.configure_canonical_self_binding_mode(mode)
         self._typed_assertions.configure_canonical_self_binding_mode(mode)

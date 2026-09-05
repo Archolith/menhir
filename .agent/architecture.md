@@ -576,6 +576,7 @@ ingestion boundary owns:
 | `infrastructure/self_binding.py` | atomically rewrites an authorized endpoint across the extraction payload |
 | typed assertion/event/View repositories | reject alternate canonical-self attachments in `enforce` |
 | `services/recall_pipeline.py` | excludes legacy unconfirmed self nodes, typed records and Views; rechecks signed Graphiti edges |
+| `infrastructure/memory_queries.py` | keeps recent/flagged bootstrap reads from bypassing exact fact-edge verification |
 | `infrastructure/graphiti_model_patches.py` | withholds a bound self and, in `enforce`, isolates canonical self from ordinary resolution |
 
 Evidence survives the asynchronous queue in the episode's persisted `source`. That value is a
@@ -652,12 +653,15 @@ marker occurrences in persisted relationship fact/name text.
 Graphiti's later edge resolver is also inside the authority boundary. For an authorized self edge,
 Menhir rechecks the external confirmation, requires the actual endpoint direction, resolved
 counterpart name and labels, predicate, fact and temporal fields to equal the signed payload,
-disables model dedup/invalidation, and reuses an
+requires the relationship's physical `group_id`, external Menhir episode stamp, internal Graphiti
+episode stamp and `episodes` attribution to agree, disables model dedup/invalidation, and reuses an
 existing edge only on an exact tuple match. It then restores the signed temporal values and the
 server-owned payload before persistence. A cloned edge, missing task-local authorization
 capability, revoked confirmation or post-authorization mutation fails the episode; it cannot fall
-back to an ordinary canonical-self write. Enforce-mode startup also refuses to proceed if this
-Graphiti resolver patch cannot be installed.
+back to an ordinary canonical-self write. Enforce-mode startup also refuses to proceed unless the
+combined extractor, exact edge resolver, candidate-isolation wrapper and canonical dedupe wrapper
+are all installed; the outer service builder cannot replace such a failure with its degraded
+Graphiti sentinel.
 
 The first extraction and relationless-repair prompts use the opaque endpoint directly rather than
 first instructing the model to emit `user`. Menhir asks for one bounded corrective extraction only
@@ -688,6 +692,15 @@ shared View writer reject canonical-self attachment, rebind/restore operations r
 marked self targets, and default recall excludes legacy self assertions and Views. `off` and
 `observe` preserve their legacy behavior. This deliberately reduces automatic personal recall until
 those lanes implement the same exact confirmation contract.
+
+Recent-memory and flagged-bootstrap readers cannot reconstruct and verify a complete relationship
+tuple. In `enforce` they therefore exclude canonical-self nodes, self-derived Views and ordinary
+counterpart summaries adjacent to structural self. Recallable UUID-less Views whose text subject is
+a self alias are refused at the shared writer, and historical rows from before that writer guard are
+excluded by both ordinary recall and generic context readers. The text check is gated on `is_view`,
+so an ordinary Entity named `user` remains eligible; a new caller representing an ordinary
+third-party `user` must provide its resolved non-self UUID where the View API supports that
+distinction.
 
 **Persisting the canonical node.** Graphiti saves a resolved node with `SET n = $entity_data`,
 which REPLACES the property map. The bypass therefore commits the STORED canonical node when one
@@ -738,9 +751,11 @@ string is reported as `other`.
 **Confirmation and revocation.** Menhir reads a PEM Ed25519 public key, requires the configured
 SHA-256 fingerprint of its raw 32-byte public key, and reads per-episode confirmation files from a
 read-only directory. It exposes no signing endpoint and stores no private key or signature in the
-graph. Authorized Graphiti edges carry only the canonical signed payload JSON. Fact-edge recall
+graph. Authorized Graphiti edges carry the canonical signed payload JSON plus server-owned external
+and internal episode-lineage stamps. Fact-edge recall
 reconstructs that payload, compares it with the relationship's actual endpoints, resolved
-counterpart name and labels, predicate, fact and temporal fields, and re-verifies the current
+counterpart name and labels, physical group, episode attribution, predicate, fact and temporal
+fields, and re-verifies the current
 external confirmation; deleting or changing a
 confirmation therefore revokes it from default recall without deleting the episode or proposal.
 Because Graphiti summaries may incorporate relationship language, any ordinary counterpart touched

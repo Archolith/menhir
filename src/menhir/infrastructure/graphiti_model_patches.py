@@ -1376,7 +1376,7 @@ def _is_structural_graphiti_candidate(node: Any) -> bool:
     return isinstance(attributes, dict) and attributes.get("structure_role") is not None
 
 
-def _patch_graphiti_structural_candidate_isolation() -> None:
+def _patch_graphiti_structural_candidate_isolation() -> bool:
     """Prevent semantic enrichment from resolving onto structural ``:Entity`` nodes.
 
     Graphiti's semantic candidate search has no knowledge of Menhir's structural/semantic
@@ -1389,7 +1389,7 @@ def _patch_graphiti_structural_candidate_isolation() -> None:
         import graphiti_core.utils.maintenance.node_operations as _no_module
 
         if getattr(_no_module, "_menhir_structural_candidate_isolation_patched", False):
-            return
+            return True
 
         _original_collect_candidate_nodes = _no_module._collect_candidate_nodes
 
@@ -1423,8 +1423,10 @@ def _patch_graphiti_structural_candidate_isolation() -> None:
         )
         _no_module._menhir_structural_candidate_isolation_patched = True  # type: ignore[attr-defined]
         logger.debug("Graphiti structural candidate isolation patch applied")
+        return True
     except (ImportError, AttributeError) as exc:
         logger.warning("Failed to patch Graphiti structural candidate isolation: %s", exc)
+        return False
 
 
 def _patch_graphiti_untyped_attribute_preservation() -> None:
@@ -1471,7 +1473,7 @@ def _patch_graphiti_untyped_attribute_preservation() -> None:
         logger.warning("Failed to patch Graphiti untyped attribute preservation: %s", exc)
 
 
-def _patch_graphiti_adaptive_dedupe() -> None:
+def _patch_graphiti_adaptive_dedupe() -> bool:
     """Split oversized node-deduplication requests without reducing candidate quality.
 
     Graphiti 0.29 retrieves up to 15 candidates for every extracted entity, merges all
@@ -1492,7 +1494,7 @@ def _patch_graphiti_adaptive_dedupe() -> None:
         from graphiti_core.utils.maintenance.dedup_helpers import DedupResolutionState
 
         if getattr(_no_module, "_menhir_adaptive_dedupe_patched", False):
-            return
+            return True
 
         async def _adaptive_resolve_extracted_nodes(
             clients,
@@ -1735,5 +1737,7 @@ def _patch_graphiti_adaptive_dedupe() -> None:
         _bulk_module.resolve_extracted_nodes = _adaptive_resolve_extracted_nodes
         _no_module._menhir_adaptive_dedupe_patched = True
         logger.debug("Graphiti adaptive node-dedupe batching patch applied")
+        return True
     except (ImportError, AttributeError) as exc:
         logger.warning("Failed to patch Graphiti adaptive node dedupe: %s", exc)
+        return False

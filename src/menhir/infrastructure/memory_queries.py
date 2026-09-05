@@ -16,6 +16,7 @@ from uuid import uuid4
 from menhir.domain.bootstrap_scope import bootstrap_selection, normalize_bootstrap_scope
 from menhir.domain.namespace import normalize_namespace, namespace_spellings, namespace_to_group_ids
 from menhir.domain.recall_visibility import default_recall_visibility_cypher
+from menhir.domain.self_identity import SELF_ALIASES, self_uuid_for_namespace
 from menhir.domain.structural_memory import non_structural_memory_cypher
 from menhir.domain.recall import adjacency_edge_pattern
 from menhir.infrastructure.cypher import (
@@ -26,6 +27,11 @@ from menhir.infrastructure.cypher import (
     SHADOW_CANDIDATE_FACT_EDGE_FIELDS,
 )
 from menhir.infrastructure.neo4j import Neo4jRepository
+from menhir.infrastructure.self_binding import (
+    SelfBindMode,
+    resolve_bind_mode,
+    structural_self_cypher,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +43,9 @@ ADMISSION_LINKED = "linked"
 ADMISSION_NO_TURNS = "no_turns"
 
 _OPAQUE_DIGEST_PATTERN = re.compile(r"^[A-Za-z0-9_-]{32,256}$")
+_SELF_ALIAS_PATTERN = "^(?:" + "|".join(
+    re.escape(alias).replace(r"\ ", r"\s+") for alias in sorted(SELF_ALIASES)
+) + ")$"
 _DIGEST_KEY_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 
 
@@ -86,6 +95,52 @@ class MemoryQueryRepository:
 
     def __init__(self, neo4j: Neo4jRepository) -> None:
         self.neo4j = neo4j
+        self._canonical_self_binding_mode = SelfBindMode.OFF
+
+    def configure_canonical_self_binding_mode(self, value: Any) -> None:
+        self._canonical_self_binding_mode = resolve_bind_mode(value, strict=True)
+
+    def _exclude_unverified_self_context(
+        self,
+        where: list[str],
+        params: dict[str, Any],
+        *,
+        namespace: str | None,
+    ) -> None:
+        """Keep generic/bootstrap reads from becoming an authority bypass.
+
+        These readers do not carry enough relationship identity to perform the exact signature
+        recheck used by ``run_recall``.  In enforce mode they therefore exclude canonical self,
+        Views derived from self, and endpoint summaries adjacent to self. Historical Views that
+        predate ``view_subject_uuid`` are isolated only when their View subject is a known self
+        alias. Ordinary entities named ``user`` remain eligible because the alias condition is
+        gated on ``is_view``.
+        """
+
+        if self._canonical_self_binding_mode is not SelfBindMode.ENFORCE:
+            return
+        params["canonical_self_uuid"] = self_uuid_for_namespace(namespace)
+        params["canonical_self_alias_pattern"] = _SELF_ALIAS_PATTERN
+        where.append(
+            "NOT ("
+            f"{structural_self_cypher('n')} "
+            "OR n.uuid = $canonical_self_uuid "
+            "OR coalesce(n.view_subject_uuid, '') = $canonical_self_uuid "
+            "OR (coalesce(n.is_view, false) "
+            "AND trim(coalesce(n.view_subject_uuid, '')) = '' "
+            "AND toLower(trim(coalesce(n.view_subject, ''))) "
+            "=~ $canonical_self_alias_pattern) "
+            "OR EXISTS { "
+            "MATCH (view_subject:Entity) "
+            "WHERE view_subject.uuid = n.view_subject_uuid AND "
+            f"{structural_self_cypher('view_subject')} "
+            "} "
+            "OR EXISTS { "
+            "MATCH (n)-[:RELATES_TO]-(self_neighbor:Entity) "
+            f"WHERE self_neighbor.uuid = $canonical_self_uuid OR {structural_self_cypher('self_neighbor')} "
+            "}"
+            ")"
+        )
 
     # --- Overview & listing -------------------------------------------------
 
@@ -193,6 +248,7 @@ class MemoryQueryRepository:
         if namespace is not None and str(namespace).strip():
             where.append("coalesce(n.namespace, 'default') = $namespace")
             params["namespace"] = str(namespace).strip()
+        self._exclude_unverified_self_context(where, params, namespace=namespace)
         query = (Cypher()
             .match("(n)")
             .where(*where)
@@ -230,6 +286,7 @@ class MemoryQueryRepository:
         if group_ids is not None:
             where.append("n.group_id IN $group_ids")
             params["group_ids"] = group_ids
+        self._exclude_unverified_self_context(where, params, namespace=namespace)
         query = (Cypher()
             .match("(n)")
             .where(*where)
@@ -262,6 +319,7 @@ class MemoryQueryRepository:
         if group_ids is not None:
             where.append("n.group_id IN $group_ids")
             params["group_ids"] = group_ids
+        self._exclude_unverified_self_context(where, params, namespace=namespace)
         rows = self.neo4j.execute(
             f"""
             MATCH (n)

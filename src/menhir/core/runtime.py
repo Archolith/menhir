@@ -759,6 +759,9 @@ async def _initialize_services(
         from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
 
         graph_adapter = MemoryGraphAdapter(neo4j=built.neo4j)
+        graph_adapter.configure_canonical_self_binding_mode(
+            getattr(settings, "canonical_self_binding_mode", "off")
+        )
         schema_ready = await asyncio.to_thread(graph_adapter.phase_one_schema_ready)
         if not schema_ready:
             raise RuntimeError(

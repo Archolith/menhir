@@ -293,6 +293,12 @@ async def snapshot_candidate_facts(
                     if row.get("edge_source_uuid") == canonical_self_uuid
                     else row.get("edge_source_labels")
                 ),
+                group_id=row.get("group_id"),
+                episode_uuids=row.get("edge_episode_uuids"),
+                authority_episode_uuid=row.get("self_authority_episode_uuid"),
+                authority_graphiti_episode_uuid=row.get(
+                    "self_authority_graphiti_episode_uuid"
+                ),
                 predicate=row.get("predicate"),
                 fact=row.get("fact_text"),
                 valid_at=row.get("valid_at"),

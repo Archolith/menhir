@@ -1253,6 +1253,9 @@ def create_app(
         from menhir.services.lifecycle_service import LifecycleService
 
         graph_adapter = MemoryGraphAdapter(neo4j=app.state.repo)
+        graph_adapter.configure_canonical_self_binding_mode(
+            getattr(settings, "canonical_self_binding_mode", "off")
+        )
         lifecycle_service = LifecycleService(
             graph_adapter=graph_adapter,
             graphiti_client=UnavailableGraphitiClient("explorer: no live Graphiti client"),

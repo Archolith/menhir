@@ -20,6 +20,8 @@ from menhir.domain.self_identity import (
     self_uuid_for_namespace,
 )
 from menhir.domain.self_authority import (
+    SELF_ASSERTION_EDGE_EPISODE_PROPERTY,
+    SELF_ASSERTION_EDGE_GRAPHITI_EPISODE_PROPERTY,
     SELF_ASSERTION_EDGE_PAYLOAD_PROPERTY,
     SelfAssertionProposal,
     SelfAuthorizationDecision,
@@ -1688,6 +1690,8 @@ def _declare_subject_endpoint(
         # This property is server-owned.  A model-produced value can never survive to the
         # persistence payload, even when authorization later fails closed.
         attributes.pop(SELF_ASSERTION_EDGE_PAYLOAD_PROPERTY, None)
+        attributes.pop(SELF_ASSERTION_EDGE_EPISODE_PROPERTY, None)
+        attributes.pop(SELF_ASSERTION_EDGE_GRAPHITI_EPISODE_PROPERTY, None)
         try:
             proposal = _self_assertion_proposal_for_edge(
                 marker_uuid=marker_uuid,
@@ -1727,9 +1731,11 @@ def _declare_subject_endpoint(
             receipt.self_assertion_counterpart_by_edge_id[id(edge)] = (
                 target_uuid if source_uuid == marker_uuid else source_uuid
             )
-            # No model-produced relationship attributes survive beside the exact signed payload.
-            # The payload itself carries the approved polarity and structured assertion.
+            # No model-produced relationship attributes survive beside the exact signed payload
+            # and the two server-owned stamps that bind it to persisted episode attribution.
             edge.attributes = {
+                SELF_ASSERTION_EDGE_EPISODE_PROPERTY: proposal.episode_uuid,
+                SELF_ASSERTION_EDGE_GRAPHITI_EPISODE_PROPERTY: graphiti_episode_uuid,
                 SELF_ASSERTION_EDGE_PAYLOAD_PROPERTY: canonical_json_bytes(
                     proposal.confirmation_payload()
                 ).decode("utf-8")
@@ -1804,6 +1810,8 @@ def _wrap_self_authority_edge_resolver(original: Any) -> Any:
             # path otherwise preserves arbitrary untyped attributes.
             current_attributes = dict(getattr(extracted_edge, "attributes", None) or {})
             current_attributes.pop(SELF_ASSERTION_EDGE_PAYLOAD_PROPERTY, None)
+            current_attributes.pop(SELF_ASSERTION_EDGE_EPISODE_PROPERTY, None)
+            current_attributes.pop(SELF_ASSERTION_EDGE_GRAPHITI_EPISODE_PROPERTY, None)
             extracted_edge.attributes = current_attributes
             return await original(
                 llm_client,
@@ -1878,6 +1886,12 @@ def _wrap_self_authority_edge_resolver(original: Any) -> Any:
             target_node_uuid=getattr(extracted_edge, "target_node_uuid", None),
             counterpart_name=resolved_counterpart[1],
             counterpart_labels=resolved_counterpart[2],
+            group_id=getattr(extracted_edge, "group_id", None),
+            episode_uuids=getattr(extracted_edge, "episodes", None),
+            authority_episode_uuid=attributes.get(SELF_ASSERTION_EDGE_EPISODE_PROPERTY),
+            authority_graphiti_episode_uuid=attributes.get(
+                SELF_ASSERTION_EDGE_GRAPHITI_EPISODE_PROPERTY
+            ),
             predicate=getattr(extracted_edge, "name", None),
             fact=getattr(extracted_edge, "fact", None),
             valid_at=getattr(extracted_edge, "valid_at", None),
@@ -1886,6 +1900,17 @@ def _wrap_self_authority_edge_resolver(original: Any) -> Any:
         ):
             raise InvalidSelfSubjectDeclarationError(
                 "canonical-self edge changed after owner authorization"
+            )
+        if (
+            str(attributes.get(SELF_ASSERTION_EDGE_EPISODE_PROPERTY) or "").strip()
+            != str(receipt.episode_key or "").strip()
+            or str(
+                attributes.get(SELF_ASSERTION_EDGE_GRAPHITI_EPISODE_PROPERTY) or ""
+            ).strip()
+            != str(receipt.graphiti_episode_uuid or "").strip()
+        ):
+            raise InvalidSelfSubjectDeclarationError(
+                "canonical-self edge authority lineage does not match the active episode"
             )
         authorizer = receipt.self_assertion_authorizer
         try:
@@ -1919,6 +1944,7 @@ def _wrap_self_authority_edge_resolver(original: Any) -> Any:
             name: getattr(extracted_edge, name, None)
             for name in ("valid_at", "invalid_at", "expired_at")
         }
+        signed_episodes = list(getattr(extracted_edge, "episodes", None) or [])
         signed_attributes = dict(attributes)
         for candidate in [*related_edges, *existing_edges]:
             if (
@@ -1928,6 +1954,7 @@ def _wrap_self_authority_edge_resolver(original: Any) -> Any:
                 == str(getattr(extracted_edge, "target_node_uuid", "") or "").strip()
                 and str(getattr(candidate, "name", "") or "")
                 == str(getattr(extracted_edge, "name", "") or "")
+                and getattr(candidate, "group_id", None) is not None
                 and str(getattr(candidate, "group_id", "") or "").strip()
                 == str(getattr(extracted_edge, "group_id", "") or "").strip()
                 and str(getattr(candidate, "fact", "") or "")
@@ -1959,6 +1986,7 @@ def _wrap_self_authority_edge_resolver(original: Any) -> Any:
             setattr(resolved_edge, name, value)
         for name, value in signed_temporal.items():
             setattr(resolved_edge, name, value)
+        resolved_edge.episodes = signed_episodes
         return resolved_edge, [], []
 
     return _resolve_preserving_owner_authority
@@ -2287,7 +2315,7 @@ async def _extract_edges_from_combined_cache(
     )
 
 
-def _patch_graphiti_combined_extraction() -> None:
+def _patch_graphiti_combined_extraction() -> bool:
     """Use Graphiti's typed combined extractor for single-episode ``add_episode``.
 
     Graphiti 0.29 documents the combined extractor as the path that prevents orphaned
@@ -2311,7 +2339,7 @@ def _patch_graphiti_combined_extraction() -> None:
         import graphiti_core.graphiti as graphiti_module
 
         if getattr(graphiti_module, "_menhir_combined_extraction_patched", False):
-            return
+            return True
         # Prove the replacement's own dependency FIRST, inside this guard. It used to be imported
         # lazily inside `_run_graphiti_combined_extraction`, where this except clause could not
         # reach it: the patch logged success and every add_episode then raised.
@@ -2326,6 +2354,7 @@ def _patch_graphiti_combined_extraction() -> None:
         graphiti_module.extract_edges = _extract_edges_from_combined_cache
         graphiti_module._menhir_combined_extraction_patched = True
         logger.debug("Graphiti single-episode combined extraction patch applied")
+        return True
     except (ImportError, AttributeError) as exc:
         # Restore whatever was rebound before the failure, so a partial patch cannot leave
         # Graphiti pointing at a replacement whose dependency is missing. Without originals to
@@ -2342,6 +2371,7 @@ def _patch_graphiti_combined_extraction() -> None:
             "Failed to patch Graphiti combined extraction; left Graphiti on its own extractors: %s",
             exc,
         )
+        return False
 
 
 def _patch_graphiti_combined_extraction_models() -> None:

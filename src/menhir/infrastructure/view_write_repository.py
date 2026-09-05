@@ -16,6 +16,7 @@ from menhir.domain.self_authority import (
     UnconfirmedSelfAssertionError,
     is_canonical_self_subject,
 )
+from menhir.domain.self_identity import is_self_alias
 from menhir.infrastructure.neo4j import SAGA_MUTATION_TIMEOUT_S
 from menhir.infrastructure.self_binding import (
     SelfBindMode,
@@ -40,6 +41,7 @@ from menhir.infrastructure.view_models import (
     ScalarHistoryKind,
     ScalarStateKind,
     TimelineKind,
+    ViewAudience,
     ViewClass,
     ViewKind,
     _COUNT_TOKEN,
@@ -142,8 +144,9 @@ class ViewWriteRepositoryMixin:
         `audit_props` are provenance-only node properties (e.g. the perception gate's agreement/k/
         reason) — stamped onto the node but kept OUT of the signature (never trigger supersession)
         and OUT of the embedding/surface (never rank). A receipt, not a confidence signal."""
-        if self._canonical_self_binding_mode is SelfBindMode.ENFORCE and subject_uuid is not None:
-            if (
+        kind = self.KINDS[kind_name]
+        if self._canonical_self_binding_mode is SelfBindMode.ENFORCE:
+            if subject_uuid is not None and (
                 is_canonical_self_subject(subject_uuid, namespace)
                 or self._subject_is_structural_self(subject_uuid)
             ):
@@ -153,7 +156,17 @@ class ViewWriteRepositoryMixin:
                 raise UnconfirmedSelfAssertionError(
                     "View cannot attach to canonical self without exact owner confirmation"
                 )
-        kind = self.KINDS[kind_name]
+            if (
+                subject_uuid is None
+                and kind.view_audience(payload) is ViewAudience.RECALL
+                and is_self_alias(subject)
+            ):
+                # A recallable text-keyed View has no durable entity identity to prove that
+                # ``user`` means an ordinary third party.  Refuse the ambiguous writer; callers
+                # may supply a resolved non-self UUID where the API supports one.
+                raise UnconfirmedSelfAssertionError(
+                    "recallable View for a self alias requires a resolved non-self subject UUID"
+                )
         key = self._key(namespace, subject, kind.key_discriminator(payload), subject_uuid=subject_uuid)
         # Normalize provenance ONCE, before the surface is rendered, so the supporting-event count
         # quoted in the summary is the count actually stored on the node (plan D1: sorted, dedup).

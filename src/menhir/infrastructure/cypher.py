@@ -333,6 +333,7 @@ ENTITY_METADATA_FIELDS = (
     # cannot distinguish a legacy View derived from canonical self even though the View node has a
     # different UUID; test doubles that supplied it would mask the omission.
     "n.view_subject_uuid AS view_subject_uuid",
+    "n.view_subject AS view_subject",
     "coalesce(n.retired, false) AS retired",
     "coalesce(n.is_view, false) AS is_view",
     "n.episode_uuids AS episode_uuids",
@@ -358,6 +359,9 @@ FACT_TEMPORAL_FIELDS = (
     "r.uuid AS fact_uuid",
     "r.group_id AS group_id",
     "r.menhir_self_authority_payload_json AS self_authority_payload_json",
+    "r.menhir_self_authority_episode_uuid AS self_authority_episode_uuid",
+    "r.menhir_self_authority_graphiti_episode_uuid AS self_authority_graphiti_episode_uuid",
+    "r.episodes AS edge_episode_uuids",
     "r.name AS predicate",
     "r.fact AS fact",
     "toString(r.valid_at) AS valid_at",
@@ -387,6 +391,9 @@ SHADOW_CANDIDATE_FACT_EDGE_FIELDS = (
     "labels(endNode(r)) AS edge_target_labels",
     "r.group_id AS group_id",
     "r.menhir_self_authority_payload_json AS self_authority_payload_json",
+    "r.menhir_self_authority_episode_uuid AS self_authority_episode_uuid",
+    "r.menhir_self_authority_graphiti_episode_uuid AS self_authority_graphiti_episode_uuid",
+    "r.episodes AS edge_episode_uuids",
     "r.name AS predicate",
     "toString(r.valid_at) AS valid_at",
     "toString(r.invalid_at) AS invalid_at",

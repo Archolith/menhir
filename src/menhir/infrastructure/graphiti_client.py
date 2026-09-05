@@ -37,6 +37,8 @@ else:
 
 from menhir.config import MemorySettings
 from menhir.domain.self_authority import (
+    SELF_ASSERTION_EDGE_EPISODE_PROPERTY,
+    SELF_ASSERTION_EDGE_GRAPHITI_EPISODE_PROPERTY,
     SELF_ASSERTION_EDGE_PAYLOAD_PROPERTY,
     proposal_from_confirmation_payload,
     proposal_matches_persisted_edge,
@@ -176,6 +178,10 @@ class GraphitiClient:
         target_node_uuid: Any,
         counterpart_name: Any,
         counterpart_labels: Any,
+        group_id: Any,
+        episode_uuids: Any,
+        authority_episode_uuid: Any,
+        authority_graphiti_episode_uuid: Any,
         predicate: Any,
         fact: Any,
         valid_at: Any,
@@ -202,6 +208,10 @@ class GraphitiClient:
                 target_node_uuid=target_node_uuid,
                 counterpart_name=counterpart_name,
                 counterpart_labels=counterpart_labels,
+                group_id=group_id,
+                episode_uuids=episode_uuids,
+                authority_episode_uuid=authority_episode_uuid,
+                authority_graphiti_episode_uuid=authority_graphiti_episode_uuid,
                 predicate=predicate,
                 fact=fact,
                 valid_at=valid_at,
@@ -294,27 +304,36 @@ class GraphitiClient:
             ) from _GRAPHITI_IMPORT_ERROR
 
         _patch_graphiti_prompt_json()
-        _patch_graphiti_combined_extraction()
+        combined_extraction_patch_ready = _patch_graphiti_combined_extraction()
         _patch_graphiti_combined_extraction_models()
+        self_bind_mode = resolve_bind_mode(
+            getattr(settings, "canonical_self_binding_mode", "off"), strict=True
+        )
         authority_edge_patch_ready = _patch_graphiti_self_authority_edge_resolution()
-        if (
-            resolve_bind_mode(
-                getattr(settings, "canonical_self_binding_mode", "off"), strict=True
-            )
-            is SelfBindMode.ENFORCE
-            and not authority_edge_patch_ready
-        ):
-            raise RuntimeError(
-                "canonical-self enforce mode requires the exact Graphiti edge-resolution gate"
-            )
         _patch_graphiti_entity_extraction()
         _patch_graphiti_dedupe_resolutions()
         _patch_graphiti_dedup_prompt()
         _patch_graphiti_dedup_identity_gate()
-        _patch_graphiti_structural_candidate_isolation()
+        candidate_isolation_patch_ready = _patch_graphiti_structural_candidate_isolation()
         _patch_graphiti_untyped_attribute_preservation()
         _patch_graphiti_dedup_branch_telemetry()
-        _patch_graphiti_adaptive_dedupe()
+        authority_dedupe_patch_ready = _patch_graphiti_adaptive_dedupe()
+        if self_bind_mode is SelfBindMode.ENFORCE:
+            missing_authority_patches = [
+                name
+                for name, ready in (
+                    ("combined extraction", combined_extraction_patch_ready),
+                    ("exact edge resolution", authority_edge_patch_ready),
+                    ("candidate isolation", candidate_isolation_patch_ready),
+                    ("canonical dedupe", authority_dedupe_patch_ready),
+                )
+                if not ready
+            ]
+            if missing_authority_patches:
+                raise RuntimeError(
+                    "canonical-self enforce mode requires Graphiti authority patches: "
+                    + ", ".join(missing_authority_patches)
+                )
         _patch_graphiti_openai_generic_client(
             max_request_estimated_tokens=int(settings.graphiti_request_max_estimated_tokens)
         )
@@ -1470,6 +1489,16 @@ class GraphitiClient:
                     if isinstance(attributes, dict)
                     else None
                 )
+                authority_episode_uuid = (
+                    attributes.get(SELF_ASSERTION_EDGE_EPISODE_PROPERTY)
+                    if isinstance(attributes, dict)
+                    else None
+                )
+                authority_graphiti_episode_uuid = (
+                    attributes.get(SELF_ASSERTION_EDGE_GRAPHITI_EPISODE_PROPERTY)
+                    if isinstance(attributes, dict)
+                    else None
+                )
                 if not self.canonical_self_payload_is_authorized(
                     payload_json,
                     expected_self_uuid=edge_self_uuid,
@@ -1477,6 +1506,10 @@ class GraphitiClient:
                     target_node_uuid=target_node_uuid,
                     counterpart_name=counterpart_name,
                     counterpart_labels=counterpart_labels,
+                    group_id=getattr(edge, "group_id", None),
+                    episode_uuids=getattr(edge, "episodes", None),
+                    authority_episode_uuid=authority_episode_uuid,
+                    authority_graphiti_episode_uuid=authority_graphiti_episode_uuid,
                     predicate=getattr(edge, "name", None),
                     fact=getattr(edge, "fact", None),
                     valid_at=getattr(edge, "valid_at", None),

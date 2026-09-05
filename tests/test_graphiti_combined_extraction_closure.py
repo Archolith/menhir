@@ -33,6 +33,8 @@ from menhir.domain.self_identity import (  # noqa: E402
     self_uuid_for_namespace,
 )
 from menhir.domain.self_authority import (  # noqa: E402
+    SELF_ASSERTION_EDGE_EPISODE_PROPERTY,
+    SELF_ASSERTION_EDGE_GRAPHITI_EPISODE_PROPERTY,
     SELF_ASSERTION_EDGE_PAYLOAD_PROPERTY,
     SelfAuthorizationDecision,
     canonical_json_bytes,
@@ -98,13 +100,19 @@ async def test_signed_edge_payload_and_temporal_scope_survive_graphiti_resolutio
         temporal_scope={"valid_at": None, "invalid_at": None, "expired_at": None},
     )
     payload_json = canonical_json_bytes(proposal.confirmation_payload()).decode("utf-8")
+    authority_attributes = {
+        SELF_ASSERTION_EDGE_EPISODE_PROPERTY: "episode-1",
+        SELF_ASSERTION_EDGE_GRAPHITI_EPISODE_PROPERTY: "graphiti-episode",
+        SELF_ASSERTION_EDGE_PAYLOAD_PROPERTY: payload_json,
+    }
     edge = SimpleNamespace(
         source_node_uuid=self_uuid_for_namespace("default"),
         target_node_uuid="postcards",
         name="OWNS",
         fact="user owns 25 postcards",
-        group_id="default",
-        attributes={SELF_ASSERTION_EDGE_PAYLOAD_PROPERTY: payload_json},
+        group_id="",
+        episodes=["graphiti-episode"],
+        attributes=dict(authority_attributes),
         valid_at=None,
         invalid_at=None,
         expired_at=None,
@@ -117,6 +125,7 @@ async def test_signed_edge_payload_and_temporal_scope_survive_graphiti_resolutio
         self_assertion_authorizer=_OwnerAuthorizer(),
     )
     receipt.self_assertion_authorized_edge_ids.add(id(edge))
+    receipt.graphiti_episode_uuid = "graphiti-episode"
     receipt.self_assertion_counterpart_by_edge_id[id(edge)] = "postcards"
     receipt.resolved_node_identity_by_extracted_uuid["postcards"] = (
         "postcards",
@@ -148,7 +157,8 @@ async def test_signed_edge_payload_and_temporal_scope_survive_graphiti_resolutio
     )
 
     assert observed == {"related": [], "existing": []}
-    assert resolved.attributes == {SELF_ASSERTION_EDGE_PAYLOAD_PROPERTY: payload_json}
+    assert resolved.attributes == authority_attributes
+    assert resolved.episodes == ["graphiti-episode"]
     assert resolved.valid_at is None
     assert resolved.name == "OWNS"
     assert resolved.fact == "user owns 25 postcards"
@@ -175,13 +185,19 @@ async def test_signed_edge_resolution_reuses_only_exact_existing_edge() -> None:
         temporal_scope={"valid_at": None, "invalid_at": None, "expired_at": None},
     )
     payload_json = canonical_json_bytes(proposal.confirmation_payload()).decode("utf-8")
+    authority_attributes = {
+        SELF_ASSERTION_EDGE_EPISODE_PROPERTY: "episode-1",
+        SELF_ASSERTION_EDGE_GRAPHITI_EPISODE_PROPERTY: "graphiti-episode",
+        SELF_ASSERTION_EDGE_PAYLOAD_PROPERTY: payload_json,
+    }
     edge = SimpleNamespace(
         source_node_uuid=self_uuid_for_namespace("default"),
         target_node_uuid="postcards",
         name="OWNS",
         fact="user owns 25 postcards",
-        group_id="default",
-        attributes={SELF_ASSERTION_EDGE_PAYLOAD_PROPERTY: payload_json},
+        group_id="",
+        episodes=["graphiti-episode"],
+        attributes=dict(authority_attributes),
         valid_at=None,
         invalid_at=None,
         expired_at=None,
@@ -206,6 +222,7 @@ async def test_signed_edge_resolution_reuses_only_exact_existing_edge() -> None:
         self_assertion_authorizer=_OwnerAuthorizer(),
     )
     receipt.self_assertion_authorized_edge_ids.add(id(edge))
+    receipt.graphiti_episode_uuid = "graphiti-episode"
     receipt.self_assertion_counterpart_by_edge_id[id(edge)] = "postcards"
     receipt.resolved_node_identity_by_extracted_uuid["postcards"] = (
         "postcards",
@@ -222,7 +239,7 @@ async def test_signed_edge_resolution_reuses_only_exact_existing_edge() -> None:
     )
 
     assert resolved is existing
-    assert existing.attributes == {SELF_ASSERTION_EDGE_PAYLOAD_PROPERTY: payload_json}
+    assert existing.attributes == authority_attributes
     assert existing.episodes == ["graphiti-episode"]
     assert invalidated == [] and duplicates == []
 

@@ -5,6 +5,8 @@ from __future__ import annotations
 import base64
 from hashlib import sha256
 import json
+from pathlib import Path
+import re
 from types import SimpleNamespace
 
 import pytest
@@ -12,6 +14,8 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from menhir.domain.self_authority import (
+    SELF_ASSERTION_EDGE_EPISODE_PROPERTY,
+    SELF_ASSERTION_EDGE_GRAPHITI_EPISODE_PROPERTY,
     SELF_ASSERTION_EDGE_PAYLOAD_PROPERTY,
     SelfAuthorizationDecision,
     UnconfirmedSelfAssertionError,
@@ -21,6 +25,7 @@ from menhir.domain.self_authority import (
     proposal_from_confirmation_payload,
     proposal_matches_persisted_edge,
 )
+from menhir.domain.namespace import namespace_to_group_id
 from menhir.domain.self_identity import self_uuid_for_namespace
 from menhir.domain.typed_assertion import TypedAssertion
 from menhir.domain.event_history import TypedEventAssertion
@@ -43,6 +48,7 @@ from menhir.infrastructure.self_binding import (
 from menhir.infrastructure.consolidation_queries import ConsolidationRepository
 from menhir.infrastructure.correlation_queries import CorrelationRepository
 from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
+from menhir.infrastructure.memory_queries import MemoryQueryRepository
 from menhir.infrastructure.typed_assertion_repository import TypedAssertionRepository
 from menhir.infrastructure.typed_event_repository import TypedEventAssertionRepository
 from menhir.infrastructure.episode_repository import EpisodeRepository
@@ -199,6 +205,10 @@ def test_persisted_edge_must_match_signed_direction_semantics_and_time() -> None
         "target_node_uuid": "chicago",
         "counterpart_name": "Chicago",
         "counterpart_labels": ["Entity"],
+        "group_id": namespace_to_group_id(proposal.namespace),
+        "episode_uuids": ["graphiti-episode-1"],
+        "authority_episode_uuid": proposal.episode_uuid,
+        "authority_graphiti_episode_uuid": "graphiti-episode-1",
         "predicate": "LIVES_IN",
         "fact": "I live in Chicago.",
         "valid_at": None,
@@ -210,6 +220,11 @@ def test_persisted_edge_must_match_signed_direction_semantics_and_time() -> None
         {"source_node_uuid": "chicago", "target_node_uuid": canonical_uuid},
         {"counterpart_name": "Boston"},
         {"counterpart_labels": ["Location"]},
+        {"group_id": "other"},
+        {"group_id": None},
+        {"episode_uuids": ["other-graphiti-episode"]},
+        {"authority_episode_uuid": "other-external-episode"},
+        {"authority_graphiti_episode_uuid": "other-graphiti-episode"},
         {"predicate": "VISITED"},
         {"fact": "I live in Boston."},
         {"valid_at": "2026-09-05T12:00:00Z"},
@@ -233,14 +248,16 @@ def _signed_edge(proposal):
         uuid="edge-new",
         name=assertion["predicate"],
         fact=assertion["fact"],
-        group_id=proposal.namespace,
+        group_id=namespace_to_group_id(proposal.namespace),
         source_node_uuid=self_uuid_for_namespace(proposal.namespace),
         target_node_uuid="chicago",
-        episodes=[proposal.episode_uuid],
+        episodes=["graphiti-episode-1"],
         valid_at=temporal["valid_at"],
         invalid_at=temporal["invalid_at"],
         expired_at=temporal["expired_at"],
         attributes={
+            SELF_ASSERTION_EDGE_EPISODE_PROPERTY: proposal.episode_uuid,
+            SELF_ASSERTION_EDGE_GRAPHITI_EPISODE_PROPERTY: "graphiti-episode-1",
             SELF_ASSERTION_EDGE_PAYLOAD_PROPERTY: canonical_json_bytes(
                 proposal.confirmation_payload()
             ).decode("utf-8")
@@ -262,6 +279,9 @@ def _begin_authorized_resolver_receipt(proposal, edge, *, authorizer=None):
         self_assertion_authorizer=authorizer or _AllowExactProposal(),
     )
     receipt.self_assertion_authorized_edge_ids.add(id(edge))
+    receipt.graphiti_episode_uuid = edge.attributes[
+        SELF_ASSERTION_EDGE_GRAPHITI_EPISODE_PROPERTY
+    ]
     receipt.self_assertion_counterpart_by_edge_id[id(edge)] = edge.target_node_uuid
     receipt.resolved_node_identity_by_extracted_uuid[edge.target_node_uuid] = (
         edge.target_node_uuid,
@@ -292,7 +312,7 @@ async def test_signed_edge_payload_and_time_survive_mutating_graphiti_resolver()
     try:
         resolved, invalidated, duplicates = await _wrap_self_authority_edge_resolver(
             mutating_resolver
-        )(None, edge, [], [], SimpleNamespace(uuid="episode-1"))
+        )(None, edge, [], [], SimpleNamespace(uuid="graphiti-episode-1"))
     finally:
         clear_extraction_receipt()
 
@@ -324,13 +344,13 @@ async def test_signed_edge_exact_replay_reuses_existing_edge_without_model_resol
     try:
         resolved, invalidated, duplicates = await _wrap_self_authority_edge_resolver(
             unexpected_resolver
-        )(None, edge, [existing], [], SimpleNamespace(uuid="episode-1"))
+        )(None, edge, [existing], [], SimpleNamespace(uuid="graphiti-episode-1"))
     finally:
         clear_extraction_receipt()
 
     assert resolved is existing
     assert resolved.attributes == edge.attributes
-    assert resolved.episodes == ["older-episode", "episode-1"]
+    assert resolved.episodes == ["older-episode", "graphiti-episode-1"]
     assert invalidated == []
     assert duplicates == []
 
@@ -345,7 +365,7 @@ async def test_protected_edge_fails_closed_if_changed_after_authorization() -> N
     try:
         with pytest.raises(InvalidSelfSubjectDeclarationError, match="changed"):
             await _wrap_self_authority_edge_resolver(lambda *args: None)(
-                None, edge, [], [], SimpleNamespace(uuid="episode-1")
+                None, edge, [], [], SimpleNamespace(uuid="graphiti-episode-1")
             )
     finally:
         clear_extraction_receipt()
@@ -365,7 +385,7 @@ async def test_protected_edge_rechecks_owner_confirmation_at_final_resolution() 
     try:
         with pytest.raises(InvalidSelfSubjectDeclarationError, match="absent"):
             await _wrap_self_authority_edge_resolver(lambda *args: None)(
-                None, edge, [], [], SimpleNamespace(uuid="episode-1")
+                None, edge, [], [], SimpleNamespace(uuid="graphiti-episode-1")
             )
     finally:
         clear_extraction_receipt()
@@ -401,7 +421,10 @@ async def test_graphiti_edge_recall_rechecks_confirmation_and_excludes_revoked_f
         valid_at=None,
         invalid_at=None,
         expired_at=None,
+        episodes=["graphiti-episode-1"],
         attributes={
+            SELF_ASSERTION_EDGE_EPISODE_PROPERTY: proposal.episode_uuid,
+            SELF_ASSERTION_EDGE_GRAPHITI_EPISODE_PROPERTY: "graphiti-episode-1",
             SELF_ASSERTION_EDGE_PAYLOAD_PROPERTY: canonical_json_bytes(
                 proposal.confirmation_payload()
             ).decode("utf-8")
@@ -488,7 +511,10 @@ async def test_unscoped_graphiti_edge_recall_derives_canonical_self_from_group(t
         valid_at=None,
         invalid_at=None,
         expired_at=None,
+        episodes=["graphiti-episode-tenant-a"],
         attributes={
+            SELF_ASSERTION_EDGE_EPISODE_PROPERTY: proposal.episode_uuid,
+            SELF_ASSERTION_EDGE_GRAPHITI_EPISODE_PROPERTY: "graphiti-episode-tenant-a",
             SELF_ASSERTION_EDGE_PAYLOAD_PROPERTY: canonical_json_bytes(
                 proposal.confirmation_payload()
             ).decode("utf-8")
@@ -587,6 +613,22 @@ def test_view_repository_rejects_direct_canonical_self_projection() -> None:
     assert neo4j.calls == []
 
 
+@pytest.mark.unit
+def test_counter_view_rejects_uuidless_self_alias_in_enforce_mode() -> None:
+    neo4j = _NoWriteNeo4j()
+    repository = ViewRepository(neo4j)
+    repository.configure_canonical_self_binding_mode("enforce")
+
+    with pytest.raises(UnconfirmedSelfAssertionError, match="resolved non-self subject UUID"):
+        repository.record_counter(
+            subject="user",
+            counter="notebooks",
+            value=4,
+            namespace="ns-a",
+        )
+    assert neo4j.calls == []
+
+
 class _AuthorityBoundaryNeo4j:
     def __init__(self, responses=None) -> None:
         self.responses = list(responses or [])
@@ -595,6 +637,37 @@ class _AuthorityBoundaryNeo4j:
     def execute(self, query, params=None, **kwargs):
         self.calls.append((str(query), dict(params or {}), dict(kwargs)))
         return self.responses.pop(0) if self.responses else []
+
+
+@pytest.mark.unit
+def test_generic_context_reads_exclude_unverified_self_in_enforce_only() -> None:
+    enforce_neo4j = _AuthorityBoundaryNeo4j()
+    repository = MemoryQueryRepository(enforce_neo4j)
+    repository.configure_canonical_self_binding_mode("enforce")
+
+    repository.fetch_recent_memories(limit=5, namespace="ns-a")
+    repository.fetch_flagged_memories(limit=5, namespace="ns-a")
+    repository.fetch_flagged_memory_bootstrap_version(namespace="ns-a")
+
+    expected_uuid = self_uuid_for_namespace("ns-a")
+    for query, params, _kwargs in enforce_neo4j.calls:
+        assert "n.uuid = $canonical_self_uuid" in query
+        assert "n.view_subject_uuid" in query
+        assert "n.view_subject" in query
+        assert "coalesce(n.is_view, false)" in query
+        assert "self_neighbor:Entity" in query
+        assert "coalesce(self_neighbor.is_self, false)" in query
+        assert params["canonical_self_uuid"] == expected_uuid
+        alias_pattern = params["canonical_self_alias_pattern"]
+        assert re.fullmatch(alias_pattern, "the   user")
+        assert re.fullmatch(alias_pattern, "user")
+        assert re.fullmatch(alias_pattern, "myself")
+        assert re.fullmatch(alias_pattern, "database user") is None
+
+    off_neo4j = _AuthorityBoundaryNeo4j()
+    MemoryQueryRepository(off_neo4j).fetch_recent_memories(limit=5, namespace="ns-a")
+    assert "canonical_self_uuid" not in off_neo4j.calls[0][0]
+    assert "canonical_self_uuid" not in off_neo4j.calls[0][1]
 
 
 @pytest.mark.unit
@@ -782,16 +855,129 @@ def test_runtime_rejects_misspelled_self_authority_mode_and_wires_all_low_points
 
     adapter.configure_canonical_self_binding_mode("enforce")
     assert adapter.canonical_self_binding_mode == "enforce"
+    assert adapter._memory_queries._canonical_self_binding_mode is SelfBindMode.ENFORCE
     assert adapter._correlation._canonical_self_binding_mode is SelfBindMode.ENFORCE
     assert adapter._consolidation._canonical_self_binding_mode is SelfBindMode.ENFORCE
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    "relative_path",
+    [
+        "api/server_support.py",
+        "cli/bootstrap.py",
+        "core/bootstrap.py",
+        "core/runtime.py",
+        "explorer/app.py",
+    ],
+)
+def test_every_production_memory_adapter_construction_applies_authority_mode(
+    relative_path,
+) -> None:
+    source = (
+        Path(__file__).parents[1] / "src" / "menhir" / relative_path
+    ).read_text(encoding="utf-8")
+    assert source.count("MemoryGraphAdapter(") == 1
+    direct_wiring = source.count(".configure_canonical_self_binding_mode(")
+    compatibility_wiring = (
+        (
+            "configure_self_binding(self_binding_mode)" in source
+            or "configure_self_binding(self_binding_mode.value)" in source
+        )
+        and '"configure_canonical_self_binding_mode"' in source
+    )
+    assert direct_wiring == 1 or compatibility_wiring
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("failed_patch", "message"),
+    [
+        ("_patch_graphiti_combined_extraction", "combined extraction"),
+        ("_patch_graphiti_self_authority_edge_resolution", "exact edge resolution"),
+        ("_patch_graphiti_structural_candidate_isolation", "candidate isolation"),
+        ("_patch_graphiti_adaptive_dedupe", "canonical dedupe"),
+    ],
+)
+def test_enforce_startup_fails_when_any_authority_patch_is_unavailable(
+    monkeypatch, failed_patch, message
+) -> None:
+    import menhir.infrastructure.graphiti_client as graphiti_client_module
+
+    monkeypatch.setattr(graphiti_client_module, "_GRAPHITI_IMPORT_ERROR", None)
+    for patch_name in (
+        "_patch_graphiti_prompt_json",
+        "_patch_graphiti_combined_extraction_models",
+        "_patch_graphiti_entity_extraction",
+        "_patch_graphiti_dedupe_resolutions",
+        "_patch_graphiti_dedup_prompt",
+        "_patch_graphiti_dedup_identity_gate",
+        "_patch_graphiti_untyped_attribute_preservation",
+        "_patch_graphiti_dedup_branch_telemetry",
+    ):
+        monkeypatch.setattr(graphiti_client_module, patch_name, lambda: None)
+    for patch_name in (
+        "_patch_graphiti_combined_extraction",
+        "_patch_graphiti_self_authority_edge_resolution",
+        "_patch_graphiti_structural_candidate_isolation",
+        "_patch_graphiti_adaptive_dedupe",
+    ):
+        monkeypatch.setattr(
+            graphiti_client_module,
+            patch_name,
+            (lambda: False) if patch_name == failed_patch else (lambda: True),
+        )
+
+    with pytest.raises(RuntimeError, match=message):
+        GraphitiClient.from_settings_with_capabilities(
+            SimpleNamespace(canonical_self_binding_mode="enforce")
+        )
+
+
+@pytest.mark.unit
 def test_recall_metadata_projects_view_subject_for_canonical_self_gate() -> None:
     assert "n.view_subject_uuid AS view_subject_uuid" in ENTITY_METADATA_FIELDS
+    assert "n.view_subject AS view_subject" in ENTITY_METADATA_FIELDS
     assert "coalesce(n.is_self, false) AS is_self" in ENTITY_METADATA_FIELDS
     assert "n.entity_role AS entity_role" in ENTITY_METADATA_FIELDS
     assert "coalesce(n.namespace, n.group_id, 'default') AS namespace" in ENTITY_METADATA_FIELDS
+
+
+@pytest.mark.unit
+def test_service_builder_does_not_degrade_authority_patch_failure_in_enforce(
+    monkeypatch,
+) -> None:
+    from menhir.config import MemorySettings
+    from menhir.core.bootstrap import build_memory_services
+
+    monkeypatch.setattr("menhir.core.bootstrap.Neo4jRepository", lambda **kwargs: object())
+
+    def _fail_authority_startup(*args, **kwargs):
+        raise RuntimeError("canonical-self enforce mode requires Graphiti authority patches")
+
+    monkeypatch.setattr(
+        "menhir.core.bootstrap.GraphitiClient.from_settings_with_capabilities",
+        _fail_authority_startup,
+    )
+
+    with pytest.raises(RuntimeError, match="requires Graphiti authority patches"):
+        build_memory_services(MemorySettings(canonical_self_binding_mode="enforce"))
+
+
+@pytest.mark.unit
+def test_service_builder_refuses_degraded_graphiti_reads_in_enforce(
+    monkeypatch,
+) -> None:
+    from menhir.config import MemorySettings
+    from menhir.core.bootstrap import build_memory_services
+
+    monkeypatch.setattr("menhir.core.bootstrap.Neo4jRepository", lambda **kwargs: object())
+
+    with pytest.raises(RuntimeError, match="requires Graphiti-backed reads"):
+        build_memory_services(
+            MemorySettings(canonical_self_binding_mode="enforce"),
+            capabilities=SimpleNamespace(reads_ready=False),
+        )
 
 
 @pytest.mark.unit

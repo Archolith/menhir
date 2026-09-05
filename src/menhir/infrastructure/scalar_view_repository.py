@@ -85,7 +85,8 @@ class ScalarViewRepositoryMixin:
     # ------------------------------------------------------------------ counter (QuantState) API
 
     def record_counter(
-        self, *, subject: str, counter: str, value: float, namespace: str | None = None,
+        self, *, subject: str, counter: str, value: float, subject_uuid: str | None = None,
+        namespace: str | None = None,
         valid_at: str | None = None, source: str = "consolidation", source_confidence: float = 0.6,
         episode_uuids: list[str] | None = None, name_embedding: list[float] | None = None,
         audit: dict[str, Any] | None = None,
@@ -94,7 +95,7 @@ class ScalarViewRepositoryMixin:
         keeps `qs_key`/`value` for back-compat. `audit` is provenance-only node metadata (never
         signature, never embedding) — e.g. the perception gate's decision receipt."""
         res = self.record(
-            "counter", subject=subject, namespace=namespace, source=source,
+            "counter", subject=subject, subject_uuid=subject_uuid, namespace=namespace, source=source,
             source_confidence=source_confidence, name_embedding=name_embedding, audit_props=audit,
             counter=counter, value=float(value), valid_at=valid_at,
             episode_uuids=list(episode_uuids or []),

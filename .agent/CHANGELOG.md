@@ -20,11 +20,14 @@
   from durable structural markers rather than trusting a caller-supplied namespace.
 - Recheck external confirmation during fact-edge recall so deletion or change revokes that edge from
   authoritative recall; compare the relationship's actual direction, predicate, fact and temporal
-  tuple with the signed payload, preserve it through Graphiti's final resolver, and fail closed on
-  post-authorization drift or revocation.
+  tuple with the signed payload, require physical-group and external/internal episode attribution,
+  preserve it through Graphiti's final resolver, and fail closed on post-authorization drift or
+  revocation.
 - Withhold unconfirmed self-edge temporal enrichment and render affected counterpart summaries
-  name-only; remove canonical self from generic adjacency context because that lane cannot verify
-  relationship authority. Preserve legacy behavior in `off` and `observe`; keep the feature
+  name-only; remove canonical self from generic adjacency and recent/flagged bootstrap context
+  because those lanes cannot verify relationship authority. Refuse recallable UUID-less self-alias
+  Views and fail enforce-mode startup unless all authority-critical Graphiti patches are installed.
+  Preserve legacy behavior in `off` and `observe`; keep the feature
   default-off with no database migration, Docker/live-provider test, deployment or production
   activation in this change.
 

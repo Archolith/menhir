@@ -14,16 +14,21 @@ from hashlib import sha256
 import json
 from typing import Any, Mapping
 
+from menhir.domain.namespace import namespace_to_group_id
 from menhir.domain.self_identity import normalize_logical_namespace, self_uuid_for_namespace
 
 SELF_ASSERTION_SCHEMA_VERSION = 1
 SELF_ASSERTION_POLICY_VERSION = "menhir-canonical-self-authority-v1"
 SELF_ASSERTION_EDGE_PAYLOAD_PROPERTY = "menhir_self_authority_payload_json"
+SELF_ASSERTION_EDGE_EPISODE_PROPERTY = "menhir_self_authority_episode_uuid"
+SELF_ASSERTION_EDGE_GRAPHITI_EPISODE_PROPERTY = "menhir_self_authority_graphiti_episode_uuid"
 
 __all__ = [
     "SELF_ASSERTION_POLICY_VERSION",
     "SELF_ASSERTION_SCHEMA_VERSION",
     "SELF_ASSERTION_EDGE_PAYLOAD_PROPERTY",
+    "SELF_ASSERTION_EDGE_EPISODE_PROPERTY",
+    "SELF_ASSERTION_EDGE_GRAPHITI_EPISODE_PROPERTY",
     "SelfAssertionProposal",
     "SelfAuthorizationDecision",
     "UnconfirmedSelfAssertionError",
@@ -284,6 +289,10 @@ def proposal_matches_persisted_edge(
     target_node_uuid: Any,
     counterpart_name: Any,
     counterpart_labels: Any,
+    group_id: Any,
+    episode_uuids: Any,
+    authority_episode_uuid: Any,
+    authority_graphiti_episode_uuid: Any,
     predicate: Any,
     fact: Any,
     valid_at: Any,
@@ -296,6 +305,21 @@ def proposal_matches_persisted_edge(
     source = str(source_node_uuid or "").strip()
     target = str(target_node_uuid or "").strip()
     if not expected or self_uuid_for_namespace(proposal.namespace) != expected:
+        return False
+    if group_id is None or str(group_id).strip() != namespace_to_group_id(proposal.namespace):
+        return False
+    authority_episode = str(authority_episode_uuid or "").strip()
+    authority_graphiti_episode = str(authority_graphiti_episode_uuid or "").strip()
+    actual_episode_uuids = (
+        {str(value).strip() for value in episode_uuids}
+        if isinstance(episode_uuids, (list, tuple, set))
+        else set()
+    )
+    if (
+        authority_episode != proposal.episode_uuid
+        or not authority_graphiti_episode
+        or authority_graphiti_episode not in actual_episode_uuids
+    ):
         return False
     if proposal.direction == "self_to_entity":
         if source != expected or target == expected:

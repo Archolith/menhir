@@ -29,6 +29,10 @@ Runtime startup rejects an explicitly configured unrecognized value. This is del
 an intended `enforce` activation must not silently run the service in unprotected `off` mode. The
 default remains `off` when the variable is absent.
 
+`enforce` startup also requires Graphiti-backed reads and the combined-extraction, exact-edge,
+candidate-isolation, and canonical-dedupe patches. A missing patch or failed Graphiti construction
+aborts startup; the degraded-client fallback remains available only to `off` and `observe`.
+
 This repository change does not activate any mode in production. `enforce` is fail-closed: if any
 confirmation setting is blank, unreadable or inconsistent, semantic self assertions remain
 proposal-only.
@@ -176,9 +180,11 @@ extractor unless the production-model corpus or live canary exposes a problem th
 This mode now governs the complete canonical-self semantic boundary, not only Graphiti resolution.
 In `enforce`, typed-scalar and event-history lanes have no signed promotion path and remain
 proposal/advisory-only for canonical self; direct typed repositories reject canonical-self writes;
-self-anchored Views are rejected; rebind/restore paths cannot attach assertions to canonical self;
-and default recall excludes legacy canonical-self nodes, Views, scalar states/history and event
-authority. `off` and `observe` preserve those legacy paths for compatibility.
+self-anchored and UUID-less self-alias recall Views are rejected; rebind/restore paths cannot attach
+assertions to canonical self; and default recall plus recent/flagged bootstrap context exclude
+legacy canonical-self nodes, including historical UUID-less self-alias Views, scalar states/history,
+counterpart summaries and event authority. Ordinary non-View entities named `user` remain eligible.
+`off` and `observe` preserve those legacy paths for compatibility.
 
 ### Residuals before activation
 

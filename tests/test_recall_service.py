@@ -1927,6 +1927,40 @@ async def test_enforce_mode_excludes_legacy_canonical_self_view(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_enforce_mode_excludes_uuidless_text_keyed_self_view(
+    stub_graphiti_client, stub_memory_graph_adapter
+) -> None:
+    stub_graphiti_client.search_scored_results = [("view-1", "legacy self view", 0.99)]
+    view_meta = _meta("view-1", "legacy self view")
+    view_meta.update({"namespace": "proj", "is_view": True, "view_subject": "user"})
+    stub_memory_graph_adapter.candidate_metadata = [view_meta]
+    stub_memory_graph_adapter.canonical_self_binding_mode = "enforce"
+    svc = _build_recall_service(stub_graphiti_client, stub_memory_graph_adapter)
+
+    result = await svc.recall("what do I know about myself", namespace="proj")
+
+    assert result.results == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_enforce_mode_keeps_ordinary_entity_named_user(
+    stub_graphiti_client, stub_memory_graph_adapter
+) -> None:
+    stub_graphiti_client.search_scored_results = [("ordinary-user", "user", 0.99)]
+    entity_meta = _meta("ordinary-user", "user")
+    entity_meta.update({"namespace": "proj", "is_view": False, "view_subject": "user"})
+    stub_memory_graph_adapter.candidate_metadata = [entity_meta]
+    stub_memory_graph_adapter.canonical_self_binding_mode = "enforce"
+    svc = _build_recall_service(stub_graphiti_client, stub_memory_graph_adapter)
+
+    result = await svc.recall("software user", namespace="proj")
+
+    assert [row.uuid for row in result.results] == ["ordinary-user"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_enforce_mode_excludes_unscoped_canonical_self_view(
     stub_graphiti_client, stub_memory_graph_adapter
 ) -> None:
