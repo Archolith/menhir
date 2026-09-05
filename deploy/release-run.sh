@@ -11,6 +11,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [ "$(id -u)" -eq 0 ] || { echo "release-run must run as root" >&2; exit 1; }
 load_production_env
 validate_release_authority
+same_host_helper="${SCRIPT_DIR}/lib/same_host_fence.py"
+[ -f "$same_host_helper" ] || same_host_helper="${SCRIPT_DIR}/same_host_fence.py"
 
 run_lock="/run/lock/menhir-release-run.lock"
 exec 8>"$run_lock"
@@ -106,7 +108,7 @@ then
             && docker inspect menhir-prod-app menhir-prod-neo4j >/dev/null 2>&1; then
         fence_args+=(--allow-production)
     fi
-    python3 "${SCRIPT_DIR}/lib/same_host_fence.py" "${fence_args[@]}"
+    python3 "$same_host_helper" "${fence_args[@]}"
     rm -f "$census"
     advance backup
 
@@ -182,7 +184,7 @@ if at_least routed && ! at_least promoted \
     else
         printf '[]\n' > "$census"
     fi
-    python3 "${SCRIPT_DIR}/lib/same_host_fence.py" verify "$RELEASE_JSON" \
+    python3 "$same_host_helper" verify "$RELEASE_JSON" \
         "${STATUS_DIR}/same-host-writer-fence.json" "$census" --allow-production
     rm -f "$census"
     advance promoted

@@ -272,6 +272,7 @@ def _validate_census(containers: list, intent: dict, release: dict,
             and mount_sources == {
                 "/srv/menhir/production/state/neo4j/data",
                 "/srv/menhir/production/state/neo4j/logs",
+                "/srv/menhir/production/secrets/neo4j/neo4j-auth",
             }
         )
         candidate_claim = (
@@ -309,6 +310,7 @@ def _validate_census(containers: list, intent: dict, release: dict,
             } if expected_role == "app" else {
                 "/srv/menhir/production/state/neo4j/data",
                 "/srv/menhir/production/state/neo4j/logs",
+                "/srv/menhir/production/secrets/neo4j/neo4j-auth",
             })
             is_reviewed_production = is_reviewed_production and mount_sources == expected_mounts
             if not is_reviewed_production:

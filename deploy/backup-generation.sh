@@ -356,7 +356,7 @@ for evidence in \
 done
 
 # --- Hash every file (except the markers written after this) ---
-( cd "${target}" && find . -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS )
+( cd "${target}" && find . -type f ! -path './SHA256SUMS' -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS )
 sha256sums_sha256="$( (cd "${target}" && sha256sum SHA256SUMS | cut -d' ' -f1) )"
 
 # --- Manifest (strict duplicate-key-rejecting schema; exact set equality +

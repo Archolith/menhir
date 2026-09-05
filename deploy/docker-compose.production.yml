@@ -127,6 +127,10 @@ services:
     image: "${MENHIR_IMAGE:?MENHIR_IMAGE (digest-pinned menhir image) is required}"
     container_name: ${MENHIR_APP_CONTAINER:-menhir-prod-app}
     restart: unless-stopped
+    # Compose `run` has no --memory option. Keep the limit in the service
+    # model so normal and one-shot containers receive a parser-validated
+    # limit; the authority digest raises this value to 4 GiB explicitly.
+    mem_limit: "${MENHIR_APP_MEMORY_LIMIT:-2g}"
     depends_on:
       neo4j:
         condition: service_healthy
@@ -237,7 +241,7 @@ services:
       resources:
         limits:
           cpus: "1"
-          memory: 2g
+          memory: "${MENHIR_APP_MEMORY_LIMIT:-2g}"
           pids: 256
     logging:
       driver: json-file

@@ -61,6 +61,22 @@ def _require_success(status: int, response: dict, label: str) -> None:
         raise RuntimeError(f"{label} failed: HTTP {status}: {response}")
 
 
+def _is_explicit_mutation_refusal(status: int, response: dict) -> bool:
+    if status == 503 and response.get("error") == "temporarily_unavailable":
+        return True
+    if status // 100 != 2:
+        return False
+    if response.get("error") or response.get("result", {}).get("isError") is True:
+        return True
+    denial = (
+        "Error: PermissionError: Token tier 'readonly' cannot invoke "
+        "`add_memory` (requires 'agent')"
+    )
+    return response.get("result", {}).get("content", []) == [
+        {"type": "text", "text": denial}
+    ]
+
+
 def _run(command: list[str], *, input_bytes: bytes | None = None) -> str:
     result = subprocess.run(
         command, input=input_bytes, capture_output=True, check=False, timeout=20,
@@ -193,14 +209,7 @@ def _candidate_accept(base_url: str, token: str) -> None:
             "text": "candidate acceptance probe -- must never persist",
             "source": "menhir-candidate-accept"}},
     }, session)
-    is_http_fence = (
-        status == 503
-        and isinstance(response, dict)
-        and response.get("error") == "temporarily_unavailable"
-    )
-    is_jsonrpc_error = bool(response.get("error"))
-    is_tool_error = bool(response.get("result", {}).get("isError"))
-    if not (is_http_fence or (status // 100 == 2 and (is_jsonrpc_error or is_tool_error))):
+    if not _is_explicit_mutation_refusal(status, response):
         raise RuntimeError(
             f"candidate mutation was not explicitly refused: HTTP {status}: {response}")
     print("MCP recall succeeded and mutation was refused")
