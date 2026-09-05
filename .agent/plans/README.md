@@ -10,6 +10,10 @@ routed through the [backlog index](backlog/README.md). Useful non-executable mat
 
 This index routes the current execution owners listed below exactly once.
 
+Canonical-self note (2026-09-05): the proposed authority-boundary repair below records an unresolved
+reported-speech attribution defect. The older release-plan listing is not sign-off for canonical-self
+`enforce`; the product contract and prevention acceptance evidence still require owner review.
+
 ## Active execution authority
 
 | Document | Current ownership |
@@ -32,13 +36,14 @@ This index routes the current execution owners listed below exactly once.
 |---|---|---|
 | [`menhir-artifact-semantic-model.md`](menhir-artifact-semantic-model.md) | WorkArtifact model, migration, relationships, open questions, and MCP surface. | `CurrentPlanView`. |
 | [`menhir-compositional-scalar-identity-2026-08-05.md`](menhir-compositional-scalar-identity-2026-08-05.md) | Phases 1–4 and bounded panels. | Preregistered larger-population evidence and any promotion decision. |
-| [`menhir-deterministic-first-event-scalar-2026-07-30.md`](menhir-deterministic-first-event-scalar-2026-07-30.md) | Phase 1/2A and bounded smoke. | Population gates, frozen evaluation, and class-level promotion decisions. |
+| [`menhir-deterministic-first-event-scalar-2026-07-30.md`](menhir-deterministic-first-event-scalar-2026-07-30.md) | Phases 1/2A and bounded smoke. | Population gates, frozen evaluation, and class-level promotion decisions. |
 | [`typed-recall-packet-prototype.md`](typed-recall-packet-prototype.md) | Scalar/event inspection packet. | Admitted intent-state integration after the Intent State View exists. |
 
 ## Owner decision required
 
 | Document | Decision |
 |---|---|
+| [`menhir-canonical-self-authority-boundary-2026-09-05.md`](menhir-canonical-self-authority-boundary-2026-09-05.md) | Choose the canonical-self attribution contract; proposed hybrid separates model-extracted proposals from owner-confirmed self facts. Implementation, database writes, deployment and historical remediation are not approved by plan authoring. |
 | [`menhir-context-composition-production-integration.md`](menhir-context-composition-production-integration.md) | Decide whether Stages 2–4 remain wanted after Stage 1's negative result and the later independent fix of the motivating extraction failure. |
 
 ## Maintenance rule

@@ -1,3 +1,15 @@
+## 2026-09-05 - plan the canonical-self authority-boundary repair
+
+- Added `.agent/plans/menhir-canonical-self-authority-boundary-2026-09-05.md` as a proposed,
+  owner-decision-gated hybrid: structural author identity, non-authoritative extracted proposals,
+  and assertion-scoped owner confirmation before canonical-self attachment.
+- Updated `.agent/plans/README.md` with the pending contract decision and an explicit warning that
+  the older release-plan listing is not canonical-self enforcement sign-off.
+- Defined test-first phases, the multiline reported-speech regression, scalar/event and recall
+  bypass coverage, exact-model/image local verification, and separate production/migration gates.
+- Documentation only: no implementation, deployment, database write, or historical-fork remediation.
+  Draft metadata/structure checks passed; the full repository validator and runtime suites were not run.
+
 ## 2026-09-04 - add verified subject endpoints for canonical self
 
 - Made the lease-acquiring episode claim atomically certify exact evidence-projection lineage,
@@ -194,17 +206,3 @@ predicate-evaluating fake to confirm both guards compose.
   SBOM without presenting a historical `.env`, coverage snapshot, or benchmark as live
   deployment evidence.
 - Updated package metadata to use the same provenance and governed-context description.
-
-## 2026-08-30 - require an independent security review for every production release
-
-- Added a two-phase release-authoring flow that emits the exact candidate
-  authority digest for review and refuses final authoring without a matching
-  independent `APPROVED` attestation.
-- Bound the review to every release claim, including all four commits, evidence,
-  rendered artifacts, image digests, policies, rollback anchors, secret versions,
-  and installed artifacts; any drift invalidates approval.
-- Made zero unresolved critical/high findings and complete security scope strict
-  release-schema requirements inherited by bootstrap, backup, candidate,
-  promotion, rollback, and runtime validation paths.
-- Documented the permanent release gate and recorded the follow-up to replace
-  opaque MCP internal errors with actionable subsystem-specific diagnostics.
