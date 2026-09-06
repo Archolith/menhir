@@ -6,6 +6,10 @@ For an immutable production release to the live VPS, start with the
 per-client OAuth identity, and ChatGPT/Codex/Claude/OpenCode role invariant is
 in [ACCESS_CONTRACT.md](ACCESS_CONTRACT.md).
 
+Use [RELEASE_AUTOMATION.md](RELEASE_AUTOMATION.md) for the maintained,
+resumable desktop flow that prepares the review request, finalizes the reviewed
+authority, builds the install bundle, and hands it to the production wrapper.
+
 Production deployment has two operational paths:
 
 - routine `app-only`: verify the one-time scaffold, pull and replace only the Menhir

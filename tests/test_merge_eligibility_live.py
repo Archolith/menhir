@@ -92,6 +92,12 @@ def test_eligible_pair_merges(live_repo, make_pair):
         ({"namespace": "proj-a"}, {"namespace": "proj-b"}, me.NAMESPACE_MISMATCH),
         # Path-shaped name -> ineligible role.
         ({}, {"name": "src/menhir/foo.py"}, me.INELIGIBLE_ROLE),
+        # Canonical self is an endpoint authority and must never be absorbed or used as survivor.
+        ({"is_self": True, "entity_role": "self"}, {}, me.INELIGIBLE_ROLE),
+        ({}, {"is_self": True, "entity_role": "self"}, me.INELIGIBLE_ROLE),
+        # Either marker independently protects legacy or partially stamped canonical nodes.
+        ({"entity_role": "SELF"}, {}, me.INELIGIBLE_ROLE),
+        ({}, {"is_self": True}, me.INELIGIBLE_ROLE),
     ],
 )
 def test_ineligible_pair_abstains_and_preserves_node(
@@ -144,6 +150,31 @@ def test_derived_nodes_are_ineligible_at_both_call_sites(live_repo, make_pair, d
     assert repo.check_ineligible_node_veto(s, a) is True
     # the mutation-boundary gate -- the one that actually guards DETACH DELETE
     assert repo.evaluate_merge_eligibility(s, a).allowed is False
+
+
+@pytest.mark.online
+@pytest.mark.parametrize(
+    "canonical_props",
+    [
+        pytest.param({"is_self": True}, id="is-self-marker"),
+        pytest.param({"entity_role": "self"}, id="entity-role-marker"),
+    ],
+)
+def test_canonical_self_is_ineligible_at_both_call_sites(
+    live_repo, make_pair, canonical_props
+):
+    s, a = make_pair(
+        survivor_props={"freshness": "ACTIVE", "scope": "PERSISTENT"},
+        absorbed_props={
+            "freshness": "ACTIVE", "scope": "PERSISTENT", **canonical_props,
+        },
+    )
+    repo = CorrelationRepository(live_repo)
+
+    assert repo.check_ineligible_node_veto(s, a) is True
+    decision = repo.evaluate_merge_eligibility(s, a)
+    assert decision.allowed is False
+    assert decision.reason_code == me.INELIGIBLE_ROLE
 
 
 @pytest.mark.online
