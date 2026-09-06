@@ -58,7 +58,7 @@ IMAGE_REF_RE = re.compile(
     r"@sha256:[0-9a-f]{64}$"
 )
 PLACEHOLDER_RE = re.compile(
-    r"<[^>]+>|\{\{[^}]+\}\}|\b(?:TODO|CHANGEME)\b", re.I
+    r"<[^>]+>|\{\{[^}]+\}\}|\b(?:TODO|CHANGEME|REPLACE_WITH)\b", re.I
 )
 SECRET_KEY_RE = re.compile(
     r"(?:^|_)(?:PASSWORD|PASSWD|SECRET|TOKEN|API_KEY|PRIVATE_KEY|CREDENTIAL)(?:$|_)",

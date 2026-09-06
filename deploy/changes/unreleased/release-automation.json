@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "id": "release-automation",
+  "category": "operations",
+  "deployment_class": "maintenance",
+  "summary": "Automate reviewed release staging and bundle construction.",
+  "details": "Commit ce32b2a0d8c573ddbf29f0be13ffb6818316f4de replaces one-off release preparation with maintained specification generation, deterministic install-bundle construction, and a resumable gated coordinator.",
+  "operator_impact": "Operators prepare one strict inputs file, obtain the existing independent review, and use the coordinator to finalize and preview deployment. Production execution still requires the exact release ID and an explicit execution flag.",
+  "repositories": {
+    "menhir": [
+      "ce32b2a0d8c573ddbf29f0be13ffb6818316f4de"
+    ]
+  },
+  "security_scopes": [
+    "backup-restore-and-rollback",
+    "host-privilege-and-command-wrappers",
+    "secret-handling",
+    "supply-chain-and-build-evidence"
+  ],
+  "breaking": false
+}
