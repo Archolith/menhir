@@ -4,12 +4,13 @@
   "category": "operations",
   "deployment_class": "maintenance",
   "summary": "Automate reviewed release staging and bundle construction.",
-  "details": "Commits 0e6628be5203401ef7895a1a3cf28bd5776a33e4 and 3f5eebe99689e0c1cae066d01edce6a057372672 replace one-off release preparation with maintained specification generation, deterministic install-bundle construction, and a resumable gated coordinator with a bound deployment handoff.",
+  "details": "Commits 0e6628be5203401ef7895a1a3cf28bd5776a33e4, 3f5eebe99689e0c1cae066d01edce6a057372672, and 963f1abe00dc71ac31d58a00641decd1683bd594 replace one-off release preparation with maintained specification generation, deterministic install-bundle construction, and a resumable gated coordinator that binds the complete bundle tree through desktop and remote verification.",
   "operator_impact": "Operators prepare one strict inputs file, obtain the existing independent review, and use the coordinator to finalize and preview deployment. Production execution still requires the exact release ID and an explicit execution flag.",
   "repositories": {
     "menhir": [
       "0e6628be5203401ef7895a1a3cf28bd5776a33e4",
-      "3f5eebe99689e0c1cae066d01edce6a057372672"
+      "3f5eebe99689e0c1cae066d01edce6a057372672",
+      "963f1abe00dc71ac31d58a00641decd1683bd594"
     ]
   },
   "security_scopes": [
