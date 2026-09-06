@@ -1,3 +1,13 @@
+## 2026-09-06 - automate reviewed production release staging
+
+- Added committed change fragments and deterministic Markdown/JSON release-note rendering so
+  release history is staged alongside each production-impacting fix.
+- Added strict four-repository release-spec generation and deterministic install-bundle creation,
+  replacing the previous one-off release workspace scripts.
+- Added a resumable `prepare -> review -> finalize -> deploy` coordinator that preserves the
+  independent security-review gate, previews deployment by default, and requires the exact release
+  ID plus an explicit execution flag before invoking the existing production transaction.
+
 ## 2026-09-06 - admit ChatGPT's stable CIMD identity
 
 - Added `https://chatgpt.com/oauth/client.json` to the digest-bound ChatGPT
@@ -191,30 +201,3 @@ predicate-evaluating fake to confirm both guards compose.
   **`MENHIR_CLIENT_POLICY_DIGEST` must be updated on the deployed host before this
   ships, or startup fails closed. Independent security review and reauthorization of
   existing grants are still outstanding, per deploy/ACCESS_CONTRACT.md.**
-
-## 2026-08-30 - position Menhir around provenance and governance
-
-- Reframed the public README, runtime descriptions, CLI help, and agent template around
-  inspectable evidence, code impact, lifecycle authority, artifact governance, and
-  release provenance, with MCP described as an access surface rather than the product
-  category.
-- Added an evaluation posture for the LongMemEval-derived temporal subset that records
-  its diagnostic limits, publication requirements, and effect on default-off decisions.
-- Updated governance and model records to match current source defaults and the checked-in
-  SBOM without presenting a historical `.env`, coverage snapshot, or benchmark as live
-  deployment evidence.
-- Updated package metadata to use the same provenance and governed-context description.
-
-## 2026-08-30 - require an independent security review for every production release
-
-- Added a two-phase release-authoring flow that emits the exact candidate
-  authority digest for review and refuses final authoring without a matching
-  independent `APPROVED` attestation.
-- Bound the review to every release claim, including all four commits, evidence,
-  rendered artifacts, image digests, policies, rollback anchors, secret versions,
-  and installed artifacts; any drift invalidates approval.
-- Made zero unresolved critical/high findings and complete security scope strict
-  release-schema requirements inherited by bootstrap, backup, candidate,
-  promotion, rollback, and runtime validation paths.
-- Documented the permanent release gate and recorded the follow-up to replace
-  opaque MCP internal errors with actionable subsystem-specific diagnostics.

@@ -157,10 +157,14 @@ For `maintenance`, the desktop command performs the release-bound cutover backup
 verified desktop archive, and fixed resumable VPS transaction:
 
 ```powershell
-PowerShell -File C:\Users\thron\IdeaProjects\scripts\deploy-menhir.ps1 -BundlePath <reviewed-install-bundle>
+PowerShell -File C:\Users\thron\IdeaProjects\scripts\deploy-menhir.ps1 `
+  -BundlePath <reviewed-install-bundle> `
+  -ExpectedBundleSha256 <digest-from-release-flow-state>
 ```
 
-An explicit bundle is required; timestamp-based discovery is not release authority.
+An explicit bundle and its `bundle_sha256` from `release-flow.json` are required;
+timestamp-based discovery is not release authority. Prefer the
+`release_flow.py deploy` command, which supplies both values automatically.
 A repeated maintenance call resumes the exact release and generation from
 `/var/lib/menhir-production/release-run.json`; it never starts another release silently.
 
@@ -179,6 +183,18 @@ capture legacy writer + backup + retire writer
 
 Errors state the missing or conflicting authority. Do not reinterpret a failed
 check as success or replace the fixed command with ad-hoc Compose/SSH commands.
+
+## Automated release staging
+
+Use [`RELEASE_AUTOMATION.md`](RELEASE_AUTOMATION.md) and
+`deploy/release_flow.py` for routine release preparation. It replaces the
+one-off workspace scripts with a digest-bound `prepare -> independent review ->
+finalize -> deploy` flow. The deploy command is a preview unless `--execute` is
+supplied, and execution also requires the exact reviewed release ID.
+
+This coordinator does not weaken the controls below. It calls the existing
+release author and desktop deployment wrapper, and it cannot skip independent
+review, artifact validation, or the server-side transaction.
 
 ## Release inputs
 
@@ -222,6 +238,17 @@ approval only for sensitive surfaces proven byte-identical. A new independent se
 review bound to the complete release authority digest is mandatory for `security-config`,
 `maintenance`, and any change to authentication, authorization, secrets, privileged
 deployment, backup, restore, recovery, or release-authoring code:
+
+```powershell
+python deploy/release_flow.py prepare --inputs <absolute-inputs.json> --workspace <empty-absolute-workspace>
+python deploy/release_flow.py finalize --workspace <absolute-workspace> --security-review <absolute-review.json>
+```
+
+`release-author.py` remains the low-level authority boundary used by the
+coordinator. Do not invoke it directly for a routine release unless recovering
+or diagnosing the coordinator itself.
+
+The equivalent low-level review boundary remains:
 
 ```powershell
 python deploy/release-author.py --spec <absolute-spec.json> --review-request <absolute-request.json>
@@ -367,3 +394,8 @@ selection, scaffold verification, exact app-image pull, app-only replacement,
 authenticated acceptance, and automatic prior-image rollback on failure. Host
 topology, Neo4j, Caddy, backup identity, network, systemd, sudoers, gateway bootstrap,
 full backup generation, and restore rehearsal are not recreated.
+
+Stage and review the release through `release_flow.py`, preview its deployment
+command, then execute that same release only after production approval. Any
+`security-config` or `maintenance` fragment automatically selects the full
+maintenance path.
