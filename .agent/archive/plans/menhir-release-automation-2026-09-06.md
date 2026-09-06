@@ -7,6 +7,10 @@ artifact_status: IMPLEMENTED
 
 # Menhir release staging and automation
 
+> **Disposition (2026-09-06): COMPLETE.** Maintained change fragments, deterministic notes,
+> release-spec preparation, install-bundle construction, and the resumable gated coordinator are
+> implemented and tested. No production deployment was performed as part of this plan.
+
 ## Why
 
 - Release preparation currently depends on one-off scripts and hand-assembled workspaces.

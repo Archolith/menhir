@@ -91,10 +91,20 @@ python deploy/release_flow.py deploy `
 ```
 
 The coordinator selects `AppOnly` only when every staged fragment is
-`app-only`; any security or host-impacting fragment escalates to `Maintenance`.
+`app-only`, no sibling repository changed, and the Menhir diff contains only
+application source outside the protected authentication, runtime, schema, and
+configuration paths. A fragment can escalate that result but cannot de-escalate
+it. Any security or host-impacting change selects `Maintenance`; the external
+app-only classifier repeats the source check before mutation.
 The deployment wrapper and server-side transaction remain authoritative for
 preflight, backup, fencing, candidate acceptance, routing, promotion,
 acceptance, rollback, and recovery.
+
+For maintenance installs, the bundle installer reloads systemd definitions and
+restarts the operations gateway and Caddy reconcile path only when each service
+was already active. A failed activation restores the prior files, reloads the
+restored definitions, and attempts to return those services to their prior
+active state before failing the deployment.
 
 ## After release
 

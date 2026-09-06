@@ -106,6 +106,46 @@ def test_fragment_coverage_rejects_commit_outside_candidate_range(tmp_path: Path
         MODULE._verify_fragment_coverage([fragment], spec)
 
 
+def test_deployment_class_never_deescalates_non_app_source(tmp_path: Path) -> None:
+    spec, _ = _coverage_fixture(tmp_path)
+    fragment = {"deployment_class": "app-only"}
+
+    assert MODULE._deployment_class([fragment], spec) == "maintenance"
+
+
+def test_deployment_class_accepts_only_menhir_application_source(
+    tmp_path: Path,
+) -> None:
+    repositories: dict[str, str] = {}
+    prior_repos: dict[str, str] = {}
+    for name in sorted(MODULE.REPOSITORIES):
+        repo = tmp_path / name
+        repo.mkdir()
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        subprocess.run(
+            ["git", "-C", str(repo), "config", "user.email", "test@example.com"],
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(repo), "config", "user.name", "Test"], check=True
+        )
+        base = _commit(repo, "base.txt", "base\n")
+        prior_repos[name] = base
+        if name == "menhir":
+            _commit(repo, "src/menhir/change.py", "VALUE = 1\n")
+        repositories[name] = str(repo.resolve())
+    prior = tmp_path / "prior-release.json"
+    prior.write_text(json.dumps({"repos": prior_repos}), encoding="ascii")
+    spec = {
+        "repositories": repositories,
+        "prior_release": str(prior.resolve()),
+    }
+
+    assert MODULE._deployment_class(
+        [{"deployment_class": "app-only"}], spec
+    ) == "app-only"
+
+
 def _write_staged_workspace(tmp_path: Path, phase: str = "bundled") -> tuple[Path, dict]:
     workspace = tmp_path / "release-workspace"
     workspace.mkdir()
@@ -148,27 +188,37 @@ def _write_staged_workspace(tmp_path: Path, phase: str = "bundled") -> tuple[Pat
             _sha(workspace / MODULE.BUNDLE_NAME / "bundle-manifest.json")
             if phase in {"bundled", "deployed"} else None
         ),
+        "bundle_sha256": (
+            MODULE._tree_sha256(workspace / MODULE.BUNDLE_NAME)
+            if phase in {"bundled", "deployed"} else None
+        ),
     }
     MODULE._atomic_json(workspace / MODULE.STATE_NAME, state)
     return workspace, state
 
 
-def test_deploy_requires_exact_release_confirmation(tmp_path: Path) -> None:
+def test_deploy_requires_exact_release_confirmation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     workspace, _ = _write_staged_workspace(tmp_path)
     wrapper = tmp_path / "deploy-menhir.ps1"
     wrapper.write_text("# test\n", encoding="ascii")
+    monkeypatch.setattr(MODULE, "DEFAULT_WRAPPER", wrapper)
 
     with pytest.raises(MODULE.ReleaseFlowError, match="exactly match"):
-        MODULE.deploy_flow(workspace, "menhir-prod-0.2.0-12", wrapper, execute=False)
+        MODULE.deploy_flow(workspace, "menhir-prod-0.2.0-12", execute=False)
 
 
-def test_deploy_dry_run_preserves_state_and_selects_maintenance(tmp_path: Path) -> None:
+def test_deploy_dry_run_preserves_state_and_selects_maintenance(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     workspace, _ = _write_staged_workspace(tmp_path)
     wrapper = tmp_path / "deploy-menhir.ps1"
     wrapper.write_text("# test\n", encoding="ascii")
+    monkeypatch.setattr(MODULE, "DEFAULT_WRAPPER", wrapper)
 
     command = MODULE.deploy_flow(
-        workspace, "menhir-prod-0.2.0-11", wrapper, execute=False
+        workspace, "menhir-prod-0.2.0-11", execute=False
     )
 
     assert isinstance(command, list)
@@ -176,16 +226,18 @@ def test_deploy_dry_run_preserves_state_and_selects_maintenance(tmp_path: Path) 
     assert json.loads((workspace / MODULE.STATE_NAME).read_text())["phase"] == "bundled"
 
 
-def test_deploy_records_success_only_after_runner_returns(tmp_path: Path) -> None:
+def test_deploy_records_success_only_after_runner_returns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     workspace, _ = _write_staged_workspace(tmp_path)
     wrapper = tmp_path / "deploy-menhir.ps1"
     wrapper.write_text("# test\n", encoding="ascii")
+    monkeypatch.setattr(MODULE, "DEFAULT_WRAPPER", wrapper)
     seen: list[list[str]] = []
 
     result = MODULE.deploy_flow(
         workspace,
         "menhir-prod-0.2.0-11",
-        wrapper,
         execute=True,
         runner=seen.append,
     )
@@ -195,15 +247,17 @@ def test_deploy_records_success_only_after_runner_returns(tmp_path: Path) -> Non
     assert json.loads((workspace / MODULE.STATE_NAME).read_text())["phase"] == "deployed"
 
 
-def test_deploy_resume_does_not_run_transaction_twice(tmp_path: Path) -> None:
+def test_deploy_resume_does_not_run_transaction_twice(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     workspace, _ = _write_staged_workspace(tmp_path, phase="deployed")
     wrapper = tmp_path / "deploy-menhir.ps1"
     wrapper.write_text("# test\n", encoding="ascii")
+    monkeypatch.setattr(MODULE, "DEFAULT_WRAPPER", wrapper)
 
     result = MODULE.deploy_flow(
         workspace,
         "menhir-prod-0.2.0-11",
-        wrapper,
         execute=True,
         runner=lambda _command: pytest.fail("completed deployment ran again"),
     )
@@ -216,6 +270,16 @@ def test_status_rejects_artifact_drift(tmp_path: Path) -> None:
     (workspace / MODULE.NOTES_MARKDOWN_NAME).write_text("changed\n", encoding="ascii")
 
     with pytest.raises(MODULE.ReleaseFlowError, match="artifact changed"):
+        MODULE.status_flow(workspace)
+
+
+def test_status_rejects_bundle_payload_drift(tmp_path: Path) -> None:
+    workspace, _ = _write_staged_workspace(tmp_path)
+    (workspace / MODULE.BUNDLE_NAME / "extra").write_text(
+        "changed\n", encoding="ascii"
+    )
+
+    with pytest.raises(MODULE.ReleaseFlowError, match="install bundle changed"):
         MODULE.status_flow(workspace)
 
 
@@ -279,7 +343,7 @@ def test_prepare_authors_review_request_and_binds_outputs(
     state = MODULE.prepare_flow(inputs.resolve(), workspace.resolve(), fragments.resolve())
 
     assert state["phase"] == "review_requested"
-    assert state["deployment_class"] == "security-config"
+    assert state["deployment_class"] == "maintenance"
     assert (workspace / MODULE.REVIEW_REQUEST_NAME).exists()
     assert MODULE.status_flow(workspace.resolve()) == state
 

@@ -10,6 +10,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -25,11 +26,22 @@ NOTES_MARKDOWN_NAME = "release-notes.md"
 REVIEW_REQUEST_NAME = "security-review-request.json"
 RELEASE_NAME = "release.json"
 BUNDLE_NAME = "install-bundle"
+DEFAULT_WRAPPER = SCRIPT_DIR.parents[3] / "scripts" / "deploy-menhir.ps1"
 KIND = "menhir-release-flow"
 SCHEMA = 1
 PHASES = ("review_requested", "bundled", "deployed")
 REPOSITORIES = frozenset({"menhir", "archolith_oauth", "yawn_deploy", "yawn_vps"})
 CLASS_ORDER = {"app-only": 0, "security-config": 1, "maintenance": 2}
+APP_ONLY_FORBIDDEN = tuple(re.compile(pattern) for pattern in (
+    r"^deploy/",
+    r"^\.github/",
+    r"^(pyproject\.toml|uv\.lock|poetry\.lock|requirements[^/]*)$",
+    r"^src/menhir/config/",
+    r"^src/menhir/api/(auth|client_policy|oauth[^/]*)\.py$",
+    r"^src/menhir/core/(bootstrap|runtime|runtime_preflight)\.py$",
+    r"^src/menhir/infrastructure/(schema|migration_batches|embedding_dimensions)\.py$",
+    r"^src/menhir/infrastructure/telemetry/schema_migrations\.py$",
+))
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 RELEASE_ID_RE = re.compile(r"^menhir-prod-[0-9]+\.[0-9]+\.[0-9]+-[0-9]+$")
@@ -37,7 +49,7 @@ STATE_KEYS = frozenset({
     "schema", "kind", "phase", "release_id", "release_author", "workspace",
     "deployment_class", "inputs_sha256", "spec_sha256", "notes_json_sha256",
     "notes_markdown_sha256", "review_request_sha256", "security_review_sha256",
-    "release_sha256", "bundle_manifest_sha256",
+    "release_sha256", "bundle_manifest_sha256", "bundle_sha256",
 })
 
 
@@ -50,6 +62,32 @@ def _sha256(path: Path) -> str:
     with path.open("rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _tree_sha256(root: Path) -> str:
+    try:
+        root_info = root.lstat()
+    except OSError as exc:
+        raise ReleaseFlowError(f"bundle does not exist: {root}") from exc
+    if not stat.S_ISDIR(root_info.st_mode) or stat.S_ISLNK(root_info.st_mode):
+        raise ReleaseFlowError("install bundle must be a non-symlink directory")
+    digest = hashlib.sha256()
+    for path in sorted(root.rglob("*"), key=lambda item: item.relative_to(root).as_posix()):
+        relative = path.relative_to(root).as_posix()
+        info = path.lstat()
+        if stat.S_ISLNK(info.st_mode):
+            raise ReleaseFlowError(f"install bundle contains symlink: {relative}")
+        if stat.S_ISDIR(info.st_mode):
+            kind = "directory"
+            payload_digest = ""
+        elif stat.S_ISREG(info.st_mode):
+            kind = "file"
+            payload_digest = _sha256(path)
+        else:
+            raise ReleaseFlowError(f"install bundle contains special entry: {relative}")
+        record = f"{kind}\0{relative}\0{stat.S_IMODE(info.st_mode):04o}\0{payload_digest}\n"
+        digest.update(record.encode("utf-8"))
     return digest.hexdigest()
 
 
@@ -246,11 +284,49 @@ def _verify_fragment_coverage(
                 )
 
 
-def _deployment_class(fragments: list[Any]) -> str:
+def _candidate_deployment_class(spec: dict[str, Any]) -> str:
+    repository_paths = spec.get("repositories")
+    prior_value = spec.get("prior_release")
+    if not isinstance(repository_paths, dict) or set(repository_paths) != REPOSITORIES \
+            or not isinstance(prior_value, str):
+        raise ReleaseFlowError("release spec cannot be classified")
+    prior_repos = _load_json(Path(prior_value), "prior release").get("repos")
+    if not isinstance(prior_repos, dict) or set(prior_repos) != REPOSITORIES:
+        raise ReleaseFlowError("prior release repositories are invalid")
+
+    heads: dict[str, str] = {}
+    for name in sorted(REPOSITORIES):
+        repo = Path(repository_paths[name])
+        heads[name] = _git(repo, "rev-parse", "HEAD").stdout.strip()
+        if name != "menhir" and heads[name] != prior_repos[name]:
+            return "maintenance"
+
+    menhir_base = prior_repos["menhir"]
+    menhir_head = heads["menhir"]
+    if menhir_base == menhir_head:
+        return "maintenance"
+    changed = _git(
+        Path(repository_paths["menhir"]),
+        "diff", "--name-only", "--diff-filter=ACDMRTUXB",
+        menhir_base, menhir_head,
+    ).stdout.splitlines()
+    if not changed or any(
+        not path.startswith("src/")
+        or any(pattern.search(path) for pattern in APP_ONLY_FORBIDDEN)
+        for path in changed
+    ):
+        return "maintenance"
+    return "app-only"
+
+
+def _deployment_class(fragments: list[Any], spec: dict[str, Any]) -> str:
     classes = [_fragment_value(fragment, "deployment_class") for fragment in fragments]
     if not classes or any(value not in CLASS_ORDER for value in classes):
         raise ReleaseFlowError("release-note fragments do not declare valid deployment classes")
-    return max(classes, key=CLASS_ORDER.__getitem__)
+    return max(
+        [*classes, _candidate_deployment_class(spec)],
+        key=CLASS_ORDER.__getitem__,
+    )
 
 
 def _run(command: list[str]) -> None:
@@ -314,6 +390,9 @@ def _verify_staged_files(workspace: Path, state: dict[str, Any]) -> None:
         expected = state.get(key)
         if expected is None or _sha256(_regular_file(path, key)) != expected:
             raise ReleaseFlowError(f"staged release artifact changed: {path.name}")
+    if state["phase"] in {"bundled", "deployed"}:
+        if _tree_sha256(workspace / BUNDLE_NAME) != state.get("bundle_sha256"):
+            raise ReleaseFlowError("staged install bundle changed")
 
 
 def prepare_flow(inputs_path: Path, workspace: Path, fragments_dir: Path) -> dict[str, Any]:
@@ -366,7 +445,7 @@ def prepare_flow(inputs_path: Path, workspace: Path, fragments_dir: Path) -> dic
             "release_id": release.get("release_id"),
             "release_author": release.get("release_author"),
             "workspace": str(workspace),
-            "deployment_class": _deployment_class(fragments),
+            "deployment_class": _deployment_class(fragments, spec),
             "inputs_sha256": _sha256(inputs_path),
             "spec_sha256": _sha256(spec_path),
             "notes_json_sha256": _sha256(workspace / NOTES_JSON_NAME),
@@ -375,6 +454,7 @@ def prepare_flow(inputs_path: Path, workspace: Path, fragments_dir: Path) -> dic
             "security_review_sha256": None,
             "release_sha256": None,
             "bundle_manifest_sha256": None,
+            "bundle_sha256": None,
         }
         if not isinstance(state["release_id"], str) or not RELEASE_ID_RE.fullmatch(state["release_id"]):
             raise ReleaseFlowError("authored review request release_id is invalid")
@@ -435,6 +515,7 @@ def finalize_flow(workspace: Path, security_review: Path) -> dict[str, Any]:
         "security_review_sha256": _sha256(review_copy),
         "release_sha256": _sha256(release_path),
         "bundle_manifest_sha256": _sha256(bundle_path / "bundle-manifest.json"),
+        "bundle_sha256": _tree_sha256(bundle_path),
     })
     _atomic_json(_state_path(workspace), state)
     return state
@@ -443,9 +524,8 @@ def finalize_flow(workspace: Path, security_review: Path) -> dict[str, Any]:
 def deployment_command(
     workspace: Path,
     state: dict[str, Any],
-    wrapper: Path,
 ) -> list[str]:
-    wrapper = _regular_file(wrapper, "deployment wrapper")
+    wrapper = _regular_file(DEFAULT_WRAPPER, "deployment wrapper")
     mode = "AppOnly" if state["deployment_class"] == "app-only" else "Maintenance"
     return [
         "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
@@ -459,7 +539,6 @@ def deployment_command(
 def deploy_flow(
     workspace: Path,
     confirmation: str,
-    wrapper: Path,
     *,
     execute: bool,
     runner: Callable[[list[str]], None] = _run,
@@ -476,7 +555,7 @@ def deploy_flow(
     _verify_staged_files(workspace, state)
     if confirmation != state["release_id"]:
         raise ReleaseFlowError("deployment confirmation must exactly match the release_id")
-    command = deployment_command(workspace, state, wrapper)
+    command = deployment_command(workspace, state)
     if not execute:
         return command
     runner(command)
@@ -509,11 +588,6 @@ def _parser() -> argparse.ArgumentParser:
     deploy = commands.add_parser("deploy")
     deploy.add_argument("--workspace", type=Path, required=True)
     deploy.add_argument("--confirm-release-id", required=True)
-    deploy.add_argument(
-        "--wrapper",
-        type=Path,
-        default=SCRIPT_DIR.parents[3] / "scripts" / "deploy-menhir.ps1",
-    )
     deploy.add_argument("--execute", action="store_true")
     status = commands.add_parser("status")
     status.add_argument("--workspace", type=Path, required=True)
@@ -531,7 +605,6 @@ def main(argv: list[str] | None = None) -> int:
             result = deploy_flow(
                 args.workspace,
                 args.confirm_release_id,
-                args.wrapper,
                 execute=args.execute,
             )
         else:

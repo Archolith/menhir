@@ -79,11 +79,11 @@ def test_builds_release_bound_bundle_from_real_git_fixture(tmp_path: Path) -> No
     manifest = values["manifest"]
     assert manifest["kind"] == "menhir-release-install-bundle"
     assert manifest["release_sha256"] == _sha256(release_path)
-    assert (output / "release-install.sh").is_file()
+    assert (output / "install.sh").is_file()
     assert (output / "rootfs/srv/menhir/production/release/release.json").read_bytes() \
         == release_path.read_bytes()
     assert MODULE._validate_bundle(
-        output, _sha256(output / "release-install.sh")
+        output, _sha256(output / "install.sh")
     ) == manifest
 
 
@@ -208,7 +208,7 @@ def test_validator_rejects_extra_or_missing_bundle_files(
     tmp_path: Path, mutation: str
 ) -> None:
     output, _, _, _ = _build(tmp_path)
-    installer_digest = _sha256(output / "release-install.sh")
+    installer_digest = _sha256(output / "install.sh")
     if mutation == "extra":
         (output / "unexpected").write_text("extra\n", encoding="ascii")
     else:
@@ -219,7 +219,7 @@ def test_validator_rejects_extra_or_missing_bundle_files(
 
 def test_validator_rejects_manifest_digest_drift(tmp_path: Path) -> None:
     output, _, _, _ = _build(tmp_path)
-    installer_digest = _sha256(output / "release-install.sh")
+    installer_digest = _sha256(output / "install.sh")
     worker = output / "rootfs/srv/menhir/production/bin/worker"
     worker.write_bytes(worker.read_bytes() + b"drift\n")
     with pytest.raises(ValueError, match="digest mismatch"):
@@ -256,7 +256,7 @@ def test_validator_rejects_manifest_mode_change(tmp_path: Path) -> None:
     manifest["files"][destination]["mode"] = "0777"
     manifest_path.write_text(json.dumps(manifest), encoding="ascii")
     with pytest.raises(ValueError, match="mode/digest"):
-        MODULE._validate_bundle(output, _sha256(output / "release-install.sh"))
+        MODULE._validate_bundle(output, _sha256(output / "install.sh"))
 
 
 def test_cleans_temporary_sibling_when_validation_fails(
@@ -292,6 +292,9 @@ def test_installer_keeps_scaffold_and_cutover_out_of_routine_install() -> None:
     assert "bundle file census mismatch" in source
     assert "replaced files restored" in source
     assert "/srv/menhir/production/bin/verify-artifacts" in source
+    assert "systemctl daemon-reload" in source
+    assert "systemctl restart menhir-oauth-operations.service" in source
+    assert "systemctl try-restart menhir-caddy-reconcile.path" in source
     assert "production cutover was not started" in source
 
 

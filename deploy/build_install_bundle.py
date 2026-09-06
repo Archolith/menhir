@@ -46,7 +46,8 @@ RENDERED_DESTINATIONS = {
 }
 RELEASE_DESTINATION = "/srv/menhir/production/release/release.json"
 MANIFEST_NAME = "bundle-manifest.json"
-INSTALLER_NAME = "release-install.sh"
+INSTALLER_NAME = "install.sh"
+INSTALLER_SOURCE_NAME = "release-install.sh"
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 OID_RE = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
 ALLOWED_GIT_MODES = frozenset({"100644", "100755"})
@@ -602,7 +603,7 @@ def build_install_bundle(
     spec = Path(spec_path)
     output = Path(output_path)
     installer = Path(installer_path) if installer_path is not None \
-        else SCRIPT_DIR / INSTALLER_NAME
+        else SCRIPT_DIR / INSTALLER_SOURCE_NAME
     return _build_install_bundle(
         release, spec, output, installer, spec.parent
     )
@@ -613,7 +614,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("release", type=Path)
     parser.add_argument("spec", type=Path)
     parser.add_argument("output", type=Path)
-    parser.add_argument("--installer", type=Path, default=SCRIPT_DIR / INSTALLER_NAME)
+    parser.add_argument(
+        "--installer", type=Path, default=SCRIPT_DIR / INSTALLER_SOURCE_NAME
+    )
     parser.add_argument(
         "--workspace-root",
         type=Path,
