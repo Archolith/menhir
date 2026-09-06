@@ -7,6 +7,7 @@ umask 077
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCHEMA="${SCRIPT_DIR}/lib/menhir_schema.py"
+[ -f "$SCHEMA" ] || SCHEMA="${SCRIPT_DIR}/menhir_schema.py"
 
 MENHIR_RELEASE_JSON="${MENHIR_RELEASE_JSON:-/srv/menhir/production/release/release.json}"
 

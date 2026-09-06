@@ -38,7 +38,12 @@ _PREFIX_LOCAL_SET = b"authority-local-set\x00"
 _PREFIX_NEO4J_RECORD = b"authority-neo4j-record\x00"
 
 
-NEO4J_AUTHORITY_QUERIES = (
+NEO4J_COMPONENT_QUERY = (
+    "CALL dbms.components() YIELD name, versions, edition "
+    "RETURN name, versions, edition"
+)
+
+NEO4J_COMMUNITY_AUTHORITY_QUERIES = (
     (
         "nodes",
         "MATCH (n) RETURN elementId(n) AS element_id, labels(n) AS labels, "
@@ -54,8 +59,15 @@ NEO4J_AUTHORITY_QUERIES = (
     ("constraints", "SHOW CONSTRAINTS"),
     ("databases", "SHOW DATABASES"),
     ("users", "SHOW USERS"),
+)
+
+NEO4J_ENTERPRISE_AUTHORITY_QUERIES = (
     ("roles", "SHOW ROLES WITH USERS"),
     ("privileges", "SHOW PRIVILEGES"),
+)
+
+NEO4J_AUTHORITY_QUERIES = (
+    NEO4J_COMMUNITY_AUTHORITY_QUERIES + NEO4J_ENTERPRISE_AUTHORITY_QUERIES
 )
 
 _GRAPH_QUERY_NAMES = frozenset({"nodes", "relationships", "indexes", "constraints"})
@@ -244,7 +256,20 @@ def neo4j_authority_digest(
 
     records: list[dict[str, Any]] = []
     with GraphDatabase.driver(uri, auth=(username, password)) as driver:
-        for name, query in NEO4J_AUTHORITY_QUERIES:
+        with driver.session(database="system") as session:
+            components = list(session.run(NEO4J_COMPONENT_QUERY))
+        if not components:
+            raise ValueError("Neo4j component authority is empty")
+        editions = {str(row["edition"]).strip().lower() for row in components}
+        if len(editions) != 1 or not editions <= {"community", "enterprise"}:
+            raise ValueError("Neo4j edition authority is unsupported or ambiguous")
+        for row in components:
+            records.append({"authority": "components", "row": _authority_row("components", row)})
+
+        queries = NEO4J_COMMUNITY_AUTHORITY_QUERIES
+        if editions == {"enterprise"}:
+            queries += NEO4J_ENTERPRISE_AUTHORITY_QUERIES
+        for name, query in queries:
             selected_database = database if name in _GRAPH_QUERY_NAMES else "system"
             with driver.session(database=selected_database) as session:
                 for row in session.run(query):

@@ -162,7 +162,8 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, dict]:
             path.write_text(json.dumps(policy_payload), encoding="ascii")
         elif name == "production_env_sha256":
             path.write_text(
-                f"MENHIR_CLIENT_POLICY_DIGEST={policy_digest}\n",
+                f"MENHIR_CLIENT_POLICY_DIGEST={policy_digest}\n"
+                "MENHIR_CANONICAL_SELF_BINDING_MODE=enforce\n",
                 encoding="ascii",
             )
         else:
@@ -316,7 +317,8 @@ def test_refuses_production_env_bound_to_raw_policy_file_digest(tmp_path: Path) 
     policy = Path(spec["rendered"]["policy_sha256"])
     env = Path(spec["rendered"]["production_env_sha256"])
     env.write_text(
-        f"MENHIR_CLIENT_POLICY_DIGEST={_sha(policy)}\n",
+        f"MENHIR_CLIENT_POLICY_DIGEST={_sha(policy)}\n"
+        "MENHIR_CANONICAL_SELF_BINDING_MODE=enforce\n",
         encoding="ascii",
     )
 
@@ -346,11 +348,32 @@ def test_refuses_digest_valid_policy_with_product_role_drift(tmp_path: Path) -> 
     policy["canonical_digest"] = digest
     policy_path.write_text(json.dumps(policy), encoding="ascii")
     env_path.write_text(
-        f"MENHIR_CLIENT_POLICY_DIGEST={digest}\n",
+        f"MENHIR_CLIENT_POLICY_DIGEST={digest}\n"
+        "MENHIR_CANONICAL_SELF_BINDING_MODE=enforce\n",
         encoding="ascii",
     )
 
     with pytest.raises(ValueError, match="codex client tier"):
+        _author(spec_path, output)
+
+
+@pytest.mark.parametrize("mode", [None, "", "typo", "enforce\nenforce"])
+def test_refuses_missing_or_invalid_canonical_self_mode(
+    tmp_path: Path, mode: str | None,
+) -> None:
+    spec_path, output, spec = _fixture(tmp_path)
+    env_path = Path(spec["rendered"]["production_env_sha256"])
+    policy_path = Path(spec["rendered"]["policy_sha256"])
+    policy = json.loads(policy_path.read_text(encoding="utf-8"))
+    lines = [f"MENHIR_CLIENT_POLICY_DIGEST={policy['canonical_digest']}"]
+    if mode is not None:
+        lines.extend(
+            f"MENHIR_CANONICAL_SELF_BINDING_MODE={value}"
+            for value in mode.splitlines()
+        )
+    env_path.write_text("\n".join(lines) + "\n", encoding="ascii")
+
+    with pytest.raises(ValueError, match="MENHIR_CANONICAL_SELF_BINDING_MODE"):
         _author(spec_path, output)
 
 
