@@ -1,0 +1,23 @@
+name: canonical-self automatic source
+on:
+  push:
+    branches: [workbench/canonical-self-automatic-source]
+    paths: [.github/workflows/canonical-self-automatic-source.yml]
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 58acda2fd51729bf76db6f69f56bc3860fa457fb
+          persist-credentials: false
+      - run: git archive --format=tar.gz --output="$RUNNER_TEMP/menhir-main.tar.gz" HEAD
+      - uses: actions/upload-artifact@v4
+        with:
+          name: canonical-self-automatic-main-source
+          path: ${{ runner.temp }}/menhir-main.tar.gz
+          retention-days: 1
+          if-no-files-found: error
