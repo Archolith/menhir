@@ -32,6 +32,7 @@ Start with one file:
 - backend startup, queue ops, and operator checks -> `workflows/operations_runbook.md`
 - stdio/remote MCP connection setup -> `workflows/backend-first-mcp.md`
 - logging, request ids, and API errors -> `workflows/logging-and-troubleshooting.md`
+- who "the user" is, self-entity identity, or self forks -> `workflows/canonical-self-migration-runbook.md`
 - purpose and principles -> `memory-foundations.md`
 - the governance constitution (admission/assertion/authority/accountability/reversibility) -> `memory-governance.md`
 - current STATE of artifacts, provenance, and governance (what's wired/dark/unwired, with live measurements) -> `artifacts-provenance-governance-status.md`
