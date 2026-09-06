@@ -1,0 +1,35 @@
+name: canonical-self remediation workbench
+
+on:
+  push:
+    branches: [workbench/canonical-self-remediation-20260905]
+    paths: [.github/workflows/canonical-self-remediation-workbench.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  source-and-offline-dependencies:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: d1a4bb4f368d6af397dcc15ebc180b952265dc7f
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Export exact tracked source and build offline wheelhouse
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/menhir-offline/wheels"
+          git archive --format=tar.gz --output="${RUNNER_TEMP}/menhir-offline/source.tar.gz" HEAD
+          git rev-parse HEAD > "${RUNNER_TEMP}/menhir-offline/source-commit.txt"
+          python -m pip wheel --wheel-dir "${RUNNER_TEMP}/menhir-offline/wheels" . pytest pytest-asyncio pytest-xdist pytest-timeout ruff setuptools wheel
+      - uses: actions/upload-artifact@v4
+        with:
+          name: canonical-self-offline-workbench
+          path: ${{ runner.temp }}/menhir-offline/
+          retention-days: 1
+          if-no-files-found: error
