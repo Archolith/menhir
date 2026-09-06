@@ -45,8 +45,8 @@ def _repo(path: Path) -> tuple[str, str]:
     subprocess.run(
         ["git", "-C", str(path), "config", "user.name", "Test"], check=True
     )
-    base = _commit(path, "base.txt", "base\n")
-    head = _commit(path, "change.txt", "change\n")
+    base = _commit(path, "base.txt", f"base {path.name}\n")
+    head = _commit(path, "change.txt", f"change {path.name}\n")
     return base, head
 
 
