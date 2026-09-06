@@ -8,16 +8,16 @@ implements: 35d57efd-8fd5-4b9a-9fd5-582ebfb134f7
 
 # WRAPUP — Menhir release staging and deployment automation
 
-**Date:** 2026-09-06  
-**Agent:** Codex  
-**Model:** gpt-5.6-sol  
-**Status:** PARTIAL  
-**Plan / Ticket:** `C:\Users\thron\IdeaProjects\projects\archolith\menhir\.agent\archive\plans\menhir-release-automation-2026-09-06.md`  
-**Worktree:** `C:\Users\thron\IdeaProjects\projects\archolith\menhir`  
-**Branch:** `feat/release-automation`  
-**Commits:** `e9dde81d6b181e7abd9d2960e96cb262d2832b43`, `0e6628be5203401ef7895a1a3cf28bd5776a33e4`, `6e913691efe91706da4d7fe6db075198ec9e8614`, `3f5eebe99689e0c1cae066d01edce6a057372672`, `5c1d12bb36c514eed4889eaf6a6a9a8a16ffb4ca`, `963f1abe2a9761cae620295301fd60b3ebdabdc7`, `8eaa706548a5cfde4ac0764d4418b07dd88ce959`, `8e427f107268aaf76064a9563593972a88f7b8a8`, `bf646676abdeb5d3c4b28e3af2f888fe5c5f3e90`, `362eb37742768adf649a30799d874827a7e06535`; companion workspace-meta commit `2d9c028003b1e23aab922962315b176f1e5aa5d4`  
-**Verification Scope:** Menhir `abb1f10ada2eabc0ed63f8c085b7357b37019342..362eb37742768adf649a30799d874827a7e06535`; workspace-meta `fed867d5..2d9c028003b1e23aab922962315b176f1e5aa5d4`; plus this closeout artifact  
-**Docs Updated:** `C:\Users\thron\IdeaProjects\projects\archolith\menhir\deploy\RELEASE_AUTOMATION.md`, `C:\Users\thron\IdeaProjects\projects\archolith\menhir\deploy\LIVE_VPS_PLAYBOOK.md`, `C:\Users\thron\IdeaProjects\projects\archolith\menhir\deploy\README.md`, `C:\Users\thron\IdeaProjects\projects\archolith\menhir\deploy\changes\README.md`, `C:\Users\thron\IdeaProjects\projects\archolith\menhir\.agent\scripts-index.md`, `C:\Users\thron\IdeaProjects\projects\archolith\menhir\.agent\archive\plans\menhir-release-automation-2026-09-06.md`, `C:\Users\thron\IdeaProjects\scripts\README.md`  
+**Date:** 2026-09-06
+**Agent:** Codex
+**Model:** gpt-5.6-sol
+**Status:** PARTIAL
+**Plan / Ticket:** `C:\Users\thron\IdeaProjects\projects\archolith\menhir\.agent\archive\plans\menhir-release-automation-2026-09-06.md`
+**Worktree:** `C:\Users\thron\IdeaProjects\projects\archolith\menhir`
+**Branch:** `feat/release-automation`
+**Commits:** `e9dde81d6b181e7abd9d2960e96cb262d2832b43`, `0e6628be5203401ef7895a1a3cf28bd5776a33e4`, `6e913691efe91706da4d7fe6db075198ec9e8614`, `3f5eebe99689e0c1cae066d01edce6a057372672`, `5c1d12bb36c514eed4889eaf6a6a9a8a16ffb4ca`, `963f1abe2a9761cae620295301fd60b3ebdabdc7`, `8eaa706548a5cfde4ac0764d4418b07dd88ce959`, `8e427f107268aaf76064a9563593972a88f7b8a8`, `bf646676abdeb5d3c4b28e3af2f888fe5c5f3e90`, `362eb37742768adf649a30799d874827a7e06535`; companion workspace-meta commit `2d9c028003b1e23aab922962315b176f1e5aa5d4`
+**Verification Scope:** Menhir `abb1f10ada2eabc0ed63f8c085b7357b37019342..362eb37742768adf649a30799d874827a7e06535`; workspace-meta `fed867d5..2d9c028003b1e23aab922962315b176f1e5aa5d4`; plus this closeout artifact
+**Docs Updated:** `C:\Users\thron\IdeaProjects\projects\archolith\menhir\deploy\RELEASE_AUTOMATION.md`, `C:\Users\thron\IdeaProjects\projects\archolith\menhir\deploy\LIVE_VPS_PLAYBOOK.md`, `C:\Users\thron\IdeaProjects\projects\archolith\menhir\deploy\README.md`, `C:\Users\thron\IdeaProjects\projects\archolith\menhir\deploy\changes\README.md`, `C:\Users\thron\IdeaProjects\projects\archolith\menhir\.agent\scripts-index.md`, `C:\Users\thron\IdeaProjects\projects\archolith\menhir\.agent\archive\plans\menhir-release-automation-2026-09-06.md`, `C:\Users\thron\IdeaProjects\scripts\README.md`
 **Changelog Updated:** `C:\Users\thron\IdeaProjects\projects\archolith\menhir\CHANGELOG.md`
 
 ---
