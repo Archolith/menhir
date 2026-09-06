@@ -235,7 +235,7 @@ def test_self_identity_producer_census_is_closed():
     )
     assert declarations == Counter(
         {
-            "src/menhir/infrastructure/graphiti_extraction_patches.py:_declare_subject_endpoint": 1
+            "src/menhir/infrastructure/graphiti_extraction_patches.py:begin_extraction_receipt": 1
         }
     )
     assert explicit_authority == Counter(

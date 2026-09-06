@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-09-06 - Keep deterministic self identity and automatic memory
+
+- `self_identity.py`, `enrichment_steps.py`, `enrichment_failures.py`: distinguish an eligible
+  reserved-marker collision from ineligibility; block before shadow search/publication/dispatch and
+  classify persisted collision failures as manual review, never a transient retry. Preserve raw
+  evidence and legacy modes. Add full-worker, retry-polling and pre-dispatch regressions in
+  `test_self_endpoint_collision.py`; document the bounded refusal in the canonical-self runbook.
+- `graphiti_extraction_patches.py`: preallocate/declaratively identify the Menhir author before
+  model dispatch; atomically substitute it for the model carrier before dedup. Remove the
+  affirmative/quotation parser as identity authority. Withhold unresolved aliases after one
+  bounded correction, including mixed payloads, without shutting down unrelated enrichment.
+- `graphiti_client.py`: refuse enforced dispatch if the extraction or resolver-bypass patch is
+  missing. No configuration, signature requirement, dependency or hydration mode is added.
+- Update the producer census and transport tests for the explicitly chosen option-1 contract;
+  add preallocation, atomicity, namespace/task isolation, real-resolver and normal summary/attribute
+  regressions. Semantic misattribution remains possible; facts are inferred, not owner-confirmed.
+- Correct identity docs, architecture and the runbook. Production activation, live-provider/image
+  tests, and historical remediation remain separately gated. This is a focused alternative to
+  PRs #46–48 on the PR #45 identity baseline, not an approval to merge those certification branches.
+
 ## 2026-09-04 - Make canonical-self authority node-scoped
 
 - Complete deployment Phase 1 discovery: distinguish the installed `0.2.0-8` maintenance

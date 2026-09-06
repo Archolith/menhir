@@ -4,7 +4,7 @@ description: Operating the canonical-self identity boundary, and what consolidat
 
 # Canonical self: operations runbook
 
-Covers the **prevention** half, which has landed and remains default-off, and states precisely what
+Covers the default-off **prevention candidate**, not a deployment or activation, and states what
 the **remediation** half still needs. Consolidating the existing forks is not authorized by this
 document and cannot be performed with the tooling in the repository today.
 
@@ -14,7 +14,7 @@ The 2026-09-04 observation corrections are in
 `.agent/plans/menhir-canonical-self-observation-correction-2026-09-04.md`; they supersede the
 parent plan's node-authority, score-bound, and historical-population assumptions.
 
-## What is live
+## Candidate modes (not activation evidence)
 
 `MENHIR_CANONICAL_SELF_BINDING_MODE` — `off` (default) | `observe` | `enforce`.
 
@@ -26,6 +26,47 @@ parent plan's node-authority, score-bound, and historical-population assumptions
 
 An unrecognized value falls back to `off` with a warning — a config typo must not enable a
 durable-write-semantics change.
+
+## Smaller implementation decision (2026-09-06)
+
+The owner chose deterministic identity with useful automatic memory (original option 1), explicitly
+accepting occasional semantic misattribution. This replaces the stronger reported-speech guarantee
+for this candidate. It does not authorize production activation, live tests or historical cleanup.
+
+**Scope and sequence:** start from PR #45 at `a9d74bf0547a37499f4bebec6b263a054ae02bd4`, not
+signature-heavy PRs #46–48. Construct/declaratively identify the author node before extraction;
+replace the model's transport carrier with that node; reuse atomic binding, dedup bypass, persistence
+protection and merge immunity. Keep summaries, attributes, lifecycle merging and recall automatic.
+No new store, fork, signing mechanism, dependency or production configuration is needed.
+
+The endpoint is always available on eligible projections, irrespective of grammar. Malformed or
+foreign transport is refused. Ambiguous bare author aliases left after one corrective pass are
+withheld (including in mixed payloads); no substitute self node is persisted for those references.
+A legitimate bare RBAC `user` in mixed prose can be withheld, so use a source-qualified entity name
+when supported by the text. Ordinary third-person users are not canonical self.
+
+**Reserved-prefix collision:** an otherwise eligible verbatim projection containing
+`MenhirCurrentSpeaker_` (case-insensitive) raises `SelfSubjectEndpointCollisionError`; it is not an
+ineligible claim and must never fall back to ordinary extraction. In `enforce`, validation occurs
+before shadow candidate search, publication intent creation or Graphiti dispatch. The worker keeps
+the raw evidence, records `self_subject_endpoint_collision` as a `FAILED` episode requiring
+`manual_review`, and releases its lease. Automatic retry polling leaves unchanged collision text
+parked; any corrected evidence must follow the normal evidence/admission process, not an in-place
+text edit or a marker-escaping shortcut. No semantic entity/relationship write is dispatched for the
+blocked episode; evidence and failure bookkeeping remain allowed. Genuinely ineligible messages and
+`off`/`observe` retain their prior behavior. This does not disable normal automatic enrichment.
+
+**Tradeoff:** a model may still misread a question, negation, or reported speaker and attach an
+incorrect inferred fact to the fixed author endpoint. There is no claim that free-text facts are
+owner-confirmed. Binding identity and assessing relationship accuracy are different guarantees.
+The former quote parser did not establish the latter and is removed rather than expanded.
+
+**Acceptance:** tests must cover pre-model declaration, both edge directions, repair, mixed aliases,
+namespace isolation, exact/similarity/LLM/override bypass, persistence/merge protections, and a
+positive ordinary summary AND attribute update. Preserve off/observe behavior. Run the existing
+serial offline tests and an independently reviewed diff; real-model and exact-image acceptance
+remain separately approved and must evaluate attribution error as well as useful recall. A green
+stubbed-model corpus is not proof of live-model accuracy. Do not merge #46–48 on top of this branch.
 
 ## Risk profile
 
@@ -160,8 +201,9 @@ list contains no `/tmp` path.
    person — because a name is not provenance.
    A declaration must also carry the nonblank external pending-episode UUID for the active
    extraction call. The sole production declaration producer accepts only the receipt-owned
-   endpoint on an atomically verified verbatim projection and requires a final current-episode edge
-   plus index entry. The display name is never an identity-key fallback.
+   Menhir-created author node at receipt construction for an atomically verified verbatim projection.
+   Final transport attachment requires a current-episode edge and index entry; it creates no new
+   declaration. The display name is never an identity-key fallback.
 6. Runtime paths never delete or absorb forks.
 7. Telemetry carries enums, counts and UUIDs — never memory text or arbitrary entity names.
 8. A canonical-node read failure -- or a missing driver -- is an error, never "absent". Falling

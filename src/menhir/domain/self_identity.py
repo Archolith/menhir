@@ -5,7 +5,7 @@ never ask semantic retrieval or an LLM to decide that identity. This module is t
 of truth for *who the human is* and *what proves it*. It is pure: no infrastructure imports, no
 I/O, no graph access, so every caller -- writer and reader alike -- can use it on a hot path.
 
-Two rules carry the whole design:
+Three rules carry the whole design:
 
 1. **The name is never authority.** An entity called ``user`` is not the human because it is
    spelled that way. Only trusted, Menhir-owned episode metadata establishes the human, via
@@ -19,8 +19,10 @@ Two rules carry the whole design:
    :func:`proves_self_subject` the second; binding requires both. No property of the extracted
    NAME -- not the literal string, not its grammatical person -- can answer the second, because
    the name is not provenance. Only a declaration naming the exact in-memory subject node can.
-   The queued Graphiti lifecycle produces one only for its receipt-owned endpoint on an
-   atomically verified, verbatim evidence projection.
+   The queued Graphiti lifecycle constructs and declares its own author node before extraction
+   on an atomically verified, verbatim evidence projection. Model output may reference that
+   endpoint but does not select its identity. Relationship attribution remains fallible inference;
+   a declaration is not owner confirmation of a fact.
 
 The physical Graphiti partition is derived separately by
 :func:`menhir.domain.namespace.namespace_to_group_id`. Logical ``default`` maps to physical
@@ -47,6 +49,7 @@ __all__ = [
     "SelfEvidenceKind",
     "SelfIdentityContext",
     "SelfSubjectEndpointEnvelope",
+    "SelfSubjectEndpointCollisionError",
     "SpeakerRole",
     "SUBJECT_ENDPOINT_MARKER_PREFIX",
     "declare_self_subject",
@@ -63,6 +66,21 @@ __all__ = [
 
 SUBJECT_ENDPOINT_MARKER_PREFIX = "MenhirCurrentSpeaker_"
 _SUBJECT_ENDPOINT_VERSION = "speaker-endpoint-v1"
+
+
+class SelfSubjectEndpointCollisionError(ValueError):
+    """An eligible projection contains reserved transport text; ordinary fallback is unsafe.
+
+    Unlike an ineligible claim, this input must stop before semantic dispatch in enforce mode.
+    The stable reason survives persistence/retry classification without copying source text.
+    """
+
+    reason_code = "self_subject_endpoint_collision"
+
+    def __init__(self) -> None:
+        super().__init__(
+            f"{self.reason_code}: reserved marker prefix in eligible evidence projection"
+        )
 
 
 class SpeakerRole(StrEnum):
@@ -153,9 +171,9 @@ GATE_APPROVED_HUMAN_SOURCES = frozenset({"user", "manual"})
 #: not of where the string came from. The counterexample is reported speech: a proven human turn
 #: reading `She told me, "I will handle it"` extracts an `I` that is a different person, and by the
 #: time binding sees the payload there is no quote boundary, source span, or speaker attribution
-#: left to distinguish the two. Restoring first-person as authority requires extraction to return
-#: per-node provenance (the span each node came from, plus whether that span is inside quoted or
-#: reported speech). See ``proves_self_subject``.
+#: left to distinguish the two. Richer provenance may improve attribution, but model-produced
+#: spans or speaker labels still do not create identity authority. The automatic-memory path
+#: instead declares its own author node before extraction. See ``proves_self_subject``.
 FIRST_PERSON_SELF_ALIASES = frozenset({"i", "me", "my", "mine", "myself"})
 
 #: Third-person labels for the human. These are self-LIKE and never self-PROVING on their own: a
@@ -194,8 +212,8 @@ class SelfIdentityContext:
     #: from episode authorship to node subjecthood: names, aliases, and grammatical person never
     #: fill it. A caller that already owns the final in-memory payload may set it only by promoting
     #: a TRUSTED_USER_TURN through :func:`declare_self_subject` after constructing the subject
-    #: node/edge. The queued Graphiti path may set it only after validating its receipt-owned
-    #: endpoint in the final post-repair payload.
+    #: node/edge. The queued Graphiti path sets it to a Menhir-allocated author node before
+    #: model dispatch; a model-produced node UUID is never promoted into this field.
     subject_node_uuid: str | None = None
 
     def __post_init__(self) -> None:
@@ -261,8 +279,10 @@ def self_subject_endpoint_for_claim(
     """Build an endpoint only for a graph-proven, verbatim user-turn projection.
 
     Every input is projected by the same atomic claim query that acquires the episode lease.  A
-    missing or contradictory field therefore fails closed instead of falling back to ``source`` or
-    text-shaped evidence.  Returning ``None`` means ordinary extraction must continue unchanged.
+    missing or contradictory field supplies no author authority; ``None`` means the claim is
+    ineligible and ordinary extraction continues unchanged. A reserved-prefix collision in an
+    otherwise eligible claim instead raises :class:`SelfSubjectEndpointCollisionError`: callers
+    must stop semantic dispatch, never turn that refusal into the ordinary-path ``None`` sentinel.
     """
 
     if claimed.get("subject_endpoint_eligible") is not True:
@@ -300,10 +320,10 @@ def self_subject_endpoint_for_claim(
     if namespace != turn_namespace:
         return None
 
-    # A user-authored occurrence of the reserved prefix would make model output
-    # indistinguishable from Menhir's capability token.  Refuse the endpoint path entirely.
+    # Refuse the episode, not just its endpoint: returning None here would bypass author
+    # quarantine and let ordinary resolution persist another self-like entity.
     if SUBJECT_ENDPOINT_MARKER_PREFIX.casefold() in content.casefold():
-        return None
+        raise SelfSubjectEndpointCollisionError()
 
     marker = _subject_endpoint_marker(
         version=_SUBJECT_ENDPOINT_VERSION,
@@ -382,14 +402,15 @@ def declare_self_subject(
 ) -> SelfIdentityContext:
     """Promote trusted turn evidence to an exact, node-scoped self declaration.
 
-    The caller must already own the final payload and subject assignment: for example, a structured
-    memory writer that constructed an ``EntityEdge`` with the turn author as its source. This
+    The caller must own the node and its identity assignment: for example, the ingestion boundary
+    that constructed the current-author node before running an extractor. This
     function does not inspect text, names, edge facts, or grammatical person. It binds the
     declaration to the current episode and the exact in-memory node UUID the caller constructed.
 
-    This is a binding primitive, not a text classifier. Menhir's queued Graphiti path calls it
-    only after Graphiti allocates the receipt-owned endpoint node and final relationless repair has
-    completed, at the post-repair/pre-dedup injection point.
+    This is a binding primitive, not a text classifier. Menhir's queued Graphiti path calls it in
+    begin_extraction_receipt, before model dispatch. The final payload substitutes this preallocated
+    node for the model's transport carrier and binds a copy before candidate acquisition. This
+    certifies endpoint identity, not the accuracy of the model's proposed relationships.
 
     A normal user turn is deliberately insufficient. Only a trusted user-turn context with an
     episode UUID can be promoted, and the selected node UUID must be non-blank. Invalid inputs fail
@@ -436,10 +457,10 @@ def proves_self_subject(node_uuid: Any, context: SelfIdentityContext | None) -> 
     (``She told me, "I will handle it"``) for the second. By the time binding runs, extraction has
     discarded the quote boundaries, source spans and speaker attribution that would separate them.
 
-    **Production producer:** the only production caller is the final-payload validator for a
-    Menhir-owned endpoint on an atomically verified verbatim evidence projection. Ordinary
-    extracted text still cannot supply this declaration, and the producer census prevents a
-    second call site from appearing without review.
+    **Production producer:** the only production caller is receipt construction, which declares a
+    Menhir-created node before extraction on an atomically verified verbatim evidence projection.
+    Extracted text cannot supply this declaration; the producer census pins the call site. Model
+    relationships to the declared endpoint remain inferences, not owner-confirmed assertions.
     """
     if not eligible_self_evidence(context):
         return False

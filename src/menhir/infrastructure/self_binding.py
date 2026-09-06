@@ -14,8 +14,10 @@ prompt, or Menhir's identity gate.
 What it is not: a name rule. No property of an extracted entity's NAME -- not the literal string
 ``user``, not first-person grammar -- promotes it to the human, because a name is not provenance.
 Binding requires a declared per-node subject (``EXPLICIT_SELF_SUBJECT``). The sole production
-producer is the final-payload validator for a Menhir-owned endpoint on an atomically verified
-verbatim evidence projection. See ``domain/self_identity.proves_self_subject`` for the boundary.
+producer is receipt construction, which declares a Menhir-owned node BEFORE extraction on an
+atomically verified verbatim evidence projection. Model-selected transport carriers are replaced,
+not declared. Binding certifies identity, not semantic fact attribution. See
+``domain/self_identity.proves_self_subject`` for the boundary.
 """
 
 from __future__ import annotations
