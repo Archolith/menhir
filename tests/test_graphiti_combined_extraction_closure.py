@@ -1385,7 +1385,7 @@ async def test_subject_endpoint_corrective_retry_replaces_model_user_fallback(
 
 
 @pytest.mark.asyncio
-async def test_marked_first_person_projection_refuses_missing_marker_after_correction(
+async def test_missing_marker_after_correction_withholds_only_ambiguous_output(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _begin_subject_endpoint_receipt()
@@ -1401,15 +1401,14 @@ async def test_marked_first_person_projection_refuses_missing_marker_after_corre
         return [ordinary, target], [edge], {}
 
     monkeypatch.setattr(ce, "extract_nodes_and_edges", fake_extract_nodes_and_edges)
-    with pytest.raises(InvalidSelfSubjectDeclarationError, match="omitted its required"):
-        await extraction_patches._run_graphiti_combined_extraction(
-            clients=object(),
-            episode=SimpleNamespace(uuid="projection-1"),
-            previous_episodes=[],
-            entity_types=None,
-            excluded_entity_types=None,
-            custom_extraction_instructions=None,
-        )
+    nodes, edges, indices = await extraction_patches._run_graphiti_combined_extraction(
+        clients=object(), episode=SimpleNamespace(uuid="projection-1"),
+        previous_episodes=[], entity_types=None, excluded_entity_types=None,
+        custom_extraction_instructions=None,
+    )
+    assert nodes == [] and edges == [] and indices == {}
+    assert extraction_patches.is_policy_empty_extraction(patches.get_extraction_receipt())
+
 
 
 @pytest.mark.asyncio
@@ -1423,12 +1422,12 @@ async def test_marked_first_person_projection_refuses_missing_marker_after_corre
         ),
         (
             'Mara said, "I own 25 postcards."',
-            "I",
-            "Mara said that I own 25 postcards.",
+            "Mara",
+            "Mara owns 25 postcards.",
         ),
     ],
 )
-async def test_third_person_and_quoted_self_like_nodes_do_not_require_author_marker(
+async def test_third_person_and_named_reported_speakers_remain_ordinary(
     monkeypatch: pytest.MonkeyPatch, episode_text: str, node_name: str, fact: str
 ) -> None:
     _begin_subject_endpoint_receipt()
@@ -1554,7 +1553,7 @@ def test_marker_text_without_marker_endpoint_is_dropped_before_persistence() -> 
     assert receipt.subject_marker_edges_suppressed == 1
 
 
-def test_marker_edge_requires_predicate_support_beyond_shared_target() -> None:
+def test_marker_transport_is_not_a_semantic_grounding_certificate() -> None:
     endpoint = _begin_subject_endpoint_receipt()
     receipt = patches.get_extraction_receipt()
     payload = extraction_patches._sanitize_combined_payload(
@@ -1572,9 +1571,10 @@ def test_marker_edge_requires_predicate_support_beyond_shared_target() -> None:
         "Can you tell me about Kubernetes?",
     )
 
-    assert payload["edges"] == []
+    assert len(payload["edges"]) == 1
     assert receipt is not None
-    assert receipt.subject_marker_edges_suppressed == 1
+    assert receipt.subject_marker_edges_suppressed == 0
+    assert receipt.self_identity.subject_node_uuid == receipt.self_subject_node.uuid
 
 
 @pytest.mark.parametrize(
@@ -1589,7 +1589,7 @@ def test_marker_edge_requires_predicate_support_beyond_shared_target() -> None:
         "Mara said:\n```text\nI own Kubernetes.\n```",
     ],
 )
-def test_non_assertive_first_person_text_cannot_activate_subject_marker(
+def test_natural_language_shape_does_not_control_structural_identity(
     episode_text: str,
 ) -> None:
     endpoint = _begin_subject_endpoint_receipt()
@@ -1614,8 +1614,11 @@ def test_non_assertive_first_person_text_cannot_activate_subject_marker(
         episode_text,
     )
 
-    assert endpoint.marker not in {row["name"] for row in payload["extracted_entities"]}
-    assert payload["edges"] == []
+    assert endpoint.marker in {row["name"] for row in payload["extracted_entities"]}
+    assert len(payload["edges"]) == 1
+    # Option 1 explicitly accepts possible semantic mistakes. This sanitizer validates transport,
+    # not whether an affirmative fact correctly interprets a question, negation, or quotation.
+    assert receipt.self_identity.subject_node_uuid == receipt.self_subject_node.uuid
 
 
 @pytest.mark.parametrize(
@@ -1626,13 +1629,16 @@ def test_non_assertive_first_person_text_cannot_activate_subject_marker(
         "- I own 37 postcards.",
     ],
 )
-def test_prefixed_first_person_assertions_require_declared_endpoint(
+def test_endpoint_transport_is_available_without_a_first_person_parser(
     episode_text: str,
 ) -> None:
-    assert extraction_patches._requires_declared_author_endpoint(episode_text) is True
+    endpoint = _begin_subject_endpoint_receipt()
+    receipt = patches.get_extraction_receipt()
+    receipt.episode_text = episode_text
+    assert extraction_patches._active_subject_marker(receipt) == endpoint.marker
 
 
-def test_marker_fact_must_be_supported_by_one_affirmative_author_clause() -> None:
+def test_quoted_semantics_do_not_issue_a_new_identity_declaration() -> None:
     endpoint = _begin_subject_endpoint_receipt()
     receipt = patches.get_extraction_receipt()
     assert receipt is not None
@@ -1647,10 +1653,13 @@ def test_marker_fact_must_be_supported_by_one_affirmative_author_clause() -> Non
         episodes=["projection-1"],
     )
 
-    with pytest.raises(InvalidSelfSubjectDeclarationError, match="predicate grounding"):
-        extraction_patches._declare_subject_endpoint(
-            [marker_node, target], [edge], {"marker": [0]}, receipt
-        )
+    declared = receipt.self_identity
+    extraction_patches._bind_subject_endpoint(
+        [marker_node, target], [edge], {"marker": [0]}, receipt
+    )
+    assert receipt.self_identity is declared
+    assert declared.subject_node_uuid != marker_node.uuid
+
 
 
 @pytest.mark.parametrize("mode", [SelfBindMode.OFF, SelfBindMode.OBSERVE])
@@ -1731,7 +1740,7 @@ async def test_subject_endpoint_is_reused_by_relationless_repair(
 
 
 @pytest.mark.asyncio
-async def test_subject_marker_and_ordinary_user_remain_distinct(
+async def test_subject_marker_and_qualified_application_user_remain_distinct(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     endpoint = _begin_subject_endpoint_receipt()
@@ -1739,7 +1748,7 @@ async def test_subject_marker_and_ordinary_user_remain_distinct(
     assert receipt is not None
     receipt.episode_text = "I grant read access to the application user."
     marker_node = SimpleNamespace(uuid="marker", name=endpoint.marker, group_id="")
-    ordinary_user = SimpleNamespace(uuid="rbac-user", name="user", group_id="")
+    ordinary_user = SimpleNamespace(uuid="rbac-user", name="application user", group_id="")
     role = SimpleNamespace(uuid="role", name="read access", group_id="")
     edges = [
         SimpleNamespace(
@@ -1775,7 +1784,7 @@ async def test_subject_marker_and_ordinary_user_remain_distinct(
 
     assert nodes[0].name == "user"
     assert nodes[0].uuid == self_uuid_for_namespace("default")
-    assert nodes[1].name == "user"
+    assert nodes[1].name == "application user"
     assert nodes[1].uuid == "rbac-user"
     assert final_edges[1].source_node_uuid == "rbac-user"
 
@@ -1805,7 +1814,7 @@ def test_subject_marker_requires_edge_and_current_episode_attribution(
     receipt.graphiti_episode_uuid = "projection-1"
 
     with pytest.raises(InvalidSelfSubjectDeclarationError, match=message):
-        extraction_patches._declare_subject_endpoint(
+        extraction_patches._bind_subject_endpoint(
             [marker_node], edges, index_map, receipt
         )
 
@@ -1820,7 +1829,7 @@ def test_duplicate_subject_marker_nodes_are_refused() -> None:
     assert receipt is not None
 
     with pytest.raises(InvalidSelfSubjectDeclarationError, match="more than one"):
-        extraction_patches._declare_subject_endpoint(nodes, [], {}, receipt)
+        extraction_patches._bind_subject_endpoint(nodes, [], {}, receipt)
 
 
 def test_context_only_marker_edge_cannot_authorize_current_subject() -> None:
@@ -1836,12 +1845,12 @@ def test_context_only_marker_edge_cannot_authorize_current_subject() -> None:
     receipt.graphiti_episode_uuid = "current-graphiti-episode"
 
     with pytest.raises(InvalidSelfSubjectDeclarationError, match="current Graphiti episode"):
-        extraction_patches._declare_subject_endpoint(
+        extraction_patches._bind_subject_endpoint(
             [marker_node], [edge], {"marker": [0]}, receipt
         )
 
 
-def test_current_episode_marker_edge_requires_current_predicate_grounding() -> None:
+def test_marker_edge_attribution_is_not_misrepresented_as_owner_confirmation() -> None:
     endpoint = _begin_subject_endpoint_receipt()
     marker_node = SimpleNamespace(uuid="marker", name=endpoint.marker, group_id="")
     target = SimpleNamespace(uuid="k8s", name="Kubernetes", group_id="")
@@ -1856,10 +1865,14 @@ def test_current_episode_marker_edge_requires_current_predicate_grounding() -> N
     receipt.episode_text = "Can you tell me about Kubernetes?"
     receipt.graphiti_episode_uuid = "projection-1"
 
-    with pytest.raises(InvalidSelfSubjectDeclarationError, match="affirmative unquoted"):
-        extraction_patches._declare_subject_endpoint(
-            [marker_node, target], [edge], {"marker": [0]}, receipt
-        )
+    declared = receipt.self_identity
+    nodes, edges = [marker_node, target], [edge]
+    result = extraction_patches._bind_subject_endpoint(nodes, edges, {"marker": [0]}, receipt)
+    assert result.bound
+    assert receipt.self_identity is declared
+    assert nodes[0].uuid == self_uuid_for_namespace("default")
+    assert declared.subject_node_uuid != marker_node.uuid
+
 
 
 @pytest.mark.asyncio

@@ -864,6 +864,24 @@ class GraphitiClient:
         group_id: str = "",
     ) -> Any:
         """Delegate episode ingestion to Graphiti."""
+        from menhir.infrastructure.graphiti_extraction_patches import (
+            _extract_nodes_combined_for_add_episode,
+            get_extraction_receipt,
+        )
+
+        receipt = get_extraction_receipt()
+        if receipt is not None and str(receipt.self_bind_mode) == "enforce":
+            import graphiti_core.graphiti as graphiti_module
+            import graphiti_core.utils.maintenance.node_operations as node_operations
+
+            # A failed compatibility patch must not reopen probabilistic self resolution.
+            # Check before the native add_episode call can perform any persistence.
+            if (
+                graphiti_module.extract_nodes is not _extract_nodes_combined_for_add_episode
+                or not getattr(node_operations, "_menhir_adaptive_dedupe_patched", False)
+                or graphiti_module.resolve_extracted_nodes is not node_operations.resolve_extracted_nodes
+            ):
+                raise RuntimeError("canonical-self enforce requires combined extraction and resolver bypass")
         uses_scheduler_trace = self._uses_scheduler_watchdog()
         task = (
             build_episode_scheduler_task(
