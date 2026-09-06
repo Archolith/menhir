@@ -40,6 +40,16 @@
   close, while retaining the existing agent OAuth tier and all non-todo denials.
 - Made production startup fail closed when runtime scope/tier configuration cannot satisfy the
   canonical access contract, and added compose plus startup regression coverage.
+
+## 2026-09-03 - add Utopia prior-art comparison
+
+- Added a revision-pinned comparison of Utopia's governed bitemporal knowledge application against
+  Menhir's code-linked evidence, repository structure, agent authority, and change-impact model.
+- Recorded the novelty and category boundary, the ideas worth borrowing, the ideas to keep outside
+  Menhir core, and a dependency-aware follow-up order.
+- Updated the prior-art index to classify Utopia as the strongest adjacent comparison for enterprise
+  world models rather than a direct replacement for Menhir's software-understanding center.
+
 ## 2026-09-03 - fix three faults found in the live production logs
 
 - **`get_artifact_relationships` had never worked.** The adapter delegated to
@@ -181,23 +191,3 @@
 Verified: 8483 passed, 347 skipped. The Cypher remains unexecuted by tests (stubbed
 driver); the cycle sequence was replayed through the real methods against a
 predicate-evaluating fake to confirm both guards compose.
-
-## 2026-09-03 - todo lifecycle and refile lineage reach the MCP surface
-
-- Added `supersede_todo`: closes a todo and writes a `SUPERSEDED_BY` edge to its
-  replacement in one statement. Menhir has no update path, so editing a todo means
-  closing it and adding a new one; until now that lineage was lost. The edge is the
-  first todo-to-todo relationship and the exception to the inward-only rule is
-  recorded at its definition -- supersession is an identity fact, not a knowledge
-  claim, and a todo still never becomes a semantic object.
-- Exposed `resolve_todo`, `reopen_todo`, and `link_memory_to_todo`, which were
-  written, tested, and unreachable since slice 1: no MCP tool and no caller outside
-  `TodoRepository`. All four run the ownership guard on every uuid they name.
-- `get_todo` now returns a `supersession` block (`superseded_by`, `supersedes`), so
-  the new edge has a reader rather than becoming the next CF-143 dead edge.
-- Updated the production client policy for the four new tools and recomputed its
-  canonical digest to
-  `09ede2c69a145ec551bcd51e037d8f825e6cc7fb211335450c1d736bb616d3b7`.
-  **`MENHIR_CLIENT_POLICY_DIGEST` must be updated on the deployed host before this
-  ships, or startup fails closed. Independent security review and reauthorization of
-  existing grants are still outstanding, per deploy/ACCESS_CONTRACT.md.**
