@@ -293,6 +293,18 @@ mcp:
   mcp.tool.close_todo:
     owner: endpoints.md
     meaning: Mark a TODO as closed
+  mcp.tool.supersede_todo:
+    owner: endpoints.md
+    meaning: Close a TODO and record the TODO that replaced it, moving status and edge together
+  mcp.tool.resolve_todo:
+    owner: endpoints.md
+    meaning: Close a TODO and record the memory that resolved it, moving status and edge together
+  mcp.tool.reopen_todo:
+    owner: endpoints.md
+    meaning: Reopen a closed TODO and record the memory that reopened it
+  mcp.tool.link_memory_to_todo:
+    owner: endpoints.md
+    meaning: Declare that a memory mentions or addresses a TODO
   mcp.tool.close_stale_todos:
     owner: endpoints.md
     meaning: Close TODO items open past an age threshold

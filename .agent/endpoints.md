@@ -644,6 +644,60 @@ Mark a TODO as closed.
 - **`uuid`** (str): UUID of the TODO to close.
 - Returns confirmation or "not found or already closed".
 
+### `supersede_todo`
+Concept id: `mcp.tool.supersede_todo`
+
+Close a TODO and record the TODO that replaced it, atomically. Menhir has no update path:
+editing a todo means closing it and adding a replacement. Use this instead of `close_todo`
+whenever the new todo IS the edited version of the old one, so the refile lineage survives
+as a `SUPERSEDED_BY` edge rather than as prose in some memory.
+- **`old_uuid`** (str): TODO being replaced. Must be open and have no successor already.
+- **`new_uuid`** (str): Replacement TODO. Must be open, and in the old todo's namespace or
+  the shared `default` bucket.
+- Returns confirmation, or a specific reason: `old_todo_not_found`,
+  `old_todo_already_superseded`, `old_todo_not_open`, `new_todo_ineligible`, or
+  `cannot_supersede_itself`.
+- Read the lineage back through `get_todo`, which prints `superseded by: <uuid>` and
+  `supersedes: <uuid>` lines, scoped to your namespace.
+- `superseded_by` is a LIST. More than one successor means concurrent supersessions
+  raced; `get_todo` prints a warning and the lineage is ambiguous until one edge is
+  removed. Note the namespace rule is the INVERSE of `supersede_artifact`'s: here the
+  NEW todo must be in the OLD one's silo (or `default`), where for artifacts the OLD
+  must be in the NEW one's.
+
+### `resolve_todo`
+Concept id: `mcp.tool.resolve_todo`
+
+Close a TODO and record the memory that resolved it, atomically. Use instead of `close_todo`
+when a stored memory is the evidence the work is done: `close_todo` moves status and writes
+no edge, so a todo closed that way cannot answer "why did this close?".
+- **`todo_uuid`** (str): TODO to close. Must be open.
+- **`memory_uuid`** (str): Memory that resolved it. Must be a durable, non-structural memory
+  in the todo's namespace or the shared `default` bucket.
+- Returns confirmation, or the reason it was refused.
+
+### `reopen_todo`
+Concept id: `mcp.tool.reopen_todo`
+
+Reopen a closed TODO and record the memory that reopened it. Clears `closed_at` and returns
+any linked reminder to open.
+- **`todo_uuid`** (str): TODO to reopen. Must be closed, and must NOT be superseded --
+  reopening a superseded todo would leave an open node still pointing at its replacement.
+  To revive superseded work, act on the successor instead.
+- **`memory_uuid`** (str): Memory that reopened it, same eligibility as `resolve_todo`.
+- Returns confirmation, or the reason it was refused.
+
+### `link_memory_to_todo`
+Concept id: `mcp.tool.link_memory_to_todo`
+
+Point a stored memory at a TODO. Direction is always inward -- a memory references the todo,
+never the reverse -- so knowledge stays in the memory and the todo stays operational.
+- **`memory_uuid`** (str): The referencing memory. Must be durable and non-structural.
+- **`todo_uuid`** (str): The TODO being referenced.
+- **`relation`** (str): `mentions` or `addresses`. Neither moves status: closing is
+  `resolve_todo`, which writes its own edge.
+- Returns confirmation, or the reason it was refused.
+
 ### `close_stale_todos`
 Concept id: `mcp.tool.close_stale_todos`
 

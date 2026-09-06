@@ -23,6 +23,7 @@ from menhir.infrastructure.episode_repository import (
     is_context_window_error_text,
     is_recoverable_context_window_error,
 )
+from menhir.domain.self_identity import self_uuid_for_namespace
 from menhir.infrastructure.consolidation_queries import ConsolidationRepository
 from menhir.infrastructure.correlation_queries import CorrelationRepository
 from menhir.infrastructure.neo4j import Neo4jRepository
@@ -379,6 +380,15 @@ class MemoryGraphAdapter:
             namespace=namespace,
         )
 
+    def find_pending_evidence_projection_uuid(
+        self, *, turn_evidence_uuid: str, namespace: str | None = None
+    ) -> str | None:
+        """Find a durable pending projection so an admission retry can re-enqueue it."""
+        return self._episodes.find_pending_evidence_projection_uuid(
+            turn_evidence_uuid=turn_evidence_uuid,
+            namespace=namespace,
+        )
+
     def list_pending_episode_uuids(
         self, *, max_attempts: int, limit: int = 100
     ) -> list[str]:
@@ -597,8 +607,24 @@ class MemoryGraphAdapter:
 
     def ensure_self_entity(self, namespace: str) -> str:
         """Idempotently MERGE the canonical per-namespace self :Entity and return its (deterministic)
-        uuid — the binding target for first-person typed-scalar assertions (C.4.3 canonical self)."""
+        uuid — the binding target for first-person typed-scalar assertions (C.4.3 canonical self).
+
+        NON-DESTRUCTIVE. Creates or updates only the canonical target. Pre-existing forks are
+        reported, never absorbed; see `EpisodeLifecycleRepository.ensure_self_entity`."""
         return self._episodes.ensure_self_entity(namespace)
+
+    def detect_self_forks(self, namespace: str) -> list[str]:
+        """Read-only inventory of same-named self forks for `namespace`.
+
+        Discovery is deliberately separate from consolidation: this reports what an operator-only,
+        journaled migration would have to consider, and mutates nothing."""
+        # Derive the target uuid, never MERGE it. `ensure_self_entity` writes -- calling it here
+        # would make a census or pre-migration inventory mutate the graph it is inspecting, and
+        # the plan requires discovery to be read-only and separable from consolidation.
+        return self._episodes.detect_self_forks(
+            namespace=namespace,
+            self_uuid=self_uuid_for_namespace(namespace),
+        )
 
     def stamp_ingest_metadata(
         self,
@@ -1602,7 +1628,7 @@ class MemoryGraphAdapter:
         )
 
     def get_artifact_relationships(self, artifact_uuid: str) -> dict[str, list[dict[str, Any]]]:
-        return self._work_artifacts.get_artifact_relationships(artifact_uuid)
+        return self._work_artifacts.artifact_relationships(artifact_uuid)
 
     def link_artifacts(
         self, source_uuid: str, target_uuid: str, relation: str
@@ -1786,6 +1812,20 @@ class MemoryGraphAdapter:
         except Exception as exc:  # noqa: BLE001 - fail open, never block the hook
             return {"attempted": True, "applied": False, "reason": f"error:{type(exc).__name__}"}
         return {"attempted": True, **result}
+
+    def supersede_todo(self, old_uuid: str, new_uuid: str) -> dict[str, Any]:
+        return self._todos.supersede_todo(old_uuid, new_uuid)
+
+    def resolve_todo(self, todo_uuid: str, memory_uuid: str) -> dict[str, Any]:
+        return self._todos.resolve_todo(todo_uuid, memory_uuid)
+
+    def reopen_todo(self, todo_uuid: str, memory_uuid: str) -> dict[str, Any]:
+        return self._todos.reopen_todo(todo_uuid, memory_uuid)
+
+    def link_memory_to_todo(
+        self, memory_uuid: str, todo_uuid: str, relation: str
+    ) -> dict[str, Any]:
+        return self._todos.link_memory_to_todo(memory_uuid, todo_uuid, relation)
 
     def close_todo(self, uuid: str) -> bool:
         return self._todos.close_todo(uuid)
