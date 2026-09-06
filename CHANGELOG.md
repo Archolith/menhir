@@ -1,3 +1,13 @@
+## 2026-09-06 - admit ChatGPT's stable CIMD identity
+
+- Added `https://chatgpt.com/oauth/client.json` to the digest-bound ChatGPT
+  operator policy while retaining the restored DCR identity during migration.
+- Added an authorization regression test that combines ChatGPT's current CIMD
+  metadata shape, stable callback, public-client method negotiation, and the
+  real production policy.
+- Updated the hosted-client access documentation and production policy digest
+  to `a6c7cd4f061010415c9f68b66bb79b808eca49b8ed5df51495ff18de312a865c`.
+
 ## 2026-09-04 - align production OAuth and agent todo authority
 
 - Restored `menhir:admin` to the production compose authorization-server scope surface so the

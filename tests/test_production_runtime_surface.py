@@ -257,7 +257,7 @@ def _production_settings(**overrides: object) -> MemorySettings:
         "oauth_signing_key_path": str(
             Path(__file__).resolve().parent / "oauth-signing-key.test.json"
         ),
-        "client_policy_digest": "09ede2c69a145ec551bcd51e037d8f825e6cc7fb211335450c1d736bb616d3b7",
+        "client_policy_digest": "a6c7cd4f061010415c9f68b66bb79b808eca49b8ed5df51495ff18de312a865c",
         "api_key": "test-api-key",
     }
     values.update(overrides)
@@ -329,7 +329,7 @@ def test_production_client_policy_is_digest_bound_and_tracks_clients() -> None:
     path = (
         Path(__file__).resolve().parents[1] / "deploy" / "client-policy.production.json"
     )
-    digest = "09ede2c69a145ec551bcd51e037d8f825e6cc7fb211335450c1d736bb616d3b7"
+    digest = "a6c7cd4f061010415c9f68b66bb79b808eca49b8ed5df51495ff18de312a865c"
 
     from menhir.mcp.tools import ALL_TOOLS
 
@@ -370,6 +370,16 @@ def test_production_client_policy_is_digest_bound_and_tracks_clients() -> None:
         scopes=frozenset({"menhir:read", "menhir:write", "menhir:admin"}),
     ) is policy
 
+    chatgpt_cimd = authority.require_client(
+        client_id="https://chatgpt.com/oauth/client.json",
+        scopes=frozenset({"menhir:read", "menhir:write", "menhir:admin"}),
+        tier="operator",
+    )
+    assert chatgpt_cimd.label == "chatgpt-web-cimd"
+    assert chatgpt_cimd.registration is None
+    assert chatgpt_cimd.allowed_tools == web_allowed_tools
+    assert chatgpt_cimd.denied_tools == web_denied_tools
+
     claude_web = authority.require_client(
         client_id="6cf6322fa828bb72",
         scopes=frozenset(
@@ -399,6 +409,10 @@ def test_production_client_policy_is_digest_bound_and_tracks_clients() -> None:
         product: access.role
         for product, access in authority.access_contract.products.items()
     } == EXPECTED_PRODUCT_ROLES
+    assert authority.access_contract.products["chatgpt"].client_ids == (
+        "69c2cd871b488ff4",
+        "https://chatgpt.com/oauth/client.json",
+    )
     authority.access_contract.require_oauth_scope_mapping(
         scopes_supported=("menhir:read", "menhir:write", "menhir:admin"),
         read_scopes=("menhir:read",),
