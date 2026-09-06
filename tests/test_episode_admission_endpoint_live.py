@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import uuid as uuidlib
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi import FastAPI
@@ -30,8 +30,12 @@ def live_client(test_neo4j_repo):
     adapter = MemoryGraphAdapter(neo4j=test_neo4j_repo)
     app = FastAPI()
     app.include_router(router)
+    ingest_service = SimpleNamespace(
+        enqueue_pending_episode=AsyncMock(return_value=True),
+        enrichment_enabled=lambda: True,
+    )
     app.state.runtime_ctx = SimpleNamespace(
-        built=SimpleNamespace(graph_adapter=adapter),
+        built=SimpleNamespace(graph_adapter=adapter, ingest_service=ingest_service),
         session=SimpleNamespace(session_id="s", user_id="u"),
         capabilities=SimpleNamespace(startup_mode="full", failures=[]),
     )
@@ -69,6 +73,9 @@ def test_the_full_server_half_of_the_loop(live_client, test_neo4j_repo):
     assert body["linked"] is True
     projection = body["projection_uuid"]
     assert projection
+    client.app.state.runtime_ctx.built.ingest_service.enqueue_pending_episode.assert_awaited_once_with(
+        projection
+    )
 
     # the memory now reaches its turn
     rows = test_neo4j_repo.execute(
@@ -112,6 +119,7 @@ def test_a_second_memory_on_the_same_turn_links_but_does_not_re_project(live_cli
         "MATCH (e:Episodic)-[:ADMITTED_ON]->(:TurnEvidence {turn_id: $t}) "
         "WHERE e.is_evidence_projection IS NULL RETURN count(e) AS c", params={"t": tid})
     assert rows[0]["c"] == 2
+    assert client.app.state.runtime_ctx.built.ingest_service.enqueue_pending_episode.await_count == 2
 
 
 @pytest.mark.online

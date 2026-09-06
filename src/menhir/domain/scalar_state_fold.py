@@ -25,6 +25,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from menhir.domain.temporal import parse_iso8601
@@ -111,7 +112,18 @@ _parse_dt = parse_iso8601
 
 
 def _is_number(x: Any) -> bool:
-    return isinstance(x, (int, float)) and not isinstance(x, bool)
+    return isinstance(x, (int, float, Decimal)) and not isinstance(x, bool)
+
+
+def _money_decimal(value: Any) -> Decimal | None:
+    """Return a finite Decimal for a hydrated or legacy numeric money value."""
+    if isinstance(value, bool):
+        return None
+    try:
+        result = value if isinstance(value, Decimal) else Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return None
+    return result if result.is_finite() else None
 
 
 def fold_assertions(
@@ -222,9 +234,19 @@ def fold_assertions(
         value: Any = anchor_value
         if applied:
             applied.sort(key=lambda d: (str(d.get("valid_at") or ""), str(d.get("assertion_id") or "")))
-            delta_total = float(sum(float(d.get("value")) for d in applied))
-            folded = float(anchor_value) + delta_total
-            value = int(folded) if folded == int(folded) else folded
+            if value_kind == "money":
+                anchor_decimal = _money_decimal(anchor_value)
+                delta_decimals = [_money_decimal(d.get("value")) for d in applied]
+                if anchor_decimal is None or any(delta is None for delta in delta_decimals):
+                    result.abstentions.append(Abstention(slot_key, DELTA_ON_RANGE, subject_uuid))
+                    continue
+                exact_delta = sum((delta for delta in delta_decimals if delta is not None), Decimal("0"))
+                value = anchor_decimal + exact_delta
+                delta_total = float(exact_delta)  # audit mirror only; register identity stays Decimal-exact
+            else:
+                delta_total = float(sum(float(d.get("value")) for d in applied))
+                folded = float(anchor_value) + delta_total
+                value = int(folded) if folded == int(folded) else folded
             contributors += applied
 
         # Phase 3 (7.D/G11) edge inputs, split by the fold's algebra. The anchor + APPLIED deltas are

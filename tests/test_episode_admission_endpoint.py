@@ -12,7 +12,7 @@ without a landed link) rather than pretending to a guarantee. See the CORRECTION
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import FastAPI
@@ -27,6 +27,7 @@ def graph_adapter():
     adapter = MagicMock()
     adapter.link_episode_admission.return_value = True
     adapter.create_evidence_projection.return_value = "proj-1"
+    adapter.find_pending_evidence_projection_uuid.return_value = None
     return adapter
 
 
@@ -34,8 +35,15 @@ def graph_adapter():
 def client(graph_adapter):
     app = FastAPI()
     app.include_router(router)
+    ingest_service = SimpleNamespace(
+        enqueue_pending_episode=AsyncMock(return_value=True),
+        enrichment_enabled=lambda: True,
+    )
     app.state.runtime_ctx = SimpleNamespace(
-        built=SimpleNamespace(graph_adapter=graph_adapter),
+        built=SimpleNamespace(
+            graph_adapter=graph_adapter,
+            ingest_service=ingest_service,
+        ),
         session=SimpleNamespace(session_id="process-session", user_id="claude-code"),
         capabilities=SimpleNamespace(startup_mode="full", failures=[]),
     )
@@ -60,6 +68,9 @@ def test_links_and_projects(client, graph_adapter):
     # value and preserves the previous behaviour.
     assert graph_adapter.link_episode_admission.call_args.kwargs == {
         "episode_uuid": "ep-1", "turn_evidence_uuid": "turn-1", "namespace": None}
+    client.app.state.runtime_ctx.built.ingest_service.enqueue_pending_episode.assert_awaited_once_with(
+        "proj-1"
+    )
 
 
 def test_no_projection_when_the_link_did_not_land(client, graph_adapter):
@@ -71,6 +82,7 @@ def test_no_projection_when_the_link_did_not_land(client, graph_adapter):
     assert resp.json()["linked"] is False
     assert resp.json()["projection_uuid"] is None
     assert graph_adapter.create_evidence_projection.call_count == 0
+    client.app.state.runtime_ctx.built.ingest_service.enqueue_pending_episode.assert_not_awaited()
 
 
 def test_an_already_projected_turn_reports_no_new_projection(client, graph_adapter):
@@ -80,6 +92,24 @@ def test_an_already_projected_turn_reports_no_new_projection(client, graph_adapt
     resp = _post(client)
     assert resp.json()["linked"] is True
     assert resp.json()["projection_uuid"] is None
+    client.app.state.runtime_ctx.built.ingest_service.enqueue_pending_episode.assert_not_awaited()
+
+
+def test_retry_recovers_projection_created_before_enqueue_failure(client, graph_adapter):
+    queue = client.app.state.runtime_ctx.built.ingest_service.enqueue_pending_episode
+    queue.side_effect = [RuntimeError("queue unavailable"), True]
+
+    with pytest.raises(RuntimeError, match="queue unavailable"):
+        _post(client)
+
+    graph_adapter.create_evidence_projection.return_value = None
+    graph_adapter.find_pending_evidence_projection_uuid.return_value = "proj-1"
+    retry = _post(client)
+
+    assert retry.status_code == 200
+    assert retry.json() == {"linked": True, "projection_uuid": None}
+    assert queue.await_count == 2
+    assert queue.await_args_list[-1].args == ("proj-1",)
 
 
 def test_the_projection_is_named_for_its_turn_not_the_episode(client, graph_adapter):
@@ -107,3 +137,40 @@ def test_blank_ids_are_refused(client, graph_adapter, body, why):
 def test_unavailable_adapter_is_503_not_500(client, graph_adapter):
     del graph_adapter.link_episode_admission
     assert _post(client).status_code == 503
+
+
+def test_unavailable_queue_refuses_before_writing(client, graph_adapter):
+    del client.app.state.runtime_ctx.built.ingest_service.enqueue_pending_episode
+
+    assert _post(client).status_code == 503
+    graph_adapter.link_episode_admission.assert_not_called()
+    graph_adapter.create_evidence_projection.assert_not_called()
+
+
+def test_disabled_enrichment_refuses_before_writing(client, graph_adapter):
+    client.app.state.runtime_ctx.built.ingest_service.enrichment_enabled = lambda: False
+
+    resp = _post(client)
+
+    assert resp.status_code == 503
+    assert "disabled" in resp.json()["detail"]
+    graph_adapter.link_episode_admission.assert_not_called()
+    graph_adapter.create_evidence_projection.assert_not_called()
+
+
+def test_enqueue_failure_is_visible(client, graph_adapter):
+    client.app.state.runtime_ctx.built.ingest_service.enqueue_pending_episode.side_effect = (
+        RuntimeError("queue unavailable")
+    )
+
+    with pytest.raises(RuntimeError, match="queue unavailable"):
+        _post(client)
+
+
+def test_queue_false_is_an_idempotent_success(client, graph_adapter):
+    client.app.state.runtime_ctx.built.ingest_service.enqueue_pending_episode.return_value = False
+
+    resp = _post(client)
+
+    assert resp.status_code == 200
+    assert resp.json()["projection_uuid"] == "proj-1"

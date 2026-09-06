@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "canonical_digest": "09ede2c69a145ec551bcd51e037d8f825e6cc7fb211335450c1d736bb616d3b7",
+  "canonical_digest": "a6c7cd4f061010415c9f68b66bb79b808eca49b8ed5df51495ff18de312a865c",
   "access_contract": {
     "primary_endpoint": "https://memory.ctharvey.me/mcp-http",
     "authentication": {
@@ -14,7 +14,8 @@
       "chatgpt": {
         "role": "operator",
         "client_ids": [
-          "69c2cd871b488ff4"
+          "69c2cd871b488ff4",
+          "https://chatgpt.com/oauth/client.json"
         ]
       },
       "codex": {
@@ -120,6 +121,78 @@
         ],
         "token_endpoint_auth_method": "none"
       },
+      "scopes": [
+        "menhir:read",
+        "menhir:write",
+        "menhir:admin"
+      ],
+      "maximum_tier": "operator",
+      "namespace": "",
+      "allowed_tools": [
+        "add_candidate",
+        "add_memory",
+        "add_memory_and_track",
+        "add_todo",
+        "audit_artifact_corpus",
+        "build_context",
+        "close_memory",
+        "close_stale_todos",
+        "close_todo",
+        "delete_memory",
+        "flag_memory",
+        "force_reenrich",
+        "force_release_enrichment_lease",
+        "force_scheduler_takeover",
+        "get_artifact",
+        "get_artifact_relationships",
+        "get_client_context",
+        "get_enrichment_status",
+        "get_episode_trace",
+        "get_memory_stats",
+        "get_provenance",
+        "get_todo",
+        "ingest_document",
+        "ingest_project",
+        "link_artifacts",
+        "link_memory_to_todo",
+        "list_artifact_questions",
+        "list_artifacts",
+        "list_clients",
+        "list_conflicts",
+        "list_enrichment_queue",
+        "list_todos",
+        "pause_scheduler",
+        "promote_memory",
+        "query_structure",
+        "rate_recall",
+        "read_flagged_memories",
+        "recall_context_memories",
+        "recall_memories",
+        "recover_orphans",
+        "relocate_artifact_source",
+        "reopen_todo",
+        "repair_stale_enrichment",
+        "requeue_conflicts_for_llm_review",
+        "resolve_conflict",
+        "resolve_todo",
+        "resume_scheduler",
+        "run_llm_conflict_review",
+        "scan_for_conflicts",
+        "supersede_artifact",
+        "supersede_todo",
+        "transition_artifact",
+        "unflag_memory",
+        "view_entropy",
+        "watch_enrichment"
+      ],
+      "denied_tools": [
+        "delete_namespace",
+        "mint_client",
+        "revoke_client"
+      ]
+    },
+    "https://chatgpt.com/oauth/client.json": {
+      "label": "chatgpt-web-cimd",
       "scopes": [
         "menhir:read",
         "menhir:write",
