@@ -19,6 +19,11 @@
 - Correct identity docs, architecture and the runbook. Production activation, live-provider/image
   tests, and historical remediation remain separately gated. This is a focused alternative to
   PRs #46–48 on the PR #45 identity baseline, not an approval to merge those certification branches.
+- Align the production release plan, runbook and architecture on the machine-checked
+  `automatic-memory-v1` contract: structural identity failures block release, while question,
+  negation and reported-speech attribution remain measured model-accuracy outcomes. Correct the
+  historical population wording to 73 observed exact-name nodes with zero proven self dispositions,
+  and record the current implementation/CI evidence without upgrading an unattached image-test claim.
 
 ## 2026-09-04 - Make canonical-self authority node-scoped
 
@@ -47,10 +52,11 @@
   fallback), and classify arbitrary source-kind strings as `other` before telemetry persistence.
 - Pin the currently inert exact-node binding surface with an AST census that fails on any new
   declaration producer, while preserving observe-mode and resolver-bypass checks.
-- Remove the legacy `user` instruction from endpoint-bearing extraction prompts, require the opaque
-  endpoint only for sentence-initial first-person subjects outside common quote/code spans, and make
-  one bounded corrective extraction when that deterministic signal is present but the endpoint is
-  absent.
+- **Superseded by `automatic-memory-v1` on 2026-09-06; retained as historical implementation
+  record:** Remove the legacy `user` instruction from endpoint-bearing extraction prompts, require
+  the opaque endpoint only for sentence-initial first-person subjects outside common quote/code
+  spans, and make one bounded corrective extraction when that deterministic signal is present but
+  the endpoint is absent.
 - Reject endpoint-bearing edges unless every meaningful non-endpoint fact token and the other
   endpoint are supported by one affirmative, unquoted current-author clause. Questions, explicit
   negation, quoted/reported speech, multiline code fences, and unterminated quote spans cannot

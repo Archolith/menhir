@@ -588,10 +588,11 @@ candidates. The rewrite covers the node UUID, both edge endpoint directions and 
 one unit, with rollback: a node rewritten while its edges still point at the discarded UUID would
 orphan the episode's facts.
 
-**Automatic-memory contract (owner decision, 2026-09-06).** Identity is deterministic; semantic
-interpretation remains fallible. Ordinary personal facts, summaries, attributes, lifecycle merging,
-scalar/event extraction and recall remain automatic. No owner signature or global hydration shutdown
-is part of this candidate. The rejected certification alternatives in PRs #46–48 are not dependencies.
+**Automatic-memory contract (owner decision, 2026-09-06; `automatic-memory-v1`).** Identity is
+deterministic; semantic interpretation remains fallible. Ordinary personal facts, summaries,
+attributes, lifecycle merging, scalar/event extraction and recall remain automatic. No owner
+signature or global hydration shutdown is part of this candidate. The rejected certification
+alternatives in PRs #46–48 are not dependencies.
 
 | Question | Responsible boundary |
 |---|---|

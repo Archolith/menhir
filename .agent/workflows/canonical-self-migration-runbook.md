@@ -29,6 +29,8 @@ durable-write-semantics change.
 
 ## Smaller implementation decision (2026-09-06)
 
+**Canonical-self contract:** `automatic-memory-v1`.
+
 The owner chose deterministic identity with useful automatic memory (original option 1), explicitly
 accepting occasional semantic misattribution. This replaces the stronger reported-speech guarantee
 for this candidate. It does not authorize production activation, live tests or historical cleanup.
@@ -112,9 +114,11 @@ profile above.
    event `canonical_self_decision`, should show the expected `bound` decision for the canary and no
    `ambiguous` decision. Also check projection failures/retries and the dedup resolution counters.
    No arbitrary entity names or memory text need to leave the server.
-7. **Stop or roll back on a concrete failure.** Any false bind, marker leakage, ambiguous
-   declaration, failed canary assertion, or repeated binding-attributable projection failure is a
-   release failure. While no consolidation migration has run, restore the prior app/config or set
+7. **Stop or roll back on a concrete identity failure.** An undeclared or ordinary node acquiring
+   canonical identity, a declared author resolving to the wrong UUID, marker leakage, an ambiguous
+   declaration, a failed structural canary assertion, or repeated binding-attributable projection
+   failure is a release failure. A model-attribution error is accuracy evidence, not by itself an
+   identity failure. While no consolidation migration has run, restore the prior app/config or set
    the mode back to `off`; no database restore is required.
 
 Use `observe` only when diagnosing legacy extractor output. Its

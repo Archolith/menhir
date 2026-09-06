@@ -28,6 +28,11 @@ the exact candidate, evidence, release class, rollback bundle, and remaining ris
 approval may then cover immutable artifact publication, the fixed deployment transaction, the
 synthetic canary write, and its bounded cleanup.
 
+**Canonical-self contract:** `automatic-memory-v1` (owner decision, 2026-09-06). Identity is
+structural and deterministic; relationship attribution remains fallible model output. Questions,
+negation, and reported speech are accuracy cases, not identity-authority or grammatical-refusal
+rules.
+
 ## Current anchors
 
 These are observations, not permanent release identifiers. Re-read them at execution time.
@@ -111,8 +116,11 @@ Authority and refusal outcome:
 
 - authority: atomically claimed turn evidence, the task-local opaque subject endpoint, current
   episode identity, relationship endpoint, assertion grounding, and the final pre-write validator;
-- refusal: missing, duplicated, replayed, colliding, quoted, negated, questioned, unsupported, or
+- structural refusal: missing, duplicated, replayed, colliding, stale, foreign, unsupported, or
   undeclared authority produces no canonical binding and no partially persisted graph write;
+- semantic interpretation: a question, negation, or reported speaker may still be attributed to
+  the declared author by the model. Record that outcome as accuracy evidence; it does not create a
+  second identity, certify the inferred fact, or by itself fail the identity contract;
 - reserved endpoint text is transport-only and must never persist in node or relationship
   properties;
 - the canonical node is ineligible for merge in either survivor/absorbed direction at the final
@@ -272,23 +280,25 @@ only to read the live configuration and later to execute the approved deployment
 4. Run the focused canonical, evidence, admission, merge, todo, scheduler, MCP, and production
    runtime suites.
 5. Optionally drive the exact image through the public-path E2E as an additional confidence probe:
-   - affirmative first-person subject statements that should bind;
-   - first-person object/non-subject use that must not bind;
-   - a question and an explicit negation;
-   - quoted and reported first-person speech;
-   - multiline/code-fence content and an unterminated quote;
-   - third-person `user` and RBAC-role uses;
-   - mixed self and third-party entities;
-   - replay and evidence/body mismatch.
+   - an affirmative first-person subject statement expected to produce useful automatic memory;
+   - first-person object/non-subject use, a question, an explicit negation, quoted/reported speech,
+     multiline/code-fence content, and an unterminated quote as semantic-accuracy observations;
+   - third-person `user`, RBAC-role uses, and mixed self/third-party entities as ordinary-identity
+     controls;
+   - replay, evidence/body mismatch, stale/foreign transport, and reserved-prefix collision as
+     structural identity controls.
 6. If the optional E2E is run, require for the positive case `READY`, the deterministic canonical
    UUID, a relationship tied to the current Graphiti episode, `MENTIONS` provenance, zero
    endpoint-marker text across every persisted node/relationship property, and an idempotent replay.
-   Require canonical merge refusal in both directions. For every negative case require no canonical
-   authority; ordinary entities may still be extracted normally.
-7. Treat an optional production-model failure as diagnostic evidence. Fix a demonstrated
-   parser/prompt/validation defect before relying on that behavior, then rebuild and rerun the
-   affected checks. The optional probe does not itself authorize or block deployment; required CI,
-   release packaging, and the post-deploy canary retain their own pass/fail authority.
+   Require canonical merge refusal in both directions. Across every case, require that no
+   undeclared or ordinary entity acquires the canonical UUID, every used author endpoint resolves
+   only to that UUID, and no reserved marker persists. Do not require a semantic sample to bind or
+   abstain based on grammar alone; record its inferred relationship and attribution outcome.
+7. Treat an optional production-model attribution error as diagnostic accuracy evidence. Fix a
+   demonstrated transport, identity, persistence, or validation defect before relying on that
+   behavior, then rebuild and rerun the affected checks. The optional probe does not itself
+   authorize or block deployment; required CI, release packaging, and the post-deploy canary retain
+   their own pass/fail authority.
 
 Exit evidence:
 
@@ -421,7 +431,9 @@ Require:
 - no persisted endpoint marker in any node or relationship property;
 - replay idempotence;
 - merge refusal in both directions;
-- one negative quoted/reported-speech case that does not gain canonical authority;
+- one question, negation, or reported-speech sample with its model-selected relationship and
+  attribution outcome recorded as semantic-accuracy evidence; if the author endpoint is used, it
+  must still resolve only to the deterministic canonical UUID;
 - no rise in projection failures attributable to binding during the canary's complete async cycle.
 
 As part of the same bounded acceptance window, execute the policy-bound product identity/tool
@@ -446,12 +458,18 @@ Declare the release complete only when:
 
 Rollback triggers:
 
-- a false canonical bind, especially quoted/reported speech or an undeclared node;
+- a structural identity violation, including an undeclared or ordinary node acquiring canonical
+  identity, a declared author resolving to the wrong UUID, or a cross-namespace bind;
 - failure to bind the declared positive canary;
 - marker leakage, wrong physical group, non-idempotent replay, or successful canonical merge;
 - repeated binding-attributable projection failure;
 - image/config/release identity mismatch, OAuth scope regression, writer-fence failure, or broader
   public acceptance failure.
+
+A model-attribution error in a question, negation, or reported-speech sample is not by itself a
+canonical-self rollback trigger. Record it as accuracy evidence and separately decide whether its
+broader product impact is acceptable; it becomes an identity failure only if one of the structural
+rules above is also violated.
 
 Response:
 
@@ -470,20 +488,20 @@ Response:
 |---|---|---|
 | Explicit release-model E2E | Durable test accepts and reports OpenRouter Luna with OpenAI embeddings | Supporting evidence only; not a deployment blocker. |
 | OpenRouter production secret | Workstation key exists; VPS `local-llm-api-key` is absent | Block production deployment until the fixed secret path contains the key with the enforced owner/mode and verification passes. |
-| Exact-image E2E | Packaged-image probe exists and has passed against disposable Docker Neo4j | Supporting evidence only; a later packaging-neutral change does not require rerunning it for deployment. |
+| Exact-image E2E | A packaged-image pass is reported for a prior candidate, but no durable receipt path is recorded in this repository | Supporting evidence only; do not present it as final-head release authority unless the receipt is attached and identifies the exact image and model. |
 | Production mode wiring | Compose now passes `MENHIR_CANONICAL_SELF_BINDING_MODE` and the example sets `enforce` | Block until the rendered release environment proves the intended value before deployment. |
 | Release authority for mode | Release authoring now validates and digest-binds the canonical mode enum | Block until the finalized bundle and running-container acceptance prove the same effective value. |
 | Maintenance class authority | The app-only classifier is trusted, but `release.json`/maintenance runner do not yet bind a deployment class or changed-path evidence | Block until the immutable authority and runner verify both. |
 | Fixed production canary | Turn-evidence/admission routes are private and no receipt-producing canary exists | Block until the scoped verifier exists; its required execution is the post-deploy synthetic canary, not a local image E2E. |
 | Changed client-policy acceptance | Current deployment probe is read-only and cannot prove the new TODO grants or product identities | Block until the product/tool matrix and bounded TODO lifecycle are fixed acceptance checks. |
-| Final PR CI | No final pull-request result for this candidate | Block until all required jobs are green on the final commit. |
+| Final PR CI | Run `34051433787` is green on implementation head `2c6564e2`; this contract-only follow-up still needs final-head CI | Block until all required jobs are green on the final commit. |
 | Full release review | Pre-plan delta spans 78 files and protected surfaces | Block until every final changed file has test/review ownership. |
 | Mechanical release bundle | Not yet prepared for the final merge commit | Block owner approval until classification, scan, provenance, and security review pass; block deployment until post-approval publication and bundle validation preserve the approved digests. |
 | Out-of-band hotfix overlay | The live overlay is durable and not under `/tmp`, but its image/policy/scope authority is outside the older maintenance manifest; the no-`/tmp` prohibition is still not enforced by release scripts | Block restart until the candidate absorbs the hotfix effects, drops the extra overlay, and the runner hard-refuses any `/tmp` config reference before fencing. |
 
-The existing self-like/fork population is not a release blocker because this release performs no
-historical consolidation and does not claim to repair existing data. It remains separate owner
-work under the canonical-self remediation runbook.
+The existing exact-name `user` population is not a release blocker because this release performs
+no historical classification or consolidation and does not claim to repair existing data. It
+remains separate owner work under the canonical-self remediation runbook.
 
 ## Execution record
 
@@ -491,14 +509,15 @@ Fill this section during implementation; do not replace evidence with prose.
 
 ```text
 Live release / Menhir commit / image: authority menhir-prod-0.2.0-8 / d8bcd6f5 / sha256:af970091…; running override menhir-prod-hotfix-agent-todos-20260904 / 613ff786 / sha256:c406c621…
-Final candidate commit / image digest: Phase 1 lineage merge 4fdb27a7; final Phase 4 commit and image TBD
-Complete diff reviewed: 82-file authority census assigned with zero unowned paths; semantic acceptance remains in Phases 2–4
+Reviewed implementation baseline / tree: 2c6564e2c47c2b0f4a318305f1a295b9e84e0095 / abbdee55a85ffc1cb95b67ec4bfb330d54a05061
+Final candidate commit / image digest: pending this contract-only follow-up and final packaging
+Complete diff reviewed: canonical-self contract and remediation PRs reviewed; final 78-file release-delta reconciliation remains pending
 Live providers / chat model / embedding model: openai/openai/openai; gpt-4.1-nano; text-embedding-3-small
 Candidate providers / chat model / embedding model: local/local/openai; openai/gpt-5.6-luna via https://openrouter.ai/api/v1; text-embedding-3-small
-Canonical mode in rendered candidate:
-Full suite / focused suite:
-Optional exact-model/image E2E receipt:
-PR CI run:
+Canonical mode in rendered candidate: Compose requires the value and production.env.example selects enforce; finalized bundle/container render pending
+Full suite / focused suite: implementation tree 8,934 passed / 352 skipped; patched contract suite 446 passed / 4 skipped; final-head full CI pending
+Optional exact-model/image E2E receipt: prior pass reported; no durable receipt path found, so not counted as final-head authority
+PR CI run: 34051433787 green on 2c6564e2; final-head run pending
 Mechanical release class:
 SBOM / scan / provenance:
 Security review digest and reviewer:
@@ -510,10 +529,10 @@ Maintenance transaction receipt:
 Public acceptance receipt:
 Canonical canary namespace / receipt / cleanup outcome:
 Final running release / image / mode:
-Remaining assumptions:
+Remaining assumptions: automatic-memory-v1 accepts semantic misattribution; existing exact-name nodes are not remediated; production release/deployment evidence remains pending
 ```
 
-## Follow-up: remediate the existing 66-user population
+## Follow-up: classify and remediate the existing 73 exact-name `user` observations
 
 After this release passes its production canary, open the historical-fork remediation as the next
 separate work item. Its authorities are:
@@ -526,12 +545,12 @@ separate work item. Its authorities are:
   `C:\Users\thron\IdeaProjects\.agent\plans\menhir-canonical-self-observation-correction-2026-09-04.md`,
   which supersede the earlier name-, arity-, and grammar-based authority assumptions.
 
-The previously measured 66 nodes are a planning baseline, not an immutable target list. Start with
-a fresh read-only production recount, classify each candidate from episode and relationship
-provenance, and obtain owner approval of the exact manifest. Apply only through a journaled,
-reversible migration whose inverse bundle and restore/reapply behavior have been proven on a restored
-production copy. Ambiguous nodes remain quarantined; no node is selected or merged by the name
-`user` alone.
+The 2026-09-04 read-only observation found 73 exact-name `user` nodes in the default physical group.
+It proved zero of them to be human-self forks and produced no disposition manifest. Start with a
+fresh read-only production recount, classify each candidate from episode and relationship provenance,
+and obtain owner approval of the exact manifest. Apply only through a journaled, reversible migration
+whose inverse bundle and restore/reapply behavior have been proven on a restored production copy.
+Ambiguous nodes remain quarantined; no node is selected or merged by the name `user` alone.
 
 This deployment plan neither executes nor authorizes that migration. It establishes prevention
 first so the historical population does not keep growing while remediation is prepared.
