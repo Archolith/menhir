@@ -2,6 +2,11 @@
 
 ## 2026-09-06 - Keep deterministic self identity and automatic memory
 
+- `self_identity.py`, `enrichment_steps.py`, `enrichment_failures.py`: distinguish an eligible
+  reserved-marker collision from ineligibility; block before shadow search/publication/dispatch and
+  classify persisted collision failures as manual review, never a transient retry. Preserve raw
+  evidence and legacy modes. Add full-worker, retry-polling and pre-dispatch regressions in
+  `test_self_endpoint_collision.py`; document the bounded refusal in the canonical-self runbook.
 - `graphiti_extraction_patches.py`: preallocate/declaratively identify the Menhir author before
   model dispatch; atomically substitute it for the model carrier before dedup. Remove the
   affirmative/quotation parser as identity authority. Withhold unresolved aliases after one

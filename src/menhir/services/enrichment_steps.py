@@ -522,6 +522,19 @@ async def run_graphiti_extraction(
     namespace = str(ctx.claimed.get("namespace") or "default")
     group_id = namespace_to_group_id(namespace if namespace != "default" else None)
 
+    self_bind_mode = resolve_bind_mode(
+        getattr(ctx, "canonical_self_binding_mode", None)
+    )
+    # Validate before any shadow candidate search, publication intent, or native dispatch.
+    # None means genuinely ineligible. A collision in an eligible projection raises and is
+    # parked by the worker's existing failure path; it must not disable self-fork prevention.
+    # The endpoint changes behavior, so off/observe still do not construct one.
+    self_subject_endpoint = (
+        self_subject_endpoint_for_claim(ctx.claimed)
+        if self_bind_mode is SelfBindMode.ENFORCE
+        else None
+    )
+
     stamped_ok = ctx.graph_adapter.update_episode_processing(
         ctx.episode_uuid,
         worker_id=ctx.worker_id,
@@ -690,9 +703,6 @@ async def run_graphiti_extraction(
                         f"{publication_intent.status}"
                     )
 
-            self_bind_mode = resolve_bind_mode(
-                getattr(ctx, "canonical_self_binding_mode", None)
-            )
             self_identity = self_context_for_pending_episode(
                 source=ctx.claimed.get("source"),
                 namespace=namespace,
@@ -701,15 +711,6 @@ async def run_graphiti_extraction(
                     ctx.claimed.get("turn_evidence_uuid") or ""
                 ).strip() or None,
             )
-            # Observe must preserve the real extraction prompt byte-for-byte.  The endpoint is a
-            # behavioral input, so only enforce constructs and transports it; off/observe keep the
-            # established extraction path while the existing decision telemetry remains available.
-            self_subject_endpoint = (
-                self_subject_endpoint_for_claim(ctx.claimed)
-                if self_bind_mode is SelfBindMode.ENFORCE
-                else None
-            )
-
             graphiti_result = await add_episode_with_timeout(
                 ctx.graphiti_client,
                 name=episode_name,

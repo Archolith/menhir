@@ -45,6 +45,17 @@ withheld (including in mixed payloads); no substitute self node is persisted for
 A legitimate bare RBAC `user` in mixed prose can be withheld, so use a source-qualified entity name
 when supported by the text. Ordinary third-person users are not canonical self.
 
+**Reserved-prefix collision:** an otherwise eligible verbatim projection containing
+`MenhirCurrentSpeaker_` (case-insensitive) raises `SelfSubjectEndpointCollisionError`; it is not an
+ineligible claim and must never fall back to ordinary extraction. In `enforce`, validation occurs
+before shadow candidate search, publication intent creation or Graphiti dispatch. The worker keeps
+the raw evidence, records `self_subject_endpoint_collision` as a `FAILED` episode requiring
+`manual_review`, and releases its lease. Automatic retry polling leaves unchanged collision text
+parked; any corrected evidence must follow the normal evidence/admission process, not an in-place
+text edit or a marker-escaping shortcut. No semantic entity/relationship write is dispatched for the
+blocked episode; evidence and failure bookkeeping remain allowed. Genuinely ineligible messages and
+`off`/`observe` retain their prior behavior. This does not disable normal automatic enrichment.
+
 **Tradeoff:** a model may still misread a question, negation, or reported speaker and attach an
 incorrect inferred fact to the fixed author endpoint. There is no claim that free-text facts are
 owner-confirmed. Binding identity and assessing relationship accuracy are different guarantees.

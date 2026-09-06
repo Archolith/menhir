@@ -49,6 +49,7 @@ __all__ = [
     "SelfEvidenceKind",
     "SelfIdentityContext",
     "SelfSubjectEndpointEnvelope",
+    "SelfSubjectEndpointCollisionError",
     "SpeakerRole",
     "SUBJECT_ENDPOINT_MARKER_PREFIX",
     "declare_self_subject",
@@ -65,6 +66,21 @@ __all__ = [
 
 SUBJECT_ENDPOINT_MARKER_PREFIX = "MenhirCurrentSpeaker_"
 _SUBJECT_ENDPOINT_VERSION = "speaker-endpoint-v1"
+
+
+class SelfSubjectEndpointCollisionError(ValueError):
+    """An eligible projection contains reserved transport text; ordinary fallback is unsafe.
+
+    Unlike an ineligible claim, this input must stop before semantic dispatch in enforce mode.
+    The stable reason survives persistence/retry classification without copying source text.
+    """
+
+    reason_code = "self_subject_endpoint_collision"
+
+    def __init__(self) -> None:
+        super().__init__(
+            f"{self.reason_code}: reserved marker prefix in eligible evidence projection"
+        )
 
 
 class SpeakerRole(StrEnum):
@@ -263,8 +279,10 @@ def self_subject_endpoint_for_claim(
     """Build an endpoint only for a graph-proven, verbatim user-turn projection.
 
     Every input is projected by the same atomic claim query that acquires the episode lease.  A
-    missing or contradictory field therefore fails closed instead of falling back to ``source`` or
-    text-shaped evidence.  Returning ``None`` means ordinary extraction must continue unchanged.
+    missing or contradictory field supplies no author authority; ``None`` means the claim is
+    ineligible and ordinary extraction continues unchanged. A reserved-prefix collision in an
+    otherwise eligible claim instead raises :class:`SelfSubjectEndpointCollisionError`: callers
+    must stop semantic dispatch, never turn that refusal into the ordinary-path ``None`` sentinel.
     """
 
     if claimed.get("subject_endpoint_eligible") is not True:
@@ -302,10 +320,10 @@ def self_subject_endpoint_for_claim(
     if namespace != turn_namespace:
         return None
 
-    # A user-authored occurrence of the reserved prefix would make model output
-    # indistinguishable from Menhir's capability token.  Refuse the endpoint path entirely.
+    # Refuse the episode, not just its endpoint: returning None here would bypass author
+    # quarantine and let ordinary resolution persist another self-like entity.
     if SUBJECT_ENDPOINT_MARKER_PREFIX.casefold() in content.casefold():
-        return None
+        raise SelfSubjectEndpointCollisionError()
 
     marker = _subject_endpoint_marker(
         version=_SUBJECT_ENDPOINT_VERSION,
