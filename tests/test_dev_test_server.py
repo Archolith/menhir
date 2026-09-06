@@ -329,3 +329,74 @@ def test_restart_preserves_command_environment_and_instance(tmp_path, monkeypatc
     assert health_calls == [
         ("http://127.0.0.1:8123", 45.0, new_proc, "same-instance")
     ]
+
+
+def test_container_confirmation_mounts_keep_live_directory_and_exclude_private_key(tmp_path) -> None:
+    fixtures = tmp_path / "owner-fixtures"
+    fixtures.mkdir()
+    public_key = fixtures / "owner-public.pem"
+    public_key.write_text("test public key", encoding="utf-8")
+    private_key = fixtures / "owner-private.pem"
+    private_key.write_text("must never be mounted", encoding="utf-8")
+    confirmations = fixtures / "confirmations"
+    confirmations.mkdir()
+    workdir = tmp_path / "launcher"
+    workdir.mkdir()
+    env = _shape_env(
+        "static", port=8123, host="127.0.0.1", workdir=workdir,
+        jwks_uri=DEAD_JWKS_URI, backend="neo4j", instance_id="test-instance",
+        neo4j=("bolt://127.0.0.1:17687", "neo4j", "throwaway-password"),
+    )
+    key_setting = "MENHIR_CANONICAL_SELF_CONFIRMATION_PUBLIC_KEY_PATH"
+    directory_setting = "MENHIR_CANONICAL_SELF_CONFIRMATION_DIRECTORY"
+    env[key_setting] = str(public_key)
+    env[directory_setting] = str(confirmations)
+    env["MENHIR_CANONICAL_SELF_CONFIRMATION_PUBLIC_KEY_SHA256"] = "a" * 64
+
+    command, process_env = _container_command(
+        image="menhir:test-image", name="menhir-test-app", port=18123,
+        workdir=workdir, env=env,
+    )
+
+    volumes = [command[i + 1] for i, value in enumerate(command) if value == "-v"]
+    assert f"{public_key.resolve()}:/run/menhir-self-confirmation/owner-public.pem:ro" in volumes
+    assert f"{confirmations.resolve()}:/run/menhir-self-confirmation/confirmations:ro" in volumes
+    assert process_env[key_setting] == "/run/menhir-self-confirmation/owner-public.pem"
+    assert process_env[directory_setting] == "/run/menhir-self-confirmation/confirmations"
+    assert process_env["MENHIR_CANONICAL_SELF_CONFIRMATION_PUBLIC_KEY_SHA256"] == "a" * 64
+    assert env[key_setting] == str(public_key) and env[directory_setting] == str(confirmations)
+    # Neither the private key nor its parent is exposed. The confirmation directory is mounted
+    # itself (not copied), so creation and revocation after startup affect the same source.
+    assert not any(volume.startswith(f"{fixtures.resolve()}:") for volume in volumes)
+    assert not any(str(private_key) in volume for volume in volumes)
+    mounted_directory = next(volume for volume in volumes if volume.startswith(str(confirmations.resolve()) + ":"))
+    source = Path(mounted_directory.rsplit(":", 2)[0])
+    confirmation = confirmations / "new-confirmation.json"
+    confirmation.write_text("{}", encoding="utf-8")
+    assert (source / confirmation.name).is_file()
+    confirmation.unlink()
+    assert not (source / confirmation.name).exists()
+
+
+@pytest.mark.parametrize("kind", ["missing", "key_is_directory", "confirmations_is_file"])
+def test_container_confirmation_mounts_fail_early_for_invalid_host_paths(tmp_path, kind) -> None:
+    key = tmp_path / "public.pem"
+    confirmations = tmp_path / "confirmations"
+    if kind == "key_is_directory":
+        key.mkdir()
+        confirmations.mkdir()
+    elif kind == "confirmations_is_file":
+        key.write_text("key", encoding="utf-8")
+        confirmations.write_text("not a directory", encoding="utf-8")
+    env = _shape_env(
+        "static", port=8123, host="127.0.0.1", workdir=tmp_path,
+        jwks_uri=DEAD_JWKS_URI, backend="neo4j", instance_id="test-instance",
+        neo4j=("bolt://127.0.0.1:17687", "neo4j", "throwaway-password"),
+    )
+    env["MENHIR_CANONICAL_SELF_CONFIRMATION_PUBLIC_KEY_PATH"] = str(key)
+    env["MENHIR_CANONICAL_SELF_CONFIRMATION_DIRECTORY"] = str(confirmations)
+    with pytest.raises((ValueError, FileNotFoundError), match="confirmation|public.pem"):
+        _container_command(
+            image="menhir:test-image", name="menhir-test-app", port=18123,
+            workdir=tmp_path, env=env,
+        )

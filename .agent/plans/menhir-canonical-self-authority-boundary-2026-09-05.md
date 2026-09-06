@@ -231,3 +231,25 @@ approval. Repository artifact validation still reports 22 inherited findings, no
 by this plan; that unrelated corpus debt was not folded into this authority change. The plan remains
 `IMPLEMENTING` because disposable database, live-provider, deployment, production activation and
 historical migration checks remain intentionally unrun without separate approval.
+
+
+### PR #46 review follow-ups (2026-09-05)
+
+The owner requested remediation and a follow-up PR. Extend this plan without changing its hybrid
+contract or authorizing deployment, historical changes, or manual live-database/provider tests.
+Scope: mixed marked/unmarked references, later reuse of unsigned text in hydration, and the exact-image
+confirmation mounts/searchable-counterpart fixture. Add deterministic regressions before repairs.
+
+Use one refusal-only classifier for both bounded correction and final whole-payload quarantine.
+Do not let one valid marker exempt unrelated unmarked aliases; keep marker counterpart relationships
+inside the existing per-edge signature gate. A bare unmarked `user` in mixed author-bearing text is
+ambiguous even when its model-authored fact calls it an application user. Retain its evidence rather
+than inventing authority; preserve qualified ordinary actors and third-person-only users.
+
+For hydration, use the conservative existing-contract option: all `enforce` calls perform name
+embeddings only and preserve resolved state. Current/previous/batched raw episodes do not carry
+assertion-level proof, so do not introduce an inferred per-episode "safe" flag. This deliberately
+reduces ordinary summary/attribute updates under enforcement. Re-enabling them needs an approved
+verified-input contract. `off`/`observe`, signature schema, namespace identity and production defaults
+remain unchanged. Seed the online counterpart through the tested app, not a raw unembedded node;
+mount only its public confirmation fixtures read-only with live directory visibility.

@@ -108,9 +108,12 @@ therefore blocks an in-flight final write and revokes an existing relationship f
 authoritative recall. The relationship remains available to explicit operator graph inspection
 until a separately approved reconciliation removes it.
 Unconfirmed proposals are bounded, lease-guarded JSON receipts on their `:Episodic` evidence node;
-they have no authoritative entity edge and do not enter ordinary recall. A rejected self-proposal
-episode also skips free-form Graphiti node-summary and attribute hydration, preventing its text from
-reappearing through an ordinary counterpart summary. Confirmed self facts use a dedicated verified
+they have no authoritative entity edge and do not enter ordinary recall. Every `enforce` hydration
+call skips free-form Graphiti node-summary/attribute generation and direct fact appending. This is
+not restricted to the task that rejected a proposal: later current/previous/batched raw text has no
+assertion-level authority either. Existing node state and name embeddings are preserved, but ordinary
+free-form summaries and attributes also stop updating in this mode. `off` and `observe` are unchanged.
+This guard does not certify or clean historical stored summaries. Confirmed self facts use a dedicated verified
 recall lane in `enforce`; general fact-edge feature flags and history-query classification do not
 disable it.
 
@@ -127,6 +130,27 @@ episode UUID. That tool may reopen a `READY` episode only when its last receipt 
 proposals than verified confirmations; it cannot reopen arbitrary completed work. The second pass
 still performs full extraction, evidence binding and signature verification and fails closed if the
 payload changes. Operator access to reprocess is not authority to sign.
+
+### Mixed references and disposable acceptance fixtures
+
+An author marker on one relationship does not exempt unmarked author aliases elsewhere in the
+payload. Correction and final quarantine inspect the complete payload; unsupported orphan aliases
+are removed too. A bare `user` in mixed author-bearing text can denote either the author or an
+application actor, so model-written relationship text cannot grant an ordinary-identity exemption.
+Ambiguous unmarked relationships remain in raw evidence/refusal receipts. Third-person-only users,
+source-qualified application identities and exact owner-gated marker counterparts remain ordinary.
+
+The real-model acceptance test seeds its counterpart through the candidate app's public ingestion
+path and requires exactly one episode-linked persistent UUID with a populated name embedding. Its
+subsequent unsigned proposal must resolve to that same UUID; an unembedded raw `CREATE` fixture is
+not equivalent to a searchable Graphiti entity.
+
+For exact-image tests, `scripts/dev/test_server.py` translates the explicit host public-key and
+confirmation-directory settings into read-only mounts at `/run/menhir-self-confirmation/owner-public.pem`
+and `/run/menhir-self-confirmation/confirmations`. It mounts only the public file (not its parent),
+keeps the private key outside the container, and binds the live confirmation directory rather than
+copying a startup snapshot. Confirmation creation and removal after startup must drive the
+unsigned -> confirmed -> revoked test. Production mount paths/configuration are not changed.
 
 ## Risk profile
 

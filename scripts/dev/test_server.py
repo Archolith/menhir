@@ -464,6 +464,38 @@ def _container_secret_mounts(workdir: Path, env: dict[str, str]) -> list[tuple[P
     ]
 
 
+def _container_confirmation_mounts(env: dict[str, str]) -> list[tuple[Path, str]]:
+    """Translate explicit host confirmation fixtures into narrow read-only bind mounts.
+
+    Mutates only the container environment. Mount the public file, not its parent (which may
+    contain the private signing key), and bind the confirmation directory itself so later
+    confirmation creation/revocation is visible without restarting or copying stale files.
+    """
+    mounts: list[tuple[Path, str]] = []
+    for setting, target, directory in (
+        (
+            "MENHIR_CANONICAL_SELF_CONFIRMATION_PUBLIC_KEY_PATH",
+            "/run/menhir-self-confirmation/owner-public.pem",
+            False,
+        ),
+        (
+            "MENHIR_CANONICAL_SELF_CONFIRMATION_DIRECTORY",
+            "/run/menhir-self-confirmation/confirmations",
+            True,
+        ),
+    ):
+        value = str(env.get(setting) or "").strip()
+        if not value:
+            continue
+        source = Path(value).resolve(strict=True)
+        if not (source.is_dir() if directory else source.is_file()):
+            expected = "directory" if directory else "file"
+            raise ValueError(f"canonical-self confirmation path must be a {expected}: {source}")
+        mounts.append((source, target))
+        env[setting] = target
+    return mounts
+
+
 def _container_command(
     *, image: str, name: str, port: int, workdir: Path, env: dict[str, str]
 ) -> tuple[list[str], dict[str, str]]:
@@ -497,6 +529,7 @@ def _container_command(
         "NEO4J_URI": f"bolt://host.docker.internal:{neo4j.port}",
         "WORKSPACE_ROOT": "/tmp/menhir-workspace",
     })
+    mounts.extend(_container_confirmation_mounts(container_env))
     docker_env = os.environ.copy()
     for key in secret_env_keys:
         docker_env.pop(key, None)

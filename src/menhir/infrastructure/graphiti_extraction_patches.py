@@ -142,8 +142,8 @@ class CombinedExtractionReceipt:
     resolved_node_was_persistent_by_extracted_uuid: dict[str, bool] = field(
         default_factory=dict
     )
-    #: A self proposal makes the full episode unsafe input for free-form node attribute/summary
-    #: generation. Exact signed facts are recalled from edges; node hydration is skipped.
+    #: Audit signal that this episode proposed self facts. It is NOT permission to hydrate
+    #: other episodes: enforce-mode hydration never consumes raw current/previous episode text.
     suppress_node_semantic_hydration: bool = False
     self_assertion_finalized: bool = False
     #: Graphiti's internally allocated primary episode UUID for this extraction.  It differs from
@@ -1357,7 +1357,9 @@ MENHIR VERIFIED CURRENT-MESSAGE AUTHOR ENDPOINT:
 - Do not use the marker for a person speaking inside quoted or reported speech.
 - Do not replace third-person users, customers, roles, tables, collections, or application actors
   with the marker.
-- Emit the marker only when at least one extracted edge about the current author uses it.
+- Preserve source-qualified ordinary names such as `application user` when available rather
+  than collapsing them to the ambiguous bare label `user`.
+- Emit `{endpoint.marker}` only when at least one extracted edge about the current author uses it.
 """
 
 _RELATIONLESS_REPAIR_CONTEXT_INSTRUCTIONS = """\
@@ -1567,62 +1569,75 @@ def _self_assertion_proposal_for_edge(
     )
 
 
+def _unmarked_author_fallbacks(
+    nodes: list[Any],
+    edges: list[Any],
+    receipt: CombinedExtractionReceipt,
+) -> tuple[list[Any], set[str]]:
+    """Find ambiguous unmarked author references across the entire payload.
+
+    This is refusal-only, never identity authority. A bare self alias in an author-bearing
+    turn is ambiguous even when a different edge uses the marker correctly. Marker-bearing
+    edges are excluded here: their exact counterpart (which may legitimately be named
+    ``user``) must pass the separate persistent-UUID/owner-confirmation gate.
+    """
+
+    if (
+        receipt.self_bind_mode is not SelfBindMode.ENFORCE
+        or receipt.self_subject_endpoint is None
+        or not _current_message_mentions_author(receipt.episode_text)
+    ):
+        return [], set()
+    unsafe_node_uuids = {
+        str(getattr(node, "uuid", "") or "").strip()
+        for node in nodes
+        if is_self_alias(getattr(node, "name", None))
+    } - {""}
+    if not unsafe_node_uuids:
+        return [], set()
+    marker_uuids = {
+        str(getattr(node, "uuid", "") or "").strip()
+        for node in nodes
+        if getattr(node, "name", None) == receipt.self_subject_endpoint.marker
+    } - {""}
+    rejected_edges: list[Any] = []
+    rejected_endpoints: set[str] = set()
+    surviving_endpoints: set[str] = set()
+    for edge in edges:
+        endpoints = {
+            str(getattr(edge, "source_node_uuid", "") or "").strip(),
+            str(getattr(edge, "target_node_uuid", "") or "").strip(),
+        } - {""}
+        if endpoints & unsafe_node_uuids and not endpoints & marker_uuids:
+            rejected_edges.append(edge)
+            rejected_endpoints.update(endpoints)
+        else:
+            surviving_endpoints.update(endpoints)
+    # Include isolated aliases, not just nodes reached by rejected edges. Otherwise an
+    # orphan ``user`` could still enter candidate acquisition alongside a valid marker.
+    pruned_uuids = (unsafe_node_uuids | rejected_endpoints) - surviving_endpoints
+    return rejected_edges, pruned_uuids
+
+
 def _quarantine_unmarked_author_fallbacks(
     nodes: list[Any],
     edges: list[Any],
     index_map: dict[str, list[int]],
     receipt: CombinedExtractionReceipt,
 ) -> None:
-    """Fail closed when a current-author reference ignored the structural marker.
+    """Remove ambiguous author fallbacks without binding or deleting stored identities.
 
-    An ordinary third-person application/RBAC entity named ``user`` remains ordinary when the
-    current message does not refer to its author.  When it does, an unmarked self-like endpoint is
-    ambiguous and therefore cannot enter durable entity resolution.  The raw turn plus a bounded
-    refusal receipt remain available for an operator/retry.
+    Third-person-only application/RBAC users retain ordinary resolution. In a mixed turn,
+    an unmarked bare alias cannot be proven ordinary merely from model-authored edge text;
+    retain its raw evidence and refusal receipt rather than inventing a durable self fork.
+    Source-qualified ordinary names and owner-gated marker counterparts remain distinct.
     """
 
-    if not _current_message_mentions_author(receipt.episode_text):
-        return
-    unsafe_node_uuids = {
-        str(getattr(node, "uuid", "") or "").strip()
-        for node in nodes
-        if is_self_alias(getattr(node, "name", None))
-    }
-    unsafe_node_uuids.discard("")
-    if not unsafe_node_uuids:
-        return
-    rejected_edges = [
-        edge
-        for edge in edges
-        if unsafe_node_uuids
-        & {
-            str(getattr(edge, "source_node_uuid", "") or "").strip(),
-            str(getattr(edge, "target_node_uuid", "") or "").strip(),
-        }
-    ]
-    if not rejected_edges:
+    rejected_edges, pruned_uuids = _unmarked_author_fallbacks(nodes, edges, receipt)
+    if not rejected_edges and not pruned_uuids:
         return
     rejected_ids = {id(edge) for edge in rejected_edges}
-    rejected_endpoints = {
-        endpoint
-        for edge in rejected_edges
-        for endpoint in (
-            str(getattr(edge, "source_node_uuid", "") or "").strip(),
-            str(getattr(edge, "target_node_uuid", "") or "").strip(),
-        )
-        if endpoint
-    }
     edges[:] = [edge for edge in edges if id(edge) not in rejected_ids]
-    surviving_endpoints = {
-        endpoint
-        for edge in edges
-        for endpoint in (
-            str(getattr(edge, "source_node_uuid", "") or "").strip(),
-            str(getattr(edge, "target_node_uuid", "") or "").strip(),
-        )
-        if endpoint
-    }
-    pruned_uuids = rejected_endpoints - surviving_endpoints
     nodes[:] = [
         node
         for node in nodes
@@ -1694,8 +1709,10 @@ def _declare_subject_endpoint(
         raise InvalidSelfSubjectDeclarationError(
             "final payload contains more than one self-subject marker node"
         )
+    # Validate every unmarked reference, including mixed payloads. A valid marker on one
+    # relationship is not a blanket exemption for ordinary-looking relationships elsewhere.
+    _quarantine_unmarked_author_fallbacks(nodes, edges, index_map, receipt)
     if not marker_nodes:
-        _quarantine_unmarked_author_fallbacks(nodes, edges, index_map, receipt)
         return
 
     marker_node = marker_nodes[0]
@@ -2371,9 +2388,8 @@ async def _run_graphiti_combined_extraction(
         )
     if (
         endpoint is not None
-        and not any(getattr(node, "name", None) == endpoint.marker for node in nodes)
-        and _current_message_mentions_author(receipt.episode_text if receipt else "")
-        and any(is_self_alias(getattr(node, "name", None)) for node in nodes)
+        and receipt is not None
+        and any(_unmarked_author_fallbacks(nodes, edges, receipt))
     ):
         # Real models can privilege a familiar `user` convention even when a later instruction
         # declares a safer opaque endpoint. Do not reinterpret that string as provenance. Give the

@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 from hashlib import sha256
 import json
+import math
 import os
 import sys
 import time
@@ -34,7 +35,7 @@ from menhir.infrastructure.self_authority import confirmation_filename
 from scripts.dev import test_server
 
 
-pytestmark = [pytest.mark.online, pytest.mark.timeout(420)]
+pytestmark = [pytest.mark.online, pytest.mark.timeout(600)]
 
 _RELEASE_TEST_FLAG = "MENHIR_RELEASE_TEST"
 _RELEASE_TEST_MODEL = "MENHIR_RELEASE_TEST_MODEL"
@@ -175,6 +176,68 @@ def _contains_reserved_marker(value: Any) -> bool:
     return SUBJECT_ENDPOINT_MARKER_PREFIX.casefold() in str(value or "").casefold()
 
 
+def _seed_counterpart_through_public_ingest(
+    server: test_server.RunningServer,
+    driver: Any,
+    namespace: str,
+    *,
+    timeout_s: float = 180,
+) -> str:
+    """Create the counterpart through the tested app's real embedding/persistence path.
+
+    A raw CREATE with only name/UUID is invisible to Graphiti's cosine-only candidate
+    acquisition. Do not fabricate an embedding with a different client/model either:
+    seed an ordinary episode through the candidate app and require its exact provenance,
+    unique entity identity and persisted name embedding before attempting confirmation.
+    The unsigned proposal below additionally proves that real resolution found this UUID.
+    """
+    memory = _request(server.base_url, "POST", "/api/memory", {
+        "episode": "Project Cobalt is a software project.",
+        "source": "claude-code",
+        "session_id": "canonical-self-e2e-session",
+        "user_id": "canonical-self-e2e",
+        "namespace": namespace,
+    })
+    pending_uuid = str(memory["episode_id"])
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        with driver.session() as session:
+            pending = session.run(
+                "MATCH (p:Episodic {uuid:$uuid}) "
+                "RETURN p.processing_state AS state, p.processing_error AS error",
+                uuid=pending_uuid,
+            ).single()
+        state = str(pending["state"] if pending else "MISSING")
+        if state == "READY":
+            break
+        if state in {"FAILED", "MANUAL_REVIEW"}:
+            raise AssertionError(
+                f"counterpart seed state={state!r}, error={pending['error']!r}\n"
+                f"isolated server log:\n{server.tail_log()}"
+            )
+        time.sleep(1)
+    else:
+        raise TimeoutError("counterpart seed did not become READY")
+    with driver.session() as session:
+        candidates = list(session.run(
+            "MATCH (p:Episodic {uuid:$pending}) "
+            "MATCH (g:Episodic)-[:MENTIONS]->(n:Entity {name:$name, group_id:$group}) "
+            "WHERE g.uuid = p.resolved_episode_uuid "
+            "RETURN DISTINCT n.uuid AS uuid, n.name_embedding AS embedding",
+            pending=pending_uuid, name="Project Cobalt", group=namespace,
+        ))
+    assert len(candidates) == 1, "counterpart seed must produce one exact episode-linked identity"
+    candidate = candidates[0]
+    vector = candidate["embedding"]
+    assert isinstance(vector, list) and vector and all(
+        isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+        for value in vector
+    ), "counterpart seed must have a searchable name embedding from the candidate app"
+    counterpart_uuid = str(candidate["uuid"] or "").strip()
+    assert counterpart_uuid, "counterpart seed must have a persistent UUID"
+    return counterpart_uuid
+
+
 def test_owner_confirmation_controls_public_self_fact_lifecycle(
     monkeypatch, record_property, tmp_path,
 ) -> None:
@@ -228,7 +291,6 @@ def test_owner_confirmation_controls_public_self_fact_lifecycle(
     monkeypatch.setattr(test_server, "_shape_env", _shape_env)
     namespace = f"canonical-self-e2e-{uuid4()}"
     turn_text = "I own Project Cobalt."
-    counterpart_uuid = f"project-cobalt-{uuid4()}"
 
     with test_server.launch(
         "static", backend="neo4j",
@@ -241,13 +303,9 @@ def test_owner_confirmation_controls_public_self_fact_lifecycle(
             server.neo4j_uri, auth=(server.neo4j_user, server.neo4j_password)
         )
         try:
-            with seed_driver.session() as session:
-                session.run(
-                    "CREATE (:Entity {uuid:$uuid, name:'Project Cobalt', group_id:$group, "
-                    "scope:'PERSISTENT', freshness:'ACTIVE'})",
-                    uuid=counterpart_uuid,
-                    group=namespace,
-                ).consume()
+            counterpart_uuid = _seed_counterpart_through_public_ingest(
+                server, seed_driver, namespace
+            )
         finally:
             seed_driver.close()
         turn = _request(server.base_url, "POST", "/api/turn-evidence", {
@@ -393,6 +451,7 @@ def test_owner_confirmation_controls_public_self_fact_lifecycle(
                 == counterpart_uuid
             )
             assert proposal["authorization"]["authorized"] is False
+            assert proposal["authorization"]["reason"] != "counterpart_identity_not_persistent"
             payload = {
                 key: value for key, value in proposal.items() if key != "authorization"
             }

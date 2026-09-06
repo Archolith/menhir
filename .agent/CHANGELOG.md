@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-09-05 - Close canonical-self mixed-payload and cross-turn review gaps
+
+- Apply unmarked-author correction/quarantine to whole mixed payloads and orphan aliases, while
+  retaining owner-gated named-user counterparts and qualified/third-person ordinary identities.
+- Make every enforce-mode hydration call embeddings-only; fresh receipts cannot reintroduce
+  unsigned history through summaries/attributes or direct fact appending. Document the reduction
+  in ordinary summary updates and preserve off/observe behavior and existing stored properties.
+- Bind public confirmation fixtures read-only into candidate containers using container paths;
+  preserve host-side signing and live confirmation creation/removal without mounting private keys.
+- Seed the acceptance counterpart through public ingestion and require a real persisted name
+  embedding, exact episode linkage and the same resolved UUID in the unsigned proposal.
+- Add mixed-direction, orphan, real-resolver, cross-turn, task-local mode, mount and seed regressions.
+  No production activation, migration, schema change or manual live-provider/database test is included.
+
 ## 2026-09-05 - Separate canonical identity from assertion authority
 
 - Close review gaps by transporting the structural author endpoint independently of grammar,

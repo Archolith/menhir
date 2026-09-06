@@ -26,6 +26,7 @@ from menhir.infrastructure.graphiti_extraction_patches import (
     get_extraction_receipt,
 )
 from menhir.infrastructure.graphiti_llm_patches import GraphitiRequestTooLargeError
+from menhir.infrastructure.self_binding import SelfBindMode
 
 logger = logging.getLogger(__name__)
 
@@ -1475,16 +1476,22 @@ def _patch_graphiti_untyped_attribute_preservation() -> None:
 
 
 def _wrap_self_authority_node_hydration(original: Any, embed_nodes: Any) -> Any:
-    """Return a hydration guard whose authority branch performs embeddings only."""
+    """Keep raw episode text out of free-form hydration for every enforced call.
+
+    Graphiti's current and previous episodes carry no assertion-level authority receipt.
+    A fresh task's lack of a rejected proposal therefore cannot certify its prompt inputs:
+    previous episodes (including batched inputs) may contain an earlier unsigned claim.
+    Until hydration accepts independently verified inputs, enforcement preserves resolved
+    node state and creates name embeddings only. Off/observe retain the original behavior.
+    """
 
     async def _authority_safe_hydration(clients, nodes, *args, **kwargs):
         receipt = get_extraction_receipt()
-        if receipt is None or not receipt.suppress_node_semantic_hydration:
+        if receipt is None or receipt.self_bind_mode is not SelfBindMode.ENFORCE:
             return await original(clients, nodes, *args, **kwargs)
-        # Attribute and summary prompts receive the entire episode, so filtering only the
-        # rejected relationship is insufficient: the model can restate that relationship in
-        # any surviving node. Preserve already-resolved node state and generate only the name
-        # embedding Graphiti requires for persistence/search.
+        # Neither an episode-local flag nor a model's assessment of previous text can grant
+        # summary/attribute authority. This also disables Graphiti's direct fact-appending
+        # shortcut, which could otherwise copy a revocable signed fact into an unsigned summary.
         await embed_nodes(clients.embedder, nodes)
         return nodes
 

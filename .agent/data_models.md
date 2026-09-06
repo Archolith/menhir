@@ -304,9 +304,11 @@ relationship's actual source/target direction, counterpart UUID, resolved counte
 labels, physical `group_id`, stamped/actual episode attribution, `name`, `fact`, `valid_at`,
 `invalid_at` and `expired_at` to equal that authority tuple and recheck the current read-only confirmation
 file. Missing, changed, malformed, revoked or mismatched records are excluded; final-resolution
-drift fails the episode before persistence. Rejected self proposals cannot seed new counterpart
-summaries or attributes: Graphiti's free-form node hydration is skipped for that episode while name
-embeddings and existing persistent node state are preserved.
+drift fails the episode before persistence. Under `enforce`, Graphiti free-form node hydration is
+skipped for all episodes, not only the current self-proposal episode: prior/batched raw text lacks
+assertion-level authority and can contain a previously rejected claim. Name embeddings and existing
+persistent node state are preserved; raw-text summary/attribute updates and direct fact appending
+are disabled. No durable schema or whole-episode trust marker is introduced by this guard.
 
 | `content` | string | Original episode text |
 | `processing_state` | string | `PENDING`, `ENRICHING`, `READY`, `FAILED` |

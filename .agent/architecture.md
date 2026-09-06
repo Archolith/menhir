@@ -616,8 +616,8 @@ one answer it, and each had a counterexample inside a perfectly valid human turn
 The common error is treating a property of the extracted STRING as a fact about its PROVENANCE. The
 receipt-owned endpoint is therefore transport, not permission. A missing endpoint, two payload
 nodes carrying it, or a different node already carrying canonical identity raises a retryable
-refusal. Even a valid endpoint edge is removed before candidate acquisition unless its final
-structured assertion has an exact current owner signature. The signed payload binds principal,
+refusal. A valid endpoint edge remains proposal-local while its ordinary counterpart is resolved;
+it cannot reach hydration or persistence without an exact current owner signature. The signed payload binds principal,
 logical namespace, external episode UUID, turn-evidence UUID, source-text SHA-256, lane, endpoint
 direction, predicate/fact/object, polarity, temporal scope, claim revision, schema and policy.
 Graphiti's internally generated episode UUID is never substituted for that external lineage.
@@ -643,19 +643,36 @@ marker node to participate in a current-episode edge and index entry, establishe
 canonical structural self, strips model-authored authority fields, and holds every incident semantic
 edge proposal-local. If an extractor ignores the endpoint and emits an unmarked `I`/`me`/`user`
 fallback for a current-author reference, one bounded corrective extraction is allowed; a second miss
-is quarantined with a refusal receipt rather than entering ordinary dedup. This refusal-only check
-cannot grant authority, and ordinary application/RBAC users plus quoted/reported speakers remain
-ordinary entities.
+is quarantined with a refusal receipt rather than entering ordinary dedup. The same check examines
+**every** unmarked relationship in a mixed payload, even when another relationship already uses the
+marker. Orphan aliases and targets supported only by rejected relationships are removed from both
+the node list and episode index map before candidate acquisition. Marker-bearing edges are not
+exempt from authority: their exact counterpart UUID and assertion must pass owner confirmation.
+
+This is refusal-only and never identifies a bare alias as self. In mixed author-bearing text,
+model-authored descriptions cannot prove an unmarked bare `user` is an ordinary application actor;
+that ambiguous relationship is withheld even when it may be legitimate. Source-qualified ordinary
+names such as `application user`, third-person-only ordinary `user` entities, and named `user`
+counterparts on owner-gated marker edges retain their distinct identities. No stored node is deleted.
 
 Graphiti then resolves each non-self counterpart normally. Only a counterpart that resolved to an
 already-persistent identity can produce an owner-signable schema-v2 proposal, and that proposal
 includes the exact persistent counterpart UUID as well as its name and labels. A newly synthesized
 extraction UUID, missing resolution, changed duplicate choice, or same-name/different-UUID candidate
 fails closed. Menhir verifies the owner signature only after this resolution. Unauthorized edges are
-removed; nodes supported only by rejected edges are pruned. Because Graphiti's node-summary and
-attribute prompts receive the full episode text, every self-proposal episode bypasses free-form node
-hydration and performs name embeddings only, preserving existing node state. This prevents rejected
-self language from escaping through a surviving counterpart summary.
+removed; nodes supported only by rejected edges are pruned. In **every enforce-mode hydration call**,
+Menhir preserves already-resolved node state and generates name embeddings only. It does not invoke
+Graphiti's raw-episode summary/attribute generation or direct fact-appending shortcut. Current,
+previous and batched episodes lack assertion-level authorization; a later task's empty proposal
+list or false `suppress_node_semantic_hydration` flag does not make those inputs safe. That flag is
+an episode audit signal, not a hydration permission. This closes cross-turn reuse of rejected text
+without assigning trust from another language classifier or minting a whole-episode approval.
+
+**Tradeoff:** ordinary free-form node summaries and attributes also stop updating under `enforce`.
+Names, name embeddings, ordinary edge extraction/resolution and exact verified-self-edge recall
+remain available. Existing stored node properties are preserved, not retrospectively certified or
+cleaned. Re-enabling semantic hydration requires a separate verified-input/provenance contract.
+`off` and `observe` keep the original hydration behavior, including its input/call signatures.
 
 Graphiti's later edge resolver is also inside the authority boundary. For an authorized self edge,
 Menhir rechecks the external confirmation, requires the actual endpoint direction, resolved

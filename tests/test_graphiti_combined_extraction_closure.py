@@ -2271,15 +2271,18 @@ async def test_subject_endpoint_is_reused_by_relationless_repair(
 
 
 @pytest.mark.asyncio
-async def test_subject_marker_and_ordinary_user_remain_distinct(
+async def test_subject_marker_and_qualified_ordinary_user_remain_distinct(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # An unmarked bare "user" in a mixed turn is ambiguous, regardless of how the model
+    # describes its edge. Preserve the source-qualified ordinary actor instead. Bare-user
+    # controls (third-person-only and exact owner-gated counterparts) live in the PR regressions.
     endpoint = _begin_subject_endpoint_receipt()
     receipt = patches.get_extraction_receipt()
     assert receipt is not None
     receipt.episode_text = "I grant read access to the application user."
     marker_node = SimpleNamespace(uuid="marker", name=endpoint.marker, group_id="")
-    ordinary_user = SimpleNamespace(uuid="rbac-user", name="user", group_id="")
+    ordinary_user = SimpleNamespace(uuid="rbac-user", name="application user", group_id="")
     role = SimpleNamespace(uuid="role", name="read access", group_id="")
     edges = [
         SimpleNamespace(
@@ -2315,7 +2318,7 @@ async def test_subject_marker_and_ordinary_user_remain_distinct(
 
     assert nodes[0].name == "user"
     assert nodes[0].uuid == self_uuid_for_namespace("default")
-    assert nodes[1].name == "user"
+    assert nodes[1].name == "application user"
     assert nodes[1].uuid == "rbac-user"
     assert final_edges[1].source_node_uuid == "rbac-user"
 
