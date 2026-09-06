@@ -464,6 +464,45 @@ def _container_secret_mounts(workdir: Path, env: dict[str, str]) -> list[tuple[P
     ]
 
 
+def _container_self_confirmation_mounts(
+    env: dict[str, str],
+) -> tuple[list[tuple[Path, str]], dict[str, str]]:
+    """Map only explicit public verification fixtures into the disposable app image.
+
+    Bind the live confirmation directory, not a copied snapshot, so signatures added/replaced or
+    revoked by the host-side test remain visible. Never mount its parent (which may hold private
+    signing material). All mounts are made read-only by `_container_command`.
+    """
+    mounts: list[tuple[Path, str]] = []
+    overrides: dict[str, str] = {}
+    for setting, target, directory in (
+        (
+            "MENHIR_CANONICAL_SELF_CONFIRMATION_PUBLIC_KEY_PATH",
+            "/run/menhir-self-authority/owner-public.pem",
+            False,
+        ),
+        (
+            "MENHIR_CANONICAL_SELF_CONFIRMATION_DIRECTORY",
+            "/run/menhir-self-authority/confirmations",
+            True,
+        ),
+    ):
+        value = env.get(setting, "").strip()
+        if not value:
+            continue
+        try:
+            source = Path(value).resolve(strict=True)
+            valid = source.is_dir() if directory else source.is_file()
+        except (OSError, RuntimeError) as exc:
+            raise ValueError(f"{setting} must name an existing test fixture") from exc
+        if not valid:
+            kind = "directory" if directory else "regular file"
+            raise ValueError(f"{setting} must name a {kind}")
+        mounts.append((source, target))
+        overrides[setting] = target
+    return mounts, overrides
+
+
 def _container_command(
     *, image: str, name: str, port: int, workdir: Path, env: dict[str, str]
 ) -> tuple[list[str], dict[str, str]]:
@@ -474,7 +513,8 @@ def _container_command(
     if neo4j.hostname not in {"127.0.0.1", "localhost"} or neo4j.port is None:
         raise ValueError("container-image tests require a loopback disposable Neo4j")
 
-    mounts = _container_secret_mounts(workdir, env)
+    confirmation_mounts, confirmation_env = _container_self_confirmation_mounts(env)
+    mounts = [*_container_secret_mounts(workdir, env), *confirmation_mounts]
     prefixes = (
         "ENV_FILE", "GRAPHITI_", "LLM_", "LOCAL_LLM_", "MENHIR_",
         "NEO4J_", "OPENAI_", "SCHEDULER_", "GEMINI_",
@@ -497,6 +537,7 @@ def _container_command(
         "NEO4J_URI": f"bolt://host.docker.internal:{neo4j.port}",
         "WORKSPACE_ROOT": "/tmp/menhir-workspace",
     })
+    container_env.update(confirmation_env)
     docker_env = os.environ.copy()
     for key in secret_env_keys:
         docker_env.pop(key, None)

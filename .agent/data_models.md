@@ -304,9 +304,11 @@ relationship's actual source/target direction, counterpart UUID, resolved counte
 labels, physical `group_id`, stamped/actual episode attribution, `name`, `fact`, `valid_at`,
 `invalid_at` and `expired_at` to equal that authority tuple and recheck the current read-only confirmation
 file. Missing, changed, malformed, revoked or mismatched records are excluded; final-resolution
-drift fails the episode before persistence. Rejected self proposals cannot seed new counterpart
-summaries or attributes: Graphiti's free-form node hydration is skipped for that episode while name
-embeddings and existing persistent node state are preserved.
+drift fails the episode before persistence. Graphiti's free-form node hydration is skipped for every
+`enforce` receipt, including later ordinary turns that reuse earlier unconfirmed evidence. New
+model-generated summaries/attributes are unavailable until per-input attribution authority exists;
+name embeddings and existing persistent node state are preserved. This is containment, not a
+historical-summary repair.
 
 | `content` | string | Original episode text |
 | `processing_state` | string | `PENDING`, `ENRICHING`, `READY`, `FAILED` |

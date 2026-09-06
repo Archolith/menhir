@@ -329,3 +329,86 @@ def test_restart_preserves_command_environment_and_instance(tmp_path, monkeypatc
     assert health_calls == [
         ("http://127.0.0.1:8123", 45.0, new_proc, "same-instance")
     ]
+
+
+
+def test_container_confirmation_fixtures_are_live_narrow_readonly_mounts(tmp_path) -> None:
+    fixtures = tmp_path / "owner fixtures"
+    fixtures.mkdir()
+    public_key = fixtures / "owner-public.pem"
+    public_key.write_text("test public key", encoding="utf-8")
+    private_key = fixtures / "owner-private.pem"
+    private_key.write_text("private-key-sentinel", encoding="utf-8")
+    confirmations = fixtures / "confirmations"
+    confirmations.mkdir()
+    workdir = tmp_path / "launcher"
+    workdir.mkdir()
+    env = _shape_env(
+        "static", port=8123, host="127.0.0.1", workdir=workdir,
+        jwks_uri=DEAD_JWKS_URI, backend="neo4j", instance_id="test-instance",
+        neo4j=("bolt://127.0.0.1:17687", "neo4j", "throwaway-password"),
+    )
+    env.update({
+        "MENHIR_CANONICAL_SELF_CONFIRMATION_PUBLIC_KEY_PATH": str(public_key),
+        "MENHIR_CANONICAL_SELF_CONFIRMATION_DIRECTORY": str(confirmations),
+        "MENHIR_CANONICAL_SELF_CONFIRMATION_PUBLIC_KEY_SHA256": "a" * 64,
+    })
+    original_env = dict(env)
+    command, process_env = _container_command(
+        image="menhir:test-image", name="menhir-test-app", port=18123,
+        workdir=workdir, env=env,
+    )
+
+    mounts = [command[index + 1] for index, part in enumerate(command) if part == "-v"]
+    key_target = "/run/menhir-self-authority/owner-public.pem"
+    directory_target = "/run/menhir-self-authority/confirmations"
+    assert f"{public_key.resolve()}:{key_target}:ro" in mounts
+    assert f"{confirmations.resolve()}:{directory_target}:ro" in mounts
+    assert process_env["MENHIR_CANONICAL_SELF_CONFIRMATION_PUBLIC_KEY_PATH"] == key_target
+    assert process_env["MENHIR_CANONICAL_SELF_CONFIRMATION_DIRECTORY"] == directory_target
+    assert process_env["MENHIR_CANONICAL_SELF_CONFIRMATION_PUBLIC_KEY_SHA256"] == "a" * 64
+    assert env == original_env
+    assert not any(str(private_key) in mount or mount.startswith(f"{fixtures}:") for mount in mounts)
+    assert "private-key-sentinel" not in " ".join(command)
+
+    # Docker execution is a separate opt-in test. Pin that the mount uses the live directory,
+    # not a startup snapshot, for creation, atomic replacement, and revocation by the host.
+    mounted = next(mount for mount in mounts if mount.endswith(f":{directory_target}:ro"))
+    mounted_source = Path(mounted.removesuffix(f":{directory_target}:ro"))
+    confirmation = confirmations / "episode.json"
+    confirmation.write_text("confirmed", encoding="utf-8")
+    assert (mounted_source / confirmation.name).read_text(encoding="utf-8") == "confirmed"
+    replacement = confirmations / "replacement.tmp"
+    replacement.write_text("replaced", encoding="utf-8")
+    replacement.replace(confirmation)
+    assert (mounted_source / confirmation.name).read_text(encoding="utf-8") == "replaced"
+    confirmation.unlink()
+    assert not (mounted_source / confirmation.name).exists()
+
+
+@pytest.mark.parametrize(
+    "setting,kind",
+    [
+        ("PUBLIC_KEY_PATH", "missing"), ("PUBLIC_KEY_PATH", "directory"),
+        ("DIRECTORY", "missing"), ("DIRECTORY", "file"),
+    ],
+)
+def test_container_confirmation_mounts_reject_invalid_paths(tmp_path, setting, kind) -> None:
+    source = tmp_path / "bad-fixture"
+    if kind == "directory":
+        source.mkdir()
+    elif kind == "file":
+        source.write_text("not a directory", encoding="utf-8")
+    (tmp_path / "launcher").mkdir()
+    env = _shape_env(
+        "static", port=8123, host="127.0.0.1", workdir=tmp_path / "launcher",
+        jwks_uri=DEAD_JWKS_URI, backend="neo4j", instance_id="test-instance",
+        neo4j=("bolt://127.0.0.1:17687", "neo4j", "throwaway-password"),
+    )
+    env[f"MENHIR_CANONICAL_SELF_CONFIRMATION_{setting}"] = str(source)
+
+    with pytest.raises(ValueError, match=f"MENHIR_CANONICAL_SELF_CONFIRMATION_{setting}"):
+        _container_command(
+            image="menhir:test-image", name="menhir-test-app", port=18123,
+            workdir=tmp_path / "launcher", env=env,
+        )

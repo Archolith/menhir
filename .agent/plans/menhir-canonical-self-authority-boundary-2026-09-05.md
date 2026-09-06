@@ -231,3 +231,28 @@ approval. Repository artifact validation still reports 22 inherited findings, no
 by this plan; that unrelated corpus debt was not folded into this authority change. The plan remains
 `IMPLEMENTING` because disposable database, live-provider, deployment, production activation and
 historical migration checks remain intentionally unrun without separate approval.
+
+
+## PR #46 follow-up: mixed payloads, later context and image fixtures
+
+This bounded correction starts from `d1a4bb4f368d6af397dcc15ebc180b952265dc7f` on a separate
+follow-up branch. It changes no identity formula, signature schema, confirmation authority or
+production configuration. It does not approve a database/live-provider test or deployment.
+
+- Run unmarked-author correction/quarantine even if some edges already use the marker; remove
+  orphan aliases and re-check marker survival before declaring it. Refusal applies to ambiguous
+  bare `user` in mixed-author payloads, not to stored entities. An explicitly scoped `application
+  user` remains ordinary; a marker-free RBAC-only `user` remains ordinary. No prose-based exception
+  grants identity or assertion authority.
+- Skip free-form node summaries AND attributes for all enforce-mode receipts. Current/prior
+  episodes and node summaries have no per-input attribution proof, so a later clean-looking receipt
+  cannot safely release them to generation. This trades ordinary summary/attribute coverage for
+  containment until provenance-aware hydration is designed; embeddings, signed-edge recall,
+  off/observe behavior and existing stored properties remain intact. Historical data is not repaired.
+- Bind public verification fixtures narrowly and read-only in image E2E; translate host paths and
+  live-mount the confirmation directory so add/replace/revoke can be observed. Keep private signing
+  material outside those mounts. Validate paths before invoking Docker.
+
+Regression gates cover mixed edges in both directions, orphan and pruned-marker cases, ordinary
+RBAC controls, a two-turn malicious summary/attribute generator, legacy hydration modes, and exact
+fixture mounts/environment mapping. The actual image lifecycle remains a separately approved gate.

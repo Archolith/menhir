@@ -2271,15 +2271,16 @@ async def test_subject_endpoint_is_reused_by_relationless_repair(
 
 
 @pytest.mark.asyncio
-async def test_subject_marker_and_ordinary_user_remain_distinct(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("ordinary_name", ["application user", "user"])
+async def test_mixed_rbac_user_is_preserved_unless_it_is_an_ambiguous_author_alias(
+    monkeypatch: pytest.MonkeyPatch, ordinary_name: str,
 ) -> None:
     endpoint = _begin_subject_endpoint_receipt()
     receipt = patches.get_extraction_receipt()
     assert receipt is not None
     receipt.episode_text = "I grant read access to the application user."
     marker_node = SimpleNamespace(uuid="marker", name=endpoint.marker, group_id="")
-    ordinary_user = SimpleNamespace(uuid="rbac-user", name="user", group_id="")
+    ordinary_user = SimpleNamespace(uuid="rbac-user", name=ordinary_name, group_id="")
     role = SimpleNamespace(uuid="role", name="read access", group_id="")
     edges = [
         SimpleNamespace(
@@ -2315,9 +2316,16 @@ async def test_subject_marker_and_ordinary_user_remain_distinct(
 
     assert nodes[0].name == "user"
     assert nodes[0].uuid == self_uuid_for_namespace("default")
-    assert nodes[1].name == "user"
-    assert nodes[1].uuid == "rbac-user"
-    assert final_edges[1].source_node_uuid == "rbac-user"
+    if ordinary_name == "application user":
+        assert nodes[1].name == ordinary_name
+        assert nodes[1].uuid == "rbac-user"
+        assert final_edges[1].source_node_uuid == "rbac-user"
+    else:
+        # Bare aliases have no independent proof of RBAC identity. Letting edge prose exempt
+        # this alias would reopen the same mixed-payload bypass this test now guards.
+        assert all(node.uuid != "rbac-user" for node in nodes)
+        assert len(final_edges) == 1
+        assert receipt.self_assertion_proposals[0]["kind"] == "unresolved_author_reference"
 
 
 @pytest.mark.parametrize(
@@ -2456,3 +2464,216 @@ def test_foreign_turn_endpoint_cannot_enter_receipt() -> None:
             self_subject_endpoint=endpoint,
             self_bind_mode=SelfBindMode.ENFORCE,
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reverse_fallback", [False, True])
+@pytest.mark.parametrize("author_mentioned", [False, True])
+async def test_mixed_marker_payload_quarantines_unmarked_author_before_resolution(
+    monkeypatch: pytest.MonkeyPatch, reverse_fallback: bool, author_mentioned: bool,
+) -> None:
+    """One compliant marker edge must not vouch for an unmarked second self reference."""
+    endpoint = _begin_subject_endpoint_receipt(authorized=False)
+    receipt = patches.get_extraction_receipt()
+    assert receipt is not None
+    episode_text = (
+        "I own postcards. I also own stamps. The postcards are blue." if author_mentioned
+        else "The postcards and stamps are in the cabinet. The postcards are blue."
+    )
+    receipt.episode_text = episode_text
+    calls = []
+
+    async def extract(*args, **kwargs):
+        calls.append(kwargs["custom_extraction_instructions"])
+        # Each extraction gets a fresh payload, just as the actual corrective call does.
+        nodes = [
+            SimpleNamespace(uuid=uuid, name=name, group_id="", labels=[])
+            for uuid, name in (
+                ("marker", endpoint.marker), ("ordinary-user", "user"),
+                ("postcards", "postcards"), ("stamps", "stamps"), ("blue", "blue"),
+            )
+        ]
+        source, target = (
+            ("stamps", "ordinary-user") if reverse_fallback else ("ordinary-user", "stamps")
+        )
+        edges = [
+            SimpleNamespace(
+                source_node_uuid="marker", target_node_uuid="postcards",
+                name="OWNS", fact=f"{endpoint.marker} owns postcards.", episodes=["projection-1"],
+            ),
+            SimpleNamespace(
+                source_node_uuid=source, target_node_uuid=target,
+                name="OWNS", fact="user owns stamps.", episodes=["projection-1"],
+            ),
+            SimpleNamespace(
+                source_node_uuid="postcards", target_node_uuid="blue",
+                name="COLOR", fact="The postcards are blue.", episodes=["projection-1"],
+            ),
+        ]
+        return nodes, edges, {node.uuid: [0] for node in nodes}
+
+    monkeypatch.setattr(ce, "extract_nodes_and_edges", extract)
+    nodes, edges, index_map = await extraction_patches._run_graphiti_combined_extraction(
+        clients=object(), episode=SimpleNamespace(uuid="projection-1"),
+        previous_episodes=[], entity_types=None, excluded_entity_types=None,
+        custom_extraction_instructions=None,
+    )
+
+    assert len(calls) == 2  # Exactly one correction, even with a valid marker already present.
+    assert "MENHIR INVALID AUTHOR-ENDPOINT CORRECTION" in calls[1]
+    canonical = self_uuid_for_namespace("default")
+    assert {node.uuid for node in nodes} == {canonical, "postcards", "blue"}
+    assert set(index_map) == {canonical, "postcards", "blue"}
+    assert all("ordinary-user" not in (edge.source_node_uuid, edge.target_node_uuid) for edge in edges)
+    assert receipt.self_assertion_proposals[0]["kind"] == "unresolved_author_reference"
+
+    receipt.resolved_node_identity_by_extracted_uuid["postcards"] = (
+        "persistent-postcards", "postcards", ()
+    )
+    receipt.resolved_node_was_persistent_by_extracted_uuid["postcards"] = True
+    assert extraction_patches.finalize_self_assertion_authority_after_node_resolution(receipt) == set()
+    assert [edge.fact for edge in edges] == ["The postcards are blue."]
+    assert receipt.self_assertions_authorized == 0
+    assert receipt.episode_text == episode_text
+
+
+def test_mixed_marker_payload_prunes_orphan_author_alias() -> None:
+    endpoint = _begin_subject_endpoint_receipt(authorized=False)
+    receipt = patches.get_extraction_receipt()
+    assert receipt is not None
+    receipt.graphiti_episode_uuid = "projection-1"
+    nodes = [
+        SimpleNamespace(uuid=uuid, name=name, group_id="")
+        for uuid, name in (("marker", endpoint.marker), ("alias", "I"), ("postcards", "postcards"))
+    ]
+    edges = [SimpleNamespace(
+        source_node_uuid="marker", target_node_uuid="postcards", fact="I own postcards.",
+        episodes=["projection-1"],
+    )]
+    index_map = {node.uuid: [0] for node in nodes}
+
+    extraction_patches._declare_subject_endpoint(nodes, edges, index_map, receipt)
+
+    assert {node.uuid for node in nodes} == {"marker", "postcards"}
+    assert set(index_map) == {"marker", "postcards"}
+    assert receipt.self_assertion_proposals[0]["kind"] == "unresolved_author_reference"
+
+
+def test_quarantining_alias_does_not_declare_a_pruned_marker() -> None:
+    endpoint = _begin_subject_endpoint_receipt(authorized=False)
+    receipt = patches.get_extraction_receipt()
+    assert receipt is not None
+    receipt.graphiti_episode_uuid = "projection-1"
+    nodes = [
+        SimpleNamespace(uuid="marker", name=endpoint.marker, group_id=""),
+        SimpleNamespace(uuid="alias", name="user", group_id=""),
+    ]
+    edges = [SimpleNamespace(
+        source_node_uuid="marker", target_node_uuid="alias", fact="I know the user.",
+        episodes=["projection-1"],
+    )]
+    index_map = {node.uuid: [0] for node in nodes}
+
+    extraction_patches._declare_subject_endpoint(nodes, edges, index_map, receipt)
+
+    assert nodes == [] and edges == [] and index_map == {}
+    assert receipt.self_identity.evidence_kind is SelfEvidenceKind.TRUSTED_USER_TURN
+    assert receipt.self_assertion_pending_edges == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("previous_as_keyword", [False, True])
+async def test_later_ordinary_turn_cannot_hydrate_from_rejected_self_context(
+    previous_as_keyword: bool,
+) -> None:
+    """A fresh receipt cannot certify earlier evidence, including summaries/attributes."""
+    first = patches.begin_extraction_receipt(
+        "first", "I own 37 postcards.", self_bind_mode=SelfBindMode.ENFORCE
+    )
+    first.suppress_node_semantic_hydration = True
+    first_episode = SimpleNamespace(uuid="first", content=first.episode_text)
+    node = SimpleNamespace(uuid="postcards", summary="color:blue", attributes={"color": "blue"})
+    hydrated, embedded = [], []
+
+    async def repeat_rejected_claim(clients, nodes, *args, **kwargs):
+        hydrated.append(nodes)
+        nodes[0].summary = "user owns 37 postcards"
+        nodes[0].attributes["owner"] = "user"
+        return nodes
+
+    async def embed_nodes(embedder, nodes):
+        embedded.append(list(nodes))
+
+    wrapped = model_patches._wrap_self_authority_node_hydration(repeat_rejected_claim, embed_nodes)
+    clients = SimpleNamespace(embedder=object())
+    await wrapped(clients, [node], first_episode)
+    later = patches.begin_extraction_receipt(
+        "later", "The postcards are blue.", self_bind_mode=SelfBindMode.ENFORCE
+    )
+    assert not later.suppress_node_semantic_hydration
+    later_episode = SimpleNamespace(uuid="later", content=later.episode_text)
+    if previous_as_keyword:
+        result = await wrapped(clients, [node], episode=later_episode, previous_episodes=[first_episode])
+    else:
+        result = await wrapped(clients, [node], later_episode, [first_episode])
+
+    assert hydrated == []
+    assert embedded == [[node], [node]]
+    assert result == [node]
+    assert node.summary == "color:blue"
+    assert node.attributes == {"color": "blue"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", [None, SelfBindMode.OFF, SelfBindMode.OBSERVE])
+async def test_hydration_guard_preserves_legacy_modes(mode) -> None:
+    if mode is not None:
+        patches.begin_extraction_receipt("legacy", "ordinary text", self_bind_mode=mode)
+    calls = []
+    clients, nodes, episode, previous = object(), [object()], object(), [object()]
+    expected = [object()]
+
+    async def original(*args, **kwargs):
+        calls.append((args, kwargs))
+        return expected
+
+    async def no_embeddings(*args, **kwargs):
+        raise AssertionError("legacy hydration unexpectedly bypassed")
+
+    wrapped = model_patches._wrap_self_authority_node_hydration(original, no_embeddings)
+    assert await wrapped(clients, nodes, episode, previous_episodes=previous) is expected
+    assert calls == [((clients, nodes, episode), {"previous_episodes": previous})]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", [SelfBindMode.OFF, SelfBindMode.OBSERVE, SelfBindMode.ENFORCE])
+async def test_bare_user_in_rbac_only_turn_remains_ordinary(monkeypatch, mode) -> None:
+    if mode is SelfBindMode.ENFORCE:
+        _begin_subject_endpoint_receipt(authorized=False)
+        receipt = patches.get_extraction_receipt()
+    else:
+        receipt = patches.begin_extraction_receipt("projection-1", "", self_bind_mode=mode)
+    assert receipt is not None
+    receipt.episode_text = "The user role grants read access to the database."
+    ordinary = SimpleNamespace(uuid="rbac-user", name="user", group_id="")
+    database = SimpleNamespace(uuid="database", name="database", group_id="")
+    edge = SimpleNamespace(
+        source_node_uuid="rbac-user", target_node_uuid="database", name="READS",
+        fact="The user role can read the database.", episodes=["projection-1"],
+    )
+    calls = []
+
+    async def extract(*args, **kwargs):
+        calls.append(True)
+        return [ordinary, database], [edge], {"rbac-user": [0], "database": [0]}
+
+    monkeypatch.setattr(ce, "extract_nodes_and_edges", extract)
+    nodes, edges, index_map = await extraction_patches._run_graphiti_combined_extraction(
+        clients=object(), episode=SimpleNamespace(uuid="projection-1"),
+        previous_episodes=[], entity_types=None, excluded_entity_types=None,
+        custom_extraction_instructions=None,
+    )
+    assert len(calls) == 1
+    assert nodes == [ordinary, database] and edges == [edge]
+    assert set(index_map) == {"rbac-user", "database"}
+    assert not receipt.self_assertion_proposals

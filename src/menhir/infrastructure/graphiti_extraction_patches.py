@@ -142,8 +142,9 @@ class CombinedExtractionReceipt:
     resolved_node_was_persistent_by_extracted_uuid: dict[str, bool] = field(
         default_factory=dict
     )
-    #: A self proposal makes the full episode unsafe input for free-form node attribute/summary
-    #: generation. Exact signed facts are recalled from edges; node hydration is skipped.
+    #: The current payload contains self-proposal material. This is a suppression signal, never
+    #: proof that a later payload's context is safe. In enforce mode the hydration guard skips
+    #: free-form summaries/attributes for ALL receipts until input-level authority exists.
     suppress_node_semantic_hydration: bool = False
     self_assertion_finalized: bool = False
     #: Graphiti's internally allocated primary episode UUID for this extraction.  It differs from
@@ -1567,6 +1568,24 @@ def _self_assertion_proposal_for_edge(
     )
 
 
+def _has_ambiguous_author_aliases(
+    nodes: list[Any], receipt: CombinedExtractionReceipt | None,
+) -> bool:
+    """Shared correction/quarantine predicate; this can only withhold, never grant authority.
+
+    A mixed marker/alias payload is ambiguous even when no first-person phrase is recognized in
+    the current text (for example, the model borrowed it from context). A marker-free RBAC-only
+    turn remains ordinary. Do not read edge prose as an exception that proves a bare alias generic.
+    """
+    if receipt is None or receipt.self_subject_endpoint is None:
+        return False
+    if not any(is_self_alias(getattr(node, "name", None)) for node in nodes):
+        return False
+    return any(
+        getattr(node, "name", None) == receipt.self_subject_endpoint.marker for node in nodes
+    ) or _current_message_mentions_author(receipt.episode_text)
+
+
 def _quarantine_unmarked_author_fallbacks(
     nodes: list[Any],
     edges: list[Any],
@@ -1575,13 +1594,12 @@ def _quarantine_unmarked_author_fallbacks(
 ) -> None:
     """Fail closed when a current-author reference ignored the structural marker.
 
-    An ordinary third-person application/RBAC entity named ``user`` remains ordinary when the
-    current message does not refer to its author.  When it does, an unmarked self-like endpoint is
-    ambiguous and therefore cannot enter durable entity resolution.  The raw turn plus a bounded
-    refusal receipt remain available for an operator/retry.
+    An application/RBAC entity named ``user`` remains ordinary in marker-free, non-author turns.
+    A marker/alias mixture is ambiguous even without a recognized author phrase. Such aliases
+    cannot enter durable entity resolution; raw evidence plus a bounded refusal remain available.
     """
 
-    if not _current_message_mentions_author(receipt.episode_text):
+    if not _has_ambiguous_author_aliases(nodes, receipt):
         return
     unsafe_node_uuids = {
         str(getattr(node, "uuid", "") or "").strip()
@@ -1600,8 +1618,8 @@ def _quarantine_unmarked_author_fallbacks(
             str(getattr(edge, "target_node_uuid", "") or "").strip(),
         }
     ]
-    if not rejected_edges:
-        return
+    # Orphan self aliases must also be removed: otherwise they can still enter node resolution
+    # even though no incident relationship happened to survive extraction.
     rejected_ids = {id(edge) for edge in rejected_edges}
     rejected_endpoints = {
         endpoint
@@ -1622,7 +1640,7 @@ def _quarantine_unmarked_author_fallbacks(
         )
         if endpoint
     }
-    pruned_uuids = rejected_endpoints - surviving_endpoints
+    pruned_uuids = unsafe_node_uuids | (rejected_endpoints - surviving_endpoints)
     nodes[:] = [
         node
         for node in nodes
@@ -1694,8 +1712,12 @@ def _declare_subject_endpoint(
         raise InvalidSelfSubjectDeclarationError(
             "final payload contains more than one self-subject marker node"
         )
+    # One correctly marked edge cannot vouch for other self-like references in the same payload.
+    # Quarantine across the complete final extraction, not just the all-markers-missing case.
+    # Recompute afterwards: a marker supported only by a rejected edge may itself be pruned.
+    _quarantine_unmarked_author_fallbacks(nodes, edges, index_map, receipt)
+    marker_nodes = [node for node in nodes if getattr(node, "name", None) == endpoint.marker]
     if not marker_nodes:
-        _quarantine_unmarked_author_fallbacks(nodes, edges, index_map, receipt)
         return
 
     marker_node = marker_nodes[0]
@@ -2369,16 +2391,11 @@ async def _run_graphiti_combined_extraction(
             receipt.raw_entity_count,
             receipt.raw_edge_count,
         )
-    if (
-        endpoint is not None
-        and not any(getattr(node, "name", None) == endpoint.marker for node in nodes)
-        and _current_message_mentions_author(receipt.episode_text if receipt else "")
-        and any(is_self_alias(getattr(node, "name", None)) for node in nodes)
-    ):
+    if endpoint is not None and _has_ambiguous_author_aliases(nodes, receipt):
         # Real models can privilege a familiar `user` convention even when a later instruction
         # declares a safer opaque endpoint. Do not reinterpret that string as provenance. Give the
-        # model one bounded correction with no conflicting Menhir-authored `user` instruction;
-        # final validation still fails closed if it does not emit the exact marker.
+        # model one bounded correction even for a partially marked payload. Final validation
+        # quarantines every remaining ambiguous alias; one compliant edge is not blanket authority.
         assert receipt is not None
         logger.warning(
             "Eligible extraction used an undeclared self-like endpoint; running one corrective "

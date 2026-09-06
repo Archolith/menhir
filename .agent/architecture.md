@@ -642,20 +642,29 @@ or authority gate. After the final relationless-repair payload exists, Menhir re
 marker node to participate in a current-episode edge and index entry, establishes that endpoint as
 canonical structural self, strips model-authored authority fields, and holds every incident semantic
 edge proposal-local. If an extractor ignores the endpoint and emits an unmarked `I`/`me`/`user`
-fallback for a current-author reference, one bounded corrective extraction is allowed; a second miss
-is quarantined with a refusal receipt rather than entering ordinary dedup. This refusal-only check
-cannot grant authority, and ordinary application/RBAC users plus quoted/reported speakers remain
-ordinary entities.
+fallback for a current-author reference, one bounded corrective extraction is allowed even when
+another edge already uses the marker. Final quarantine covers the whole payload, including orphan
+aliases, and runs before ordinary dedup. It removes no stored entity and grants no identity.
+A bare `user` in a mixed-author turn is ambiguous and may be withheld even if it actually refers to
+an application actor; edge prose is not proof that can exempt it. Explicitly scoped ordinary names
+such as `application user`, and bare `user` in marker-free RBAC-only turns, retain ordinary resolution.
+Quoted and reported speakers never gain canonical authority from their name or grammar.
 
 Graphiti then resolves each non-self counterpart normally. Only a counterpart that resolved to an
 already-persistent identity can produce an owner-signable schema-v2 proposal, and that proposal
 includes the exact persistent counterpart UUID as well as its name and labels. A newly synthesized
 extraction UUID, missing resolution, changed duplicate choice, or same-name/different-UUID candidate
 fails closed. Menhir verifies the owner signature only after this resolution. Unauthorized edges are
-removed; nodes supported only by rejected edges are pruned. Because Graphiti's node-summary and
-attribute prompts receive the full episode text, every self-proposal episode bypasses free-form node
-hydration and performs name embeddings only, preserving existing node state. This prevents rejected
-self language from escaping through a surviving counterpart summary.
+removed; nodes supported only by rejected edges are pruned. Graphiti's node-summary and attribute
+prompts can receive current/previous episodes and existing summaries without per-input attribution
+authority. A fresh receipt with no self proposal does not make that context safe. Consequently ALL
+`enforce` extractions bypass free-form node hydration and perform name embeddings only, preserving
+existing resolved node state. This deliberately sacrifices new AI-generated summaries and attributes
+for ordinary nodes as well as self-proposal counterparts. Verified self facts remain available via
+signed-edge recall; ordinary edge extraction and embeddings are unchanged. Restoring free-form
+hydration requires a separately reviewed, provenance-aware input contract, not a quote heuristic or
+an absent proposal flag. This prevents new hydration-based leakage; it does not repair historical
+summaries or certify their existing content.
 
 Graphiti's later edge resolver is also inside the authority boundary. For an authorized self edge,
 Menhir rechecks the external confirmation, requires the actual endpoint direction, resolved
@@ -758,8 +767,9 @@ UUID, resolved counterpart name and labels, physical group, episode attribution,
 and temporal fields, and re-verifies the current
 external confirmation; deleting or changing a
 confirmation therefore revokes it from default recall without deleting the episode or proposal.
-Because Graphiti summaries may incorporate relationship language, free-form hydration is skipped
-for the complete self-proposal episode and existing counterpart state is preserved. Generic
+Because Graphiti summaries may incorporate relationship language from any current or prior source,
+free-form hydration is skipped for every enforce-mode receipt and existing counterpart state is
+preserved (not retrospectively certified). Generic
 adjacency cannot prove an edge payload, so canonical self is removed from adjacency context in
 `enforce`; confirmed self facts enter through a separately verified authority lane even when the
 experimental general fact-edge feature is disabled or the query is not classified as historical.

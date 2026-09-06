@@ -108,11 +108,22 @@ therefore blocks an in-flight final write and revokes an existing relationship f
 authoritative recall. The relationship remains available to explicit operator graph inspection
 until a separately approved reconciliation removes it.
 Unconfirmed proposals are bounded, lease-guarded JSON receipts on their `:Episodic` evidence node;
-they have no authoritative entity edge and do not enter ordinary recall. A rejected self-proposal
-episode also skips free-form Graphiti node-summary and attribute hydration, preventing its text from
-reappearing through an ordinary counterpart summary. Confirmed self facts use a dedicated verified
-recall lane in `enforce`; general fact-edge feature flags and history-query classification do not
-disable it.
+they have no authoritative entity edge and do not enter ordinary recall. The rejected self-proposal
+episode is not the only risk: later ordinary turns can reuse its text as context. Therefore every
+`enforce` receipt skips free-form Graphiti node-summary and attribute hydration. Ordinary nodes also
+lose NEW model-generated summaries/attributes in this mode; existing stored state and name
+embeddings are preserved. Historical summaries are not repaired or certified. Restoring hydration
+requires verified per-input provenance, not inspection of language shape. Confirmed self facts use
+a dedicated verified recall lane in `enforce`; general fact-edge feature flags and history-query
+classification do not disable it. `off` and `observe` retain their existing hydration behavior.
+
+The test-image launcher binds only explicitly configured public-key and confirmation fixtures at
+`/run/menhir-self-authority/owner-public.pem` and `/run/menhir-self-authority/confirmations`, read-only.
+It rewrites their environment paths for the container and rejects nonexistent/wrong-type fixtures
+before launching Docker. The confirmation DIRECTORY is live-mounted so host additions, atomic file
+replacement and revocation can be seen by a running image. Do not place private signing material in
+that directory; the E2E signing key stays on the host and its parent directory is not mounted.
+Launcher unit tests verify the mount contract, not actual Docker visibility or release acceptance.
 
 In `enforce`, post-extraction maintenance is fenced too. Correlation and lifecycle bridge writers
 cannot create unsigned `RELATES_TO` edges involving structural self; merge, unmerge, decay and direct

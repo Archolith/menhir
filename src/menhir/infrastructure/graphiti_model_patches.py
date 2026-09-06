@@ -1475,16 +1475,24 @@ def _patch_graphiti_untyped_attribute_preservation() -> None:
 
 
 def _wrap_self_authority_node_hydration(original: Any, embed_nodes: Any) -> Any:
-    """Return a hydration guard whose authority branch performs embeddings only."""
+    """Keep all enforcement-mode hydration free of unsigned semantic generation.
+
+    Current and previous episodes, repair context, and existing node summaries carry no per-input
+    self-attribution proof. A fresh receipt with no self proposal is NOT evidence those inputs are
+    safe: a later ordinary turn can reintroduce an earlier rejected claim. Until provenance-aware
+    hydration exists, enforce mode deliberately gives up new free-form summaries and attributes,
+    including for ordinary nodes. Signed self facts remain available through verified edge recall.
+    """
 
     async def _authority_safe_hydration(clients, nodes, *args, **kwargs):
         receipt = get_extraction_receipt()
-        if receipt is None or not receipt.suppress_node_semantic_hydration:
+        if receipt is None or (
+            receipt.self_bind_mode != "enforce" and not receipt.suppress_node_semantic_hydration
+        ):
             return await original(clients, nodes, *args, **kwargs)
-        # Attribute and summary prompts receive the entire episode, so filtering only the
-        # rejected relationship is insufficient: the model can restate that relationship in
-        # any surviving node. Preserve already-resolved node state and generate only the name
-        # embedding Graphiti requires for persistence/search.
+        # Do not inspect natural-language shape or trust a missing proposal/taint flag to release
+        # context to the model. Preserve already-resolved node state and generate only the name
+        # embedding Graphiti requires for persistence/search. No historical summary is repaired here.
         await embed_nodes(clients.embedder, nodes)
         return nodes
 

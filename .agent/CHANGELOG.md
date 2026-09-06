@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-09-06 - Close mixed-payload and later-context authority bypasses
+
+- `graphiti_extraction_patches.py`: apply unmarked-author correction and final quarantine across
+  mixed payloads, including orphan aliases, and never declare a marker removed by that quarantine.
+- `graphiti_model_patches.py`: use embeddings-only hydration for every enforce-mode receipt, not
+  only a current self proposal; earlier rejected facts cannot be regenerated on later ordinary
+  turns. New free-form summaries/attributes are intentionally unavailable in enforce.
+- `scripts/dev/test_server.py`: validate and narrowly bind public confirmation fixtures read-only
+  at container paths, keeping the live confirmation directory visible for add/replace/revoke.
+- Add mixed-payload, later-context, mode-compatibility and mount-contract regressions; document
+  ambiguous mixed-author alias refusal and the hydration coverage tradeoff. Production, live
+  Docker/Neo4j/model acceptance and historical remediation remain unchanged and separately gated.
+
 ## 2026-09-05 - Separate canonical identity from assertion authority
 
 - Close review gaps by transporting the structural author endpoint independently of grammar,
