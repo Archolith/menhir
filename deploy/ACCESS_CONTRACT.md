@@ -21,10 +21,11 @@ Menhir memory API.
 ## Identity, cryptographic proof, and authorization
 
 Every client is an OAuth public client with its own immutable `client_id`.
-Agent Smith clients use a client-specific HTTPS Client ID Metadata Document
-(CIMD); hosted web clients use their policy-owned static client ID and exact
-callback. Client IDs, callback registrations, token caches, and audit labels
-must never be shared across products.
+Agent Smith clients use client-specific HTTPS Client ID Metadata Documents
+(CIMD). ChatGPT web uses OpenAI's stable CIMD identity; its restored DCR identity
+remains policy-bound during migration. Claude web uses its policy-owned static
+client ID and exact callback. Client IDs, callback registrations, token caches,
+and audit labels must never be shared across products.
 
 The required flow is OAuth 2.1 authorization code with PKCE S256:
 
@@ -48,7 +49,7 @@ the exact digest-bound policy entry for that client ID.
 
 | Product | Required role | Production identities |
 | --- | --- | --- |
-| ChatGPT | `operator` | `69c2cd871b488ff4` (`chatgpt-chat`) |
+| ChatGPT | `operator` | `https://chatgpt.com/oauth/client.json` (`chatgpt-web-cimd`), `69c2cd871b488ff4` (`chatgpt-chat`, legacy DCR) |
 | Codex | `operator` | `agent-smith-codex` CIMD |
 | Claude | `operator` | `6cf6322fa828bb72` (`claude-web`), `agent-smith-claude`, `agent-smith-wsl-claude` |
 | OpenCode | `agent` | `agent-smith-opencode`, `agent-smith-wsl-opencode` |

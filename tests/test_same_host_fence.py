@@ -85,7 +85,8 @@ def _app_mounts(*, candidate=False):
 
 def _database_mounts():
     return [{"Source": "/srv/menhir/production/state/neo4j/data"},
-            {"Source": "/srv/menhir/production/state/neo4j/logs"}]
+            {"Source": "/srv/menhir/production/state/neo4j/logs"},
+            {"Source": "/srv/menhir/production/secrets/neo4j/neo4j-auth"}]
 
 
 def test_writer_census_allows_only_exact_readonly_candidate():
@@ -144,6 +145,21 @@ def test_writer_census_rejects_wrong_production_image():
         fence._validate_census(
             [app, database], _intent(), _release(), allow_production=True
         )
+
+
+def test_writer_census_rejects_database_missing_required_secret_mount():
+    candidate = _container(
+        cid="c" * 64, name="menhir-candidate-app", image="f" * 64,
+        project="menhir-candidate", mode="candidate-readonly",
+        mounts=_app_mounts(candidate=True),
+    )
+    database = _container(
+        cid="2" * 64, name="menhir-candidate-neo4j", image="9" * 64,
+        project="menhir-candidate", service="neo4j", mode="",
+        mounts=_database_mounts()[:-1],
+    )
+    with pytest.raises(ValueError, match="candidate identity"):
+        fence._validate_census([candidate, database], _intent(), _release())
 
 
 @pytest.mark.parametrize(

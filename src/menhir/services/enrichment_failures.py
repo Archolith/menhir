@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from menhir.domain.self_identity import SelfSubjectEndpointCollisionError
 from menhir.infrastructure.episode_repository import is_context_window_error_text
 
 _MANUAL_REVIEW_TYPE_NAMES = {
@@ -138,6 +139,16 @@ def classify_enrichment_failure(error: object | None, *, error_type: object | No
 
     if error is None:
         return "retryable"
+
+    # A deterministic transport collision needs an operator decision, not another extraction.
+    # Retry polling reads the persisted message; callers handling the exception may pass its type.
+    # Give both forms precedence over transient words such as "refused" or "timeout".
+    if (
+        _normalize_error_type(error, error_type)
+        == SelfSubjectEndpointCollisionError.__name__.lower()
+        or SelfSubjectEndpointCollisionError.reason_code in _normalize_error_text(error)
+    ):
+        return "manual_review"
 
     # Checked BEFORE every marker list. A budget message that happened to contain a retryable
     # marker would otherwise be requeued, and requeueing a deterministic overrun spends the
