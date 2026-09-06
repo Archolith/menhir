@@ -79,14 +79,12 @@ def _tree_sha256(root: Path) -> str:
         if stat.S_ISLNK(info.st_mode):
             raise ReleaseFlowError(f"install bundle contains symlink: {relative}")
         if stat.S_ISDIR(info.st_mode):
-            kind = "directory"
-            payload_digest = ""
+            continue
         elif stat.S_ISREG(info.st_mode):
-            kind = "file"
             payload_digest = _sha256(path)
         else:
             raise ReleaseFlowError(f"install bundle contains special entry: {relative}")
-        record = f"{kind}\0{relative}\0{stat.S_IMODE(info.st_mode):04o}\0{payload_digest}\n"
+        record = f"{relative}\0{payload_digest}\n"
         digest.update(record.encode("utf-8"))
     return digest.hexdigest()
 
@@ -531,6 +529,7 @@ def deployment_command(
         "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
         "-File", str(wrapper), "-Mode", mode,
         "-BundlePath", str(workspace / BUNDLE_NAME),
+        "-ExpectedBundleSha256", state["bundle_sha256"],
         "-Release", state["release_id"],
         "-SourceRepository", str(SCRIPT_DIR.parent),
     ]

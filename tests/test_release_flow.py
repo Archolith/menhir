@@ -212,7 +212,7 @@ def test_deploy_requires_exact_release_confirmation(
 def test_deploy_dry_run_preserves_state_and_selects_maintenance(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    workspace, _ = _write_staged_workspace(tmp_path)
+    workspace, state = _write_staged_workspace(tmp_path)
     wrapper = tmp_path / "deploy-menhir.ps1"
     wrapper.write_text("# test\n", encoding="ascii")
     monkeypatch.setattr(MODULE, "DEFAULT_WRAPPER", wrapper)
@@ -223,6 +223,10 @@ def test_deploy_dry_run_preserves_state_and_selects_maintenance(
 
     assert isinstance(command, list)
     assert command[command.index("-Mode") + 1] == "Maintenance"
+    assert (
+        command[command.index("-ExpectedBundleSha256") + 1]
+        == state["bundle_sha256"]
+    )
     assert json.loads((workspace / MODULE.STATE_NAME).read_text())["phase"] == "bundled"
 
 
@@ -281,6 +285,20 @@ def test_status_rejects_bundle_payload_drift(tmp_path: Path) -> None:
 
     with pytest.raises(MODULE.ReleaseFlowError, match="install bundle changed"):
         MODULE.status_flow(workspace)
+
+
+def test_tree_sha256_is_portable_sorted_file_manifest(tmp_path: Path) -> None:
+    bundle = tmp_path / "bundle"
+    (bundle / "nested").mkdir(parents=True)
+    (bundle / "z.txt").write_bytes(b"last\n")
+    (bundle / "nested" / "a.txt").write_bytes(b"first\n")
+
+    expected = hashlib.sha256()
+    for relative in ("nested/a.txt", "z.txt"):
+        payload = hashlib.sha256((bundle / Path(relative)).read_bytes()).hexdigest()
+        expected.update(f"{relative}\0{payload}\n".encode("utf-8"))
+
+    assert MODULE._tree_sha256(bundle) == expected.hexdigest()
 
 
 def test_state_rejects_duplicate_json_keys(tmp_path: Path) -> None:

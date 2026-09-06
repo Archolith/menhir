@@ -157,10 +157,14 @@ For `maintenance`, the desktop command performs the release-bound cutover backup
 verified desktop archive, and fixed resumable VPS transaction:
 
 ```powershell
-PowerShell -File C:\Users\thron\IdeaProjects\scripts\deploy-menhir.ps1 -BundlePath <reviewed-install-bundle>
+PowerShell -File C:\Users\thron\IdeaProjects\scripts\deploy-menhir.ps1 `
+  -BundlePath <reviewed-install-bundle> `
+  -ExpectedBundleSha256 <digest-from-release-flow-state>
 ```
 
-An explicit bundle is required; timestamp-based discovery is not release authority.
+An explicit bundle and its `bundle_sha256` from `release-flow.json` are required;
+timestamp-based discovery is not release authority. Prefer the
+`release_flow.py deploy` command, which supplies both values automatically.
 A repeated maintenance call resumes the exact release and generation from
 `/var/lib/menhir-production/release-run.json`; it never starts another release silently.
 

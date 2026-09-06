@@ -100,6 +100,12 @@ The deployment wrapper and server-side transaction remain authoritative for
 preflight, backup, fencing, candidate acceptance, routing, promotion,
 acceptance, rollback, and recovery.
 
+The coordinator also passes the staged bundle's complete file-tree SHA-256 to
+the fixed desktop wrapper. Maintenance deployment recomputes that digest before
+upload and again on the VPS before running `install.sh`; a missing digest, an
+extra or changed file, a symlink, or any other mismatch stops before production
+mutation.
+
 For maintenance installs, the bundle installer reloads systemd definitions and
 restarts the operations gateway and Caddy reconcile path only when each service
 was already active. A failed activation restores the prior files, reloads the
