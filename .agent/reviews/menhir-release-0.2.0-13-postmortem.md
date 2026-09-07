@@ -101,7 +101,9 @@ an unsafe improvisation.
 | Manual fragment lifecycle | FIXED IN BRANCH | Explicit nonce-bound `publish` transaction; drift, unowned archives, interruption, and idempotence tests pass. |
 | Repeated release/digest copy-paste | FIXED IN BRANCH | One resumable `rehearse` command; approval and promotion derive the validated identifiers. Owner identity and explicit promotion execution remain intentional. |
 | Late host prerequisite discovery | FIXED IN BRANCH | A sanitized class-specific production preflight is required before image load or staging resource creation and is bound into the staging receipt. |
-| Deployment class/changelog outside authority | FIX IN PROGRESS | Bind mechanically derived class and both generated notes digests into `release.json` and require state/authority agreement. |
+| Deployment class/changelog outside authority | FIXED IN BRANCH | Mechanically derived class and both generated notes digests are bound into `release.json`; prepare, bundle, personal selection, staging, and promotion require agreement. The direct promotion gate derives its mode from this authority. |
+| Release-label drift | FIXED IN BRANCH | `next-id` derives the candidate and `prepare` independently refuses skipped sequences, version regressions, or a non-1 initial sequence. |
+| Preflight evidence could be rebound after inner tampering | FIXED IN BRANCH | The direct PowerShell promotion gate recomputes the canonical preflight seal before invoking any production transaction. |
 | Restore evidence incompatibility | FIXED IN BRANCH AND LIVE | Current maintenance rehearsal receipts are accepted strictly; the live drill receipt was rebound to the current backup generation and the audit now passes. |
 | Failed operational units | FIXED LIVE | Caddy reconcile path and scaffold audit timer are active; audit result is successful. |
 | Resource gate brittleness | FIXED IN BRANCH | Sidecar memory is explicitly limited and the preflight uses the resulting 6.5 GiB envelope; the live app-only preflight passes. |

@@ -8,8 +8,8 @@
 **Plan / Ticket:** C:\Users\thron\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion\.agent\plans\menhir-deployment-reliability-2026-09-07.md  
 **Worktree:** C:\Users\thron\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion  
 **Branch:** fix/deployment-reliability-20260907  
-**Commits:** 62a536854b69b25611ab70faea8ea080869ee824  
-**Verification Scope:** commit 62a536854b69b25611ab70faea8ea080869ee824 plus the live 0.2.0-13 read-only rehearsal and health audit recorded below  
+**Commits:** 62a536854b69b25611ab70faea8ea080869ee824; 476f5efc944e64f8aa9ac5b9c0adae7f1590810c; 5b8db26d0f7649575b1f28d79425a6de96c5e65c
+**Verification Scope:** commits 62a536854b69b25611ab70faea8ea080869ee824, 476f5efc944e64f8aa9ac5b9c0adae7f1590810c, and 5b8db26d0f7649575b1f28d79425a6de96c5e65c, plus the live 0.2.0-13 read-only rehearsal and health audit recorded below
 **Docs Updated:** C:\Users\thron\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion\deploy\RELEASE_AUTOMATION.md; C:\Users\thron\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion\deploy\LIVE_VPS_PLAYBOOK.md; C:\Users\thron\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion\deploy\PRODUCTION.md; C:\Users\thron\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion\deploy\release.json.example; C:\Users\thron\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion\.agent\scripts-index.md  
 **Changelog Updated:** C:\Users\thron\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion\.agent\CHANGELOG.md
 
@@ -24,6 +24,11 @@ crash recovery, runs selection plus isolated staging through one resumable `rehe
 requires a class-specific live preflight in the staging receipt. Current-generation maintenance
 rehearsal evidence is accepted by the readiness audit. The live app-only preflight and production
 health audit pass.
+
+A single independent acceptance audit was scoped to the implementation commits. Its three concrete
+findings were closed without reopening the broader audit: prepare now enforces generated release-label
+sequence, the coordinator refuses the incomplete direct VPS staging entry point, and the direct
+promotion gate derives mode from immutable authority and recomputes the preflight seal.
 
 This wrapup is `PARTIAL` because two intentionally disclosed system-level items remain: a dedicated
 security-config transaction/receipt is not implemented, and maintenance is fail-closed until the
@@ -45,11 +50,11 @@ underlying transaction receipt and fixed operator-wrapper digest.
 | `deploy/build_install_bundle.py` | Require release/spec class and changelog digest agreement. |
 | `deploy/lib/menhir_schema.py` | Validate current release authority fields while retaining read-only legacy compatibility. |
 | `deploy/personal_deploy.py` | Add resumable rehearsal, derived confirmations, strict authority agreement, and preflight validation. |
-| `deploy/personal_promote.ps1` | Revalidate the production preflight before invoking the operator transaction. |
+| `deploy/personal_promote.ps1` | Derive mode from immutable release authority and recompute the production-preflight seal before invoking the operator transaction. |
 | `deploy/personal_stage_vps.py` | Add class-specific live preflight and bounded staging sidecars. |
 | `deploy/release-author.py` | Include class and changelog digests in reviewed immutable release authority. |
 | `deploy/release.json.example` | Document the current authority schema. |
-| `deploy/release_flow.py` | Add next-label generation and atomic, recoverable fragment publication. |
+| `deploy/release_flow.py` | Add next-label generation/enforcement and atomic, recoverable fragment publication. |
 | `deploy/scaffold/menhir_scaffold.py` | Accept fresh release rehearsal evidence bound to the current backup/release. |
 | `tests/test_install_bundle_builder.py` | Cover authority/spec binding refusal. |
 | `tests/test_personal_deploy.py` | Cover rehearsal, preflight, legacy refusal, and derived confirmation behavior. |
@@ -63,6 +68,8 @@ underlying transaction receipt and fixed operator-wrapper digest.
 
 - `python -m pytest tests/test_release_flow.py tests/test_release_author.py tests/test_install_bundle_builder.py tests/test_personal_deploy.py tests/test_personal_promote.py tests/test_personal_stage_vps.py tests/test_scaffold_authority.py -q` with third-party plugin autoload disabled — `PASS` — 162 passed, 3 skipped, zero failed in 511.53 seconds.
 - `python -m pytest tests/test_personal_deploy.py -q` with third-party plugin autoload disabled after adding legacy-absence coverage — `PASS` — 20 passed, zero failed in 1.31 seconds.
+- Independent acceptance audit of commits `62a5368` and `476f5ef` — `COMPLETE` — three actionable gate findings; no broad audit restart.
+- `python -m pytest tests/test_release_flow.py tests/test_personal_deploy.py tests/test_personal_promote.py -q` with third-party plugin autoload disabled after closing only those findings — `PASS` — 60 passed, zero failed in 22.88 seconds.
 - `ruff check <changed Python files and focused tests>` — `PASS` — all checks passed.
 - `python -m py_compile <changed Python deployment files>` — `PASS` — exit code 0.
 - `python deploy/release_notes.py validate deploy/changes/unreleased` — `PASS` — validated 9 release-note fragments.
@@ -123,7 +130,7 @@ Authority and refusal outcome: release.json plus release-flow/personal-deploymen
 System boundary: Menhir product release coordinator, release author/bundle builder, personal coordinator, desktop staging/promotion wrappers, VPS staging runner, scaffold readiness, app-only/maintenance root runners, and unrestricted root/SSH recovery administration.
 In-repo paths: release_flow prepare/finalize/publish/deploy, release-author, build_install_bundle, personal_deploy select/rehearse/stage/approve/promote, personal_stage.ps1, personal_promote.ps1, personal_stage_vps.py, menhir_app_only.py, release-run.sh, and menhir_scaffold.py; census based on source search because the structure index was stale.
 External paths: desktop operator wrapper and root/SSH administration; controls/evidence: fixed sudoers commands, handbook recovery-only designation, owner approval, and live installed-artifact verification.
-Enforcement point: personal_deploy._release_binding and _validate_staging_receipt plus personal_promote.ps1; required context: release/state digests, deployment class, changelog digests, preflight, staging receipt, and approval.
+Enforcement point: release_flow._verify_next_release_id, personal_deploy._release_binding and _validate_staging_receipt, plus personal_promote.ps1; required context: prior release ID, release/state digests, deployment class, changelog digests, preflight, staging receipt, and approval.
 Atomicity: release publication uses a nonce-bound staged directory and atomic renames; personal state files use atomic replacement; production atomicity remains in the existing app-only/maintenance transaction and lock.
 Accommodations: legacy release authorities remain readable by schema/audit but are refused for new personal selection; tested yes.
 NULL/absent behavior: missing current class, changelog, preflight, receipt, or approval fields fail closed; tested yes.

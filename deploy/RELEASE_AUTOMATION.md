@@ -210,7 +210,8 @@ the exact release before approval can be recorded. Direct execution through
 
    Pass `--version <major>.<minor>.<patch>` only for an intentional semantic-version change; its
    sequence starts at 1. Run this only when product bytes or reviewed evidence will change. A failed
-   staging or production rehearsal reuses the same immutable label.
+   staging or production rehearsal reuses the same immutable label. `prepare` independently verifies
+   that this is the generated next label and refuses skipped sequences or version regressions.
 2. Commit and push every repository included in the release. Each checkout
    must be clean and at an exact remote-tracking tip.
 3. Add one JSON change fragment under `deploy/changes/unreleased/` for every
@@ -330,8 +331,9 @@ python deploy/personal_deploy.py promote `
 ```
 
 `personal_promote.ps1` independently rehashes the bundle, release authority, staging receipt, and
-approval; rechecks all staging results and their 24-hour freshness; verifies image and deployment
-class bindings; and only then invokes the existing production transaction. `app-only` selects the
+approval; recomputes the sealed production preflight; rechecks all staging results and their 24-hour
+freshness; derives the only permitted promotion mode from the immutable release class; verifies image
+and deployment-class bindings; and only then invokes the existing production transaction. `app-only` selects the
 bounded app replacement. `security-config` currently uses the conservative maintenance runner until
 its focused production runner is implemented. `maintenance` uses the full resumable backup,
 restore, candidate, fence, route, and promotion transaction.

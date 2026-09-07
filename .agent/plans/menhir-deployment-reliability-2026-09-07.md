@@ -109,6 +109,7 @@ Extend the existing two state machines instead of adding a parallel deployer:
 | New app-only production preflight | PASS | Exact 0.2.0-13 app and Neo4j digests healthy; completed release journal; expected network roles; 105,022,050,304 bytes free disk and 7,496,204,288 bytes available memory. Sanitized report digest: `be492ac57a33650251586580429992c05fb299eec8f015ea20e5be1928a287d3`. |
 | Preflight resource envelope | PASS after correction | The first 7 GiB threshold failed on a normal 32 MiB fluctuation. Staging sidecars now have explicit 256 MiB limits and the gate requires the resulting 6.5 GiB total hard-limit envelope. |
 | Operational units | PASS | `menhir-caddy-reconcile.path` and `menhir-scaffold-audit.timer` are active; the scaffold audit exits successfully after rebinding the restore-drill receipt to the current backup generation. |
+| Scoped acceptance audit | PASS after correction | One independent audit found three release-gate gaps. Generated label sequence, direct-runner refusal, authority-derived promotion mode, and preflight-seal recomputation were corrected; only the affected suite was rerun, with 60 tests passing. |
 | Maintenance route preflight | BLOCKED as designed | Live ingress is Cloudflared at `.2`; the reviewed Caddy route authority still assumes Caddy at `.2`, TLS paths include directories, and AOP client files are absent. No maintenance mutation is permitted until one ingress mode is made authoritative. |
 
 This is a valid rehearsal of the next routine app-only path because the application behavior was
@@ -119,8 +120,8 @@ a successful maintenance rehearsal, and the plan does not claim one.
 
 | Lane | Current readiness | Next required work |
 |---|---|---|
-| Packaged product | Ready after focused tests | Use `prepare -> review -> finalize -> publish`; publication archives exact prepared fragments. |
-| Personal app-only | Ready after final suite | Use `rehearse -> approve -> promote`; one human approval remains intentional. |
+| Packaged product | Ready in branch | Use `next-id -> prepare -> review -> finalize -> publish`; prepare enforces the generated label and publication archives exact prepared fragments. |
+| Personal app-only | Ready in branch | Use `rehearse -> approve -> promote`; one human approval remains intentional and the direct gate independently verifies authority and preflight evidence. |
 | Security configuration | Not yet bounded | Implement a dedicated config/app transaction and receipt before claiming the ten-minute target. Until then it receives maintenance prerequisites and no fast-lane promise. |
 | Maintenance | Fail-closed on current ingress drift | Declare Cloudflared or Caddy in release authority, remove the inactive duplicate path, and test that mode's rollback before the next maintenance release. |
 | Recovery | Existing contract retained | Continue scheduled encrypted backups and current-generation restore evidence; do not exercise during routine app-only release. |
