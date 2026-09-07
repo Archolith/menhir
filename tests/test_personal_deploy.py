@@ -57,6 +57,7 @@ def _selected(tmp_path: Path) -> tuple[Path, Path, dict]:
 def _runner(tmp_path: Path) -> Path:
     runner = tmp_path / "stage.py"
     runner.write_text("# immutable staging runner\n", encoding="ascii")
+    runner.chmod(0o700)
     return runner.resolve()
 
 

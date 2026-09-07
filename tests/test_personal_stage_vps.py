@@ -63,7 +63,10 @@ def _policy() -> dict:
     }
 
 
-def test_staging_policy_preserves_canonical_endpoint_and_adds_isolated_probe(tmp_path: Path) -> None:
+def test_staging_policy_preserves_canonical_endpoint_and_adds_isolated_probe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(MODULE, "_chown", lambda *_args: None)
     source = tmp_path / "source.json"
     destination = tmp_path / "staged.json"
     source.write_text(json.dumps(_policy()), encoding="utf-8")
@@ -79,7 +82,10 @@ def test_staging_policy_preserves_canonical_endpoint_and_adds_isolated_probe(tmp
     assert probe["denied_tools"] == ["delete_namespace", "mint_client", "revoke_client"]
 
 
-def test_compose_override_uses_only_disposable_root_and_exact_image_digests(tmp_path: Path) -> None:
+def test_compose_override_uses_only_disposable_root_and_exact_image_digests(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(MODULE, "_chown", lambda *_args: None)
     root = tmp_path / "stage-root"
     root.mkdir()
     bundle = tmp_path / "bundle"
