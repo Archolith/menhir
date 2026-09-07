@@ -81,6 +81,9 @@ _MEASUREMENT_UNIT_ALIASES: dict[str, str] = {
     "kilogram": "kg", "kilograms": "kg",
     "cm": "cm", "centimeter": "cm", "centimeters": "cm",
     "centimetre": "cm", "centimetres": "cm",
+    "km": "km", "kilometer": "km", "kilometers": "km",
+    "kilometre": "km", "kilometres": "km",
+    "mi": "miles", "mile": "miles", "miles": "miles",
     "%": "percent", "percent": "percent", "percentage": "percent",
 }
 _SOURCE_NUMBER = r"[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?"
@@ -660,10 +663,7 @@ def _clock_time_from_source(stated_span: str) -> str | None:
     return f"{hour:02d}:{minute:02d}"
 
 
-_COUNT_WORDS = {
-    key: value for key, value in _FREQUENCY_NUMBER_WORDS.items()
-    if key not in {"once", "twice", "thrice"}
-}
+_COUNT_WORDS = dict(_FREQUENCY_NUMBER_WORDS)
 _COUNT_TOKEN_RE = re.compile(
     rf"(?<![\w.])(?P<token>{_SOURCE_NUMBER}|{'|'.join(_COUNT_WORDS)})(?![\w.])",
     re.IGNORECASE,
@@ -1019,6 +1019,7 @@ def parse_scalar_row(
         drop("unresolvable_episode")
         return None  # unresolvable provenance -> cannot ground
 
+    count_value_unresolved = False
     normalized_frequency = (
         _normalize_interval_frequency(stated_span)
         if value_kind == "frequency" and operation != "delta"
@@ -1051,11 +1052,21 @@ def parse_scalar_row(
             drop("clock_time_unresolved")
             return None
     elif value_kind == "count":
-        value = _count_value_from_source(stated_span, operation, row.get("value"))
+        model_value = _coerce_value(value_kind, operation, row.get("value"))
+        try:
+            validate_value(value_kind, operation, model_value)
+        except (ValueError, OverflowError):
+            # Source authority may correct a plausible numeric estimate, but it must not launder a
+            # malformed or fractional model field into a valid count.
+            drop("value_failed_validation")
+            return None
+        value = _count_value_from_source(stated_span, operation, model_value)
         unit = ""
         if value is None:
-            drop("count_value_unresolved")
-            return None
+            # Preserve the parser's provenance precedence: an ambiguous/unlocatable span is first
+            # an ungrounded claim, even when its text also lacks a usable source count.
+            count_value_unresolved = True
+            value = model_value
     else:
         value = _coerce_value(value_kind, operation, row.get("value"))
         if value_kind in {"boolean", "status", "weekday"}:
@@ -1087,6 +1098,9 @@ def parse_scalar_row(
         drop("span_not_uniquely_located")
         return None  # not uniquely located in the source -> ungrounded/ambiguous -> does not exist
     span_start, span_end = span
+    if count_value_unresolved:
+        drop("count_value_unresolved")
+        return None
 
     # Activity-count rows need one additional source-shape guard.  The model may correctly fill the
     # typed schema for a hypothetical total or a single event, but those are not durable cumulative
