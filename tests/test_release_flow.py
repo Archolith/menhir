@@ -5,7 +5,7 @@ import importlib.util
 import json
 import subprocess
 from pathlib import Path
-from types import SimpleNamespace
+from types import MappingProxyType, SimpleNamespace
 
 import pytest
 
@@ -72,6 +72,17 @@ def test_fragment_coverage_accepts_claim_inside_changed_range(tmp_path: Path) ->
         "repositories": {"menhir": [commits["menhir"][1]]},
         "deployment_class": "security-config",
     }
+
+    MODULE._verify_fragment_coverage([fragment], spec)
+
+
+def test_fragment_coverage_accepts_validated_immutable_mapping(tmp_path: Path) -> None:
+    spec, commits = _coverage_fixture(tmp_path)
+    fragment = SimpleNamespace(
+        repositories=MappingProxyType({
+            "menhir": (commits["menhir"][1],),
+        })
+    )
 
     MODULE._verify_fragment_coverage([fragment], spec)
 

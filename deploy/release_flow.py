@@ -14,6 +14,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Callable
 
@@ -244,7 +245,7 @@ def _verify_fragment_coverage(
     claims: dict[str, set[str]] = {name: set() for name in REPOSITORIES}
     for fragment in fragments:
         rows = _fragment_value(fragment, "repositories")
-        if not isinstance(rows, dict):
+        if not isinstance(rows, Mapping):
             raise ReleaseFlowError("release-note fragment repositories are invalid")
         for name, commits in rows.items():
             if name not in REPOSITORIES or not isinstance(commits, (list, tuple)):
