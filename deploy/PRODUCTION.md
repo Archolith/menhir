@@ -23,6 +23,12 @@ candidate transaction. They verify scheduled backup/restore freshness and automa
 the prior application/configuration on failed acceptance. Full state protection remains mandatory
 only for mechanically classified maintenance and recovery work.
 
+Product release and personal deployment are separate trust boundaries. The product workflow may
+publish packages, images, provenance, and changelogs without access to this host. This deployment
+contract may select and promote one published digest, but it may not rebuild, modify, tag, or
+publish product artifacts. A successful product release does not imply deployment, and a successful
+personal deployment does not create a new product release.
+
 The client data-plane invariant is in
 [ACCESS_CONTRACT.md](ACCESS_CONTRACT.md): the only production client endpoint is
 `https://memory.ctharvey.me/mcp-http`; ChatGPT, Codex, and every Claude variant
