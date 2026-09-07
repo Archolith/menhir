@@ -151,7 +151,18 @@ python3 "$SCHEMA" validate-manifest "${gen}/MANIFEST.json" "${gen}" \
 python3 "$INVENTORY_VALIDATOR" "${gen}/config/durable-state-inventory.json" \
     "${gen}/config/docker-compose.production.yml" \
     || { echo "generation durable-state inventory validation failed" >&2; exit 1; }
-( cd "${gen}" && sha256sum -c SHA256SUMS --strict ) || { echo "hash verification failed" >&2; exit 1; }
+legacy_self_hash="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  ./SHA256SUMS"
+if grep -Fqx "$legacy_self_hash" "${gen}/SHA256SUMS"; then
+    [ "$(grep -Ec '[[:space:]]\./SHA256SUMS$' "${gen}/SHA256SUMS")" -eq 1 ] \
+        || { echo "invalid legacy SHA256SUMS self-entry" >&2; exit 1; }
+    ( cd "${gen}" && sha256sum -c <(grep -Fvx "$legacy_self_hash" SHA256SUMS) --strict ) \
+        || { echo "hash verification failed" >&2; exit 1; }
+else
+    ! grep -Eq '[[:space:]]\./SHA256SUMS$' "${gen}/SHA256SUMS" \
+        || { echo "unexpected SHA256SUMS self-entry" >&2; exit 1; }
+    ( cd "${gen}" && sha256sum -c SHA256SUMS --strict ) \
+        || { echo "hash verification failed" >&2; exit 1; }
+fi
 echo "Integrity chain verified: ${gen}"
 
 # --- 2. Image identity (refuse mixed-generation / wrong-schema image) ---

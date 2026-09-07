@@ -265,6 +265,7 @@ Each node represents a memory unit stored in Neo4j. Labels: `Entity` or `Episodi
 | `last_merge_op_id` | string | Op id of the most recent journaled merge into this survivor. Idempotency breadcrumb for saga replay; NOT a correctness gate. |
 | `ttl_expires` | datetime | Set once (coalesced) when a SESSION node is demoted; the TTL sweep deletes it after this passes. Cleared by promotion. |
 | `restored_from_merge` / `restored_by_op` / `restored_at` | string / string / datetime | Stamped on a node recreated by an unmerge (survivor uuid, unmerge op id, time). |
+| `is_self` / `entity_role` | boolean / string | Marks the ONE canonical human-self entity for a namespace (`entity_role='self'`). Its `uuid` is deterministic -- `uuid5(NAMESPACE_URL, "menhir-self:<logical namespace>")` via `domain/self_identity.self_uuid_for_namespace` -- so recall resolves a first-person subject with no database read, and replay can never fork a second self node. **Never infer self from the name.** An entity called `user` carries these markers only when the ingestion boundary proved the episode's author (see `runtime.canonical_self` in architecture.md); a software/application `user` is an ordinary entity with neither field. `group_id` comes from `namespace_to_group_id`, so logical `default` writes physical `""` -- writing the logical name here targets a partition holding none of the production data. |
 
 ### Node: Episode
 

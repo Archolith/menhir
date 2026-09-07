@@ -3,6 +3,7 @@ set -euo pipefail
 umask 077
 
 MENHIR_ROOT="/srv/menhir/production"
+MENHIR_PROD_ROOT="${MENHIR_PROD_ROOT:-${MENHIR_ROOT}}"
 COMPOSE_FILE="${MENHIR_ROOT}/deploy/docker-compose.production.yml"
 PRODUCTION_ENV="${MENHIR_ROOT}/release/production.env"
 STATUS_DIR="/var/lib/menhir-production"
@@ -88,7 +89,8 @@ wait_container_healthy() {
 }
 
 candidate_compose() {
-    local generation="$1" candidate_root="${BACKUP_ROOT}/candidate/${generation}"
+    local generation="$1"
+    local candidate_root="${BACKUP_ROOT}/candidate/${generation}"
     shift
     MENHIR_COMPOSE_PROJECT=menhir-candidate \
     MENHIR_RUNTIME_MODE=candidate-readonly \
@@ -138,7 +140,8 @@ candidate_neo4j_authority_digest() {
     # from the candidate's pinned Menhir image. Neo4j is already healthy, but
     # the long-running candidate app intentionally has not started yet.
     # The script is streamed over stdin and emits only the final digest.
-    candidate_compose "$generation" run --rm --no-deps -T menhir python3 - neo4j \
+    MENHIR_APP_MEMORY_LIMIT=4g candidate_compose "$generation" config --quiet
+    MENHIR_APP_MEMORY_LIMIT=4g candidate_compose "$generation" run --rm --no-deps -T menhir python3 - neo4j \
         < "$(authority_digest_tool)"
 }
 
@@ -150,7 +153,8 @@ candidate_authority_digest() {
 }
 
 candidate_up() {
-    local generation="$1" candidate_root="${BACKUP_ROOT}/candidate/${generation}"
+    local generation="$1"
+    local candidate_root="${BACKUP_ROOT}/candidate/${generation}"
     local state_root="${candidate_root}/state"
     [ -f "${BACKUP_ROOT}/candidate/${generation}/REHEARSAL-PASSED" ] \
         || { echo "candidate rehearsal marker missing" >&2; return 1; }
@@ -198,7 +202,13 @@ production_down() {
 
 RELEASE_JSON="${MENHIR_RELEASE_JSON:-/srv/menhir/production/release/release.json}"
 
-schema_py() { python3 "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/menhir_schema.py" "$@"; }
+schema_py() {
+    local helper_dir schema
+    helper_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    schema="${helper_dir}/lib/menhir_schema.py"
+    [ -f "$schema" ] || schema="${helper_dir}/menhir_schema.py"
+    python3 "$schema" "$@"
+}
 
 validate_release_authority() {
     require_root_file "$RELEASE_JSON" "release.json"
@@ -220,6 +230,11 @@ validate_runtime_release_binding() {
 import hashlib, json, sys
 release_path, compose_path, policy_path, production_env_path, release_id, commit, menhir, neo4j, policy_digest = sys.argv[1:10]
 release=json.load(open(release_path, encoding="utf-8"))
+policy=json.load(open(policy_path, encoding="utf-8"))
+declared_policy_digest=policy.pop("canonical_digest", "")
+actual_policy_digest=hashlib.sha256(json.dumps(
+    policy, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+).encode("ascii")).hexdigest()
 sha=lambda p: hashlib.sha256(open(p,"rb").read()).hexdigest()
 checks=[
     (release["release_id"], release_id, "release id"),
@@ -229,7 +244,8 @@ checks=[
     (release["rendered"]["menhir_compose_sha256"], sha(compose_path), "compose"),
     (release["rendered"]["policy_sha256"], sha(policy_path), "policy"),
     (release["rendered"]["production_env_sha256"], sha(production_env_path), "production env"),
-    (policy_digest, sha(policy_path), "configured policy"),
+    (policy_digest, declared_policy_digest, "configured policy"),
+    (declared_policy_digest, actual_policy_digest, "canonical policy"),
 ]
 for expected, actual, label in checks:
     if expected != actual:

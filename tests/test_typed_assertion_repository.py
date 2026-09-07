@@ -8,6 +8,8 @@ include_superseded query. No View writes here (commit 2 adds the fold)."""
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 import pytest
 
 from menhir.domain.typed_assertion import (
@@ -106,6 +108,23 @@ def test_normalize_scalar_shapes():
     assert normalize_scalar([10, 12]) == "10-12"
     assert normalize_scalar(True) == "true"
     assert normalize_scalar(" 07:30 ") == "07:30"
+
+
+@pytest.mark.unit
+def test_money_decimal_serialization_and_hydration_preserve_exact_scale():
+    fake = FakeNeo4j(default=[{"assertion_id": "money-1", "created": True}])
+    assertion = _assertion(value_kind="money", unit="usd", value=Decimal("1200.50"))
+
+    TypedAssertionRepository(fake).record_assertion(assertion)
+
+    params = fake.executed[0][1]
+    assert params["value_norm"] == "1200.50"
+    assert params["value_json"] == "1200.50"
+    hydrated = TypedAssertionRepository._hydrate({
+        "value_kind": "money", "value_json": "1200.50",
+    })
+    assert hydrated["value"] == Decimal("1200.50")
+    assert isinstance(hydrated["value"], Decimal)
 
 
 @pytest.mark.unit

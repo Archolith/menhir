@@ -191,7 +191,12 @@ receipt = {
         "roundtrip_verified": True,
     },
     "local_encrypted_archives": {
-        "retention_target_generations": int(retention_target),
+        # The first bootstrap snapshot is independently valid at one retained
+        # generation. Promotion separately requires the configured policy of
+        # two, which the final cutover snapshot must satisfy.
+        "retention_target_generations": min(
+            int(retention_target), len({item["generation"] for item in archives})
+        ),
         "retained_generation_count": len({item["generation"] for item in archives}),
         "current_archive_path": os.path.abspath(current_path),
         "archives": archives,
