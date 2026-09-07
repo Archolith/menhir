@@ -45,6 +45,44 @@ def test_next_release_id_refuses_malformed_version(tmp_path: Path) -> None:
         MODULE.next_release_id(prior.resolve(), "0.3")
 
 
+def test_next_release_id_refuses_version_regression(tmp_path: Path) -> None:
+    prior = tmp_path / "release.json"
+    prior.write_text(
+        json.dumps({"release_id": "menhir-prod-1.2.3-4"}), encoding="utf-8"
+    )
+
+    with pytest.raises(MODULE.ReleaseFlowError, match="backwards"):
+        MODULE.next_release_id(prior.resolve(), "1.2.2")
+
+
+def test_prepare_sequence_enforces_generated_label(tmp_path: Path) -> None:
+    prior = tmp_path / "prior.json"
+    prior.write_text(
+        json.dumps({"release_id": "menhir-prod-0.2.0-13"}), encoding="utf-8"
+    )
+
+    MODULE._verify_next_release_id({
+        "release_id": "menhir-prod-0.2.0-14",
+        "initial_release": False,
+        "prior_release": str(prior.resolve()),
+    })
+    with pytest.raises(MODULE.ReleaseFlowError, match="generated next label"):
+        MODULE._verify_next_release_id({
+            "release_id": "menhir-prod-0.2.0-15",
+            "initial_release": False,
+            "prior_release": str(prior.resolve()),
+        })
+
+
+def test_initial_release_sequence_must_start_at_one() -> None:
+    with pytest.raises(MODULE.ReleaseFlowError, match="sequence must be 1"):
+        MODULE._verify_next_release_id({
+            "release_id": "menhir-prod-0.2.0-2",
+            "initial_release": True,
+            "prior_release": None,
+        })
+
+
 def _commit(repo: Path, name: str, content: str) -> str:
     target = repo / name
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -85,7 +123,10 @@ def _coverage_fixture(tmp_path: Path) -> tuple[dict, dict[str, tuple[str, str]]]
         commits[name] = (base, head)
         prior_repos[name] = base if name == "menhir" else head
     prior = tmp_path / "prior-release.json"
-    prior.write_text(json.dumps({"repos": prior_repos}), encoding="utf-8")
+    prior.write_text(json.dumps({
+        "release_id": "menhir-prod-0.2.0-10",
+        "repos": prior_repos,
+    }), encoding="utf-8")
     spec = {"repositories": repositories, "prior_release": str(prior.resolve())}
     return spec, commits
 
@@ -678,7 +719,11 @@ def test_prepare_failure_restores_empty_workspace(
     fragments.mkdir()
 
     def prepare_release_spec(_inputs: Path, output: Path) -> None:
-        output.write_text("{}\n", encoding="ascii")
+        output.write_text(json.dumps({
+            "release_id": "menhir-prod-0.2.0-1",
+            "initial_release": True,
+            "repositories": {},
+        }), encoding="ascii")
         (output.parent / "release-spec-inputs").mkdir()
 
     modules = {

@@ -329,6 +329,11 @@ def _stage_command(workspace: Path, state: dict[str, Any], runner: Path, receipt
             "-Receipt", str(receipt),
             "-Workspace", str(workspace),
         ]
+    if runner.name.lower() == "personal_stage_vps.py":
+        raise PersonalDeployError(
+            "the VPS staging runner cannot run directly; use personal_stage.ps1 "
+            "to bind and transfer the image archive"
+        )
     prefix: list[str]
     if runner.suffix.lower() == ".py":
         prefix = [sys.executable, str(runner)]

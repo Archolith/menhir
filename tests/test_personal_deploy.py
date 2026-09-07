@@ -209,6 +209,15 @@ def test_stage_preview_is_read_only(tmp_path: Path) -> None:
     assert MODULE.status_flow(deployment)["phase"] == "selected"
 
 
+def test_stage_refuses_direct_vps_runner(tmp_path: Path) -> None:
+    _, deployment, _ = _selected(tmp_path)
+    runner = tmp_path / "personal_stage_vps.py"
+    runner.write_text("# companion only\n", encoding="ascii")
+
+    with pytest.raises(MODULE.PersonalDeployError, match="cannot run directly"):
+        MODULE.stage_flow(deployment, runner.resolve(), execute=False)
+
+
 def test_real_staging_runner_identity_binds_desktop_and_vps_components(tmp_path: Path) -> None:
     wrapper = tmp_path / "personal_stage.ps1"
     companion = tmp_path / "personal_stage_vps.py"

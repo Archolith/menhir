@@ -161,6 +161,14 @@ $releaseAuthority = Get-Content -LiteralPath $releasePath -Raw | ConvertFrom-Jso
 if ([string]$releaseAuthority.release_id -ne $Release) {
     throw "Bundled release authority identity differs from the approved release."
 }
+$authorityClass = [string]$releaseAuthority.deployment_class
+if ($authorityClass -notin @("app-only", "security-config", "maintenance")) {
+    throw "Bundled release authority deployment class is invalid."
+}
+$authorityMode = if ($authorityClass -eq "app-only") { "AppOnly" } else { "Maintenance" }
+if ($Mode -ne $authorityMode) {
+    throw "Promotion mode differs from the immutable release authority."
+}
 
 $staging = Read-JsonEvidence -Path $StagingReceipt `
     -ExpectedSha256 $ExpectedStagingReceiptSha256 -Label "Staging receipt"
@@ -177,10 +185,7 @@ Assert-ExactProperties -Value $approvalValue -Label "Promotion approval" -Expect
     "staging_receipt_sha256", "approved_by", "approved_utc"
 )
 
-$expectedClass = if ($Mode -eq "AppOnly") { "app-only" } else { [string]$staging.deployment_class }
-if ($Mode -eq "Maintenance" -and $expectedClass -notin @("security-config", "maintenance")) {
-    throw "Maintenance mode does not match the staged deployment class."
-}
+$expectedClass = $authorityClass
 if ($staging.schema -ne 1 -or $staging.kind -ne "menhir-personal-staging" -or
     $staging.result -ne "passed" -or $staging.release_id -ne $Release -or
     $staging.release_sha256 -ne $ExpectedReleaseSha256 -or
@@ -209,6 +214,30 @@ Assert-ExactProperties -Value $preflight.checks -Label "Production readiness pre
 Assert-ExactProperties -Value $preflight.checks.headroom -Label "Production readiness headroom" -Expected @(
     "disk_free_bytes", "disk_required_bytes", "memory_available_bytes", "memory_required_bytes"
 )
+$pythonCommand = Get-Command python.exe -ErrorAction SilentlyContinue
+if ($null -eq $pythonCommand) {
+    throw "Python is required to verify the production readiness preflight seal."
+}
+$sealProgram = @'
+import hashlib, json, sys
+def unique(pairs):
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError("duplicate JSON key")
+        value[key] = item
+    return value
+with open(sys.argv[1], encoding="utf-8") as handle:
+    receipt = json.load(handle, object_pairs_hook=unique)
+preflight = receipt["production_preflight"]
+actual = preflight.pop("canonical_sha256")
+encoded = json.dumps(preflight, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")
+raise SystemExit(0 if actual == hashlib.sha256(encoded).hexdigest() else 1)
+'@
+$sealProgram | & $pythonCommand.Source - $StagingReceipt
+if ($LASTEXITCODE -ne 0) {
+    throw "Production readiness preflight seal is invalid."
+}
 $routeRequired = $expectedClass -ne "app-only"
 if ($preflight.schema -ne 1 -or
     $preflight.kind -ne "menhir-production-readiness-preflight" -or

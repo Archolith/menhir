@@ -44,6 +44,9 @@ def _fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[list[str]
     release_path.parent.mkdir(parents=True)
     release_path.write_text(json.dumps({
         "release_id": release_id,
+        "deployment_class": "app-only",
+        "notes_json_sha256": "5" * 64,
+        "notes_markdown_sha256": "6" * 64,
         "images": {"menhir": release_sha_image, "neo4j": neo4j_sha_image},
     }), encoding="utf-8")
     release_sha = _sha(release_path)
@@ -68,8 +71,10 @@ def _fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[list[str]
             },
             "maintenance_route": {"applicable": False},
         },
-        "canonical_sha256": "4" * 64,
     }
+    preflight["canonical_sha256"] = hashlib.sha256(json.dumps(
+        preflight, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
+    ).encode("ascii")).hexdigest()
     staging_path = tmp_path / "staging.json"
     staging_path.write_text(json.dumps({
         "schema": 1,
@@ -155,4 +160,64 @@ def test_promotion_gate_blocks_tampered_receipt_before_transaction(
     staging.write_text(staging.read_text(encoding="utf-8") + " ", encoding="utf-8")
     result = subprocess.run(command, text=True, capture_output=True, check=False)
     assert result.returncode != 0
+    assert not marker.exists()
+
+
+@pytest.mark.skipif(shutil.which("pwsh.exe") is None, reason="requires PowerShell 7")
+def test_promotion_gate_recomputes_preflight_seal_after_outer_rebinding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    command, marker, staging = _fixture(tmp_path, monkeypatch)
+    command[0] = shutil.which("pwsh.exe") or "pwsh.exe"
+    value = json.loads(staging.read_text(encoding="utf-8"))
+    value["production_preflight"]["checks"]["headroom"]["disk_free_bytes"] += 1
+    staging.write_text(json.dumps(value), encoding="utf-8")
+    staging_sha = _sha(staging)
+    command[command.index("-ExpectedStagingReceiptSha256") + 1] = staging_sha
+    approval = Path(command[command.index("-Approval") + 1])
+    approval_value = json.loads(approval.read_text(encoding="utf-8"))
+    approval_value["staging_receipt_sha256"] = staging_sha
+    approval.write_text(json.dumps(approval_value), encoding="utf-8")
+    command[command.index("-ExpectedApprovalSha256") + 1] = _sha(approval)
+
+    result = subprocess.run(command, text=True, capture_output=True, check=False)
+
+    assert result.returncode != 0
+    assert "preflight seal is invalid" in result.stderr
+    assert not marker.exists()
+
+
+@pytest.mark.skipif(shutil.which("pwsh.exe") is None, reason="requires PowerShell 7")
+def test_promotion_gate_refuses_mode_downgrade_from_release_authority(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    command, marker, staging = _fixture(tmp_path, monkeypatch)
+    command[0] = shutil.which("pwsh.exe") or "pwsh.exe"
+    bundle = Path(command[command.index("-BundlePath") + 1])
+    release_path = bundle / "rootfs/srv/menhir/production/release/release.json"
+    release = json.loads(release_path.read_text(encoding="utf-8"))
+    release["deployment_class"] = "maintenance"
+    release_path.write_text(json.dumps(release), encoding="utf-8")
+    release_sha = _sha(release_path)
+    bundle_sha = _tree_sha(bundle)
+    command[command.index("-ExpectedReleaseSha256") + 1] = release_sha
+    command[command.index("-ExpectedBundleSha256") + 1] = bundle_sha
+    value = json.loads(staging.read_text(encoding="utf-8"))
+    value["release_sha256"] = release_sha
+    value["bundle_sha256"] = bundle_sha
+    staging.write_text(json.dumps(value), encoding="utf-8")
+    staging_sha = _sha(staging)
+    command[command.index("-ExpectedStagingReceiptSha256") + 1] = staging_sha
+    approval = Path(command[command.index("-Approval") + 1])
+    approval_value = json.loads(approval.read_text(encoding="utf-8"))
+    approval_value["release_sha256"] = release_sha
+    approval_value["bundle_sha256"] = bundle_sha
+    approval_value["staging_receipt_sha256"] = staging_sha
+    approval.write_text(json.dumps(approval_value), encoding="utf-8")
+    command[command.index("-ExpectedApprovalSha256") + 1] = _sha(approval)
+
+    result = subprocess.run(command, text=True, capture_output=True, check=False)
+
+    assert result.returncode != 0
+    assert "mode differs from the immutable release authority" in result.stderr
     assert not marker.exists()

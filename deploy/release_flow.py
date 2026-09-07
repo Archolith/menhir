@@ -440,6 +440,10 @@ def next_release_id(prior_release: Path, version: str | None = None) -> dict[str
     target_version = version or match.group("version")
     if VERSION_RE.fullmatch(target_version) is None:
         raise ReleaseFlowError("release version must match <major>.<minor>.<patch>")
+    prior_version = tuple(int(part) for part in match.group("version").split("."))
+    requested_version = tuple(int(part) for part in target_version.split("."))
+    if requested_version < prior_version:
+        raise ReleaseFlowError("release version cannot move backwards")
     sequence = int(match.group("sequence")) + 1 \
         if target_version == match.group("version") else 1
     return {
@@ -449,6 +453,27 @@ def next_release_id(prior_release: Path, version: str | None = None) -> dict[str
         "version": target_version,
         "release_id": f"menhir-prod-{target_version}-{sequence}",
     }
+
+
+def _verify_next_release_id(spec: dict[str, Any]) -> None:
+    release_id = spec.get("release_id")
+    if not isinstance(release_id, str):
+        raise ReleaseFlowError("release spec identity is invalid")
+    match = RELEASE_ID_PARTS_RE.fullmatch(release_id)
+    if match is None:
+        raise ReleaseFlowError("release spec identity is invalid")
+    if spec.get("initial_release") is True:
+        if int(match.group("sequence")) != 1:
+            raise ReleaseFlowError("initial release sequence must be 1")
+        return
+    prior_path = spec.get("prior_release")
+    if not isinstance(prior_path, str):
+        raise ReleaseFlowError("non-initial release has no prior release authority")
+    expected = next_release_id(Path(prior_path), match.group("version"))["release_id"]
+    if release_id != expected:
+        raise ReleaseFlowError(
+            f"release ID must be the generated next label: {expected}"
+        )
 
 
 def _load_state(workspace: Path) -> dict[str, Any]:
@@ -662,6 +687,7 @@ def prepare_flow(inputs_path: Path, workspace: Path, fragments_dir: Path) -> dic
         spec_path = workspace / SPEC_NAME
         release_spec.prepare_release_spec(inputs_path, spec_path)
         spec = _load_json(spec_path, "release spec")
+        _verify_next_release_id(spec)
         fragment_bindings = _snapshot_fragments(fragments_dir)
         fragments = list(release_notes.collect_fragments(fragments_dir))
         if len(fragment_bindings) != len(fragments):
