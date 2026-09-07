@@ -7,7 +7,12 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from menhir.infrastructure.todo_repository import TodoRepository
+from menhir.infrastructure.todo_repository import (
+    TODO_AGE_DAYS_CYPHER,
+    TODO_STALE_AFTER_DAYS,
+    TodoRepository,
+)
+from menhir.domain.todo_location import DEFAULT_TODO_NAMESPACE
 from menhir.cli.output import format_hook_output
 
 
@@ -935,7 +940,11 @@ def test_get_todo_returns_row_when_found() -> None:
 
     assert result is not None
     assert result["content"] == "A very long multi-part todo body"
-    assert neo4j.calls[0]["params"] == {"uuid": "u1", "namespaces": None}
+    assert neo4j.calls[0]["params"] == {
+        "uuid": "u1",
+        "namespaces": None,
+        "stale_after": TODO_STALE_AFTER_DAYS,
+    }
 
 
 @pytest.mark.unit
@@ -1085,3 +1094,541 @@ def test_list_todos_tool_empty() -> None:
 
     assert "open (0)" in result
     assert "(none)" in result
+
+
+# ---------------------------------------------------------------------------
+# Todo age SSOT (duration.inDays, not duration.between)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_age_ssot_uses_indays_not_between_on_every_age_read() -> None:
+    """Every age-bearing query must route through TODO_AGE_DAYS_CYPHER.
+
+    `duration.between` returns a structured duration: months are extracted
+    first, so `.days` is only the sub-month remainder and a 3-month-old todo
+    reports 5. That capped every displayed age at ~31, made the stale flag
+    near-unreachable, and made close_stale_todos(older_than_days>=32) a
+    permanent no-op. This pins the fix at every call site at once, so
+    re-inlining a duration call in a new query fails here rather than
+    silently under-reporting age again.
+    """
+    neo4j = _StubNeo4j()
+    repo = TodoRepository(neo4j)
+
+    repo.list_todos()
+    repo.get_todo("u1")
+    repo.close_stale_todos(older_than_days=90, dry_run=True)
+
+    assert len(neo4j.calls) >= 3
+    for call in neo4j.calls:
+        query = call["query"]
+        assert "duration.between" not in query, (
+            "duration.between under-reports age by extracting months first; "
+            "use TODO_AGE_DAYS_CYPHER"
+        )
+        assert TODO_AGE_DAYS_CYPHER in query
+
+
+@pytest.mark.unit
+def test_stale_threshold_is_parameterized_not_inlined() -> None:
+    """The staleness cutoff has one definition, passed as $stale_after."""
+    neo4j = _StubNeo4j()
+    repo = TodoRepository(neo4j)
+
+    repo.list_todos()
+    repo.get_todo("u1")
+
+    for call in neo4j.calls:
+        assert "age_days > 30" not in call["query"]
+        assert "$stale_after" in call["query"]
+        assert call["params"]["stale_after"] == TODO_STALE_AFTER_DAYS
+
+
+@pytest.mark.unit
+def test_close_stale_todos_selects_on_true_total_days() -> None:
+    """A 90-day cutoff must be expressible; the old expression could not match it.
+
+    `.days` off a structured duration never exceeds ~31, so `>= 90` matched
+    nothing regardless of how old a todo actually was -- and close_stale_todos
+    defaults to older_than_days=60, so its default was a no-op too.
+    """
+    neo4j = _StubNeo4j()
+    repo = TodoRepository(neo4j)
+
+    repo.close_stale_todos(older_than_days=90, dry_run=True)
+
+    query = neo4j.calls[0]["query"]
+    assert f"{TODO_AGE_DAYS_CYPHER} >= $days" in query
+    assert neo4j.calls[0]["params"]["days"] == 90
+
+
+@pytest.mark.unit
+def test_stale_banner_reports_the_ssot_threshold_not_a_literal(monkeypatch) -> None:
+    """The stale banner must render TODO_STALE_AFTER_DAYS, not a hardcoded 30.
+
+    `list_todos` rendered "N todo(s) older than 30 days" from a literal while the
+    `stale` flag it describes is computed server-side from TODO_STALE_AFTER_DAYS.
+    That is a fourth, out-of-band encoding of the same threshold: change the
+    constant and the banner silently lies about which todos it just flagged.
+
+    The threshold is perturbed here deliberately. Asserting "older than 30 days"
+    against the real constant proves nothing while the constant happens to be 30 --
+    a hardcoded literal passes that assertion identically. Only a value the literal
+    cannot produce distinguishes the two.
+    """
+    import menhir.mcp.tools.ops.list_todos as list_todos_mod
+    from menhir.mcp.tools.ops.list_todos import ListTodosTool
+
+    monkeypatch.setattr(list_todos_mod, "TODO_STALE_AFTER_DAYS", 45)
+
+    tool = ListTodosTool()
+    backend = MagicMock()
+    backend.list_todos = AsyncMock(
+        return_value=[
+            {
+                "uuid": "abc",
+                "content": "Old thing",
+                "priority": "normal",
+                "created_at": "2026-05-28T10:00:00+00:00",
+                "age_days": 98,
+                "stale": True,
+            }
+        ]
+    )
+    tool.get_backend = MagicMock(return_value=backend)
+
+    import asyncio
+    result = asyncio.run(tool.endpoint(status="open", limit=25))
+
+    assert "older than 45 days" in result
+    assert "older than 30 days" not in result
+    assert "age: 98d" in result
+    assert "STALE" in result
+
+
+# ---------------------------------------------------------------------------
+# Supersession (todo -> todo), Phase B slice 2
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_supersede_todo_writes_edge_and_closes_in_one_statement() -> None:
+    """Atomicity comes from a single statement, as with resolve/reopen."""
+    neo4j = _StubNeo4j(responses=[[{"applied": 1}]])
+    repo = TodoRepository(neo4j)
+
+    result = repo.supersede_todo("old1", "new1")
+
+    assert result["applied"] is True
+    assert result["status"] == "closed"
+    assert result["superseded_by"] == "new1"
+    assert len(neo4j.calls) == 1
+    query = neo4j.calls[0]["query"]
+    assert "MERGE (t_old)-[:SUPERSEDED_BY]->(t_new)" in query
+    assert "SET t_old.status = 'closed'" in query
+
+
+@pytest.mark.unit
+def test_supersede_requires_old_open_and_new_open() -> None:
+    neo4j = _StubNeo4j(responses=[[{"applied": 1}]])
+    repo = TodoRepository(neo4j)
+
+    repo.supersede_todo("old1", "new1")
+
+    query = neo4j.calls[0]["query"]
+    assert "WHERE t_old.status = 'open'" in query
+    assert "WHERE t_new.status = 'open'" in query
+
+
+@pytest.mark.unit
+def test_supersede_refuses_a_todo_that_already_has_a_successor() -> None:
+    """Guards the reopen path: without it a second call leaves two successors."""
+    neo4j = _StubNeo4j(responses=[[{"applied": 1}]])
+    repo = TodoRepository(neo4j)
+
+    repo.supersede_todo("old1", "new1")
+
+    assert "NOT (t_old)-[:SUPERSEDED_BY]->(:Todo)" in neo4j.calls[0]["query"]
+
+
+@pytest.mark.unit
+def test_supersede_refuses_self_supersession_without_touching_the_graph() -> None:
+    neo4j = _StubNeo4j()
+    repo = TodoRepository(neo4j)
+
+    result = repo.supersede_todo("same", "same")
+
+    assert result["applied"] is False
+    assert result["reason"] == "cannot_supersede_itself"
+    assert neo4j.calls == []
+
+
+@pytest.mark.unit
+def test_supersede_confines_the_new_todo_to_the_old_silo_or_default() -> None:
+    neo4j = _StubNeo4j(responses=[[{"applied": 1}]])
+    repo = TodoRepository(neo4j)
+
+    repo.supersede_todo("old1", "new1")
+
+    query = neo4j.calls[0]["query"]
+    # Both sides coalesced: a null namespace on EITHER end must not silently make the
+    # row unmatchable, which `null IN [...]` would do.
+    assert "coalesce(t_new.namespace, $default_ns)" in query
+    assert "IN [coalesce(t_old.namespace, $default_ns), $default_ns]" in query
+    assert neo4j.calls[0]["params"]["default_ns"] == DEFAULT_TODO_NAMESPACE
+
+
+@pytest.mark.unit
+def test_supersede_refusal_reports_reason_without_raising() -> None:
+    neo4j = _StubNeo4j(responses=[[{"applied": 0}]])
+    repo = TodoRepository(neo4j)
+
+    result = repo.supersede_todo("old1", "new1")
+
+    assert result["applied"] is False
+    assert "reason" in result
+
+
+@pytest.mark.unit
+def test_supersede_completes_the_linked_reminder() -> None:
+    """Mirrors close_todo: a superseded todo's reminder must not stay open."""
+    neo4j = _StubNeo4j(responses=[[{"applied": 1}]])
+    repo = TodoRepository(neo4j)
+
+    repo.supersede_todo("old1", "new1")
+
+    query = neo4j.calls[0]["query"]
+    assert "HAS_REMINDER" in query
+    assert "r.status = $reminder_status" not in query
+    assert "SET r.status = 'completed'" in query
+
+
+@pytest.mark.unit
+def test_todo_supersession_reads_both_directions() -> None:
+    """CF-143 guard: the written edge has a reader."""
+    neo4j = _StubNeo4j(responses=[[{
+        "superseded_by": [{"uuid": "new1", "ns": "default"}],
+        "supersedes": [{"uuid": "older1", "ns": "default"},
+                       {"uuid": "older2", "ns": "default"}],
+    }]])
+    repo = TodoRepository(neo4j)
+
+    lineage = repo.todo_supersession("t1")
+
+    assert lineage["superseded_by"] == ["new1"]
+    assert lineage["supersedes"] == ["older1", "older2"]
+
+
+@pytest.mark.unit
+def test_todo_supersession_is_empty_when_there_is_no_lineage() -> None:
+    neo4j = _StubNeo4j(responses=[[]])
+    repo = TodoRepository(neo4j)
+
+    lineage = repo.todo_supersession("t1")
+
+    assert lineage["superseded_by"] == []
+    assert lineage["supersedes"] == []
+
+
+@pytest.mark.unit
+def test_get_todo_surfaces_supersession() -> None:
+    neo4j = _StubNeo4j(responses=[
+        [{"uuid": "t1", "content": "body"}],
+        [],
+        [{"superseded_by": [{"uuid": "new1", "ns": "default"}], "supersedes": []}],
+    ])
+    repo = TodoRepository(neo4j)
+
+    todo = repo.get_todo("t1")
+
+    assert todo["supersession"]["superseded_by"] == ["new1"]
+
+
+# ---------------------------------------------------------------------------
+# Review remediation (2026-09-03): regressions for each confirmed finding
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_supersede_refuses_a_new_todo_that_already_has_a_successor() -> None:
+    """The cycle guard. supersede(A,B) / reopen(A) / supersede(B,A) built A->B->A
+    because only t_old was guarded; every ancestor carries an outgoing edge, so
+    guarding t_new is what makes a cycle unconstructible."""
+    neo4j = _StubNeo4j(responses=[[{"applied": 1}]])
+    repo = TodoRepository(neo4j)
+
+    repo.supersede_todo("old1", "new1")
+
+    assert "NOT (t_new)-[:SUPERSEDED_BY]->(:Todo)" in neo4j.calls[0]["query"]
+
+
+@pytest.mark.unit
+def test_reopen_refuses_a_superseded_todo() -> None:
+    """Reopening one produced an open node still carrying SUPERSEDED_BY -- the state
+    supersede_todo's own docstring calls impossible."""
+    neo4j = _StubNeo4j(responses=[[{"applied": 1}]])
+    repo = TodoRepository(neo4j)
+
+    repo.reopen_todo("t1", "m1")
+
+    assert "NOT (t)-[:SUPERSEDED_BY]->(:Todo)" in neo4j.calls[0]["query"]
+
+
+@pytest.mark.unit
+def test_resolve_does_not_carry_the_successor_guard() -> None:
+    """The guard is reopen-only: resolving a superseded todo is legitimate."""
+    neo4j = _StubNeo4j(responses=[[{"applied": 1}]])
+    repo = TodoRepository(neo4j)
+
+    repo.resolve_todo("t1", "m1")
+
+    assert "SUPERSEDED_BY" not in neo4j.calls[0]["query"]
+
+
+@pytest.mark.unit
+def test_supersession_collects_successors_rather_than_truncating() -> None:
+    """Two successors (concurrent supersessions) must both surface. The previous
+    query made succ.uuid a grouping key and took an unordered LIMIT 1, dropping one
+    at random."""
+    neo4j = _StubNeo4j(responses=[[{
+        "superseded_by": [{"uuid": "new1", "ns": "default"},
+                          {"uuid": "new2", "ns": "default"}],
+        "supersedes": [],
+    }]])
+    repo = TodoRepository(neo4j)
+
+    lineage = repo.todo_supersession("t1")
+
+    assert lineage["superseded_by"] == ["new1", "new2"]
+    query = neo4j.calls[0]["query"]
+    assert "collect(DISTINCT {uuid: succ.uuid" in query
+    assert "LIMIT 1" not in query
+
+
+@pytest.mark.unit
+def test_supersession_scopes_both_sides_to_the_caller_silo() -> None:
+    """A shared default-bucket todo must not hand a foreign reader the uuids of
+    siloed todos on either end of its lineage."""
+    neo4j = _StubNeo4j(responses=[[{
+        "superseded_by": [{"uuid": "mine", "ns": "alpha"},
+                          {"uuid": "shared", "ns": DEFAULT_TODO_NAMESPACE}],
+        "supersedes": [{"uuid": "theirs", "ns": "beta"}],
+    }]])
+    repo = TodoRepository(neo4j)
+
+    lineage = repo.todo_supersession("t1", ["alpha", DEFAULT_TODO_NAMESPACE])
+
+    # Own silo and the shared bucket are visible; another silo's uuid is not.
+    assert lineage["superseded_by"] == ["mine", "shared"]
+    assert lineage["supersedes"] == []
+
+
+@pytest.mark.unit
+def test_get_todo_passes_its_namespace_filter_into_the_lineage_read() -> None:
+    neo4j = _StubNeo4j(responses=[
+        [{"uuid": "t1", "content": "body"}],
+        [],
+        [{"superseded_by": [], "supersedes": []}],
+    ])
+    repo = TodoRepository(neo4j)
+
+    todo = repo.get_todo("t1", namespace="alpha")
+
+    # get_todo matched the todo under this list; the lineage must be filtered by the
+    # same one, so the two rules cannot drift apart.
+    assert neo4j.calls[0]["params"]["namespaces"] == ["alpha", DEFAULT_TODO_NAMESPACE]
+    assert todo["supersession"] == {"superseded_by": [], "supersedes": []}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "rows,expected",
+    [
+        ([], "old_todo_not_found"),
+        ([{"status": "open", "has_successor": True}], "old_todo_already_superseded"),
+        ([{"status": "closed", "has_successor": False}], "old_todo_not_open"),
+        ([{"status": "open", "has_successor": False}], "new_todo_ineligible"),
+    ],
+)
+def test_supersede_refusal_names_the_failed_precondition(rows, expected) -> None:
+    """One opaque reason covered five causes, and `already_superseded` is reachable."""
+    neo4j = _StubNeo4j(responses=[[{"applied": 0}], rows])
+    repo = TodoRepository(neo4j)
+
+    result = repo.supersede_todo("old1", "new1")
+
+    assert result["applied"] is False
+    assert result["reason"] == expected
+
+
+@pytest.mark.unit
+def test_link_relations_are_not_re_listed_in_the_tool_layer() -> None:
+    """CF-150 shape: the tool validated against its own copy of the whitelist."""
+    from menhir.domain.todo_location import TODO_LINK_RELATIONS
+    from menhir.infrastructure.todo_repository import _TODO_LINK_RELATIONS
+    from menhir.mcp.tools.ops.link_memory_to_todo import _RELATIONS
+
+    assert _TODO_LINK_RELATIONS is TODO_LINK_RELATIONS
+    assert set(_RELATIONS) == set(TODO_LINK_RELATIONS)
+
+
+@pytest.mark.unit
+def test_get_todo_tool_renders_supersession_lineage() -> None:
+    """The block reached the dict and never reached the agent: GetTodoTool builds its
+    output from named keys and had no branch for it, so the edge had no reader on the
+    only surface that matters."""
+    from menhir.mcp.tools.ops.get_todo import GetTodoTool
+
+    tool = GetTodoTool()
+    backend = MagicMock()
+    backend.get_todo = AsyncMock(
+        return_value={
+            "uuid": "old-1",
+            "content": "body",
+            "status": "closed",
+            "priority": "normal",
+            "supersession": {"superseded_by": ["new-1"], "supersedes": ["older-1"]},
+        }
+    )
+    tool.get_backend = MagicMock(return_value=backend)
+
+    import asyncio
+    result = asyncio.run(tool.endpoint(uuid="old-1"))
+
+    assert "superseded by: new-1" in result
+    assert "supersedes: older-1" in result
+
+
+@pytest.mark.unit
+def test_get_todo_tool_warns_on_an_ambiguous_lineage() -> None:
+    from menhir.mcp.tools.ops.get_todo import GetTodoTool
+
+    tool = GetTodoTool()
+    backend = MagicMock()
+    backend.get_todo = AsyncMock(
+        return_value={
+            "uuid": "old-1",
+            "content": "body",
+            "status": "closed",
+            "supersession": {"superseded_by": ["new-1", "new-2"], "supersedes": []},
+        }
+    )
+    tool.get_backend = MagicMock(return_value=backend)
+
+    import asyncio
+    result = asyncio.run(tool.endpoint(uuid="old-1"))
+
+    assert "new-1" in result and "new-2" in result
+    assert "WARNING" in result
+
+
+@pytest.mark.unit
+def test_get_todo_tool_omits_lineage_lines_when_there_is_none() -> None:
+    from menhir.mcp.tools.ops.get_todo import GetTodoTool
+
+    tool = GetTodoTool()
+    backend = MagicMock()
+    backend.get_todo = AsyncMock(
+        return_value={
+            "uuid": "t1",
+            "content": "body",
+            "status": "open",
+            "supersession": {"superseded_by": [], "supersedes": []},
+        }
+    )
+    tool.get_backend = MagicMock(return_value=backend)
+
+    import asyncio
+    result = asyncio.run(tool.endpoint(uuid="t1"))
+
+    assert "superseded by" not in result
+    assert "supersedes" not in result
+
+
+# ---------------------------------------------------------------------------
+# Refile discoverability: the marker must reach the surfaces an agent actually meets
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_list_todos_reports_a_predecessor_count_per_row() -> None:
+    """get_todo renders the lineage, but nothing calls get_todo unless a listing first
+    says there is one to look up."""
+    neo4j = _StubNeo4j(responses=[[
+        {"uuid": "a", "content": "refile", "pred_namespaces": ["default", "default"]},
+        {"uuid": "b", "content": "fresh", "pred_namespaces": []},
+    ]])
+    repo = TodoRepository(neo4j)
+
+    rows = repo.list_todos()
+
+    assert rows[0]["supersedes_count"] == 2
+    assert rows[1]["supersedes_count"] == 0
+    # The raw namespace list is an implementation detail and must not leak outward.
+    assert "pred_namespaces" not in rows[0]
+
+
+@pytest.mark.unit
+def test_list_todos_counts_only_predecessors_the_caller_may_see() -> None:
+    neo4j = _StubNeo4j(responses=[[
+        {"uuid": "a", "content": "x", "pred_namespaces": ["alpha", "beta", "default"]},
+    ]])
+    repo = TodoRepository(neo4j)
+
+    rows = repo.list_todos(namespace="alpha")
+
+    # alpha + the shared bucket count; beta is another silo.
+    assert rows[0]["supersedes_count"] == 2
+
+
+@pytest.mark.unit
+def test_list_todos_tool_surfaces_the_refile_marker() -> None:
+    from menhir.mcp.tools.ops.list_todos import ListTodosTool
+
+    tool = ListTodosTool()
+    backend = MagicMock()
+    backend.list_todos = AsyncMock(return_value=[
+        {"uuid": "a", "content": "refiled work", "priority": "high",
+         "created_at": "2026-09-03", "supersedes_count": 2},
+    ])
+    tool.get_backend = MagicMock(return_value=backend)
+
+    import asyncio
+    result = asyncio.run(tool.endpoint(status="open", limit=25))
+
+    assert "refile of 2 earlier todo(s)" in result
+    assert "get_todo(uuid) lists them" in result
+
+
+@pytest.mark.unit
+def test_list_todos_tool_stays_quiet_when_nothing_was_refiled() -> None:
+    from menhir.mcp.tools.ops.list_todos import ListTodosTool
+
+    tool = ListTodosTool()
+    backend = MagicMock()
+    backend.list_todos = AsyncMock(return_value=[
+        {"uuid": "a", "content": "fresh", "priority": "normal",
+         "created_at": "2026-09-03", "supersedes_count": 0},
+    ])
+    tool.get_backend = MagicMock(return_value=backend)
+
+    import asyncio
+    result = asyncio.run(tool.endpoint(status="open", limit=25))
+
+    assert "refile" not in result
+
+
+@pytest.mark.unit
+def test_hook_output_marks_a_refiled_todo() -> None:
+    out = format_hook_output(
+        [],
+        todos=[
+            {"priority": "high", "content": "refiled work", "supersedes_count": 3},
+            {"priority": "normal", "content": "fresh work", "supersedes_count": 0},
+        ],
+    )
+
+    assert "(refile of 3)" in out
+    assert "fresh work" in out
+    assert "fresh work (refile" not in out

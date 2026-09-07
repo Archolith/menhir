@@ -39,6 +39,20 @@ def test_production_env_uses_current_canonical_policy_digest() -> None:
     assert match.group(1) == declared
 
 
+def test_production_env_selects_openrouter_luna_for_chat_and_graphiti() -> None:
+    source = ENV_EXAMPLE.read_text(encoding="utf-8")
+    for required in (
+        "LLM_CHAT_PROVIDER=local",
+        "GRAPHITI_LLM_PROVIDER=local",
+        "GRAPHITI_EMBED_PROVIDER=openai",
+        "LOCAL_LLM_BASE_URL=https://openrouter.ai/api/v1",
+        "LOCAL_LLM_CHAT_MODEL=openai/gpt-5.6-luna",
+        "OPENAI_EMBED_MODEL=text-embedding-3-small",
+        "MENHIR_CANONICAL_SELF_BINDING_MODE=enforce",
+    ):
+        assert required in source.splitlines()
+
+
 def test_access_contract_is_executable_and_documented() -> None:
     payload = json.loads(POLICY.read_text(encoding="utf-8"))
     contract = payload["access_contract"]

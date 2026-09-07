@@ -9,6 +9,7 @@ import sys
 from types import ModuleType
 
 import pytest
+from pydantic import BaseModel, Field
 
 from menhir.config import MemorySettings
 from menhir.infrastructure.graphiti_client import GraphitiClient
@@ -17,6 +18,7 @@ from menhir.infrastructure.graphiti_helpers import (
     _normalize_graphiti_json_payload,
     _raw_preview,
 )
+from menhir.infrastructure.graphiti_llm_patches import _openai_strict_json_schema
 from menhir.infrastructure.scheduler_trace import build_episode_scheduler_task
 import menhir.infrastructure.graphiti_client as graphiti_client_module
 
@@ -422,6 +424,68 @@ def test_raw_preview_compacts_whitespace_and_truncates() -> None:
     assert preview.startswith("line1 line2 ")
     assert preview.endswith("...")
     assert len(preview) == 40
+
+
+@pytest.mark.unit
+def test_openai_structured_output_schema_is_strict_at_every_object() -> None:
+    class NestedPayload(BaseModel):
+        name: str
+        tags: list[str] = Field(default_factory=list)
+
+    class ResponsePayload(BaseModel):
+        nested: NestedPayload
+
+    schema = _openai_strict_json_schema(ResponsePayload)
+    nested = schema["$defs"]["NestedPayload"]
+
+    assert schema["additionalProperties"] is False
+    assert schema["required"] == ["nested"]
+    assert nested["additionalProperties"] is False
+    assert nested["required"] == ["name", "tags"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_graphiti_openai_generic_client_sends_strict_response_format(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class ResponsePayload(BaseModel):
+        value: str = "default"
+
+    class _PatchedOpenAIGenericClient:
+        def __init__(self, *, config: object, client: object | None = None) -> None:
+            self.config = config
+            self.client = client
+            self.max_tokens = 128
+            self.model = "chat-model"
+            self.temperature = 0.0
+
+        def _clean_input(self, value: str) -> str:
+            return value
+
+    chat_client = _DummyOpenAIChat(
+        response=_DummyChatResponse(content='{"value": "ok"}')
+    )
+    client = type("Client", (), {"chat": chat_client})()
+    monkeypatch.setattr(
+        graphiti_client_module, "OpenAIGenericClient", _PatchedOpenAIGenericClient
+    )
+    monkeypatch.delattr(_PatchedOpenAIGenericClient, "_yawn_patched", raising=False)
+    graphiti_client_module._patch_graphiti_openai_generic_client()
+    llm_client = _PatchedOpenAIGenericClient(config=object(), client=client)
+
+    response = await llm_client._generate_response(
+        messages=[_DummyOpenAIMessage(role="user", content="hello")],
+        response_model=ResponsePayload,
+        max_tokens=64,
+    )
+
+    assert response == {"value": "ok"}
+    response_format = chat_client.completions.calls[0]["response_format"]
+    assert response_format["type"] == "json_schema"
+    assert response_format["json_schema"]["strict"] is True
+    assert response_format["json_schema"]["schema"]["additionalProperties"] is False
+    assert response_format["json_schema"]["schema"]["required"] == ["value"]
 
 
 @pytest.mark.unit

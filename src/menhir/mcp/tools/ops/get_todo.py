@@ -80,6 +80,22 @@ class GetTodoTool(BaseTextTool):
             name = link.get("memory_name") or link.get("memory_uuid", "?")
             lines.append(f"{str(link.get('relation', '')).lower()}: {name}")
 
+        # Refile lineage. Rendered here because this is the ONLY agent-facing reader of
+        # the SUPERSEDED_BY edge: the repository attaches the block, and without these
+        # lines every MCP client gets a todo with no successor and writes the lineage as
+        # prose again -- which is the whole thing supersede_todo exists to stop.
+        supersession = row.get("supersession") or {}
+        successors = supersession.get("superseded_by") or []
+        for successor in successors:
+            lines.append(f"superseded by: {successor}")
+        if len(successors) > 1:
+            lines.append(
+                "  ^ WARNING: more than one successor. Concurrent supersessions can "
+                "produce this; the lineage is ambiguous until one edge is removed."
+            )
+        for predecessor in supersession.get("supersedes") or []:
+            lines.append(f"supersedes: {predecessor}")
+
         lines.append("")
         lines.append(row.get("content") or "(no content)")
         return "\n".join(lines)

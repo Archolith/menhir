@@ -28,9 +28,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import ntpath
 import os
 import posixpath
 import re
+import stat
 import sys
 from datetime import datetime, timedelta, timezone
 
@@ -113,6 +115,7 @@ _RELEASE_RENDERED = frozenset({
     "production_env_sha256", "operations_policy_sha256",
     "oauth_public_key_sha256",
 })
+_RELEASE_RENDERED_OPTIONAL = frozenset({"python_runtime_digest_sha256"})
 _RELEASE_NETWORK = frozenset({
     "project", "external_network", "alias", "peers",
 })
@@ -154,6 +157,7 @@ _RELEASE_REQUIRED_RENDERED_ARTIFACTS = {
     "/srv/menhir/production/release/production.env": "production_env_sha256",
     "/etc/yawn-vps/menhir-oauth-policy.json": "operations_policy_sha256",
     "/etc/yawn-vps/menhir-oauth-public.pem": "oauth_public_key_sha256",
+    "/etc/yawn-vps/menhir-python-runtime.sha256": "python_runtime_digest_sha256",
 }
 
 # Safe, monotonic release identity shape. Every release_id MUST match so a
@@ -491,8 +495,10 @@ def validate_release(path: str) -> dict:
     _require_sha256(release.get("provenance_sha256"), "provenance_sha256")
 
     rendered = release.get("rendered")
-    _require_exact_keys(rendered, _RELEASE_RENDERED, "rendered")
-    for key in sorted(_RELEASE_RENDERED):
+    if not isinstance(rendered, dict) or not _RELEASE_RENDERED.issubset(rendered) \
+            or not set(rendered).issubset(_RELEASE_RENDERED | _RELEASE_RENDERED_OPTIONAL):
+        raise ValueError("rendered has invalid labels")
+    for key in sorted(rendered):
         _require_sha256(rendered.get(key), "rendered.%s" % key)
 
     network = release.get("network")
@@ -584,11 +590,18 @@ def validate_release(path: str) -> dict:
             digest = _require_sha256(entry.get("sha256"),
                                      "artifacts[%s].sha256" % path)
             rendered_key = entry.get("rendered_key")
-            if rendered_key not in _RELEASE_RENDERED or rendered.get(rendered_key) != digest:
+            if rendered_key not in (_RELEASE_RENDERED | _RELEASE_RENDERED_OPTIONAL) \
+                    or rendered.get(rendered_key) != digest:
                 raise ValueError("artifacts[%s] is not bound to rendered authority" % path)
         else:
             raise ValueError("artifacts[%s].kind must be git or rendered" % path)
     for path, rendered_key in _RELEASE_REQUIRED_RENDERED_ARTIFACTS.items():
+        if rendered_key in _RELEASE_RENDERED_OPTIONAL and rendered_key not in rendered:
+            if path in artifacts:
+                raise ValueError(
+                    "artifacts[%s] cannot exist without rendered authority" % path
+                )
+            continue
         entry = artifacts.get(path)
         if not isinstance(entry, dict) or entry.get("kind") != "rendered" \
                 or entry.get("rendered_key") != rendered_key \
@@ -814,6 +827,13 @@ _LOCAL_ARCHIVE_ENTRY_KEYS = frozenset({
     "generation", "path", "sha256", "size",
 })
 
+_DESKTOP_ARCHIVE_KEYS = frozenset({
+    "schema", "kind", "generation", "release", "archive",
+    "desktop_destination", "archived_utc",
+})
+_DESKTOP_RELEASE_KEYS = frozenset({"release_id", "release_manifest_sha256"})
+_DESKTOP_ARCHIVE_ENTRY_KEYS = frozenset({"sha256", "size_bytes"})
+
 
 def _validate_receipt_release(release, label):
     _require_exact_keys(release, _RECEIPT_RELEASE_KEYS, label)
@@ -871,8 +891,8 @@ def validate_receipt(path: str, kind: str) -> dict:
                             "local_encrypted_archives")
         retention_target = local_archives.get("retention_target_generations")
         if not isinstance(retention_target, int) or isinstance(retention_target, bool) \
-                or retention_target < 2:
-            raise ValueError("local encrypted retention target must be at least two generations")
+                or retention_target < 1:
+            raise ValueError("local encrypted retention target must be positive")
         archives = local_archives.get("archives")
         if not isinstance(archives, list) or not archives:
             raise ValueError("local_encrypted_archives.archives must be a non-empty list")
@@ -883,7 +903,7 @@ def validate_receipt(path: str, kind: str) -> dict:
             local_archives.get("current_archive_path"),
             "local_encrypted_archives.current_archive_path",
         )
-        if not posixpath.isabs(current_archive_path):
+        if not (posixpath.isabs(current_archive_path) or ntpath.isabs(current_archive_path)):
             raise ValueError("local_encrypted_archives.current_archive_path must be absolute")
         for index, archive in enumerate(archives):
             label = "local_encrypted_archives.archives[%d]" % index
@@ -893,7 +913,7 @@ def validate_receipt(path: str, kind: str) -> dict:
             if not _GENERATION_RE.match(archive_generation):
                 raise ValueError("%s.generation is invalid" % label)
             local_path = _require_str(archive.get("path"), "%s.path" % label)
-            if not posixpath.isabs(local_path):
+            if not (posixpath.isabs(local_path) or ntpath.isabs(local_path)):
                 raise ValueError("%s.path must be absolute" % label)
             if not os.path.basename(local_path).startswith(archive_generation + "-") or \
                     not local_path.endswith(".tar.gz.age"):
@@ -914,6 +934,8 @@ def validate_receipt(path: str, kind: str) -> dict:
         if not isinstance(retained_count, int) or isinstance(retained_count, bool) or \
                 retained_count != len(archive_generations):
             raise ValueError("local retained generation count must match distinct evidence")
+        if retained_count < retention_target:
+            raise ValueError("local retained generation count is below retention target")
         if not current_matches:
             raise ValueError(
                 "local encrypted archive evidence must include the current generation"
@@ -988,12 +1010,92 @@ def validate_receipt_binding(path: str, kind: str, release_path: str,
     return receipt
 
 
-def validate_backup_promotion(path: str) -> dict:
-    """Apply the stricter freshness/retention gate used only for promotion."""
+def validate_backup_promotion(
+        path: str, archive_root: str = "/srv/menhir/backups/encrypted") -> dict:
+    """Validate promotion evidence against the encrypted files that exist now."""
     receipt = validate_receipt(path, "backup-local")
     if receipt.get("plaintext_removed") is not True:
         raise ValueError("plaintext removal must be confirmed before promotion")
+    local_archives = receipt["local_encrypted_archives"]
+    if local_archives["retention_target_generations"] < 2:
+        raise ValueError("promotion requires two retained encrypted generations")
     _require_fresh(receipt["checked_utc"], "backup-local.checked_utc", 3600)
+    archive_root = os.path.abspath(archive_root)
+    root_stat = os.lstat(archive_root)
+    if stat.S_ISLNK(root_stat.st_mode) or not stat.S_ISDIR(root_stat.st_mode):
+        raise ValueError("encrypted archive root must be a non-symlink directory")
+    archives = local_archives["archives"]
+    for index, archive in enumerate(archives):
+        archive_path = os.path.abspath(archive["path"])
+        if os.path.dirname(archive_path) != archive_root:
+            raise ValueError("encrypted archive is outside the fixed archive root")
+        info = os.lstat(archive_path)
+        if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+            raise ValueError("encrypted archive must be a regular non-symlink file")
+        if info.st_size != archive["size"]:
+            raise ValueError("encrypted archive size does not match receipt")
+        if _sha256_file(archive_path) != archive["sha256"]:
+            raise ValueError("encrypted archive digest does not match receipt")
+    return receipt
+
+
+def validate_desktop_archive(
+        path: str, backup_path: str, release_path: str,
+        archive_root: str = "/srv/menhir/backups/encrypted") -> dict:
+    """Bind a fresh desktop-copy receipt to the live backup and release authority."""
+    receipt = load_strict(path)
+    _require_exact_keys(receipt, _DESKTOP_ARCHIVE_KEYS, "desktop archive receipt")
+    if receipt.get("schema") != SCHEMA_VERSION:
+        raise ValueError("desktop archive receipt schema must be %d" % SCHEMA_VERSION)
+    if receipt.get("kind") != "menhir-desktop-archive":
+        raise ValueError("desktop archive receipt kind is invalid")
+    generation = _require_str(receipt.get("generation"), "desktop archive generation")
+    if not _GENERATION_RE.match(generation):
+        raise ValueError("desktop archive generation is invalid")
+    release_binding = receipt.get("release")
+    _require_exact_keys(release_binding, _DESKTOP_RELEASE_KEYS, "desktop archive release")
+    _require_str(release_binding.get("release_id"), "desktop archive release_id")
+    _require_sha256(release_binding.get("release_manifest_sha256"),
+                    "desktop archive release manifest")
+    archive = receipt.get("archive")
+    _require_exact_keys(archive, _DESKTOP_ARCHIVE_ENTRY_KEYS, "desktop archive")
+    _require_sha256(archive.get("sha256"), "desktop archive sha256")
+    size = archive.get("size_bytes")
+    if not isinstance(size, int) or isinstance(size, bool) or size <= 0:
+        raise ValueError("desktop archive size_bytes must be positive")
+    destination = _require_str(
+        receipt.get("desktop_destination"), "desktop archive destination"
+    )
+    if not ntpath.isabs(destination):
+        raise ValueError("desktop archive destination must be an absolute Windows path")
+    _require_fresh(receipt.get("archived_utc"), "desktop archive archived_utc", 3600)
+
+    backup = validate_backup_promotion(backup_path, archive_root)
+    release = validate_release(release_path)
+    if backup["release"]["release_id"] != release["release_id"] or \
+            backup["release"]["release_manifest_sha256"] != _sha256_file(release_path):
+        raise ValueError("backup receipt does not bind the release authority")
+    current_path = backup["local_encrypted_archives"]["current_archive_path"]
+    current = next(
+        item for item in backup["local_encrypted_archives"]["archives"]
+        if item["path"] == current_path and item["generation"] == backup["generation"]
+    )
+    expected = {
+        "generation": backup["generation"],
+        "release_id": release["release_id"],
+        "release_manifest_sha256": _sha256_file(release_path),
+        "sha256": current["sha256"],
+        "size_bytes": current["size"],
+    }
+    actual = {
+        "generation": generation,
+        "release_id": release_binding["release_id"],
+        "release_manifest_sha256": release_binding["release_manifest_sha256"],
+        "sha256": archive["sha256"],
+        "size_bytes": size,
+    }
+    if actual != expected:
+        raise ValueError("desktop archive receipt does not bind the current backup and release")
     return receipt
 
 
@@ -1027,7 +1129,8 @@ def main(argv):
         print("usage: menhir_schema.py <validate-manifest|validate-release|"
               "validate-receipt|validate-receipt-binding|validate-prerequisite|"
               "validate-prerequisite-binding|validate-source-fence|"
-              "verify-source-fence|validate-backup-promotion> "
+              "verify-source-fence|validate-backup-promotion|"
+              "validate-desktop-archive> "
                "<path> [root] [kind] [release_path]", file=sys.stderr)
         return 2
     command, path = argv[1], argv[2]
@@ -1053,6 +1156,12 @@ def main(argv):
             verify_source_fence(path, argv[3])
         elif command == "validate-backup-promotion":
             validate_backup_promotion(path)
+        elif command == "validate-desktop-archive":
+            if len(argv) != 5:
+                raise ValueError(
+                    "validate-desktop-archive requires backup and release paths"
+                )
+            validate_desktop_archive(path, argv[3], argv[4])
         else:
             print("unknown command: %s" % command, file=sys.stderr)
             return 2
