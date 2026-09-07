@@ -12,6 +12,10 @@ from .projection_lifecycle_repository import (
     projection_lifecycle_schema_queries,
 )
 from .providers import ProviderConfig, ProviderKind, build_chat_backend
+from .realization_coverage_repository import (
+    RealizationLifecycleRepository,
+    ScalarStateProjectionHashSource,
+)
 from .schema import (
     EDGE_LABELS,
     MEMORY_NODE_LABELS,
@@ -35,6 +39,8 @@ __all__ = [
     "ProjectionLifecycleRepository",
     "PROJECTION_LIFECYCLE_SCHEMA_QUERIES",
     "projection_lifecycle_schema_queries",
+    "RealizationLifecycleRepository",
+    "ScalarStateProjectionHashSource",
     "PhaseOneSchemaResult",
     "PolicyStampResult",
     "MEMORY_NODE_LABELS",
