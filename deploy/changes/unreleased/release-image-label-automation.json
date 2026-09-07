@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "id": "release-image-label-automation",
+  "category": "operations",
+  "deployment_class": "maintenance",
+  "summary": "Derive, verify, publish, and record release image provenance labels automatically.",
+  "details": "Commit 8f52a5a21801de20bc207a57daf954754eb5e531 adds a maintained release image builder that derives the Git revision and wheel digests, verifies every wheelhouse entry, supplies the Docker label arguments, verifies the built labels, optionally publishes the image, and emits its exact registry manifest reference. The deployment handbook also separates packaged-product release work from personal deployment and records the private-registry, authority-digest, PowerShell, and Caddy failure modes found during release 13.",
+  "operator_impact": "Use deploy/build_release_image.py instead of manually constructing Docker label arguments. Copy its image_ref and registry_digest output into release inputs.",
+  "repositories": {
+    "menhir": [
+      "8f52a5a21801de20bc207a57daf954754eb5e531"
+    ]
+  },
+  "security_scopes": [
+    "host-privilege-and-command-wrappers",
+    "supply-chain-and-build-evidence"
+  ],
+  "breaking": false
+}
