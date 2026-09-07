@@ -12,6 +12,7 @@ from pathlib import Path
 
 
 PROBE_CLIENT_ID = "menhir-deploy-probe"
+USER_AGENT = "Menhir-Release-Accept/1"
 IMAGE_DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
 
 
@@ -32,6 +33,7 @@ def _post(url: str, token: str, payload: dict, session: str = "") -> tuple[int, 
         "Authorization": "Bearer " + token,
         "Content-Type": "application/json",
         "Accept": "application/json, text/event-stream",
+        "User-Agent": USER_AGENT,
     }
     if session:
         headers["Mcp-Session-Id"] = session
@@ -106,7 +108,7 @@ def _inspect_container(name: str) -> dict:
 
 def _get_json(url: str) -> dict:
     request = urllib.request.Request(
-        url, headers={"Accept": "application/json", "User-Agent": "Menhir-Release-Accept/1"}
+        url, headers={"Accept": "application/json", "User-Agent": USER_AGENT}
     )
     with urllib.request.urlopen(request, timeout=15) as response:
         value = json.load(response)
@@ -132,7 +134,9 @@ def _require_probe_policy(policy: dict) -> None:
         raise RuntimeError("deploy-probe deny boundary is invalid")
 
 
-def _mint_probe_token() -> str:
+def _mint_probe_token(container_name: str = "menhir-prod-app") -> str:
+    if container_name not in {"menhir-prod-app", "menhir-candidate-app"}:
+        raise RuntimeError("unsupported probe-token container")
     script = r'''import json
 import os
 import secrets
@@ -161,7 +165,7 @@ print(jose_provider.sign_jwt(
 ))
 '''
     token = _run(
-        ["docker", "exec", "-i", "menhir-prod-app", "python", "-"],
+        ["docker", "exec", "-i", container_name, "python", "-"],
         input_bytes=script.encode("ascii"),
     )
     if token.count(".") != 2 or any(character.isspace() for character in token):
@@ -277,6 +281,9 @@ def _production_accept(base_url: str, release_path: Path, policy_path: Path) -> 
 
 
 def main() -> int:
+    if len(sys.argv) == 2 and sys.argv[1] == "mint-candidate":
+        print(_mint_probe_token("menhir-candidate-app"))
+        return 0
     if len(sys.argv) == 3:
         _candidate_accept(sys.argv[1], sys.argv[2])
         return 0
@@ -284,7 +291,8 @@ def main() -> int:
         _production_accept(sys.argv[2], Path(sys.argv[3]), Path(sys.argv[4]))
         return 0
     print(
-        "usage: mcp_acceptance_probe.py <base-url> <bearer-token> | "
+        "usage: mcp_acceptance_probe.py mint-candidate | "
+        "<base-url> <bearer-token> | "
         "production <base-url> <release-json> <policy-json>",
         file=sys.stderr,
     )

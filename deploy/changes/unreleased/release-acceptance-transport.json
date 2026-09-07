@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "id": "release-acceptance-transport",
+  "category": "fixed",
+  "deployment_class": "maintenance",
+  "summary": "Make maintenance release acceptance self-contained and Cloudflare-compatible.",
+  "details": "Commit 7d7171924f5869b6012e362cf66e57d43d38dcd9 makes the maintenance runner mint its 60-second read-only candidate probe token in memory, gives authenticated acceptance POSTs the same declared release User-Agent as GET checks, and rejects incorrectly prefixed Python runtime digest evidence during preparation.",
+  "operator_impact": "Maintenance releases no longer require an operator-created acceptance-token file, and deterministic Cloudflare browser-signature rejection is caught by tests before deployment.",
+  "repositories": {
+    "menhir": [
+      "7d7171924f5869b6012e362cf66e57d43d38dcd9"
+    ]
+  },
+  "security_scopes": [
+    "authentication-and-oauth-authority",
+    "runtime-hardening-and-observability",
+    "supply-chain-and-build-evidence"
+  ],
+  "breaking": false
+}

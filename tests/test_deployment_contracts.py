@@ -746,6 +746,8 @@ def test_release_run_reconstructs_progress_instead_of_trusting_state():
     assert "current-generation" in source
     assert 'validate-desktop-archive "$desktop_receipt" "$backup_receipt" "$RELEASE_JSON"' in source
     assert "requires a completed local backup and verified desktop archive receipt" in source
+    assert 'recall_token="$(python3 "$acceptance_probe" mint-candidate)"' in source
+    assert 'MENHIR_RECALL_TOKEN="$recall_token" "${SCRIPT_DIR}/candidate-accept.sh"' in source
 
 
 def test_runtime_binding_distinguishes_policy_file_and_canonical_digests():

@@ -217,7 +217,12 @@ fi
 
 if ! at_least accepted; then
     echo "[5/8] Running candidate acceptance"
-    "${SCRIPT_DIR}/candidate-accept.sh"
+    acceptance_probe="${SCRIPT_DIR}/mcp_acceptance_probe.py"
+    require_root_file "$acceptance_probe" "release-owned candidate acceptance probe"
+    recall_token="$(python3 "$acceptance_probe" mint-candidate)"
+    [ -n "$recall_token" ] || { echo "candidate probe token mint returned empty output" >&2; exit 1; }
+    MENHIR_RECALL_TOKEN="$recall_token" "${SCRIPT_DIR}/candidate-accept.sh"
+    unset recall_token
     write_stage accepted "$generation"; stage=accepted
 fi
 

@@ -49,6 +49,7 @@ RELEASE_ID_RE = re.compile(r"^menhir-prod-[0-9]+\.[0-9]+\.[0-9]+-[0-9]+$")
 AUTHOR_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._@+-]{0,127}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+SHA256_HEX_RE = re.compile(r"^[0-9a-f]{64}$")
 VERSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,255}$")
 ENV_KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
 IMAGE_REF_RE = re.compile(
@@ -614,7 +615,7 @@ def prepare_release_spec(
         public_key_text = public_key_bytes.decode("ascii")
     except UnicodeError as exc:
         raise ReleaseSpecError("runtime digest and public key must be ASCII") from exc
-    if not DIGEST_RE.fullmatch(runtime_text):
+    if not SHA256_HEX_RE.fullmatch(runtime_text):
         raise ReleaseSpecError(
             "python runtime digest file must contain one sha256 digest"
         )
