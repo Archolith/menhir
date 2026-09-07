@@ -6,6 +6,10 @@ from .list_artifact_questions import ArtifactQuestionsTool
 from .get_artifact_relationships import ArtifactRelationshipsTool
 from .close_stale_todos import CloseStaleTodosTool
 from .close_todo import CloseTodoTool
+from .supersede_todo import SupersedeTodoTool
+from .resolve_todo import ResolveTodoTool
+from .reopen_todo import ReopenTodoTool
+from .link_memory_to_todo import LinkMemoryToTodoTool
 from .delete_namespace import DeleteNamespaceTool
 from .force_reenrich import ForceReenrichTool
 from .force_release_lease import ForceReleaseEnrichmentLeaseTool
@@ -57,6 +61,10 @@ OPS_TOOLS = [
     GetTodoTool,
     CloseTodoTool,
     CloseStaleTodosTool,
+    SupersedeTodoTool,
+    ResolveTodoTool,
+    ReopenTodoTool,
+    LinkMemoryToTodoTool,
     GetArtifactTool,
     ListArtifactsTool,
     ArtifactQuestionsTool,

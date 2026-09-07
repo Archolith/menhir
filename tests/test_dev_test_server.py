@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 
 import pytest
 
@@ -12,8 +13,10 @@ from scripts.dev.test_server import (
     TEST_KEYS,
     RunningServer,
     _shape_env,
+    _container_command,
     _throwaway_neo4j,
     launch,
+    resolve_container_image,
 )
 
 
@@ -98,6 +101,83 @@ def test_public_profile_refuses_external_test_neo4j(monkeypatch) -> None:
     with pytest.raises(RuntimeError, match="refuse.*MENHIR_TEST_NEO4J_URI"):
         with _throwaway_neo4j(allow_external=False):
             pass
+
+
+def test_container_command_keeps_secrets_out_of_argv(tmp_path) -> None:
+    env = _shape_env(
+        "static", port=8123, host="127.0.0.1", workdir=tmp_path,
+        jwks_uri=DEAD_JWKS_URI, backend="neo4j", instance_id="test-instance",
+        neo4j=("bolt://127.0.0.1:17687", "neo4j", "throwaway-password"),
+    )
+    env.update({
+        "OPENAI_API_KEY": "openai-secret-value",
+        "LOCAL_LLM_API_KEY": "openrouter-secret-value",
+    })
+
+    command, process_env = _container_command(
+        image="menhir:test-image", name="menhir-test-app", port=18123,
+        workdir=tmp_path, env=env,
+    )
+
+    rendered = " ".join(command)
+    assert "openai-secret-value" not in rendered
+    assert "openrouter-secret-value" not in rendered
+    assert "OPENAI_API_KEY" not in process_env
+    assert "LOCAL_LLM_API_KEY" not in process_env
+    assert "NEO4J_PASSWORD" not in process_env
+    assert "-e OPENAI_API_KEY" not in rendered
+    assert "-e LOCAL_LLM_API_KEY" not in rendered
+    assert "-e NEO4J_PASSWORD" not in rendered
+    assert "bolt://host.docker.internal:17687" == process_env["NEO4J_URI"]
+    assert "--read-only" in command
+    assert "--pull=never" in command
+    assert "--no-healthcheck" in command
+    assert command[-1] == "menhir:test-image"
+
+
+def test_container_command_refuses_non_loopback_neo4j(tmp_path) -> None:
+    env = _shape_env(
+        "static", port=8123, host="127.0.0.1", workdir=tmp_path,
+        jwks_uri=DEAD_JWKS_URI, backend="neo4j", instance_id="test-instance",
+        neo4j=("bolt://production.example:7687", "neo4j", "not-used"),
+    )
+
+    with pytest.raises(ValueError, match="loopback disposable Neo4j"):
+        _container_command(
+            image="menhir:test-image", name="menhir-test-app", port=18123,
+            workdir=tmp_path, env=env,
+        )
+
+
+def test_resolve_container_image_pins_id_and_revision(monkeypatch) -> None:
+    result = test_server.subprocess.CompletedProcess(
+        args=[], returncode=0,
+        stdout=json.dumps([{
+            "Id": "sha256:abc123",
+            "Config": {"Labels": {"org.opencontainers.image.revision": "commit123"}},
+        }]),
+        stderr="",
+    )
+    monkeypatch.setattr(test_server.subprocess, "run", lambda *args, **kwargs: result)
+
+    assert resolve_container_image(
+        "menhir:candidate", expected_revision="commit123"
+    ) == ("sha256:abc123", "commit123")
+
+
+def test_resolve_container_image_refuses_wrong_revision(monkeypatch) -> None:
+    result = test_server.subprocess.CompletedProcess(
+        args=[], returncode=0,
+        stdout=json.dumps([{
+            "Id": "sha256:abc123",
+            "Config": {"Labels": {"org.opencontainers.image.revision": "wrong"}},
+        }]),
+        stderr="",
+    )
+    monkeypatch.setattr(test_server.subprocess, "run", lambda *args, **kwargs: result)
+
+    with pytest.raises(RuntimeError, match="revision mismatch"):
+        resolve_container_image("menhir:candidate", expected_revision="commit123")
 
 
 def test_invalid_explicit_interpreter_cleans_temporary_workdir(

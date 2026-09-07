@@ -296,11 +296,15 @@ class TurnEvidenceRepository:
         rows = self._neo4j.execute(
             """
             MATCH (current:TurnEvidence {turn_id: $turn_id})
-            WHERE current.namespace IS NOT NULL AND current.session_id IS NOT NULL
+            WHERE current.session_id IS NOT NULL
                   AND current.recorded_at IS NOT NULL
-                  AND coalesce(current.namespace, 'default') = $namespace
+                  AND CASE WHEN trim(coalesce(current.namespace, '')) = '' THEN 'default'
+                           ELSE trim(current.namespace) END = $namespace
             MATCH (prior:TurnEvidence)
-            WHERE prior.namespace = current.namespace
+            WHERE CASE WHEN trim(coalesce(prior.namespace, '')) = '' THEN 'default'
+                       ELSE trim(prior.namespace) END =
+                  CASE WHEN trim(coalesce(current.namespace, '')) = '' THEN 'default'
+                       ELSE trim(current.namespace) END
                   AND prior.session_id = current.session_id
                   AND prior.turn_id <> current.turn_id
                   AND prior.recorded_at < current.recorded_at

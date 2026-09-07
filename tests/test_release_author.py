@@ -162,7 +162,8 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, dict]:
             path.write_text(json.dumps(policy_payload), encoding="ascii")
         elif name == "production_env_sha256":
             path.write_text(
-                f"MENHIR_CLIENT_POLICY_DIGEST={policy_digest}\n",
+                f"MENHIR_CLIENT_POLICY_DIGEST={policy_digest}\n"
+                "MENHIR_CANONICAL_SELF_BINDING_MODE=enforce\n",
                 encoding="ascii",
             )
         else:
@@ -282,12 +283,42 @@ def test_authors_canonical_release_from_clean_exact_inputs(tmp_path: Path) -> No
     ).stdout.strip()
 
 
+def test_accepts_yawn_env_as_digest_without_copying_secret_file(tmp_path: Path) -> None:
+    spec_path, output, spec = _fixture(tmp_path)
+    digest = "d" * 64
+    spec["rendered"]["yawn_env_sha256"] = "sha256:" + digest
+    spec_path.write_text(json.dumps(spec), encoding="utf-8")
+
+    release = _author(spec_path, output)
+
+    assert release["rendered"]["yawn_env_sha256"] == digest
+
+
+def test_refuses_literal_digest_for_nonsecret_rendered_artifact(tmp_path: Path) -> None:
+    spec_path, output, spec = _fixture(tmp_path)
+    spec["rendered"]["caddy_sha256"] = "sha256:" + "d" * 64
+    spec_path.write_text(json.dumps(spec), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="does not permit a literal digest"):
+        _author(spec_path, output)
+
+
+def test_refuses_malformed_yawn_env_literal_digest(tmp_path: Path) -> None:
+    spec_path, output, spec = _fixture(tmp_path)
+    spec["rendered"]["yawn_env_sha256"] = "sha256:not-a-digest"
+    spec_path.write_text(json.dumps(spec), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="literal digest is invalid"):
+        _author(spec_path, output)
+
+
 def test_refuses_production_env_bound_to_raw_policy_file_digest(tmp_path: Path) -> None:
     spec_path, output, spec = _fixture(tmp_path)
     policy = Path(spec["rendered"]["policy_sha256"])
     env = Path(spec["rendered"]["production_env_sha256"])
     env.write_text(
-        f"MENHIR_CLIENT_POLICY_DIGEST={_sha(policy)}\n",
+        f"MENHIR_CLIENT_POLICY_DIGEST={_sha(policy)}\n"
+        "MENHIR_CANONICAL_SELF_BINDING_MODE=enforce\n",
         encoding="ascii",
     )
 
@@ -317,11 +348,32 @@ def test_refuses_digest_valid_policy_with_product_role_drift(tmp_path: Path) -> 
     policy["canonical_digest"] = digest
     policy_path.write_text(json.dumps(policy), encoding="ascii")
     env_path.write_text(
-        f"MENHIR_CLIENT_POLICY_DIGEST={digest}\n",
+        f"MENHIR_CLIENT_POLICY_DIGEST={digest}\n"
+        "MENHIR_CANONICAL_SELF_BINDING_MODE=enforce\n",
         encoding="ascii",
     )
 
     with pytest.raises(ValueError, match="codex client tier"):
+        _author(spec_path, output)
+
+
+@pytest.mark.parametrize("mode", [None, "", "typo", "enforce\nenforce"])
+def test_refuses_missing_or_invalid_canonical_self_mode(
+    tmp_path: Path, mode: str | None,
+) -> None:
+    spec_path, output, spec = _fixture(tmp_path)
+    env_path = Path(spec["rendered"]["production_env_sha256"])
+    policy_path = Path(spec["rendered"]["policy_sha256"])
+    policy = json.loads(policy_path.read_text(encoding="utf-8"))
+    lines = [f"MENHIR_CLIENT_POLICY_DIGEST={policy['canonical_digest']}"]
+    if mode is not None:
+        lines.extend(
+            f"MENHIR_CANONICAL_SELF_BINDING_MODE={value}"
+            for value in mode.splitlines()
+        )
+    env_path.write_text("\n".join(lines) + "\n", encoding="ascii")
+
+    with pytest.raises(ValueError, match="MENHIR_CANONICAL_SELF_BINDING_MODE"):
         _author(spec_path, output)
 
 
@@ -335,6 +387,10 @@ def test_refuses_digest_valid_policy_with_product_role_drift(tmp_path: Path) -> 
         (
             "/etc/yawn-vps/menhir-oauth-public.pem",
             "oauth_public_key_sha256",
+        ),
+        (
+            "/etc/yawn-vps/menhir-python-runtime.sha256",
+            "python_runtime_digest_sha256",
         ),
     ),
 )

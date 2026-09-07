@@ -3,15 +3,25 @@
 from __future__ import annotations
 
 import json
+from decimal import Decimal, InvalidOperation
 from typing import Any, Callable
 
 from menhir.domain.typed_assertion import IDENTITY_VERSION, TypedAssertion, normalize_scalar
 from menhir.infrastructure.schema import get_scalar_state_activation_queries
-
 from menhir.infrastructure.typed_assertion_models import (
     ScalarStateActivationError,
     _RECORD_CYPHER,
 )
+
+
+def _scalar_value_json(value: Any) -> str:
+    """Encode Decimal values as JSON numbers so currency scale survives durable storage."""
+    if isinstance(value, Decimal):
+        return normalize_scalar(value)
+    if isinstance(value, (list, tuple)):
+        return "[" + ", ".join(_scalar_value_json(item) for item in value) + "]"
+    return json.dumps(value, ensure_ascii=False)
+
 
 class TypedAssertionRepairMixin:
     def head_uuids_for_source_key(self, source_key: str) -> list[dict[str, Any]]:
@@ -290,7 +300,7 @@ class TypedAssertionRepairMixin:
             """
             MATCH (h:TypedAssertionHead {claim_key: $ck})-[:CURRENT]->(a:TypedAssertion)
             RETURN a.assertion_id AS assertion_id, a.assertion_key AS assertion_key,
-                   a.value AS value, a.value_json AS value_json,
+                   a.value_kind AS value_kind, a.value AS value, a.value_json AS value_json,
                    a.evidence_tier AS evidence_tier, a.perceiver_version AS perceiver_version
             LIMIT 1
             """,
@@ -315,7 +325,7 @@ class TypedAssertionRepairMixin:
             "unit": (a.unit or "").strip().lower(),
             "operation": a.operation.strip().lower(),
             "value_norm": normalize_scalar(a.value),
-            "value_json": json.dumps(a.value, ensure_ascii=False),
+            "value_json": _scalar_value_json(a.value),
             "stated_span": a.stated_span.strip(),
             "span_start": int(a.span_start), "span_end": int(a.span_end),
             "claim_ordinal": int(a.claim_ordinal),
@@ -337,7 +347,10 @@ class TypedAssertionRepairMixin:
         raw = row.get("value_json")
         if raw is not None:
             try:
-                row["value"] = json.loads(raw)
-            except (json.JSONDecodeError, TypeError):
+                if str(row.get("value_kind") or "").strip().lower() == "money":
+                    row["value"] = json.loads(raw, parse_float=Decimal, parse_int=Decimal)
+                else:
+                    row["value"] = json.loads(raw)
+            except (json.JSONDecodeError, InvalidOperation, TypeError):
                 pass
         return row

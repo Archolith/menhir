@@ -580,7 +580,7 @@ class ScalarStateKind(ViewKind):
         # numeric compat mirror for view_value; the register content proper is ss_value/ss_display.
         if isinstance(value, bool):
             numeric = 1.0 if value else 0.0
-        elif isinstance(value, (int, float)):
+        elif isinstance(value, (int, float, Decimal)):
             numeric = float(value)
         else:
             numeric = 0.0

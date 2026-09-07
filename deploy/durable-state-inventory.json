@@ -9,6 +9,9 @@
     {"backup_path": "config/release.json", "capture": "exact-file-copy", "restore": "release-authority-validation", "source": "release/release.json", "writers": []}
   ],
   "excluded": [
-    {"path": "state/neo4j/logs", "reason": "operational logs are non-authoritative and independently rotated"}
+    {"path": "state/neo4j/logs", "reason": "operational logs are non-authoritative and independently rotated"},
+    {"path": "runtime/menhir/tmp/logs/server.access.log", "reason": "container-local access log is non-authoritative and discarded with the container"},
+    {"path": "runtime/menhir/tmp/logs/server.err.log", "reason": "container-local error log is non-authoritative and discarded with the container"},
+    {"path": "runtime/menhir/tmp/logs/server.log", "reason": "container-local server log is non-authoritative and discarded with the container"}
   ]
 }
