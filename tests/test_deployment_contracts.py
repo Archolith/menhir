@@ -1042,6 +1042,16 @@ def test_neo4j_community_query_inventory_omits_enterprise_only_authority():
     assert "dbms.components" in _authority.NEO4J_COMPONENT_QUERY
 
 
+def test_neo4j_index_authority_excludes_volatile_usage_statistics():
+    query = dict(_authority.NEO4J_COMMUNITY_AUTHORITY_QUERIES)["indexes"]
+    assert "YIELD" in query
+    assert "lastRead" not in query
+    assert "readCount" not in query
+    for field in ("name", "state", "type", "labelsOrTypes", "properties",
+                  "indexProvider", "owningConstraint"):
+        assert field in query
+
+
 def test_neo4j_enterprise_query_inventory_requires_roles_and_privileges():
     queries = dict(_authority.NEO4J_ENTERPRISE_AUTHORITY_QUERIES)
     assert set(queries) == {"roles", "privileges"}
@@ -1051,6 +1061,8 @@ def test_release_library_defines_canonical_prod_root_and_hash_memory_limit():
     source = (REPO_ROOT / "deploy" / "release-lib.sh").read_text(encoding="utf-8")
     assert 'MENHIR_PROD_ROOT="${MENHIR_PROD_ROOT:-${MENHIR_ROOT}}"' in source
     assert 'MENHIR_APP_MEMORY_LIMIT=4g candidate_compose "$generation" config --quiet' in source
+    assert 'MENHIR_APP_MEMORY_LIMIT=4g candidate_compose "$1" up -d menhir' in source
+    assert 'MENHIR_APP_MEMORY_LIMIT=4g candidate_compose "$generation" up -d --remove-orphans' in source
     assert '--rm --no-deps -T menhir python3 - neo4j' in source
     assert '--memory 4g' not in source
 

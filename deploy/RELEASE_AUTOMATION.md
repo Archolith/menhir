@@ -89,6 +89,46 @@ Every staging attempt snapshots production authority and container identity and 
 unchanged. Future cold-cache tests must remove or avoid the candidate app image so this path is not
 accidentally validated only by a previously cached image.
 
+Windows operator wrappers must not assume profile-loaded PowerShell hashing commands or Unix mode
+preservation. Use an embedded .NET SHA-256 implementation, verify the complete uploaded bundle by
+content, and only then restore every payload mode from the verified `bundle-manifest.json` plus
+`install.sh` mode `0755`. Recursive SCP from Windows preserves the reviewed bytes but not the Unix
+modes; treating transferred modes as authoritative makes an otherwise valid bundle fail before
+installation. Never normalize modes broadly or before the content digest passes.
+
+The production wrapper's transient private-registry credential lookup must also avoid piping the
+registry key directly from Windows PowerShell 5 into `docker-credential-desktop`. That shell can
+encode native-pipeline input in a form the helper misreads, returning a non-JSON error even though
+the credential exists. Invoke the helper with redirected .NET process streams, keep the secret out
+of command arguments and logs, upload only the restricted temporary Docker config, and remove it
+from both desktop and VPS immediately after the digest-pinned pulls.
+
+On operator workstations with PowerShell 7, `personal_deploy.py` selects `pwsh.exe` for its staging
+and promotion wrappers and falls back to Windows PowerShell only when necessary. This keeps native
+process I/O and modern cmdlet behavior consistent with the shell in which deployment preflights are
+tested; the lower-level wrapper still uses portable .NET hashing and redirected credential-helper
+streams so the fallback remains supported.
+
+PowerShell 7 can deserialize an ISO-8601 JSON string directly into a UTC `DateTime`, while Windows
+PowerShell 5 leaves the same value as a string. Timestamp gates must accept both representations:
+require `Utc` kind for a deserialized `DateTime`, or require an explicit `Z`, successful invariant
+round-trip parse, and zero offset for a string. Tests must execute the promotion gate under both
+shells using a Python-generated timestamp such as `2026-09-07T15:51:00.882184Z`.
+
+Neo4j `SHOW INDEXES` includes volatile usage statistics. In particular, `lastRead` and `readCount`
+change during the mandatory read-only recall probe. They are observations, not schema authority,
+and including them in the before/after authority digest makes production acceptance fail by
+construction while leaving graph content unchanged. The digest must select only index definition
+and health fields. The production incident that exposed this showed six indexes read during the
+probe and no admitted graph mutation.
+
+The authority digest's Compose override requests 4 GiB, but an override supplied to `compose exec`
+cannot resize an already-running 2 GiB container. On the production-sized graph this caused the
+post-probe digest to page tens of gigabytes and stretched a minutes-long check past twenty minutes.
+Create the isolated candidate with the reviewed 4 GiB digest allowance; production remains at its
+normal 2 GiB limit. Future work should make the digest bounded-memory and emit progress so the
+temporary allowance is no longer necessary.
+
 This contract is implemented by `personal_deploy.py`, `personal_stage.ps1`,
 `personal_stage_vps.py`, and `personal_promote.ps1`. The isolated end-to-end rehearsal must pass for
 the exact release before approval can be recorded. Direct execution through

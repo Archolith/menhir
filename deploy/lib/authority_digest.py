@@ -55,7 +55,17 @@ NEO4J_COMMUNITY_AUTHORITY_QUERIES = (
         "type(r) AS type, elementId(start) AS start_element_id, "
         "elementId(end) AS end_element_id, properties(r) AS properties",
     ),
-    ("indexes", "SHOW INDEXES"),
+    # Index usage counters are runtime observations, not schema authority.
+    # A mandatory recall probe updates ``lastRead`` and ``readCount`` even when
+    # the graph is otherwise perfectly read-only, so selecting every SHOW
+    # INDEXES column makes the before/after invariant fail by construction.
+    (
+        "indexes",
+        "SHOW INDEXES YIELD id, name, state, populationPercent, type, "
+        "entityType, labelsOrTypes, properties, indexProvider, owningConstraint "
+        "RETURN id, name, state, populationPercent, type, entityType, "
+        "labelsOrTypes, properties, indexProvider, owningConstraint",
+    ),
     ("constraints", "SHOW CONSTRAINTS"),
     ("databases", "SHOW DATABASES"),
     ("users", "SHOW USERS"),

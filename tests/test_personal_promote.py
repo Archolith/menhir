@@ -112,6 +112,19 @@ def test_promotion_gate_validates_evidence_before_calling_transaction(
     assert marker.read_text(encoding="utf-8") == "AppOnly|menhir-prod-0.2.0-12"
 
 
+@pytest.mark.skipif(shutil.which("pwsh.exe") is None, reason="requires PowerShell 7")
+def test_promotion_gate_accepts_json_timestamps_under_powershell_7(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    command, marker, _ = _fixture(tmp_path, monkeypatch)
+    command[0] = shutil.which("pwsh.exe") or "pwsh.exe"
+
+    result = subprocess.run(command, text=True, capture_output=True, check=False)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert marker.read_text(encoding="utf-8") == "AppOnly|menhir-prod-0.2.0-12"
+
+
 @pytest.mark.skipif(shutil.which("powershell.exe") is None, reason="requires Windows PowerShell")
 def test_promotion_gate_blocks_tampered_receipt_before_transaction(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,

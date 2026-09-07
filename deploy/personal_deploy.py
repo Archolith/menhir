@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import stat
 import subprocess
 import sys
@@ -31,6 +32,7 @@ RELEASE_STATE_NAME = "release-flow.json"
 RELEASE_NAME = "release.json"
 BUNDLE_NAME = "install-bundle"
 DEFAULT_PROMOTION_WRAPPER = Path(__file__).resolve().with_name("personal_promote.ps1")
+POWERSHELL = shutil.which("pwsh.exe") or shutil.which("powershell.exe") or "powershell.exe"
 
 KIND = "menhir-personal-deployment"
 SCHEMA = 1
@@ -296,7 +298,7 @@ def _runner_sha256(path: Path) -> str:
 def _stage_command(workspace: Path, state: dict[str, Any], runner: Path, receipt: Path) -> list[str]:
     if runner.suffix.lower() == ".ps1":
         return [
-            "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(runner),
+            POWERSHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(runner),
             "-Bundle", str(Path(state["release_workspace"]) / BUNDLE_NAME),
             "-ExpectedBundleSha256", state["bundle_sha256"],
             "-ExpectedReleaseId", state["release_id"],
@@ -503,7 +505,7 @@ def _validate_promotion_receipt(
 def _promotion_command(workspace: Path, state: dict[str, Any], wrapper: Path) -> list[str]:
     mode = "AppOnly" if state["deployment_class"] == "app-only" else "Maintenance"
     return [
-        "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
+        POWERSHELL, "-NoProfile", "-ExecutionPolicy", "Bypass",
         "-File", str(wrapper),
         "-Mode", mode,
         "-BundlePath", str(Path(state["release_workspace"]) / BUNDLE_NAME),

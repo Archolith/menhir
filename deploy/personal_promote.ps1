@@ -104,14 +104,28 @@ function Assert-UtcTimestamp {
         [switch]$Recent
     )
     $parsed = [DateTimeOffset]::MinValue
-    $text = [string]$Value
-    if (-not $text.EndsWith("Z", [StringComparison]::Ordinal) -or
-        -not [DateTimeOffset]::TryParse(
-        $text,
-        [Globalization.CultureInfo]::InvariantCulture,
-        [Globalization.DateTimeStyles]::RoundtripKind,
-        [ref]$parsed
-    ) -or $parsed.Offset -ne [TimeSpan]::Zero) {
+    if ($Value -is [DateTime]) {
+        if ($Value.Kind -ne [DateTimeKind]::Utc) {
+            throw "$Label must be an ISO-8601 UTC timestamp."
+        }
+        $parsed = [DateTimeOffset]::new($Value)
+    }
+    elseif ($Value -is [DateTimeOffset]) {
+        $parsed = $Value
+    }
+    else {
+        $text = [string]$Value
+        $parsedOk = [DateTimeOffset]::TryParse(
+            $text,
+            [Globalization.CultureInfo]::InvariantCulture,
+            [Globalization.DateTimeStyles]::RoundtripKind,
+            [ref]$parsed
+        )
+        if (-not $text.EndsWith("Z", [StringComparison]::Ordinal) -or -not $parsedOk) {
+            throw "$Label must be an ISO-8601 UTC timestamp."
+        }
+    }
+    if ($parsed.Offset -ne [TimeSpan]::Zero) {
         throw "$Label must be an ISO-8601 UTC timestamp."
     }
     $age = [DateTimeOffset]::UtcNow - $parsed

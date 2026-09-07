@@ -112,7 +112,10 @@ candidate_neo4j_up() {
 }
 
 candidate_app_up() {
-    candidate_compose "$1" up -d menhir
+    # The full authority digest canonicalizes and sorts the production graph.
+    # Give the isolated candidate the already-reviewed one-shot allowance while
+    # keeping the writable production service at its normal 2 GiB limit.
+    MENHIR_APP_MEMORY_LIMIT=4g candidate_compose "$1" up -d menhir
     wait_healthy menhir-candidate-app menhir-candidate-neo4j
 }
 
@@ -168,7 +171,7 @@ candidate_up() {
     # candidate telemetry sink must therefore be writable by that identity while
     # remaining private from every other host user.
     install -d -o 10001 -g 10001 -m 0700 "${candidate_root}/probe-output/telemetry"
-    candidate_compose "$generation" up -d --remove-orphans
+    MENHIR_APP_MEMORY_LIMIT=4g candidate_compose "$generation" up -d --remove-orphans
     wait_healthy menhir-candidate-app menhir-candidate-neo4j
 }
 
