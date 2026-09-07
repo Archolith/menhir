@@ -24,26 +24,41 @@ test is not evidence for unrelated changes shipping in the same image.
 
 ## Required future release method
 
-Production is a promotion target, not the environment where release automation is debugged. Before
-the next production release, the release workflow must implement and pass this sequence unattended:
+Product publication and this owner's production deployment are two independent workflows with an
+explicit artifact handoff. Publishing a Menhir package or image must never deploy it, and deploying
+Menhir personally must never rebuild or republish it.
 
-1. CI builds, scans, and publishes one immutable image and release manifest.
-2. A production-equivalent staging job deploys that exact image with the production container
+The **product release workflow** builds, tests, scans, versions, signs, documents, and publishes one
+immutable package/image plus its release manifest and changelog. It ends when those artifacts are
+available for consumers. It has no production credentials and cannot invoke the personal deployment
+runner.
+
+The **personal deployment workflow** selects one already-published release by immutable digest,
+rehearses that exact artifact in private staging, obtains one owner approval, promotes it to
+`memory.ctharvey.me`, runs the bounded public canary, and records success or automatic rollback. It
+cannot change the package, image, manifest, or changelog it consumes.
+
+Production is a promotion target, not the environment where either workflow is debugged. Before
+the next personal production deployment, automation must implement and pass this sequence unattended:
+
+1. Select one completed product release and verify its published provenance, manifest, and digest.
+2. A production-equivalent staging job deploys that exact artifact with the production container
    memory limits, network shape, OAuth policy shape, and ingress behavior. Staging uses isolated
    disposable data and non-production credentials; it never mounts production authority.
 3. Staging exercises OAuth discovery and authorization, MCP initialization/list/recall, an allowed
    synthetic write, a denied operation, restart behavior, and automatic rollback. It emits one
    digest-bound receipt only after the complete workflow passes.
-4. The owner reviews the staged changelog and grants one production-promotion approval.
+4. The owner reviews the product release changelog plus staging receipt and grants one
+   production-promotion approval.
 5. The production runner verifies the staging receipt, backup and restore-drill freshness, and the
    exact image digest; replaces only the components admitted by the mechanical deployment class;
    runs a bounded read-only public canary; and records success or automatically restores the prior
    image.
 
-No LLM review, image build, dependency scan, full database traversal, new backup generation, or
-restore rehearsal belongs in the routine production cutover. Those checks happen in CI, isolated
-staging, or scheduled operations and are reused through immutable receipts. A routine cutover has
-a five-minute foreground budget and one human approval. A timeout or missing receipt exits or rolls
+No package publication, LLM review, image build, dependency scan, full database traversal, new
+backup generation, or restore rehearsal belongs in the routine production cutover. Those checks
+happen in CI, isolated staging, or scheduled operations and are reused through immutable receipts.
+A routine cutover has a five-minute foreground budget and one human approval. A timeout or missing receipt exits or rolls
 back; it never starts an improvised repair or escalates itself into maintenance.
 
 `maintenance` remains a separate, deliberately rare path for schema/data migrations, database or
@@ -60,6 +75,10 @@ scripts or unit tests pass. The first eligible production release must present e
 clean, end-to-end production-equivalent rehearsal, including failure and automatic rollback. Until
 then, keep any interrupted transaction fenced and use the recovery section below rather than
 debugging successive release stages against production.
+
+This transition gate blocks personal deployment only. Product releases may continue to be packaged
+and published while deployment automation is being repaired; their publication must not imply that
+the owner's production instance has adopted them.
 
 ## Non-negotiable client access invariant
 

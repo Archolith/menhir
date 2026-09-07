@@ -8,6 +8,9 @@
 - Reserved fresh backups, restore rehearsals, full authority comparisons, and writer replacement for
   mechanically classified maintenance or recovery releases, and blocked further production releases
   until the staging receipt is enforced end to end.
+- Separated product publication from personal deployment: publication produces immutable consumable
+  artifacts without production access, while personal deployment selects one published digest and
+  cannot rebuild or republish it.
 
 ## 2026-09-06 - harden the stacked core projection promotion
 

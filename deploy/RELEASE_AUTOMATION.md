@@ -1,22 +1,31 @@
 # Release automation
 
-`release_flow.py` is the coordinator for a resumable release workflow. The required
-target sequence is `prepare -> review when required -> finalize -> stage -> approve ->
-promote`. It prepares immutable release inputs, renders the staged change notes, creates
-the independent-review request, finalizes the reviewed authority, builds the host
-installer, and must bind production promotion to a complete production-equivalent staging
-receipt.
+Menhir has two independent automation boundaries:
 
-It does not build or publish container images, invent evidence, perform the
-independent review, or deploy without an explicit command. Those remain
-separate trust boundaries. Production must not be used to discover whether the coordinator,
+- **Product release:** `prepare -> review when required -> finalize -> publish`. It builds,
+  tests, scans, versions, documents, and publishes immutable packages/images and provenance.
+  Success means a consumable product release exists; it does not mean any production instance was
+  deployed.
+- **Personal deployment:** `select published release -> stage -> approve -> promote -> observe`.
+  It consumes an immutable product release without rebuilding it, proves it against this owner's
+  production contract, and deploys only after one explicit owner approval.
+
+`release_flow.py` currently coordinates release preparation and the existing deployment handoff.
+The target implementation must expose the two workflows as separate commands and state machines.
+The only shared object is the immutable published release identity and its evidence; neither
+workflow may silently invoke or mutate the other.
+
+The personal deployment side does not build or publish container images, invent evidence, perform
+the product's independent review, or deploy without an explicit command. Those remain separate
+trust boundaries. Production must not be used to discover whether the coordinator,
 transport, candidate topology, acceptance probe, or rollback works.
 
 ## Target staging and promotion contract
 
-Before production promotion is enabled, automation must:
+Before personal production promotion is enabled, deployment automation must:
 
-1. deploy the exact finalized image and release manifest into isolated disposable staging;
+1. select an already-published immutable image and release manifest, then deploy them into isolated
+   disposable staging without rebuilding or changing them;
 2. reproduce production memory limits, Compose networking, OAuth policy shape, and ingress
    request handling without using production secrets or data;
 3. run the complete OAuth/MCP/read/write/deny/restart/rollback suite as one job;
@@ -33,8 +42,9 @@ Only a mechanically classified maintenance or recovery release may invoke the fu
 transaction.
 
 This contract is not satisfied merely by the current `prepare`, `finalize`, and `deploy` commands.
-Until `stage` produces and `deploy --execute` verifies the required receipt, follow the transition
-gate in `LIVE_VPS_PLAYBOOK.md` and do not start another production release.
+Until a separate personal-deployment `stage` produces and `promote` verifies the required receipt,
+follow the transition gate in `LIVE_VPS_PLAYBOOK.md` and do not start another personal production
+deployment. Product packaging and publication may continue independently.
 
 ## Before starting
 
