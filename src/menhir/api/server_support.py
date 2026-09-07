@@ -98,6 +98,12 @@ def build_server_prereqs(
         if client_policy.access_contract is None:
             raise ValueError("production startup requires a version 2 access contract")
         client_policy.access_contract.require_primary_endpoint(oauth_config.resource)
+        client_policy.access_contract.require_oauth_scope_mapping(
+            scopes_supported=oauth_config.scopes_supported,
+            read_scopes=oauth_config.read_scopes,
+            write_scopes=oauth_config.write_scopes,
+            admin_scopes=oauth_config.admin_scopes,
+        )
         if not candidate_readonly and oauth_client_store is not None:
             reconcile_policy_clients(
                 client_policy,

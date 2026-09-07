@@ -35,7 +35,11 @@ OPERATOR_DENIED_TOOLS = frozenset(
 AGENT_ALLOWED_TOOLS = frozenset(
     {
         "add_memory",
+        "add_todo",
         "build_context",
+        "close_stale_todos",
+        "close_todo",
+        "get_todo",
         "list_todos",
         "query_structure",
         "read_flagged_memories",
@@ -73,6 +77,34 @@ class ProductionAccessContract:
             raise ValueError(
                 "production OAuth resource must equal the policy access contract "
                 f"primary endpoint {self.primary_endpoint!r}"
+            )
+
+    def require_oauth_scope_mapping(
+        self,
+        *,
+        scopes_supported: tuple[str, ...],
+        read_scopes: tuple[str, ...],
+        write_scopes: tuple[str, ...],
+        admin_scopes: tuple[str, ...],
+    ) -> None:
+        """Refuse a runtime that cannot issue every production access role."""
+
+        expected = {
+            "supported": OPERATOR_SCOPES,
+            "read": frozenset({"menhir:read"}),
+            "write": frozenset({"menhir:write"}),
+            "admin": frozenset({"menhir:admin"}),
+        }
+        actual = {
+            "supported": frozenset(scopes_supported),
+            "read": frozenset(read_scopes),
+            "write": frozenset(write_scopes),
+            "admin": frozenset(admin_scopes),
+        }
+        if actual != expected:
+            raise ValueError(
+                "production OAuth scope mapping must expose read/write/admin "
+                "and map menhir:admin to the operator tier"
             )
 
 

@@ -307,3 +307,18 @@ def code_ref_file_predicate(file_alias: str, path_expr: str) -> str:
         f"{file_alias}.structure_path ENDS WITH ('/' + {path_expr}))\n"
         ")"
     )
+
+
+#: The relations a memory may declare against a todo, and their edge types. THE single
+#: definition: `TodoRepository._TODO_LINK_RELATIONS` reads it as the injection whitelist,
+#: and the `link_memory_to_todo` MCP tool reads its keys to validate the argument. Both
+#: sites previously hand-wrote the pair -- they agreed, and nothing kept them agreeing,
+#: which is the CF-150 finding this module's other shared constants exist to avoid.
+#:
+#: Lifecycle relations (RESOLVES_TODO / REOPENS_TODO) are deliberately NOT here: they
+#: exist only as the evidence half of resolve_todo / reopen_todo, which move status and
+#: edge together, so a bare link call must never be able to name one.
+TODO_LINK_RELATIONS: dict[str, str] = {
+    "mentions": "MENTIONS_TODO",
+    "addresses": "ADDRESSES_TODO",
+}

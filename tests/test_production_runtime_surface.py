@@ -157,7 +157,10 @@ def test_candidate_prereqs_do_not_open_mutating_oauth_stores(monkeypatch) -> Non
 
     marker = object()
     policy_marker = SimpleNamespace(
-        access_contract=SimpleNamespace(require_primary_endpoint=lambda endpoint: None)
+        access_contract=SimpleNamespace(
+            require_primary_endpoint=lambda endpoint: None,
+            require_oauth_scope_mapping=lambda **kwargs: None,
+        )
     )
     monkeypatch.setattr(
         server_support, "configure_signing_key_readonly", lambda settings: marker
@@ -254,7 +257,7 @@ def _production_settings(**overrides: object) -> MemorySettings:
         "oauth_signing_key_path": str(
             Path(__file__).resolve().parent / "oauth-signing-key.test.json"
         ),
-        "client_policy_digest": "6d9ccdb4cf3e2e29123abf62178dbc165bd30933fcc677764d992b3f22f24a68",
+        "client_policy_digest": "a6c7cd4f061010415c9f68b66bb79b808eca49b8ed5df51495ff18de312a865c",
         "api_key": "test-api-key",
     }
     values.update(overrides)
@@ -326,7 +329,7 @@ def test_production_client_policy_is_digest_bound_and_tracks_clients() -> None:
     path = (
         Path(__file__).resolve().parents[1] / "deploy" / "client-policy.production.json"
     )
-    digest = "6d9ccdb4cf3e2e29123abf62178dbc165bd30933fcc677764d992b3f22f24a68"
+    digest = "a6c7cd4f061010415c9f68b66bb79b808eca49b8ed5df51495ff18de312a865c"
 
     from menhir.mcp.tools import ALL_TOOLS
 
@@ -367,6 +370,16 @@ def test_production_client_policy_is_digest_bound_and_tracks_clients() -> None:
         scopes=frozenset({"menhir:read", "menhir:write", "menhir:admin"}),
     ) is policy
 
+    chatgpt_cimd = authority.require_client(
+        client_id="https://chatgpt.com/oauth/client.json",
+        scopes=frozenset({"menhir:read", "menhir:write", "menhir:admin"}),
+        tier="operator",
+    )
+    assert chatgpt_cimd.label == "chatgpt-web-cimd"
+    assert chatgpt_cimd.registration is None
+    assert chatgpt_cimd.allowed_tools == web_allowed_tools
+    assert chatgpt_cimd.denied_tools == web_denied_tools
+
     claude_web = authority.require_client(
         client_id="6cf6322fa828bb72",
         scopes=frozenset(
@@ -396,6 +409,16 @@ def test_production_client_policy_is_digest_bound_and_tracks_clients() -> None:
         product: access.role
         for product, access in authority.access_contract.products.items()
     } == EXPECTED_PRODUCT_ROLES
+    assert authority.access_contract.products["chatgpt"].client_ids == (
+        "69c2cd871b488ff4",
+        "https://chatgpt.com/oauth/client.json",
+    )
+    authority.access_contract.require_oauth_scope_mapping(
+        scopes_supported=("menhir:read", "menhir:write", "menhir:admin"),
+        read_scopes=("menhir:read",),
+        write_scopes=("menhir:write",),
+        admin_scopes=("menhir:admin",),
+    )
 
     with pytest.raises(PermissionError, match="scopes do not match"):
         authority.require_authorization(
@@ -450,7 +473,11 @@ def test_production_client_policy_is_digest_bound_and_tracks_clients() -> None:
     agent_base_tools = frozenset(
         {
             "add_memory",
+            "add_todo",
             "build_context",
+            "close_stale_todos",
+            "close_todo",
+            "get_todo",
             "list_todos",
             "query_structure",
             "read_flagged_memories",
@@ -519,6 +546,11 @@ def test_candidate_compose_uses_exact_restored_production_authorities() -> None:
         "source: ${MENHIR_PROD_ROOT:-/srv/menhir/production}/state/oauth" not in compose
     )
     assert 'MENHIR_OAUTH_AS_REFRESH_WITHOUT_OFFLINE_ACCESS_ENABLED: "true"' in compose
+    assert (
+        'MENHIR_OAUTH_SCOPES_SUPPORTED: "menhir:read,menhir:write,menhir:admin"'
+        in compose
+    )
+    assert 'MENHIR_OAUTH_ADMIN_SCOPES: "menhir:admin"' in compose
     assert 'MENHIR_STATE_ROOT="${MENHIR_ROOT}/state"' in release_lib
     assert 'MENHIR_PROD_SECRETS_DIR="${MENHIR_ROOT}/secrets"' in release_lib
     assert 'MENHIR_PROD_POLICY_DIR="${MENHIR_ROOT}/policy"' in release_lib
@@ -537,10 +569,65 @@ def test_candidate_compose_uses_exact_restored_production_authorities() -> None:
     assert "SHOW ROLES WITH USERS" in authority_digest
     assert "SHOW PRIVILEGES" in authority_digest
     assert (
-        'candidate_compose "$generation" run --rm --no-deps -T menhir '
+        'MENHIR_APP_MEMORY_LIMIT=4g candidate_compose "$generation" run '
+        '--rm --no-deps -T menhir '
         "python3 - neo4j" in release_lib
     )
+    assert (
+        'MENHIR_APP_MEMORY_LIMIT=4g candidate_compose "$generation" config --quiet'
+        in release_lib
+    )
     assert "toString(" not in release_lib
+
+
+def test_production_startup_refuses_scope_mapping_below_access_contract(
+    monkeypatch,
+) -> None:
+    from menhir.api import server_support
+    from menhir.mcp.tools import ALL_TOOLS
+
+    monkeypatch.setattr(
+        server_support,
+        "configure_signing_key_readonly",
+        lambda settings: object(),
+    )
+    settings = _production_settings(
+        runtime_mode="candidate-readonly",
+        oauth_scopes_supported=("menhir:read", "menhir:write"),
+        oauth_admin_scopes=(),
+    )
+
+    with pytest.raises(ValueError, match="scope mapping"):
+        build_server_prereqs(
+            settings,
+            tool_catalog=frozenset(tool.name for tool in ALL_TOOLS),
+        )
+
+
+def test_release_schema_helpers_support_installed_flat_layout() -> None:
+    root = Path(__file__).resolve().parents[1]
+    release_lib = (root / "deploy" / "release-lib.sh").read_text(encoding="utf-8")
+    release_validate = (root / "deploy" / "release-validate.sh").read_text(
+        encoding="utf-8"
+    )
+    release_run = (root / "deploy" / "release-run.sh").read_text(encoding="utf-8")
+
+    assert '[ -f "$schema" ] || schema="${helper_dir}/menhir_schema.py"' in release_lib
+    assert '[ -f "$SCHEMA" ] || SCHEMA="${SCRIPT_DIR}/menhir_schema.py"' in release_validate
+    assert (
+        '[ -f "$same_host_helper" ] || '
+        'same_host_helper="${SCRIPT_DIR}/same_host_fence.py"'
+    ) in release_run
+    assert 'python3 "${SCRIPT_DIR}/lib/same_host_fence.py"' not in release_run
+
+
+def test_secret_mode_verifier_normalizes_shell_octal_notation() -> None:
+    source = (
+        Path(__file__).resolve().parents[1] / "deploy" / "secrets-map.sh"
+    ).read_text(encoding="utf-8")
+
+    assert 'normalized_mode="${m#0}"' in source
+    assert '[ "$am" = "$normalized_mode" ]' in source
 
 
 def test_production_compose_uses_compose_v5_compatible_pid_limits() -> None:

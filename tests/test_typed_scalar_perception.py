@@ -234,14 +234,14 @@ def test_each_of_the_nine_kinds_round_trips_with_real_grounding():
     for p in out:                                                         # each really grounded in source
         assert ep[0].content[p.span_start:p.span_end].lower() == p.stated_span.lower()
     dur = next(p for p in out if p.value_kind == "duration")
-    assert dur.value == [25, 35]
+    assert dur.value == [1500, 2100] and dur.unit == "seconds"
 
 
 @pytest.mark.unit
 def test_value_coercion_rescues_common_near_misses():
-    ep = [_Ep(uuid="e", content="my rent is 1200 and I am married")]
+    ep = [_Ep(uuid="e", content="my rent is $1200 and I am married")]
     rows = [
-        _row(attribute="rent", value_kind="money", unit="usd", value="$1,200", stated_span="rent is 1200"),
+        _row(attribute="rent", value_kind="money", unit="usd", value="$1,200", stated_span="rent is $1200"),
         _row(attribute="married", value_kind="boolean", value="true", stated_span="I am married"),
     ]
     out = extract_typed_scalars_once(ep, _llm(rows))
@@ -577,9 +577,8 @@ def test_scope_and_unit_collapse_spacing_to_one_slot():
     ]
     out = extract_typed_scalars_once(ep, _llm(rows))
     assert len(out) == 2
-    # "work days"/"work_days" and "per week"/"per-week" both normalize to one canonical modifier,
-    # so both proposals land in the SAME durable slot instead of forking three.
-    assert all(p.scope == "work_days" and p.unit == "per_week" for p in out)
+    # Count is intrinsically unitless; scope spelling still canonicalizes before slot identity.
+    assert all(p.scope == "work_days" and p.unit == "" for p in out)
     assert out[0].slot_key == out[1].slot_key
 
 
