@@ -26,6 +26,7 @@ from menhir.infrastructure.graphiti_model_patches import (
     _has_positive_identity_evidence,
     _is_structural_graphiti_candidate,
     _patch_graphiti_adaptive_dedupe,
+    _patch_graphiti_dedup_branch_telemetry,
     _patch_graphiti_dedup_identity_gate,
     _patch_graphiti_dedup_prompt,
     _patch_graphiti_dedupe_resolutions,

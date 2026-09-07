@@ -55,6 +55,11 @@ Do not add a `_` script to answer a question one of the durable instruments alre
 ### Operations and one-time migrations
 | Script | Purpose |
 |---|---|
+| `deploy/release_flow.py` | Resumable, digest-bound `prepare` / `finalize` / `status` / `deploy` coordinator; deploy is preview-only without exact confirmation plus `--execute` |
+| `deploy/release_spec.py` | Strictly validates release inputs and generates the maintained four-repository release-author specification |
+| `deploy/release_notes.py` | Validates committed change fragments and deterministically renders release Markdown or JSON |
+| `deploy/build_install_bundle.py` | Builds and revalidates the exact reviewed host installation bundle from committed blobs and rendered artifacts |
+| `deploy/release-install.sh` | Root-only transactional bundle installer with an independent destination allowlist and rollback of replaced files; does not start cutover |
 | `run_mcp_gateway.py` | stdio launcher for the MCP server |
 | `export_graph_backup.py` / `_tolerant.py` | logical graph backup; the tolerant variant survives corruption |
 | `migrate_schema_v_property.py` | dry-run-first `_yawn_schema_v` removal and replacement-index migration. Remote writes require `--allow-remote`; configured production targets require `--allow-production` after a verified backup |

@@ -15,7 +15,7 @@ ACTIVE and allowing SESSION alongside PERSISTENT.
 Hard vetoes:
   - either node missing (stale discovery)
   - same uuid (a node cannot absorb itself)
-  - ineligible role: structural, path-shaped, or a View/instrumentation node
+  - ineligible role: structural, path-shaped, View/instrumentation, or canonical-self node
   - namespace mismatch (never merge identities across silos)
   - COMPRESSED or GONE freshness (must be rehydrated through the lifecycle path first)
   - PROMOTED scope (operator-curated ground truth is merge-immune)
@@ -107,6 +107,8 @@ def mutable_eligibility_cypher(survivor: str = "survivor", absorbed: str = "abso
     clauses = []
     for var in (survivor, absorbed):
         clauses.extend([
+            f"coalesce({var}.is_self, false) = false",
+            f"toLower(trim(coalesce({var}.entity_role, ''))) <> 'self'",
             f"toUpper(trim(coalesce({var}.freshness, 'ACTIVE'))) IN $mergeable_freshness",
             f"toUpper(trim(coalesce({var}.scope, ''))) <> 'PROMOTED'",
             f"coalesce({var}.user_flagged, false) = false",

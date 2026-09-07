@@ -91,6 +91,15 @@ class TestClaimProjectionCarriesWorldTime:
         "session_id",
         "user_id",
         "namespace",
+        "diff",
+        "is_evidence_projection",
+        "evidence_projection_of",
+        "turn_evidence_count",
+        "turn_evidence_role",
+        "turn_evidence_declarant",
+        "turn_evidence_text",
+        "turn_evidence_namespace",
+        "subject_endpoint_eligible",
         "reference_time",
         "queued_at",
         "turn_evidence_uuid",
@@ -117,6 +126,43 @@ class TestClaimProjectionCarriesWorldTime:
         assert "n.reference_time AS reference_time" in query
         assert "n.queued_at AS queued_at" in query, (
             "queued_at is the intended fallback for live turns and must stay")
+
+    def test_subject_endpoint_eligibility_is_computed_in_the_atomic_claim(self):
+        query = self._claim_query()
+
+        assert "WITH n, [(n)-[:ADMITTED_ON]->(t:TurnEvidence) | t] AS subject_turns" in query
+        assert "size(subject_turns) = 1" in query
+        assert "n.content = subject_turns[0].text" in query
+        assert "n.evidence_projection_of = subject_turns[0].turn_id" in query
+        assert "n.diff IS NULL" in query
+        assert "AS subject_endpoint_eligible" in query
+
+
+def test_finds_pending_projection_for_idempotent_admission_retry():
+    repo = _make_repo([{"uuid": "projection-1"}])
+
+    found = repo.find_pending_evidence_projection_uuid(
+        turn_evidence_uuid="turn-1", namespace="default"
+    )
+
+    assert found == "projection-1"
+    query = repo.neo4j.execute.call_args.args[0]
+    params = repo.neo4j.execute.call_args.kwargs["params"]
+    assert "p.processing_state = 'PENDING'" in query
+    assert "evidence_projection_of: $turn_evidence_uuid" in query
+    assert "coalesce(p.namespace, p.group_id, '') IN $tenant_namespaces" in query
+    assert params == {
+        "turn_evidence_uuid": "turn-1",
+        "tenant_namespaces": ["default", ""],
+    }
+
+
+def test_pending_projection_retry_lookup_returns_none_when_absent():
+    repo = _make_repo()
+
+    assert repo.find_pending_evidence_projection_uuid(
+        turn_evidence_uuid="turn-1", namespace="tenant-a"
+    ) is None
     def test_detects_context_window_markers(self):
         from menhir.infrastructure.episode_lifecycle import is_context_window_error_text
 
@@ -189,13 +235,8 @@ class TestFetchEpisodeProcessingNoDuplicateColumns:
         assert len(aliases) == len(set(aliases)), f"duplicate RETURN aliases: {aliases}"
 
 
-class TestEnsureSelfEntityAbsorbsForks:
-    """One self identity per namespace, even though two independent creators mint it.
-
-    `ensure_self_entity` writes the canonical uuid5 node; combined-extraction now names the self
-    endpoint so a first-person edge survives, which mints a second `user` :Entity. Both fire in any
-    namespace where scalar consolidation runs, so the fork is deterministic, not a dedup race.
-    """
+class TestEnsureSelfEntityReportsForksWithoutMutation:
+    """Runtime ensure creates the target and reports forks; migration owns consolidation."""
 
     @staticmethod
     def _statements(repo):
@@ -207,34 +248,27 @@ class TestEnsureSelfEntityAbsorbsForks:
         repo.ensure_self_entity("ns-1")
         assert not any("DETACH DELETE" in s for s in self._statements(repo))
 
-    def test_fork_is_rewired_then_deleted(self):
+    def test_fork_is_reported_without_rewire_or_delete(self):
         repo = _make_repo([{"uuid": "fork-1"}])
         repo.ensure_self_entity("ns-1")
         joined = "\n".join(self._statements(repo))
-        assert "MERGE (c)-[r2:RELATES_TO {uuid: r.uuid}]->(m)" in joined
-        assert "MERGE (m)-[r2:RELATES_TO {uuid: r.uuid}]->(c)" in joined
-        assert "MERGE (e)-[:MENTIONS]->(c)" in joined
-        assert "DETACH DELETE f" in joined
+        assert "RETURN f.uuid AS uuid" in joined
+        assert "RELATES_TO" not in joined
+        assert "MENTIONS" not in joined
+        assert "DETACH DELETE" not in joined
 
-    def test_entity_edge_payload_is_carried_across(self):
-        """`SET r2 = properties(r)` — a rewire that drops the payload keeps the graph's shape and
-        loses the fact the edge carried (fact, fact_embedding, episodes, valid_at)."""
+    def test_runtime_ensure_never_touches_entity_edge_payload(self):
         repo = _make_repo([{"uuid": "fork-1"}])
         repo.ensure_self_entity("ns-1")
         rewires = [s for s in self._statements(repo) if "RELATES_TO" in s]
-        assert rewires
-        assert all("SET r2 = properties(r)" in s for s in rewires)
+        assert rewires == []
 
-    def test_embedding_is_carried_before_the_fork_dies(self):
-        """The canonical node is raw-Cypher written and has no name_embedding, so it is invisible to
-        semantic search. Folding an embedded node into it without the vector would move every stated
-        fact onto a node recall cannot find — strictly worse than the fork."""
+    def test_runtime_ensure_never_copies_embedding_or_deletes_fork(self):
         repo = _make_repo([{"uuid": "fork-1"}])
         repo.ensure_self_entity("ns-1")
-        statements = self._statements(repo)
-        carry = [i for i, s in enumerate(statements) if "c.name_embedding = coalesce(" in s]
-        delete = [i for i, s in enumerate(statements) if "DETACH DELETE" in s]
-        assert carry and delete and carry[0] < delete[0]
+        joined = "\n".join(self._statements(repo))
+        assert "c.name_embedding = coalesce(" not in joined
+        assert "DETACH DELETE" not in joined
 
     def test_views_are_never_absorbed(self):
         """A View is a projection of the subject; absorbing one would fold a derived answer into the
@@ -246,9 +280,8 @@ class TestEnsureSelfEntityAbsorbsForks:
         assert "NOT coalesce(f.is_quantstate, false)" in find
         assert "f.view_kind IS NULL" in find
 
-    def test_absorbed_summary_survives_a_later_ensure(self):
-        """The canned self summary is ON CREATE only. Setting it unconditionally would overwrite the
-        richer absorbed summary on the very next consolidation pass."""
+    def test_existing_summary_survives_a_later_ensure(self):
+        """The canned self summary is ON CREATE only; ordinary ensure never overwrites it."""
         repo = _make_repo([])
         repo.ensure_self_entity("ns-1")
         merge = self._statements(repo)[0]
@@ -256,15 +289,14 @@ class TestEnsureSelfEntityAbsorbsForks:
         assert "SET n.name = $name" in merge
         assert "n.summary = $summary," not in merge
 
-    def test_self_loops_are_not_rewired(self):
-        """An edge from the twin back to the canonical node is an artifact of the split, not a fact."""
+    def test_no_relationship_rewire_query_exists(self):
         repo = _make_repo([{"uuid": "fork-1"}])
         repo.ensure_self_entity("ns-1")
         rewires = [s for s in self._statements(repo) if "RELATES_TO" in s]
-        assert all("m.uuid <> $self_uuid" in s for s in rewires)
+        assert rewires == []
 
     def test_returns_the_deterministic_uuid_unchanged(self):
-        """Recall computes uuid5("menhir-self:<ns>") with no DB read, so absorbing must not move it."""
+        """Recall computes uuid5("menhir-self:<ns>") with no DB read; ensure never moves it."""
         import uuid as _uuid
         repo = _make_repo([{"uuid": "fork-1"}])
         got = repo.ensure_self_entity("ns-1")
