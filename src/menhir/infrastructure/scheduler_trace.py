@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from functools import partial
 from typing import Any
 
@@ -25,8 +26,26 @@ _registered = False
 _register_lock = asyncio.Lock()
 
 
+def scheduler_trace_enabled() -> bool:
+    """Whether to post task traces to the external scheduler.
+
+    Set ``SCHEDULER_TRACE_DISABLED=1`` where no scheduler is reachable. The scheduler
+    is a developer-workstation service; a deployment that has none otherwise pays a
+    2s-timeout HTTP attempt and a WARNING per lifecycle transition, forever. Tracing
+    is observability only -- disabling it changes no ingest or recall behaviour.
+    """
+    raw = os.getenv("SCHEDULER_TRACE_DISABLED", "0").strip().lower()
+    return raw not in {"1", "true", "yes", "on"}
+
+
 async def register_scheduler_task_source() -> None:
     global _registered
+    if not scheduler_trace_enabled():
+        logger.info(
+            "Scheduler task tracing disabled by SCHEDULER_TRACE_DISABLED; "
+            "no task events will be emitted"
+        )
+        return
     async with _register_lock:
         if _registered:
             await asyncio.to_thread(
@@ -86,6 +105,8 @@ async def emit_scheduler_task_event(
     parent_metadata: dict[str, Any] | None = None,
     child: dict[str, Any] | None = None,
 ) -> None:
+    if not scheduler_trace_enabled():
+        return
     scheduler_url = scheduler_url_from_env().rstrip("/")
     payload = {
         "source": "memory",

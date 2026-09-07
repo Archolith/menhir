@@ -56,8 +56,11 @@
 #   export MENHIR_RUNTIME_MODE=production
 #   export MENHIR_PUBLIC_BASE_URL=https://memory.ctharvey.me
 #   export MENHIR_CLIENT_POLICY_DIGEST=<64-hex-sha256>
-#   export LLM_CHAT_PROVIDER=openai GRAPHITI_LLM_PROVIDER=openai
+#   export LLM_CHAT_PROVIDER=local GRAPHITI_LLM_PROVIDER=local
 #   export GRAPHITI_EMBED_PROVIDER=openai
+#   export LOCAL_LLM_BASE_URL=https://openrouter.ai/api/v1
+#   export LOCAL_LLM_CHAT_MODEL=openai/gpt-5.6-luna
+#   export MENHIR_CANONICAL_SELF_BINDING_MODE=enforce
 #   docker compose -f deploy/docker-compose.production.yml up -d
 #
 # See deploy/PRODUCTION.md for exact candidate-mode env/mount commands.
@@ -127,6 +130,10 @@ services:
     image: "${MENHIR_IMAGE:?MENHIR_IMAGE (digest-pinned menhir image) is required}"
     container_name: ${MENHIR_APP_CONTAINER:-menhir-prod-app}
     restart: unless-stopped
+    # Compose `run` has no --memory option. Keep the limit in the service
+    # model so normal and one-shot containers receive a parser-validated
+    # limit; the authority digest raises this value to 4 GiB explicitly.
+    mem_limit: "${MENHIR_APP_MEMORY_LIMIT:-2g}"
     depends_on:
       neo4j:
         condition: service_healthy
@@ -162,11 +169,12 @@ services:
       MENHIR_OAUTH_ISSUER: "${MENHIR_PUBLIC_BASE_URL:?...}"
       MENHIR_OAUTH_JWKS_URI: "${MENHIR_PUBLIC_BASE_URL:?...}/.well-known/jwks.json"
       MENHIR_OAUTH_AUDIENCE: "${MENHIR_PUBLIC_BASE_URL:?...}/mcp-http"
-      # Read/write scopes; admin scope is ABSENT (empty) as required by policy.
-      MENHIR_OAUTH_SCOPES_SUPPORTED: "menhir:read,menhir:write"
+      # Exact production permission surface. The digest-bound client policy decides
+      # which identities receive operator (admin) versus agent (read/write) grants.
+      MENHIR_OAUTH_SCOPES_SUPPORTED: "menhir:read,menhir:write,menhir:admin"
       MENHIR_OAUTH_READ_SCOPES: "menhir:read"
       MENHIR_OAUTH_WRITE_SCOPES: "menhir:write"
-      MENHIR_OAUTH_ADMIN_SCOPES: ""
+      MENHIR_OAUTH_ADMIN_SCOPES: "menhir:admin"
       MENHIR_OAUTH_AS_DIR: /srv/menhir/production/state/oauth
       MENHIR_OAUTH_SIGNING_KEY_PATH: /run/secrets/oauth/oauth_signing_key.json
       MENHIR_OAUTH_REFRESH_RETRY_KEYRING_PATH: /run/secrets/oauth/retry-response-keyring.json
@@ -192,13 +200,22 @@ services:
       NEO4J_USER: neo4j
       NEO4J_DATABASE: neo4j
       MENHIR_MCP_TELEMETRY_DB: /srv/menhir/state/telemetry/mcp_telemetry.db
+      # Scheduler task tracing targets a developer-workstation service
+      # (cth.mcp.scheduler on :8082) that no deployed host runs, so it defaults to
+      # off here: otherwise every lifecycle transition pays a 2s connect timeout and
+      # logs a WARNING. Set to 0 only where a scheduler is actually reachable, and
+      # set SCHEDULER_URL alongside it.
+      SCHEDULER_TRACE_DISABLED: "${SCHEDULER_TRACE_DISABLED:-1}"
       # --- Provider selection + models. API keys come from secret files via the
       # image entrypoint, never from this file. ---
       LLM_CHAT_PROVIDER: "${LLM_CHAT_PROVIDER:?LLM_CHAT_PROVIDER is required}"
       GRAPHITI_LLM_PROVIDER: "${GRAPHITI_LLM_PROVIDER:?GRAPHITI_LLM_PROVIDER is required}"
       GRAPHITI_EMBED_PROVIDER: "${GRAPHITI_EMBED_PROVIDER:?GRAPHITI_EMBED_PROVIDER is required}"
+      LOCAL_LLM_BASE_URL: "${LOCAL_LLM_BASE_URL:-}"
+      LOCAL_LLM_CHAT_MODEL: "${LOCAL_LLM_CHAT_MODEL:-}"
       OPENAI_CHAT_MODEL: "${OPENAI_CHAT_MODEL:-gpt-4.1-nano}"
       OPENAI_EMBED_MODEL: "${OPENAI_EMBED_MODEL:-text-embedding-3-small}"
+      MENHIR_CANONICAL_SELF_BINDING_MODE: "${MENHIR_CANONICAL_SELF_BINDING_MODE:?MENHIR_CANONICAL_SELF_BINDING_MODE (off|observe|enforce) is required}"
     volumes:
       # Secrets: fixed-path, read-only, always.
       - type: bind
@@ -230,7 +247,7 @@ services:
       resources:
         limits:
           cpus: "1"
-          memory: 2g
+          memory: "${MENHIR_APP_MEMORY_LIMIT:-2g}"
           pids: 256
     logging:
       driver: json-file
