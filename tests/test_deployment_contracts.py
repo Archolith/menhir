@@ -16,6 +16,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
@@ -738,11 +739,33 @@ def test_release_run_reconstructs_progress_instead_of_trusting_state():
     assert 'require_root_file "$state" "release-run state"' in source
     assert '"${SCRIPT_DIR}/same-host-fence.sh"' in source
     assert '"$caddy_release" reconcile' in source
-    assert 'same_host_fence.py" verify' in source
+    assert 'same_host_helper="${SCRIPT_DIR}/lib/same_host_fence.py"' in source
+    assert 'same_host_helper="${SCRIPT_DIR}/same_host_fence.py"' in source
+    assert '"$same_host_helper" verify' in source
     assert "--allow-production" in source
     assert "current-generation" in source
     assert 'validate-desktop-archive "$desktop_receipt" "$backup_receipt" "$RELEASE_JSON"' in source
     assert "requires a completed local backup and verified desktop archive receipt" in source
+
+
+def test_runtime_binding_distinguishes_policy_file_and_canonical_digests():
+    source = (Path(__file__).resolve().parents[1] / "deploy" / "release-lib.sh").read_text()
+    assert 'policy.pop("canonical_digest", "")' in source
+    assert 'actual_policy_digest=hashlib.sha256(json.dumps(' in source
+    assert '(release["rendered"]["policy_sha256"], sha(policy_path), "policy")' in source
+    assert '(policy_digest, declared_policy_digest, "configured policy")' in source
+    assert '(declared_policy_digest, actual_policy_digest, "canonical policy")' in source
+    assert '(policy_digest, sha(policy_path), "configured policy")' not in source
+
+
+def test_generation_checksum_manifest_is_not_self_referential():
+    root = Path(__file__).resolve().parents[1]
+    backup = (root / "deploy" / "backup-generation.sh").read_text()
+    restore = (root / "deploy" / "restore-generation.sh").read_text()
+    assert "! -path './SHA256SUMS'" in backup
+    assert "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  ./SHA256SUMS" in restore
+    assert "invalid legacy SHA256SUMS self-entry" in restore
+    assert "unexpected SHA256SUMS self-entry" in restore
 
 
 def test_promotion_requires_release_bound_desktop_archive_receipt():
@@ -812,7 +835,12 @@ def test_candidate_prestart_neo4j_digest_uses_ephemeral_reviewed_image() -> None
         "candidate_neo4j_authority_digest() {", 1
     )[1].split("\n}", 1)[0]
     assert (
-        'candidate_compose "$generation" run --rm --no-deps -T menhir '
+        'MENHIR_APP_MEMORY_LIMIT=4g candidate_compose "$generation" config --quiet'
+        in digest_function
+    )
+    assert (
+        'MENHIR_APP_MEMORY_LIMIT=4g candidate_compose "$generation" run '
+        '--rm --no-deps -T menhir '
         "python3 - neo4j" in digest_function
     )
     assert "docker exec -i menhir-candidate-app" not in digest_function
@@ -993,3 +1021,221 @@ def test_neo4j_authority_query_inventory_includes_security_authority():
             "users", "roles", "privileges"} <= set(queries)
     assert "SHOW ROLES WITH USERS" in queries["roles"]
     assert "SHOW PRIVILEGES" in queries["privileges"]
+
+
+def test_neo4j_community_query_inventory_omits_enterprise_only_authority():
+    queries = dict(_authority.NEO4J_COMMUNITY_AUTHORITY_QUERIES)
+    assert {"nodes", "relationships", "indexes", "constraints", "databases",
+            "users"} <= set(queries)
+    assert "roles" not in queries
+    assert "privileges" not in queries
+    assert "dbms.components" in _authority.NEO4J_COMPONENT_QUERY
+
+
+def test_neo4j_enterprise_query_inventory_requires_roles_and_privileges():
+    queries = dict(_authority.NEO4J_ENTERPRISE_AUTHORITY_QUERIES)
+    assert set(queries) == {"roles", "privileges"}
+
+
+def test_release_library_defines_canonical_prod_root_and_hash_memory_limit():
+    source = (REPO_ROOT / "deploy" / "release-lib.sh").read_text(encoding="utf-8")
+    assert 'MENHIR_PROD_ROOT="${MENHIR_PROD_ROOT:-${MENHIR_ROOT}}"' in source
+    assert 'MENHIR_APP_MEMORY_LIMIT=4g candidate_compose "$generation" config --quiet' in source
+    assert '--rm --no-deps -T menhir python3 - neo4j' in source
+    assert '--memory 4g' not in source
+
+
+def test_compose_parser_resolves_authority_memory_limit_to_four_gibibytes():
+    if shutil.which("docker") is None:
+        pytest.skip("docker CLI unavailable")
+    env = {
+        **os.environ,
+        "MENHIR_IMAGE": "example.invalid/menhir@sha256:" + "1" * 64,
+        "NEO4J_IMAGE": "example.invalid/neo4j@sha256:" + "2" * 64,
+        "MENHIR_RUNTIME_MODE": "candidate-readonly",
+        "MENHIR_INSTANCE_ID": "parser-test",
+        "MENHIR_RELEASE_ID": "parser-test",
+        "MENHIR_PUBLIC_BASE_URL": "https://memory.example",
+        "MENHIR_CLIENT_POLICY_DIGEST": "3" * 64,
+        "LLM_CHAT_PROVIDER": "openai",
+        "GRAPHITI_LLM_PROVIDER": "openai",
+        "GRAPHITI_EMBED_PROVIDER": "openai",
+        "MENHIR_CANONICAL_SELF_BINDING_MODE": "enforce",
+        "MENHIR_APP_MEMORY_LIMIT": "4g",
+    }
+    completed = subprocess.run(
+        [
+            "docker", "compose", "--file",
+            str(REPO_ROOT / "deploy" / "docker-compose.production.yml"),
+            "config", "--format", "json",
+        ],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    config = json.loads(completed.stdout)
+    assert int(config["services"]["menhir"]["mem_limit"]) == 4 * 1024**3
+
+
+def test_compose_parser_forwards_openrouter_luna_settings():
+    if shutil.which("docker") is None:
+        pytest.skip("docker CLI unavailable")
+    env = {
+        **os.environ,
+        "MENHIR_IMAGE": "example.invalid/menhir@sha256:" + "1" * 64,
+        "NEO4J_IMAGE": "example.invalid/neo4j@sha256:" + "2" * 64,
+        "MENHIR_RUNTIME_MODE": "candidate-readonly",
+        "MENHIR_INSTANCE_ID": "parser-test",
+        "MENHIR_RELEASE_ID": "parser-test",
+        "MENHIR_PUBLIC_BASE_URL": "https://memory.example",
+        "MENHIR_CLIENT_POLICY_DIGEST": "3" * 64,
+        "LLM_CHAT_PROVIDER": "local",
+        "GRAPHITI_LLM_PROVIDER": "local",
+        "GRAPHITI_EMBED_PROVIDER": "openai",
+        "LOCAL_LLM_BASE_URL": "https://openrouter.ai/api/v1",
+        "LOCAL_LLM_CHAT_MODEL": "openai/gpt-5.6-luna",
+        "MENHIR_CANONICAL_SELF_BINDING_MODE": "enforce",
+    }
+    completed = subprocess.run(
+        [
+            "docker", "compose", "--file",
+            str(REPO_ROOT / "deploy" / "docker-compose.production.yml"),
+            "config", "--format", "json",
+        ],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    service_env = json.loads(completed.stdout)["services"]["menhir"]["environment"]
+    assert service_env["LLM_CHAT_PROVIDER"] == "local"
+    assert service_env["GRAPHITI_LLM_PROVIDER"] == "local"
+    assert service_env["GRAPHITI_EMBED_PROVIDER"] == "openai"
+    assert service_env["LOCAL_LLM_BASE_URL"] == "https://openrouter.ai/api/v1"
+    assert service_env["LOCAL_LLM_CHAT_MODEL"] == "openai/gpt-5.6-luna"
+    assert service_env["MENHIR_CANONICAL_SELF_BINDING_MODE"] == "enforce"
+
+
+def test_candidate_shell_functions_do_not_require_ambient_generation(tmp_path):
+    def bash_path(path: Path) -> str:
+        resolved = path.resolve()
+        if os.name == "nt":
+            return f"/mnt/{resolved.drive[0].lower()}{resolved.as_posix()[2:]}"
+        return resolved.as_posix()
+
+    source = (REPO_ROOT / "deploy" / "release-lib.sh").read_text(encoding="utf-8")
+    backup_root = tmp_path / "backups"
+    source = source.replace(
+        'BACKUP_ROOT="/srv/menhir/backups"',
+        f'BACKUP_ROOT="{bash_path(backup_root)}"',
+    )
+    library = tmp_path / "release-lib.sh"
+    library.write_text(source, encoding="utf-8", newline="\n")
+    (backup_root / "candidate" / "abc").mkdir(parents=True)
+    (backup_root / "candidate" / "abc" / "REHEARSAL-PASSED").write_text("ok\n")
+    script = f'''set -euo pipefail
+source "{bash_path(library)}"
+compose_env() {{ :; }}
+unset generation || true
+candidate_down abc
+candidate_compose() {{ :; }}
+wait_healthy() {{ :; }}
+install() {{ :; }}
+unset generation || true
+candidate_up abc
+'''
+    completed = subprocess.run(
+        ["bash", "-c", script],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+
+def _run_fake_neo4j_authority(monkeypatch, components):
+    import neo4j
+
+    calls = []
+
+    class Session:
+        def __init__(self, database):
+            self.database = database
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def run(self, query):
+            calls.append((self.database, query))
+            if query == _authority.NEO4J_COMPONENT_QUERY:
+                return components
+            return []
+
+    class Driver:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def session(self, *, database):
+            return Session(database)
+
+    monkeypatch.setattr(neo4j.GraphDatabase, "driver", lambda *_args, **_kwargs: Driver())
+    digest = _authority.neo4j_authority_digest(
+        uri="bolt://neo4j:7687", username="neo4j", password="secret", database="neo4j"
+    )
+    return digest, calls
+
+
+def test_neo4j_community_execution_omits_enterprise_queries(monkeypatch):
+    digest, calls = _run_fake_neo4j_authority(
+        monkeypatch,
+        [{"name": "Neo4j Kernel", "versions": ["5.26.30"], "edition": "community"}],
+    )
+    queries = [query for _database, query in calls]
+    assert len(digest) == 64
+    assert "SHOW USERS" in queries
+    assert "SHOW ROLES WITH USERS" not in queries
+    assert "SHOW PRIVILEGES" not in queries
+
+
+def test_neo4j_enterprise_execution_requires_security_queries(monkeypatch):
+    _digest, calls = _run_fake_neo4j_authority(
+        monkeypatch,
+        [{"name": "Neo4j Kernel", "versions": ["5.26.30"], "edition": "enterprise"}],
+    )
+    queries = [query for _database, query in calls]
+    assert "SHOW ROLES WITH USERS" in queries
+    assert "SHOW PRIVILEGES" in queries
+
+
+def test_neo4j_component_authority_changes_digest(monkeypatch):
+    first, _calls = _run_fake_neo4j_authority(
+        monkeypatch,
+        [{"name": "Neo4j Kernel", "versions": ["5.26.29"], "edition": "community"}],
+    )
+    second, _calls = _run_fake_neo4j_authority(
+        monkeypatch,
+        [{"name": "Neo4j Kernel", "versions": ["5.26.30"], "edition": "community"}],
+    )
+    assert first != second
+
+
+@pytest.mark.parametrize("components", [
+    [],
+    [{"name": "Neo4j Kernel", "versions": ["5"], "edition": "unknown"}],
+    [
+        {"name": "Neo4j Kernel", "versions": ["5"], "edition": "community"},
+        {"name": "Other", "versions": ["5"], "edition": "enterprise"},
+    ],
+])
+def test_neo4j_edition_detection_fails_closed(monkeypatch, components):
+    with pytest.raises(ValueError):
+        _run_fake_neo4j_authority(monkeypatch, components)

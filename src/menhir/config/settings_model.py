@@ -218,6 +218,12 @@ class MemorySettings:
     verifier_sync_enabled: bool = False
     verifier_sync_interval_s: float = 300.0
 
+    # Deterministic canonical-self binding rollout. "off" preserves pre-change behavior exactly;
+    # "observe" evaluates and records the decision without rewriting the payload; "enforce" binds.
+    # Default off until the plan's acceptance gates pass -- a proven self bypasses graphiti dedup
+    # entirely, which is a durable-write-semantics change.
+    canonical_self_binding_mode: str = "off"
+
     # Personal-memory consolidation job (gated perception -> count/amount Views from user turns).
     # Short interval + dirty-namespace filter keeps it cheap; all bias guards pinned on. Default off.
     personal_memory_consolidation_enabled: bool = False
@@ -800,6 +806,7 @@ class MemorySettings:
                 _getenv("MENHIR_VERIFIER_SYNC_INTERVAL_S", default=str(cls.verifier_sync_interval_s)),
                 env_var="MENHIR_VERIFIER_SYNC_INTERVAL_S",
             ),
+            canonical_self_binding_mode=_getenv("MENHIR_CANONICAL_SELF_BINDING_MODE", default=cls.canonical_self_binding_mode),
             personal_memory_consolidation_enabled=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_CONSOLIDATION_ENABLED", default=str(cls.personal_memory_consolidation_enabled))),
             personal_memory_consolidation_interval_s=_parse_float(
                 _getenv("MENHIR_PERSONAL_MEMORY_CONSOLIDATION_INTERVAL_S", default=str(cls.personal_memory_consolidation_interval_s)),

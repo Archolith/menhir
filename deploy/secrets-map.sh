@@ -30,9 +30,11 @@ _verify_perm() { # path expected_mode expected_uid expected_gid label
     local p="$1" m="$2" u="$3" g="$4" label="$5"
     [ -e "$p" ] || { echo "$label missing: $p" >&2; return 1; }
     [ ! -L "$p" ] || { echo "$label must not be a symlink: $p" >&2; return 1; }
-    local am au ag
+    local am au ag normalized_mode
     am="$(stat -c '%a' "$p")"; au="$(stat -c '%u' "$p")"; ag="$(stat -c '%g' "$p")"
-    [ "$am" = "$m" ] || { echo "$label mode $am != $m: $p" >&2; return 1; }
+    normalized_mode="${m#0}"
+    [ "$am" = "$normalized_mode" ] \
+        || { echo "$label mode $am != $normalized_mode: $p" >&2; return 1; }
     [ "$au" = "$u" ] || { echo "$label uid $au != $u: $p" >&2; return 1; }
     [ "$ag" = "$g" ] || { echo "$label gid $ag != $g: $p" >&2; return 1; }
 }
