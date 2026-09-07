@@ -4,6 +4,12 @@ The operator sequence is in [LIVE_VPS_PLAYBOOK.md](LIVE_VPS_PLAYBOOK.md). This
 document defines the host, authority, backup, candidate, writer-fence, and
 recovery invariants enforced by the fixed scripts.
 
+Production has separate deployment classes. A routine `app-only` release must finish
+within five minutes and does not rebuild host scaffolding or exercise disaster
+recovery. `security-config`, `maintenance`, and `recovery` releases use the additional
+gates appropriate to the changed authority. The class is mechanically derived during
+release preparation; unknown changes become `maintenance`.
+
 The client data-plane invariant is in
 [ACCESS_CONTRACT.md](ACCESS_CONTRACT.md): the only production client endpoint is
 `https://memory.ctharvey.me/mcp-http`; ChatGPT, Codex, and every Claude variant
@@ -47,10 +53,11 @@ Neo4j's auth file is `root:7474 0440`; Menhir/OAuth files are `root:10001
 0440`; service directories are not cross-readable. Secrets never appear in
 release JSON, Git, command arguments, or diagnostic output.
 
-The required secret set includes Neo4j auth/password, operator key, OAuth
-signing key, refresh retry keyring, consent secret, the selected provider key,
-and the short-lived acceptance token. The obsolete remote source-fence bearer
-token is not required.
+The required persistent secret set includes Neo4j auth/password, operator key, OAuth
+signing key, refresh retry keyring, consent secret, and the selected provider key. An
+acceptance token is minted just in time for a deployment probe, expires quickly, and is
+removed automatically; it is not persistent scaffold state. The obsolete remote
+source-fence bearer token is not required.
 
 The immutable client policy is mounted read-only. Its canonical digest must
 match `MENHIR_CLIENT_POLICY_DIGEST`, the rendered policy file, and
@@ -76,7 +83,23 @@ startup refuse drift from that matrix.
 - an independent security review covering every required scope with zero
   unresolved critical/high findings.
 
-Every mutating lifecycle script validates this authority before acting.
+Every mutating lifecycle script validates this authority before acting. Release
+authoring, build, scan, provenance, and review happen before the VPS cutover and are
+published as immutable CI evidence. The deployment host verifies that evidence; it
+does not rebuild or re-review it.
+
+## One-time scaffold and routine verification
+
+Host users/groups, fixed directories, networks, backup identity, secret ownership,
+systemd units, sudoers, Caddy topology, operations gateway, a read-only admission
+audit, desktop archival, and restore evidence are scaffolded once. Successful
+bootstrap writes a root-owned receipt binding that host contract.
+
+Every deployment verifies the receipt and referenced files, permissions, service
+health, and digests. Verification must be read-only and fast. It does not recreate
+accounts or networks, recursively rewrite ownership, enable/restart unrelated units,
+or reinstall unchanged infrastructure. Drift fails closed into a scoped scaffold
+repair or `maintenance` release.
 
 ## Runtime modes
 
@@ -94,6 +117,25 @@ with Compose project `menhir-candidate`, service `menhir`, and runtime mode
 
 ## Backup and restore rehearsal
 
+Backups and restore drills are continuously maintained safety controls. They are not
+created merely because an app-only image changed. The app-only preflight checks that
+retention, desktop-copy freshness, and the latest scheduled restore drill satisfy the
+declared RPO/RTO. A missing or stale proof refuses the deploy and requests the backup
+job; it does not silently run a long disaster-recovery exercise inside the five-minute
+cutover.
+
+The default scaffold policy requires at least two complete encrypted VPS generations,
+a VPS generation and verified desktop copy no older than 24 hours, and a successful
+clean restore drill no older than seven days. Changing those limits is a reviewed
+scaffold-policy change, not a per-deploy command-line override.
+
+The production database is Neo4j Community, which has offline `dump` but no online
+`backup` command. `backup-generation.sh` therefore remains explicit maintenance and
+is never an unattended timer: it intentionally quiesces the stack and leaves it
+stopped on failure. The scaffold schedules only a read-only app-only admission audit;
+desktop archival remains scheduled on the operator desktop. Plan offline backup
+maintenance before the 24-hour evidence window expires.
+
 `backup-generation.sh` quiesces the stack under
 `/run/lock/menhir-production.lock` and captures:
 
@@ -107,9 +149,10 @@ with Compose project `menhir-candidate`, service `menhir`, and runtime mode
 `menhir-backup-local.sh` protects the exact generation outside the active writer by
 encrypting it with age under `/srv/menhir/backups/encrypted`, verifying a decrypt/hash
 roundtrip, retaining the encrypted archive on the VPS, removing plaintext staging, and
-writing a structured release-bound receipt. The retention target is at least two
-generations as backups accumulate. An operator may additionally copy the encrypted
-archive to the desktop; that optional copy never gates the VPS release transaction.
+writing a structured release-bound receipt. A new host may write one bootstrap
+generation, but promotion requires a second distinct encrypted generation and
+revalidates both files. The exact cutover archive must also be copied to the desktop;
+promotion requires a fresh root-owned receipt bound to that verified desktop copy.
 No remote object store, cloud backup provider, provider CLI, or provider credential is
 part of the production backup contract.
 
@@ -158,7 +201,24 @@ If the process stops after backup but before receipt finalization,
 `same-host-fence.sh` resumes only from the pre-mutation intent and the fresh
 verified backup. It cannot invent a legacy identity after the container is gone.
 
-## One-command release transaction
+## One-command deployment contracts
+
+The routine app-only transaction performs:
+
+1. explicit release and CI-evidence verification;
+2. mechanical app-only classification and scaffold/backup-freshness checks;
+3. deployment lock and current writer census;
+4. exact Menhir image pull;
+5. app-container-only replacement while Neo4j and Caddy remain running;
+6. bounded readiness, liveness, JWKS, OAuth identity, and authenticated MCP probes;
+7. durable success receipt or automatic restoration of the prior app digest.
+
+App-only rollback never restores data because the class proves the data contract and
+schema are unchanged. The previous app image/config must remain locally available
+during the observation window.
+
+The existing `release-run.sh` is the full `maintenance` transaction, not the routine
+app-only path. It accepts no arguments and holds a separate orchestration lock.
 
 `release-run.sh` accepts no arguments and holds a separate orchestration lock.
 It records the exact release digest, generation, and completed stage in
@@ -194,7 +254,10 @@ evidence.
 
 ## Rollback and recovery
 
-Before the first writable production mutation, route rollback and candidate
+For `app-only`, failed acceptance stops the new app and restarts the prior immutable
+image against the unchanged data authority. This rollback is automatic and bounded.
+
+For `maintenance`, before the first writable production mutation, route rollback and candidate
 discard are reversible. After `first-mutation` exists, blind reattachment of a
 stale candidate or legacy image is refused.
 

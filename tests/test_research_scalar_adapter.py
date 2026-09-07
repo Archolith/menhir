@@ -127,7 +127,6 @@ def test_invalid_typed_or_temporal_candidates_fail_closed(row):
 @pytest.mark.parametrize(
     ("row", "reason"),
     [
-        (_candidate(value_kind="measurement", unit="bananas"), "struct.constraint_mismatch"),
         (_candidate(operation="delta"), "struct.operation_unsupported"),
     ],
 )
@@ -140,6 +139,18 @@ def test_parser_admission_still_requires_structural_composer_support(row, reason
     assert result.receipt.parse_status == "admitted"
     assert result.receipt.composition_status == "abstained"
     assert result.receipt.composition_reason == reason
+
+
+def test_unknown_grounded_measurement_unit_fails_before_composition():
+    result = adapt_research_candidate(
+        _candidate(value_kind="measurement", unit="bananas"),
+        [_episode("episode-1", "I have 3 coins.")],
+    )
+
+    assert result.proposal is None
+    assert result.composition is None
+    assert result.receipt.parse_status == "rejected"
+    assert result.receipt.parse_reason == "measurement_unit_unresolved"
 
 
 def test_duplicate_episode_uuids_fail_closed_before_grounding():

@@ -5,8 +5,10 @@ All resolver/network access is injected; no real network is used.
 
 from __future__ import annotations
 
+import json
 import re
 import time
+from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
 
@@ -15,6 +17,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from menhir.api import auth_code_store, oauth_client_store
+from menhir.api.client_policy import ClientPolicyAuthority, load_client_policy
 from menhir.api.oauth_authorize import router as oauth_authorize_router
 from menhir.api.oauth_as_register import router as oauth_as_register_router
 from menhir.api.oauth_client_store import (
@@ -28,6 +31,8 @@ pytestmark = pytest.mark.unit
 
 _URL = "https://client.example.com/.well-known/oauth-client"
 _CB = "https://app.example.com/cb"
+_CHATGPT_URL = "https://chatgpt.com/oauth/client.json"
+_CHATGPT_CB = "https://chatgpt.com/connector_platform_oauth_redirect"
 
 _ENABLED = SimpleNamespace(
     oauth_as_enabled=True,
@@ -120,9 +125,15 @@ def _pkce() -> tuple[str, str]:
     return verifier, challenge
 
 
-def _client(settings=_ENABLED) -> TestClient:
+def _client(
+    settings=_ENABLED,
+    *,
+    policy: ClientPolicyAuthority | None = None,
+) -> TestClient:
     app = FastAPI()
     app.state.settings = settings
+    if policy is not None:
+        app.state.client_policy = policy
     app.include_router(oauth_authorize_router)
     app.include_router(oauth_as_register_router)
     return TestClient(app, follow_redirects=False)
@@ -191,6 +202,48 @@ def test_cimd_selects_none_when_client_prefers_private_key_jwt(monkeypatch):
 
     assert resp.status_code == 200
     assert get_client_store().get(_URL).token_endpoint_auth_method == "none"
+
+
+def test_production_policy_accepts_chatgpt_stable_cimd(monkeypatch):
+    """Keep the advertised CIMD mode aligned with the digest-bound web policy."""
+
+    policy_path = (
+        Path(__file__).resolve().parents[1] / "deploy" / "client-policy.production.json"
+    )
+    payload = json.loads(policy_path.read_text(encoding="utf-8"))
+    policy = load_client_policy(str(policy_path), payload["canonical_digest"])
+    _install_resolver(
+        monkeypatch,
+        {
+            _CHATGPT_URL: _doc(
+                url=_CHATGPT_URL,
+                cb=_CHATGPT_CB,
+                client_name="ChatGPT",
+                token_endpoint_auth_method="private_key_jwt",
+                token_endpoint_auth_methods_supported=["none", "private_key_jwt"],
+                token_endpoint_auth_signing_alg="RS256",
+                jwks_uri="https://chatgpt.com/oauth/jwks.json",
+            )
+        },
+    )
+    _, challenge = _pkce()
+    params = _get_params(
+        _CHATGPT_URL,
+        challenge=challenge,
+        redirect_uri=_CHATGPT_CB,
+    )
+    params["scope"] = "menhir:read menhir:write menhir:admin"
+
+    response = _client(_ENABLED_REFRESH, policy=policy).get(
+        "/oauth/authorize",
+        params=params,
+    )
+
+    assert response.status_code == 200
+    assert "ChatGPT" in response.text
+    stored = get_client_store().get(_CHATGPT_URL)
+    assert stored is not None
+    assert stored.token_endpoint_auth_method == "none"
 
 
 def test_cimd_rejects_private_key_jwt_when_none_is_not_offered(monkeypatch):
