@@ -1,3 +1,12 @@
+## 2026-09-06 - harden the stacked core projection promotion
+
+- Added instance-local View and evidence registries plus source-bound admission and projection
+  definition contracts while preserving the existing default vocabularies.
+- Added durable projection lifecycle, coverage, realization, materialization, and reconciliation
+  components with transaction-scoped fencing and fail-closed stale or corrupt state handling.
+- Kept the new lifecycle opt-in: existing scalar rebuilding remains available, physical default-
+  namespace storage is unchanged, and only typed-assertion reads canonicalize logical aliases.
+
 ## 2026-09-06 - tighten typed scalar identity before voting
 
 - Canonicalized elapsed durations to seconds, explicit USD money to exact decimals, supported
@@ -159,18 +168,3 @@
 - Ships dormant. `MENHIR_CANONICAL_SELF_BINDING_MODE` is `off | observe | enforce`, default
   `off`, and an unrecognized value falls back to `off`. Consolidating the existing forks remains
   blocked on an approved census and a restored-copy rehearsal.
-
-## 2026-09-03 - surface refile lineage where agents actually meet todos
-
-- `list_todos` rows now carry `supersedes_count`, and both renderers that consume
-  them show it: the MCP tool prints "refile of N earlier todo(s)" with a footer
-  pointing at `get_todo`, and the session-start hook appends "(refile of N)".
-- Closes the half of the supersession feature that the earlier fix missed. `get_todo`
-  renders the full lineage, but nothing reaches `get_todo` unless something first says
-  there is a lineage to look up -- and `list_todos` is the pinned discovery tool, the
-  session-start hook, and the bootstrap recall path. A refiled todo appeared in all
-  three as brand-new work, so the prior attempt's context sat behind a uuid no agent
-  had a reason to ask for.
-- A count rather than the uuids: listings are token-sensitive and the marker only has
-  to prompt the drill-down. Predecessors are counted in Python and scoped to the
-  caller's silo, for the same reason the lineage read is.

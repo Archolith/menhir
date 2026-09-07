@@ -12,6 +12,7 @@ from menhir.infrastructure.realization_coverage_repository import (
     ScalarStateProjectionHashSource,
 )
 from menhir.services.scalar_projection_definition import SCALAR_STATE_PROJECTION
+from menhir.services.scalar_projection_hash import scalar_projection_present_hash
 
 
 class ScriptedNeo4j:
@@ -104,8 +105,9 @@ def test_lifecycle_target_snapshot_fails_closed_on_wrong_current_version() -> No
 def test_scalar_hash_reflects_actual_installed_state_not_expected_membership() -> None:
     target = _target()
     present = {
-        "value": 183,
-        "valid_at": "2026-08-17T00:00:00+00:00",
+        # ScalarStateKind persists normalized strings and Neo4j may normalize the timestamp.
+        "value": "183",
+        "valid_at": "2026-08-17T00:00:00Z[UTC]",
         "scalar_contributors": ["b", "a"],
         "scalar_effective_tier": "user",
         "episode_uuids": ["episode-2", "episode-1"],
@@ -125,6 +127,15 @@ def test_scalar_hash_reflects_actual_installed_state_not_expected_membership() -
     )
 
     assert expected_present == expected_absent_membership
+    assert expected_present == scalar_projection_present_hash(
+        SCALAR_STATE_PROJECTION,
+        target,
+        value=183,
+        valid_at="2026-08-17T00:00:00+00:00",
+        contributor_ids=["a", "b"],
+        effective_tier="user",
+        episode_uuids=["episode-1", "episode-2"],
+    )
     assert fake.calls[0][1]["subject_uuid"] == target.subject_id
 
 
