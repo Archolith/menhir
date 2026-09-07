@@ -911,16 +911,17 @@ def _runtime_contract(root: Path, release: dict[str, Any], subnet: str) -> None:
 def _ensure_images(
     source_environment: dict[str, str], release: dict[str, Any],
 ) -> None:
-    # A newly published application image is not expected to exist on the VPS.
-    # Pull the immutable references before inspecting them. The Caddy authority
-    # currently records only its digest, so it remains a required preinstalled
-    # production image and is verified after the pullable release images.
+    # The desktop wrapper loads the exact application image for private
+    # registries. Pull immutable references only when they are not already
+    # present, then verify every image before creating disposable state.
     pullable = (
         source_environment["MENHIR_IMAGE"],
         source_environment["NEO4J_IMAGE"],
     )
     for image in pullable:
-        _run("docker", "pull", image)
+        present = _run("docker", "image", "inspect", image, check=False)
+        if present.returncode != 0:
+            _run("docker", "pull", image)
     for image in (*pullable, release["images"]["caddy"]):
         _run("docker", "image", "inspect", image)
 

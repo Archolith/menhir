@@ -102,6 +102,20 @@ if (Test-Path -LiteralPath $receiptPath) {
 if ((Get-BundleTreeSha256 -Root $bundlePath) -ne $ExpectedBundleSha256) {
     throw "Install bundle digest differs from the selected product release."
 }
+$productionEnv = Join-Path $bundlePath "rootfs\srv\menhir\production\release\production.env"
+if (-not (Test-Path -LiteralPath $productionEnv -PathType Leaf)) {
+    throw "Bundled production environment is missing."
+}
+$menhirImageRows = @(Get-Content -LiteralPath $productionEnv | Where-Object {
+    $_ -match '^MENHIR_IMAGE='
+})
+if ($menhirImageRows.Count -ne 1) {
+    throw "Bundled production environment must contain exactly one MENHIR_IMAGE."
+}
+$menhirImage = $menhirImageRows[0].Substring("MENHIR_IMAGE=".Length).Trim("'`"")
+if ($menhirImage -notmatch '^ghcr\.io/[a-z0-9._/-]+:[a-zA-Z0-9._-]+@sha256:[0-9a-f]{64}$') {
+    throw "Bundled MENHIR_IMAGE is not an immutable GHCR reference."
+}
 $runner = Join-Path $PSScriptRoot "personal_stage_vps.py"
 if (-not (Test-Path -LiteralPath $runner -PathType Leaf)) {
     throw "VPS staging runner is missing: $runner"
@@ -128,6 +142,8 @@ $remoteBundle = "$remoteRoot/bundle"
 $remoteRunner = "$remoteRoot/personal_stage_vps.py"
 $remoteReceipt = "$remoteRoot/staging-receipt.json"
 $localTemp = "$receiptPath.$uploadId.tmp"
+$localImageTar = "$receiptPath.$uploadId.image.tar"
+$remoteImageTar = "$remoteRoot/menhir-image.tar"
 
 function Invoke-Vps {
     param([Parameter(Mandatory = $true)][string]$Command)
@@ -138,6 +154,17 @@ function Invoke-Vps {
 }
 
 try {
+    & docker image inspect $menhirImage *> $null
+    if ($LASTEXITCODE -ne 0) {
+        & docker pull $menhirImage
+        if ($LASTEXITCODE -ne 0) {
+            throw "Could not obtain the selected Menhir image locally."
+        }
+    }
+    & docker save --output $localImageTar $menhirImage
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not export the selected Menhir image."
+    }
     Invoke-Vps "install -d -m 0700 '/home/thron/.menhir-stage-upload' '$remoteRoot'"
     & $helpers.Scp -Source $bundlePath -Destination "${remoteHost}:$remoteBundle" -Recurse
     if ($LASTEXITCODE -ne 0) {
@@ -147,6 +174,11 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "Could not upload the staging runner."
     }
+    & $helpers.Scp -Source $localImageTar -Destination "${remoteHost}:$remoteImageTar"
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not upload the selected Menhir image."
+    }
+    Invoke-Vps "sudo -n docker load --input '$remoteImageTar'"
     Invoke-Vps "chmod 0600 '$remoteRunner' && sudo -n python3 '$remoteRunner' --bundle '$remoteBundle' --expected-bundle-sha256 '$ExpectedBundleSha256' --expected-release-id '$ExpectedReleaseId' --expected-release-sha256 '$ExpectedReleaseSha256' --deployment-class '$DeploymentClass' --runner-sha256 '$runnerSha' --receipt '$remoteReceipt'"
     Invoke-Vps "sudo -n chown thron:thron '$remoteReceipt' && chmod 0600 '$remoteReceipt'"
     & $helpers.Scp -Source "${remoteHost}:$remoteReceipt" -Destination $localTemp
@@ -158,6 +190,9 @@ try {
 finally {
     if (Test-Path -LiteralPath $localTemp) {
         Remove-Item -LiteralPath $localTemp -Force
+    }
+    if (Test-Path -LiteralPath $localImageTar) {
+        Remove-Item -LiteralPath $localImageTar -Force
     }
     try {
         Invoke-Vps "rm -rf -- '$remoteRoot'"

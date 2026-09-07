@@ -5,6 +5,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -204,11 +205,13 @@ def test_fresh_release_images_are_pulled_before_identity_inspection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[tuple[str, ...]] = []
-    monkeypatch.setattr(
-        MODULE,
-        "_run",
-        lambda *args, **_kwargs: calls.append(args),
-    )
+
+    def fake_run(*args: str, **kwargs: object) -> SimpleNamespace:
+        calls.append(args)
+        missing = args[:3] == ("docker", "image", "inspect") and kwargs.get("check") is False
+        return SimpleNamespace(returncode=1 if missing else 0)
+
+    monkeypatch.setattr(MODULE, "_run", fake_run)
     menhir = "ghcr.io/archolith/menhir:0.2.0-12@sha256:" + "1" * 64
     neo4j = "ghcr.io/archolith/menhir-neo4j:5.26.30-1@sha256:" + "2" * 64
     caddy = "sha256:" + "3" * 64
@@ -219,9 +222,21 @@ def test_fresh_release_images_are_pulled_before_identity_inspection(
     )
 
     assert calls == [
+        ("docker", "image", "inspect", menhir),
         ("docker", "pull", menhir),
+        ("docker", "image", "inspect", neo4j),
         ("docker", "pull", neo4j),
         ("docker", "image", "inspect", menhir),
         ("docker", "image", "inspect", neo4j),
         ("docker", "image", "inspect", caddy),
     ]
+
+
+def test_desktop_wrapper_transfers_private_registry_image_before_remote_stage() -> None:
+    wrapper = (Path(__file__).parents[1] / "deploy" / "personal_stage.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    assert "docker save --output $localImageTar $menhirImage" in wrapper
+    assert "sudo -n docker load --input '$remoteImageTar'" in wrapper
+    assert wrapper.index("docker load --input") < wrapper.index("sudo -n python3 '$remoteRunner'")
