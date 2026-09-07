@@ -205,11 +205,14 @@ def test_runner_never_contains_production_data_mount() -> None:
     assert '"down", "--volumes", "--remove-orphans"' in source
 
 
-def test_transferred_private_image_is_bound_by_local_image_id(
+def test_transferred_private_image_uses_tag_and_checks_release_labels(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[tuple[str, ...]] = []
     expected_id = "sha256:" + "4" * 64
+    commit = "a" * 40
+    wheel_manifest = "b" * 64
+    oauth_wheel = "c" * 64
 
     def fake_run(*args: str, **kwargs: object) -> SimpleNamespace:
         calls.append(args)
@@ -218,7 +221,15 @@ def test_transferred_private_image_is_bound_by_local_image_id(
         if optional and "@sha256:" in reference and "menhir:0.2.0-12" in reference:
             return SimpleNamespace(returncode=1, stdout="")
         identity = expected_id if "menhir:0.2.0-12" in reference else "sha256:" + "5" * 64
-        return SimpleNamespace(returncode=0, stdout=json.dumps([{"Id": identity}]))
+        labels = {
+            "org.opencontainers.image.revision": commit,
+            "org.archolith.menhir.wheel-manifest.sha256": wheel_manifest,
+            "org.archolith.oauth.wheel.sha256": oauth_wheel,
+        }
+        return SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps([{"Id": identity, "Config": {"Labels": labels}}]),
+        )
 
     monkeypatch.setattr(MODULE, "_run", fake_run)
     menhir = "ghcr.io/archolith/menhir:0.2.0-12@sha256:" + "1" * 64
@@ -228,8 +239,12 @@ def test_transferred_private_image_is_bound_by_local_image_id(
     environment = {"MENHIR_IMAGE": menhir, "NEO4J_IMAGE": neo4j}
     runtime = MODULE._ensure_images(
         environment,
-        {"images": {"caddy": caddy}},
-        expected_id,
+        {
+            "images": {"caddy": caddy},
+            "repos": {"menhir": commit},
+            "wheel_manifest_sha256": wheel_manifest,
+            "oauth_wheel_sha256": oauth_wheel,
+        },
     )
 
     assert environment["MENHIR_IMAGE"] == menhir.split("@", 1)[0]
@@ -242,6 +257,7 @@ def test_transferred_private_image_is_bound_by_local_image_id(
         ("docker", "image", "inspect", menhir.split("@", 1)[0]),
         ("docker", "image", "inspect", neo4j),
         ("docker", "image", "inspect", caddy),
+        ("docker", "image", "inspect", menhir.split("@", 1)[0]),
     ]
 
 
@@ -252,5 +268,5 @@ def test_desktop_wrapper_transfers_private_registry_image_before_remote_stage() 
 
     assert "docker save --output $localImageTar $menhirImageTag" in wrapper
     assert "sudo -n docker load --input '$remoteImageTar'" in wrapper
-    assert "--expected-menhir-image-id '$menhirImageId'" in wrapper
+    assert "--expected-menhir-image-archive-sha256 '$menhirImageArchiveSha256'" in wrapper
     assert wrapper.index("docker load --input") < wrapper.index("sudo -n python3 '$remoteRunner'")

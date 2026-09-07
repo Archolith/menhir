@@ -162,14 +162,11 @@ try {
             throw "Could not obtain the selected Menhir image locally."
         }
     }
-    $menhirImageId = (& docker image inspect --format '{{.Id}}' $menhirImage).Trim()
-    if ($LASTEXITCODE -ne 0 -or $menhirImageId -notmatch '^sha256:[0-9a-f]{64}$') {
-        throw "Could not resolve the selected Menhir image ID."
-    }
     & docker save --output $localImageTar $menhirImageTag
     if ($LASTEXITCODE -ne 0) {
         throw "Could not export the selected Menhir image."
     }
+    $menhirImageArchiveSha256 = Get-FileSha256 -Path $localImageTar
     Invoke-Vps "install -d -m 0700 '/home/thron/.menhir-stage-upload' '$remoteRoot'"
     & $helpers.Scp -Source $bundlePath -Destination "${remoteHost}:$remoteBundle" -Recurse
     if ($LASTEXITCODE -ne 0) {
@@ -184,7 +181,7 @@ try {
         throw "Could not upload the selected Menhir image."
     }
     Invoke-Vps "sudo -n docker load --input '$remoteImageTar'"
-    Invoke-Vps "chmod 0600 '$remoteRunner' && sudo -n python3 '$remoteRunner' --bundle '$remoteBundle' --expected-bundle-sha256 '$ExpectedBundleSha256' --expected-release-id '$ExpectedReleaseId' --expected-release-sha256 '$ExpectedReleaseSha256' --expected-menhir-image-id '$menhirImageId' --deployment-class '$DeploymentClass' --runner-sha256 '$runnerSha' --receipt '$remoteReceipt'"
+    Invoke-Vps "chmod 0600 '$remoteRunner' && sudo -n python3 '$remoteRunner' --bundle '$remoteBundle' --expected-bundle-sha256 '$ExpectedBundleSha256' --expected-release-id '$ExpectedReleaseId' --expected-release-sha256 '$ExpectedReleaseSha256' --menhir-image-archive '$remoteImageTar' --expected-menhir-image-archive-sha256 '$menhirImageArchiveSha256' --deployment-class '$DeploymentClass' --runner-sha256 '$runnerSha' --receipt '$remoteReceipt'"
     Invoke-Vps "sudo -n chown thron:thron '$remoteReceipt' && chmod 0600 '$remoteReceipt'"
     & $helpers.Scp -Source "${remoteHost}:$remoteReceipt" -Destination $localTemp
     if ($LASTEXITCODE -ne 0) {

@@ -917,7 +917,6 @@ def _runtime_contract(root: Path, runtime_images: dict[str, str], subnet: str) -
 def _ensure_images(
     source_environment: dict[str, str],
     release: dict[str, Any],
-    expected_menhir_image_id: str,
 ) -> dict[str, str]:
     # The desktop wrapper loads the exact application image for private
     # registries. Pull immutable references only when they are not already
@@ -954,8 +953,17 @@ def _ensure_images(
         "neo4j": image_id(neo4j),
         "caddy": image_id(release["images"]["caddy"]),
     }
-    if runtime_images["menhir"] != expected_menhir_image_id:
-        raise StageError("transferred Menhir image ID differs from selected release")
+    menhir_value = json.loads(_run("docker", "image", "inspect", menhir).stdout)[0]
+    labels = menhir_value.get("Config", {}).get("Labels", {})
+    expected_labels = {
+        "org.opencontainers.image.revision": release["repos"]["menhir"],
+        "org.archolith.menhir.wheel-manifest.sha256": release["wheel_manifest_sha256"],
+        "org.archolith.oauth.wheel.sha256": release["oauth_wheel_sha256"],
+    }
+    if not isinstance(labels, dict) or any(
+        labels.get(name) != value for name, value in expected_labels.items()
+    ):
+        raise StageError("transferred Menhir image labels differ from release authority")
     return runtime_images
 
 
@@ -967,7 +975,11 @@ def run_stage(args: argparse.Namespace) -> dict[str, Any]:
         (args.expected_release_sha256, SHA256_RE, "release digest"),
         (args.runner_sha256, SHA256_RE, "runner digest"),
         (args.expected_release_id, RELEASE_ID_RE, "release ID"),
-        (args.expected_menhir_image_id, IMAGE_RE, "Menhir image ID"),
+        (
+            args.expected_menhir_image_archive_sha256,
+            SHA256_RE,
+            "Menhir image archive digest",
+        ),
     ):
         if pattern.fullmatch(value) is None:
             raise StageError(f"invalid expected {label}")
@@ -984,9 +996,11 @@ def run_stage(args: argparse.Namespace) -> dict[str, Any]:
         args.expected_release_id,
         args.expected_release_sha256,
     )
-    runtime_images = _ensure_images(
-        source_environment, release, args.expected_menhir_image_id,
-    )
+    archive = args.menhir_image_archive.resolve()
+    _safe_file(archive, "transferred Menhir image archive")
+    if _sha256(archive) != args.expected_menhir_image_archive_sha256:
+        raise StageError("transferred Menhir image archive digest mismatch")
+    runtime_images = _ensure_images(source_environment, release)
 
     started = _now()
     production_before = _production_snapshot()
@@ -1112,7 +1126,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--expected-bundle-sha256", required=True)
     parser.add_argument("--expected-release-id", required=True)
     parser.add_argument("--expected-release-sha256", required=True)
-    parser.add_argument("--expected-menhir-image-id", required=True)
+    parser.add_argument("--menhir-image-archive", type=Path, required=True)
+    parser.add_argument("--expected-menhir-image-archive-sha256", required=True)
     parser.add_argument("--deployment-class", required=True)
     parser.add_argument("--runner-sha256", required=True)
     parser.add_argument("--receipt", type=Path, required=True)

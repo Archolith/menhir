@@ -40,6 +40,46 @@ review, or debug failed staging logic. Scheduled backup/restore evidence is chec
 Only a mechanically classified maintenance or recovery release may invoke the full state-protection
 transaction.
 
+### Lessons from the first live personal-deployment run
+
+The first release exercised through this path exposed two assumptions that a warm VPS had hidden:
+
+- A newly published Menhir image is not present in the VPS Docker cache. Inspecting it before it is
+  obtained fails even though the image was built and pushed correctly.
+- The Menhir GHCR package is private, and the VPS deliberately has no standing GitHub registry
+  credential. Routine deployment must not copy a developer token to the host merely to make a
+  pull work.
+
+`personal_stage.ps1` therefore resolves the digest-pinned image locally, exports the selected tag,
+hashes the archive, transfers it over the existing authenticated SSH channel, and loads it into
+isolated staging. `personal_stage_vps.py` accepts the transferred tag only when the archive digest
+matches and the loaded revision, Menhir wheel-manifest, and OAuth-wheel labels match the finalized
+release authority. The staging receipt continues to bind the registry manifest digest from the
+finalized release.
+
+This distinction matters because `docker save`/`docker load` preserves the image configuration and
+tag but does not reproduce the registry's `tag@digest` lookup metadata on another Docker host.
+Treating a failed post-load `docker image inspect tag@digest` as proof that the archive is wrong
+causes an unnecessary registry pull and fails for a private package. The correct checks are:
+
+1. select the local source image by the finalized digest-pinned reference;
+2. transfer the tagged archive over the authenticated transport;
+3. compare the transferred archive digest and release-bound labels; and
+4. retain the finalized registry manifest digest in release and staging evidence.
+
+Docker image configuration IDs are not a portable cross-engine authority: Docker Desktop and the
+Linux engine can assign different configuration IDs while loading the same archive with identical
+layers, labels, creation timestamp, and runtime content. Do not compare those IDs across hosts.
+Bind the archive bytes before transfer and use the loaded engine's image ID only to verify which
+local image its staging containers actually ran.
+
+A staging failure writes no passing receipt and grants no promotion authority. After correcting a
+personal-deployment runner, rerun `stage` against the same selected immutable product release and
+empty receipt path; do not rebuild the application release unless application artifacts changed.
+Every staging attempt snapshots production authority and container identity and must leave both
+unchanged. Future cold-cache tests must remove or avoid the candidate app image so this path is not
+accidentally validated only by a previously cached image.
+
 This contract is implemented by `personal_deploy.py`, `personal_stage.ps1`,
 `personal_stage_vps.py`, and `personal_promote.ps1`. The isolated end-to-end rehearsal must pass for
 the exact release before approval can be recorded. Direct execution through
