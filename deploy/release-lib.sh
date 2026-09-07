@@ -137,12 +137,18 @@ candidate_local_authority_digest() {
 candidate_neo4j_authority_digest() {
     local generation="$1"
     # Execute the reviewed standard-library encoder in a one-shot container
-    # from the candidate's pinned Menhir image. Neo4j is already healthy, but
-    # the long-running candidate app intentionally has not started yet.
-    # The script is streamed over stdin and emits only the final digest.
+    # from the candidate's pinned Menhir image before the long-running app is
+    # started. Once the reviewed candidate is running, execute the same encoder
+    # there so a Compose one-off container cannot contend for its fixed proxy
+    # address. The script is streamed over stdin and emits only the final digest.
     MENHIR_APP_MEMORY_LIMIT=4g candidate_compose "$generation" config --quiet
-    MENHIR_APP_MEMORY_LIMIT=4g candidate_compose "$generation" run --rm --no-deps -T menhir python3 - neo4j \
-        < "$(authority_digest_tool)"
+    if [ "$(docker inspect -f '{{.State.Running}}' menhir-candidate-app 2>/dev/null || true)" = true ]; then
+        MENHIR_APP_MEMORY_LIMIT=4g candidate_compose "$generation" exec -T menhir python3 - neo4j \
+            < "$(authority_digest_tool)"
+    else
+        MENHIR_APP_MEMORY_LIMIT=4g candidate_compose "$generation" run --rm --no-deps -T menhir python3 - neo4j \
+            < "$(authority_digest_tool)"
+    fi
 }
 
 candidate_authority_digest() {

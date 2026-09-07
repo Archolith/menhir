@@ -845,6 +845,14 @@ def test_candidate_prestart_neo4j_digest_uses_ephemeral_reviewed_image() -> None
         '--rm --no-deps -T menhir '
         "python3 - neo4j" in digest_function
     )
+    assert (
+        "docker inspect -f '{{.State.Running}}' menhir-candidate-app"
+        in digest_function
+    )
+    assert (
+        'MENHIR_APP_MEMORY_LIMIT=4g candidate_compose "$generation" exec '
+        '-T menhir python3 - neo4j' in digest_function
+    )
     assert "docker exec -i menhir-candidate-app" not in digest_function
 # ---------------------------------------------------------------------------
 
