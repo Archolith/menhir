@@ -56,8 +56,11 @@
 #   export MENHIR_RUNTIME_MODE=production
 #   export MENHIR_PUBLIC_BASE_URL=https://memory.ctharvey.me
 #   export MENHIR_CLIENT_POLICY_DIGEST=<64-hex-sha256>
-#   export LLM_CHAT_PROVIDER=openai GRAPHITI_LLM_PROVIDER=openai
+#   export LLM_CHAT_PROVIDER=local GRAPHITI_LLM_PROVIDER=local
 #   export GRAPHITI_EMBED_PROVIDER=openai
+#   export LOCAL_LLM_BASE_URL=https://openrouter.ai/api/v1
+#   export LOCAL_LLM_CHAT_MODEL=openai/gpt-5.6-luna
+#   export MENHIR_CANONICAL_SELF_BINDING_MODE=enforce
 #   docker compose -f deploy/docker-compose.production.yml up -d
 #
 # See deploy/PRODUCTION.md for exact candidate-mode env/mount commands.
@@ -127,6 +130,10 @@ services:
     image: "${MENHIR_IMAGE:?MENHIR_IMAGE (digest-pinned menhir image) is required}"
     container_name: ${MENHIR_APP_CONTAINER:-menhir-prod-app}
     restart: unless-stopped
+    # Compose `run` has no --memory option. Keep the limit in the service
+    # model so normal and one-shot containers receive a parser-validated
+    # limit; the authority digest raises this value to 4 GiB explicitly.
+    mem_limit: "${MENHIR_APP_MEMORY_LIMIT:-2g}"
     depends_on:
       neo4j:
         condition: service_healthy
@@ -204,8 +211,11 @@ services:
       LLM_CHAT_PROVIDER: "${LLM_CHAT_PROVIDER:?LLM_CHAT_PROVIDER is required}"
       GRAPHITI_LLM_PROVIDER: "${GRAPHITI_LLM_PROVIDER:?GRAPHITI_LLM_PROVIDER is required}"
       GRAPHITI_EMBED_PROVIDER: "${GRAPHITI_EMBED_PROVIDER:?GRAPHITI_EMBED_PROVIDER is required}"
+      LOCAL_LLM_BASE_URL: "${LOCAL_LLM_BASE_URL:-}"
+      LOCAL_LLM_CHAT_MODEL: "${LOCAL_LLM_CHAT_MODEL:-}"
       OPENAI_CHAT_MODEL: "${OPENAI_CHAT_MODEL:-gpt-4.1-nano}"
       OPENAI_EMBED_MODEL: "${OPENAI_EMBED_MODEL:-text-embedding-3-small}"
+      MENHIR_CANONICAL_SELF_BINDING_MODE: "${MENHIR_CANONICAL_SELF_BINDING_MODE:?MENHIR_CANONICAL_SELF_BINDING_MODE (off|observe|enforce) is required}"
     volumes:
       # Secrets: fixed-path, read-only, always.
       - type: bind
@@ -237,7 +247,7 @@ services:
       resources:
         limits:
           cpus: "1"
-          memory: 2g
+          memory: "${MENHIR_APP_MEMORY_LIMIT:-2g}"
           pids: 256
     logging:
       driver: json-file

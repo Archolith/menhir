@@ -1,0 +1,52 @@
+{
+  "schema": 1,
+  "release_id": "menhir-prod-0.2.0-9",
+  "release_author": "release-operator@example.com",
+  "release_workspace_root": "C:\\absolute\\release-workspace",
+  "repositories": {
+    "menhir": "C:\\absolute\\repos\\menhir",
+    "archolith_oauth": "C:\\absolute\\repos\\archolith_oauth",
+    "yawn_deploy": "C:\\absolute\\repos\\yawn.deploy",
+    "yawn_vps": "C:\\absolute\\repos\\yawn.vps"
+  },
+  "images": {
+    "menhir": {
+      "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "ref": "ghcr.io/archolith/menhir:0.2.0@sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    "neo4j": {
+      "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "ref": "neo4j:5-community@sha256:2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    "caddy": {
+      "digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+      "ref": "caddy:2@sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "base": {
+      "digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+      "ref": "python:3.13-slim@sha256:4444444444444444444444444444444444444444444444444444444444444444"
+    }
+  },
+  "evidence": {
+    "wheelhouse": "C:\\absolute\\evidence\\wheelhouse",
+    "sbom": "C:\\absolute\\evidence\\sbom.json",
+    "scan": "C:\\absolute\\evidence\\scan.json"
+  },
+  "baseline_production_env": "C:\\absolute\\evidence\\production.env",
+  "operations_policy": "C:\\absolute\\evidence\\menhir-oauth-policy.json",
+  "oauth_public_key": "C:\\absolute\\evidence\\menhir-oauth-public.pem",
+  "python_runtime_digest": "C:\\absolute\\evidence\\menhir-python-runtime.sha256",
+  "prior_release": "C:\\absolute\\evidence\\prior-release.json",
+  "prior_route": "C:\\absolute\\evidence\\prior-route.json",
+  "yawn_env_sha256": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+  "secret_version_ids": {
+    "neo4j-auth": "version-neo4j-auth",
+    "neo4j-password": "version-neo4j-password",
+    "oauth-signing-key": "version-oauth-signing-key",
+    "oauth-retry-keyring": "version-oauth-retry-keyring",
+    "oauth-consent-secret": "version-oauth-consent-secret",
+    "operator-key": "version-operator-key",
+    "client-policy": "sha256-REPLACE_WITH_CLIENT_POLICY_CANONICAL_DIGEST",
+    "provider-key": "version-provider-key"
+  }
+}

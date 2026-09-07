@@ -32,6 +32,15 @@ def _node(
 
 
 class TestMergeEligibility:
+    def test_mutation_predicate_rechecks_canonical_self_markers(self) -> None:
+        predicate = me.mutable_eligibility_cypher()
+        for variable in ("survivor", "absorbed"):
+            assert f"coalesce({variable}.is_self, false) = false" in predicate
+            assert (
+                f"toLower(trim(coalesce({variable}.entity_role, ''))) <> 'self'"
+                in predicate
+            )
+
     def test_two_plain_nodes_are_eligible(self) -> None:
         survivor = _node(uuid="s")
         absorbed = _node(uuid="a")

@@ -213,6 +213,7 @@ def build_memory_services(
     ingest_service.configure(
         graphiti_add_episode_timeout_s=float(settings.graphiti_add_episode_timeout_seconds),
         graphiti_episode_max_estimated_tokens=int(settings.graphiti_episode_max_estimated_tokens),
+        canonical_self_binding_mode=str(getattr(settings, "canonical_self_binding_mode", "off")),
         max_llm_calls_per_session_window=settings.max_llm_calls_per_session_window,
         llm_session_window_seconds=settings.llm_session_window_seconds,
         max_llm_calls_per_enrichment_job=settings.max_llm_calls_per_enrichment_job,

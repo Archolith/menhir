@@ -7,6 +7,8 @@ live-fold-vs-rebuild parity (same pure fold backs both paths)."""
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 import pytest
 
 from menhir.domain.scalar_state_fold import (
@@ -98,6 +100,23 @@ def test_multiple_deltas_sum_and_can_decrement():
     ])
     assert s.value == 12 and s.delta_total == 2.0
     assert s.contributor_ids == ["anc", "d1", "d2"]
+
+
+@pytest.mark.unit
+def test_money_deltas_fold_with_decimal_exactness():
+    s = _one([
+        _row(
+            assertion_id="anc", value_kind="money", unit="usd", value=Decimal("0.10"),
+            valid_at="2026-07-01T00:00:00+00:00",
+        ),
+        _row(
+            assertion_id="d1", value_kind="money", unit="usd", operation="delta",
+            value=Decimal("0.20"), valid_at="2026-07-02T00:00:00+00:00",
+        ),
+    ])
+
+    assert s.value == Decimal("0.30")
+    assert isinstance(s.value, Decimal)
 
 
 # --------------------------------------------------------------------- abstention
