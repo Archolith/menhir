@@ -4,12 +4,13 @@
   "category": "operations",
   "deployment_class": "maintenance",
   "summary": "Make production promotion consume complete staging evidence instead of debugging release automation live.",
-  "details": "Commits 9b37082a23d544dc9458b5ef47c03da6da5c684a and ae6055e61cff6ae4d036cf6900286c8d390d14bc define the future release method and its two independent workflows. Product release builds, verifies, documents, and publishes immutable artifacts without production access. Personal deployment selects one published digest, exercises it through production-equivalent isolated staging, binds one owner approval to the staging receipt, and performs only a bounded production replacement and read-only canary. Fresh backups, restore rehearsals, full authority comparisons, and writer replacement are reserved for mechanically classified maintenance or recovery work.",
-  "operator_impact": "Product packaging and publication may proceed independently. Do not start another personal production deployment until automation emits and verifies the required end-to-end staging receipt; routine app and non-migrating security-configuration deployments should then require one promotion approval and complete within their bounded cutover budgets.",
+  "details": "Commits 9b37082a23d544dc9458b5ef47c03da6da5c684a, ae6055e61cff6ae4d036cf6900286c8d390d14bc, and 3e412a9510211147e8b5ae480cf5ad8d81039197 define and implement two independent workflows. Product release builds, verifies, documents, and publishes immutable artifacts without production access. Personal deployment selects one finalized digest, exercises the exact images through disposable production-equivalent staging, binds one owner approval to the complete receipt, and promotes through a second evidence-verifying wrapper. The legacy direct deploy execution path is disabled. Staging proves OAuth authorization code with PKCE, MCP read/write/deny behavior, restart persistence, production non-interference, and simulated automatic rollback before emitting a receipt.",
+  "operator_impact": "Use release_flow.py only to prepare and finalize the product release. For this owner's instance, use personal_deploy.py select, stage, approve, and promote; review the release notes and staging receipt before the one bound approval. App-only promotion remains bounded; security-config temporarily uses the conservative maintenance transaction until its focused production runner exists.",
   "repositories": {
     "menhir": [
       "9b37082a23d544dc9458b5ef47c03da6da5c684a",
-      "ae6055e61cff6ae4d036cf6900286c8d390d14bc"
+      "ae6055e61cff6ae4d036cf6900286c8d390d14bc",
+      "3e412a9510211147e8b5ae480cf5ad8d81039197"
     ]
   },
   "security_scopes": [
