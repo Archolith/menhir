@@ -32,6 +32,7 @@ import hashlib
 import math
 import re
 from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import Any
 
 #: identity-contract version stamped on every head + assertion. v2 is the source_key-anchored
@@ -126,7 +127,7 @@ def build_source_key(episode_uuid: str, span_start: int, span_end: int, claim_or
 
 
 def _is_number(x: Any) -> bool:
-    return isinstance(x, (int, float)) and not isinstance(x, bool)
+    return isinstance(x, (int, float, Decimal)) and not isinstance(x, bool)
 
 
 def _is_finite_number(value: Any) -> bool:
@@ -142,10 +143,21 @@ def _is_finite_number(value: Any) -> bool:
             return math.isfinite(float(value))
         except OverflowError:
             return False
+    if isinstance(value, Decimal):
+        return value.is_finite()
     return isinstance(value, float) and math.isfinite(value)
 
 
-def _num_norm(x: float) -> str:
+def _is_integral_number(value: Any) -> bool:
+    """True for a finite numeric value with no fractional component."""
+    if not _is_finite_number(value):
+        return False
+    if isinstance(value, Decimal):
+        return value == value.to_integral_value()
+    return value == int(value)
+
+
+def _num_norm(x: int | float | Decimal) -> str:
     """Stable string for one number. An arbitrary-precision int is stringified directly (never routed
     through `float()`/`math.isfinite`, which would `OverflowError` on a huge int); a non-finite float
     (NaN/inf) is stringified defensively rather than run through `int()` (which raises on NaN/inf).
@@ -153,6 +165,8 @@ def _num_norm(x: float) -> str:
     belt-and-suspenders guard that never itself crashes the key builder."""
     if isinstance(x, int) and not isinstance(x, bool):
         return str(x)
+    if isinstance(x, Decimal):
+        return format(x, "f") if x.is_finite() else str(x)
     if not math.isfinite(x):
         return str(x)
     return str(int(x)) if float(x) == int(x) else str(x)
@@ -163,7 +177,7 @@ def normalize_scalar(value: Any) -> str:
     assertion_key. Mirrors ScalarStateKind._scalar_norm so the assertion and the View agree."""
     if isinstance(value, bool):
         return "true" if value else "false"
-    if isinstance(value, (int, float)):
+    if isinstance(value, (int, float, Decimal)):
         return _num_norm(value)
     if isinstance(value, (list, tuple)):
         parts = [_num_norm(x) if _is_number(x) else str(x).strip() for x in value]
@@ -188,6 +202,8 @@ def validate_value(value_kind: str, operation: str, value: Any) -> None:
             raise ValueError(f"delta operation requires a numeric value_kind, got {value_kind!r}")
         if not _is_finite_number(value):
             raise ValueError("a delta value must be a single finite number")
+        if value_kind == "count" and not _is_integral_number(value):
+            raise ValueError("a count delta must be an integer")
         return
     if value_kind == "boolean":
         if not isinstance(value, bool):
@@ -213,6 +229,10 @@ def validate_value(value_kind: str, operation: str, value: Any) -> None:
         if not (ok_single or ok_range):
             raise ValueError(
                 f"{value_kind} value must be a finite number or a [lo, hi] finite range, got {value!r}")
+        if value_kind == "count":
+            values = value if isinstance(value, (list, tuple)) else (value,)
+            if any(not _is_integral_number(item) for item in values):
+                raise ValueError("count values must be integers")
 
 
 def slot_of(row: dict[str, Any]) -> tuple[str, str, str, str, str]:
