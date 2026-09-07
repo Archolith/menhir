@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "id": "typed-scalar-identity-hardening",
+  "category": "fixed",
+  "deployment_class": "app-only",
+  "summary": "Canonicalize typed scalar values before identity and voting.",
+  "details": "Merge commits 013b821cae6559fe1550b8748d4b1ea12845a137, 6e658c7249e0b18183733f303f03263c965d3979, 62a5fb2c6441c6bdd0e625e22ed790e2b0d7ec57, 83152fcd6f27c9d975a6d4e762dd48954466cc4a, b02a943b2194dd906df4dfa449dca668fd0a114e, b8fe7491c9074dcf7e7bde9ac081958e4c21a9bc, 7a01cedffad8e21abb5c8afcfcab2a3804ba311b, 389d7d8cd7418a6dbeb8cb19ffd76710586ada36, and 1ff37ec09cfae47829842d9a373d3162bf56886b add regression coverage and canonical handling for frequency, duration, money, measurement units, clock time, counts, weekdays, booleans, and status values before proposal identity and voting.",
+  "operator_impact": "No operator action is required. Newly perceived typed scalar values follow the stricter source-grounded canonical forms.",
+  "repositories": {
+    "menhir": [
+      "013b821cae6559fe1550b8748d4b1ea12845a137",
+      "6e658c7249e0b18183733f303f03263c965d3979",
+      "62a5fb2c6441c6bdd0e625e22ed790e2b0d7ec57",
+      "83152fcd6f27c9d975a6d4e762dd48954466cc4a",
+      "b02a943b2194dd906df4dfa449dca668fd0a114e",
+      "b8fe7491c9074dcf7e7bde9ac081958e4c21a9bc",
+      "7a01cedffad8e21abb5c8afcfcab2a3804ba311b",
+      "389d7d8cd7418a6dbeb8cb19ffd76710586ada36",
+      "1ff37ec09cfae47829842d9a373d3162bf56886b"
+    ]
+  },
+  "security_scopes": [
+    "runtime-hardening-and-observability"
+  ],
+  "breaking": false
+}

@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "id": "core-promotion-abstractions",
+  "category": "added",
+  "deployment_class": "maintenance",
+  "summary": "Stage generic projection lifecycle abstractions without automatic activation.",
+  "details": "Merge commits 31011ef38dae47375fb9eca11dba16824027e019, 0acd6ddbf105473793af603aff12d4af0b41d7e8, ba60cef31cd41a185926f205c5e5a45382a8f03e, 34d4fd74e7196c8dbc5247825331f60260247be1, bc5d220398cb93ad040e15832c45d424d43053cb, d443921b735033db01d01e126600bfc6794c9351, c56dca49781b212f54f724fd6dbc7cc46f0e50f7, fc4cdd51d868b1df40b1643facf18d4c53188731, and 8c29d10ee96149a834a5a6837868d68fa7fb049a add injectable registries, source-bound admission contracts, projection definitions, durable lifecycle and coverage repositories, scalar materialization, and explicit reconciliation. Existing defaults remain available and the new lifecycle has no automatic caller.",
+  "operator_impact": "No operator action is required. Typed-assertion reads now treat the logical default namespace aliases as one canonical default identity; physical storage remains unchanged.",
+  "repositories": {
+    "menhir": [
+      "31011ef38dae47375fb9eca11dba16824027e019",
+      "0acd6ddbf105473793af603aff12d4af0b41d7e8",
+      "ba60cef31cd41a185926f205c5e5a45382a8f03e",
+      "34d4fd74e7196c8dbc5247825331f60260247be1",
+      "bc5d220398cb93ad040e15832c45d424d43053cb",
+      "d443921b735033db01d01e126600bfc6794c9351",
+      "c56dca49781b212f54f724fd6dbc7cc46f0e50f7",
+      "fc4cdd51d868b1df40b1643facf18d4c53188731",
+      "8c29d10ee96149a834a5a6837868d68fa7fb049a"
+    ]
+  },
+  "security_scopes": [
+    "runtime-hardening-and-observability"
+  ],
+  "breaking": false
+}
