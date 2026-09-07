@@ -456,6 +456,14 @@ async def link_episode_admission(
     adapter = getattr(runtime_ctx.built, "graph_adapter", None)
     if adapter is None or not hasattr(adapter, "link_episode_admission"):
         raise HTTPException(status_code=503, detail="episode admission unavailable")
+    ingest_service = getattr(runtime_ctx.built, "ingest_service", None)
+    if ingest_service is None or not hasattr(
+        ingest_service, "enqueue_pending_episode"
+    ):
+        raise HTTPException(status_code=503, detail="episode enrichment queue unavailable")
+    enrichment_enabled = getattr(ingest_service, "enrichment_enabled", None)
+    if not callable(enrichment_enabled) or not enrichment_enabled():
+        raise HTTPException(status_code=503, detail="episode enrichment is disabled")
 
     # Resolved once and used for BOTH the link and the projection below. They must be the same
     # value: linking in one namespace while projecting from another is precisely the split that
@@ -482,6 +490,29 @@ async def link_episode_admission(
             user_id=getattr(session, "user_id", "") or "",
             namespace=resolved_namespace,
         )
+        queue_uuid = projection_uuid
+        if queue_uuid is None and hasattr(
+            adapter, "find_pending_evidence_projection_uuid"
+        ):
+            # Creation is idempotent. If an earlier request created the durable PENDING node but
+            # failed while enqueueing it, the retry must recover and enqueue that same node rather
+            # than interpreting "already exists" as completed work.
+            queue_uuid = await asyncio.to_thread(
+                adapter.find_pending_evidence_projection_uuid,
+                turn_evidence_uuid=turn_evidence_uuid,
+                namespace=resolved_namespace,
+            )
+        if queue_uuid:
+            # False is an idempotent outcome (already queued, or it raced into ENRICHING), not a
+            # refusal. Exceptions remain visible, and a retry can recover the durable PENDING node.
+            enqueued = await ingest_service.enqueue_pending_episode(queue_uuid)
+            if not enqueued and not enrichment_enabled():
+                # Close the small race between the pre-write capability check and enqueue. The
+                # durable PENDING projection remains discoverable for a later retry.
+                raise HTTPException(
+                    status_code=503,
+                    detail="evidence projection created but enrichment became disabled",
+                )
     return EpisodeAdmissionResponse(linked=linked, projection_uuid=projection_uuid)
 
 

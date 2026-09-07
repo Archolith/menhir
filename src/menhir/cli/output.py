@@ -369,7 +369,12 @@ def format_hook_output(
         content = todo.get("content") or ""
         snippet = (content[:80] + "...") if len(content) > 80 else content
         ref_part = f" {ref} —" if ref else " —"
-        todo_lines.append(f"- [{tag}]{ref_part} {snippet}")
+        # Marks a todo that replaced earlier ones. The hook is the first place an agent
+        # sees a todo at all, so a refile that looks brand new here reads as untouched
+        # work when it already has a prior attempt behind it.
+        n_prior = todo.get("supersedes_count") or 0
+        prior = f" (refile of {n_prior})" if n_prior else ""
+        todo_lines.append(f"- [{tag}]{ref_part} {snippet}{prior}")
 
     pinned_lines = [_format_item(item) for item in flagged]
     pinned_lines = [line for line in pinned_lines if line]

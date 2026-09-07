@@ -62,6 +62,10 @@ PARENTS: dict[str, list[str]] = {
         "get_todo",
         "close_todo",
         "close_stale_todos",
+        "supersede_todo",
+        "resolve_todo",
+        "reopen_todo",
+        "link_memory_to_todo",
     ],
     "artifacts": [
         "get_artifact",

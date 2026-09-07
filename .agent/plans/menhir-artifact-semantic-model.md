@@ -97,6 +97,12 @@ Contrast with `:Todo`, which is *operational*. Both are first-class, but a todo 
 of work and an artifact is a unit of recorded thinking. The `model.operational_vs_semantic`
 boundary still applies: an artifact may describe a todo; a todo never describes an artifact.
 
+Amended 2026-09-03: one todo-to-todo edge exists, `SUPERSEDED_BY` (see `supersede_todo`).
+It is not a counter-example to the rule above. The rule is about *description* -- a todo
+never carries a claim about another object -- and supersession states identity, not
+meaning: which node replaced which. A todo still never describes an artifact, never
+becomes recallable, and is excluded from `ADJACENCY_EDGE_TYPES`.
+
 Initial types (`artifact_type`): `plan`, `review`, `investigation`, `implementation_report`.
 **`handoff` was added after migration (2026-08-03).** It came off the deferred list because
 the corpus answered the question: 14 handoff documents exist across two repos, and without a
@@ -505,7 +511,9 @@ Owned Record but worth stating precisely, because it looks like a violation:
 > meaning independently, and still dies with its artifact.
 
 This mirrors `:Todo` exactly: semantic objects point inward at it, and it never becomes a
-semantic object itself.
+semantic object itself. (A `:Todo` also carries one outward `SUPERSEDED_BY` edge to another
+todo, added 2026-09-03 -- an identity fact rather than a knowledge claim, and still not
+recallable. See §1.)
 
 ## 10. Shape validation (added 2026-08-03)
 

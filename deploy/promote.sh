@@ -53,6 +53,9 @@ acc_gen="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["gener
 backup_receipt="$(backup_receipt_path)"
 validate_receipt_file "$backup_receipt" backup-local
 schema_py validate-backup-promotion "$backup_receipt"
+desktop_receipt="${STATUS_DIR}/desktop-archive-receipt.json"
+require_root_file "$desktop_receipt" "desktop archive receipt"
+schema_py validate-desktop-archive "$desktop_receipt" "$backup_receipt" "$RELEASE_JSON"
 bak_gen="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["generation"])' "$backup_receipt")"
 [ "$bak_gen" = "$candidate" ] || { echo "backup receipt generation mismatch" >&2; exit 1; }
 
