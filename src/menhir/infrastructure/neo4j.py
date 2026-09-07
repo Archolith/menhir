@@ -8,7 +8,7 @@ import time
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable, TypeVar
 
 
 class _Neo4jDriverUnavailable(Exception):
@@ -101,6 +101,7 @@ def mutation_window_seconds(timeout_s: float, *, statements: int = 1) -> float:
 
 
 logger = logging.getLogger(__name__)
+_T = TypeVar("_T")
 
 
 def _record_and_backoff(exc: Exception, attempt: int, *, label: str) -> None:
@@ -163,6 +164,21 @@ class SagaOwnershipRevoked(RuntimeError):
     driver exceptions to retry must not swallow this one -- retrying is the exact thing it exists
     to stop.
     """
+
+
+@dataclass(frozen=True)
+class Neo4jTransaction:
+    """Transaction-scoped execute adapter for atomic multi-repository work."""
+
+    _tx: Any = field(repr=False)
+
+    def execute(
+        self,
+        query: str,
+        params: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        result = self._tx.run(query, **(params or {}))
+        return [record.data() for record in result]
 
 
 @dataclass
@@ -371,4 +387,57 @@ class Neo4jRepository:
                 # what the statement does.
                 last_exc = exc
                 _record_and_backoff(exc, attempt, label="transient error")
+        raise last_exc  # type: ignore[misc]
+
+    def execute_write(self, work: Callable[[Neo4jTransaction], _T]) -> _T:
+        """Run replay-safe graph work in one explicit write transaction.
+
+        This deliberately does not use ``session.execute_write``. Managed transaction functions may
+        retry the whole callback after connection loss, but a connection failure at commit time is
+        ambiguous: the server may already have committed. Current Menhir's auto-commit path fails
+        closed on exactly that ambiguity, and projection lifecycle work must preserve the same rule.
+
+        Server ``TransientError`` values are safe to retry because Neo4j has rolled that transaction
+        back. ``ServiceUnavailable`` and ``SessionExpired`` are never retried here. The callback must
+        contain graph-local work only; all mutations performed through the supplied adapter commit or
+        roll back with the lifecycle fence.
+        """
+        if not callable(work):
+            raise TypeError("execute_write requires a callable transaction body")
+
+        last_exc: Exception | None = None
+        for attempt in range(_TRANSIENT_RETRIES):
+            revoked = _revocation.get()
+            if revoked is not None and not revoked():
+                raise SagaOwnershipRevoked(
+                    "ownership was lost before transactional attempt "
+                    f"{attempt + 1}/{_TRANSIENT_RETRIES}; refusing to dispatch further statements"
+                )
+            try:
+                with self._get_driver().session(database=self.database) as session:
+                    tx = session.begin_transaction()
+                    try:
+                        result = work(Neo4jTransaction(tx))
+                        tx.commit()
+                        return result
+                    except Exception:
+                        try:
+                            tx.rollback()
+                        except Exception:  # noqa: BLE001
+                            logger.warning(
+                                "Neo4j rollback failed while preserving the original transaction error",
+                                exc_info=True,
+                            )
+                        raise
+            except (ServiceUnavailable, SessionExpired) as exc:
+                logger.warning(
+                    "Neo4j transactional ambiguous failure (attempt %d/%d); NOT retrying: %s",
+                    attempt + 1,
+                    _TRANSIENT_RETRIES,
+                    exc,
+                )
+                raise
+            except TransientError as exc:
+                last_exc = exc
+                _record_and_backoff(exc, attempt, label="transactional transient error")
         raise last_exc  # type: ignore[misc]
