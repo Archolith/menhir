@@ -14,10 +14,9 @@
 #   * Healthcheck probes /livez, which the production route surface serves when
 #     MENHIR_STARTUP_SCOPE=production.
 #
-# Build (from the repo root, after the wheelhouse exists):
-#   docker build -f deploy/Dockerfile \
-#       --build-arg PYTHON_BASE=python:3.12-slim@sha256:<digest> \
-#       -t <registry>/menhir:<version> .
+# Build and verify through deploy/build_release_image.py. It derives every
+# provenance label from Git and the wheelhouse; operators do not transcribe
+# RELEASE_COMMIT or wheel digests into a raw docker build command.
 #
 # The compose contract (deploy/docker-compose.production.yml) supplies the
 # image reference as the required MENHIR_IMAGE variable; there is no source
