@@ -83,13 +83,16 @@ _REQUIRED_AUTHORITY = frozenset({
     "config/commit.txt",
 })
 
-_RELEASE_TOP_KEYS = frozenset({
+_LEGACY_RELEASE_TOP_KEYS = frozenset({
     "schema", "release_id", "release_author", "security_review", "repos",
     "oauth_wheel_sha256", "oauth_wheel_source", "images",
     "wheel_manifest_sha256", "dockerfile_wheel_manifest_sha256",
     "sbom_sha256", "scan_evidence_sha256", "provenance_sha256",
     "rendered", "network", "rollback_anchors", "secret_version_ids",
     "artifacts", "repo_remotes", "deployment",
+})
+_RELEASE_TOP_KEYS = _LEGACY_RELEASE_TOP_KEYS | frozenset({
+    "deployment_class", "notes_json_sha256", "notes_markdown_sha256",
 })
 _RELEASE_SECURITY_REVIEW_KEYS = frozenset({
     "schema", "kind", "review_id", "release_author", "reviewer",
@@ -109,6 +112,9 @@ REQUIRED_SECURITY_REVIEW_SCOPE = frozenset({
 })
 _RELEASE_REPOS = frozenset({"menhir", "archolith_oauth", "yawn_deploy", "yawn_vps"})
 _RELEASE_IMAGES = frozenset({"menhir", "neo4j", "caddy", "base"})
+_RELEASE_DEPLOYMENT_CLASSES = frozenset({
+    "app-only", "security-config", "maintenance",
+})
 _RELEASE_RENDERED = frozenset({
     "menhir_compose_sha256", "yawn_compose_sha256", "caddy_sha256",
     "registry_sha256", "policy_sha256", "yawn_env_sha256",
@@ -440,7 +446,9 @@ def validate_release(path: str) -> dict:
     release = load_strict(path)
     if not isinstance(release, dict):
         raise ValueError("release.json must be a JSON object")
-    _require_exact_keys(release, _RELEASE_TOP_KEYS, "release.json")
+    release_keys = set(release)
+    if release_keys not in {_RELEASE_TOP_KEYS, _LEGACY_RELEASE_TOP_KEYS}:
+        _require_exact_keys(release, _RELEASE_TOP_KEYS, "release.json")
     if release.get("schema") != SCHEMA_VERSION:
         raise ValueError("release.json schema must be %d" % SCHEMA_VERSION)
     _require_release_id(release.get("release_id"), "release_id")
@@ -449,6 +457,13 @@ def validate_release(path: str) -> dict:
         r"[A-Za-z0-9][A-Za-z0-9._@+-]*", release_author
     ):
         raise ValueError("release_author must be a safe bounded identity")
+    if release_keys == _RELEASE_TOP_KEYS:
+        if release.get("deployment_class") not in _RELEASE_DEPLOYMENT_CLASSES:
+            raise ValueError("deployment_class is invalid")
+        _require_sha256(release.get("notes_json_sha256"), "notes_json_sha256")
+        _require_sha256(
+            release.get("notes_markdown_sha256"), "notes_markdown_sha256"
+        )
 
     repos = release.get("repos")
     _require_exact_keys(repos, _RELEASE_REPOS, "repos")
@@ -694,7 +709,8 @@ def validate_prerequisite(path: str) -> dict:
         network = _require_key_id(observation.get("network_id"), "network_id")
         if worker in workers or network in networks:
             raise ValueError("prerequisite observations must use distinct workers and networks")
-        workers.add(worker); networks.add(network)
+        workers.add(worker)
+        networks.add(network)
         _require_fresh(observation.get("observed_utc"), "observed_utc", 900)
         if observation.get("route_version") != route_version:
             raise ValueError("prerequisite observation route_version mismatch")
@@ -922,8 +938,7 @@ def validate_receipt(path: str, kind: str) -> dict:
                 raise ValueError("local encrypted archive paths must be unique")
             archive_paths.add(local_path)
             archive_generations.add(archive_generation)
-            archive_sha256 = _require_sha256(archive.get("sha256"),
-                                             "%s.sha256" % label)
+            _require_sha256(archive.get("sha256"), "%s.sha256" % label)
             if not isinstance(archive.get("size"), int) or \
                     isinstance(archive.get("size"), bool) or archive["size"] <= 0:
                 raise ValueError("%s.size must be positive" % label)

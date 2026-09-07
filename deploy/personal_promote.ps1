@@ -170,7 +170,7 @@ $approvalValue = Read-JsonEvidence -Path $Approval `
 Assert-ExactProperties -Value $staging -Label "Staging receipt" -Expected @(
     "schema", "kind", "result", "release_id", "release_sha256", "bundle_sha256",
     "deployment_class", "images", "runner_sha256", "started_utc", "completed_utc",
-    "test_identities", "checks"
+    "test_identities", "checks", "production_preflight"
 )
 Assert-ExactProperties -Value $approvalValue -Label "Promotion approval" -Expected @(
     "schema", "kind", "release_id", "release_sha256", "bundle_sha256",
@@ -198,6 +198,29 @@ if ($staging.runner_sha256 -notmatch '^[0-9a-f]{64}$' -or
     $staging.test_identities.namespace -ne "menhir-staging") {
     throw "Staging receipt runner or test identity is invalid."
 }
+$preflight = $staging.production_preflight
+Assert-ExactProperties -Value $preflight -Label "Production readiness preflight" -Expected @(
+    "schema", "kind", "result", "observed_utc", "deployment_class",
+    "candidate_release_id", "checks", "canonical_sha256"
+)
+Assert-ExactProperties -Value $preflight.checks -Label "Production readiness preflight checks" -Expected @(
+    "live_services", "network_roles", "release_journal", "headroom", "maintenance_route"
+)
+Assert-ExactProperties -Value $preflight.checks.headroom -Label "Production readiness headroom" -Expected @(
+    "disk_free_bytes", "disk_required_bytes", "memory_available_bytes", "memory_required_bytes"
+)
+$routeRequired = $expectedClass -ne "app-only"
+if ($preflight.schema -ne 1 -or
+    $preflight.kind -ne "menhir-production-readiness-preflight" -or
+    $preflight.result -ne "passed" -or
+    $preflight.deployment_class -ne $expectedClass -or
+    $preflight.candidate_release_id -ne $Release -or
+    [string]$preflight.canonical_sha256 -notmatch '^[0-9a-f]{64}$' -or
+    [bool]$preflight.checks.maintenance_route.applicable -ne $routeRequired -or
+    [long]$preflight.checks.headroom.disk_free_bytes -lt [long]$preflight.checks.headroom.disk_required_bytes -or
+    [long]$preflight.checks.headroom.memory_available_bytes -lt [long]$preflight.checks.headroom.memory_required_bytes) {
+    throw "Production readiness preflight is not bound to this promotion."
+}
 $requiredChecks = @(
     "artifact_identity", "production_memory_limits", "production_network_shape",
     "oauth_policy_shape", "ingress_request_handling", "isolated_disposable_data",
@@ -216,8 +239,9 @@ foreach ($check in $requiredChecks) {
     }
 }
 $startedAt = Assert-UtcTimestamp -Value $staging.started_utc -Label "Staging start"
+$preflightAt = Assert-UtcTimestamp -Value $preflight.observed_utc -Label "Production preflight observation"
 $completedAt = Assert-UtcTimestamp -Value $staging.completed_utc -Label "Staging completion" -Recent
-if ($completedAt -lt $startedAt) {
+if ($preflightAt -gt $startedAt -or $completedAt -lt $startedAt) {
     throw "Staging completion precedes staging start."
 }
 

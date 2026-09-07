@@ -33,7 +33,8 @@ SPEC_KEYS = frozenset({
     "rendered", "network", "initial_release", "prior_release",
     "prior_route", "initial_prior_images", "secret_version_ids",
     "artifact_sources",
-    "initial_host_state",
+    "initial_host_state", "deployment_class", "notes_json_sha256",
+    "notes_markdown_sha256",
 })
 SECURITY_REVIEW_KEYS = frozenset({
     "schema", "kind", "review_id", "release_author", "reviewer",
@@ -61,6 +62,7 @@ SECRET_VERSIONS = frozenset({
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
+DEPLOYMENT_CLASSES = frozenset({"app-only", "security-config", "maintenance"})
 ALLOWED_ARTIFACT_PREFIXES = ("/srv/menhir/production/", "/srv/yawn/projects/",
                              "/etc/sudoers.d/", "/etc/systemd/system/",
                              "/etc/tmpfiles.d/", "/etc/yawn-vps/",
@@ -447,6 +449,17 @@ def author_release(
     if not isinstance(release_author, str) or len(release_author) > 128 \
             or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._@+-]*", release_author):
         raise ValueError("release_author must be a safe bounded identity")
+    deployment_class = spec.get("deployment_class")
+    if deployment_class not in DEPLOYMENT_CLASSES:
+        raise ValueError("deployment_class is invalid")
+    notes_json_sha256 = spec.get("notes_json_sha256")
+    notes_markdown_sha256 = spec.get("notes_markdown_sha256")
+    for key, value in (
+        ("notes_json_sha256", notes_json_sha256),
+        ("notes_markdown_sha256", notes_markdown_sha256),
+    ):
+        if not isinstance(value, str) or SHA256_RE.fullmatch(value) is None:
+            raise ValueError(f"{key} must be a 64-char lowercase sha256")
 
     repo_paths = _exact(spec.get("repositories"), REPOSITORIES, "repositories")
     repo_identities = {
@@ -605,6 +618,9 @@ def author_release(
         "schema": 1,
         "release_id": release_id,
         "release_author": release_author,
+        "deployment_class": deployment_class,
+        "notes_json_sha256": notes_json_sha256,
+        "notes_markdown_sha256": notes_markdown_sha256,
         "repos": repos,
         "repo_remotes": repo_remotes,
         "oauth_wheel_sha256": oauth_sha,

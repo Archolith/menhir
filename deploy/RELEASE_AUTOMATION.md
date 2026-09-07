@@ -6,7 +6,7 @@ Menhir has two independent automation boundaries:
   tests, scans, versions, documents, and publishes immutable packages/images and provenance.
   Success means a consumable product release exists; it does not mean any production instance was
   deployed.
-- **Personal deployment:** `select published release -> stage -> approve -> promote -> observe`.
+- **Personal deployment:** `rehearse (select + stage) -> approve -> promote -> observe`.
   It consumes an immutable product release without rebuilding it, proves it against this owner's
   production contract, and deploys only after one explicit owner approval.
 
@@ -18,6 +18,20 @@ The personal deployment side does not build or publish container images, invent 
 the product's independent review, or deploy without an explicit command. Those remain separate
 trust boundaries. Production must not be used to discover whether the coordinator,
 transport, candidate topology, acceptance probe, or rollback works.
+
+The release 11-13 incident review is
+[`../.agent/reviews/menhir-release-0.2.0-13-postmortem.md`](../.agent/reviews/menhir-release-0.2.0-13-postmortem.md).
+Its controlling rule is that application delivery and release-engineering changes use separate
+release trains. A deployment-tool, host, sibling-repository, database, or ingress change correctly
+selects `maintenance`; do not combine it with an otherwise routine application update and then
+expect the five-minute app-only path.
+
+Before an owner is asked to approve promotion, product publication must archive the current release's exact
+fragments, bind deployment class/changelog/source/image identity, complete exact-image staging with
+cold-cache transfer, pass a class-specific read-only live preflight, and render one preview naming
+the components that may change and the enforced time budget. A failed rehearsal is repaired and
+rerun against the same immutable product release. It does not create a new product version unless
+product bytes, release authority, or reviewed evidence changed.
 
 ## Personal staging and promotion contract
 
@@ -148,6 +162,15 @@ step created it. Once constructed from the reviewed installed files, the Caddy v
 container tried to claim the live proxy's fixed IP. The four configured TLS source paths were also
 directories created by Docker because the expected certificate files had never been provisioned.
 
+The live host also disproved the handbook's single-Caddy ingress diagram. The `menhir-proxy`
+network currently assigns `172.30.0.2` to `menhir-prod-cloudflared`, which proxies the approved
+public allowlist directly to `menhir-prod-app:8099`; Menhir remains `172.30.0.3`. The shared Caddy
+container is part of the separate Yawn Compose network and also contains a Menhir virtual host.
+Until release authority declares one ingress mode, this is ambiguous dual configuration. Routine
+app-only and security-config deployment must retain ingress unchanged. A maintenance route change
+must declare `cloudflared` or `caddy`, validate only that mode's assets, and refuse before backup or
+writer fencing when live topology disagrees.
+
 Do not take a healthy Menhir application back down to debug an unchanged shared route. If the
 public host, upstream, Caddy image, and route files are unchanged, the personal app-only lane must
 retain the existing route and run the release-owned production OAuth/MCP acceptance against the
@@ -156,6 +179,13 @@ receipt containing the release digest, reason, exact image identity, candidate r
 checks. Before a release that really changes proxy authority, create the candidate directory from
 reviewed files, provision those TLS paths as regular root-owned files, and validate Caddy in a
 network-isolated container that cannot claim the live proxy address.
+
+Release completion includes operational health, not only application health. It must require an
+active `menhir-caddy-reconcile.path`, an active `menhir-scaffold-audit.timer`, no failed Menhir
+units, no unfinished release/route journal, and a passing app-only readiness audit whose backup and
+restore evidence is bound to the current generation. A completed maintenance rehearsal is valid
+restore evidence only when its strict receipt schema, generation, release digest, and freshness
+all match.
 
 This is the intended split: packaged-product release automation may carry all reviewed deployment
 artifacts, while personal deployment touches shared Caddy only when the selected release actually
@@ -170,15 +200,26 @@ the exact release before approval can be recorded. Direct execution through
 
 ## Before starting
 
-1. Commit and push every repository included in the release. Each checkout
+1. Generate the next label from the installed prior release instead of inventing it or incrementing
+   it by hand:
+
+   ```powershell
+   python deploy/release_flow.py next-id `
+     --prior-release C:\absolute\prior-release.json
+   ```
+
+   Pass `--version <major>.<minor>.<patch>` only for an intentional semantic-version change; its
+   sequence starts at 1. Run this only when product bytes or reviewed evidence will change. A failed
+   staging or production rehearsal reuses the same immutable label.
+2. Commit and push every repository included in the release. Each checkout
    must be clean and at an exact remote-tracking tip.
-2. Add one JSON change fragment under `deploy/changes/unreleased/` for every
+3. Add one JSON change fragment under `deploy/changes/unreleased/` for every
    production-impacting change. See [changes/README.md](changes/README.md).
-3. Produce the immutable image references, wheelhouse, SBOM, scan evidence,
+4. Produce the immutable image references, wheelhouse, SBOM, scan evidence,
    public OAuth key, runtime digest, current operations policy, prior release,
    prior route, and current Yawn environment digest required by
    `release-inputs.example.json`.
-4. Copy `release-inputs.example.json` outside the repository and replace every
+5. Copy `release-inputs.example.json` outside the repository and replace every
    example value. Never put secret values in this file. Secret entries are
    version identifiers only.
 
@@ -220,6 +261,19 @@ Finalization refuses a mismatched review. It creates `release.json` and
 entire bundle validates. Repeating the command with the same review is safe;
 changed inputs or artifacts are rejected.
 
+Publish the packaged product after finalization. This revalidates every frozen artifact, moves only
+the fragments that were bound during `prepare`, and writes a nonce-bound publication receipt. It
+does not contact production or publish a container image:
+
+```powershell
+python deploy/release_flow.py publish `
+  --workspace C:\absolute\menhir-prod-0.2.0-9 `
+  --confirm-release-id menhir-prod-0.2.0-9
+```
+
+The command is resumable after interruption. A pre-existing unowned archive, changed fragment, or
+changed bundle is refused rather than adopted. Later unreleased fragments remain untouched.
+
 Inspect the current phase at any time:
 
 ```powershell
@@ -230,20 +284,14 @@ python deploy/release_flow.py status `
 ## Select, stage, approve, and promote personally
 
 Create one empty personal-deployment workspace beside the finalized product-release workspace.
-Selection verifies the finalized release authority and complete bundle-tree digest; it does not
-rebuild or publish anything.
+The `rehearse` command selects the exact product release and immediately runs its isolated staging
+rehearsal. Selection verifies the release authority, immutable deployment class, generated
+changelog digests, and complete bundle-tree digest; it does not rebuild or publish anything.
 
 ```powershell
 New-Item -ItemType Directory C:\absolute\personal-menhir-prod-0.2.0-9
-python deploy/personal_deploy.py select `
+python deploy/personal_deploy.py rehearse `
   --release-workspace C:\absolute\menhir-prod-0.2.0-9 `
-  --workspace C:\absolute\personal-menhir-prod-0.2.0-9
-```
-
-Preview the isolated staging command by omitting `--execute`, or run it as follows:
-
-```powershell
-python deploy/personal_deploy.py stage `
   --workspace C:\absolute\personal-menhir-prod-0.2.0-9 `
   --runner (Resolve-Path deploy/personal_stage.ps1) `
   --execute
@@ -251,7 +299,9 @@ python deploy/personal_deploy.py status `
   --workspace C:\absolute\personal-menhir-prod-0.2.0-9
 ```
 
-Staging uploads the exact bundle into a random private VPS directory, creates disposable Neo4j,
+Omit `--execute` to preview the exact staging command. Repeating `rehearse` resumes the same
+digest-bound state and does not repeat a completed stage. Staging first runs a read-only production
+preflight; only then does it upload the exact bundle into a random private VPS directory, create disposable Neo4j,
 OAuth, policy, ingress, and telemetry authority under `/srv/menhir/staging`, and uses only
 non-production credentials. It verifies production-equivalent image digests, memory limits,
 network shape, OAuth authorization code with PKCE, MCP discovery/list/recall, an allowed synthetic
@@ -259,14 +309,12 @@ write, an exact policy denial, restart persistence, and simulated automatic roll
 the production release and container identities before and after, removes staging, and writes a
 receipt only if every check passes.
 
-Review `release-notes.md` and `staging-receipt.json`. Then bind one owner approval to the exact
-release ID and the `staging_receipt_sha256` printed by `status`:
+Review `release-notes.md` and `staging-receipt.json`. Then bind one owner approval. The coordinator
+derives the already-validated release ID and staging digest; the operator supplies only an identity:
 
 ```powershell
 python deploy/personal_deploy.py approve `
   --workspace C:\absolute\personal-menhir-prod-0.2.0-9 `
-  --confirm-release-id menhir-prod-0.2.0-9 `
-  --confirm-staging-sha256 <64-character-staging-receipt-digest> `
   --approved-by <owner-identity>
 ```
 
@@ -274,14 +322,10 @@ Preview promotion first, then execute the same bound command:
 
 ```powershell
 python deploy/personal_deploy.py promote `
-  --workspace C:\absolute\personal-menhir-prod-0.2.0-9 `
-  --confirm-release-id menhir-prod-0.2.0-9 `
-  --confirm-staging-sha256 <64-character-staging-receipt-digest>
+  --workspace C:\absolute\personal-menhir-prod-0.2.0-9
 
 python deploy/personal_deploy.py promote `
   --workspace C:\absolute\personal-menhir-prod-0.2.0-9 `
-  --confirm-release-id menhir-prod-0.2.0-9 `
-  --confirm-staging-sha256 <64-character-staging-receipt-digest> `
   --execute
 ```
 
@@ -292,7 +336,8 @@ bounded app replacement. `security-config` currently uses the conservative maint
 its focused production runner is implemented. `maintenance` uses the full resumable backup,
 restore, candidate, fence, route, and promotion transaction.
 
-The deployment class is mechanical. It selects `AppOnly` only when every staged fragment is
+The deployment class is mechanical and is part of the reviewed immutable release authority. It
+selects `AppOnly` only when every staged fragment is
 `app-only`, no sibling repository changed, and the Menhir diff contains only application source
 outside protected authentication, runtime, schema, configuration, and deployment paths. A fragment
 can escalate but cannot de-escalate the result.
@@ -312,6 +357,6 @@ active state before failing the deployment.
 
 Retain the product-release workspace as immutable publication evidence. Retain the separate personal
 deployment workspace through the observation window as staging, approval, and promotion evidence.
-Move released fragments out of `changes/unreleased/` in the next release-preparation commit. The
-generated Markdown is the detailed release changelog source; `CHANGELOG.md` remains the short
-repository history.
+The `publish` transaction archives the exact prepared fragments under
+`deploy/changes/releases/<release-id>/`; do not move them manually. The generated Markdown is the
+detailed release changelog source; `CHANGELOG.md` remains the short repository history.

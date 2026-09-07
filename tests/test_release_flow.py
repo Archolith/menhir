@@ -21,6 +21,30 @@ def _sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def test_next_release_id_increments_sequence_or_resets_for_new_version(
+    tmp_path: Path,
+) -> None:
+    prior = tmp_path / "release.json"
+    prior.write_text(
+        json.dumps({"release_id": "menhir-prod-0.2.0-13"}), encoding="utf-8"
+    )
+
+    assert MODULE.next_release_id(prior.resolve())["release_id"] \
+        == "menhir-prod-0.2.0-14"
+    assert MODULE.next_release_id(prior.resolve(), "0.3.0")["release_id"] \
+        == "menhir-prod-0.3.0-1"
+
+
+def test_next_release_id_refuses_malformed_version(tmp_path: Path) -> None:
+    prior = tmp_path / "release.json"
+    prior.write_text(
+        json.dumps({"release_id": "menhir-prod-0.2.0-13"}), encoding="utf-8"
+    )
+
+    with pytest.raises(MODULE.ReleaseFlowError, match="major"):
+        MODULE.next_release_id(prior.resolve(), "0.3")
+
+
 def _commit(repo: Path, name: str, content: str) -> str:
     target = repo / name
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -176,6 +200,23 @@ def _write_staged_workspace(tmp_path: Path, phase: str = "bundled") -> tuple[Pat
         path = workspace / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(payload)
+    authority = {
+        "release_id": "menhir-prod-0.2.0-11",
+        "release_author": "release-operator",
+        "deployment_class": "security-config",
+        "notes_json_sha256": _sha(workspace / MODULE.NOTES_JSON_NAME),
+        "notes_markdown_sha256": _sha(workspace / MODULE.NOTES_MARKDOWN_NAME),
+    }
+    (workspace / MODULE.SPEC_NAME).write_text(
+        json.dumps(authority), encoding="utf-8"
+    )
+    (workspace / MODULE.REVIEW_REQUEST_NAME).write_text(
+        json.dumps({"release": authority}), encoding="utf-8"
+    )
+    if phase in {"bundled", "deployed"}:
+        (workspace / MODULE.RELEASE_NAME).write_text(
+            json.dumps(authority), encoding="utf-8"
+        )
     state = {
         "schema": MODULE.SCHEMA,
         "kind": MODULE.KIND,
@@ -206,6 +247,32 @@ def _write_staged_workspace(tmp_path: Path, phase: str = "bundled") -> tuple[Pat
     }
     MODULE._atomic_json(workspace / MODULE.STATE_NAME, state)
     return workspace, state
+
+
+def _publication_workspace(
+    tmp_path: Path,
+    fragments: dict[str, bytes] | None = None,
+) -> tuple[Path, dict, Path]:
+    workspace, state = _write_staged_workspace(tmp_path)
+    fragments_dir = tmp_path / "changes" / "unreleased"
+    fragments_dir.mkdir(parents=True)
+    payloads = fragments or {
+        "first.json": b'{"id":"first"}\n',
+        "second.json": b'{"id":"second"}\n',
+    }
+    for name, payload in payloads.items():
+        (fragments_dir / name).write_bytes(payload)
+    state.update({
+        "fragments_dir": str(fragments_dir.resolve()),
+        "fragments": [
+            {"name": name, "sha256": _sha(fragments_dir / name)}
+            for name in sorted(payloads)
+        ],
+        "publication_nonce": None,
+        "publication_receipt_sha256": None,
+    })
+    MODULE._atomic_json(workspace / MODULE.STATE_NAME, state)
+    return workspace, state, fragments_dir
 
 
 def test_deploy_requires_exact_release_confirmation(
@@ -295,6 +362,209 @@ def test_status_rejects_bundle_payload_drift(tmp_path: Path) -> None:
         MODULE.status_flow(workspace)
 
 
+def test_publish_archives_only_bound_fragments_and_is_idempotent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace, state, fragments_dir = _publication_workspace(tmp_path)
+    later = fragments_dir / "later.json"
+    later.write_bytes(b'{"id":"later"}\n')
+    monkeypatch.setattr(
+        MODULE,
+        "deployment_command",
+        lambda *_args: pytest.fail("publication attempted to deploy production"),
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "_run",
+        lambda *_args: pytest.fail("publication attempted to run a deployment"),
+    )
+
+    published = MODULE.publish_flow(workspace.resolve(), state["release_id"])
+    archive = fragments_dir.parent / "releases" / state["release_id"]
+    receipt = archive / MODULE.PUBLICATION_RECEIPT_NAME
+
+    assert published["phase"] == "published"
+    assert published["publication_receipt_sha256"] == _sha(receipt)
+    assert sorted(path.name for path in archive.iterdir()) == [
+        "first.json",
+        MODULE.PUBLICATION_RECEIPT_NAME,
+        "second.json",
+    ]
+    assert later.exists()
+    assert not (archive / MODULE.BUNDLE_NAME).exists()
+    receipt_value = json.loads(receipt.read_text(encoding="utf-8"))
+    assert receipt_value["artifacts"] == {
+        key: state[key] for key in MODULE.FROZEN_ARTIFACT_KEYS
+    }
+    assert receipt_value["fragments"] == state["fragments"]
+
+    receipt_bytes = receipt.read_bytes()
+    resumed = MODULE.publish_flow(workspace.resolve(), state["release_id"])
+    assert resumed == published
+    assert receipt.read_bytes() == receipt_bytes
+
+
+def test_publish_requires_exact_release_confirmation_before_mutation(
+    tmp_path: Path,
+) -> None:
+    workspace, state, fragments_dir = _publication_workspace(tmp_path)
+
+    with pytest.raises(MODULE.ReleaseFlowError, match="exactly match"):
+        MODULE.publish_flow(workspace.resolve(), "menhir-prod-0.2.0-12")
+
+    assert all((fragments_dir / row["name"]).exists() for row in state["fragments"])
+    assert not (fragments_dir.parent / "releases").exists()
+    assert json.loads((workspace / MODULE.STATE_NAME).read_text())["phase"] == "bundled"
+
+
+def test_legacy_bundled_workspace_remains_readable_but_cannot_publish(
+    tmp_path: Path,
+) -> None:
+    workspace, state = _write_staged_workspace(tmp_path)
+
+    assert MODULE.status_flow(workspace.resolve()) == state
+    with pytest.raises(MODULE.ReleaseFlowError, match="legacy release flow"):
+        MODULE.publish_flow(workspace.resolve(), state["release_id"])
+
+
+def test_publish_refuses_preexisting_unowned_release_archive(tmp_path: Path) -> None:
+    workspace, state, fragments_dir = _publication_workspace(tmp_path)
+    archive = fragments_dir.parent / "releases" / state["release_id"]
+    archive.mkdir(parents=True)
+    for binding in state["fragments"]:
+        (archive / binding["name"]).write_bytes(
+            (fragments_dir / binding["name"]).read_bytes()
+        )
+    (archive / MODULE.PUBLICATION_RECEIPT_NAME).write_text(
+        '{"kind":"menhir-release-publication"}\n', encoding="ascii"
+    )
+
+    with pytest.raises(MODULE.ReleaseFlowError, match="unexpected release archive"):
+        MODULE.publish_flow(workspace.resolve(), state["release_id"])
+
+    assert all((fragments_dir / row["name"]).exists() for row in state["fragments"])
+    persisted = json.loads((workspace / MODULE.STATE_NAME).read_text())
+    assert persisted["phase"] == "bundled"
+    assert persisted["publication_nonce"] is None
+
+
+def test_publish_refuses_fragment_drift_before_archiving(tmp_path: Path) -> None:
+    workspace, state, fragments_dir = _publication_workspace(tmp_path)
+    changed = fragments_dir / state["fragments"][0]["name"]
+    changed.write_bytes(b"changed after prepare\n")
+
+    with pytest.raises(MODULE.ReleaseFlowError, match="fragment changed"):
+        MODULE.publish_flow(workspace.resolve(), state["release_id"])
+
+    assert changed.exists()
+    assert not (fragments_dir.parent / "releases" / state["release_id"]).exists()
+    assert json.loads((workspace / MODULE.STATE_NAME).read_text())["phase"] == "bundled"
+
+
+def test_publish_refuses_a_fragment_replaced_during_atomic_move(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace, state, fragments_dir = _publication_workspace(
+        tmp_path, {"only.json": b'{"id":"only"}\n'}
+    )
+    source = fragments_dir / "only.json"
+    real_replace = MODULE.os.replace
+
+    def replace_after_check(old: Path | str, new: Path | str) -> None:
+        if Path(old) == source:
+            source.write_bytes(b"replacement bytes\n")
+        real_replace(old, new)
+
+    monkeypatch.setattr(MODULE.os, "replace", replace_after_check)
+
+    with pytest.raises(MODULE.ReleaseFlowError, match="replaced while publishing"):
+        MODULE.publish_flow(workspace.resolve(), state["release_id"])
+
+    assert source.read_bytes() == b"replacement bytes\n"
+    assert not (fragments_dir.parent / "releases" / state["release_id"]).exists()
+    assert json.loads((workspace / MODULE.STATE_NAME).read_text())["phase"] == "publishing"
+
+
+def test_publish_resumes_after_an_interrupted_fragment_move(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace, state, fragments_dir = _publication_workspace(tmp_path)
+    real_replace = MODULE.os.replace
+    moves = 0
+
+    def interrupt_second_move(old: Path | str, new: Path | str) -> None:
+        nonlocal moves
+        if Path(old).parent == fragments_dir:
+            moves += 1
+            if moves == 2:
+                raise OSError("injected interruption")
+        real_replace(old, new)
+
+    monkeypatch.setattr(MODULE.os, "replace", interrupt_second_move)
+    with pytest.raises(OSError, match="injected interruption"):
+        MODULE.publish_flow(workspace.resolve(), state["release_id"])
+    monkeypatch.setattr(MODULE.os, "replace", real_replace)
+
+    assert json.loads((workspace / MODULE.STATE_NAME).read_text())["phase"] == "publishing"
+    interrupted = json.loads((workspace / MODULE.STATE_NAME).read_text())
+    staging = fragments_dir.parent / "releases" / (
+        f".{state['release_id']}.{interrupted['publication_nonce']}.publishing"
+    )
+    assert staging.is_dir()
+    assert len(list(staging.iterdir())) == 1
+
+    published = MODULE.publish_flow(workspace.resolve(), state["release_id"])
+    assert published["phase"] == "published"
+    assert not staging.exists()
+    assert MODULE.status_flow(workspace.resolve()) == published
+
+
+def test_publish_recovers_only_its_nonce_bound_committed_archive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace, state, fragments_dir = _publication_workspace(tmp_path)
+    real_replace = MODULE.os.replace
+
+    def crash_after_archive_commit(old: Path | str, new: Path | str) -> None:
+        real_replace(old, new)
+        if Path(new).name == state["release_id"]:
+            raise OSError("crash after archive commit")
+
+    monkeypatch.setattr(MODULE.os, "replace", crash_after_archive_commit)
+    with pytest.raises(OSError, match="crash after archive commit"):
+        MODULE.publish_flow(workspace.resolve(), state["release_id"])
+    monkeypatch.setattr(MODULE.os, "replace", real_replace)
+
+    interrupted = json.loads((workspace / MODULE.STATE_NAME).read_text())
+    assert interrupted["phase"] == "publishing"
+    assert MODULE.PUBLICATION_NONCE_RE.fullmatch(interrupted["publication_nonce"])
+
+    published = MODULE.publish_flow(workspace.resolve(), state["release_id"])
+    assert published["phase"] == "published"
+    receipt = (
+        fragments_dir.parent
+        / "releases"
+        / state["release_id"]
+        / MODULE.PUBLICATION_RECEIPT_NAME
+    )
+    assert json.loads(receipt.read_text())["publication_nonce"] == interrupted[
+        "publication_nonce"
+    ]
+
+
+def test_publish_validates_all_frozen_artifacts_before_moving_fragments(
+    tmp_path: Path,
+) -> None:
+    workspace, state, fragments_dir = _publication_workspace(tmp_path)
+    (workspace / MODULE.BUNDLE_NAME / "extra").write_bytes(b"drift\n")
+
+    with pytest.raises(MODULE.ReleaseFlowError, match="install bundle changed"):
+        MODULE.publish_flow(workspace.resolve(), state["release_id"])
+
+    assert all((fragments_dir / row["name"]).exists() for row in state["fragments"])
+    assert not (fragments_dir.parent / "releases").exists()
+
+
 def test_tree_sha256_is_portable_sorted_file_manifest(tmp_path: Path) -> None:
     bundle = tmp_path / "bundle"
     (bundle / "nested").mkdir(parents=True)
@@ -320,6 +590,17 @@ def test_state_rejects_duplicate_json_keys(tmp_path: Path) -> None:
         MODULE._load_state(workspace.resolve())
 
 
+def test_current_state_rejects_release_authority_binding_mismatch(
+    tmp_path: Path,
+) -> None:
+    workspace, state, _ = _publication_workspace(tmp_path)
+    state["deployment_class"] = "maintenance"
+    MODULE._atomic_json(workspace / MODULE.STATE_NAME, state)
+
+    with pytest.raises(MODULE.ReleaseFlowError, match="release spec deployment_class"):
+        MODULE.status_flow(workspace.resolve())
+
+
 def test_prepare_authors_review_request_and_binds_outputs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -330,6 +611,7 @@ def test_prepare_authors_review_request_and_binds_outputs(
     workspace.mkdir()
     fragments = tmp_path / "fragments"
     fragments.mkdir()
+    (fragments / "prepared.json").write_text("{}\n", encoding="ascii")
     fragment = {
         "repositories": {"menhir": [commits["menhir"][1]]},
         "deployment_class": "security-config",
@@ -357,10 +639,14 @@ def test_prepare_authors_review_request_and_binds_outputs(
 
     def author(_spec: Path, destination: Path, security_review: Path | None = None) -> None:
         assert security_review is None
+        authored_spec = json.loads(_spec.read_text(encoding="utf-8"))
         destination.write_text(json.dumps({
             "release": {
                 "release_id": "menhir-prod-0.2.0-11",
                 "release_author": "release-operator",
+                "deployment_class": authored_spec["deployment_class"],
+                "notes_json_sha256": authored_spec["notes_json_sha256"],
+                "notes_markdown_sha256": authored_spec["notes_markdown_sha256"],
             }
         }), encoding="utf-8")
 
@@ -370,6 +656,10 @@ def test_prepare_authors_review_request_and_binds_outputs(
 
     assert state["phase"] == "review_requested"
     assert state["deployment_class"] == "maintenance"
+    prepared_spec = json.loads((workspace / MODULE.SPEC_NAME).read_text(encoding="utf-8"))
+    assert prepared_spec["deployment_class"] == state["deployment_class"]
+    assert prepared_spec["notes_json_sha256"] == state["notes_json_sha256"]
+    assert prepared_spec["notes_markdown_sha256"] == state["notes_markdown_sha256"]
     assert (workspace / MODULE.REVIEW_REQUEST_NAME).exists()
     assert MODULE.status_flow(workspace.resolve()) == state
 

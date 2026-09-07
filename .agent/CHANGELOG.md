@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-09-07 - Make Menhir releases rehearsable and deployment-bound
+
+- Add an explicit, resumable product-publication transaction that archives only the release-note
+  fragments frozen during preparation and records their exact digests without touching production.
+- Generate the next release label from the prior immutable authority, and bind the mechanically
+  derived deployment class plus both generated changelog digests into the reviewed release.
+- Collapse personal selection and isolated staging into one resumable `rehearse` command; derive
+  validated approval and promotion confirmations instead of requiring operators to retype digests.
+- Run a sanitized, receipt-bound production readiness preflight before expensive staging, including
+  service identity, health, resource headroom, journal, network, TLS, and fixed-address checks for
+  the transaction class that will actually run.
+- Accept a fresh maintenance rehearsal as restore-drill evidence only when it is bound to the
+  current backup generation and release; document and repair the live ingress/audit drift found
+  after 0.2.0-13.
+- Add the 0.2.0-11 through 0.2.0-13 incident postmortem, split packaged-product release from personal
+  deployment, and record the remaining dedicated security-config and ingress-authority work as
+  explicit gates rather than hidden operator troubleshooting.
+
 ## 2026-09-06 - Keep deterministic self identity and automatic memory
 
 - `self_identity.py`, `enrichment_steps.py`, `enrichment_failures.py`: distinguish an eligible

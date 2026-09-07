@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
-import os
 import re
 import stat
 import subprocess
@@ -156,6 +155,25 @@ def test_rejects_rendered_digest_drift(tmp_path: Path) -> None:
     rendered = Path(spec["rendered"]["production_env_sha256"])
     rendered.write_bytes(rendered.read_bytes() + b"DRIFT\n")
     with pytest.raises(ValueError, match="digest drift"):
+        MODULE.build_install_bundle(release_path, spec_path, tmp_path / "bundle")
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    (
+        ("deployment_class", "app-only"),
+        ("notes_json_sha256", "0" * 64),
+        ("notes_markdown_sha256", "1" * 64),
+    ),
+)
+def test_rejects_release_authority_binding_mismatch(
+    tmp_path: Path, key: str, value: str,
+) -> None:
+    release_path, spec_path, spec = _release_fixture(tmp_path)
+    spec[key] = value
+    spec_path.write_text(json.dumps(spec), encoding="ascii")
+
+    with pytest.raises(ValueError, match=f"release spec {key}"):
         MODULE.build_install_bundle(release_path, spec_path, tmp_path / "bundle")
 
 

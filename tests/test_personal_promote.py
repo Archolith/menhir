@@ -49,6 +49,27 @@ def _fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[list[str]
     release_sha = _sha(release_path)
     bundle_sha = _tree_sha(bundle)
     now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    preflight = {
+        "schema": 1,
+        "kind": "menhir-production-readiness-preflight",
+        "result": "passed",
+        "observed_utc": now,
+        "deployment_class": "app-only",
+        "candidate_release_id": release_id,
+        "checks": {
+            "live_services": {},
+            "network_roles": {},
+            "release_journal": {},
+            "headroom": {
+                "disk_free_bytes": 9,
+                "disk_required_bytes": 8,
+                "memory_available_bytes": 8,
+                "memory_required_bytes": 7,
+            },
+            "maintenance_route": {"applicable": False},
+        },
+        "canonical_sha256": "4" * 64,
+    }
     staging_path = tmp_path / "staging.json"
     staging_path.write_text(json.dumps({
         "schema": 1,
@@ -68,6 +89,7 @@ def _fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[list[str]
             "namespace": "menhir-staging",
         },
         "checks": {name: True for name in REQUIRED_CHECKS},
+        "production_preflight": preflight,
     }), encoding="utf-8")
     staging_sha = _sha(staging_path)
     approval_path = tmp_path / "approval.json"

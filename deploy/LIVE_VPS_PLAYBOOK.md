@@ -61,6 +61,11 @@ happen in CI, isolated staging, or scheduled operations and are reused through i
 A routine cutover has a five-minute foreground budget and one human approval. A timeout or missing receipt exits or rolls
 back; it never starts an improvised repair or escalates itself into maintenance.
 
+Release-engineering changes do not share a release train with routine application changes. Changes
+to `deploy/`, host services, backup/restore, networking, ingress, or a sibling release repository
+mechanically select `maintenance`; release and rehearse those changes first. The following
+application release can then use `app-only` when its own immutable delta qualifies.
+
 `maintenance` remains a separate, deliberately rare path for schema/data migrations, database or
 host replacement, backup/restore changes, network topology, privileged service definitions, or
 recovery. Only that path may quiesce the database, create a release-bound backup, rehearse a restore,
@@ -110,6 +115,13 @@ docker inspect -f '{{.Name}} {{.Image}} {{.State.Health.Status}}' menhir-prod-ap
 curl -fsS https://memory.ctharvey.me/readyz
 ```
 
+The automated preflight must additionally require healthy Menhir/Neo4j containers, sufficient
+disk/RAM headroom, no conflicting release journal, active reconciliation/audit units, and an
+ingress topology compatible with the selected class. It runs before owner approval. For app-only,
+it verifies ingress identity but does not require or mutate route assets. For maintenance, it
+rejects missing candidate files, directory-valued TLS paths, or fixed-IP collisions before any
+backup, fence, or writer shutdown.
+
 `/var/lib/menhir-production/release-run.json` is an unfinished maintenance
 transaction when its stage is not `complete`. A normal app-only deployment must refuse
 to start while such a transaction is active; the operator must reconcile or explicitly
@@ -150,6 +162,24 @@ fail closed into `maintenance`.
 | `security-config` | OAuth, client policy, scopes, secrets metadata, or application configuration changes without a data migration | 10 minutes | Focused independent review, production-equivalent staging, bounded config/app replacement, access-contract canary, automatic rollback |
 | `maintenance` | Neo4j, schema, migration/startup writes, durable inventory, backup/restore code, deployment tooling, Caddy, networking, systemd, sudoers, or host topology changes | No 5-minute promise | Full backup, rehearsal, candidate, fence, route, promotion transaction |
 | `recovery` | Restoring authority after data loss or an interrupted irreversible operation | No 5-minute promise | Verified generation restore and recovery playbook |
+
+The ten-minute `security-config` row is a required design, not permission to route the class through
+the maintenance transaction indefinitely. Until its dedicated runner and receipt tests are green,
+the coordinator must report that the focused lane is unavailable rather than presenting a
+maintenance run as a ten-minute security-config deployment.
+
+## Current ingress inventory
+
+As observed after release 0.2.0-13, `menhir-proxy` contains
+`menhir-prod-cloudflared` at `172.30.0.2` and `menhir-prod-app` at `172.30.0.3`.
+Cloudflared has a path allowlist and proxies directly to the app. The shared Yawn Caddy container is
+on `yawndeploy_default` and also contains a Menhir virtual host. These are two installed ingress
+configurations, not interchangeable implementations of one transaction.
+
+Release authority must name the active ingress mode before a maintenance route mutation. App-only
+and security-config releases retain both route configurations byte-for-byte and prove public
+behavior through the canonical URL. Do not infer that `.2` is Caddy from its address or start a
+validation container on an occupied address.
 
 Classification must be produced mechanically from the immutable release inputs and
 included in CI evidence. A caller cannot self-assert `app-only`. In particular,
@@ -348,8 +378,9 @@ drill, absence of candidate/maintenance state, and public production readiness.
 1. Install Docker/Compose, Python 3, GNU `flock`, `age`, `sqlite3`, `sha256sum`,
    and the existing Caddy stack.
 2. Create `menhir-proxy` with subnet `172.30.0.0/24` and gateway
-   `172.30.0.1`. Caddy is `172.30.0.2`; Menhir is `172.30.0.3`. Never publish
-   Menhir port 8099.
+   `172.30.0.1`. The declared ingress peer is `172.30.0.2`; Menhir is
+   `172.30.0.3`. In the current Cloudflared mode, the ingress peer is
+   `menhir-prod-cloudflared`. Never publish Menhir port 8099.
 3. Create `/srv/menhir/production`, `/srv/menhir/backups`,
    `/var/lib/menhir-production`, and `/var/log/menhir-production` as root-owned
    fixed roots.
@@ -393,8 +424,9 @@ ss -lnt | grep '172.30.0.1:8000'
 The operations resource remains `https://memory.ctharvey.me/ops/mcp`, with
 issuer `https://memory.ctharvey.me`, audience
 `https://memory.ctharvey.me/ops/mcp`, and gateway base URL
-`https://memory.ctharvey.me/ops`. Caddy at `172.30.0.2` is the only admitted peer
-to the gateway.
+`https://memory.ctharvey.me/ops`. The gateway peer allowlist must be derived from
+the declared ingress mode and verified from the actual container network; an IP
+address alone is not proof that the peer is Caddy.
 
 ## What `release-run.sh` proves
 
@@ -462,9 +494,11 @@ automatic prior-image rollback on failure. Host
 topology, Neo4j, Caddy, backup identity, network, systemd, sudoers, gateway bootstrap,
 full backup generation, and restore rehearsal are not recreated.
 
-Finalize the product through `release_flow.py`, then select and stage it through
-`personal_deploy.py`. Review the release notes and exact staging receipt, record one bound approval,
-preview promotion, and execute that same promotion. `security-config` is conservatively promoted by
-the maintenance transaction until a focused production runner is implemented. Mechanically
-classified `maintenance` changes always require the full state-protection path; using that stronger
-path temporarily for `security-config` is safe but slower.
+Finalize and publish the product through `release_flow.py`, then run the single resumable
+`personal_deploy.py rehearse` command. Review the release notes and exact staging receipt, record one
+bound approval, preview promotion, and execute that same promotion. `security-config` currently
+uses the maintenance transaction and therefore receives no ten-minute promise; its production
+preflight must prove every maintenance-route prerequisite before staging can pass. Mechanically
+classified `maintenance` changes always require the full state-protection path. A dedicated
+security-config runner remains required before that class may claim the bounded path described
+above.

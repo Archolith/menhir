@@ -25,8 +25,15 @@ def _product_release(tmp_path: Path) -> Path:
     bundle = workspace / MODULE.BUNDLE_NAME
     release_path = workspace / MODULE.RELEASE_NAME
     bundle.mkdir(parents=True)
+    notes_json = workspace / "release-notes.json"
+    notes_markdown = workspace / "release-notes.md"
+    notes_json.write_text('{"release_id":"menhir-prod-0.2.0-12"}\n', encoding="ascii")
+    notes_markdown.write_text("# Menhir release\n", encoding="ascii")
     release = {
         "release_id": "menhir-prod-0.2.0-12",
+        "deployment_class": "security-config",
+        "notes_json_sha256": _sha(notes_json),
+        "notes_markdown_sha256": _sha(notes_markdown),
         "images": {
             "menhir": "sha256:" + "1" * 64,
             "neo4j": "sha256:" + "2" * 64,
@@ -41,6 +48,8 @@ def _product_release(tmp_path: Path) -> Path:
         "release_sha256": _sha(release_path),
         "bundle_sha256": MODULE._tree_sha256(bundle),
         "deployment_class": "security-config",
+        "notes_json_sha256": release["notes_json_sha256"],
+        "notes_markdown_sha256": release["notes_markdown_sha256"],
     }
     (workspace / MODULE.RELEASE_STATE_NAME).write_text(json.dumps(state), encoding="utf-8")
     return workspace
@@ -63,6 +72,30 @@ def _runner(tmp_path: Path) -> Path:
 
 def _receipt(state: dict, runner: Path, *, checks: dict | None = None, hours_old: int = 0) -> dict:
     completed = datetime.now(timezone.utc) - timedelta(hours=hours_old)
+    started = completed - timedelta(minutes=4)
+    preflight = {
+        "schema": 1,
+        "kind": "menhir-production-readiness-preflight",
+        "result": "passed",
+        "observed_utc": (started - timedelta(seconds=1)).isoformat().replace("+00:00", "Z"),
+        "deployment_class": state["deployment_class"],
+        "candidate_release_id": state["release_id"],
+        "checks": {
+            "live_services": {},
+            "network_roles": {},
+            "release_journal": {},
+            "headroom": {
+                "disk_free_bytes": 9,
+                "disk_required_bytes": 8,
+                "memory_available_bytes": 8,
+                "memory_required_bytes": 7,
+            },
+            "maintenance_route": {"applicable": state["deployment_class"] != "app-only"},
+        },
+    }
+    preflight["canonical_sha256"] = hashlib.sha256(json.dumps(
+        preflight, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
+    ).encode("ascii")).hexdigest()
     return {
         "schema": 1,
         "kind": "menhir-personal-staging",
@@ -76,7 +109,7 @@ def _receipt(state: dict, runner: Path, *, checks: dict | None = None, hours_old
             "neo4j": state["neo4j_image"],
         },
         "runner_sha256": MODULE._runner_sha256(runner),
-        "started_utc": (completed - timedelta(minutes=4)).isoformat().replace("+00:00", "Z"),
+        "started_utc": started.isoformat().replace("+00:00", "Z"),
         "completed_utc": completed.isoformat().replace("+00:00", "Z"),
         "test_identities": {
             "oauth_client_id": "menhir-staging-probe",
@@ -84,6 +117,7 @@ def _receipt(state: dict, runner: Path, *, checks: dict | None = None, hours_old
             "namespace": "menhir-staging",
         },
         "checks": checks or {name: True for name in MODULE.STAGING_CHECKS},
+        "production_preflight": preflight,
     }
 
 
@@ -119,6 +153,51 @@ def test_select_rejects_changed_product_bundle(tmp_path: Path) -> None:
         MODULE.select_flow(product, deployment)
 
 
+def test_select_rejects_state_release_deployment_class_mismatch(tmp_path: Path) -> None:
+    product = _product_release(tmp_path)
+    release_path = product / MODULE.RELEASE_NAME
+    release = json.loads(release_path.read_text(encoding="utf-8"))
+    release["deployment_class"] = "maintenance"
+    release_path.write_text(json.dumps(release), encoding="utf-8")
+    state_path = product / MODULE.RELEASE_STATE_NAME
+    release_state = json.loads(state_path.read_text(encoding="utf-8"))
+    release_state["release_sha256"] = _sha(release_path)
+    state_path.write_text(json.dumps(release_state), encoding="utf-8")
+    deployment = tmp_path / "personal-deployment"
+    deployment.mkdir()
+
+    with pytest.raises(MODULE.PersonalDeployError, match="state/release deployment class"):
+        MODULE.select_flow(product, deployment)
+
+
+def test_select_refuses_legacy_release_without_immutable_bindings(tmp_path: Path) -> None:
+    product = _product_release(tmp_path)
+    release_path = product / MODULE.RELEASE_NAME
+    release = json.loads(release_path.read_text(encoding="utf-8"))
+    for key in ("deployment_class", "notes_json_sha256", "notes_markdown_sha256"):
+        release.pop(key)
+    release_path.write_text(json.dumps(release), encoding="utf-8")
+    state_path = product / MODULE.RELEASE_STATE_NAME
+    release_state = json.loads(state_path.read_text(encoding="utf-8"))
+    release_state["release_sha256"] = _sha(release_path)
+    state_path.write_text(json.dumps(release_state), encoding="utf-8")
+    deployment = tmp_path / "personal-deployment"
+    deployment.mkdir()
+
+    with pytest.raises(MODULE.PersonalDeployError, match="deployment class mismatch"):
+        MODULE.select_flow(product, deployment)
+
+
+def test_select_rejects_generated_release_notes_drift(tmp_path: Path) -> None:
+    product = _product_release(tmp_path)
+    (product / "release-notes.md").write_text("changed\n", encoding="ascii")
+    deployment = tmp_path / "personal-deployment"
+    deployment.mkdir()
+
+    with pytest.raises(MODULE.PersonalDeployError, match="release-notes.md changed"):
+        MODULE.select_flow(product, deployment)
+
+
 def test_stage_preview_is_read_only(tmp_path: Path) -> None:
     _, deployment, _ = _selected(tmp_path)
     runner = _runner(tmp_path)
@@ -146,6 +225,80 @@ def test_stage_accepts_only_complete_digest_bound_receipt(tmp_path: Path) -> Non
     assert state["phase"] == "staged"
     assert state["staging_receipt_sha256"] == _sha(deployment / MODULE.STAGING_RECEIPT_NAME)
     assert MODULE.status_flow(deployment) == state
+
+
+def test_stage_rejects_tampered_production_preflight(tmp_path: Path) -> None:
+    _, deployment, selected = _selected(tmp_path)
+    runner = _runner(tmp_path)
+
+    def run(command: list[str]) -> None:
+        receipt_path = Path(command[command.index("--receipt") + 1])
+        receipt = _receipt(selected, runner)
+        receipt["production_preflight"]["checks"]["headroom"]["disk_free_bytes"] = 0
+        receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+
+    with pytest.raises(MODULE.PersonalDeployError, match="preflight digest mismatch"):
+        MODULE.stage_flow(deployment, runner, execute=True, command_runner=run)
+
+
+def test_rehearse_selects_stages_and_resumes_without_reexecution(tmp_path: Path) -> None:
+    product = _product_release(tmp_path)
+    deployment = tmp_path / "personal-deployment"
+    deployment.mkdir()
+    runner = _runner(tmp_path)
+    seen: list[list[str]] = []
+
+    def run(command: list[str]) -> None:
+        seen.append(command)
+        selected = MODULE.status_flow(deployment)
+        receipt_path = Path(command[command.index("--receipt") + 1])
+        receipt_path.write_text(json.dumps(_receipt(selected, runner)), encoding="utf-8")
+
+    staged = MODULE.rehearse_flow(
+        product,
+        deployment,
+        runner,
+        execute=True,
+        command_runner=run,
+    )
+    resumed = MODULE.rehearse_flow(
+        product,
+        deployment,
+        runner,
+        execute=True,
+        command_runner=lambda _: pytest.fail("completed rehearsal ran twice"),
+    )
+
+    assert len(seen) == 1
+    assert isinstance(staged, dict) and staged["phase"] == "staged"
+    assert resumed == staged
+    assert not (deployment / MODULE.APPROVAL_NAME).exists()
+
+
+def test_rehearse_resumes_an_existing_matching_selection(tmp_path: Path) -> None:
+    product = _product_release(tmp_path)
+    deployment = tmp_path / "personal-deployment"
+    deployment.mkdir()
+    runner = _runner(tmp_path)
+
+    command = MODULE.rehearse_flow(product, deployment, runner, execute=False)
+    selected = MODULE.status_flow(deployment)
+
+    def run(command: list[str]) -> None:
+        receipt_path = Path(command[command.index("--receipt") + 1])
+        receipt_path.write_text(json.dumps(_receipt(selected, runner)), encoding="utf-8")
+
+    state = MODULE.rehearse_flow(
+        product,
+        deployment,
+        runner,
+        execute=True,
+        command_runner=run,
+    )
+
+    assert isinstance(command, list)
+    assert selected["phase"] == "selected"
+    assert isinstance(state, dict) and state["phase"] == "staged"
 
 
 def test_stage_rejects_missing_required_check(tmp_path: Path) -> None:
@@ -187,6 +340,17 @@ def test_approval_requires_release_and_receipt_confirmations(tmp_path: Path) -> 
         MODULE.approve_flow(deployment, staged["release_id"], "0" * 64, "owner")
 
 
+def test_approval_derives_validated_confirmations_but_requires_identity(tmp_path: Path) -> None:
+    deployment, _, _ = _stage(tmp_path)
+
+    with pytest.raises(MODULE.PersonalDeployError, match="identity"):
+        MODULE.approve_flow(deployment)
+
+    approved = MODULE.approve_flow(deployment, approved_by="owner")
+
+    assert approved["phase"] == "approved"
+
+
 def test_one_approval_unlocks_promotion_preview(tmp_path: Path) -> None:
     deployment, _, staged = _stage(tmp_path)
     approved = MODULE.approve_flow(
@@ -211,6 +375,57 @@ def test_one_approval_unlocks_promotion_preview(tmp_path: Path) -> None:
     assert command[command.index("-ExpectedStagingReceiptSha256") + 1] == approved["staging_receipt_sha256"]
     assert command[command.index("-ExpectedApprovalSha256") + 1] == approved["approval_sha256"]
     assert command[command.index("-ExpectedReleaseSha256") + 1] == approved["release_sha256"]
+    assert MODULE.status_flow(deployment)["phase"] == "approved"
+
+
+def test_cli_derives_confirmations_and_promotion_still_requires_execute(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    deployment, _, _ = _stage(tmp_path)
+    wrapper = tmp_path / "deploy-menhir.ps1"
+    wrapper.write_text("# production wrapper\n", encoding="ascii")
+    monkeypatch.setenv("USERNAME", "implicit-owner")
+
+    assert MODULE.main([
+        "approve",
+        "--workspace", str(deployment),
+    ]) == 1
+    assert MODULE.status_flow(deployment)["phase"] == "staged"
+
+    assert MODULE.main([
+        "approve",
+        "--workspace", str(deployment),
+        "--approved-by", "owner",
+    ]) == 0
+    assert MODULE.main([
+        "promote",
+        "--workspace", str(deployment),
+        "--wrapper", str(wrapper.resolve()),
+    ]) == 0
+
+    capsys.readouterr()
+    assert MODULE.status_flow(deployment)["phase"] == "approved"
+    assert not (deployment / MODULE.PROMOTION_RECEIPT_NAME).exists()
+
+
+def test_legacy_cli_confirmations_keep_environment_identity_default(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    deployment, _, staged = _stage(tmp_path)
+    monkeypatch.setenv("USERNAME", "legacy-owner")
+
+    assert MODULE.main([
+        "approve",
+        "--workspace", str(deployment),
+        "--confirm-release-id", staged["release_id"],
+        "--confirm-staging-sha256", staged["staging_receipt_sha256"],
+    ]) == 0
+
+    capsys.readouterr()
     assert MODULE.status_flow(deployment)["phase"] == "approved"
 
 

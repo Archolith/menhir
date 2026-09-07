@@ -72,6 +72,15 @@ STAGING_KEYS = frozenset({
     "schema", "kind", "result", "release_id", "release_sha256",
     "bundle_sha256", "deployment_class", "images", "runner_sha256",
     "started_utc", "completed_utc", "test_identities", "checks",
+    "production_preflight",
+})
+PREFLIGHT_KEYS = frozenset({
+    "schema", "kind", "result", "observed_utc", "deployment_class",
+    "candidate_release_id", "checks", "canonical_sha256",
+})
+PREFLIGHT_CHECK_KEYS = frozenset({
+    "live_services", "network_roles", "release_journal", "headroom",
+    "maintenance_route",
 })
 APPROVAL_KEYS = frozenset({
     "schema", "kind", "release_id", "release_sha256", "bundle_sha256",
@@ -220,6 +229,19 @@ def _release_binding(release_workspace: Path) -> dict[str, Any]:
     release = _load_json(release_path, "release authority")
     if release.get("release_id") != release_id:
         raise PersonalDeployError("release authority identity mismatch")
+    if release.get("deployment_class") != deployment_class:
+        raise PersonalDeployError("product state/release deployment class mismatch")
+    for state_key, release_key, filename in (
+        ("notes_json_sha256", "notes_json_sha256", "release-notes.json"),
+        ("notes_markdown_sha256", "notes_markdown_sha256", "release-notes.md"),
+    ):
+        state_digest = release_state.get(state_key)
+        release_digest = release.get(release_key)
+        if not isinstance(state_digest, str) or SHA256_RE.fullmatch(state_digest) is None \
+                or release_digest != state_digest:
+            raise PersonalDeployError(f"product {filename} authority mismatch")
+        if _sha256(_regular_file(release_workspace / filename, filename)) != state_digest:
+            raise PersonalDeployError(f"finalized product {filename} changed")
     images = release.get("images")
     if not isinstance(images, dict):
         raise PersonalDeployError("release image authority is invalid")
@@ -355,10 +377,50 @@ def _validate_staging_receipt(path: Path, state: dict[str, Any], runner_sha: str
     if not isinstance(checks, dict) or set(checks) != STAGING_CHECKS \
             or any(value is not True for value in checks.values()):
         raise PersonalDeployError("staging receipt does not prove every required check")
+    preflight = receipt.get("production_preflight")
+    if not isinstance(preflight, dict):
+        raise PersonalDeployError("staging receipt has no production readiness preflight")
+    _exact_keys(preflight, PREFLIGHT_KEYS, "production readiness preflight")
+    expected_preflight = {
+        "schema": 1,
+        "kind": "menhir-production-readiness-preflight",
+        "result": "passed",
+        "deployment_class": state["deployment_class"],
+        "candidate_release_id": state["release_id"],
+    }
+    for key, value in expected_preflight.items():
+        if preflight.get(key) != value:
+            raise PersonalDeployError(f"production readiness preflight {key} mismatch")
+    digest = preflight.get("canonical_sha256")
+    if not isinstance(digest, str) or SHA256_RE.fullmatch(digest) is None:
+        raise PersonalDeployError("production readiness preflight digest is invalid")
+    unsealed = dict(preflight)
+    unsealed.pop("canonical_sha256")
+    canonical = hashlib.sha256(json.dumps(
+        unsealed, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
+    ).encode("ascii")).hexdigest()
+    if digest != canonical:
+        raise PersonalDeployError("production readiness preflight digest mismatch")
+    preflight_checks = preflight.get("checks")
+    if not isinstance(preflight_checks, dict) or set(preflight_checks) != PREFLIGHT_CHECK_KEYS:
+        raise PersonalDeployError("production readiness preflight check set is invalid")
+    headroom = preflight_checks.get("headroom")
+    if not isinstance(headroom, dict) or set(headroom) != {
+        "disk_free_bytes", "disk_required_bytes",
+        "memory_available_bytes", "memory_required_bytes",
+    } or any(not isinstance(value, int) or isinstance(value, bool) for value in headroom.values()) \
+            or headroom["disk_free_bytes"] < headroom["disk_required_bytes"] \
+            or headroom["memory_available_bytes"] < headroom["memory_required_bytes"]:
+        raise PersonalDeployError("production readiness preflight headroom is invalid")
+    route = preflight_checks.get("maintenance_route")
+    route_required = state["deployment_class"] != "app-only"
+    if not isinstance(route, dict) or route.get("applicable") is not route_required:
+        raise PersonalDeployError("production readiness preflight route scope is invalid")
     started = _utc(receipt.get("started_utc"), "staging started_utc")
+    observed = _utc(preflight.get("observed_utc"), "production preflight observed_utc")
     completed = _utc(receipt.get("completed_utc"), "staging completed_utc")
     current = datetime.now(timezone.utc)
-    if completed < started or completed > current + timedelta(minutes=1) \
+    if observed > started or completed < started or completed > current + timedelta(minutes=1) \
             or current - completed > MAX_STAGING_AGE:
         raise PersonalDeployError("staging receipt is stale or has invalid timing")
     return receipt
@@ -396,6 +458,32 @@ def stage_flow(
     return state
 
 
+def rehearse_flow(
+    release_workspace: Path,
+    workspace: Path,
+    runner_path: Path,
+    *,
+    execute: bool,
+    command_runner: Callable[[list[str]], None] | None = None,
+) -> dict[str, Any] | list[str]:
+    """Select and stage one release, resuming an existing matching selection."""
+    workspace = _directory(workspace, "personal deployment workspace")
+    if not any(workspace.iterdir()):
+        select_flow(release_workspace, workspace)
+    else:
+        state = _load_state(workspace)
+        binding = _release_binding(release_workspace)
+        for key, expected in binding.items():
+            if state.get(key) != expected:
+                raise PersonalDeployError(f"rehearsal release binding mismatch: {key}")
+    return stage_flow(
+        workspace,
+        runner_path,
+        execute=execute,
+        command_runner=command_runner,
+    )
+
+
 def _verify_staging(workspace: Path, state: dict[str, Any]) -> str:
     receipt = _regular_file(workspace / STAGING_RECEIPT_NAME, "staging receipt")
     digest = _sha256(receipt)
@@ -413,16 +501,16 @@ def _verify_staging(workspace: Path, state: dict[str, Any]) -> str:
 
 def approve_flow(
     workspace: Path,
-    confirmation: str,
-    staging_confirmation: str,
-    approved_by: str,
+    confirmation: str | None = None,
+    staging_confirmation: str | None = None,
+    approved_by: str | None = None,
 ) -> dict[str, Any]:
     workspace = _directory(workspace, "personal deployment workspace")
     state = _load_state(workspace)
-    if confirmation != state["release_id"]:
+    if confirmation is not None and confirmation != state["release_id"]:
         raise PersonalDeployError("approval release confirmation must exactly match the release ID")
     staging_sha = _verify_staging(workspace, state)
-    if staging_confirmation != staging_sha:
+    if staging_confirmation is not None and staging_confirmation != staging_sha:
         raise PersonalDeployError("approval staging confirmation must exactly match the receipt digest")
     if not isinstance(approved_by, str) or not re.fullmatch(r"[A-Za-z0-9._@+-]{1,128}", approved_by):
         raise PersonalDeployError("approval identity is invalid")
@@ -522,8 +610,8 @@ def _promotion_command(workspace: Path, state: dict[str, Any], wrapper: Path) ->
 
 def promote_flow(
     workspace: Path,
-    confirmation: str,
-    staging_confirmation: str,
+    confirmation: str | None = None,
+    staging_confirmation: str | None = None,
     *,
     execute: bool,
     wrapper_path: Path = DEFAULT_PROMOTION_WRAPPER,
@@ -531,10 +619,10 @@ def promote_flow(
 ) -> dict[str, Any] | list[str]:
     workspace = _directory(workspace, "personal deployment workspace")
     state = _load_state(workspace)
-    if confirmation != state["release_id"]:
+    if confirmation is not None and confirmation != state["release_id"]:
         raise PersonalDeployError("promotion release confirmation must exactly match the release ID")
     staging_sha = _verify_staging(workspace, state)
-    if staging_confirmation != staging_sha:
+    if staging_confirmation is not None and staging_confirmation != staging_sha:
         raise PersonalDeployError("promotion staging confirmation must exactly match the receipt digest")
     approval_sha = _verify_approval(workspace, state)
     wrapper = _regular_file(wrapper_path, "production promotion wrapper")
@@ -600,15 +688,20 @@ def _parser() -> argparse.ArgumentParser:
     stage.add_argument("--workspace", type=Path, required=True)
     stage.add_argument("--runner", type=Path, required=True)
     stage.add_argument("--execute", action="store_true")
+    rehearse = commands.add_parser("rehearse")
+    rehearse.add_argument("--release-workspace", type=Path, required=True)
+    rehearse.add_argument("--workspace", type=Path, required=True)
+    rehearse.add_argument("--runner", type=Path, required=True)
+    rehearse.add_argument("--execute", action="store_true")
     approve = commands.add_parser("approve")
     approve.add_argument("--workspace", type=Path, required=True)
-    approve.add_argument("--confirm-release-id", required=True)
-    approve.add_argument("--confirm-staging-sha256", required=True)
-    approve.add_argument("--approved-by", default=os.environ.get("USERNAME") or os.environ.get("USER"))
+    approve.add_argument("--confirm-release-id")
+    approve.add_argument("--confirm-staging-sha256")
+    approve.add_argument("--approved-by")
     promote = commands.add_parser("promote")
     promote.add_argument("--workspace", type=Path, required=True)
-    promote.add_argument("--confirm-release-id", required=True)
-    promote.add_argument("--confirm-staging-sha256", required=True)
+    promote.add_argument("--confirm-release-id")
+    promote.add_argument("--confirm-staging-sha256")
     promote.add_argument("--wrapper", type=Path, default=DEFAULT_PROMOTION_WRAPPER)
     promote.add_argument("--execute", action="store_true")
     status = commands.add_parser("status")
@@ -623,12 +716,25 @@ def main(argv: list[str] | None = None) -> int:
             result: Any = select_flow(args.release_workspace, args.workspace)
         elif args.command == "stage":
             result = stage_flow(args.workspace, args.runner, execute=args.execute)
+        elif args.command == "rehearse":
+            result = rehearse_flow(
+                args.release_workspace,
+                args.workspace,
+                args.runner,
+                execute=args.execute,
+            )
         elif args.command == "approve":
+            approved_by = args.approved_by
+            if approved_by is None and args.confirm_release_id is not None \
+                    and args.confirm_staging_sha256 is not None:
+                # Preserve the legacy CLI's environment-derived identity only
+                # when its two formerly-required confirmations are supplied.
+                approved_by = os.environ.get("USERNAME") or os.environ.get("USER")
             result = approve_flow(
                 args.workspace,
                 args.confirm_release_id,
                 args.confirm_staging_sha256,
-                args.approved_by,
+                approved_by,
             )
         elif args.command == "promote":
             result = promote_flow(

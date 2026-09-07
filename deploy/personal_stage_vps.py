@@ -15,6 +15,7 @@ import base64
 import hashlib
 import html
 import http.client
+import ipaddress
 import json
 import os
 import re
@@ -43,6 +44,38 @@ SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 IMAGE_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 RELEASE_ID_RE = re.compile(r"^menhir-prod-[0-9]+\.[0-9]+\.[0-9]+-[0-9]+$")
 DEPLOYMENT_CLASSES = frozenset({"app-only", "security-config", "maintenance"})
+PREFLIGHT_SCHEMA = 1
+PRODUCTION_ROOT = Path("/srv/menhir/production")
+PRODUCTION_RELEASE = PRODUCTION_ROOT / "release/release.json"
+PRODUCTION_STATUS_ROOT = Path("/var/lib/menhir-production")
+RELEASE_JOURNAL = PRODUCTION_STATUS_ROOT / "release-run.json"
+ROUTE_PHASE_JOURNAL = Path("/var/lib/yawn/caddy-release.phase")
+ROUTE_CANDIDATE = Path("/srv/yawn/releases/menhir-route-candidate")
+ROUTE_ENV = Path("/srv/yawn/projects/yawn.deploy/.env")
+LIVE_ROUTE_RUNNER = PRODUCTION_ROOT / "bin/caddy-release.sh"
+MIN_STAGING_DISK_BYTES = 8 * 1024**3
+# The disposable Menhir and Neo4j containers retain production's 2/4 GiB hard
+# limits, plus a small proxy/fake-provider allowance. Requiring 7 GiB proved
+# brittle on the 12.5 GB host (a normal 32 MB fluctuation blocked rehearsal),
+# while 6.5 GiB preserves the complete limit envelope and a 512 MiB allowance.
+MIN_STAGING_MEMORY_BYTES = 13 * 1024**3 // 2
+PRODUCTION_MEMORY_LIMITS = {
+    "menhir": 2 * 1024**3,
+    "neo4j": 4 * 1024**3,
+}
+ROUTE_ASSETS = {
+    "Caddyfile": "rootfs/srv/yawn/projects/yawn.deploy/Caddyfile",
+    "docker-compose.yml": "rootfs/srv/yawn/projects/yawn.deploy/docker-compose.yml",
+    "releases.json": "rootfs/srv/yawn/projects/yawn.deploy/releases.json",
+}
+TLS_ROUTE_KEYS = (
+    "memory_tls_cert",
+    "memory_tls_key",
+    "origin_ca_trust",
+    "aop_trust",
+    "aop_client_cert",
+    "aop_client_key",
+)
 CHECKS = (
     "artifact_identity",
     "production_memory_limits",
@@ -177,6 +210,20 @@ def _atomic_json(path: Path, value: dict[str, Any]) -> None:
         os.replace(temp, path)
     finally:
         temp.unlink(missing_ok=True)
+
+
+def _canonical_json_sha256(value: dict[str, Any]) -> str:
+    return hashlib.sha256(json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
+    ).encode("ascii")).hexdigest()
+
+
+def _seal_preflight(report: dict[str, Any]) -> dict[str, Any]:
+    """Add a digest over the allowlisted report fields, never over raw host data."""
+    sealed = dict(report)
+    sealed.pop("canonical_sha256", None)
+    sealed["canonical_sha256"] = _canonical_json_sha256(sealed)
+    return sealed
 
 
 def _parse_env(path: Path) -> dict[str, str]:
@@ -427,6 +474,7 @@ def _compose_files(
     entrypoint: ["python", "/probe/fake_openai.py"]
     user: "10001:10001"
     read_only: true
+    mem_limit: 256m
     tmpfs: [/tmp]
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
@@ -440,6 +488,7 @@ def _compose_files(
     image: "{release['images']['caddy']}"
     container_name: menhir-stage-{root.name}-proxy
     restart: "no"
+    mem_limit: 256m
     ports:
       - "127.0.0.1::443"
     networks:
@@ -696,7 +745,7 @@ def _json_response(port: int, path: str) -> dict[str, Any]:
 
 def _production_snapshot() -> dict[str, str]:
     snapshot: dict[str, str] = {}
-    authority = Path("/srv/menhir/production/release/release.json")
+    authority = PRODUCTION_RELEASE
     if authority.is_file() and not authority.is_symlink():
         snapshot["release_sha256"] = _sha256(authority)
     for name in ("menhir-prod-app", "menhir-prod-neo4j"):
@@ -704,6 +753,348 @@ def _production_snapshot() -> dict[str, str]:
         if result.returncode == 0 and result.stdout.strip():
             snapshot[name] = result.stdout.strip()
     return snapshot
+
+
+def _available_memory_bytes() -> int:
+    try:
+        rows = Path("/proc/meminfo").read_text(encoding="ascii").splitlines()
+    except (OSError, UnicodeError) as exc:
+        raise StageError("production preflight cannot read available memory") from exc
+    for row in rows:
+        match = re.fullmatch(r"MemAvailable:\s+([0-9]+)\s+kB", row)
+        if match is not None:
+            return int(match.group(1)) * 1024
+    raise StageError("production preflight cannot determine available memory")
+
+
+def _network_inspect(name: str) -> dict[str, Any]:
+    result = _run("docker", "network", "inspect", name, check=False)
+    if result.returncode != 0:
+        raise StageError(f"production preflight network is absent: {name}")
+    try:
+        value = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise StageError("production preflight network inspection is invalid") from exc
+    if not isinstance(value, list) or len(value) != 1 or not isinstance(value[0], dict):
+        raise StageError("production preflight network inspection is ambiguous")
+    return value[0]
+
+
+def _container_digest(container: dict[str, Any], role: str) -> str:
+    reference = container.get("Config", {}).get("Image")
+    if not isinstance(reference, str):
+        raise StageError(f"production {role} image identity is absent")
+    match = re.search(r"@(sha256:[0-9a-f]{64})$", reference)
+    if match is None:
+        raise StageError(f"production {role} image is not digest-pinned")
+    return match.group(1)
+
+
+def _container_environment(container: dict[str, Any]) -> dict[str, str]:
+    """Select environment fields for validation without retaining raw secrets."""
+    rows = container.get("Config", {}).get("Env", [])
+    if not isinstance(rows, list):
+        raise StageError("production Menhir environment inspection is invalid")
+    selected: dict[str, str] = {}
+    for row in rows:
+        if not isinstance(row, str):
+            raise StageError("production Menhir environment inspection is invalid")
+        key, separator, value = row.partition("=")
+        if separator and key in {"MENHIR_RELEASE_ID", "MENHIR_RUNTIME_MODE"}:
+            selected[key] = value
+    return selected
+
+
+def _healthy_container(name: str, role: str) -> dict[str, Any]:
+    container = _inspect(name)
+    state = container.get("State", {})
+    if state.get("Running") is not True or state.get("Status") != "running" \
+            or state.get("Health", {}).get("Status") != "healthy":
+        raise StageError(f"production {role} container is not running and healthy")
+    expected_memory = PRODUCTION_MEMORY_LIMITS[role]
+    if container.get("HostConfig", {}).get("Memory") != expected_memory:
+        raise StageError(f"production {role} memory limit differs from its role contract")
+    return container
+
+
+def _ipv4(value: Any, label: str) -> str:
+    if not isinstance(value, str):
+        raise StageError(f"{label} is invalid")
+    address = value.split("/", 1)[0]
+    try:
+        parsed = ipaddress.ip_address(address)
+    except ValueError as exc:
+        raise StageError(f"{label} is invalid") from exc
+    if parsed.version != 4:
+        raise StageError(f"{label} must be IPv4")
+    return str(parsed)
+
+
+def _network_containers(network: dict[str, Any]) -> list[dict[str, str]]:
+    value = network.get("Containers", {})
+    if not isinstance(value, dict):
+        raise StageError("production proxy network container census is invalid")
+    rows: list[dict[str, str]] = []
+    for container_id, details in value.items():
+        if not isinstance(container_id, str) or not isinstance(details, dict):
+            raise StageError("production proxy network container census is invalid")
+        name = details.get("Name")
+        if not isinstance(name, str) or not name:
+            raise StageError("production proxy network container identity is invalid")
+        rows.append({
+            "id": container_id,
+            "name": name,
+            "ipv4": _ipv4(details.get("IPv4Address"), "production proxy peer address"),
+        })
+    return rows
+
+
+def _release_journal_status(candidate_release_id: str) -> dict[str, Any]:
+    if not RELEASE_JOURNAL.exists() and not RELEASE_JOURNAL.is_symlink():
+        return {"state": "absent"}
+    journal = _load_json(RELEASE_JOURNAL, "production release journal")
+    release_id = journal.get("release_id")
+    stage = journal.get("stage")
+    if not isinstance(release_id, str) or RELEASE_ID_RE.fullmatch(release_id) is None \
+            or stage not in {
+                "start", "backup", "staged", "rehearsal", "candidate",
+                "accepted", "routed", "promoted", "complete",
+            }:
+        raise StageError("production release journal identity or stage is invalid")
+    if stage != "complete" and release_id != candidate_release_id:
+        raise StageError("an unfinished conflicting production release journal exists")
+    return {
+        "state": "complete" if stage == "complete" else "same-release-resumable",
+        "release_id": release_id,
+        "stage": stage,
+    }
+
+
+def _regular_executable(path: Path, label: str) -> Path:
+    value = _safe_file(path, label)
+    if os.name != "nt" and value.stat().st_mode & 0o111 == 0:
+        raise StageError(f"{label} is not executable")
+    return value
+
+
+def _safe_directory(path: Path, label: str) -> Path:
+    if not path.is_absolute():
+        raise StageError(f"{label} must be absolute")
+    try:
+        info = path.lstat()
+    except OSError as exc:
+        raise StageError(f"missing {label}") from exc
+    if not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode):
+        raise StageError(f"{label} must be a non-symlink directory")
+    return path
+
+
+def _candidate_fixed_ips(compose: Path) -> list[tuple[str, str]]:
+    """Read only literal service IPv4 assignments from the reviewed route YAML."""
+    service = ""
+    rows: list[tuple[str, str]] = []
+    for line in compose.read_text(encoding="utf-8").splitlines():
+        service_match = re.fullmatch(r"  ([A-Za-z0-9_.-]+):\s*", line)
+        if service_match is not None:
+            service = service_match.group(1)
+            continue
+        address_match = re.fullmatch(
+            r"\s{6,}ipv4_address:\s*[\"']?([^\"'\s#]+)[\"']?\s*(?:#.*)?", line,
+        )
+        if address_match is not None:
+            if not service:
+                raise StageError("candidate route fixed IP has no service role")
+            rows.append((service, _ipv4(address_match.group(1), "candidate route fixed IP")))
+    return rows
+
+
+def _maintenance_route_preflight(
+    bundle: Path,
+    release: dict[str, Any],
+    network: dict[str, Any],
+) -> dict[str, Any]:
+    bundled_runner = bundle / "rootfs/srv/menhir/production/bin/caddy-release.sh"
+    # The install manifest carries the destination mode. The uploaded bundle
+    # may have crossed a filesystem that cannot represent Unix execute bits.
+    _safe_file(bundled_runner, "bundled route transaction runner")
+    _regular_executable(LIVE_ROUTE_RUNNER, "live route transaction runner")
+    _safe_file(ROUTE_ENV, "live route transaction environment")
+    _safe_directory(ROUTE_CANDIDATE.parent, "live route candidate parent")
+    candidate_target_state = "absent"
+    if ROUTE_CANDIDATE.exists() or ROUTE_CANDIDATE.is_symlink():
+        _safe_directory(ROUTE_CANDIDATE, "live route candidate target")
+        candidate_target_state = "replaceable-directory"
+
+    bundled_assets: dict[str, Path] = {}
+    for name, relative in ROUTE_ASSETS.items():
+        bundled = _safe_file(bundle / relative, f"bundled route asset {name}")
+        bundled_assets[name] = bundled
+
+    if ROUTE_PHASE_JOURNAL.exists() or ROUTE_PHASE_JOURNAL.is_symlink():
+        raise StageError("an unfinished route transaction journal exists")
+
+    registry = _load_json(bundled_assets["releases.json"], "bundled route registry")
+    proxy = registry.get("proxy")
+    if not isinstance(proxy, dict):
+        raise StageError("bundled route registry has no proxy contract")
+    release_network = release.get("network")
+    if not isinstance(release_network, dict) \
+            or proxy.get("menhir_network") != release_network.get("external_network"):
+        raise StageError("candidate route network differs from release authority")
+
+    for key in TLS_ROUTE_KEYS:
+        raw = proxy.get(key)
+        if not isinstance(raw, str) or not Path(raw).is_absolute():
+            raise StageError(f"candidate route TLS prerequisite is invalid: {key}")
+        # _safe_file distinguishes directories and symlinks without reading any
+        # certificate/key bytes into process output or the readiness report.
+        _safe_file(Path(raw), f"candidate route TLS prerequisite {key}")
+
+    occupants = {row["ipv4"]: row for row in _network_containers(network)}
+    fixed = _candidate_fixed_ips(bundled_assets["docker-compose.yml"])
+    if not fixed:
+        raise StageError("candidate route design has no fixed proxy IP")
+    for service, address in fixed:
+        occupied = occupants.get(address)
+        if occupied is None:
+            continue
+        live = _inspect(occupied["name"])
+        labels = live.get("Config", {}).get("Labels", {})
+        if not isinstance(labels, dict) \
+                or labels.get("com.docker.compose.project") != "yawndeploy" \
+                or labels.get("com.docker.compose.service") != service:
+            raise StageError(
+                f"candidate route fixed IP is occupied by another role: {address}"
+            )
+
+    return {
+        "applicable": True,
+        "bundle_assets": sorted(["transaction-runner", *bundled_assets]),
+        "live_prerequisites": [
+            "transaction-runner", "environment", "candidate-parent",
+        ],
+        "candidate_target_state": candidate_target_state,
+        "tls_files": len(TLS_ROUTE_KEYS),
+        "fixed_ip_roles": [service for service, _ in fixed],
+        "fixed_ip_collisions": 0,
+    }
+
+
+def _production_preflight(
+    bundle: Path,
+    release: dict[str, Any],
+    deployment_class: str,
+) -> dict[str, Any]:
+    """Inspect production read-only and return a sanitized, digest-bound report."""
+    if deployment_class not in DEPLOYMENT_CLASSES:
+        raise StageError("invalid deployment class")
+    candidate_release_id = release.get("release_id")
+    if not isinstance(candidate_release_id, str) \
+            or RELEASE_ID_RE.fullmatch(candidate_release_id) is None:
+        raise StageError("candidate release identity is invalid")
+    journal = _release_journal_status(candidate_release_id)
+    live_release = _load_json(PRODUCTION_RELEASE, "live production release authority")
+    live_release_id = live_release.get("release_id")
+    live_images = live_release.get("images")
+    live_network = live_release.get("network")
+    if not isinstance(live_release_id, str) \
+            or RELEASE_ID_RE.fullmatch(live_release_id) is None \
+            or not isinstance(live_images, dict) or not isinstance(live_network, dict):
+        raise StageError("live production release authority is invalid")
+
+    app = _healthy_container("menhir-prod-app", "menhir")
+    neo4j = _healthy_container("menhir-prod-neo4j", "neo4j")
+    app_digest = _container_digest(app, "menhir")
+    neo4j_digest = _container_digest(neo4j, "neo4j")
+    if app_digest != live_images.get("menhir") or neo4j_digest != live_images.get("neo4j"):
+        raise StageError("live production container images differ from release authority")
+    app_environment = _container_environment(app)
+    if app_environment != {
+        "MENHIR_RELEASE_ID": live_release_id,
+        "MENHIR_RUNTIME_MODE": "production",
+    }:
+        raise StageError("live production Menhir runtime identity is invalid")
+
+    external_network = live_network.get("external_network")
+    alias = live_network.get("alias")
+    peers = live_network.get("peers")
+    if not isinstance(external_network, str) or not external_network \
+            or not isinstance(alias, str) or not alias \
+            or not isinstance(peers, list) or not peers:
+        raise StageError("live production network authority is invalid")
+    expected_peers = {_ipv4(value, "trusted ingress peer") for value in peers}
+    network = _network_inspect(external_network)
+    network_rows = _network_containers(network)
+    occupied = {row["ipv4"] for row in network_rows}
+    if not expected_peers.issubset(occupied):
+        raise StageError("production ingress peer role is absent from the proxy network")
+
+    app_networks = app.get("NetworkSettings", {}).get("Networks", {})
+    neo4j_networks = neo4j.get("NetworkSettings", {}).get("Networks", {})
+    if not isinstance(app_networks, dict) or not isinstance(neo4j_networks, dict):
+        raise StageError("production container network inspection is invalid")
+    app_proxy = app_networks.get(external_network)
+    if not isinstance(app_proxy, dict) or alias not in app_proxy.get("Aliases", []):
+        raise StageError("production application proxy role is invalid")
+    app_ipv4 = _ipv4(app_proxy.get("IPAddress"), "production application proxy address")
+    if app_ipv4 in expected_peers:
+        raise StageError("production application and ingress roles share an address")
+    internal_networks = (set(app_networks) & set(neo4j_networks)) - {external_network}
+    if not internal_networks or external_network in neo4j_networks:
+        raise StageError("production database network role is invalid")
+
+    disk_free = shutil.disk_usage(PRODUCTION_ROOT).free
+    memory_available = _available_memory_bytes()
+    if disk_free < MIN_STAGING_DISK_BYTES:
+        raise StageError("insufficient disk headroom for isolated staging")
+    if memory_available < MIN_STAGING_MEMORY_BYTES:
+        raise StageError("insufficient memory headroom for isolated staging")
+
+    maintenance = {"applicable": False}
+    if deployment_class in {"security-config", "maintenance"}:
+        maintenance = _maintenance_route_preflight(bundle, release, network)
+
+    report = {
+        "schema": PREFLIGHT_SCHEMA,
+        "kind": "menhir-production-readiness-preflight",
+        "result": "passed",
+        "observed_utc": _now(),
+        "deployment_class": deployment_class,
+        "candidate_release_id": candidate_release_id,
+        "checks": {
+            "live_services": {
+                "release_id": live_release_id,
+                "menhir": {
+                    "container": "menhir-prod-app",
+                    "image_digest": app_digest,
+                    "health": "healthy",
+                    "memory_limit_bytes": PRODUCTION_MEMORY_LIMITS["menhir"],
+                },
+                "neo4j": {
+                    "container": "menhir-prod-neo4j",
+                    "image_digest": neo4j_digest,
+                    "health": "healthy",
+                    "memory_limit_bytes": PRODUCTION_MEMORY_LIMITS["neo4j"],
+                },
+            },
+            "network_roles": {
+                "external_network": external_network,
+                "application_alias": alias,
+                "application_ipv4": app_ipv4,
+                "internal_network_count": len(internal_networks),
+                "ingress_peer_count": len(expected_peers),
+            },
+            "release_journal": journal,
+            "headroom": {
+                "disk_free_bytes": disk_free,
+                "disk_required_bytes": MIN_STAGING_DISK_BYTES,
+                "memory_available_bytes": memory_available,
+                "memory_required_bytes": MIN_STAGING_MEMORY_BYTES,
+            },
+            "maintenance_route": maintenance,
+        },
+    }
+    return _seal_preflight(report)
 
 
 def _oauth_token(port: int, operator_key: str) -> str:
@@ -998,13 +1389,16 @@ def run_stage(args: argparse.Namespace) -> dict[str, Any]:
         args.expected_release_id,
         args.expected_release_sha256,
     )
+    production_preflight = _production_preflight(
+        bundle, release, args.deployment_class,
+    )
+    started = _now()
     archive = args.menhir_image_archive.resolve()
     _safe_file(archive, "transferred Menhir image archive")
     if _sha256(archive) != args.expected_menhir_image_archive_sha256:
         raise StageError("transferred Menhir image archive digest mismatch")
     runtime_images = _ensure_images(source_environment, release)
 
-    started = _now()
     production_before = _production_snapshot()
     run_id = secrets.token_hex(6)
     root = STAGING_ROOT / run_id
@@ -1108,6 +1502,7 @@ def run_stage(args: argparse.Namespace) -> dict[str, Any]:
                 "subject": STAGING_SUBJECT,
                 "namespace": STAGING_NAMESPACE,
             },
+            "production_preflight": production_preflight,
             "checks": checks,
         }
         _atomic_json(receipt, result)

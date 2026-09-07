@@ -31,6 +31,11 @@ contract may select and promote one published digest, but it may not rebuild, mo
 publish product artifacts. A successful product release does not imply deployment, and a successful
 personal deployment does not create a new product release.
 
+The normal personal sequence is `rehearse`, `approve`, then `promote`. Rehearsal performs selection,
+the read-only production preflight, and isolated production-equivalent staging in one resumable
+operation. Approval is the sole required human gate; the coordinator derives the exact release and
+receipt digests instead of asking the operator to copy them between commands.
+
 The client data-plane invariant is in
 [ACCESS_CONTRACT.md](ACCESS_CONTRACT.md): the only production client endpoint is
 `https://memory.ctharvey.me/mcp-http`; ChatGPT, Codex, and every Claude variant
@@ -41,7 +46,7 @@ signed JWT access token.
 ## Host topology
 
 Production uses Compose project `menhir-prod` with two services: `menhir` and
-`neo4j`. Caddy is outside that project on the external `menhir-proxy` network.
+`neo4j`. The application joins the external `menhir-proxy` network for ingress.
 
 ```bash
 docker network create \
@@ -51,9 +56,16 @@ docker network create \
   menhir-proxy
 ```
 
-Caddy is `172.30.0.2`; Menhir is `172.30.0.3` with alias
-`menhir-prod-app`. Menhir does not publish a host port. The dedicated operator
-gateway binds only `172.30.0.1:8000`, and Caddy is its only admitted peer.
+The current live inventory assigns Cloudflared `172.30.0.2` and Menhir
+`172.30.0.3` with alias `menhir-prod-app`. Cloudflared proxies the approved public path allowlist
+directly to Menhir. Menhir does not publish a host port. The dedicated operator gateway binds only
+`172.30.0.1:8000`.
+
+The shared Yawn Caddy container is on `yawndeploy_default`, not `menhir-proxy`, and its Caddyfile
+also contains a Menhir virtual host. This dual installed configuration is drift from the former
+single-Caddy model. Release authority must explicitly select `cloudflared` or `caddy` as the route
+transaction mode before maintenance may mutate ingress. Routine app-only and security-config
+releases retain ingress unchanged and must not assume that the peer at `.2` is Caddy.
 
 The release authority fixes the same-host topology and all container/project
 names. Caller-provided names, paths, Compose projects, networks, and commands
@@ -94,6 +106,7 @@ startup refuse drift from that matrix.
 `release.json` binds:
 
 - four clean canonical repository commits;
+- the mechanically derived deployment class and both generated release-note digests;
 - Menhir, Neo4j, Caddy, and base image digests;
 - OAuth wheel source and hash, wheelhouse manifests, SBOM, scan, and provenance;
 - rendered Compose, Caddy, registry, policy, environment, operations policy,

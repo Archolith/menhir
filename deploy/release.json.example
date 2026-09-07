@@ -2,6 +2,9 @@
   "schema": 1,
   "release_id": "menhir-prod-0.2.0-<seq>",
   "release_author": "<release-operator-identity>",
+  "deployment_class": "<app-only|security-config|maintenance>",
+  "notes_json_sha256": "<64-lowercase-hex>",
+  "notes_markdown_sha256": "<64-lowercase-hex>",
   "repos": {
     "menhir": "<40-lowercase-hex>",
     "archolith_oauth": "<40-lowercase-hex>",

@@ -34,9 +34,11 @@ ENCRYPTED_BACKUP_ROOT = Path("/srv/menhir/backups/encrypted")
 BACKUP_RECEIPT = STATUS_ROOT / "backup-local-receipt.json"
 DESKTOP_RECEIPT = STATUS_ROOT / "desktop-archive-receipt.json"
 DRILL_RECEIPT = STATUS_ROOT / "scaffold-restore-drill-receipt.json"
+REHEARSAL_RECEIPT = STATUS_ROOT / "rehearsal-receipt.json"
 RELEASE_RUN = STATUS_ROOT / "release-run.json"
 FIRST_MUTATION = STATUS_ROOT / "first-mutation"
 HEX64 = re.compile(r"[0-9a-f]{64}")
+GENERATION = re.compile(r"generation\.[A-Za-z0-9]+")
 SAFE_REASON = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ._:/+-]{0,255}")
 CONTRACT_KEYS = {
     "schema", "kind", "host", "directories", "files", "identities",
@@ -45,6 +47,14 @@ CONTRACT_KEYS = {
 RECEIPT_KEYS = {
     "schema", "kind", "contract_sha256", "verifier_sha256",
     "machine_id_sha256", "captured_utc", "static",
+}
+SCAFFOLD_DRILL_KEYS = {
+    "schema", "kind", "generation", "backup_receipt_sha256",
+    "checked_utc", "recorded_utc", "method",
+}
+SCAFFOLD_DRILL_METHODS = {
+    "release-rehearsal-clean-load-and-consistency-check",
+    "backup-generation-clean-load-and-consistency-check",
 }
 
 
@@ -473,16 +483,97 @@ def public_ready(url: str) -> bool:
     return value.get("status") == "ready" and value.get("mode") == "production"
 
 
-def operational_evidence(contract: dict[str, Any]) -> dict[str, Any]:
+def validate_scaffold_drill(backup: dict[str, Any]) -> dict[str, Any]:
+    """Validate the original scaffold-owned restore-drill receipt."""
+    require_safe_root_file(DRILL_RECEIPT, "restore drill receipt")
+    drill = strict_load(DRILL_RECEIPT)
+    if set(drill) != SCAFFOLD_DRILL_KEYS or drill.get("schema") != 1 \
+            or drill.get("kind") != "menhir-scaffold-restore-drill":
+        raise ScaffoldError("restore drill receipt schema mismatch")
+    if not isinstance(drill.get("generation"), str) \
+            or not GENERATION.fullmatch(drill["generation"]):
+        raise ScaffoldError("restore drill generation is invalid")
+    if not HEX64.fullmatch(drill.get("backup_receipt_sha256", "")) \
+            or drill["backup_receipt_sha256"] != sha256_file(BACKUP_RECEIPT):
+        raise ScaffoldError("restore drill does not bind the current backup receipt")
+    if drill.get("method") not in SCAFFOLD_DRILL_METHODS:
+        raise ScaffoldError("restore drill method is invalid")
+    parse_time(drill.get("checked_utc"), "restore drill")
+    parse_time(drill.get("recorded_utc"), "restore drill recording")
+    return drill
+
+
+def validate_release_rehearsal(backup: dict[str, Any]) -> dict[str, Any]:
+    """Validate maintenance rehearsal evidence against the current backup and release."""
+    require_safe_root_file(REHEARSAL_RECEIPT, "release rehearsal receipt")
+    require_safe_root_file(RELEASE_PATH, "live release descriptor")
+    require_safe_root_file(SCHEMA_PATH, "backup promotion validator")
+    rehearsal = strict_load(REHEARSAL_RECEIPT)
+    binding = backup.get("release")
+    if not isinstance(binding, dict):
+        raise ScaffoldError("backup receipt release binding is invalid")
+    run([
+        "python3", str(SCHEMA_PATH), "validate-receipt-binding",
+        str(REHEARSAL_RECEIPT), "rehearsal", str(RELEASE_PATH),
+        str(backup.get("generation", "")), str(backup.get("manifest_sha256", "")),
+        str(binding.get("menhir_image_digest", "")),
+        str(binding.get("neo4j_image_digest", "")),
+    ])
+    return rehearsal
+
+
+def restore_drill_evidence(
+    backup: dict[str, Any], max_age_hours: int, now: dt.datetime,
+) -> dict[str, Any]:
+    """Choose the newest valid restore proof bound to the current backup generation."""
+    candidates: list[dict[str, Any]] = []
+    refusals: list[str] = []
+
+    def admit(receipt: dict[str, Any], source: str) -> None:
+        checked = parse_time(receipt.get("checked_utc"), "restore drill")
+        if age_hours(checked, now) > max_age_hours:
+            raise ScaffoldError("restore drill is stale")
+        candidates.append({**receipt, "source": source})
+
+    if DRILL_RECEIPT.exists():
+        try:
+            drill = validate_scaffold_drill(backup)
+            if drill.get("generation") != backup.get("generation"):
+                raise ScaffoldError(
+                    "scaffold restore drill is not bound to the current VPS generation"
+                )
+            admit(drill, "scaffold-restore-drill")
+        except ScaffoldError as exc:
+            refusals.append(str(exc))
+    if REHEARSAL_RECEIPT.exists():
+        try:
+            rehearsal = validate_release_rehearsal(backup)
+            admit(rehearsal, "release-rehearsal")
+        except ScaffoldError as exc:
+            refusals.append(str(exc))
+    if not candidates:
+        detail = "; ".join(refusals) if refusals else "no restore receipt exists"
+        raise ScaffoldError(f"no valid current-generation restore drill: {detail}")
+    return max(
+        candidates,
+        key=lambda item: parse_time(item.get("checked_utc"), "restore drill"),
+    )
+
+
+def operational_evidence(
+    contract: dict[str, Any], now: dt.datetime | None = None,
+) -> dict[str, Any]:
+    audit_now = now or utc_now()
     require_safe_root_file(BACKUP_RECEIPT, "VPS backup receipt")
     require_safe_root_file(DESKTOP_RECEIPT, "desktop archive receipt")
-    require_safe_root_file(DRILL_RECEIPT, "restore drill receipt")
     backup = strict_load(BACKUP_RECEIPT)
     desktop = strict_load(DESKTOP_RECEIPT)
-    drill = strict_load(DRILL_RECEIPT)
     require_safe_root_file(SCHEMA_PATH, "backup promotion validator")
     run(["python3", str(SCHEMA_PATH), "validate-receipt", str(BACKUP_RECEIPT), "backup-local"])
     retained_generations = verify_encrypted_archives(backup)
+    drill = restore_drill_evidence(
+        backup, contract["backup_policy"]["restore_drill_max_age_hours"], audit_now,
+    )
     runtime_healthy, candidates = inspect_runtime(contract)
     stage = None
     if RELEASE_RUN.exists():
@@ -501,6 +592,7 @@ def operational_evidence(contract: dict[str, Any]) -> dict[str, Any]:
         "backup_generation": backup.get("generation"),
         "desktop_generation": desktop.get("generation"),
         "drill_generation": drill.get("generation"),
+        "restore_drill_source": drill.get("source"),
         "maintenance_stage": stage,
         "app_only_stage": app_only_stage,
         "candidate_containers": candidates,
@@ -511,8 +603,9 @@ def operational_evidence(contract: dict[str, Any]) -> dict[str, Any]:
 
 def verify_app_only(contract_path: Path, receipt_path: Path) -> dict[str, Any]:
     verified = verify_static(contract_path, receipt_path)
-    evidence = operational_evidence(verified["contract"])
-    failures = evaluate_evidence(verified["contract"]["backup_policy"], evidence, utc_now())
+    now = utc_now()
+    evidence = operational_evidence(verified["contract"], now)
+    failures = evaluate_evidence(verified["contract"]["backup_policy"], evidence, now)
     if failures:
         raise ScaffoldError("app-only admission refused: " + "; ".join(failures))
     return {"static": "ok", "app_only": "admitted", "evidence": evidence}
@@ -540,15 +633,13 @@ def seed_drill() -> dict[str, Any]:
     require_safe_root_file(BACKUP_RECEIPT, "VPS backup receipt")
     backup = strict_load(BACKUP_RECEIPT)
     if DRILL_RECEIPT.exists():
-        require_safe_root_file(DRILL_RECEIPT, "restore drill receipt")
-        current = strict_load(DRILL_RECEIPT)
-        if current.get("generation") == backup.get("generation"):
-            parse_time(current.get("checked_utc"), "restore drill")
-            return current
-    require_safe_root_file(STATUS_ROOT / "rehearsal-receipt.json", "rehearsal receipt")
-    rehearsal = strict_load(STATUS_ROOT / "rehearsal-receipt.json")
-    if backup.get("generation") != rehearsal.get("generation"):
-        raise ScaffoldError("existing rehearsal is not bound to the current backup generation")
+        try:
+            current = validate_scaffold_drill(backup)
+            if current.get("generation") == backup.get("generation"):
+                return current
+        except ScaffoldError:
+            pass
+    rehearsal = validate_release_rehearsal(backup)
     return write_drill_receipt(
         backup, rehearsal.get("checked_utc"), "release-rehearsal-clean-load-and-consistency-check",
     )
@@ -639,11 +730,12 @@ def main(argv: list[str]) -> int:
                 else {"static": "ok", "receipt": verify_static(args.contract, args.receipt)["receipt"]}
         elif args.command == "status":
             verified = verify_static(args.contract, args.receipt)
-            evidence = operational_evidence(verified["contract"])
+            now = utc_now()
+            evidence = operational_evidence(verified["contract"], now)
             value = {
                 "static": "ok", "evidence": evidence,
                 "app_only_failures": evaluate_evidence(
-                    verified["contract"]["backup_policy"], evidence, utc_now(),
+                    verified["contract"]["backup_policy"], evidence, now,
                 ),
             }
         elif args.command == "seed-drill":

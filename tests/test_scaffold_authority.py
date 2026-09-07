@@ -15,6 +15,12 @@ assert SPEC is not None and SPEC.loader is not None
 scaffold = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(scaffold)
 
+SCHEMA_SCRIPT = Path(__file__).resolve().parents[1] / "deploy" / "lib" / "menhir_schema.py"
+SCHEMA_SPEC = importlib.util.spec_from_file_location("menhir_schema", SCHEMA_SCRIPT)
+assert SCHEMA_SPEC is not None and SCHEMA_SPEC.loader is not None
+schema = importlib.util.module_from_spec(SCHEMA_SPEC)
+SCHEMA_SPEC.loader.exec_module(schema)
+
 APP_ONLY_SCRIPT = Path(__file__).resolve().parents[1] / "deploy" / "scaffold" / "menhir_app_only.py"
 APP_SPEC = importlib.util.spec_from_file_location("menhir_app_only", APP_ONLY_SCRIPT)
 assert APP_SPEC is not None and APP_SPEC.loader is not None
@@ -172,8 +178,13 @@ def test_seed_drill_preserves_current_generation_evidence(
     drill = tmp_path / "drill.json"
     backup.write_text('{"generation":"generation.current"}', encoding="ascii")
     expected = {
+        "schema": 1,
+        "kind": "menhir-scaffold-restore-drill",
         "generation": "generation.current",
+        "backup_receipt_sha256": scaffold.sha256_file(backup),
         "checked_utc": "2026-09-01T02:00:00+00:00",
+        "recorded_utc": "2026-09-01T02:01:00+00:00",
+        "method": "release-rehearsal-clean-load-and-consistency-check",
     }
     drill.write_text(json.dumps(expected), encoding="ascii")
     monkeypatch.setattr(scaffold, "BACKUP_RECEIPT", backup)
@@ -181,6 +192,179 @@ def test_seed_drill_preserves_current_generation_evidence(
     monkeypatch.setattr(scaffold, "require_root", lambda: None)
     monkeypatch.setattr(scaffold, "require_safe_root_file", lambda path, label: None)
     assert scaffold.seed_drill() == expected
+
+
+def maintenance_restore_artifacts(
+    tmp_path: Path, checked_utc: str,
+) -> tuple[Path, Path, Path, dict, dict]:
+    release_path = tmp_path / "release.json"
+    release = {
+        "release_id": "menhir-prod-0.2.0-13",
+        "images": {
+            "menhir": "sha256:" + "1" * 64,
+            "neo4j": "sha256:" + "2" * 64,
+        },
+    }
+    release_path.write_text(json.dumps(release), encoding="ascii")
+    release_binding = {
+        "release_id": release["release_id"],
+        "release_manifest_sha256": scaffold.sha256_file(release_path),
+        "menhir_image_digest": release["images"]["menhir"],
+        "neo4j_image_digest": release["images"]["neo4j"],
+    }
+    backup = {
+        "generation": "generation.current",
+        "manifest_sha256": "3" * 64,
+        "release": release_binding,
+    }
+    backup_path = tmp_path / "backup-local-receipt.json"
+    backup_path.write_text(json.dumps(backup), encoding="ascii")
+    rehearsal = {
+        "schema": 1,
+        "kind": "rehearsal",
+        "generation": backup["generation"],
+        "manifest_sha256": backup["manifest_sha256"],
+        "release": release_binding,
+        "neo4j_check": "ok",
+        "sqlite_integrity": "ok",
+        "checked_utc": checked_utc,
+    }
+    rehearsal_path = tmp_path / "rehearsal-receipt.json"
+    rehearsal_path.write_text(json.dumps(rehearsal), encoding="ascii")
+    return backup_path, rehearsal_path, release_path, backup, rehearsal
+
+
+def strict_rehearsal_schema_run(command: list[str], *, check: bool = True) -> str:
+    assert check is True
+    assert command[2:5] == [
+        "validate-receipt-binding", command[3], "rehearsal",
+    ]
+    try:
+        receipt = schema.validate_receipt(command[3], command[4])
+        release_path = Path(command[5])
+        release = json.loads(release_path.read_text(encoding="ascii"))
+        expected = {
+            "generation": command[6],
+            "manifest_sha256": command[7],
+            "release_id": release["release_id"],
+            "release_manifest_sha256": scaffold.sha256_file(release_path),
+            "menhir_image_digest": command[8],
+            "neo4j_image_digest": command[9],
+        }
+        actual = {
+            "generation": receipt["generation"],
+            "manifest_sha256": receipt["manifest_sha256"],
+            **receipt["release"],
+        }
+        if actual != expected:
+            raise ValueError("receipt does not bind the current release and generation")
+        if release["images"]["menhir"] != command[8] \
+                or release["images"]["neo4j"] != command[9]:
+            raise ValueError("expected images differ from release authority")
+    except (KeyError, OSError, ValueError) as exc:
+        raise scaffold.ScaffoldError(f"schema validation failed: {exc}") from exc
+    return ""
+
+
+def configure_restore_artifacts(
+    monkeypatch: pytest.MonkeyPatch,
+    backup_path: Path,
+    rehearsal_path: Path,
+    release_path: Path,
+    drill_path: Path,
+) -> None:
+    monkeypatch.setattr(scaffold, "BACKUP_RECEIPT", backup_path)
+    monkeypatch.setattr(scaffold, "REHEARSAL_RECEIPT", rehearsal_path)
+    monkeypatch.setattr(scaffold, "RELEASE_PATH", release_path)
+    monkeypatch.setattr(scaffold, "DRILL_RECEIPT", drill_path)
+    monkeypatch.setattr(scaffold, "SCHEMA_PATH", SCHEMA_SCRIPT)
+    monkeypatch.setattr(scaffold, "require_safe_root_file", lambda path, label: None)
+    monkeypatch.setattr(scaffold, "run", strict_rehearsal_schema_run)
+
+
+def test_current_maintenance_rehearsal_satisfies_restore_admission(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = dt.datetime.now(dt.timezone.utc)
+    backup_path, rehearsal_path, release_path, backup, _ = maintenance_restore_artifacts(
+        tmp_path, now.isoformat(),
+    )
+    old_drill = tmp_path / "scaffold-restore-drill-receipt.json"
+    old_drill.write_text(json.dumps({
+        "schema": 1,
+        "kind": "menhir-scaffold-restore-drill",
+        "generation": "generation.previous",
+        "backup_receipt_sha256": scaffold.sha256_file(backup_path),
+        "checked_utc": (now - dt.timedelta(hours=1)).isoformat(),
+        "recorded_utc": (now - dt.timedelta(hours=1)).isoformat(),
+        "method": "release-rehearsal-clean-load-and-consistency-check",
+    }), encoding="ascii")
+    configure_restore_artifacts(
+        monkeypatch, backup_path, rehearsal_path, release_path, old_drill,
+    )
+
+    evidence = scaffold.restore_drill_evidence(backup, 168, now)
+
+    assert evidence["source"] == "release-rehearsal"
+    assert evidence["generation"] == backup["generation"]
+    assert evidence["checked_utc"] == now.isoformat()
+
+
+@pytest.mark.parametrize("mutation", ["mismatched", "stale", "tampered"])
+def test_invalid_maintenance_rehearsal_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str,
+) -> None:
+    now = dt.datetime.now(dt.timezone.utc)
+    backup_path, rehearsal_path, release_path, backup, rehearsal = (
+        maintenance_restore_artifacts(tmp_path, now.isoformat())
+    )
+    if mutation == "mismatched":
+        rehearsal["generation"] = "generation.other"
+    elif mutation == "stale":
+        rehearsal["checked_utc"] = (now - dt.timedelta(hours=2)).isoformat()
+    else:
+        rehearsal["manifest_sha256"] = "0" * 64
+    rehearsal_path.write_text(json.dumps(rehearsal), encoding="ascii")
+    configure_restore_artifacts(
+        monkeypatch, backup_path, rehearsal_path, release_path,
+        tmp_path / "missing-scaffold-drill.json",
+    )
+
+    with pytest.raises(
+        scaffold.ScaffoldError, match="no valid current-generation restore drill",
+    ) as exc_info:
+        scaffold.restore_drill_evidence(
+            backup, 1 if mutation == "stale" else 168, now,
+        )
+    if mutation == "stale":
+        assert "restore drill is stale" in str(exc_info.value)
+
+
+def test_scaffold_drill_refuses_a_tampered_backup_binding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backup_path = tmp_path / "backup-local-receipt.json"
+    backup = {"generation": "generation.current"}
+    backup_path.write_text(json.dumps(backup), encoding="ascii")
+    drill_path = tmp_path / "scaffold-restore-drill-receipt.json"
+    drill_path.write_text(json.dumps({
+        "schema": 1,
+        "kind": "menhir-scaffold-restore-drill",
+        "generation": backup["generation"],
+        "backup_receipt_sha256": "0" * 64,
+        "checked_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "recorded_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "method": "release-rehearsal-clean-load-and-consistency-check",
+    }), encoding="ascii")
+    monkeypatch.setattr(scaffold, "BACKUP_RECEIPT", backup_path)
+    monkeypatch.setattr(scaffold, "DRILL_RECEIPT", drill_path)
+    monkeypatch.setattr(scaffold, "REHEARSAL_RECEIPT", tmp_path / "missing-rehearsal.json")
+    monkeypatch.setattr(scaffold, "require_safe_root_file", lambda path, label: None)
+
+    with pytest.raises(scaffold.ScaffoldError, match="does not bind the current backup receipt"):
+        scaffold.restore_drill_evidence(
+            backup, 168, dt.datetime.now(dt.timezone.utc),
+        )
 
 
 def release_pair() -> tuple[dict, dict, dict, dict, str]:

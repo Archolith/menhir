@@ -178,6 +178,9 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, dict]:
         "schema": 1,
         "release_id": "menhir-prod-0.2.0-1",
         "release_author": "release-operator@example.com",
+        "deployment_class": "maintenance",
+        "notes_json_sha256": "d" * 64,
+        "notes_markdown_sha256": "e" * 64,
         "repositories": repos,
         "images": images,
         "evidence": evidence,
@@ -249,6 +252,9 @@ def test_authors_canonical_release_from_clean_exact_inputs(tmp_path: Path) -> No
     )
     assert release["rollback_anchors"]["prior_release_id"] == ""
     assert release["rollback_anchors"]["initial_release"] is True
+    assert release["deployment_class"] == spec["deployment_class"]
+    assert release["notes_json_sha256"] == spec["notes_json_sha256"]
+    assert release["notes_markdown_sha256"] == spec["notes_markdown_sha256"]
     assert release["oauth_wheel_sha256"] == _sha(
         Path(json.loads(spec_path.read_text())["evidence"]["oauth_wheel"])
     )
@@ -292,6 +298,42 @@ def test_accepts_yawn_env_as_digest_without_copying_secret_file(tmp_path: Path) 
     release = _author(spec_path, output)
 
     assert release["rendered"]["yawn_env_sha256"] == digest
+
+
+@pytest.mark.parametrize(
+    ("key", "value", "message"),
+    (
+        ("deployment_class", "direct", "deployment_class"),
+        ("notes_json_sha256", "not-a-digest", "notes_json_sha256"),
+        ("notes_markdown_sha256", "A" * 64, "notes_markdown_sha256"),
+    ),
+)
+def test_refuses_invalid_release_authority_binding(
+    tmp_path: Path, key: str, value: str, message: str,
+) -> None:
+    spec_path, output, spec = _fixture(tmp_path)
+    spec[key] = value
+    spec_path.write_text(json.dumps(spec), encoding="utf-8")
+
+    with pytest.raises(ValueError, match=message):
+        _author(spec_path, output)
+
+
+def test_legacy_release_remains_readable(tmp_path: Path) -> None:
+    spec_path, output, _ = _fixture(tmp_path)
+    release = _author(spec_path, output)
+    output.chmod(0o600)
+    for key in (
+        "deployment_class", "notes_json_sha256", "notes_markdown_sha256",
+    ):
+        release.pop(key)
+    release["security_review"]["authority_sha256"] = (
+        MODULE.menhir_schema.release_authority_sha256(release)
+    )
+    output.write_text(json.dumps(release), encoding="utf-8")
+
+    assert MODULE.menhir_schema.validate_release(str(output))["release_id"] \
+        == release["release_id"]
 
 
 def test_refuses_literal_digest_for_nonsecret_rendered_artifact(tmp_path: Path) -> None:

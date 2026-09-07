@@ -9,6 +9,7 @@ import importlib.util
 import json
 import os
 import re
+import secrets
 import shutil
 import stat
 import subprocess
@@ -27,10 +28,12 @@ NOTES_MARKDOWN_NAME = "release-notes.md"
 REVIEW_REQUEST_NAME = "security-review-request.json"
 RELEASE_NAME = "release.json"
 BUNDLE_NAME = "install-bundle"
+PUBLICATION_RECEIPT_NAME = "publication-receipt.json"
 DEFAULT_WRAPPER = SCRIPT_DIR.parents[3] / "scripts" / "deploy-menhir.ps1"
 KIND = "menhir-release-flow"
+PUBLICATION_KIND = "menhir-release-publication"
 SCHEMA = 1
-PHASES = ("review_requested", "bundled", "deployed")
+PHASES = ("review_requested", "bundled", "publishing", "published", "deployed")
 REPOSITORIES = frozenset({"menhir", "archolith_oauth", "yawn_deploy", "yawn_vps"})
 CLASS_ORDER = {"app-only": 0, "security-config": 1, "maintenance": 2}
 APP_ONLY_FORBIDDEN = tuple(re.compile(pattern) for pattern in (
@@ -46,12 +49,36 @@ APP_ONLY_FORBIDDEN = tuple(re.compile(pattern) for pattern in (
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 RELEASE_ID_RE = re.compile(r"^menhir-prod-[0-9]+\.[0-9]+\.[0-9]+-[0-9]+$")
-STATE_KEYS = frozenset({
+RELEASE_ID_PARTS_RE = re.compile(
+    r"^menhir-prod-(?P<version>[0-9]+\.[0-9]+\.[0-9]+)-(?P<sequence>[0-9]+)$"
+)
+VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+PUBLICATION_NONCE_RE = re.compile(r"^[0-9a-f]{32}$")
+LEGACY_STATE_KEYS = frozenset({
     "schema", "kind", "phase", "release_id", "release_author", "workspace",
     "deployment_class", "inputs_sha256", "spec_sha256", "notes_json_sha256",
     "notes_markdown_sha256", "review_request_sha256", "security_review_sha256",
     "release_sha256", "bundle_manifest_sha256", "bundle_sha256",
 })
+STATE_KEYS = LEGACY_STATE_KEYS | frozenset({
+    "fragments_dir", "fragments", "publication_nonce",
+    "publication_receipt_sha256",
+})
+FROZEN_ARTIFACT_KEYS = (
+    "spec_sha256",
+    "notes_json_sha256",
+    "notes_markdown_sha256",
+    "review_request_sha256",
+    "security_review_sha256",
+    "release_sha256",
+    "bundle_manifest_sha256",
+    "bundle_sha256",
+)
+RELEASE_AUTHORITY_BINDINGS = (
+    "deployment_class",
+    "notes_json_sha256",
+    "notes_markdown_sha256",
+)
 
 
 class ReleaseFlowError(ValueError):
@@ -140,14 +167,21 @@ def _atomic_json(path: Path, value: dict[str, Any]) -> None:
     descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
-            json.dump(value, handle, indent=2, sort_keys=True)
-            handle.write("\n")
+            handle.write(_json_text(value))
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary, path)
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
+
+
+def _json_text(value: dict[str, Any]) -> str:
+    return json.dumps(value, indent=2, sort_keys=True) + "\n"
+
+
+def _json_sha256(value: dict[str, Any]) -> str:
+    return hashlib.sha256(_json_text(value).encode("utf-8")).hexdigest()
 
 
 def _atomic_text(path: Path, value: str) -> None:
@@ -216,6 +250,48 @@ def _fragment_value(fragment: Any, name: str) -> Any:
     if isinstance(fragment, dict):
         return fragment.get(name)
     return getattr(fragment, name, None)
+
+
+def _snapshot_fragments(fragments_dir: Path) -> list[dict[str, str]]:
+    """Bind each prepared fragment to its directory entry and exact bytes."""
+    bindings: list[dict[str, str]] = []
+    try:
+        entries = sorted(os.scandir(fragments_dir), key=lambda entry: entry.name)
+    except OSError as exc:
+        raise ReleaseFlowError(f"cannot read fragments directory: {fragments_dir}") from exc
+    for entry in entries:
+        if entry.is_symlink() or not entry.is_file(follow_symlinks=False) \
+                or not entry.name.endswith(".json"):
+            raise ReleaseFlowError(f"unsafe release-note fragment entry: {entry.name}")
+        if entry.name == PUBLICATION_RECEIPT_NAME:
+            raise ReleaseFlowError("release-note fragment uses the publication receipt name")
+        path = _regular_file(Path(entry.path).resolve(), "release-note fragment")
+        bindings.append({"name": entry.name, "sha256": _sha256(path)})
+    return bindings
+
+
+def _validate_fragment_bindings(value: Any) -> list[dict[str, str]]:
+    if not isinstance(value, list) or not value:
+        raise ReleaseFlowError("release flow has no prepared fragment bindings")
+    bindings: list[dict[str, str]] = []
+    names: set[str] = set()
+    for binding in value:
+        if not isinstance(binding, dict) or set(binding) != {"name", "sha256"}:
+            raise ReleaseFlowError("release flow fragment binding is invalid")
+        name = binding.get("name")
+        digest = binding.get("sha256")
+        if not isinstance(name, str) or Path(name).name != name \
+                or not name.endswith(".json") or name == PUBLICATION_RECEIPT_NAME:
+            raise ReleaseFlowError("release flow fragment name is unsafe")
+        if name in names:
+            raise ReleaseFlowError(f"duplicate release flow fragment binding: {name}")
+        if not isinstance(digest, str) or not SHA256_RE.fullmatch(digest):
+            raise ReleaseFlowError(f"release flow fragment digest is invalid: {name}")
+        names.add(name)
+        bindings.append({"name": name, "sha256": digest})
+    if bindings != sorted(bindings, key=lambda binding: binding["name"]):
+        raise ReleaseFlowError("release flow fragment bindings are not sorted")
+    return bindings
 
 
 def _git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -351,9 +427,35 @@ def _state_path(workspace: Path) -> Path:
     return workspace / STATE_NAME
 
 
+def next_release_id(prior_release: Path, version: str | None = None) -> dict[str, Any]:
+    """Derive the next deterministic release label without reserving or mutating it."""
+    prior_release = _regular_file(prior_release, "prior release authority")
+    prior = _load_json(prior_release, "prior release authority")
+    prior_id = prior.get("release_id")
+    if not isinstance(prior_id, str):
+        raise ReleaseFlowError("prior release identity is invalid")
+    match = RELEASE_ID_PARTS_RE.fullmatch(prior_id)
+    if match is None:
+        raise ReleaseFlowError("prior release identity is invalid")
+    target_version = version or match.group("version")
+    if VERSION_RE.fullmatch(target_version) is None:
+        raise ReleaseFlowError("release version must match <major>.<minor>.<patch>")
+    sequence = int(match.group("sequence")) + 1 \
+        if target_version == match.group("version") else 1
+    return {
+        "schema": 1,
+        "kind": "menhir-next-release-id",
+        "prior_release_id": prior_id,
+        "version": target_version,
+        "release_id": f"menhir-prod-{target_version}-{sequence}",
+    }
+
+
 def _load_state(workspace: Path) -> dict[str, Any]:
     state = _load_json(_state_path(workspace), "release flow state")
-    if set(state) != STATE_KEYS or state.get("schema") != SCHEMA or state.get("kind") != KIND:
+    keys = set(state)
+    if keys not in {STATE_KEYS, LEGACY_STATE_KEYS} \
+            or state.get("schema") != SCHEMA or state.get("kind") != KIND:
         raise ReleaseFlowError("release flow state schema is invalid")
     if state.get("phase") not in PHASES:
         raise ReleaseFlowError("release flow phase is invalid")
@@ -364,11 +466,29 @@ def _load_state(workspace: Path) -> dict[str, Any]:
     if not isinstance(state.get("release_id"), str) \
             or not RELEASE_ID_RE.fullmatch(state["release_id"]):
         raise ReleaseFlowError("release flow release_id is invalid")
-    for key in STATE_KEYS:
+    for key in keys:
         if key.endswith("_sha256"):
             value = state.get(key)
             if value is not None and (not isinstance(value, str) or not SHA256_RE.fullmatch(value)):
                 raise ReleaseFlowError(f"release flow digest is invalid: {key}")
+    if keys == LEGACY_STATE_KEYS:
+        if state["phase"] == "published":
+            raise ReleaseFlowError("published release flow lacks publication bindings")
+        return state
+    fragments_dir = state.get("fragments_dir")
+    if not isinstance(fragments_dir, str) or not Path(fragments_dir).is_absolute():
+        raise ReleaseFlowError("release flow fragments directory is invalid")
+    _validate_fragment_bindings(state.get("fragments"))
+    publication_nonce = state.get("publication_nonce")
+    receipt_digest = state.get("publication_receipt_sha256")
+    if state["phase"] in {"publishing", "published"}:
+        if not isinstance(publication_nonce, str) \
+                or not PUBLICATION_NONCE_RE.fullmatch(publication_nonce):
+            raise ReleaseFlowError("publication transaction nonce is invalid")
+        if receipt_digest is None:
+            raise ReleaseFlowError("publication transaction has no receipt digest")
+    elif publication_nonce is not None or receipt_digest is not None:
+        raise ReleaseFlowError("inactive release flow has publication transaction state")
     return state
 
 
@@ -379,7 +499,7 @@ def _verify_staged_files(workspace: Path, state: dict[str, Any]) -> None:
         "notes_markdown_sha256": workspace / NOTES_MARKDOWN_NAME,
         "review_request_sha256": workspace / REVIEW_REQUEST_NAME,
     }
-    if state["phase"] in {"bundled", "deployed"}:
+    if state["phase"] in {"bundled", "publishing", "published", "deployed"}:
         bindings.update({
             "security_review_sha256": workspace / "security-review.json",
             "release_sha256": workspace / RELEASE_NAME,
@@ -389,9 +509,131 @@ def _verify_staged_files(workspace: Path, state: dict[str, Any]) -> None:
         expected = state.get(key)
         if expected is None or _sha256(_regular_file(path, key)) != expected:
             raise ReleaseFlowError(f"staged release artifact changed: {path.name}")
-    if state["phase"] in {"bundled", "deployed"}:
+    if state["phase"] in {"bundled", "publishing", "published", "deployed"}:
         if _tree_sha256(workspace / BUNDLE_NAME) != state.get("bundle_sha256"):
             raise ReleaseFlowError("staged install bundle changed")
+    if set(state) == STATE_KEYS:
+        _verify_release_authority_bindings(workspace, state)
+    if state["phase"] == "published":
+        _verify_publication(state)
+
+
+def _verify_release_authority_bindings(
+    workspace: Path,
+    state: dict[str, Any],
+) -> None:
+    expected = {key: state[key] for key in RELEASE_AUTHORITY_BINDINGS}
+    spec = _load_json(workspace / SPEC_NAME, "release spec")
+    for key, value in expected.items():
+        if spec.get(key) != value:
+            raise ReleaseFlowError(f"release spec {key} differs from release flow state")
+
+    request = _load_json(workspace / REVIEW_REQUEST_NAME, "security review request")
+    request_release = request.get("release")
+    if not isinstance(request_release, dict):
+        raise ReleaseFlowError("security review request has no release authority")
+    for key, value in expected.items():
+        if request_release.get(key) != value:
+            raise ReleaseFlowError(
+                f"security review request {key} differs from release flow state"
+            )
+
+    if state["phase"] in {"bundled", "publishing", "published", "deployed"}:
+        release = _load_json(workspace / RELEASE_NAME, "release authority")
+        for key, value in expected.items():
+            if release.get(key) != value:
+                raise ReleaseFlowError(
+                    f"release authority {key} differs from release flow state"
+                )
+
+
+def _regular_directory(path: Path, label: str) -> Path:
+    if not path.is_absolute():
+        raise ReleaseFlowError(f"{label} must be an absolute path")
+    try:
+        path.lstat()
+    except OSError as exc:
+        raise ReleaseFlowError(f"{label} does not exist: {path}") from exc
+    if not path.is_dir() or path.is_symlink():
+        raise ReleaseFlowError(f"{label} must be a non-symlink directory")
+    return path
+
+
+def _publication_paths(state: dict[str, Any]) -> tuple[Path, Path, Path, Path]:
+    fragments_dir = Path(state["fragments_dir"])
+    releases_dir = fragments_dir.parent / "releases"
+    archive = releases_dir / state["release_id"]
+    staging = releases_dir / (
+        f".{state['release_id']}.{state['publication_nonce']}.publishing"
+    )
+    return fragments_dir, releases_dir, staging, archive
+
+
+def _publication_receipt(state: dict[str, Any]) -> dict[str, Any]:
+    artifacts: dict[str, str] = {}
+    for key in FROZEN_ARTIFACT_KEYS:
+        value = state.get(key)
+        if not isinstance(value, str) or not SHA256_RE.fullmatch(value):
+            raise ReleaseFlowError(f"release is missing frozen artifact digest: {key}")
+        artifacts[key] = value
+    return {
+        "schema": SCHEMA,
+        "kind": PUBLICATION_KIND,
+        "release_id": state["release_id"],
+        "publication_nonce": state["publication_nonce"],
+        "workspace": state["workspace"],
+        "fragments_dir": state["fragments_dir"],
+        "fragments": _validate_fragment_bindings(state["fragments"]),
+        "artifacts": artifacts,
+    }
+
+
+def _verify_archive(
+    archive: Path,
+    state: dict[str, Any],
+    *,
+    receipt_sha256: str | None = None,
+) -> str:
+    _regular_directory(archive, "release fragment archive")
+    bindings = _validate_fragment_bindings(state["fragments"])
+    expected_names = {binding["name"] for binding in bindings}
+    expected_names.add(PUBLICATION_RECEIPT_NAME)
+    actual_names = {entry.name for entry in os.scandir(archive)}
+    if actual_names != expected_names:
+        raise ReleaseFlowError("release fragment archive contents are invalid")
+    for binding in bindings:
+        path = _regular_file(archive / binding["name"], "archived fragment")
+        if path.parent != archive or _sha256(path) != binding["sha256"]:
+            raise ReleaseFlowError(f"archived release-note fragment changed: {binding['name']}")
+    receipt_path = _regular_file(
+        archive / PUBLICATION_RECEIPT_NAME, "publication receipt"
+    )
+    if receipt_path.parent != archive:
+        raise ReleaseFlowError("publication receipt escaped its release archive")
+    if _load_json(receipt_path, "publication receipt") != _publication_receipt(state):
+        raise ReleaseFlowError("publication receipt does not match the frozen release")
+    actual_receipt_sha256 = _sha256(receipt_path)
+    if receipt_sha256 is not None and actual_receipt_sha256 != receipt_sha256:
+        raise ReleaseFlowError("publication receipt changed")
+    return actual_receipt_sha256
+
+
+def _verify_publication(state: dict[str, Any]) -> None:
+    fragments_dir, releases_dir, staging, archive = _publication_paths(state)
+    _regular_directory(releases_dir, "release archives directory")
+    if staging.exists() or staging.is_symlink():
+        raise ReleaseFlowError("published release still has an incomplete archive")
+    for binding in _validate_fragment_bindings(state["fragments"]):
+        source = fragments_dir / binding["name"]
+        if source.exists() or source.is_symlink():
+            raise ReleaseFlowError(
+                f"published release-note fragment was replaced: {binding['name']}"
+            )
+    _verify_archive(
+        archive,
+        state,
+        receipt_sha256=state["publication_receipt_sha256"],
+    )
 
 
 def prepare_flow(inputs_path: Path, workspace: Path, fragments_dir: Path) -> dict[str, Any]:
@@ -420,8 +662,12 @@ def prepare_flow(inputs_path: Path, workspace: Path, fragments_dir: Path) -> dic
         spec_path = workspace / SPEC_NAME
         release_spec.prepare_release_spec(inputs_path, spec_path)
         spec = _load_json(spec_path, "release spec")
+        fragment_bindings = _snapshot_fragments(fragments_dir)
         fragments = list(release_notes.collect_fragments(fragments_dir))
+        if len(fragment_bindings) != len(fragments):
+            raise ReleaseFlowError("prepared fragment set changed while it was collected")
         _verify_fragment_coverage(fragments, spec)
+        deployment_class = _deployment_class(fragments, spec)
 
         notes_markdown = release_notes.render_markdown(fragments, spec["release_id"])
         notes_json = release_notes.render_json(fragments, spec["release_id"])
@@ -429,6 +675,20 @@ def prepare_flow(inputs_path: Path, workspace: Path, fragments_dir: Path) -> dic
             raise ReleaseFlowError("release-note renderers must return text")
         _atomic_text(workspace / NOTES_MARKDOWN_NAME, notes_markdown)
         _atomic_text(workspace / NOTES_JSON_NAME, notes_json)
+        notes_json_sha256 = _sha256(workspace / NOTES_JSON_NAME)
+        notes_markdown_sha256 = _sha256(workspace / NOTES_MARKDOWN_NAME)
+        if _snapshot_fragments(fragments_dir) != fragment_bindings:
+            raise ReleaseFlowError("prepared fragment set changed while release notes were rendered")
+
+        for key in RELEASE_AUTHORITY_BINDINGS:
+            if key in spec:
+                raise ReleaseFlowError(f"generated release spec unexpectedly supplies {key}")
+        spec.update({
+            "deployment_class": deployment_class,
+            "notes_json_sha256": notes_json_sha256,
+            "notes_markdown_sha256": notes_markdown_sha256,
+        })
+        _atomic_json(spec_path, spec)
 
         review_request = workspace / REVIEW_REQUEST_NAME
         _run_release_author(spec_path, review_request)
@@ -436,6 +696,13 @@ def prepare_flow(inputs_path: Path, workspace: Path, fragments_dir: Path) -> dic
         release = request.get("release")
         if not isinstance(release, dict):
             raise ReleaseFlowError("security review request has no release authority")
+        for key in RELEASE_AUTHORITY_BINDINGS:
+            if release.get(key) != spec[key]:
+                raise ReleaseFlowError(
+                    f"authored review request does not bind {key}"
+                )
+        if _deployment_class(fragments, spec) != deployment_class:
+            raise ReleaseFlowError("deployment class changed while release authority was authored")
 
         state = {
             "schema": SCHEMA,
@@ -444,16 +711,20 @@ def prepare_flow(inputs_path: Path, workspace: Path, fragments_dir: Path) -> dic
             "release_id": release.get("release_id"),
             "release_author": release.get("release_author"),
             "workspace": str(workspace),
-            "deployment_class": _deployment_class(fragments, spec),
+            "deployment_class": deployment_class,
             "inputs_sha256": _sha256(inputs_path),
             "spec_sha256": _sha256(spec_path),
-            "notes_json_sha256": _sha256(workspace / NOTES_JSON_NAME),
-            "notes_markdown_sha256": _sha256(workspace / NOTES_MARKDOWN_NAME),
+            "notes_json_sha256": notes_json_sha256,
+            "notes_markdown_sha256": notes_markdown_sha256,
             "review_request_sha256": _sha256(review_request),
             "security_review_sha256": None,
             "release_sha256": None,
             "bundle_manifest_sha256": None,
             "bundle_sha256": None,
+            "fragments_dir": str(fragments_dir.resolve()),
+            "fragments": fragment_bindings,
+            "publication_nonce": None,
+            "publication_receipt_sha256": None,
         }
         if not isinstance(state["release_id"], str) or not RELEASE_ID_RE.fullmatch(state["release_id"]):
             raise ReleaseFlowError("authored review request release_id is invalid")
@@ -470,7 +741,7 @@ def finalize_flow(workspace: Path, security_review: Path) -> dict[str, Any]:
     workspace = _workspace(workspace)
     state = _load_state(workspace)
     security_review = _regular_file(security_review, "security review")
-    if state["phase"] in {"bundled", "deployed"}:
+    if state["phase"] in {"bundled", "publishing", "published", "deployed"}:
         _verify_staged_files(workspace, state)
         if state["security_review_sha256"] != _sha256(security_review):
             raise ReleaseFlowError("existing release flow is bound to a different security review")
@@ -491,6 +762,13 @@ def finalize_flow(workspace: Path, security_review: Path) -> dict[str, Any]:
         shutil.copyfile(security_review, staged_review)
         staged_review.chmod(0o400)
         _run_release_author(workspace / SPEC_NAME, staged_release, staged_review)
+        if set(state) == STATE_KEYS:
+            authored_release = _load_json(staged_release, "release authority")
+            for key in RELEASE_AUTHORITY_BINDINGS:
+                if authored_release.get(key) != state[key]:
+                    raise ReleaseFlowError(
+                        f"final release authority does not bind {key}"
+                    )
         bundle_builder = _load_local_module(
             "menhir_build_install_bundle", "build_install_bundle.py"
         )
@@ -516,6 +794,161 @@ def finalize_flow(workspace: Path, security_review: Path) -> dict[str, Any]:
         "bundle_manifest_sha256": _sha256(bundle_path / "bundle-manifest.json"),
         "bundle_sha256": _tree_sha256(bundle_path),
     })
+    _atomic_json(_state_path(workspace), state)
+    return state
+
+
+def publish_flow(workspace: Path, confirmation: str) -> dict[str, Any]:
+    """Publish frozen release metadata without deploying the install bundle."""
+    workspace = _workspace(workspace)
+    state = _load_state(workspace)
+    if confirmation != state["release_id"]:
+        raise ReleaseFlowError("publication confirmation must exactly match the release_id")
+    if set(state) == LEGACY_STATE_KEYS:
+        raise ReleaseFlowError(
+            "legacy release flow can be inspected but has no prepared fragment bindings"
+        )
+    if state["phase"] == "published":
+        _verify_staged_files(workspace, state)
+        return state
+    if state["phase"] not in {"bundled", "publishing"}:
+        raise ReleaseFlowError("only a bundled release can be published")
+    _verify_staged_files(workspace, state)
+
+    bindings = _validate_fragment_bindings(state["fragments"])
+    fragments_dir = Path(state["fragments_dir"])
+    releases_dir = fragments_dir.parent / "releases"
+    archive = releases_dir / state["release_id"]
+    _regular_directory(fragments_dir, "prepared fragments directory")
+
+    if state["phase"] == "bundled":
+        for binding in bindings:
+            source = _regular_file(
+                fragments_dir / binding["name"], "prepared release-note fragment"
+            )
+            if _sha256(source) != binding["sha256"]:
+                raise ReleaseFlowError(
+                    f"prepared release-note fragment changed: {binding['name']}"
+                )
+        if releases_dir.exists() or releases_dir.is_symlink():
+            _regular_directory(releases_dir, "release archives directory")
+            if archive.exists() or archive.is_symlink():
+                raise ReleaseFlowError(
+                    "unexpected release archive exists before publication transaction"
+                )
+            prefix = f".{state['release_id']}."
+            if any(
+                entry.name.startswith(prefix) and entry.name.endswith(".publishing")
+                for entry in os.scandir(releases_dir)
+            ):
+                raise ReleaseFlowError(
+                    "unexpected incomplete archive exists before publication transaction"
+                )
+        state.update({
+            "phase": "publishing",
+            "publication_nonce": secrets.token_hex(16),
+        })
+        state["publication_receipt_sha256"] = _json_sha256(
+            _publication_receipt(state)
+        )
+        _atomic_json(_state_path(workspace), state)
+
+    fragments_dir, releases_dir, staging, archive = _publication_paths(state)
+    if releases_dir.exists() or releases_dir.is_symlink():
+        _regular_directory(releases_dir, "release archives directory")
+    else:
+        releases_dir.mkdir()
+        _regular_directory(releases_dir, "release archives directory")
+
+    if archive.exists() or archive.is_symlink():
+        if staging.exists() or staging.is_symlink():
+            raise ReleaseFlowError("both complete and incomplete release archives exist")
+        for binding in bindings:
+            source = fragments_dir / binding["name"]
+            if source.exists() or source.is_symlink():
+                raise ReleaseFlowError(
+                    f"archived release-note fragment was replaced: {binding['name']}"
+                )
+        _verify_archive(
+            archive,
+            state,
+            receipt_sha256=state["publication_receipt_sha256"],
+        )
+        state["phase"] = "published"
+        _atomic_json(_state_path(workspace), state)
+        return state
+
+    if staging.exists() or staging.is_symlink():
+        _regular_directory(staging, "incomplete release fragment archive")
+    else:
+        staging.mkdir()
+    allowed_staging_names = {binding["name"] for binding in bindings}
+    allowed_staging_names.add(PUBLICATION_RECEIPT_NAME)
+    staging_names = {entry.name for entry in os.scandir(staging)}
+    if not staging_names <= allowed_staging_names:
+        raise ReleaseFlowError("incomplete release fragment archive has unknown entries")
+    if PUBLICATION_RECEIPT_NAME in staging_names \
+            and staging_names != allowed_staging_names:
+        raise ReleaseFlowError("incomplete release fragment archive has a premature receipt")
+
+    locations: list[tuple[dict[str, str], Path, Path]] = []
+    for binding in bindings:
+        source = fragments_dir / binding["name"]
+        staged = staging / binding["name"]
+        source_exists = source.exists() or source.is_symlink()
+        staged_exists = staged.exists() or staged.is_symlink()
+        if source_exists == staged_exists:
+            qualifier = "both source and archive" if source_exists else "neither source nor archive"
+            raise ReleaseFlowError(
+                f"prepared fragment exists in {qualifier}: {binding['name']}"
+            )
+        current = source if source_exists else staged
+        current = _regular_file(current, "prepared release-note fragment")
+        if _sha256(current) != binding["sha256"]:
+            raise ReleaseFlowError(
+                f"prepared release-note fragment changed: {binding['name']}"
+            )
+        locations.append((binding, source, staged))
+
+    if PUBLICATION_RECEIPT_NAME in staging_names:
+        _verify_staged_files(workspace, state)
+        _verify_archive(
+            staging,
+            state,
+            receipt_sha256=state["publication_receipt_sha256"],
+        )
+    else:
+        for binding, source, staged in locations:
+            if staged.exists():
+                continue
+            os.replace(source, staged)
+            try:
+                if _sha256(_regular_file(staged, "archived release-note fragment")) \
+                        != binding["sha256"]:
+                    raise ReleaseFlowError(
+                        f"prepared release-note fragment was replaced while publishing: "
+                        f"{binding['name']}"
+                    )
+            except Exception:
+                if not source.exists() and staged.exists():
+                    os.replace(staged, source)
+                raise
+
+        _verify_staged_files(workspace, state)
+        _atomic_json(staging / PUBLICATION_RECEIPT_NAME, _publication_receipt(state))
+        _verify_archive(
+            staging,
+            state,
+            receipt_sha256=state["publication_receipt_sha256"],
+        )
+
+    os.replace(staging, archive)
+    _verify_archive(
+        archive,
+        state,
+        receipt_sha256=state["publication_receipt_sha256"],
+    )
+    state["phase"] = "published"
     _atomic_json(_state_path(workspace), state)
     return state
 
@@ -575,6 +1008,9 @@ def status_flow(workspace: Path) -> dict[str, Any]:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
+    next_id = commands.add_parser("next-id")
+    next_id.add_argument("--prior-release", type=Path, required=True)
+    next_id.add_argument("--version")
     prepare = commands.add_parser("prepare")
     prepare.add_argument("--inputs", type=Path, required=True)
     prepare.add_argument("--workspace", type=Path, required=True)
@@ -586,6 +1022,9 @@ def _parser() -> argparse.ArgumentParser:
     finalize = commands.add_parser("finalize")
     finalize.add_argument("--workspace", type=Path, required=True)
     finalize.add_argument("--security-review", type=Path, required=True)
+    publish = commands.add_parser("publish")
+    publish.add_argument("--workspace", type=Path, required=True)
+    publish.add_argument("--confirm-release-id", required=True)
     deploy = commands.add_parser("deploy")
     deploy.add_argument("--workspace", type=Path, required=True)
     deploy.add_argument("--confirm-release-id", required=True)
@@ -598,10 +1037,14 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
-        if args.command == "prepare":
+        if args.command == "next-id":
+            result = next_release_id(args.prior_release, args.version)
+        elif args.command == "prepare":
             result: Any = prepare_flow(args.inputs, args.workspace, args.fragments)
         elif args.command == "finalize":
             result = finalize_flow(args.workspace, args.security_review)
+        elif args.command == "publish":
+            result = publish_flow(args.workspace, args.confirm_release_id)
         elif args.command == "deploy":
             result = deploy_flow(
                 args.workspace,
