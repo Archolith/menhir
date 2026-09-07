@@ -145,11 +145,13 @@ def test_completed_mapping_receipt_proves_relation_and_cumulative_marker():
     assert source not in repr(result.receipt)
 
 
-def test_normalized_abstention_forwards_rules_and_stays_quote_free():
+def test_source_authoritative_count_survives_normalization_and_stays_quote_free():
     source = "I hav 3 bikes"
     result = adapt_isolated_research_candidate(_candidate(source, value=4), _episode(source))
 
-    assert result.receipt.mode == "normalized_abstained"
+    assert result.receipt.mode == "normalized_mapped"
+    assert result.proposal is not None
+    assert result.proposal.value == 3
     assert result.receipt.normalization_rules == ("spelling_hav_have",)
     assert result.isolation is not None
     assert result.receipt.normalization_rules == result.isolation.receipt.normalization_rules
