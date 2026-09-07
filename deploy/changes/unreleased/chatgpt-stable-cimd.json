@@ -4,11 +4,11 @@
   "category": "security",
   "deployment_class": "security-config",
   "summary": "Authorize the stable ChatGPT CIMD client identity.",
-  "details": "Commit fbd4b499617a9591cd6a93b4523d76828eae5c4a adds the stable ChatGPT CIMD identity to the authenticated client policy boundary.",
+  "details": "Merge commit abb1f10ada2eabc0ed63f8c085b7357b37019342 adds the stable ChatGPT CIMD identity to the authenticated client policy boundary.",
   "operator_impact": "Operators must reauthorize ChatGPT connections so they receive credentials governed by the stable CIMD policy.",
   "repositories": {
     "menhir": [
-      "fbd4b499617a9591cd6a93b4523d76828eae5c4a"
+      "abb1f10ada2eabc0ed63f8c085b7357b37019342"
     ]
   },
   "security_scopes": [
