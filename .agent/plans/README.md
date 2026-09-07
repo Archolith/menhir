@@ -14,6 +14,7 @@ This index routes the current execution owners listed below exactly once.
 
 | Document | Current ownership |
 |---|---|
+| [`menhir-core-promotion-restack-2026-08-31.md`](menhir-core-promotion-restack-2026-08-31.md) | Restack core-promotion PRs #11–#42 from the bottom branch, preserve tranche boundaries, and repair definition-scoped bounded recovery in tranches 5 and 9. |
 | [`menhir-production-release-2026-09-04.md`](menhir-production-release-2026-09-04.md) | Prepare and deploy the complete accumulated Menhir candidate with production-model/image parity, mechanically classified maintenance controls, canonical-self enforcement, one public synthetic canary, and pre-authored rollback. |
 | [`menhir-contabo-full-production-migration-2026-08-25.md`](menhir-contabo-full-production-migration-2026-08-25.md) | Move the complete OAuth/MCP/runtime/Neo4j stack to Contabo through an isolated Menhir Compose project, a transactional shared-Caddy integration, immutable releases, bounded VPS operations, verified state transfer, and rollback-safe graph/OAuth authority. |
 | [`menhir-research-execution-ladder.md`](menhir-research-execution-ladder.md) | Dependency-ordered research → code → bench sequence. Read-side rungs are closed; Track W6 is the remaining write-side rung. |
