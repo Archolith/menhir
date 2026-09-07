@@ -4,11 +4,12 @@
   "category": "fixed",
   "deployment_class": "maintenance",
   "summary": "Make maintenance release acceptance self-contained and Cloudflare-compatible.",
-  "details": "Commit 7d7171924f5869b6012e362cf66e57d43d38dcd9 makes the maintenance runner mint its 60-second read-only candidate probe token in memory, gives authenticated acceptance POSTs the same declared release User-Agent as GET checks, and rejects incorrectly prefixed Python runtime digest evidence during preparation.",
-  "operator_impact": "Maintenance releases no longer require an operator-created acceptance-token file, and deterministic Cloudflare browser-signature rejection is caught by tests before deployment.",
+  "details": "Commits 7d7171924f5869b6012e362cf66e57d43d38dcd9 and d8df2aca053d7be3f4636e5f0129b471ae303f99 make the maintenance runner mint its 60-second read-only candidate probe token in memory, give authenticated acceptance POSTs the same declared release User-Agent as GET checks, reject incorrectly prefixed Python runtime digest evidence during preparation, and reuse the running candidate for the post-start authority digest instead of contending for its fixed proxy address.",
+  "operator_impact": "Maintenance releases no longer require an operator-created acceptance-token file, Cloudflare receives the declared release User-Agent, and the post-start authority check completes without a one-off container network collision.",
   "repositories": {
     "menhir": [
-      "7d7171924f5869b6012e362cf66e57d43d38dcd9"
+      "7d7171924f5869b6012e362cf66e57d43d38dcd9",
+      "d8df2aca053d7be3f4636e5f0129b471ae303f99"
     ]
   },
   "security_scopes": [
