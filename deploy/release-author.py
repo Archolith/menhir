@@ -383,6 +383,17 @@ def _validate_policy_env_binding(policy_path: Path, env_path: Path) -> None:
             "production environment must bind MENHIR_CLIENT_POLICY_DIGEST "
             "to the client policy canonical_digest"
         )
+    mode_prefix = "MENHIR_CANONICAL_SELF_BINDING_MODE="
+    modes = [
+        line.removeprefix(mode_prefix)
+        for line in lines
+        if line.startswith(mode_prefix)
+    ]
+    if len(modes) != 1 or modes[0] not in {"off", "observe", "enforce"}:
+        raise ValueError(
+            "production environment must bind exactly one "
+            "MENHIR_CANONICAL_SELF_BINDING_MODE=off|observe|enforce"
+        )
 
 
 def _validate_provenance(
