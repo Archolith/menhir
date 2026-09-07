@@ -241,25 +241,22 @@ def test_deploy_dry_run_preserves_state_and_selects_maintenance(
     assert json.loads((workspace / MODULE.STATE_NAME).read_text())["phase"] == "bundled"
 
 
-def test_deploy_records_success_only_after_runner_returns(
+def test_direct_deploy_execution_is_disabled(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     workspace, _ = _write_staged_workspace(tmp_path)
     wrapper = tmp_path / "deploy-menhir.ps1"
     wrapper.write_text("# test\n", encoding="ascii")
     monkeypatch.setattr(MODULE, "DEFAULT_WRAPPER", wrapper)
-    seen: list[list[str]] = []
+    with pytest.raises(MODULE.ReleaseFlowError, match="personal_deploy.py"):
+        MODULE.deploy_flow(
+            workspace,
+            "menhir-prod-0.2.0-11",
+            execute=True,
+            runner=lambda _command: pytest.fail("legacy deployment runner was invoked"),
+        )
 
-    result = MODULE.deploy_flow(
-        workspace,
-        "menhir-prod-0.2.0-11",
-        execute=True,
-        runner=seen.append,
-    )
-
-    assert seen
-    assert isinstance(result, dict) and result["phase"] == "deployed"
-    assert json.loads((workspace / MODULE.STATE_NAME).read_text())["phase"] == "deployed"
+    assert json.loads((workspace / MODULE.STATE_NAME).read_text())["phase"] == "bundled"
 
 
 def test_deploy_resume_does_not_run_transaction_twice(

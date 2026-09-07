@@ -22,7 +22,7 @@ writer fencing where the selected class requires it, and bounded rollback remain
 release containing several features is tested and reviewed as one candidate; a focused feature
 test is not evidence for unrelated changes shipping in the same image.
 
-## Required future release method
+## Required release method
 
 Product publication and this owner's production deployment are two independent workflows with an
 explicit artifact handoff. Publishing a Menhir package or image must never deploy it, and deploying
@@ -38,8 +38,8 @@ rehearses that exact artifact in private staging, obtains one owner approval, pr
 `memory.ctharvey.me`, runs the bounded public canary, and records success or automatic rollback. It
 cannot change the package, image, manifest, or changelog it consumes.
 
-Production is a promotion target, not the environment where either workflow is debugged. Before
-the next personal production deployment, automation must implement and pass this sequence unattended:
+Production is a promotion target, not the environment where either workflow is debugged. Every
+personal production deployment uses this automated sequence:
 
 1. Select one completed product release and verify its published provenance, manifest, and digest.
 2. A production-equivalent staging job deploys that exact artifact with the production container
@@ -67,18 +67,19 @@ recovery. Only that path may quiesce the database, create a release-bound backup
 or perform a full authority comparison. OAuth/client-policy changes that do not alter durable state
 use the staged `security-config` path, not the full database-maintenance transaction.
 
-### Transition gate
+### Implemented gate
 
-The streamlined workflow is a target contract until the staging job and promotion receipt are
-implemented and proven. Do not run another production deployment merely because its individual
-scripts or unit tests pass. The first eligible production release must present evidence from one
-clean, end-to-end production-equivalent rehearsal, including failure and automatic rollback. Until
-then, keep any interrupted transaction fenced and use the recovery section below rather than
-debugging successive release stages against production.
+`personal_deploy.py` now enforces `select -> stage -> approve -> promote` as a separate, resumable
+state machine. The exact-image staging runner has passed a complete production-equivalent rehearsal,
+including OAuth authorization code with PKCE, MCP read/write/deny behavior, restart persistence,
+production-identity non-interference, and simulated automatic rollback. The promotion wrapper
+independently revalidates the immutable bundle, receipt, approval, deployment class, image identity,
+and 24-hour staging freshness before it can invoke the existing production transaction.
 
-This transition gate blocks personal deployment only. Product releases may continue to be packaged
-and published while deployment automation is being repaired; their publication must not imply that
-the owner's production instance has adopted them.
+Do not use `release_flow.py deploy --execute` or call the lower-level desktop wrapper directly for a
+normal deployment. The old coordinator execution path is disabled. Lower-level wrappers remain
+available only as implementation details of `personal_promote.ps1` and for explicit recovery under
+the recovery section below.
 
 ## Non-negotiable client access invariant
 
@@ -172,7 +173,8 @@ The normal deployment is one command and performs only these blocking gates:
    probe token;
 8. record success, or automatically restore the prior app digest if acceptance fails.
 
-The required wrapper interface is:
+The app-only production transaction is an implementation detail invoked by the approved personal
+promotion. Do not call it directly for a normal release. The underlying interface remains:
 
 ```powershell
 PowerShell -File C:\Users\thron\IdeaProjects\scripts\deploy-menhir.ps1 `
@@ -226,8 +228,8 @@ PowerShell -File C:\Users\thron\IdeaProjects\scripts\deploy-menhir.ps1 `
 ```
 
 An explicit bundle and its `bundle_sha256` from `release-flow.json` are required;
-timestamp-based discovery is not release authority. Prefer the
-`release_flow.py deploy` command, which supplies both values automatically.
+timestamp-based discovery is not release authority. The personal promotion gate supplies both only
+after it verifies the exact staging receipt and owner approval.
 A repeated maintenance call resumes the exact release and generation from
 `/var/lib/menhir-production/release-run.json`; it never starts another release silently.
 
@@ -247,19 +249,18 @@ capture legacy writer + backup + retire writer
 Errors state the missing or conflicting authority. Do not reinterpret a failed
 check as success or replace the fixed command with ad-hoc Compose/SSH commands.
 
-## Automated release staging
+## Automated product release and personal deployment
 
-Use [`RELEASE_AUTOMATION.md`](RELEASE_AUTOMATION.md) and
-`deploy/release_flow.py` for routine release preparation. It replaces the
-one-off workspace scripts with a digest-bound workflow. The required future state is
-`prepare -> independent review when required -> finalize -> production-equivalent stage ->
-approve -> promote`. The deploy command remains a preview unless `--execute` is supplied,
-and execution also requires the exact reviewed release ID and successful staging receipt.
+Use [`RELEASE_AUTOMATION.md`](RELEASE_AUTOMATION.md) for the exact commands. Product preparation is
+`release_flow.py prepare -> independent review when required -> release_flow.py finalize`.
+Personal deployment is the separate `personal_deploy.py select -> stage -> approve -> promote`
+workflow. The first workflow has no production authority; the second consumes, but cannot rebuild,
+its immutable output.
 
-This coordinator does not weaken the controls below. It calls the existing
-release author and desktop deployment wrapper, and it cannot skip required independent
-review, artifact validation, staging, or the server-side transaction. Until the coordinator
-enforces the staging receipt, the transition gate above prohibits production execution.
+The personal coordinator cannot skip artifact validation, complete isolated staging, exact receipt
+confirmation, owner approval, or the server-side transaction. Omitting `--execute` previews staging
+or promotion without changing remote state. See the automation guide rather than copying low-level
+wrapper commands from later recovery sections.
 
 ## Release inputs
 
@@ -461,8 +462,9 @@ automatic prior-image rollback on failure. Host
 topology, Neo4j, Caddy, backup identity, network, systemd, sudoers, gateway bootstrap,
 full backup generation, and restore rehearsal are not recreated.
 
-Stage and review the release through `release_flow.py`, preview its deployment
-command, then execute that same release only after the exact staging receipt and production
-approval exist. A `security-config` fragment uses its focused staged path when no durable-state,
-route, host, or privileged-lifecycle surface changed. Only a mechanically classified
-`maintenance` change selects the full maintenance path.
+Finalize the product through `release_flow.py`, then select and stage it through
+`personal_deploy.py`. Review the release notes and exact staging receipt, record one bound approval,
+preview promotion, and execute that same promotion. `security-config` is conservatively promoted by
+the maintenance transaction until a focused production runner is implemented. Mechanically
+classified `maintenance` changes always require the full state-protection path; using that stronger
+path temporarily for `security-config` is safe but slower.
