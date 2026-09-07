@@ -38,6 +38,7 @@ INPUT_KEYS = frozenset({
     "repositories", "images", "evidence", "baseline_production_env",
     "operations_policy", "oauth_public_key", "python_runtime_digest",
     "prior_release", "prior_route", "secret_version_ids", "yawn_env_sha256",
+    "ingress_mode",
 })
 EVIDENCE_KEYS = frozenset({"wheelhouse", "sbom", "scan"})
 IMAGE_KEYS = frozenset({"digest", "ref"})
@@ -110,18 +111,6 @@ ARTIFACT_SOURCES: dict[str, dict[str, str]] = {
     "/srv/menhir/production/deploy/installed-artifacts.json": _git(
         "menhir", "deploy/installed-artifacts.json"
     ),
-    "/srv/yawn/projects/yawn.deploy/Caddyfile": _git(
-        "yawn_deploy", "Caddyfile"
-    ),
-    "/srv/yawn/projects/yawn.deploy/check-drift.sh": _git(
-        "yawn_deploy", "check-drift.sh"
-    ),
-    "/srv/yawn/projects/yawn.deploy/docker-compose.yml": _git(
-        "yawn_deploy", "docker-compose.yml"
-    ),
-    "/srv/yawn/projects/yawn.deploy/releases.json": _git(
-        "yawn_deploy", "releases.json"
-    ),
     "/srv/yawn/projects/yawn.vps/menhir_server.py": _git(
         "yawn_vps", "menhir_server.py"
     ),
@@ -140,8 +129,7 @@ ARTIFACT_SOURCES: dict[str, dict[str, str]] = {
     ),
 }
 for _name in (
-    "backup", "backup-status", "caddy-route-apply",
-    "caddy-route-rollback", "candidate-accept", "candidate-deploy",
+    "backup", "backup-status", "candidate-accept", "candidate-deploy",
     "generation-inspect", "lib.sh", "logs", "promote", "recover",
     "release-inspect", "release-run", "restore-production",
     "restore-rehearsal", "rollback", "status", "verify-artifacts", "worker",
@@ -149,9 +137,6 @@ for _name in (
     ARTIFACT_SOURCES[f"/srv/menhir/production/bin/{_name}"] = _git(
         "yawn_vps", f"ops/menhir/bin/{_name}"
     )
-ARTIFACT_SOURCES["/srv/menhir/production/bin/caddy-release.sh"] = _git(
-    "yawn_deploy", "caddy-release.sh"
-)
 for _name in (
     "backup-generation.sh", "candidate-accept.sh", "candidate-deploy.sh",
     "promote.sh", "release-lib.sh", "release-run.sh", "release-validate.sh",
@@ -174,7 +159,6 @@ ARTIFACT_SOURCES["/srv/menhir/production/bin/verify_python_runtime.py"] = _git(
     "yawn_vps", "ops/menhir/bin/verify_python_runtime.py"
 )
 for _name in (
-    "menhir-caddy-reconcile.path", "menhir-caddy-reconcile.service",
     "menhir-oauth-operations.service", "menhir-op@.service",
 ):
     ARTIFACT_SOURCES[f"/etc/systemd/system/{_name}"] = _git(
@@ -563,6 +547,10 @@ def prepare_release_spec(
     remotes = {name: identities[name][2] for name in sorted(REPOSITORIES)}
     _validate_census(identities["menhir"][0], identities["menhir"][1])
 
+    ingress_mode = inputs.get("ingress_mode")
+    if ingress_mode != "cloudflared":
+        raise ReleaseSpecError("ingress_mode must be cloudflared")
+
     image_values = _exact(inputs.get("images"), IMAGES, "images")
     images: dict[str, str] = {}
     image_refs: dict[str, str] = {}
@@ -746,6 +734,7 @@ def prepare_release_spec(
             "schema": 1,
             "release_id": release_id,
             "release_author": author,
+            "ingress_mode": ingress_mode,
             "repositories": {
                 name: str(identities[name][0]) for name in sorted(REPOSITORIES)
             },

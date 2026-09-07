@@ -21,6 +21,11 @@ flock -n 8 || { echo "another Menhir release-run is active: $run_lock" >&2; exit
 state="${STATUS_DIR}/release-run.json"
 release_sha="$(sha256sum "$RELEASE_JSON" | cut -d' ' -f1)"
 release_id="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["release_id"])' "$RELEASE_JSON")"
+ingress_mode="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("ingress_mode", ""))' "$RELEASE_JSON")"
+[ "$ingress_mode" = cloudflared ] || {
+    echo "release authority must declare Cloudflared ingress" >&2
+    exit 1
+}
 
 write_stage() { # stage generation
     local stage="$1" generation="${2:-}"
@@ -154,20 +159,10 @@ then
     fi
 fi
 
-# Reconcile Caddy's own crash journal, then recognize an already-active bundle
-# only when its frozen authority is byte-for-byte this release.
+# Cloudflared is the sole Menhir ingress authority. Maintenance retains it and
+# never mutates the unrelated shared Caddy deployment.
 if at_least accepted && ! at_least routed; then
-    caddy_release="${SCRIPT_DIR}/caddy-release.sh"
-    [ -x "$caddy_release" ] || { echo "fixed Caddy release script is missing: $caddy_release" >&2; exit 1; }
-    "$caddy_release" reconcile
-    active_authority="/srv/menhir/production/caddy/current/release-authority.json"
-    if [ -f "$active_authority" ] && [ ! -L "$active_authority" ]; then
-        require_root_file "$active_authority" "active Caddy release authority"
-    fi
-    if [ -f "$active_authority" ] \
-            && [ "$(sha256sum "$active_authority" | cut -d' ' -f1)" = "$release_sha" ]; then
-        advance routed
-    fi
+    advance routed
 fi
 
 # Promotion is also reconstructible: the marker and both healthy reviewed
@@ -227,10 +222,7 @@ if ! at_least accepted; then
 fi
 
 if ! at_least routed; then
-    echo "[6/8] Applying the immutable Caddy route transaction"
-    caddy_release="${SCRIPT_DIR}/caddy-release.sh"
-    [ -x "$caddy_release" ] || { echo "fixed Caddy release script is missing: $caddy_release" >&2; exit 1; }
-    "$caddy_release" release /srv/yawn/releases/menhir-route-candidate
+    echo "[6/8] Retaining the authoritative Cloudflared ingress"
     write_stage routed "$generation"; stage=routed
 fi
 

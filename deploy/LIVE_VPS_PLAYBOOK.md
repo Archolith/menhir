@@ -116,7 +116,8 @@ curl -fsS https://memory.ctharvey.me/readyz
 ```
 
 The automated preflight must additionally require healthy Menhir/Neo4j containers, sufficient
-disk/RAM headroom, no conflicting release journal, active reconciliation/audit units, and an
+disk/RAM headroom, no conflicting release journal, an active audit timer, absent retired Caddy
+reconciliation units, and an
 ingress topology compatible with the selected class. It runs before owner approval. For app-only,
 it verifies ingress identity but does not require or mutate route assets. For maintenance, it
 rejects missing candidate files, directory-valued TLS paths, or fixed-IP collisions before any

@@ -179,6 +179,7 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, dict]:
         "release_id": "menhir-prod-0.2.0-1",
         "release_author": "release-operator@example.com",
         "deployment_class": "maintenance",
+        "ingress_mode": "cloudflared",
         "notes_json_sha256": "d" * 64,
         "notes_markdown_sha256": "e" * 64,
         "repositories": repos,
@@ -324,7 +325,7 @@ def test_legacy_release_remains_readable(tmp_path: Path) -> None:
     release = _author(spec_path, output)
     output.chmod(0o600)
     for key in (
-        "deployment_class", "notes_json_sha256", "notes_markdown_sha256",
+        "deployment_class", "ingress_mode", "notes_json_sha256", "notes_markdown_sha256",
     ):
         release.pop(key)
     release["security_review"]["authority_sha256"] = (

@@ -738,7 +738,8 @@ def test_release_run_reconstructs_progress_instead_of_trusting_state():
     assert "release-run.json is observability, never authorization" in source
     assert 'require_root_file "$state" "release-run state"' in source
     assert '"${SCRIPT_DIR}/same-host-fence.sh"' in source
-    assert '"$caddy_release" reconcile' in source
+    assert 'Retaining the authoritative Cloudflared ingress' in source
+    assert '"$caddy_release" reconcile' not in source
     assert 'same_host_helper="${SCRIPT_DIR}/lib/same_host_fence.py"' in source
     assert 'same_host_helper="${SCRIPT_DIR}/same_host_fence.py"' in source
     assert '"$same_host_helper" verify' in source

@@ -1,0 +1,88 @@
+---
+- name: Validate the bounded host prerequisite contract
+  ansible.builtin.assert:
+    that:
+      - menhir_ingress_authority == 'cloudflared'
+      - >-
+        menhir_host_directories | map(attribute='path') | list ==
+        ['/srv/menhir', '/srv/menhir/production', '/srv/menhir/backups',
+        '/srv/menhir/backups/encrypted', '/srv/menhir/scaffold',
+        '/srv/menhir/scaffold/bin', '/var/lib/menhir-production',
+        '/var/log/menhir-production', '/etc/menhir', '/etc/yawn-vps']
+      - >-
+        menhir_host_directories | map(attribute='mode') | list ==
+        ['0755', '0755', '0755', '0700', '0755', '0755', '0755',
+        '0755', '0700', '0755']
+      - >-
+        menhir_host_units | map(attribute='name') | list ==
+        ['menhir-scaffold-audit.service', 'menhir-scaffold-audit.timer']
+      - >-
+        menhir_host_units | map(attribute='template') | list ==
+        ['menhir-scaffold-audit.service.j2',
+        'menhir-scaffold-audit.timer.j2']
+      - menhir_host_active_units == ['menhir-scaffold-audit.timer']
+      - >-
+        menhir_host_retired_units == ['menhir-caddy-reconcile.path',
+        'menhir-caddy-reconcile.service']
+      - menhir_host_tmpfiles | length == 7
+    fail_msg: >-
+      Menhir host prerequisites require the reviewed Cloudflared authority,
+      directory/tmpfiles contract, audit unit set, and retired Caddy writers.
+
+- name: Disable retired Caddy route writers
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    enabled: false
+    state: stopped
+  loop: "{{ menhir_host_retired_units }}"
+  failed_when: false
+
+- name: Remove retired Caddy route writer definitions
+  ansible.builtin.file:
+    path: "/etc/systemd/system/{{ item }}"
+    state: absent
+  loop: "{{ menhir_host_retired_units }}"
+  notify: Reload systemd
+
+- name: Create persistent Menhir directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+    recurse: false
+    follow: false
+  loop: "{{ menhir_host_directories }}"
+  loop_control:
+    label: "{{ item.path }}"
+
+- name: Install the Menhir tmpfiles policy
+  ansible.builtin.template:
+    src: menhir-production.conf.j2
+    dest: /etc/tmpfiles.d/menhir-production.conf
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Install Menhir audit units
+  ansible.builtin.template:
+    src: "{{ item.template }}"
+    dest: "/etc/systemd/system/{{ item.name }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ menhir_host_units }}"
+  loop_control:
+    label: "{{ item.name }}"
+  notify: Reload systemd
+
+- name: Apply changed systemd definitions before activation
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start Menhir host monitors
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop: "{{ menhir_host_active_units }}"

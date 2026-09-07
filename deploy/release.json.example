@@ -3,6 +3,7 @@
   "release_id": "menhir-prod-0.2.0-<seq>",
   "release_author": "<release-operator-identity>",
   "deployment_class": "<app-only|security-config|maintenance>",
+  "ingress_mode": "cloudflared",
   "notes_json_sha256": "<64-lowercase-hex>",
   "notes_markdown_sha256": "<64-lowercase-hex>",
   "repos": {

@@ -28,7 +28,7 @@ SPEC_KEYS = frozenset({
     "evidence", "rendered", "network", "initial_release", "prior_release",
     "prior_route", "initial_prior_images", "secret_version_ids",
     "artifact_sources", "initial_host_state", "deployment_class",
-    "notes_json_sha256", "notes_markdown_sha256",
+    "notes_json_sha256", "notes_markdown_sha256", "ingress_mode",
 })
 REPOSITORIES = frozenset({"menhir", "archolith_oauth", "yawn_deploy", "yawn_vps"})
 EVIDENCE_DIGESTS = {
@@ -265,7 +265,7 @@ def _validate_spec_relationship(
         raise ValueError("release spec schema must be 1")
     for key in (
         "release_id", "release_author", "deployment_class",
-        "notes_json_sha256", "notes_markdown_sha256",
+        "notes_json_sha256", "notes_markdown_sha256", "ingress_mode",
         "images", "network", "secret_version_ids",
     ):
         if spec.get(key) != release.get(key):

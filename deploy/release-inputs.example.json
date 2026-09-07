@@ -2,6 +2,7 @@
   "schema": 1,
   "release_id": "menhir-prod-0.2.0-9",
   "release_author": "release-operator@example.com",
+  "ingress_mode": "cloudflared",
   "release_workspace_root": "C:\\absolute\\release-workspace",
   "repositories": {
     "menhir": "C:\\absolute\\repos\\menhir",

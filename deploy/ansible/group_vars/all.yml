@@ -1,0 +1,50 @@
+---
+# Public ingress remains externally managed. The role asserts this value but
+# never installs or configures Cloudflared or its credentials.
+menhir_ingress_authority: cloudflared
+
+menhir_host_directories:
+  - path: /srv/menhir
+    mode: "0755"
+  - path: /srv/menhir/production
+    mode: "0755"
+  - path: /srv/menhir/backups
+    mode: "0755"
+  - path: /srv/menhir/backups/encrypted
+    mode: "0700"
+  - path: /srv/menhir/scaffold
+    mode: "0755"
+  - path: /srv/menhir/scaffold/bin
+    mode: "0755"
+  - path: /var/lib/menhir-production
+    mode: "0755"
+  - path: /var/log/menhir-production
+    mode: "0755"
+  - path: /etc/menhir
+    mode: "0700"
+  - path: /etc/yawn-vps
+    mode: "0755"
+
+menhir_host_units:
+  - name: menhir-scaffold-audit.service
+    template: menhir-scaffold-audit.service.j2
+  - name: menhir-scaffold-audit.timer
+    template: menhir-scaffold-audit.timer.j2
+
+menhir_host_active_units:
+  - menhir-scaffold-audit.timer
+
+# These legacy units attempted to mutate the shared Yawn Caddy route. Menhir's
+# public ingress is Cloudflared, so the host role retires the duplicate writer.
+menhir_host_retired_units:
+  - menhir-caddy-reconcile.path
+  - menhir-caddy-reconcile.service
+
+menhir_host_tmpfiles:
+  - "f /run/lock/menhir-production.lock 0600 root root - -"
+  - "f /run/lock/menhir-production-admission.lock 0600 root root - -"
+  - "d /var/lib/menhir-production 0755 root root - -"
+  - "d /var/lib/menhir-production/jobs 0755 root root - -"
+  - "d /var/lib/menhir-production/backups 0755 root root - -"
+  - "d /var/lib/menhir-production/receipts 0755 root root - -"
+  - "d /var/log/menhir-production 0755 root root - -"

@@ -56,7 +56,9 @@ Do not add a `_` script to answer a question one of the durable instruments alre
 | Script | Purpose |
 |---|---|
 | `deploy/release_flow.py` | Resumable, digest-bound product-release coordinator: derives the next label with `next-id`, then runs `prepare`, `finalize`, explicit `publish`, and `status`; publication archives only prepared fragments with a transaction receipt, while direct deploy remains disabled in favor of personal staging and approval |
-| `deploy/personal_deploy.py` | Resumable personal promotion coordinator: one `rehearse` invocation selects and stages the exact published product, then `approve` records owner identity and `promote` previews or executes the bound production transaction |
+| `deploy/personal_deploy.py` | Resumable personal promotion coordinator: one `rehearse` invocation selects and stages the exact published product, then `approve` records owner identity and `promote` requires the executing wrapper's digest- and time-bound receipt |
+| `deploy/ansible/playbook.yml` | Bounded host-prerequisite convergence: root directories/tmpfiles, scaffold audit units, and retirement of duplicate Caddy writer units; always preview with check/diff and verify over SSH with testinfra |
+| `.github/workflows/release-image.yml` | Reusable release-image validation/publication workflow with no-push validation, protected publication environment, least-privilege permissions, retained metadata, and provenance attestations |
 | `deploy/release_spec.py` | Strictly validates release inputs and generates the maintained four-repository release-author specification |
 | `deploy/release_notes.py` | Validates committed change fragments and deterministically renders release Markdown or JSON |
 | `deploy/build_install_bundle.py` | Builds and revalidates the exact reviewed host installation bundle from committed blobs and rendered artifacts |

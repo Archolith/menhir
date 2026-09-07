@@ -47,7 +47,6 @@
   },
   "schema": 1,
   "units": [
-    {"active": "active", "enabled": "enabled", "name": "menhir-caddy-reconcile.path"},
     {"active": "active", "enabled": "enabled", "name": "menhir-oauth-operations.service"},
     {"active": "active", "enabled": "enabled", "name": "menhir-scaffold-audit.timer"}
   ]

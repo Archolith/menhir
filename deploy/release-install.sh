@@ -25,8 +25,6 @@ bundle, manifest_path, plan_path = sys.argv[1:]
 release_destination = "/srv/menhir/production/release/release.json"
 allowed = frozenset(line for line in """
 /etc/sudoers.d/menhir-production
-/etc/systemd/system/menhir-caddy-reconcile.path
-/etc/systemd/system/menhir-caddy-reconcile.service
 /etc/systemd/system/menhir-oauth-operations.service
 /etc/systemd/system/menhir-op@.service
 /etc/tmpfiles.d/menhir-production.conf
@@ -38,9 +36,6 @@ allowed = frozenset(line for line in """
 /srv/menhir/production/bin/backup-status
 /srv/menhir/production/bin/backup-generation.sh
 /srv/menhir/production/bin/backup_cleanup_txn.py
-/srv/menhir/production/bin/caddy-release.sh
-/srv/menhir/production/bin/caddy-route-apply
-/srv/menhir/production/bin/caddy-route-rollback
 /srv/menhir/production/bin/candidate-accept
 /srv/menhir/production/bin/candidate-accept.sh
 /srv/menhir/production/bin/candidate-deploy
@@ -81,10 +76,6 @@ allowed = frozenset(line for line in """
 /srv/menhir/production/deploy/installed-artifacts.json
 /srv/menhir/production/policy/client-policy.json
 /srv/menhir/production/release/production.env
-/srv/yawn/projects/yawn.deploy/Caddyfile
-/srv/yawn/projects/yawn.deploy/check-drift.sh
-/srv/yawn/projects/yawn.deploy/docker-compose.yml
-/srv/yawn/projects/yawn.deploy/releases.json
 /srv/yawn/projects/yawn.vps/menhir_server.py
 /srv/yawn/projects/yawn.vps/vps/core.py
 /srv/yawn/projects/yawn.vps/vps/menhir_capabilities.py
@@ -225,12 +216,8 @@ created_list="${backup_dir}/created.list"
 : > "$created_list"
 mutated=0
 operations_was_active=0
-caddy_path_was_active=0
 if systemctl is-active --quiet menhir-oauth-operations.service; then
     operations_was_active=1
-fi
-if systemctl is-active --quiet menhir-caddy-reconcile.path; then
-    caddy_path_was_active=1
 fi
 
 rollback_install() {
@@ -252,10 +239,6 @@ rollback_install() {
         if [ "$operations_was_active" -eq 1 ] \
                 && ! systemctl restart menhir-oauth-operations.service; then
             echo "warning: restored operations gateway could not be restarted" >&2
-        fi
-        if [ "$caddy_path_was_active" -eq 1 ] \
-                && ! systemctl try-restart menhir-caddy-reconcile.path; then
-            echo "warning: restored Caddy reconcile path could not be restarted" >&2
         fi
         echo "installation failed; replaced files restored from ${backup_dir}" >&2
     fi
@@ -311,10 +294,6 @@ python3 /srv/menhir/production/bin/menhir_schema.py \
 if [ "$operations_was_active" -eq 1 ]; then
     systemctl restart menhir-oauth-operations.service
     systemctl is-active --quiet menhir-oauth-operations.service
-fi
-if [ "$caddy_path_was_active" -eq 1 ]; then
-    systemctl try-restart menhir-caddy-reconcile.path
-    systemctl is-active --quiet menhir-caddy-reconcile.path
 fi
 mutated=0
 trap - EXIT

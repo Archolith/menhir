@@ -155,6 +155,7 @@ def release_fixture(tmp_path: Path, monkeypatch):
         "schema": 1,
         "release_id": "menhir-prod-1.2.3-9",
         "release_author": "operator@example.com",
+        "ingress_mode": "cloudflared",
         "release_workspace_root": str(workspace.resolve()),
         "repositories": repos,
         "images": {
@@ -336,13 +337,6 @@ def test_refuses_installed_artifact_mapping_drift(
 
 def test_artifact_source_exceptions_match_proven_release_layout() -> None:
     assert MODULE.ARTIFACT_SOURCES[
-        "/srv/menhir/production/bin/caddy-release.sh"
-    ] == {
-        "kind": "git",
-        "repository": "yawn_deploy",
-        "path": "caddy-release.sh",
-    }
-    assert MODULE.ARTIFACT_SOURCES[
         "/srv/menhir/production/bin/verify_python_runtime.py"
     ] == {
         "kind": "git",
@@ -350,8 +344,6 @@ def test_artifact_source_exceptions_match_proven_release_layout() -> None:
         "path": "ops/menhir/bin/verify_python_runtime.py",
     }
     for name in (
-        "menhir-caddy-reconcile.path",
-        "menhir-caddy-reconcile.service",
         "menhir-oauth-operations.service",
         "menhir-op@.service",
     ):

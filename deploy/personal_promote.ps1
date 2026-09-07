@@ -2,7 +2,7 @@
 # existing production deployment transaction.
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)][ValidateSet("Maintenance", "AppOnly")][string]$Mode,
+    [Parameter(Mandatory = $true)][ValidateSet("Maintenance", "SecurityConfig", "AppOnly")][string]$Mode,
     [Parameter(Mandatory = $true)][string]$BundlePath,
     [Parameter(Mandatory = $true)][string]$ExpectedBundleSha256,
     [Parameter(Mandatory = $true)][string]$Release,
@@ -11,10 +11,15 @@ param(
     [Parameter(Mandatory = $true)][string]$ExpectedStagingReceiptSha256,
     [Parameter(Mandatory = $true)][string]$Approval,
     [Parameter(Mandatory = $true)][string]$ExpectedApprovalSha256,
-    [Parameter(Mandatory = $true)][string]$SourceRepository
+    [Parameter(Mandatory = $true)][string]$SourceRepository,
+    [Parameter(Mandatory = $true)][string]$ResultReceipt
 )
 
 $ErrorActionPreference = "Stop"
+$promotionStartedAt = [DateTimeOffset]::UtcNow
+if (Test-Path -LiteralPath $ResultReceipt) {
+    throw "Promotion receipt path must not already exist."
+}
 
 function Get-FileSha256 {
     param([Parameter(Mandatory = $true)][string]$Path)
@@ -165,7 +170,15 @@ $authorityClass = [string]$releaseAuthority.deployment_class
 if ($authorityClass -notin @("app-only", "security-config", "maintenance")) {
     throw "Bundled release authority deployment class is invalid."
 }
-$authorityMode = if ($authorityClass -eq "app-only") { "AppOnly" } else { "Maintenance" }
+$authorityIngress = [string]$releaseAuthority.ingress_mode
+if ($authorityIngress -ne "cloudflared") {
+    throw "Bundled release authority must declare Cloudflared ingress."
+}
+$authorityMode = switch ($authorityClass) {
+    "app-only" { "AppOnly" }
+    "security-config" { "SecurityConfig" }
+    default { "Maintenance" }
+}
 if ($Mode -ne $authorityMode) {
     throw "Promotion mode differs from the immutable release authority."
 }
@@ -177,7 +190,7 @@ $approvalValue = Read-JsonEvidence -Path $Approval `
 
 Assert-ExactProperties -Value $staging -Label "Staging receipt" -Expected @(
     "schema", "kind", "result", "release_id", "release_sha256", "bundle_sha256",
-    "deployment_class", "images", "runner_sha256", "started_utc", "completed_utc",
+    "deployment_class", "ingress_mode", "images", "runner_sha256", "started_utc", "completed_utc",
     "test_identities", "checks", "production_preflight"
 )
 Assert-ExactProperties -Value $approvalValue -Label "Promotion approval" -Expected @(
@@ -190,7 +203,8 @@ if ($staging.schema -ne 1 -or $staging.kind -ne "menhir-personal-staging" -or
     $staging.result -ne "passed" -or $staging.release_id -ne $Release -or
     $staging.release_sha256 -ne $ExpectedReleaseSha256 -or
     $staging.bundle_sha256 -ne $ExpectedBundleSha256 -or
-    $staging.deployment_class -ne $expectedClass) {
+    $staging.deployment_class -ne $expectedClass -or
+    $staging.ingress_mode -ne $authorityIngress) {
     throw "Staging receipt is not bound to this production promotion."
 }
 if ($staging.images.menhir -ne $releaseAuthority.images.menhir -or
@@ -206,7 +220,7 @@ if ($staging.runner_sha256 -notmatch '^[0-9a-f]{64}$' -or
 $preflight = $staging.production_preflight
 Assert-ExactProperties -Value $preflight -Label "Production readiness preflight" -Expected @(
     "schema", "kind", "result", "observed_utc", "deployment_class",
-    "candidate_release_id", "checks", "canonical_sha256"
+    "candidate_release_id", "ingress_mode", "checks", "canonical_sha256"
 )
 Assert-ExactProperties -Value $preflight.checks -Label "Production readiness preflight checks" -Expected @(
     "live_services", "network_roles", "release_journal", "headroom", "maintenance_route"
@@ -238,12 +252,13 @@ $sealProgram | & $pythonCommand.Source - $StagingReceipt
 if ($LASTEXITCODE -ne 0) {
     throw "Production readiness preflight seal is invalid."
 }
-$routeRequired = $expectedClass -ne "app-only"
+$routeRequired = $expectedClass -eq "maintenance"
 if ($preflight.schema -ne 1 -or
     $preflight.kind -ne "menhir-production-readiness-preflight" -or
     $preflight.result -ne "passed" -or
     $preflight.deployment_class -ne $expectedClass -or
     $preflight.candidate_release_id -ne $Release -or
+    $preflight.ingress_mode -ne $releaseAuthority.ingress_mode -or
     [string]$preflight.canonical_sha256 -notmatch '^[0-9a-f]{64}$' -or
     [bool]$preflight.checks.maintenance_route.applicable -ne $routeRequired -or
     [long]$preflight.checks.headroom.disk_free_bytes -lt [long]$preflight.checks.headroom.disk_required_bytes -or
@@ -288,7 +303,13 @@ if ($approvedAt -lt $completedAt) {
     throw "Owner approval predates the completed staging receipt."
 }
 
-$operatorWrapper = if ($env:MENHIR_OPERATOR_DEPLOY_WRAPPER) {
+$operatorWrapper = if ($Mode -eq "SecurityConfig") {
+    if (-not $env:MENHIR_SECURITY_CONFIG_DEPLOY_WRAPPER) {
+        throw "Security-config promotion requires MENHIR_SECURITY_CONFIG_DEPLOY_WRAPPER; it may not fall back to maintenance."
+    }
+    $env:MENHIR_SECURITY_CONFIG_DEPLOY_WRAPPER
+}
+elseif ($env:MENHIR_OPERATOR_DEPLOY_WRAPPER) {
     $env:MENHIR_OPERATOR_DEPLOY_WRAPPER
 }
 else {
@@ -306,3 +327,28 @@ $powerShellSucceeded = $?
 if (-not $powerShellSucceeded -or $LASTEXITCODE -ne 0) {
     throw "Menhir production transaction failed."
 }
+$promotionCompletedAt = [DateTimeOffset]::UtcNow
+$elapsedSeconds = [Math]::Ceiling(($promotionCompletedAt - $promotionStartedAt).TotalSeconds)
+$budget = if ($Mode -eq "AppOnly") { 300 } else { 600 }
+if ($elapsedSeconds -gt $budget) {
+    throw "Menhir production transaction exceeded its foreground time budget."
+}
+$receipt = [ordered]@{
+    schema = 1
+    kind = "menhir-personal-promotion"
+    result = "passed"
+    release_id = $Release
+    release_sha256 = $ExpectedReleaseSha256
+    bundle_sha256 = $ExpectedBundleSha256
+    staging_receipt_sha256 = $ExpectedStagingReceiptSha256
+    approval_sha256 = $ExpectedApprovalSha256
+    deployment_class = $authorityClass
+    ingress_mode = $authorityIngress
+    started_utc = $promotionStartedAt.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss.fffffffZ")
+    completed_utc = $promotionCompletedAt.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss.fffffffZ")
+    elapsed_seconds = [int]$elapsedSeconds
+    promotion_wrapper_sha256 = Get-FileSha256 -Path $PSCommandPath
+    operator_wrapper_sha256 = Get-FileSha256 -Path $operatorWrapper
+    transaction_kind = $authorityClass
+}
+$receipt | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $ResultReceipt -Encoding ascii

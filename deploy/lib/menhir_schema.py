@@ -91,9 +91,10 @@ _LEGACY_RELEASE_TOP_KEYS = frozenset({
     "rendered", "network", "rollback_anchors", "secret_version_ids",
     "artifacts", "repo_remotes", "deployment",
 })
-_RELEASE_TOP_KEYS = _LEGACY_RELEASE_TOP_KEYS | frozenset({
+_PRE_INGRESS_RELEASE_TOP_KEYS = _LEGACY_RELEASE_TOP_KEYS | frozenset({
     "deployment_class", "notes_json_sha256", "notes_markdown_sha256",
 })
+_RELEASE_TOP_KEYS = _PRE_INGRESS_RELEASE_TOP_KEYS | frozenset({"ingress_mode"})
 _RELEASE_SECURITY_REVIEW_KEYS = frozenset({
     "schema", "kind", "review_id", "release_author", "reviewer",
     "reviewed_utc", "authority_sha256", "verdict", "unresolved_findings",
@@ -115,6 +116,7 @@ _RELEASE_IMAGES = frozenset({"menhir", "neo4j", "caddy", "base"})
 _RELEASE_DEPLOYMENT_CLASSES = frozenset({
     "app-only", "security-config", "maintenance",
 })
+_RELEASE_INGRESS_MODES = frozenset({"cloudflared"})
 _RELEASE_RENDERED = frozenset({
     "menhir_compose_sha256", "yawn_compose_sha256", "caddy_sha256",
     "registry_sha256", "policy_sha256", "yawn_env_sha256",
@@ -447,7 +449,9 @@ def validate_release(path: str) -> dict:
     if not isinstance(release, dict):
         raise ValueError("release.json must be a JSON object")
     release_keys = set(release)
-    if release_keys not in {_RELEASE_TOP_KEYS, _LEGACY_RELEASE_TOP_KEYS}:
+    if release_keys not in {
+        _RELEASE_TOP_KEYS, _PRE_INGRESS_RELEASE_TOP_KEYS, _LEGACY_RELEASE_TOP_KEYS,
+    }:
         _require_exact_keys(release, _RELEASE_TOP_KEYS, "release.json")
     if release.get("schema") != SCHEMA_VERSION:
         raise ValueError("release.json schema must be %d" % SCHEMA_VERSION)
@@ -457,13 +461,16 @@ def validate_release(path: str) -> dict:
         r"[A-Za-z0-9][A-Za-z0-9._@+-]*", release_author
     ):
         raise ValueError("release_author must be a safe bounded identity")
-    if release_keys == _RELEASE_TOP_KEYS:
+    if release_keys in {_RELEASE_TOP_KEYS, _PRE_INGRESS_RELEASE_TOP_KEYS}:
         if release.get("deployment_class") not in _RELEASE_DEPLOYMENT_CLASSES:
             raise ValueError("deployment_class is invalid")
         _require_sha256(release.get("notes_json_sha256"), "notes_json_sha256")
         _require_sha256(
             release.get("notes_markdown_sha256"), "notes_markdown_sha256"
         )
+    if release_keys == _RELEASE_TOP_KEYS \
+            and release.get("ingress_mode") not in _RELEASE_INGRESS_MODES:
+        raise ValueError("ingress_mode is invalid")
 
     repos = release.get("repos")
     _require_exact_keys(repos, _RELEASE_REPOS, "repos")

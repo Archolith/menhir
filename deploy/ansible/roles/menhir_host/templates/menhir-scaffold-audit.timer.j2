@@ -1,0 +1,12 @@
+[Unit]
+Description=Audit Menhir deployment scaffold and operational evidence daily
+
+[Timer]
+OnCalendar=*-*-* 02:45:00 UTC
+Persistent=true
+RandomizedDelaySec=5min
+AccuracySec=1min
+Unit=menhir-scaffold-audit.service
+
+[Install]
+WantedBy=timers.target

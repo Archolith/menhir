@@ -345,14 +345,14 @@ def production_preflight_host(
     ingress = {
         "State": {"Running": True, "Status": "running"},
         "Config": {"Labels": {
-            "com.docker.compose.project": "yawndeploy",
-            "com.docker.compose.service": "caddy",
+            "com.docker.compose.project": "menhir-prod",
+            "com.docker.compose.service": "cloudflared",
         }},
     }
     inspect_values = {
         "menhir-prod-app": app,
         "menhir-prod-neo4j": neo4j,
-        "yawndeploy-caddy-1": ingress,
+        "menhir-prod-cloudflared": ingress,
     }
     network = [{
         "Name": "menhir-proxy",
@@ -362,7 +362,7 @@ def production_preflight_host(
                 "IPv4Address": "172.30.0.3/24",
             },
             "ingress-id": {
-                "Name": "yawndeploy-caddy-1",
+                "Name": "menhir-prod-cloudflared",
                 "IPv4Address": "172.30.0.2/24",
             },
         },
@@ -390,6 +390,7 @@ def production_preflight_host(
     )
     candidate_release = {
         "release_id": "menhir-prod-0.2.0-13",
+        "ingress_mode": "cloudflared",
         "network": dict(live_release["network"]),
     }
     return {
@@ -438,15 +439,16 @@ def test_preflight_rejects_unfinished_conflicting_release_journal(
         )
 
 
-def test_security_config_does_not_bypass_maintenance_route_preflight(
+def test_security_config_retains_cloudflared_without_route_mutation(
     production_preflight_host: dict[str, object],
 ) -> None:
-    with pytest.raises(MODULE.StageError, match="bundled route transaction runner"):
-        MODULE._production_preflight(
-            production_preflight_host["bundle"],
-            production_preflight_host["candidate_release"],
-            "security-config",
-        )
+    report = MODULE._production_preflight(
+        production_preflight_host["bundle"],
+        production_preflight_host["candidate_release"],
+        "security-config",
+    )
+    assert report["ingress_mode"] == "cloudflared"
+    assert report["checks"]["maintenance_route"] == {"applicable": False}
 
 
 def test_preflight_rejects_unhealthy_live_service(
@@ -545,26 +547,23 @@ def _sync_route_registry(fixture: dict[str, object]) -> None:
     source.write_text(json.dumps(fixture["registry"]), encoding="utf-8")
 
 
-@pytest.mark.parametrize("deployment_class", ["security-config", "maintenance"])
-def test_maintenance_classes_prove_route_transaction_prerequisites(
-    maintenance_preflight_host: dict[str, object], deployment_class: str,
+def test_maintenance_retains_authoritative_cloudflared_ingress(
+    maintenance_preflight_host: dict[str, object],
 ) -> None:
     report = MODULE._production_preflight(
         maintenance_preflight_host["bundle"],
         maintenance_preflight_host["candidate_release"],
-        deployment_class,
+        "maintenance",
     )
 
     route = report["checks"]["maintenance_route"]
     assert route["applicable"] is True
-    assert route["candidate_target_state"] == "replaceable-directory"
-    assert route["tls_files"] == len(MODULE.TLS_ROUTE_KEYS)
-    assert route["fixed_ip_roles"] == ["caddy"]
-    assert route["fixed_ip_collisions"] == 0
+    assert route["ingress_mode"] == "cloudflared"
+    assert route["route_mutation"] is False
     assert "PRIVATE_VALUE" not in json.dumps(report)
 
 
-def test_maintenance_preflight_rejects_tls_directory(
+def test_cloudflared_maintenance_does_not_consume_legacy_caddy_tls_assets(
     maintenance_preflight_host: dict[str, object],
 ) -> None:
     bad = maintenance_preflight_host["tmp_path"] / "tls-directory"
@@ -572,27 +571,27 @@ def test_maintenance_preflight_rejects_tls_directory(
     maintenance_preflight_host["registry"]["proxy"]["memory_tls_key"] = str(bad.resolve())
     _sync_route_registry(maintenance_preflight_host)
 
-    with pytest.raises(MODULE.StageError, match="regular non-symlink file"):
-        MODULE._production_preflight(
-            maintenance_preflight_host["bundle"],
-            maintenance_preflight_host["candidate_release"],
-            "maintenance",
-        )
+    report = MODULE._production_preflight(
+        maintenance_preflight_host["bundle"],
+        maintenance_preflight_host["candidate_release"],
+        "maintenance",
+    )
+    assert report["checks"]["maintenance_route"]["route_mutation"] is False
 
 
-def test_maintenance_preflight_rejects_fixed_ip_occupied_by_another_role(
-    maintenance_preflight_host: dict[str, object],
+def test_preflight_rejects_non_cloudflared_ingress_role(
+    production_preflight_host: dict[str, object],
 ) -> None:
-    ingress = maintenance_preflight_host["inspect_values"]["yawndeploy-caddy-1"]
+    ingress = production_preflight_host["inspect_values"]["menhir-prod-cloudflared"]
     ingress["Config"]["Labels"] = {
-        "com.docker.compose.project": "menhir-ingress",
-        "com.docker.compose.service": "cloudflared",
+        "com.docker.compose.project": "yawndeploy",
+        "com.docker.compose.service": "caddy",
     }
 
-    with pytest.raises(MODULE.StageError, match="fixed IP is occupied"):
+    with pytest.raises(MODULE.StageError, match="Cloudflared"):
         MODULE._production_preflight(
-            maintenance_preflight_host["bundle"],
-            maintenance_preflight_host["candidate_release"],
+            production_preflight_host["bundle"],
+            production_preflight_host["candidate_release"],
             "maintenance",
         )
 

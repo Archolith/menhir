@@ -36,12 +36,14 @@ SCHEMA = 1
 PHASES = ("review_requested", "bundled", "publishing", "published", "deployed")
 REPOSITORIES = frozenset({"menhir", "archolith_oauth", "yawn_deploy", "yawn_vps"})
 CLASS_ORDER = {"app-only": 0, "security-config": 1, "maintenance": 2}
-APP_ONLY_FORBIDDEN = tuple(re.compile(pattern) for pattern in (
+SECURITY_CONFIG_PATHS = tuple(re.compile(pattern) for pattern in (
+    r"^src/menhir/config/",
+    r"^src/menhir/api/(auth|client_policy|oauth[^/]*)\.py$",
+))
+MAINTENANCE_PATHS = tuple(re.compile(pattern) for pattern in (
     r"^deploy/",
     r"^\.github/",
     r"^(pyproject\.toml|uv\.lock|poetry\.lock|requirements[^/]*)$",
-    r"^src/menhir/config/",
-    r"^src/menhir/api/(auth|client_policy|oauth[^/]*)\.py$",
     r"^src/menhir/core/(bootstrap|runtime|runtime_preflight)\.py$",
     r"^src/menhir/infrastructure/(schema|migration_batches|embedding_dimensions)\.py$",
     r"^src/menhir/infrastructure/telemetry/schema_migrations\.py$",
@@ -60,10 +62,11 @@ LEGACY_STATE_KEYS = frozenset({
     "notes_markdown_sha256", "review_request_sha256", "security_review_sha256",
     "release_sha256", "bundle_manifest_sha256", "bundle_sha256",
 })
-STATE_KEYS = LEGACY_STATE_KEYS | frozenset({
+PRE_INGRESS_STATE_KEYS = LEGACY_STATE_KEYS | frozenset({
     "fragments_dir", "fragments", "publication_nonce",
     "publication_receipt_sha256",
 })
+STATE_KEYS = PRE_INGRESS_STATE_KEYS | frozenset({"ingress_mode"})
 FROZEN_ARTIFACT_KEYS = (
     "spec_sha256",
     "notes_json_sha256",
@@ -76,6 +79,7 @@ FROZEN_ARTIFACT_KEYS = (
 )
 RELEASE_AUTHORITY_BINDINGS = (
     "deployment_class",
+    "ingress_mode",
     "notes_json_sha256",
     "notes_markdown_sha256",
 )
@@ -370,27 +374,35 @@ def _candidate_deployment_class(spec: dict[str, Any]) -> str:
         raise ReleaseFlowError("prior release repositories are invalid")
 
     heads: dict[str, str] = {}
+    changed_oauth = False
     for name in sorted(REPOSITORIES):
         repo = Path(repository_paths[name])
         heads[name] = _git(repo, "rev-parse", "HEAD").stdout.strip()
-        if name != "menhir" and heads[name] != prior_repos[name]:
+        if name in {"yawn_deploy", "yawn_vps"} and heads[name] != prior_repos[name]:
             return "maintenance"
+        if name == "archolith_oauth" and heads[name] != prior_repos[name]:
+            changed_oauth = True
 
     menhir_base = prior_repos["menhir"]
     menhir_head = heads["menhir"]
     if menhir_base == menhir_head:
-        return "maintenance"
+        return "security-config" if changed_oauth else "maintenance"
     changed = _git(
         Path(repository_paths["menhir"]),
         "diff", "--name-only", "--diff-filter=ACDMRTUXB",
         menhir_base, menhir_head,
     ).stdout.splitlines()
-    if not changed or any(
-        not path.startswith("src/")
-        or any(pattern.search(path) for pattern in APP_ONLY_FORBIDDEN)
-        for path in changed
-    ):
+    if not changed or any(not path.startswith("src/") for path in changed) \
+            or any(
+                pattern.search(path)
+                for path in changed for pattern in MAINTENANCE_PATHS
+            ):
         return "maintenance"
+    if changed_oauth or any(
+        pattern.search(path)
+        for path in changed for pattern in SECURITY_CONFIG_PATHS
+    ):
+        return "security-config"
     return "app-only"
 
 
@@ -479,7 +491,7 @@ def _verify_next_release_id(spec: dict[str, Any]) -> None:
 def _load_state(workspace: Path) -> dict[str, Any]:
     state = _load_json(_state_path(workspace), "release flow state")
     keys = set(state)
-    if keys not in {STATE_KEYS, LEGACY_STATE_KEYS} \
+    if keys not in {STATE_KEYS, PRE_INGRESS_STATE_KEYS, LEGACY_STATE_KEYS} \
             or state.get("schema") != SCHEMA or state.get("kind") != KIND:
         raise ReleaseFlowError("release flow state schema is invalid")
     if state.get("phase") not in PHASES:
@@ -488,6 +500,8 @@ def _load_state(workspace: Path) -> dict[str, Any]:
         raise ReleaseFlowError("release flow state is bound to another workspace")
     if state.get("deployment_class") not in CLASS_ORDER:
         raise ReleaseFlowError("release flow deployment class is invalid")
+    if keys == STATE_KEYS and state.get("ingress_mode") != "cloudflared":
+        raise ReleaseFlowError("release flow ingress mode is invalid")
     if not isinstance(state.get("release_id"), str) \
             or not RELEASE_ID_RE.fullmatch(state["release_id"]):
         raise ReleaseFlowError("release flow release_id is invalid")
@@ -711,6 +725,7 @@ def prepare_flow(inputs_path: Path, workspace: Path, fragments_dir: Path) -> dic
                 raise ReleaseFlowError(f"generated release spec unexpectedly supplies {key}")
         spec.update({
             "deployment_class": deployment_class,
+            "ingress_mode": spec.get("ingress_mode"),
             "notes_json_sha256": notes_json_sha256,
             "notes_markdown_sha256": notes_markdown_sha256,
         })

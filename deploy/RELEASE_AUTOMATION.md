@@ -162,14 +162,14 @@ step created it. Once constructed from the reviewed installed files, the Caddy v
 container tried to claim the live proxy's fixed IP. The four configured TLS source paths were also
 directories created by Docker because the expected certificate files had never been provisioned.
 
-The live host also disproved the handbook's single-Caddy ingress diagram. The `menhir-proxy`
-network currently assigns `172.30.0.2` to `menhir-prod-cloudflared`, which proxies the approved
-public allowlist directly to `menhir-prod-app:8099`; Menhir remains `172.30.0.3`. The shared Caddy
-container is part of the separate Yawn Compose network and also contains a Menhir virtual host.
-Until release authority declares one ingress mode, this is ambiguous dual configuration. Routine
-app-only and security-config deployment must retain ingress unchanged. A maintenance route change
-must declare `cloudflared` or `caddy`, validate only that mode's assets, and refuse before backup or
-writer fencing when live topology disagrees.
+The live host disproved the handbook's single-Caddy ingress diagram. The `menhir-proxy` network
+assigns `172.30.0.2` to `menhir-prod-cloudflared`, which proxies the approved public allowlist
+directly to `menhir-prod-app:8099`; Menhir remains `172.30.0.3`. Cloudflared is now the sole
+supported Menhir ingress mode. Current release authorities must declare `ingress_mode:
+cloudflared`; staging checks the actual peer's Compose service label, and all deployment classes
+retain that route unchanged. The inactive Menhir virtual host was removed from shared Yawn Caddy,
+and the `menhir-caddy-reconcile` path/service units were retired. A root-only pre-change Caddyfile
+is retained at `/var/lib/menhir-production/ingress-retirement/` for incident rollback.
 
 Do not take a healthy Menhir application back down to debug an unchanged shared route. If the
 public host, upstream, Caddy image, and route files are unchanged, the personal app-only lane must
@@ -181,22 +181,32 @@ reviewed files, provision those TLS paths as regular root-owned files, and valid
 network-isolated container that cannot claim the live proxy address.
 
 Release completion includes operational health, not only application health. It must require an
-active `menhir-caddy-reconcile.path`, an active `menhir-scaffold-audit.timer`, no failed Menhir
+active `menhir-scaffold-audit.timer`, absent retired Caddy-reconcile units, no failed Menhir
 units, no unfinished release/route journal, and a passing app-only readiness audit whose backup and
 restore evidence is bound to the current generation. A completed maintenance rehearsal is valid
 restore evidence only when its strict receipt schema, generation, release digest, and freshness
 all match.
 
-This is the intended split: packaged-product release automation may carry all reviewed deployment
-artifacts, while personal deployment touches shared Caddy only when the selected release actually
-changes shared proxy authority. Durable-state, host-operation, or proxy changes use the maintenance
-lane; an application/OAuth image change with unchanged infrastructure uses the bounded app-only
-lane.
+This is the intended split: packaged-product release automation may carry legacy reviewed
+deployment artifacts, but personal deployment never mutates shared Caddy. Durable-state or host
+operation changes use the maintenance lane; an application change uses app-only, and an OAuth or
+client-policy change uses security-config.
 
 This contract is implemented by `personal_deploy.py`, `personal_stage.ps1`,
 `personal_stage_vps.py`, and `personal_promote.ps1`. The isolated end-to-end rehearsal must pass for
 the exact release before approval can be recorded. Direct execution through
 `release_flow.py deploy --execute` is disabled so the old handoff cannot bypass staging or approval.
+
+Promotion success is reported by the executing PowerShell gate, not synthesized by the Python
+coordinator. Its receipt binds the release, bundle, staging receipt, owner approval, deployment
+class, ingress mode, both wrapper digests, start/completion times, and elapsed time. App-only is
+limited to 300 seconds; security configuration and maintenance are limited to 600 seconds. A
+wrapper that exits zero without writing the exact receipt is a failed promotion.
+
+Security configuration is a distinct mode throughout selection, staging, approval, and promotion.
+It is never converted to maintenance. Until the dedicated operator transaction is installed,
+promotion fails closed and requires `MENHIR_SECURITY_CONFIG_DEPLOY_WRAPPER`; do not point that
+variable at the maintenance wrapper.
 
 ## Before starting
 

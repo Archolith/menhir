@@ -46,7 +46,7 @@ MAX_STAGING_AGE = timedelta(hours=24)
 STATE_KEYS = frozenset({
     "schema", "kind", "phase", "workspace", "release_workspace",
     "release_id", "release_sha256", "bundle_sha256", "deployment_class",
-    "menhir_image", "neo4j_image", "staging_receipt_sha256",
+    "ingress_mode", "menhir_image", "neo4j_image", "staging_receipt_sha256",
     "approval_sha256", "promotion_receipt_sha256",
 })
 STAGING_CHECKS = frozenset({
@@ -70,13 +70,13 @@ STAGING_CHECKS = frozenset({
 })
 STAGING_KEYS = frozenset({
     "schema", "kind", "result", "release_id", "release_sha256",
-    "bundle_sha256", "deployment_class", "images", "runner_sha256",
+    "bundle_sha256", "deployment_class", "ingress_mode", "images", "runner_sha256",
     "started_utc", "completed_utc", "test_identities", "checks",
     "production_preflight",
 })
 PREFLIGHT_KEYS = frozenset({
     "schema", "kind", "result", "observed_utc", "deployment_class",
-    "candidate_release_id", "checks", "canonical_sha256",
+    "candidate_release_id", "ingress_mode", "checks", "canonical_sha256",
 })
 PREFLIGHT_CHECK_KEYS = frozenset({
     "live_services", "network_roles", "release_journal", "headroom",
@@ -89,7 +89,9 @@ APPROVAL_KEYS = frozenset({
 PROMOTION_KEYS = frozenset({
     "schema", "kind", "result", "release_id", "release_sha256",
     "bundle_sha256", "staging_receipt_sha256", "approval_sha256",
-    "deployment_class", "completed_utc",
+    "deployment_class", "ingress_mode", "started_utc", "completed_utc",
+    "elapsed_seconds", "promotion_wrapper_sha256", "operator_wrapper_sha256",
+    "transaction_kind",
 })
 
 
@@ -215,6 +217,7 @@ def _release_binding(release_workspace: Path) -> dict[str, Any]:
     release_sha = release_state.get("release_sha256")
     bundle_sha = release_state.get("bundle_sha256")
     deployment_class = release_state.get("deployment_class")
+    ingress_mode = release_state.get("ingress_mode")
     if not isinstance(release_id, str) or RELEASE_ID_RE.fullmatch(release_id) is None:
         raise PersonalDeployError("product release ID is invalid")
     if not isinstance(release_sha, str) or SHA256_RE.fullmatch(release_sha) is None \
@@ -222,6 +225,8 @@ def _release_binding(release_workspace: Path) -> dict[str, Any]:
         raise PersonalDeployError("product release digests are invalid")
     if deployment_class not in DEPLOYMENT_CLASSES:
         raise PersonalDeployError("product deployment class is invalid")
+    if ingress_mode != "cloudflared":
+        raise PersonalDeployError("product ingress mode is invalid")
     release_path = _regular_file(release_workspace / RELEASE_NAME, "release authority")
     bundle = _directory(release_workspace / BUNDLE_NAME, "install bundle")
     if _sha256(release_path) != release_sha or _tree_sha256(bundle) != bundle_sha:
@@ -231,6 +236,8 @@ def _release_binding(release_workspace: Path) -> dict[str, Any]:
         raise PersonalDeployError("release authority identity mismatch")
     if release.get("deployment_class") != deployment_class:
         raise PersonalDeployError("product state/release deployment class mismatch")
+    if release.get("ingress_mode") != ingress_mode:
+        raise PersonalDeployError("product state/release ingress mode mismatch")
     for state_key, release_key, filename in (
         ("notes_json_sha256", "notes_json_sha256", "release-notes.json"),
         ("notes_markdown_sha256", "notes_markdown_sha256", "release-notes.md"),
@@ -254,6 +261,7 @@ def _release_binding(release_workspace: Path) -> dict[str, Any]:
         "release_sha256": release_sha,
         "bundle_sha256": bundle_sha,
         "deployment_class": deployment_class,
+        "ingress_mode": ingress_mode,
         "menhir_image": images["menhir"],
         "neo4j_image": images["neo4j"],
     }
@@ -362,6 +370,7 @@ def _validate_staging_receipt(path: Path, state: dict[str, Any], runner_sha: str
         "release_sha256": state["release_sha256"],
         "bundle_sha256": state["bundle_sha256"],
         "deployment_class": state["deployment_class"],
+        "ingress_mode": state["ingress_mode"],
         "runner_sha256": runner_sha,
     }
     for key, value in expected.items():
@@ -392,6 +401,7 @@ def _validate_staging_receipt(path: Path, state: dict[str, Any], runner_sha: str
         "result": "passed",
         "deployment_class": state["deployment_class"],
         "candidate_release_id": state["release_id"],
+        "ingress_mode": state["ingress_mode"],
     }
     for key, value in expected_preflight.items():
         if preflight.get(key) != value:
@@ -418,7 +428,7 @@ def _validate_staging_receipt(path: Path, state: dict[str, Any], runner_sha: str
             or headroom["memory_available_bytes"] < headroom["memory_required_bytes"]:
         raise PersonalDeployError("production readiness preflight headroom is invalid")
     route = preflight_checks.get("maintenance_route")
-    route_required = state["deployment_class"] != "app-only"
+    route_required = state["deployment_class"] == "maintenance"
     if not isinstance(route, dict) or route.get("applicable") is not route_required:
         raise PersonalDeployError("production readiness preflight route scope is invalid")
     started = _utc(receipt.get("started_utc"), "staging started_utc")
@@ -587,16 +597,35 @@ def _validate_promotion_receipt(
         "staging_receipt_sha256": state["staging_receipt_sha256"],
         "approval_sha256": approval_sha,
         "deployment_class": state["deployment_class"],
+        "ingress_mode": state["ingress_mode"],
     }
     for key, value in expected.items():
         if receipt.get(key) != value:
             raise PersonalDeployError(f"promotion receipt {key} mismatch")
-    _utc(receipt.get("completed_utc"), "promotion completed_utc")
+    started = _utc(receipt.get("started_utc"), "promotion started_utc")
+    completed = _utc(receipt.get("completed_utc"), "promotion completed_utc")
+    if completed < started:
+        raise PersonalDeployError("promotion receipt completion precedes start")
+    elapsed = receipt.get("elapsed_seconds")
+    if not isinstance(elapsed, int) or isinstance(elapsed, bool) or elapsed < 0:
+        raise PersonalDeployError("promotion receipt elapsed_seconds is invalid")
+    expected_budget = 300 if state["deployment_class"] == "app-only" else 600
+    if elapsed > expected_budget:
+        raise PersonalDeployError("promotion exceeded its foreground time budget")
+    for key in ("promotion_wrapper_sha256", "operator_wrapper_sha256"):
+        if not isinstance(receipt.get(key), str) or SHA256_RE.fullmatch(receipt[key]) is None:
+            raise PersonalDeployError(f"promotion receipt {key} is invalid")
+    if receipt.get("transaction_kind") != state["deployment_class"]:
+        raise PersonalDeployError("promotion receipt transaction kind mismatch")
     return receipt
 
 
 def _promotion_command(workspace: Path, state: dict[str, Any], wrapper: Path) -> list[str]:
-    mode = "AppOnly" if state["deployment_class"] == "app-only" else "Maintenance"
+    mode = {
+        "app-only": "AppOnly",
+        "security-config": "SecurityConfig",
+        "maintenance": "Maintenance",
+    }[state["deployment_class"]]
     return [
         POWERSHELL, "-NoProfile", "-ExecutionPolicy", "Bypass",
         "-File", str(wrapper),
@@ -610,6 +639,7 @@ def _promotion_command(workspace: Path, state: dict[str, Any], wrapper: Path) ->
         "-Approval", str(workspace / APPROVAL_NAME),
         "-ExpectedApprovalSha256", state["approval_sha256"],
         "-SourceRepository", str(Path(__file__).resolve().parent.parent),
+        "-ResultReceipt", str(workspace / PROMOTION_RECEIPT_NAME),
     ]
 
 
@@ -646,19 +676,9 @@ def promote_flow(
     if receipt_path.exists() or receipt_path.is_symlink():
         raise PersonalDeployError("promotion receipt path must not already exist")
     (command_runner or (lambda value: subprocess.run(value, check=True)))(command)
-    receipt = {
-        "schema": 1,
-        "kind": "menhir-personal-promotion",
-        "result": "passed",
-        "release_id": state["release_id"],
-        "release_sha256": state["release_sha256"],
-        "bundle_sha256": state["bundle_sha256"],
-        "staging_receipt_sha256": staging_sha,
-        "approval_sha256": approval_sha,
-        "deployment_class": state["deployment_class"],
-        "completed_utc": _now(),
-    }
-    _atomic_json(receipt_path, receipt)
+    if not receipt_path.exists():
+        raise PersonalDeployError("production wrapper returned without a promotion receipt")
+    _validate_promotion_receipt(receipt_path, state, approval_sha)
     state["phase"] = "promoted"
     state["promotion_receipt_sha256"] = _sha256(receipt_path)
     _atomic_json(_state_path(workspace), state)

@@ -245,6 +245,7 @@ def _write_staged_workspace(tmp_path: Path, phase: str = "bundled") -> tuple[Pat
         "release_id": "menhir-prod-0.2.0-11",
         "release_author": "release-operator",
         "deployment_class": "security-config",
+        "ingress_mode": "cloudflared",
         "notes_json_sha256": _sha(workspace / MODULE.NOTES_JSON_NAME),
         "notes_markdown_sha256": _sha(workspace / MODULE.NOTES_MARKDOWN_NAME),
     }
@@ -635,6 +636,7 @@ def test_current_state_rejects_release_authority_binding_mismatch(
     tmp_path: Path,
 ) -> None:
     workspace, state, _ = _publication_workspace(tmp_path)
+    state["ingress_mode"] = "cloudflared"
     state["deployment_class"] = "maintenance"
     MODULE._atomic_json(workspace / MODULE.STATE_NAME, state)
 
@@ -686,6 +688,7 @@ def test_prepare_authors_review_request_and_binds_outputs(
                 "release_id": "menhir-prod-0.2.0-11",
                 "release_author": "release-operator",
                 "deployment_class": authored_spec["deployment_class"],
+                "ingress_mode": authored_spec["ingress_mode"],
                 "notes_json_sha256": authored_spec["notes_json_sha256"],
                 "notes_markdown_sha256": authored_spec["notes_markdown_sha256"],
             }

@@ -1,0 +1,9 @@
+---
+- name: Provision persistent Menhir host prerequisites
+  hosts: menhir_hosts
+  become: true
+  gather_facts: false
+  roles:
+    - role: menhir_host
+      tags:
+        - menhir_host

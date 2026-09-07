@@ -61,11 +61,12 @@ The current live inventory assigns Cloudflared `172.30.0.2` and Menhir
 directly to Menhir. Menhir does not publish a host port. The dedicated operator gateway binds only
 `172.30.0.1:8000`.
 
-The shared Yawn Caddy container is on `yawndeploy_default`, not `menhir-proxy`, and its Caddyfile
-also contains a Menhir virtual host. This dual installed configuration is drift from the former
-single-Caddy model. Release authority must explicitly select `cloudflared` or `caddy` as the route
-transaction mode before maintenance may mutate ingress. Routine app-only and security-config
-releases retain ingress unchanged and must not assume that the peer at `.2` is Caddy.
+The shared Yawn Caddy container is on `yawndeploy_default`, not `menhir-proxy`. Its inactive Menhir
+virtual host and the Menhir Caddy reconciliation units were retired on 2026-09-07. Cloudflared is
+the sole supported Menhir ingress authority: release authority declares `cloudflared`, staging
+proves that the peer at `.2` is the running Cloudflared Compose service, and every deployment class
+retains ingress unchanged. The pre-change Caddyfile is retained root-only under
+`/var/lib/menhir-production/ingress-retirement/` for incident rollback.
 
 The release authority fixes the same-host topology and all container/project
 names. Caller-provided names, paths, Compose projects, networks, and commands

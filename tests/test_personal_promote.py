@@ -45,6 +45,7 @@ def _fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[list[str]
     release_path.write_text(json.dumps({
         "release_id": release_id,
         "deployment_class": "app-only",
+        "ingress_mode": "cloudflared",
         "notes_json_sha256": "5" * 64,
         "notes_markdown_sha256": "6" * 64,
         "images": {"menhir": release_sha_image, "neo4j": neo4j_sha_image},
@@ -58,6 +59,7 @@ def _fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[list[str]
         "result": "passed",
         "observed_utc": now,
         "deployment_class": "app-only",
+        "ingress_mode": "cloudflared",
         "candidate_release_id": release_id,
         "checks": {
             "live_services": {},
@@ -84,6 +86,7 @@ def _fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[list[str]
         "release_sha256": release_sha,
         "bundle_sha256": bundle_sha,
         "deployment_class": "app-only",
+        "ingress_mode": "cloudflared",
         "images": {"menhir": release_sha_image, "neo4j": neo4j_sha_image},
         "runner_sha256": "3" * 64,
         "started_utc": now,
@@ -123,6 +126,7 @@ def _fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[list[str]
         "-ExpectedReleaseSha256", release_sha, "-StagingReceipt", str(staging_path),
         "-ExpectedStagingReceiptSha256", staging_sha, "-Approval", str(approval_path),
         "-ExpectedApprovalSha256", _sha(approval_path), "-SourceRepository", str(tmp_path),
+        "-ResultReceipt", str(tmp_path / "promotion-result.json"),
     ]
     monkeypatch.setenv("MENHIR_OPERATOR_DEPLOY_WRAPPER", str(fake))
     monkeypatch.setenv("MENHIR_TEST_PROMOTION_MARKER", str(marker))

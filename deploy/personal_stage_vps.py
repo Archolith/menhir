@@ -980,6 +980,33 @@ def _maintenance_route_preflight(
     }
 
 
+def _cloudflared_ingress_preflight(
+    network: dict[str, Any], expected_peers: set[str],
+) -> dict[str, Any]:
+    occupants = {
+        row["ipv4"]: row for row in _network_containers(network)
+        if row["ipv4"] in expected_peers
+    }
+    if set(occupants) != expected_peers:
+        raise StageError("production Cloudflared ingress role is absent")
+    containers: list[str] = []
+    for address in sorted(expected_peers):
+        row = occupants[address]
+        value = _inspect(row["name"])
+        labels = value.get("Config", {}).get("Labels", {})
+        state = value.get("State", {})
+        if not isinstance(labels, dict) \
+                or labels.get("com.docker.compose.service") != "cloudflared" \
+                or state.get("Running") is not True or state.get("Status") != "running":
+            raise StageError("production ingress peer is not the running Cloudflared role")
+        containers.append(row["name"])
+    return {
+        "mode": "cloudflared",
+        "containers": containers,
+        "peer_count": len(containers),
+    }
+
+
 def _production_preflight(
     bundle: Path,
     release: dict[str, Any],
@@ -988,6 +1015,9 @@ def _production_preflight(
     """Inspect production read-only and return a sanitized, digest-bound report."""
     if deployment_class not in DEPLOYMENT_CLASSES:
         raise StageError("invalid deployment class")
+    ingress_mode = release.get("ingress_mode")
+    if ingress_mode != "cloudflared":
+        raise StageError("candidate ingress mode is invalid")
     candidate_release_id = release.get("release_id")
     if not isinstance(candidate_release_id, str) \
             or RELEASE_ID_RE.fullmatch(candidate_release_id) is None:
@@ -1028,6 +1058,7 @@ def _production_preflight(
     occupied = {row["ipv4"] for row in network_rows}
     if not expected_peers.issubset(occupied):
         raise StageError("production ingress peer role is absent from the proxy network")
+    ingress = _cloudflared_ingress_preflight(network, expected_peers)
 
     app_networks = app.get("NetworkSettings", {}).get("Networks", {})
     neo4j_networks = neo4j.get("NetworkSettings", {}).get("Networks", {})
@@ -1051,8 +1082,13 @@ def _production_preflight(
         raise StageError("insufficient memory headroom for isolated staging")
 
     maintenance = {"applicable": False}
-    if deployment_class in {"security-config", "maintenance"}:
-        maintenance = _maintenance_route_preflight(bundle, release, network)
+    if deployment_class == "maintenance":
+        maintenance = {
+            "applicable": True,
+            "ingress_mode": "cloudflared",
+            "route_mutation": False,
+            "reason": "Cloudflared ingress is retained by the maintenance transaction",
+        }
 
     report = {
         "schema": PREFLIGHT_SCHEMA,
@@ -1061,6 +1097,7 @@ def _production_preflight(
         "observed_utc": _now(),
         "deployment_class": deployment_class,
         "candidate_release_id": candidate_release_id,
+        "ingress_mode": ingress_mode,
         "checks": {
             "live_services": {
                 "release_id": live_release_id,
@@ -1083,6 +1120,7 @@ def _production_preflight(
                 "application_ipv4": app_ipv4,
                 "internal_network_count": len(internal_networks),
                 "ingress_peer_count": len(expected_peers),
+                "ingress": ingress,
             },
             "release_journal": journal,
             "headroom": {
@@ -1490,6 +1528,7 @@ def run_stage(args: argparse.Namespace) -> dict[str, Any]:
             "release_sha256": args.expected_release_sha256,
             "bundle_sha256": args.expected_bundle_sha256,
             "deployment_class": args.deployment_class,
+            "ingress_mode": release["ingress_mode"],
             "images": {
                 "menhir": release["images"]["menhir"],
                 "neo4j": release["images"]["neo4j"],

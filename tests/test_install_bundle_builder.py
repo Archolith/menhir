@@ -312,7 +312,7 @@ def test_installer_keeps_scaffold_and_cutover_out_of_routine_install() -> None:
     assert "/srv/menhir/production/bin/verify-artifacts" in source
     assert "systemctl daemon-reload" in source
     assert "systemctl restart menhir-oauth-operations.service" in source
-    assert "systemctl try-restart menhir-caddy-reconcile.path" in source
+    assert "menhir-caddy-reconcile" not in source
     assert "production cutover was not started" in source
 
 

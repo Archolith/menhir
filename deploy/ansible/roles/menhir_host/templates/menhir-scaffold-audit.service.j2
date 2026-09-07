@@ -1,0 +1,12 @@
+[Unit]
+Description=Verify Menhir app-only deployment admission evidence
+Requires=docker.service
+After=docker.service network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+ExecStart=/srv/menhir/scaffold/bin/menhir_scaffold.py verify --app-only
+TimeoutStartSec=2min

@@ -32,6 +32,7 @@ def _product_release(tmp_path: Path) -> Path:
     release = {
         "release_id": "menhir-prod-0.2.0-12",
         "deployment_class": "security-config",
+        "ingress_mode": "cloudflared",
         "notes_json_sha256": _sha(notes_json),
         "notes_markdown_sha256": _sha(notes_markdown),
         "images": {
@@ -48,6 +49,7 @@ def _product_release(tmp_path: Path) -> Path:
         "release_sha256": _sha(release_path),
         "bundle_sha256": MODULE._tree_sha256(bundle),
         "deployment_class": "security-config",
+        "ingress_mode": "cloudflared",
         "notes_json_sha256": release["notes_json_sha256"],
         "notes_markdown_sha256": release["notes_markdown_sha256"],
     }
@@ -79,6 +81,7 @@ def _receipt(state: dict, runner: Path, *, checks: dict | None = None, hours_old
         "result": "passed",
         "observed_utc": (started - timedelta(seconds=1)).isoformat().replace("+00:00", "Z"),
         "deployment_class": state["deployment_class"],
+        "ingress_mode": state["ingress_mode"],
         "candidate_release_id": state["release_id"],
         "checks": {
             "live_services": {},
@@ -90,7 +93,7 @@ def _receipt(state: dict, runner: Path, *, checks: dict | None = None, hours_old
                 "memory_available_bytes": 8,
                 "memory_required_bytes": 7,
             },
-            "maintenance_route": {"applicable": state["deployment_class"] != "app-only"},
+            "maintenance_route": {"applicable": state["deployment_class"] == "maintenance"},
         },
     }
     preflight["canonical_sha256"] = hashlib.sha256(json.dumps(
@@ -104,6 +107,7 @@ def _receipt(state: dict, runner: Path, *, checks: dict | None = None, hours_old
         "release_sha256": state["release_sha256"],
         "bundle_sha256": state["bundle_sha256"],
         "deployment_class": state["deployment_class"],
+        "ingress_mode": state["ingress_mode"],
         "images": {
             "menhir": state["menhir_image"],
             "neo4j": state["neo4j_image"],
@@ -380,7 +384,7 @@ def test_one_approval_unlocks_promotion_preview(tmp_path: Path) -> None:
     )
 
     assert isinstance(command, list)
-    assert command[command.index("-Mode") + 1] == "Maintenance"
+    assert command[command.index("-Mode") + 1] == "SecurityConfig"
     assert command[command.index("-ExpectedStagingReceiptSha256") + 1] == approved["staging_receipt_sha256"]
     assert command[command.index("-ExpectedApprovalSha256") + 1] == approved["approval_sha256"]
     assert command[command.index("-ExpectedReleaseSha256") + 1] == approved["release_sha256"]
@@ -450,13 +454,36 @@ def test_promotion_runs_once_and_records_bound_receipt(tmp_path: Path) -> None:
     wrapper.write_text("# production wrapper\n", encoding="ascii")
     seen: list[list[str]] = []
 
+    def run(command: list[str]) -> None:
+        seen.append(command)
+        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        receipt_path = Path(command[command.index("-ResultReceipt") + 1])
+        receipt_path.write_text(json.dumps({
+            "schema": 1,
+            "kind": "menhir-personal-promotion",
+            "result": "passed",
+            "release_id": approved["release_id"],
+            "release_sha256": approved["release_sha256"],
+            "bundle_sha256": approved["bundle_sha256"],
+            "staging_receipt_sha256": approved["staging_receipt_sha256"],
+            "approval_sha256": approved["approval_sha256"],
+            "deployment_class": approved["deployment_class"],
+            "ingress_mode": approved["ingress_mode"],
+            "started_utc": now,
+            "completed_utc": now,
+            "elapsed_seconds": 0,
+            "promotion_wrapper_sha256": "a" * 64,
+            "operator_wrapper_sha256": "b" * 64,
+            "transaction_kind": approved["deployment_class"],
+        }), encoding="utf-8")
+
     promoted = MODULE.promote_flow(
         deployment,
         approved["release_id"],
         approved["staging_receipt_sha256"],
         execute=True,
         wrapper_path=wrapper.resolve(),
-        command_runner=seen.append,
+        command_runner=run,
     )
 
     assert seen and isinstance(promoted, dict) and promoted["phase"] == "promoted"

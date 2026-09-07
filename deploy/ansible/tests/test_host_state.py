@@ -1,0 +1,73 @@
+"""SSH testinfra assertions for a provisioned Menhir host."""
+
+import pytest
+
+
+DIRECTORIES = {
+    "/srv/menhir": 0o755,
+    "/srv/menhir/production": 0o755,
+    "/srv/menhir/backups": 0o755,
+    "/srv/menhir/backups/encrypted": 0o700,
+    "/srv/menhir/scaffold": 0o755,
+    "/srv/menhir/scaffold/bin": 0o755,
+    "/var/lib/menhir-production": 0o755,
+    "/var/log/menhir-production": 0o755,
+    "/etc/menhir": 0o700,
+    "/etc/yawn-vps": 0o755,
+}
+
+FILES = {
+    "/etc/tmpfiles.d/menhir-production.conf": 0o644,
+    "/etc/systemd/system/menhir-scaffold-audit.service": 0o644,
+    "/etc/systemd/system/menhir-scaffold-audit.timer": 0o644,
+}
+
+
+@pytest.mark.parametrize("path,mode", DIRECTORIES.items())
+def test_root_owned_directory_contract(host, path, mode):
+    directory = host.file(path)
+    assert directory.is_directory
+    assert directory.user == "root"
+    assert directory.group == "root"
+    assert directory.mode == mode
+
+
+@pytest.mark.parametrize("path,mode", FILES.items())
+def test_root_owned_file_contract(host, path, mode):
+    managed_file = host.file(path)
+    assert managed_file.is_file
+    assert managed_file.user == "root"
+    assert managed_file.group == "root"
+    assert managed_file.mode == mode
+
+
+@pytest.mark.parametrize(
+    "unit",
+    ("menhir-scaffold-audit.timer",),
+)
+def test_host_monitor_is_enabled_and_active(host, unit):
+    service = host.service(unit)
+    assert service.is_enabled
+    assert service.is_running
+
+
+def test_no_failed_menhir_units(host):
+    result = host.run(
+        "systemctl list-units --failed --no-legend --plain 'menhir-*'"
+    )
+    assert result.rc == 0
+    assert result.stdout.strip() == ""
+
+
+@pytest.mark.parametrize(
+    "unit",
+    ("menhir-caddy-reconcile.path", "menhir-caddy-reconcile.service"),
+)
+def test_legacy_caddy_writer_is_absent(host, unit):
+    assert not host.file(f"/etc/systemd/system/{unit}").exists
+    enabled = host.run(f"systemctl is-enabled {unit}")
+    active = host.run(f"systemctl is-active {unit}")
+    assert enabled.rc == 4
+    assert enabled.stdout.strip() == "not-found"
+    assert active.rc in {3, 4}
+    assert active.stdout.strip() in {"inactive", "unknown"}

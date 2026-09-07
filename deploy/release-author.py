@@ -34,7 +34,7 @@ SPEC_KEYS = frozenset({
     "prior_route", "initial_prior_images", "secret_version_ids",
     "artifact_sources",
     "initial_host_state", "deployment_class", "notes_json_sha256",
-    "notes_markdown_sha256",
+    "notes_markdown_sha256", "ingress_mode",
 })
 SECURITY_REVIEW_KEYS = frozenset({
     "schema", "kind", "review_id", "release_author", "reviewer",
@@ -63,6 +63,7 @@ SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 DEPLOYMENT_CLASSES = frozenset({"app-only", "security-config", "maintenance"})
+INGRESS_MODES = frozenset({"cloudflared"})
 ALLOWED_ARTIFACT_PREFIXES = ("/srv/menhir/production/", "/srv/yawn/projects/",
                              "/etc/sudoers.d/", "/etc/systemd/system/",
                              "/etc/tmpfiles.d/", "/etc/yawn-vps/",
@@ -452,6 +453,9 @@ def author_release(
     deployment_class = spec.get("deployment_class")
     if deployment_class not in DEPLOYMENT_CLASSES:
         raise ValueError("deployment_class is invalid")
+    ingress_mode = spec.get("ingress_mode")
+    if ingress_mode not in INGRESS_MODES:
+        raise ValueError("ingress_mode is invalid")
     notes_json_sha256 = spec.get("notes_json_sha256")
     notes_markdown_sha256 = spec.get("notes_markdown_sha256")
     for key, value in (
@@ -619,6 +623,7 @@ def author_release(
         "release_id": release_id,
         "release_author": release_author,
         "deployment_class": deployment_class,
+        "ingress_mode": ingress_mode,
         "notes_json_sha256": notes_json_sha256,
         "notes_markdown_sha256": notes_markdown_sha256,
         "repos": repos,
