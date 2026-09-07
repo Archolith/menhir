@@ -1,14 +1,40 @@
 # Release automation
 
-`release_flow.py` turns the maintained release controls into one resumable
-desktop workflow. It prepares immutable release inputs, renders the staged
-change notes, creates the independent-review request, finalizes the reviewed
-authority, builds the host installer, and hands the bundle to the existing
-deployment transaction.
+`release_flow.py` is the coordinator for a resumable release workflow. The required
+target sequence is `prepare -> review when required -> finalize -> stage -> approve ->
+promote`. It prepares immutable release inputs, renders the staged change notes, creates
+the independent-review request, finalizes the reviewed authority, builds the host
+installer, and must bind production promotion to a complete production-equivalent staging
+receipt.
 
 It does not build or publish container images, invent evidence, perform the
 independent review, or deploy without an explicit command. Those remain
-separate trust boundaries.
+separate trust boundaries. Production must not be used to discover whether the coordinator,
+transport, candidate topology, acceptance probe, or rollback works.
+
+## Target staging and promotion contract
+
+Before production promotion is enabled, automation must:
+
+1. deploy the exact finalized image and release manifest into isolated disposable staging;
+2. reproduce production memory limits, Compose networking, OAuth policy shape, and ingress
+   request handling without using production secrets or data;
+3. run the complete OAuth/MCP/read/write/deny/restart/rollback suite as one job;
+4. retain a digest-bound receipt containing the release ID, image digest, test identities,
+   start/completion times, and pass/fail result;
+5. accept one owner approval bound to that receipt and release ID; and
+6. run a bounded production replacement and read-only canary, with automatic prior-image
+   rollback on failure.
+
+The production step consumes evidence; it does not create release evidence. Routine promotion
+must not run a full database hash, create a fresh backup, rehearse restoration, launch an LLM
+review, or debug failed staging logic. Scheduled backup/restore evidence is checked for freshness.
+Only a mechanically classified maintenance or recovery release may invoke the full state-protection
+transaction.
+
+This contract is not satisfied merely by the current `prepare`, `finalize`, and `deploy` commands.
+Until `stage` produces and `deploy --execute` verifies the required receipt, follow the transition
+gate in `LIVE_VPS_PLAYBOOK.md` and do not start another production release.
 
 ## Before starting
 
@@ -70,6 +96,10 @@ python deploy/release_flow.py status `
 ```
 
 ## Preview and execute deployment
+
+The following commands describe the existing coordinator interface. Under the target contract,
+`--execute` must fail closed unless the exact finalized release has a successful staging receipt
+and the owner approval is bound to it.
 
 Without `--execute`, deployment prints the exact existing wrapper command and
 does not change production:

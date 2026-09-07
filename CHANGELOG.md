@@ -1,3 +1,14 @@
+## 2026-09-07 - define the staged promotion deployment model
+
+- Made production a promotion-only target: the exact finalized image must first pass one complete
+  production-equivalent staging workflow with isolated data, OAuth/MCP behavior, restart, and
+  automatic rollback evidence.
+- Limited routine app and non-migrating security-configuration cutovers to one approval, bounded
+  replacement, read-only public canary, and automatic prior-image rollback.
+- Reserved fresh backups, restore rehearsals, full authority comparisons, and writer replacement for
+  mechanically classified maintenance or recovery releases, and blocked further production releases
+  until the staging receipt is enforced end to end.
+
 ## 2026-09-06 - harden the stacked core projection promotion
 
 - Added instance-local View and evidence registries plus source-bound admission and projection

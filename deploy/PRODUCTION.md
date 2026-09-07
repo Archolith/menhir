@@ -10,6 +10,19 @@ recovery. `security-config`, `maintenance`, and `recovery` releases use the addi
 gates appropriate to the changed authority. The class is mechanically derived during
 release preparation; unknown changes become `maintenance`.
 
+Production is only a promotion target. Before another release, the exact finalized image must
+complete a production-equivalent staging deployment with production memory/network/ingress
+constraints, isolated disposable data, non-production credentials, OAuth and MCP behavior,
+restart handling, and automatic rollback. The resulting immutable receipt plus one owner approval
+is required for promotion. The production cutover consumes that evidence and runs only a bounded
+read-only public canary; it does not debug automation or recreate CI evidence.
+
+Routine `app-only` and non-migrating `security-config` releases do not create a fresh backup,
+rehearse a restore, traverse the complete production database, or start the full maintenance
+candidate transaction. They verify scheduled backup/restore freshness and automatically restore
+the prior application/configuration on failed acceptance. Full state protection remains mandatory
+only for mechanically classified maintenance and recovery work.
+
 The client data-plane invariant is in
 [ACCESS_CONTRACT.md](ACCESS_CONTRACT.md): the only production client endpoint is
 `https://memory.ctharvey.me/mcp-http`; ChatGPT, Codex, and every Claude variant
@@ -114,6 +127,14 @@ authority mutations with the explicit fenced 503 contract.
 The only candidate admitted by the writer census is `menhir-candidate-app`
 with Compose project `menhir-candidate`, service `menhir`, and runtime mode
 `candidate-readonly`.
+
+This production candidate mode is maintenance-only. Routine staging candidates use isolated
+disposable authority and may exercise synthetic writes safely. A production maintenance candidate
+must be prevented from committing authority changes by a storage-level read-only boundary or must
+operate on an isolated restored copy; an application-mode flag alone is not sufficient future
+authority. Once that boundary exists, a cheap transaction/bookmark check may prove no commits
+occurred. Full content hashing is reserved for backup/restore validation and exceptional maintenance,
+not routine deployment acceptance.
 
 ## Backup and restore rehearsal
 
