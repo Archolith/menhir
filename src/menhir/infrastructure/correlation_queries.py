@@ -138,9 +138,14 @@ class CorrelationRepository:
     #: The derived-node clause is the same triple the typed-scalar binding queries use in
     #: `episode_lifecycle` (`is_view` / `is_quantstate` / `view_kind`), inverted: a node is
     #: INELIGIBLE if any of them says it is derived. Counters written today carry `is_view` too,
-    #: so `is_quantstate` covers pre-View registers specifically.
+    #: so `is_quantstate` covers pre-View registers specifically. Canonical-self markers are part
+    #: of this same predicate: canonical self is an endpoint authority, not a duplicate candidate,
+    #: and absorbing it into an ordinary ``user`` node destroys the deterministic identity after
+    #: an otherwise correct extraction.
     _INELIGIBLE_ROLE_PREDICATE = (
         f"(n.structure_role IS NOT NULL) OR NOT ({non_derived_view_cypher('n')}) OR "
+        "coalesce(n.is_self, false) OR "
+        "toLower(trim(coalesce(n.entity_role, ''))) = 'self' OR "
         r"(n.name =~ '(?i).*([\\/]|\\.(py|md|txt|json|ya?ml|ps1|sh|java|ts|tsx|js|sql|env|toml|"
         r"cfg|ini|gradle|html|css|png|jpg|svg))(\b|$).*')"
     )
@@ -586,8 +591,10 @@ class CorrelationRepository:
             // mutation. The preflight above already gated the pair, but another writer could change
             // freshness/scope/flag/conflict/namespace in the window before this statement runs.
             // Fail closed: if any no longer holds, this MATCH yields no row and the merge abstains
-            // (see the empty-rows guard below). Structural role and existence cannot change mid-merge,
-            // so they are not re-checked here.
+            // (see the empty-rows guard below). Structural role and existence cannot change
+            // mid-merge, so they are not re-checked here. Canonical-self markers ARE repeated by
+            // the emitted mutable predicate: a migration or repair may stamp them after preflight,
+            // and that race must abstain.
             WHERE """
             + me.mutable_eligibility_cypher()
             + """
