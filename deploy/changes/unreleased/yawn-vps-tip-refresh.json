@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "id": "yawn-vps-tip-refresh",
+  "category": "operations",
+  "deployment_class": "maintenance",
+  "summary": "Bind the release to the current Yawn VPS gateway repository tip.",
+  "details": "Commits 7e8139c6e3da05618e7638102a81c9ac95716c23, 8eb6f2ceb53076797c9222d14b4322a44ca10040, 416bbf27fc3f66ad74982468eb54a3e05ac47036, and 82e65ac22e2a590e366ffd9cd98c70305731d35a add sealed-product and pull-rate operator tools and move the gateway dependency to archolith-mcp-framework. The immutable Menhir installed-artifact census selects only its reviewed gateway files from this repository tip.",
+  "operator_impact": "The release must use the maintenance path because a sibling release repository changed. Release authority uses the clean remote master tip and the fixed Menhir installed-artifact census.",
+  "repositories": {
+    "yawn_vps": [
+      "7e8139c6e3da05618e7638102a81c9ac95716c23",
+      "8eb6f2ceb53076797c9222d14b4322a44ca10040",
+      "416bbf27fc3f66ad74982468eb54a3e05ac47036",
+      "82e65ac22e2a590e366ffd9cd98c70305731d35a"
+    ]
+  },
+  "security_scopes": [
+    "host-privilege-and-command-wrappers",
+    "runtime-hardening-and-observability",
+    "supply-chain-and-build-evidence"
+  ],
+  "breaking": false
+}

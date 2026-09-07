@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "id": "canonical-self-subject-endpoint",
+  "category": "security",
+  "deployment_class": "maintenance",
+  "summary": "Require verified subject provenance before canonical-self binding.",
+  "details": "Merge commit abb1f10ada2eabc0ed63f8c085b7357b37019342 carries episode-scoped subject provenance through extraction and repair, validates the exact current-episode endpoint before canonical binding, and preserves UUID and graph state on rollback. Production already runs canonical-self binding in enforce mode, so the release must exercise the active automatic-memory path.",
+  "operator_impact": "Keep the existing enforce mode and run the release-bound synthetic canary. Existing fork cleanup remains a separate operator-only migration under the documented census and rehearsal gates.",
+  "repositories": {
+    "menhir": [
+      "abb1f10ada2eabc0ed63f8c085b7357b37019342"
+    ]
+  },
+  "security_scopes": [
+    "authorization-and-client-tool-policy",
+    "runtime-hardening-and-observability"
+  ],
+  "breaking": false
+}
