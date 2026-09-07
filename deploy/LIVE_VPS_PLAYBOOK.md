@@ -22,6 +22,45 @@ writer fencing where the selected class requires it, and bounded rollback remain
 release containing several features is tested and reviewed as one candidate; a focused feature
 test is not evidence for unrelated changes shipping in the same image.
 
+## Required future release method
+
+Production is a promotion target, not the environment where release automation is debugged. Before
+the next production release, the release workflow must implement and pass this sequence unattended:
+
+1. CI builds, scans, and publishes one immutable image and release manifest.
+2. A production-equivalent staging job deploys that exact image with the production container
+   memory limits, network shape, OAuth policy shape, and ingress behavior. Staging uses isolated
+   disposable data and non-production credentials; it never mounts production authority.
+3. Staging exercises OAuth discovery and authorization, MCP initialization/list/recall, an allowed
+   synthetic write, a denied operation, restart behavior, and automatic rollback. It emits one
+   digest-bound receipt only after the complete workflow passes.
+4. The owner reviews the staged changelog and grants one production-promotion approval.
+5. The production runner verifies the staging receipt, backup and restore-drill freshness, and the
+   exact image digest; replaces only the components admitted by the mechanical deployment class;
+   runs a bounded read-only public canary; and records success or automatically restores the prior
+   image.
+
+No LLM review, image build, dependency scan, full database traversal, new backup generation, or
+restore rehearsal belongs in the routine production cutover. Those checks happen in CI, isolated
+staging, or scheduled operations and are reused through immutable receipts. A routine cutover has
+a five-minute foreground budget and one human approval. A timeout or missing receipt exits or rolls
+back; it never starts an improvised repair or escalates itself into maintenance.
+
+`maintenance` remains a separate, deliberately rare path for schema/data migrations, database or
+host replacement, backup/restore changes, network topology, privileged service definitions, or
+recovery. Only that path may quiesce the database, create a release-bound backup, rehearse a restore,
+or perform a full authority comparison. OAuth/client-policy changes that do not alter durable state
+use the staged `security-config` path, not the full database-maintenance transaction.
+
+### Transition gate
+
+The streamlined workflow is a target contract until the staging job and promotion receipt are
+implemented and proven. Do not run another production deployment merely because its individual
+scripts or unit tests pass. The first eligible production release must present evidence from one
+clean, end-to-end production-equivalent rehearsal, including failure and automatic rollback. Until
+then, keep any interrupted transaction fenced and use the recovery section below rather than
+debugging successive release stages against production.
+
 ## Non-negotiable client access invariant
 
 The canonical client data-plane endpoint is
@@ -88,7 +127,7 @@ fail closed into `maintenance`.
 | Class | Use when | Time target | Required path |
 |---|---|---:|---|
 | `app-only` | Only the Menhir application image changes; data, schema, policy, OAuth, host, route, and lifecycle contracts are unchanged | 5 minutes | Verify scaffold, pull app digest, replace app only, accept, automatic image rollback |
-| `security-config` | OAuth, client policy, scopes, secrets metadata, or application configuration changes without a data migration | Planned | Focused independent review plus app replacement and access-contract acceptance |
+| `security-config` | OAuth, client policy, scopes, secrets metadata, or application configuration changes without a data migration | 10 minutes | Focused independent review, production-equivalent staging, bounded config/app replacement, access-contract canary, automatic rollback |
 | `maintenance` | Neo4j, schema, migration/startup writes, durable inventory, backup/restore code, deployment tooling, Caddy, networking, systemd, sudoers, or host topology changes | No 5-minute promise | Full backup, rehearsal, candidate, fence, route, promotion transaction |
 | `recovery` | Restoring authority after data loss or an interrupted irreversible operation | No 5-minute promise | Verified generation restore and recovery playbook |
 
@@ -139,6 +178,11 @@ escalate automatically into the maintenance transaction. If backup or restore ev
 is stale, the deploy reports the exact scheduled job that must be repaired and exits
 without stopping production.
 
+The `security-config` variant follows the same promotion model with a ten-minute budget and
+additional OAuth/access-contract checks. It must not enter the full maintenance transaction when
+mechanical classification proves there is no schema, durable-state, database, route, host, or
+privileged-lifecycle change.
+
 The five-minute clock starts when the reviewed release is already published. CI image
 building, scans, release authoring, and human review are release preparation, not VPS
 cutover work. Scheduled backup creation, restore drills, and desktop archival continue
@@ -188,13 +232,15 @@ check as success or replace the fixed command with ad-hoc Compose/SSH commands.
 
 Use [`RELEASE_AUTOMATION.md`](RELEASE_AUTOMATION.md) and
 `deploy/release_flow.py` for routine release preparation. It replaces the
-one-off workspace scripts with a digest-bound `prepare -> independent review ->
-finalize -> deploy` flow. The deploy command is a preview unless `--execute` is
-supplied, and execution also requires the exact reviewed release ID.
+one-off workspace scripts with a digest-bound workflow. The required future state is
+`prepare -> independent review when required -> finalize -> production-equivalent stage ->
+approve -> promote`. The deploy command remains a preview unless `--execute` is supplied,
+and execution also requires the exact reviewed release ID and successful staging receipt.
 
 This coordinator does not weaken the controls below. It calls the existing
-release author and desktop deployment wrapper, and it cannot skip independent
-review, artifact validation, or the server-side transaction.
+release author and desktop deployment wrapper, and it cannot skip required independent
+review, artifact validation, staging, or the server-side transaction. Until the coordinator
+enforces the staging receipt, the transition gate above prohibits production execution.
 
 ## Release inputs
 
@@ -390,12 +436,14 @@ observation window.
 ## Routine later release
 
 Routine app-only releases repeat only immutable CI preparation, explicit release
-selection, scaffold verification, exact app-image pull, app-only replacement,
-authenticated acceptance, and automatic prior-image rollback on failure. Host
+selection, production-equivalent staging, one promotion approval, scaffold verification,
+exact app-image pull, app-only replacement, bounded read-only public acceptance, and
+automatic prior-image rollback on failure. Host
 topology, Neo4j, Caddy, backup identity, network, systemd, sudoers, gateway bootstrap,
 full backup generation, and restore rehearsal are not recreated.
 
 Stage and review the release through `release_flow.py`, preview its deployment
-command, then execute that same release only after production approval. Any
-`security-config` or `maintenance` fragment automatically selects the full
-maintenance path.
+command, then execute that same release only after the exact staging receipt and production
+approval exist. A `security-config` fragment uses its focused staged path when no durable-state,
+route, host, or privileged-lifecycle surface changed. Only a mechanically classified
+`maintenance` change selects the full maintenance path.
