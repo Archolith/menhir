@@ -574,6 +574,14 @@ def test_candidate_compose_uses_exact_restored_production_authorities() -> None:
         "python3 - neo4j" in release_lib
     )
     assert (
+        "docker inspect -f '{{.State.Running}}' menhir-candidate-app"
+        in release_lib
+    )
+    assert (
+        'MENHIR_APP_MEMORY_LIMIT=4g candidate_compose "$generation" exec '
+        '-T menhir python3 - neo4j' in release_lib
+    )
+    assert (
         'MENHIR_APP_MEMORY_LIMIT=4g candidate_compose "$generation" config --quiet'
         in release_lib
     )
