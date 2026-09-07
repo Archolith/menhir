@@ -129,7 +129,7 @@ def release_fixture(tmp_path: Path, monkeypatch):
         encoding="ascii",
     )
     runtime = tmp_path / "runtime.sha256"
-    runtime.write_text("sha256:" + "9" * 64 + "\n", encoding="ascii")
+    runtime.write_text("9" * 64 + "\n", encoding="ascii")
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     secret_versions = {

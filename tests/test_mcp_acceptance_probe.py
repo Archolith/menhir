@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 
 import pytest
@@ -120,6 +121,58 @@ def test_minted_probe_token_is_never_written_or_printed() -> None:
     assert "token.write" not in source
     assert "write_text(token" not in source
     assert "print(token" not in source
+
+
+def test_post_uses_declared_release_user_agent(monkeypatch: pytest.MonkeyPatch) -> None:
+    observed = {}
+
+    class Response:
+        status = 200
+        headers = {"Content-Type": "application/json", "Mcp-Session-Id": "session"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *unused):
+            return False
+
+        def read(self):
+            return json.dumps({"jsonrpc": "2.0", "id": 1, "result": {}}).encode()
+
+    def fake_urlopen(request, timeout):
+        observed["user_agent"] = request.get_header("User-agent")
+        observed["timeout"] = timeout
+        return Response()
+
+    monkeypatch.setattr(PROBE.urllib.request, "urlopen", fake_urlopen)
+    status, _, session = PROBE._post(
+        "https://memory.example/mcp-http",
+        "header.payload.signature",
+        {"jsonrpc": "2.0", "id": 1, "method": "initialize"},
+    )
+    assert status == 200
+    assert session == "session"
+    assert observed == {"user_agent": PROBE.USER_AGENT, "timeout": 15}
+
+
+def test_candidate_token_mint_targets_only_candidate_container(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed = {}
+
+    def fake_run(command, *, input_bytes=None):
+        observed["command"] = command
+        observed["has_program"] = bool(input_bytes)
+        return "header.payload.signature"
+
+    monkeypatch.setattr(PROBE, "_run", fake_run)
+    assert PROBE._mint_probe_token("menhir-candidate-app") == "header.payload.signature"
+    assert observed["command"][:4] == [
+        "docker", "exec", "-i", "menhir-candidate-app"
+    ]
+    assert observed["has_program"] is True
+    with pytest.raises(RuntimeError, match="unsupported"):
+        PROBE._mint_probe_token("unreviewed-container")
 
 
 def test_production_mode_is_release_owned() -> None:
