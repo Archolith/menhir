@@ -81,7 +81,11 @@ class EventConsolidationGraph(Protocol):
 
     def activate_event_history(self) -> dict[str, Any]: ...
 
+    #: Creates/updates only the canonical self target. Implementations MUST NOT absorb or delete
+    #: forks; consolidation is an operator-only journaled migration.
     def ensure_self_entity(self, namespace: str) -> str: ...
+
+    def detect_self_forks(self, namespace: str) -> list[str]: ...
 
     def record_typed_event_assertion(self, assertion: Any) -> dict[str, Any]: ...
 
@@ -97,6 +101,10 @@ class EventConsolidationConfig:
 
 
 #: Exact, normalized self-subject tokens admitted as the speaker (the single canonical subject).
+#: DOMAIN: event-proposal subject. Carries "speaker", which the event producer emits and the other
+#: two sets do not -- adding it to the extraction set would bind an entity literally named "speaker"
+#: to the human. Deliberately distinct from ``typed_scalar_rules.SELF_TOKENS`` and
+#: ``domain/self_identity.SELF_ALIASES``; do not merge them.
 _SELF_TOKENS = frozenset({"user", "the user", "i", "me", "myself", "speaker"})
 
 #: Structural model-output defects that invalidate the ENTIRE page (never advance the cursor).

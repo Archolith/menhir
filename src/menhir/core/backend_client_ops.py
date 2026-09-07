@@ -645,6 +645,29 @@ class BackendClientOpsMixin:
     async def close_todo(self, uuid: str) -> bool:
         return bool(await self._request("close_todo", {"uuid": uuid}))
 
+    async def supersede_todo(self, old_uuid: str, new_uuid: str) -> dict[str, Any]:
+        return await self._request(
+            "supersede_todo", {"old_uuid": old_uuid, "new_uuid": new_uuid}
+        )
+
+    async def resolve_todo(self, todo_uuid: str, memory_uuid: str) -> dict[str, Any]:
+        return await self._request(
+            "resolve_todo", {"todo_uuid": todo_uuid, "memory_uuid": memory_uuid}
+        )
+
+    async def reopen_todo(self, todo_uuid: str, memory_uuid: str) -> dict[str, Any]:
+        return await self._request(
+            "reopen_todo", {"todo_uuid": todo_uuid, "memory_uuid": memory_uuid}
+        )
+
+    async def link_memory_to_todo(
+        self, memory_uuid: str, todo_uuid: str, relation: str
+    ) -> dict[str, Any]:
+        return await self._request(
+            "link_memory_to_todo",
+            {"memory_uuid": memory_uuid, "todo_uuid": todo_uuid, "relation": relation},
+        )
+
     async def delete_todo(self, uuid: str) -> bool:
         return bool(await self._request("delete_todo", {"uuid": uuid}))
 

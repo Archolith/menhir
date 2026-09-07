@@ -9,7 +9,6 @@ import os
 from dataclasses import dataclass, field, replace
 from time import perf_counter
 from typing import TYPE_CHECKING, Any
-from uuid import NAMESPACE_URL, uuid5
 
 if TYPE_CHECKING:
     from menhir.services.ingest_service import IngestService
@@ -17,6 +16,7 @@ if TYPE_CHECKING:
 from menhir.domain.models import FreshnessState, NodeScope, ProcessingState
 from menhir.domain.truth.kinds import DIVERSITY_FAMILY as _FRONTIER_DIVERSITY_FAMILY
 from menhir.domain.namespace import namespace_to_group_ids, stamped_namespace
+from menhir.domain.self_identity import self_uuid_for_namespace
 from menhir.domain.recall import (
     CandidateData,
     QueryPreset,
@@ -823,16 +823,14 @@ async def run_recall(
             # allowed). When the query subject cannot be resolved (no first-person, no named match)
             # the set is empty and the gate is OPEN (today's behavior -- do not over-restrict).
             import re as _re
-            import uuid as _uuid
             from menhir.services.typed_scalar_perception import SELF_TOKENS
             _qlow = query.lower()
             _first_person = bool(_re.search(r"\b(i|me|my|mine|myself|we|us|our)\b", _qlow))
             query_subjects: set[str] = set()
             if _first_person:
-                # the canonical self subject: deterministic uuid5, matches what perception bound
-                # self-subject assertions to (episode_lifecycle.ensure_self_entity) -- no DB read.
-                query_subjects.add(str(_uuid.uuid5(
-                    _uuid.NAMESPACE_URL, f"menhir-self:{stamped_namespace(namespace)}")))
+                # the canonical self subject, via the identity SSOT: deterministic and I/O-free,
+                # matching what perception binds self-subject assertions to -- no DB read.
+                query_subjects.add(self_uuid_for_namespace(namespace))
             for _s_uuid, _s_disp in obs_subject_displays.items():
                 _disp = (_s_disp or "").strip().lower()
                 if not _disp:
@@ -1798,7 +1796,7 @@ async def apply_event_history_authority_layer(
         return result
     try:
         stamped = stamped_namespace(namespace)
-        subject_uuid = str(uuid5(NAMESPACE_URL, f"menhir-self:{stamped}"))
+        subject_uuid = self_uuid_for_namespace(namespace)
         # Probe recognition WITHOUT repository I/O: the pure helper over empty assertions returns
         # None exactly when the query is not a recognized conservative first-person event route
         # (third-party / nested-attributed / unclassified / malformed). No repo call in that case.

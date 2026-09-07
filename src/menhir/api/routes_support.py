@@ -650,6 +650,10 @@ _BACKEND_METHODS = {
     "close_todo",
     "delete_todo",
     "close_stale_todos",
+    "supersede_todo",
+    "resolve_todo",
+    "reopen_todo",
+    "link_memory_to_todo",
     "create_temporal",
     "list_temporal_in_window",
     "complete_temporal",
@@ -689,6 +693,10 @@ _OP_TIER_AGENT = {
     "queue_episode", "flag_memory", "unflag_memory", "enqueue_pending_episode",
     "ingest_document", "scan_and_write_project",
     "create_todo", "close_todo", "delete_todo", "close_stale_todos",
+    # Todo lifecycle and lineage. Same standing as the artifact writes below: each moves a
+    # lifecycle state or declares a relationship, so none is readonly, and none is operator
+    # either -- all are reversible and none deletes anything.
+    "supersede_todo", "resolve_todo", "reopen_todo", "link_memory_to_todo",
     "create_temporal", "complete_temporal", "create_candidate",
     # Artifact writes. Declaring a relationship or moving a lifecycle state is
     # an assertion about engineering history, so it is not readonly. None are

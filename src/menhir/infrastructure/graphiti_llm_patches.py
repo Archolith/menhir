@@ -289,6 +289,41 @@ def _truncation_offset(exc: Exception) -> int | None:
     return None
 
 
+def _openai_strict_json_schema(response_model: type[Any]) -> dict[str, Any]:
+    """Return the model schema in the strict subset accepted by OpenAI-compatible APIs.
+
+    Pydantic permits unspecified object extras and defaulted properties. OpenAI structured
+    outputs instead require every object to set ``additionalProperties: false`` and every
+    declared property to appear in ``required``. OpenRouter forwards the same validation to
+    Luna's OpenAI/Azure backends, so sending ``model_json_schema()`` unchanged is rejected before
+    inference. Build a transformed copy for the wire contract; do not tighten the Pydantic model
+    that parses local and non-strict provider responses.
+    """
+
+    def _strict(value: Any) -> Any:
+        if isinstance(value, list):
+            return [_strict(item) for item in value]
+        if not isinstance(value, dict):
+            return value
+
+        result = {
+            key: _strict(item)
+            for key, item in value.items()
+            if not (key == "default" and item is None)
+        }
+        if result.get("type") == "object":
+            result["additionalProperties"] = False
+            properties = result.get("properties")
+            if isinstance(properties, dict):
+                result["required"] = list(properties)
+        return result
+
+    schema = response_model.model_json_schema()
+    if not isinstance(schema, dict):
+        raise TypeError("response model JSON schema must be an object")
+    return _strict(schema)
+
+
 def _patch_graphiti_openai_generic_client(
     OpenAIGenericClient: type | None,
     max_request_estimated_tokens: int | None = None,
@@ -343,12 +378,13 @@ def _patch_graphiti_openai_generic_client(
             # deepseek and only use structured json_schema outputs on models that allow it.
             if response_model is not None and not _is_deepseek:
                 schema_name = getattr(response_model, "__name__", "structured_response")
-                json_schema = response_model.model_json_schema()
+                json_schema = _openai_strict_json_schema(response_model)
                 response_format = {
                     "type": "json_schema",
                     "json_schema": {
                         "name": schema_name,
                         "schema": json_schema,
+                        "strict": True,
                     },
                 }
             elif response_model is not None and _is_deepseek:

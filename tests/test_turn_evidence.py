@@ -265,14 +265,15 @@ def test_load_preceding_context_is_session_scoped_bounded_and_chronological():
 
     assert [row["role"] for row in rows] == ["user", "assistant"]
     query, params = fake.executed[-1]
-    assert "prior.namespace = current.namespace" in query
+    assert "trim(coalesce(prior.namespace, ''))" in query
     assert "prior.session_id = current.session_id" in query
     assert "prior.recorded_at < current.recorded_at" in query
     assert "prior.role IN ['user', 'assistant']" in query
-    # CF-236: the ANCHOR must be scoped to the caller too. `prior.namespace = current.namespace`
-    # above only ties the priors to whatever turn the caller named -- on its own it scopes
-    # nothing, because turn_id is caller-supplied.
-    assert "coalesce(current.namespace, 'default') = $namespace" in query
+    # CF-236: the ANCHOR must be scoped to the caller too. Matching normalized prior/current
+    # namespaces only ties the priors to whatever turn the caller named -- on its own it scopes
+    # nothing, because turn_id is caller-supplied. Blank legacy namespaces are logical default.
+    assert "trim(coalesce(current.namespace, ''))" in query
+    assert "THEN 'default'" in query
     assert params == {"turn_id": "turn-current", "limit": 4, "namespace": "tenantA"}
 
 
