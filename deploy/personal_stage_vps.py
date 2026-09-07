@@ -957,7 +957,9 @@ def _ensure_images(
     labels = menhir_value.get("Config", {}).get("Labels", {})
     expected_labels = {
         "org.opencontainers.image.revision": release["repos"]["menhir"],
-        "org.archolith.menhir.wheel-manifest.sha256": release["wheel_manifest_sha256"],
+        "org.archolith.menhir.wheel-manifest.sha256": release[
+            "dockerfile_wheel_manifest_sha256"
+        ],
         "org.archolith.oauth.wheel.sha256": release["oauth_wheel_sha256"],
     }
     if not isinstance(labels, dict) or any(

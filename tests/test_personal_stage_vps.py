@@ -242,7 +242,7 @@ def test_transferred_private_image_uses_tag_and_checks_release_labels(
         {
             "images": {"caddy": caddy},
             "repos": {"menhir": commit},
-            "wheel_manifest_sha256": wheel_manifest,
+            "dockerfile_wheel_manifest_sha256": wheel_manifest,
             "oauth_wheel_sha256": oauth_wheel,
         },
     )
