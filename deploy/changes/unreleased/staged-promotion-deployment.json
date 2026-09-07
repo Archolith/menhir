@@ -4,13 +4,14 @@
   "category": "operations",
   "deployment_class": "maintenance",
   "summary": "Make production promotion consume complete staging evidence instead of debugging release automation live.",
-  "details": "Commits 9b37082a23d544dc9458b5ef47c03da6da5c684a, ae6055e61cff6ae4d036cf6900286c8d390d14bc, and 3e412a9510211147e8b5ae480cf5ad8d81039197 define and implement two independent workflows. Product release builds, verifies, documents, and publishes immutable artifacts without production access. Personal deployment selects one finalized digest, exercises the exact images through disposable production-equivalent staging, binds one owner approval to the complete receipt, and promotes through a second evidence-verifying wrapper. The legacy direct deploy execution path is disabled. Staging proves OAuth authorization code with PKCE, MCP read/write/deny behavior, restart persistence, production non-interference, and simulated automatic rollback before emitting a receipt.",
+  "details": "Commits 9b37082a23d544dc9458b5ef47c03da6da5c684a, ae6055e61cff6ae4d036cf6900286c8d390d14bc, 3e412a9510211147e8b5ae480cf5ad8d81039197, and 5ae772d294bd9280160e4611bd81d3a6ab71d73a define, implement, and test two independent workflows. Product release builds, verifies, documents, and publishes immutable artifacts without production access. Personal deployment selects one finalized digest, exercises the exact images through disposable production-equivalent staging, binds one owner approval to the complete receipt, and promotes through a second evidence-verifying wrapper. The legacy direct deploy execution path is disabled. Staging proves OAuth authorization code with PKCE, MCP read/write/deny behavior, restart persistence, production non-interference, and simulated automatic rollback before emitting a receipt.",
   "operator_impact": "Use release_flow.py only to prepare and finalize the product release. For this owner's instance, use personal_deploy.py select, stage, approve, and promote; review the release notes and staging receipt before the one bound approval. App-only promotion remains bounded; security-config temporarily uses the conservative maintenance transaction until its focused production runner exists.",
   "repositories": {
     "menhir": [
       "9b37082a23d544dc9458b5ef47c03da6da5c684a",
       "ae6055e61cff6ae4d036cf6900286c8d390d14bc",
-      "3e412a9510211147e8b5ae480cf5ad8d81039197"
+      "3e412a9510211147e8b5ae480cf5ad8d81039197",
+      "5ae772d294bd9280160e4611bd81d3a6ab71d73a"
     ]
   },
   "security_scopes": [
