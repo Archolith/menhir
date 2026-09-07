@@ -558,10 +558,11 @@ def deploy_flow(
     command = deployment_command(workspace, state)
     if not execute:
         return command
-    runner(command)
-    state["phase"] = "deployed"
-    _atomic_json(_state_path(workspace), state)
-    return state
+    raise ReleaseFlowError(
+        "direct product-release deployment is disabled; select this release with "
+        "deploy/personal_deploy.py, complete staging, record one receipt-bound "
+        "approval, and promote it from that separate workflow"
+    )
 
 
 def status_flow(workspace: Path) -> dict[str, Any]:

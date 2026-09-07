@@ -17,11 +17,13 @@ restart handling, and automatic rollback. The resulting immutable receipt plus o
 is required for promotion. The production cutover consumes that evidence and runs only a bounded
 read-only public canary; it does not debug automation or recreate CI evidence.
 
-Routine `app-only` and non-migrating `security-config` releases do not create a fresh backup,
-rehearse a restore, traverse the complete production database, or start the full maintenance
-candidate transaction. They verify scheduled backup/restore freshness and automatically restore
-the prior application/configuration on failed acceptance. Full state protection remains mandatory
-only for mechanically classified maintenance and recovery work.
+Routine `app-only` releases do not create a fresh backup, rehearse a restore, traverse the complete
+production database, or start the full maintenance candidate transaction. They verify scheduled
+backup/restore freshness and automatically restore the prior application on failed acceptance.
+The same bounded model is the contract for non-migrating `security-config` releases, but the current
+personal promotion coordinator conservatively routes that class through the maintenance transaction
+until its focused production runner is implemented. Full state protection remains mandatory for
+mechanically classified maintenance and recovery work.
 
 Product release and personal deployment are separate trust boundaries. The product workflow may
 publish packages, images, provenance, and changelogs without access to this host. This deployment
