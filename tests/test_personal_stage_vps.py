@@ -198,3 +198,30 @@ def test_runner_never_contains_production_data_mount() -> None:
     assert 'source: /srv/menhir/production/state' not in source
     assert 'production authority or container identity changed during staging' in source
     assert '"down", "--volumes", "--remove-orphans"' in source
+
+
+def test_fresh_release_images_are_pulled_before_identity_inspection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, ...]] = []
+    monkeypatch.setattr(
+        MODULE,
+        "_run",
+        lambda *args, **_kwargs: calls.append(args),
+    )
+    menhir = "ghcr.io/archolith/menhir:0.2.0-12@sha256:" + "1" * 64
+    neo4j = "ghcr.io/archolith/menhir-neo4j:5.26.30-1@sha256:" + "2" * 64
+    caddy = "sha256:" + "3" * 64
+
+    MODULE._ensure_images(
+        {"MENHIR_IMAGE": menhir, "NEO4J_IMAGE": neo4j},
+        {"images": {"caddy": caddy}},
+    )
+
+    assert calls == [
+        ("docker", "pull", menhir),
+        ("docker", "pull", neo4j),
+        ("docker", "image", "inspect", menhir),
+        ("docker", "image", "inspect", neo4j),
+        ("docker", "image", "inspect", caddy),
+    ]

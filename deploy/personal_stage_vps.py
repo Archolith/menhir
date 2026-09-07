@@ -908,6 +908,23 @@ def _runtime_contract(root: Path, release: dict[str, Any], subnet: str) -> None:
         raise StageError("staging proxy network shape differs from its contract")
 
 
+def _ensure_images(
+    source_environment: dict[str, str], release: dict[str, Any],
+) -> None:
+    # A newly published application image is not expected to exist on the VPS.
+    # Pull the immutable references before inspecting them. The Caddy authority
+    # currently records only its digest, so it remains a required preinstalled
+    # production image and is verified after the pullable release images.
+    pullable = (
+        source_environment["MENHIR_IMAGE"],
+        source_environment["NEO4J_IMAGE"],
+    )
+    for image in pullable:
+        _run("docker", "pull", image)
+    for image in (*pullable, release["images"]["caddy"]):
+        _run("docker", "image", "inspect", image)
+
+
 def run_stage(args: argparse.Namespace) -> dict[str, Any]:
     if os.geteuid() != 0:
         raise StageError("VPS staging runner must run as root")
@@ -932,8 +949,7 @@ def run_stage(args: argparse.Namespace) -> dict[str, Any]:
         args.expected_release_id,
         args.expected_release_sha256,
     )
-    for image in (source_environment["MENHIR_IMAGE"], source_environment["NEO4J_IMAGE"], release["images"]["caddy"]):
-        _run("docker", "image", "inspect", image)
+    _ensure_images(source_environment, release)
 
     started = _now()
     production_before = _production_snapshot()
