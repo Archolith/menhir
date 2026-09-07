@@ -116,6 +116,7 @@ $menhirImage = $menhirImageRows[0].Substring("MENHIR_IMAGE=".Length).Trim("'`"")
 if ($menhirImage -notmatch '^ghcr\.io/[a-z0-9._/-]+:[a-zA-Z0-9._-]+@sha256:[0-9a-f]{64}$') {
     throw "Bundled MENHIR_IMAGE is not an immutable GHCR reference."
 }
+$menhirImageTag = $menhirImage.Split("@", 2)[0]
 $runner = Join-Path $PSScriptRoot "personal_stage_vps.py"
 if (-not (Test-Path -LiteralPath $runner -PathType Leaf)) {
     throw "VPS staging runner is missing: $runner"
@@ -161,7 +162,11 @@ try {
             throw "Could not obtain the selected Menhir image locally."
         }
     }
-    & docker save --output $localImageTar $menhirImage
+    $menhirImageId = (& docker image inspect --format '{{.Id}}' $menhirImage).Trim()
+    if ($LASTEXITCODE -ne 0 -or $menhirImageId -notmatch '^sha256:[0-9a-f]{64}$') {
+        throw "Could not resolve the selected Menhir image ID."
+    }
+    & docker save --output $localImageTar $menhirImageTag
     if ($LASTEXITCODE -ne 0) {
         throw "Could not export the selected Menhir image."
     }
@@ -179,7 +184,7 @@ try {
         throw "Could not upload the selected Menhir image."
     }
     Invoke-Vps "sudo -n docker load --input '$remoteImageTar'"
-    Invoke-Vps "chmod 0600 '$remoteRunner' && sudo -n python3 '$remoteRunner' --bundle '$remoteBundle' --expected-bundle-sha256 '$ExpectedBundleSha256' --expected-release-id '$ExpectedReleaseId' --expected-release-sha256 '$ExpectedReleaseSha256' --deployment-class '$DeploymentClass' --runner-sha256 '$runnerSha' --receipt '$remoteReceipt'"
+    Invoke-Vps "chmod 0600 '$remoteRunner' && sudo -n python3 '$remoteRunner' --bundle '$remoteBundle' --expected-bundle-sha256 '$ExpectedBundleSha256' --expected-release-id '$ExpectedReleaseId' --expected-release-sha256 '$ExpectedReleaseSha256' --expected-menhir-image-id '$menhirImageId' --deployment-class '$DeploymentClass' --runner-sha256 '$runnerSha' --receipt '$remoteReceipt'"
     Invoke-Vps "sudo -n chown thron:thron '$remoteReceipt' && chmod 0600 '$remoteReceipt'"
     & $helpers.Scp -Source "${remoteHost}:$remoteReceipt" -Destination $localTemp
     if ($LASTEXITCODE -ne 0) {

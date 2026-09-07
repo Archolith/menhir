@@ -396,7 +396,13 @@ https://{STAGING_HOST} {{
     return policy_digest, operator_key
 
 
-def _compose_files(root: Path, bundle: Path, release: dict[str, Any], subnet: str) -> tuple[Path, Path]:
+def _compose_files(
+    root: Path,
+    bundle: Path,
+    release: dict[str, Any],
+    source_environment: dict[str, str],
+    subnet: str,
+) -> tuple[Path, Path]:
     base = bundle / "rootfs/srv/menhir/production/deploy/docker-compose.production.yml"
     override = root / "docker-compose.staging.yml"
     network = f"menhir-stage-{root.name}"
@@ -416,7 +422,7 @@ def _compose_files(root: Path, bundle: Path, release: dict[str, Any], subnet: st
         target: /run/staging-ca.crt
         read_only: true
   fake-llm:
-    image: "{release['images']['menhir']}"
+    image: "{source_environment['MENHIR_IMAGE']}"
     container_name: menhir-stage-{root.name}-fake-llm
     entrypoint: ["python", "/probe/fake_openai.py"]
     user: "10001:10001"
@@ -885,11 +891,11 @@ def _todo_persists(port: int, token: str, unique: str) -> None:
         raise StageError("synthetic write did not persist across restart")
 
 
-def _runtime_contract(root: Path, release: dict[str, Any], subnet: str) -> None:
+def _runtime_contract(root: Path, runtime_images: dict[str, str], subnet: str) -> None:
     app = _inspect(f"menhir-stage-{root.name}-app")
     neo4j = _inspect(f"menhir-stage-{root.name}-neo4j")
-    if app.get("Image") != release["images"]["menhir"] \
-            or neo4j.get("Image") != release["images"]["neo4j"]:
+    if app.get("Image") != runtime_images["menhir"] \
+            or neo4j.get("Image") != runtime_images["neo4j"]:
         raise StageError("staging containers differ from release image authority")
     if app.get("HostConfig", {}).get("Memory") != 2 * 1024**3 \
             or neo4j.get("HostConfig", {}).get("Memory") != 4 * 1024**3:
@@ -909,21 +915,48 @@ def _runtime_contract(root: Path, release: dict[str, Any], subnet: str) -> None:
 
 
 def _ensure_images(
-    source_environment: dict[str, str], release: dict[str, Any],
-) -> None:
+    source_environment: dict[str, str],
+    release: dict[str, Any],
+    expected_menhir_image_id: str,
+) -> dict[str, str]:
     # The desktop wrapper loads the exact application image for private
     # registries. Pull immutable references only when they are not already
     # present, then verify every image before creating disposable state.
-    pullable = (
-        source_environment["MENHIR_IMAGE"],
-        source_environment["NEO4J_IMAGE"],
-    )
-    for image in pullable:
-        present = _run("docker", "image", "inspect", image, check=False)
-        if present.returncode != 0:
-            _run("docker", "pull", image)
-    for image in (*pullable, release["images"]["caddy"]):
-        _run("docker", "image", "inspect", image)
+    menhir = source_environment["MENHIR_IMAGE"]
+    present = _run("docker", "image", "inspect", menhir, check=False)
+    if present.returncode != 0:
+        transferred_tag = menhir.split("@", 1)[0]
+        transferred = _run(
+            "docker", "image", "inspect", transferred_tag, check=False,
+        )
+        if transferred.returncode == 0:
+            menhir = transferred_tag
+            source_environment["MENHIR_IMAGE"] = transferred_tag
+        else:
+            _run("docker", "pull", source_environment["MENHIR_IMAGE"])
+
+    neo4j = source_environment["NEO4J_IMAGE"]
+    if _run("docker", "image", "inspect", neo4j, check=False).returncode != 0:
+        _run("docker", "pull", neo4j)
+
+    def image_id(reference: str) -> str:
+        value = json.loads(_run("docker", "image", "inspect", reference).stdout)
+        if not isinstance(value, list) or len(value) != 1 \
+                or not isinstance(value[0], dict):
+            raise StageError(f"image inspection is invalid: {reference}")
+        identity = value[0].get("Id")
+        if not isinstance(identity, str) or IMAGE_RE.fullmatch(identity) is None:
+            raise StageError(f"image ID is invalid: {reference}")
+        return identity
+
+    runtime_images = {
+        "menhir": image_id(menhir),
+        "neo4j": image_id(neo4j),
+        "caddy": image_id(release["images"]["caddy"]),
+    }
+    if runtime_images["menhir"] != expected_menhir_image_id:
+        raise StageError("transferred Menhir image ID differs from selected release")
+    return runtime_images
 
 
 def run_stage(args: argparse.Namespace) -> dict[str, Any]:
@@ -934,6 +967,7 @@ def run_stage(args: argparse.Namespace) -> dict[str, Any]:
         (args.expected_release_sha256, SHA256_RE, "release digest"),
         (args.runner_sha256, SHA256_RE, "runner digest"),
         (args.expected_release_id, RELEASE_ID_RE, "release ID"),
+        (args.expected_menhir_image_id, IMAGE_RE, "Menhir image ID"),
     ):
         if pattern.fullmatch(value) is None:
             raise StageError(f"invalid expected {label}")
@@ -950,7 +984,9 @@ def run_stage(args: argparse.Namespace) -> dict[str, Any]:
         args.expected_release_id,
         args.expected_release_sha256,
     )
-    _ensure_images(source_environment, release)
+    runtime_images = _ensure_images(
+        source_environment, release, args.expected_menhir_image_id,
+    )
 
     started = _now()
     production_before = _production_snapshot()
@@ -966,7 +1002,9 @@ def run_stage(args: argparse.Namespace) -> dict[str, Any]:
         STAGING_ROOT.mkdir(parents=True, exist_ok=True, mode=0o700)
         _chown(STAGING_ROOT, 0, 0)
         policy_digest, operator_key = _prepare_tree(root, bundle, release, source_environment)
-        base, override = _compose_files(root, bundle, release, subnet)
+        base, override = _compose_files(
+            root, bundle, release, source_environment, subnet,
+        )
         environment = _stage_environment(root, source_environment, policy_digest, project, subnet)
         _compose(base, override, project, environment, "config", "--quiet")
         app = f"menhir-stage-{run_id}-app"
@@ -985,7 +1023,7 @@ def run_stage(args: argparse.Namespace) -> dict[str, Any]:
         _bootstrap_blank_schema(base, override, project, environment)
         _compose(base, override, project, environment, "up", "-d", "--remove-orphans")
         _wait_healthy((app, neo4j))
-        _runtime_contract(root, release, subnet)
+        _runtime_contract(root, runtime_images, subnet)
         checks.update({
             "artifact_identity": True,
             "production_memory_limits": True,
@@ -1074,6 +1112,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--expected-bundle-sha256", required=True)
     parser.add_argument("--expected-release-id", required=True)
     parser.add_argument("--expected-release-sha256", required=True)
+    parser.add_argument("--expected-menhir-image-id", required=True)
     parser.add_argument("--deployment-class", required=True)
     parser.add_argument("--runner-sha256", required=True)
     parser.add_argument("--receipt", type=Path, required=True)
