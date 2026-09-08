@@ -266,7 +266,7 @@ def test_validator_rejects_extra_or_missing_bundle_files(
     if mutation == "extra":
         (output / "unexpected").write_text("extra\n", encoding="ascii")
     else:
-        (output / "rootfs/srv/menhir/production/bin/worker").unlink()
+        (output / "rootfs/srv/menhir/production/bin/status").unlink()
     with pytest.raises(ValueError, match="census|payload"):
         MODULE._validate_bundle(output, installer_digest)
 
@@ -274,8 +274,8 @@ def test_validator_rejects_extra_or_missing_bundle_files(
 def test_validator_rejects_manifest_digest_drift(tmp_path: Path) -> None:
     output, _, _, _ = _build(tmp_path)
     installer_digest = _sha256(output / "install.sh")
-    worker = output / "rootfs/srv/menhir/production/bin/worker"
-    worker.write_bytes(worker.read_bytes() + b"drift\n")
+    status = output / "rootfs/srv/menhir/production/bin/status"
+    status.write_bytes(status.read_bytes() + b"drift\n")
     with pytest.raises(ValueError, match="digest mismatch"):
         MODULE._validate_bundle(output, installer_digest)
 
@@ -301,7 +301,7 @@ def test_fixed_destination_mode_policy() -> None:
         "/srv/menhir/production/bin/lib.sh"
     ) == "0644"
     assert MODULE._destination_mode(
-        "/etc/systemd/system/menhir-op@.service"
+        "/etc/systemd/system/menhir-oauth-operations.service"
     ) == "0644"
 
 
@@ -309,7 +309,7 @@ def test_validator_rejects_manifest_mode_change(tmp_path: Path) -> None:
     output, _, _, _ = _build(tmp_path)
     manifest_path = output / "bundle-manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="ascii"))
-    destination = "/srv/menhir/production/bin/worker"
+    destination = "/srv/menhir/production/bin/status"
     manifest["files"][destination]["mode"] = "0777"
     manifest_path.write_text(json.dumps(manifest), encoding="ascii")
     with pytest.raises(ValueError, match="mode/digest"):
@@ -353,8 +353,8 @@ def test_installer_keeps_scaffold_and_cutover_out_of_routine_install() -> None:
     assert "systemctl restart menhir-oauth-operations.service" in source
     assert "menhir-caddy-reconcile.path" in source
     assert "menhir-caddy-reconcile.service" in source
-    assert "retire_caddy_writers" in source
-    assert "retired Caddy writer remains loaded or active" in source
+    assert "retire_obsolete_writers" in source
+    assert "retired writer remains loaded or active" in source
     assert "production cutover was not started" in source
 
 
@@ -405,7 +405,7 @@ def test_installer_obeys_admission_then_nonblocking_mutation_lock_order() -> Non
     first_assertion = source.index("\nassert_maintenance\n")
     mutation_lock = source.index('exec 9>"$mutation_lock"')
     nonblocking = source.index("flock -n 9", mutation_lock)
-    retirement = source.index("retire_caddy_writers\n", nonblocking)
+    retirement = source.index("retire_obsolete_writers\n", nonblocking)
 
     assert first_assertion < mutation_lock < nonblocking < retirement
     assert 'exit 75' in source[nonblocking:retirement]
@@ -413,16 +413,16 @@ def test_installer_obeys_admission_then_nonblocking_mutation_lock_order() -> Non
     assert "flock -n 8" not in source
 
 
-def test_installer_snapshots_every_caddy_retirement_surface_before_arming() -> None:
+def test_installer_snapshots_every_retirement_surface_before_arming() -> None:
     source = MODULE_PATH.with_name("release-install.sh").read_text(encoding="ascii")
     snapshot = source[source.index("create_snapshot() {"):source.index("unit_property() {")]
-    retirement = source[source.index("retire_caddy_writers() {"):]
+    retirement = source[source.index("retire_obsolete_writers() {"):]
 
-    assert 'snapshot_path "caddy-${index}" "/etc/systemd/system/${unit}" file' \
+    assert 'snapshot_path "retired-${index}" "/etc/systemd/system/${unit}" file' \
         in snapshot
     assert 'snapshot_unit "$unit"' in snapshot
-    assert 'snapshot_path "caddy-${index}" "$path" file' in snapshot
-    assert 'snapshot_path "caddy-${index}" "$path" tree' in snapshot
+    assert 'snapshot_path "retired-${index}" "$path" file' in snapshot
+    assert 'snapshot_path "retired-${index}" "$path" tree' in snapshot
     for property_name in ("LoadState", "UnitFileState", "ActiveState", "SubState"):
         assert f"--property={property_name}" in source
     assert snapshot.index('fsync_tree "$snapshot_root"') \
@@ -436,9 +436,74 @@ def test_installer_snapshots_every_caddy_retirement_surface_before_arming() -> N
         "/srv/menhir/production/bin/caddy-route-apply",
         "/srv/menhir/production/bin/caddy-route-rollback",
         "/srv/yawn/releases/menhir-route-candidate",
+        "menhir-op@.service",
+        "/srv/menhir/production/bin/worker",
+        "/srv/menhir/production/bin/candidate-deploy",
+        "/srv/menhir/production/bin/candidate-accept",
+        "/srv/menhir/production/bin/backup",
+        "/srv/menhir/production/bin/restore-rehearsal",
+        "/srv/menhir/production/bin/restore-production",
+        "/srv/menhir/production/bin/promote",
+        "/srv/menhir/production/bin/rollback",
     ):
         assert path in snapshot + source[source.index("retired_caddy_units=("):source.index("fsync_directory() {")]
-        assert path in retirement or "${retired_caddy_" in retirement
+    assert 'for unit in "${retired_units[@]}"' in retirement
+    assert 'for path in "${retired_scripts[@]}"' in retirement
+    assert 'for path in "${retired_caddy_routes[@]}"' in retirement
+
+
+def test_installer_refuses_active_transient_worker_before_lane_retirement() -> None:
+    source = MODULE_PATH.with_name("release-install.sh").read_text(encoding="ascii")
+    guard = source[
+        source.index("assert_no_active_legacy_workers() {"):
+        source.index("retire_obsolete_writers() {")
+    ]
+    stop_gateway = source.index("systemctl stop menhir-oauth-operations.service")
+    first_guard = source.index("assert_no_active_legacy_workers\n", stop_gateway)
+    retirement_phase = source.index("journal_action phase retiring-caddy", first_guard)
+    second_guard = source.index("assert_no_active_legacy_workers\n", retirement_phase)
+    retire = source.index("retire_obsolete_writers\n", second_guard)
+
+    assert "systemctl list-units --type=service" in guard
+    assert "--state=activating,active,reloading,deactivating" in guard
+    assert "'menhir-op-*.service'" in guard
+    assert "return 75" in guard
+    assert stop_gateway < first_guard < retirement_phase < second_guard < retire
+    retirement = source[source.index("retire_obsolete_writers() {"):]
+    template_branch = retirement.split('if [[ "$unit" == *@.service ]]', 1)[1].split(
+        "else", 1
+    )[0]
+    assert "disable --now" not in template_branch
+    assert "systemctl stop" not in template_branch
+    assert 'masked-runtime) systemctl unmask --runtime "$unit"' in template_branch
+
+
+def test_installer_restores_exact_template_unit_file_state_on_rollback() -> None:
+    source = MODULE_PATH.with_name("release-install.sh").read_text(encoding="ascii")
+    arrays = source[
+        source.index("retired_gateway_units=("):
+        source.index("fsync_directory() {")
+    ]
+    snapshot = source[source.index("snapshot_unit() {"):source.index("create_snapshot() {")]
+    restore = source[
+        source.index("restore_unit_enablement() {"):
+        source.index("rollback_install() {")
+    ]
+    rollback = source[source.index("rollback_install() {"):source.index("finish_install() {")]
+
+    assert "menhir-op@.service" in arrays
+    for property_name in ("LoadState", "UnitFileState", "ActiveState", "SubState"):
+        assert f"--property={property_name}" in snapshot
+        assert property_name in restore
+    for state in ("enabled", "enabled-runtime", "masked", "masked-runtime"):
+        assert state in restore
+    assert '[[ "$unit" == *@.service ]]' in restore
+    assert '[ "$state" = inactive ]' in restore
+    assert 'for unit in "${retired_units[@]}"' in rollback
+    assert 'systemctl unmask --runtime "$unit"' in rollback
+    assert 'restore_unit_enablement "$unit"' in rollback
+    assert 'restore_unit_activity "$unit"' in rollback
+    assert "verify_restored_units" in rollback
 
 
 def test_installer_journals_and_fsyncs_each_mutation_boundary() -> None:
@@ -456,7 +521,7 @@ def test_installer_journals_and_fsyncs_each_mutation_boundary() -> None:
     ):
         assert durability_step in journal
     assert source.index("journal_action phase retiring-caddy") \
-        < source.index("retire_caddy_writers\n")
+        < source.index("retire_obsolete_writers\n")
     assert source.index("journal_action phase installing") \
         < source.index('install -o root -g root -m "$mode" "$source" "$temporary"')
     verifying = source.index("journal_action phase verifying")
@@ -475,7 +540,7 @@ def test_crash_in_any_mutating_phase_recovers_without_rebaselining(
     crash_phase: str,
 ) -> None:
     source = MODULE_PATH.with_name("release-install.sh").read_text(encoding="ascii")
-    retirement = source.index("retire_caddy_writers() {")
+    retirement = source.index("retire_obsolete_writers() {")
     recovery_start = source.rindex('case "$phase" in', 0, retirement)
     recovery = source[recovery_start:retirement]
     crash_arm = "armed|retiring-caddy|installing|verifying|rolling-back)"
@@ -503,7 +568,7 @@ def test_failure_trap_and_rolled_back_retry_are_idempotent() -> None:
     source = MODULE_PATH.with_name("release-install.sh").read_text(encoding="ascii")
     rollback = source[source.index("rollback_install() {"):source.index("finish_install() {")]
     finish = source[source.index("finish_install() {"):source.index("archive_terminal_transaction() {")]
-    retirement = source.index("retire_caddy_writers() {")
+    retirement = source.index("retire_obsolete_writers() {")
     recovery_start = source.rindex('case "$phase" in', 0, retirement)
     recovery = source[recovery_start:retirement]
     retry = recovery[recovery.index("rolled-back)"):recovery.index("committed)")]
@@ -571,6 +636,34 @@ def test_installer_excludes_obsolete_release_run_sudo_wrapper() -> None:
     )
     assert "\n/srv/menhir/production/bin/release-run\n" not in source
     assert "\n/srv/menhir/production/bin/release-run.sh\n" in source
+
+
+def test_clean_install_excludes_obsolete_gateway_lane_but_keeps_canonical_scripts() -> None:
+    source = MODULE_PATH.with_name("release-install.sh").read_text(encoding="ascii")
+    allowlist = source.split('allowed = frozenset(line for line in """\n', 1)[1].split(
+        '\n""".splitlines()', 1
+    )[0]
+    for obsolete in (
+        "/etc/systemd/system/menhir-op@.service",
+        "/srv/menhir/production/bin/worker",
+        "/srv/menhir/production/bin/candidate-deploy",
+        "/srv/menhir/production/bin/candidate-accept",
+        "/srv/menhir/production/bin/backup",
+        "/srv/menhir/production/bin/restore-rehearsal",
+        "/srv/menhir/production/bin/restore-production",
+        "/srv/menhir/production/bin/promote",
+        "/srv/menhir/production/bin/rollback",
+    ):
+        assert obsolete not in allowlist.splitlines()
+    for authoritative in (
+        "/srv/menhir/production/bin/release-run.sh",
+        "/srv/menhir/production/bin/backup-generation.sh",
+        "/srv/menhir/production/bin/candidate-deploy.sh",
+        "/srv/menhir/production/bin/candidate-accept.sh",
+        "/srv/menhir/production/bin/promote.sh",
+        "/srv/menhir/production/bin/rollback.sh",
+    ):
+        assert authoritative in allowlist.splitlines()
 
 
 def test_installer_mode_policy_matches_bundle_builder() -> None:

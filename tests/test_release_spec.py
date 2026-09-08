@@ -291,7 +291,7 @@ def release_fixture(tmp_path: Path, monkeypatch):
         "clients": {
             "client-id": {
                 "tier": "operator",
-                "scopes": ["menhir:read", "menhir:write"],
+                "scopes": ["menhir:read"],
                 "tools": ["menhir_status"],
             }
         },
@@ -619,6 +619,30 @@ def test_refuses_operations_policy_schema_drift(release_fixture) -> None:
         MODULE.prepare_release_spec(fixture["inputs_path"], fixture["output"])
 
 
+@pytest.mark.parametrize(
+    "tool",
+    [
+        "menhir_candidate_deploy",
+        "menhir_candidate_accept",
+        "menhir_backup_submit",
+        "menhir_restore_rehearsal_submit",
+        "menhir_restore_production_submit",
+        "menhir_caddy_route_apply",
+        "menhir_caddy_route_rollback",
+        "menhir_promote",
+        "menhir_rollback",
+    ],
+)
+def test_refuses_operations_policy_removed_mutation_tools(
+    release_fixture, tool: str
+) -> None:
+    fixture = release_fixture
+    fixture["operations"]["clients"]["client-id"]["tools"].append(tool)
+    _write_json(fixture["operations_path"], fixture["operations"])
+    with pytest.raises(MODULE.ReleaseSpecError, match="removed or unknown"):
+        MODULE.prepare_release_spec(fixture["inputs_path"], fixture["output"])
+
+
 def test_refuses_installed_artifact_mapping_drift(
     release_fixture, monkeypatch
 ) -> None:
@@ -638,15 +662,27 @@ def test_artifact_source_exceptions_match_proven_release_layout() -> None:
         "repository": "yawn_vps",
         "path": "ops/menhir/bin/verify_python_runtime.py",
     }
-    for name in (
-        "menhir-oauth-operations.service",
-        "menhir-op@.service",
-    ):
+    for name in ("menhir-oauth-operations.service",):
         assert MODULE.ARTIFACT_SOURCES[f"/etc/systemd/system/{name}"] == {
             "kind": "git",
             "repository": "yawn_vps",
             "path": f"ops/menhir/systemd/{name}",
         }
+
+
+def test_obsolete_gateway_lane_has_no_release_source_mapping() -> None:
+    obsolete = {
+        "/etc/systemd/system/menhir-op@.service",
+        "/srv/menhir/production/bin/worker",
+        "/srv/menhir/production/bin/candidate-deploy",
+        "/srv/menhir/production/bin/candidate-accept",
+        "/srv/menhir/production/bin/backup",
+        "/srv/menhir/production/bin/restore-rehearsal",
+        "/srv/menhir/production/bin/restore-production",
+        "/srv/menhir/production/bin/promote",
+        "/srv/menhir/production/bin/rollback",
+    }
+    assert obsolete.isdisjoint(MODULE.ARTIFACT_SOURCES)
 
 
 @pytest.mark.parametrize("field", ["digest", "ref"])

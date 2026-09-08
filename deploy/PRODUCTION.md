@@ -127,9 +127,15 @@ does not rebuild or re-review it.
 ## One-time scaffold and routine verification
 
 Host users/groups, fixed directories, networks, backup identity, secret ownership,
-systemd units, sudoers, Cloudflared topology, operations gateway, a read-only admission
+systemd units, read-only sudoers, Cloudflared topology, inspection gateway, a read-only admission
 audit, desktop archival, and restore evidence are scaffolded once. Successful
 bootstrap writes a root-owned receipt binding that host contract.
+
+The dedicated OAuth gateway is inspection-only: release inspect, status, logs,
+backup status, and generation inspect. It has no mutation tools or write sudo
+authorization. Production mutation remains solely under the canonical Menhir
+release/admission authority; the authoritative root-only implementation scripts
+remain installed and are not callable through the gateway.
 
 Scaffold convergence starts from the exact reviewed repository root. The operator passes that root
 as `SourceRoot`; it must not pass `deploy/scaffold`, because the fixed source map also includes
@@ -137,6 +143,11 @@ as `SourceRoot`; it must not pass `deploy/scaffold`, because the fixed source ma
 authorized root SSH bootstrap endpoint, acquire the shared admission lock and then the production
 mutation lock, and leave one durable `active-install` recovery target if interrupted. Desktop
 archive scheduling is a separate backup phase, not a side effect of convergence.
+Old hosts are upgraded only through the release installer's durable transaction.
+After both canonical locks are held it stops the gateway, refuses if any active
+`menhir-op-*` transient worker remains, snapshots and removes the obsolete unit
+template/worker/public submit wrappers, verifies absence, and restores exact prior
+files and template state on rollback or recovery.
 
 Every deployment verifies the receipt and referenced files, permissions, service
 health, and digests. Verification must be read-only and fast. It does not recreate

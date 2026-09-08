@@ -26,19 +26,15 @@ release_destination = "/srv/menhir/production/release/release.json"
 allowed = frozenset(line for line in """
 /etc/sudoers.d/menhir-production
 /etc/systemd/system/menhir-oauth-operations.service
-/etc/systemd/system/menhir-op@.service
 /etc/tmpfiles.d/menhir-production.conf
 /etc/yawn-vps/menhir-oauth-policy.json
 /etc/yawn-vps/menhir-oauth-public.pem
 /etc/yawn-vps/menhir-python-runtime.sha256
 /srv/menhir/production/bin/authority_digest.py
-/srv/menhir/production/bin/backup
 /srv/menhir/production/bin/backup-status
 /srv/menhir/production/bin/backup-generation.sh
 /srv/menhir/production/bin/backup_cleanup_txn.py
-/srv/menhir/production/bin/candidate-accept
 /srv/menhir/production/bin/candidate-accept.sh
-/srv/menhir/production/bin/candidate-deploy
 /srv/menhir/production/bin/candidate-deploy.sh
 /srv/menhir/production/bin/generation-inspect
 /srv/menhir/production/bin/lib.sh
@@ -46,18 +42,14 @@ allowed = frozenset(line for line in """
 /srv/menhir/production/bin/make_manifest.py
 /srv/menhir/production/bin/mcp_acceptance_probe.py
 /srv/menhir/production/bin/menhir_schema.py
-/srv/menhir/production/bin/promote
 /srv/menhir/production/bin/promote.sh
 /srv/menhir/production/bin/recover
 /srv/menhir/production/bin/release-inspect
 /srv/menhir/production/bin/release-lib.sh
 /srv/menhir/production/bin/release-validate.sh
 /srv/menhir/production/bin/release-run.sh
-/srv/menhir/production/bin/restore-production
-/srv/menhir/production/bin/restore-rehearsal
 /srv/menhir/production/bin/restore-generation.sh
 /srv/menhir/production/bin/restore_authority_txn.py
-/srv/menhir/production/bin/rollback
 /srv/menhir/production/bin/rollback.sh
 /srv/menhir/production/bin/secrets-map.sh
 /srv/menhir/production/bin/same-host-fence.sh
@@ -68,7 +60,6 @@ allowed = frozenset(line for line in """
 /srv/menhir/production/bin/validate_durable_inventory.py
 /srv/menhir/production/bin/verify-artifacts
 /srv/menhir/production/bin/verify_python_runtime.py
-/srv/menhir/production/bin/worker
 /srv/menhir/production/deploy/Dockerfile
 /srv/menhir/production/deploy/docker-compose.production.yml
 /srv/menhir/production/deploy/durable-state-inventory.json
@@ -344,6 +335,21 @@ retired_caddy_scripts=(
 retired_caddy_routes=(
     /srv/yawn/releases/menhir-route-candidate
 )
+retired_gateway_units=(
+    menhir-op@.service
+)
+retired_gateway_scripts=(
+    /srv/menhir/production/bin/worker
+    /srv/menhir/production/bin/candidate-deploy
+    /srv/menhir/production/bin/candidate-accept
+    /srv/menhir/production/bin/backup
+    /srv/menhir/production/bin/restore-rehearsal
+    /srv/menhir/production/bin/restore-production
+    /srv/menhir/production/bin/promote
+    /srv/menhir/production/bin/rollback
+)
+retired_units=("${retired_caddy_units[@]}" "${retired_gateway_units[@]}")
+retired_scripts=("${retired_caddy_scripts[@]}" "${retired_gateway_scripts[@]}")
 
 fsync_directory() {
     python3 - "$1" <<'PY'
@@ -529,16 +535,16 @@ validate_destination_parents() {
             }
         done
     done
-    for destination in "${retired_caddy_units[@]}"; do
+    for destination in "${retired_units[@]}"; do
         current="/etc/systemd/system/${destination}"
         [ ! -d "$current" ] || {
-            echo "retired Caddy unit path is a directory: $current" >&2
+            echo "retired unit path is a directory: $current" >&2
             return 1
         }
     done
-    for destination in "${retired_caddy_scripts[@]}"; do
+    for destination in "${retired_scripts[@]}"; do
         [ ! -d "$destination" ] || {
-            echo "retired Caddy script path is a directory: $destination" >&2
+            echo "retired script path is a directory: $destination" >&2
             return 1
         }
     done
@@ -560,13 +566,13 @@ snapshot_unit() {
     systemctl show "$unit" --property=LoadState --property=UnitFileState \
         --property=ActiveState --property=SubState > "$target"
     grep -Eq '^LoadState=(loaded|not-found|masked)$' "$target" \
-        || { echo "cannot capture Caddy unit load state: $unit" >&2; return 1; }
-    grep -Eq '^UnitFileState=(|alias|disabled|enabled|enabled-runtime|indirect|linked|linked-runtime|masked|masked-runtime|static)$' "$target" \
-        || { echo "cannot capture Caddy unit enablement: $unit" >&2; return 1; }
+        || { echo "cannot capture retired unit load state: $unit" >&2; return 1; }
+    grep -Eq '^UnitFileState=(|disabled|enabled|enabled-runtime|masked|masked-runtime|static)$' "$target" \
+        || { echo "cannot capture retired unit enablement: $unit" >&2; return 1; }
     grep -Eq '^ActiveState=(active|inactive)$' "$target" \
-        || { echo "refusing unstable Caddy unit state: $unit" >&2; return 1; }
+        || { echo "refusing unstable retired unit state: $unit" >&2; return 1; }
     grep -Eq '^SubState=[A-Za-z0-9_-]+$' "$target" \
-        || { echo "cannot capture Caddy unit substate: $unit" >&2; return 1; }
+        || { echo "cannot capture retired unit substate: $unit" >&2; return 1; }
 }
 
 create_snapshot() {
@@ -579,17 +585,17 @@ create_snapshot() {
         snapshot_path "install-${index}" "$destination" file
         index=$((index + 1))
     done < "$install_plan"
-    for unit in "${retired_caddy_units[@]}"; do
-        snapshot_path "caddy-${index}" "/etc/systemd/system/${unit}" file
+    for unit in "${retired_units[@]}"; do
+        snapshot_path "retired-${index}" "/etc/systemd/system/${unit}" file
         index=$((index + 1))
         snapshot_unit "$unit"
     done
-    for path in "${retired_caddy_scripts[@]}"; do
-        snapshot_path "caddy-${index}" "$path" file
+    for path in "${retired_scripts[@]}"; do
+        snapshot_path "retired-${index}" "$path" file
         index=$((index + 1))
     done
     for path in "${retired_caddy_routes[@]}"; do
-        snapshot_path "caddy-${index}" "$path" tree
+        snapshot_path "retired-${index}" "$path" tree
         index=$((index + 1))
     done
     fsync_tree "$snapshot_root"
@@ -610,29 +616,34 @@ restore_unit_enablement() {
         enabled-runtime) systemctl enable --runtime "$unit" ;;
         masked) systemctl mask "$unit" ;;
         masked-runtime) systemctl mask --runtime "$unit" ;;
-        ""|alias|disabled|indirect|linked|linked-runtime|static) ;;
-        *) echo "cannot restore Caddy unit-file state $state for $unit" >&2; return 1 ;;
+        ""|disabled|static) ;;
+        *) echo "cannot restore retired unit-file state $state for $unit" >&2; return 1 ;;
     esac
 }
 
 restore_unit_activity() {
     local unit="$1" state
     state="$(unit_property "$unit" ActiveState)"
+    if [[ "$unit" == *@.service ]]; then
+        [ "$state" = inactive ] \
+            || { echo "retired template unexpectedly had active state $state: $unit" >&2; return 1; }
+        return 0
+    fi
     case "$state" in
         active) systemctl start "$unit" ;;
         inactive) systemctl stop "$unit" ;;
-        *) echo "cannot restore Caddy active state $state for $unit" >&2; return 1 ;;
+        *) echo "cannot restore retired unit active state $state for $unit" >&2; return 1 ;;
     esac
 }
 
 verify_restored_units() {
     local unit property expected actual
-    for unit in "${retired_caddy_units[@]}"; do
+    for unit in "${retired_units[@]}"; do
         for property in LoadState UnitFileState ActiveState SubState; do
             expected="$(unit_property "$unit" "$property")"
             actual="$(systemctl show "$unit" --property="$property" --value)"
             [ "$actual" = "$expected" ] || {
-                echo "restored Caddy unit $unit $property differs: expected $expected, got $actual" >&2
+                echo "restored retired unit $unit $property differs: expected $expected, got $actual" >&2
                 return 1
             }
         done
@@ -644,10 +655,15 @@ rollback_install() {
     transaction_step="rolling back installation"
     journal_action phase rolling-back || return 1
     set +e
-    for unit in "${retired_caddy_units[@]}"; do
-        systemctl disable --now "$unit" >/dev/null 2>&1 || true
-        systemctl stop "$unit" >/dev/null 2>&1 || true
+    for unit in "${retired_units[@]}"; do
+        if [[ "$unit" == *@.service ]]; then
+            systemctl disable "$unit" >/dev/null 2>&1 || true
+        else
+            systemctl disable --now "$unit" >/dev/null 2>&1 || true
+            systemctl stop "$unit" >/dev/null 2>&1 || true
+        fi
         systemctl unmask "$unit" >/dev/null 2>&1 || true
+        systemctl unmask --runtime "$unit" >/dev/null 2>&1 || true
     done
     while IFS=$'\t' read -r key destination policy; do
         [ -n "$destination" ] || continue
@@ -678,10 +694,10 @@ rollback_install() {
         fi
     done < "$snapshot_entries"
     systemctl daemon-reload || failed=1
-    for unit in "${retired_caddy_units[@]}"; do
+    for unit in "${retired_units[@]}"; do
         restore_unit_enablement "$unit" || failed=1
     done
-    for unit in "${retired_caddy_units[@]}"; do
+    for unit in "${retired_units[@]}"; do
         restore_unit_activity "$unit" || failed=1
     done
     verify_restored_units || failed=1
@@ -738,16 +754,16 @@ validate_snapshot_census() {
         printf 'install-%s\t%s\tfile\n' "$index" "$destination" >> "$expected_entries"
         index=$((index + 1))
     done < "$install_plan"
-    for unit in "${retired_caddy_units[@]}"; do
-        printf 'caddy-%s\t/etc/systemd/system/%s\tfile\n' "$index" "$unit" >> "$expected_entries"
+    for unit in "${retired_units[@]}"; do
+        printf 'retired-%s\t/etc/systemd/system/%s\tfile\n' "$index" "$unit" >> "$expected_entries"
         index=$((index + 1))
     done
-    for path in "${retired_caddy_scripts[@]}"; do
-        printf 'caddy-%s\t%s\tfile\n' "$index" "$path" >> "$expected_entries"
+    for path in "${retired_scripts[@]}"; do
+        printf 'retired-%s\t%s\tfile\n' "$index" "$path" >> "$expected_entries"
         index=$((index + 1))
     done
     for path in "${retired_caddy_routes[@]}"; do
-        printf 'caddy-%s\t%s\ttree\n' "$index" "$path" >> "$expected_entries"
+        printf 'retired-%s\t%s\ttree\n' "$index" "$path" >> "$expected_entries"
         index=$((index + 1))
     done
     if ! cmp -s -- "$expected_entries" "$snapshot_entries"; then
@@ -774,27 +790,27 @@ validate_snapshot_census() {
             *) echo "install snapshot state is invalid: $destination" >&2; return 1 ;;
         esac
     done < "$snapshot_entries"
-    for unit in "${retired_caddy_units[@]}"; do
+    for unit in "${retired_units[@]}"; do
         require_safe_root_file "${snapshot_root}/units/${unit}.state" \
-            "Caddy unit snapshot" || return 1
+            "retired unit snapshot" || return 1
     done
 }
 
-verify_caddy_retired() {
+verify_obsolete_writers_retired() {
     local unit path load_state active_state sub_state
-    for unit in "${retired_caddy_units[@]}"; do
+    for unit in "${retired_units[@]}"; do
         path="/etc/systemd/system/${unit}"
         [ ! -e "$path" ] && [ ! -L "$path" ] \
-            || { echo "retired Caddy writer definition remains present: $path" >&2; return 1; }
+            || { echo "retired writer definition remains present: $path" >&2; return 1; }
         load_state="$(systemctl show "$unit" --property=LoadState --value)"
         active_state="$(systemctl show "$unit" --property=ActiveState --value)"
         sub_state="$(systemctl show "$unit" --property=SubState --value)"
         [ "$load_state" = not-found ] && [ "$active_state" = inactive ] && [ "$sub_state" = dead ] \
-            || { echo "retired Caddy writer remains loaded or active: $unit" >&2; return 1; }
+            || { echo "retired writer remains loaded or active: $unit" >&2; return 1; }
     done
-    for path in "${retired_caddy_scripts[@]}" "${retired_caddy_routes[@]}"; do
+    for path in "${retired_scripts[@]}" "${retired_caddy_routes[@]}"; do
         [ ! -e "$path" ] && [ ! -L "$path" ] \
-            || { echo "retired Caddy state remains present: $path" >&2; return 1; }
+            || { echo "retired writer state remains present: $path" >&2; return 1; }
     done
 }
 
@@ -868,7 +884,7 @@ case "$phase" in
         ;;
     committed)
         validate_snapshot_census
-        verify_caddy_retired
+        verify_obsolete_writers_retired
         python3 /srv/menhir/production/bin/menhir_schema.py \
             validate-release /srv/menhir/production/release/release.json
         /srv/menhir/production/bin/verify-artifacts
@@ -885,43 +901,73 @@ esac
 validate_snapshot_census
 transaction_active=1
 
-retire_caddy_writers() {
-    local unit path parent load_state active_state sub_state
-    for unit in "${retired_caddy_units[@]}"; do
+assert_no_active_legacy_workers() {
+    local active_units
+    active_units="$(systemctl list-units --type=service \
+        --state=activating,active,reloading,deactivating \
+        --plain --no-legend --no-pager 'menhir-op-*.service')"
+    [ -z "$active_units" ] || {
+        echo "active legacy Menhir transient worker blocks lane retirement" >&2
+        printf '%s\n' "$active_units" >&2
+        return 75
+    }
+}
+
+retire_obsolete_writers() {
+    local unit path parent load_state unit_file_state active_state sub_state
+    for unit in "${retired_units[@]}"; do
         load_state="$(systemctl show "$unit" --property=LoadState --value)"
         active_state="$(systemctl show "$unit" --property=ActiveState --value)"
         sub_state="$(systemctl show "$unit" --property=SubState --value)"
         if [ "$load_state" = "not-found" ]; then
             if [ "$active_state" != "inactive" ] || [ "$sub_state" != "dead" ]; then
-                echo "definition-free Caddy writer remains active: $unit" >&2
+                echo "definition-free retired writer remains active: $unit" >&2
                 return 1
             fi
             continue
         fi
-        systemctl disable --now "$unit"
+        if [[ "$unit" == *@.service ]]; then
+            unit_file_state="$(systemctl show "$unit" --property=UnitFileState --value)"
+            case "$unit_file_state" in
+                enabled) systemctl disable "$unit" ;;
+                enabled-runtime) systemctl disable --runtime "$unit" ;;
+                masked-runtime) systemctl unmask --runtime "$unit" ;;
+                ""|disabled|masked|static) ;;
+                *) echo "cannot disable retired template state $unit_file_state: $unit" >&2; return 1 ;;
+            esac
+        else
+            systemctl disable --now "$unit"
+        fi
         active_state="$(systemctl show "$unit" --property=ActiveState --value)"
         sub_state="$(systemctl show "$unit" --property=SubState --value)"
         if [ "$active_state" != "inactive" ] || [ "$sub_state" != "dead" ]; then
-            echo "retired Caddy writer did not stop cleanly: $unit" >&2
+            echo "retired writer did not stop cleanly: $unit" >&2
             return 1
         fi
     done
 
-    for unit in "${retired_caddy_units[@]}"; do
+    for unit in "${retired_units[@]}"; do
         rm -f -- "/etc/systemd/system/${unit}"
     done
-    for path in "${retired_caddy_scripts[@]}"; do
+    for path in "${retired_scripts[@]}"; do
         rm -f -- "$path"
     done
     for path in "${retired_caddy_routes[@]}"; do rm -rf -- "$path"; done
     systemctl daemon-reload
-    verify_caddy_retired
+    verify_obsolete_writers_retired
 }
 
-transaction_step="retiring legacy Caddy writers"
+transaction_step="quiescing obsolete Menhir mutation gateway"
+if [ "$operations_was_active" -eq 1 ]; then
+    systemctl stop menhir-oauth-operations.service
+fi
+assert_no_active_legacy_workers
+
+transaction_step="retiring obsolete production writers"
 journal_action phase retiring-caddy
 assert_maintenance
-retire_caddy_writers
+assert_no_active_legacy_workers
+retire_obsolete_writers
 
 transaction_step="installing release artifacts"
 assert_maintenance
@@ -948,7 +994,7 @@ systemctl daemon-reload
 python3 /srv/menhir/production/bin/menhir_schema.py \
     validate-release /srv/menhir/production/release/release.json
 /srv/menhir/production/bin/verify-artifacts
-verify_caddy_retired
+verify_obsolete_writers_retired
 if [ "$operations_was_active" -eq 1 ]; then
     systemctl restart menhir-oauth-operations.service
     systemctl is-active --quiet menhir-oauth-operations.service

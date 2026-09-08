@@ -485,9 +485,23 @@ security-config. That fence remains owned through installation, backup, cutover 
 acceptance; every lane refuses a conflicting owner or incomplete transaction.
 
 For maintenance installs, the bundle installer reloads systemd definitions and
-restarts the operations gateway only when it was already active. A failed activation restores the prior files, reloads the
-restored definitions, and attempts to return those services to their prior
-active state before failing the deployment.
+restarts the read-only operations gateway only when it was already active. An
+upgrade from an older host retires Yawn's alternate mutation lane inside this
+same durable transaction: after the canonical admission and mutation locks are
+held, the gateway is stopped and any active `menhir-op-*` transient worker
+causes a fail-closed refusal. The installer snapshots, disables, and removes
+`menhir-op@.service`, `worker`, and the public `candidate-deploy`,
+`candidate-accept`, `backup`, `restore-rehearsal`, `restore-production`,
+`promote`, and `rollback` wrappers. Verification requires their absence. On
+rollback or crash recovery, their exact prior files and template unit-file/
+activity state are restored before the former gateway state is resumed. Never
+delete these artifacts outside the install journal.
+
+Clean-host bundles do not contain that obsolete lane. The dedicated OAuth MCP
+exposes only `menhir_release_inspect`, `menhir_status`, `menhir_logs`,
+`menhir_backup_status`, and `menhir_generation_inspect`; its sudoers destination
+contains read authorization only. The root-only `*.sh` implementation scripts,
+including `release-run.sh`, remain installed for Menhir's canonical authority.
 
 ## After product release or personal promotion
 

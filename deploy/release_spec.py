@@ -77,6 +77,13 @@ OPERATIONS_POLICY_KEYS = frozenset({
     "schema", "issuer", "audience", "base_url", "clients",
 })
 OPERATIONS_CLIENT_KEYS = frozenset({"tier", "scopes", "tools"})
+OPERATIONS_POLICY_TOOLS = frozenset({
+    "menhir_release_inspect",
+    "menhir_status",
+    "menhir_logs",
+    "menhir_backup_status",
+    "menhir_generation_inspect",
+})
 RELEASE_ID_RE = re.compile(r"^menhir-prod-[0-9]+\.[0-9]+\.[0-9]+-[0-9]+$")
 AUTHOR_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._@+-]{0,127}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -164,10 +171,8 @@ ARTIFACT_SOURCES: dict[str, dict[str, str]] = {
     ),
 }
 for _name in (
-    "backup", "backup-status", "candidate-accept", "candidate-deploy",
-    "generation-inspect", "lib.sh", "logs", "promote", "recover",
-    "release-inspect", "restore-production",
-    "restore-rehearsal", "rollback", "status", "verify-artifacts", "worker",
+    "backup-status", "generation-inspect", "lib.sh", "logs", "recover",
+    "release-inspect", "status", "verify-artifacts",
 ):
     ARTIFACT_SOURCES[f"/srv/menhir/production/bin/{_name}"] = _git(
         "yawn_vps", f"ops/menhir/bin/{_name}"
@@ -193,9 +198,7 @@ for _name in (
 ARTIFACT_SOURCES["/srv/menhir/production/bin/verify_python_runtime.py"] = _git(
     "yawn_vps", "ops/menhir/bin/verify_python_runtime.py"
 )
-for _name in (
-    "menhir-oauth-operations.service", "menhir-op@.service",
-):
+for _name in ("menhir-oauth-operations.service",):
     ARTIFACT_SOURCES[f"/etc/systemd/system/{_name}"] = _git(
         "yawn_vps", f"ops/menhir/systemd/{_name}"
     )
@@ -752,6 +755,12 @@ def _validate_operations_policy(value: dict[str, Any]) -> None:
                 raise ReleaseSpecError(
                     f"operations policy client {field} must be unique strings"
                 )
+        unknown_tools = set(client["tools"]) - OPERATIONS_POLICY_TOOLS
+        if unknown_tools:
+            raise ReleaseSpecError(
+                "operations policy names removed or unknown Menhir tools: "
+                + ", ".join(sorted(unknown_tools))
+            )
     _reject_secret_material(policy, "operations policy")
 
 

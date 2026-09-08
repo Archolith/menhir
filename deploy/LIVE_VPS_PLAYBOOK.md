@@ -437,8 +437,17 @@ drill, absence of candidate/maintenance state, and public production readiness.
    `/srv/menhir/production/release/release.json`, root-owned and not writable by
    group or other.
 8. Run `/srv/menhir/production/bin/verify-artifacts`, enable the dedicated Menhir
-   operations gateway, install the read-only admission-audit timer and desktop-archive
-   job, and write a root-owned scaffold receipt binding the installed host contract.
+   read-only operations gateway, install the read-only admission-audit timer and
+   desktop-archive job, and write a root-owned scaffold receipt binding the installed
+   host contract. The gateway exposes only release/status/log/backup-status/generation
+   inspection. Do not install `menhir-op@.service`, `worker`, or the public submit
+   wrappers; production mutation belongs only to the canonical release/admission path.
+
+When upgrading a host that still has the obsolete Yawn lane, use the release bundle
+installer. It refuses to proceed while any active `menhir-op-*` transient worker
+exists, then snapshots and retires the template, worker, and submit wrappers inside
+its crash-safe journal. Rollback/recovery restores their exact prior files and
+template unit state. Manual deletion is outside the supported recovery boundary.
 
 Neo4j Community provides offline `dump`, not online `backup`. Therefore
 `backup-generation.sh` remains an explicit maintenance operation: it quiesces the
