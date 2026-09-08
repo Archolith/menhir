@@ -15,6 +15,12 @@ SPEC = importlib.util.spec_from_file_location("release_spec", MODULE_PATH)
 assert SPEC and SPEC.loader
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
+VERIFY_GITHUB_ATTESTATION = MODULE._verify_github_attestation
+
+
+@pytest.fixture(autouse=True)
+def _verified_attestation(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(MODULE, "_verify_github_attestation", lambda **_kwargs: None)
 
 
 def _canonical_digest(value: dict) -> str:
@@ -127,6 +133,7 @@ def _image_publication_bundle(
     metadata = root / "release-image-metadata.json"
     _write_json(metadata, {
         "schema": 3,
+        "source_repository": MODULE.CANONICAL_GITHUB_REPOSITORY,
         "source_commit": commit,
         "image_tag": image_tag,
         "image_id": image_id,
@@ -144,6 +151,7 @@ def _image_publication_bundle(
     identity = root / "release-image-identity.json"
     _write_json(identity, {
         "schema": 2,
+        "source_repository": MODULE.CANONICAL_GITHUB_REPOSITORY,
         "source_commit": commit,
         "image_tag": image_tag,
         "image_id": image_id,
@@ -165,6 +173,7 @@ def _image_publication_bundle(
     candidate_tag = f"{repository}:candidate-{archive_sha}"
     _write_json(publication, {
         "schema": 2,
+        "source_repository": MODULE.CANONICAL_GITHUB_REPOSITORY,
         "validation_identity_sha256": MODULE._sha256(identity),
         "source_commit": commit,
         "image_tag": image_tag,
@@ -181,6 +190,10 @@ def _image_publication_bundle(
             "vulnerability_scan": evidence["vulnerability_scan"]["sha256"],
         },
     })
+    attestation = root / "release-image-publication.attestation.json"
+    attestation.write_bytes(b'{"signed":"test fixture"}\n')
+    trusted_root = root / "release-image-attestation-trusted-root.jsonl"
+    trusted_root.write_bytes(b'{"trusted":"test fixture"}\n')
     return {
         "sbom": str(sbom.resolve()),
         "scan": str(scan.resolve()),
@@ -188,6 +201,8 @@ def _image_publication_bundle(
         "image_metadata": str(metadata.resolve()),
         "image_identity": str(identity.resolve()),
         "image_archive": str(archive.resolve()),
+        "publication_attestation": str(attestation.resolve()),
+        "attestation_trusted_root": str(trusted_root.resolve()),
     }
 
 
@@ -402,6 +417,7 @@ def test_prepares_deterministic_release_author_spec(release_fixture) -> None:
         ("registry_digest", "sha256:" + "f" * 64, "registry digest"),
         ("image_ref", "ghcr.io/attacker/menhir@sha256:" + "3" * 64, "image_ref"),
         ("validation_identity_sha256", "0" * 64, "validation identity"),
+        ("source_repository", "attacker/menhir", "source repository"),
     ),
 )
 def test_refuses_publication_not_bound_to_release_or_validation_identity(
@@ -415,6 +431,36 @@ def test_refuses_publication_not_bound_to_release_or_validation_identity(
 
     with pytest.raises(MODULE.ReleaseSpecError, match=message):
         MODULE.prepare_release_spec(fixture["inputs_path"], fixture["output"])
+
+
+def test_github_attestation_verifier_pins_repo_workflow_and_source_sha(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[list[str]] = []
+
+    def fake_run(command: list[str], **_kwargs):
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 0, stdout="[]", stderr="")
+
+    monkeypatch.setattr(MODULE.subprocess, "run", fake_run)
+    VERIFY_GITHUB_ATTESTATION(
+        subject=b"publication",
+        bundle=b"signed bundle",
+        trusted_root=b"trusted root",
+        repository=MODULE.CANONICAL_GITHUB_REPOSITORY,
+        source_commit="a" * 40,
+    )
+
+    command = calls[0]
+    assert command[:3] == ["gh", "attestation", "verify"]
+    assert command[command.index("--repo") + 1] == "Archolith/menhir"
+    assert command[command.index("--source-digest") + 1] == "a" * 40
+    assert "--signer-repo" not in command
+    assert command[command.index("--signer-workflow") + 1] == (
+        "Archolith/menhir/.github/workflows/release-image.yml"
+    )
+    assert "--custom-trusted-root" in command
+    assert "--deny-self-hosted-runners" in command
 
 
 def test_refuses_image_archive_not_bound_to_validation_identity(

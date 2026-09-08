@@ -97,12 +97,20 @@ _PRE_INGRESS_RELEASE_TOP_KEYS = _LEGACY_RELEASE_TOP_KEYS | frozenset({
 _PRE_IMAGE_PUBLICATION_RELEASE_TOP_KEYS = (
     _PRE_INGRESS_RELEASE_TOP_KEYS | frozenset({"ingress_mode"})
 )
-_RELEASE_TOP_KEYS = (
+_PRE_IMAGE_REFS_RELEASE_TOP_KEYS = (
     _PRE_IMAGE_PUBLICATION_RELEASE_TOP_KEYS | frozenset({"image_publication"})
 )
-_RELEASE_IMAGE_PUBLICATION_KEYS = frozenset({
+_RELEASE_TOP_KEYS = _PRE_IMAGE_REFS_RELEASE_TOP_KEYS | frozenset({"image_refs"})
+_PRE_ATTESTATION_IMAGE_PUBLICATION_KEYS = frozenset({
     "publication_sha256", "validation_identity_sha256", "image_id",
     "config_sha256", "image_archive_sha256", "registry_digest",
+})
+_RELEASE_IMAGE_PUBLICATION_KEYS = frozenset({
+    "publication_sha256", "source_repository", "source_commit",
+    "validation_identity_sha256", "image_id", "config_sha256",
+    "image_archive_sha256", "registry_digest", "sbom_sha256",
+    "scan_evidence_sha256", "attestation_bundle_sha256",
+    "attestation_trusted_root_sha256",
 })
 _RELEASE_SECURITY_REVIEW_KEYS = frozenset({
     "schema", "kind", "review_id", "release_author", "reviewer",
@@ -122,6 +130,7 @@ REQUIRED_SECURITY_REVIEW_SCOPE = frozenset({
 })
 _RELEASE_REPOS = frozenset({"menhir", "archolith_oauth", "yawn_deploy", "yawn_vps"})
 _RELEASE_IMAGES = frozenset({"menhir", "neo4j", "caddy", "base"})
+_RELEASE_IMAGE_REFS = _RELEASE_IMAGES
 _RELEASE_DEPLOYMENT_CLASSES = frozenset({
     "app-only", "security-config", "maintenance",
 })
@@ -459,7 +468,8 @@ def validate_release(path: str) -> dict:
         raise ValueError("release.json must be a JSON object")
     release_keys = set(release)
     if release_keys not in {
-        _RELEASE_TOP_KEYS, _PRE_IMAGE_PUBLICATION_RELEASE_TOP_KEYS,
+        _RELEASE_TOP_KEYS, _PRE_IMAGE_REFS_RELEASE_TOP_KEYS,
+        _PRE_IMAGE_PUBLICATION_RELEASE_TOP_KEYS,
         _PRE_INGRESS_RELEASE_TOP_KEYS, _LEGACY_RELEASE_TOP_KEYS,
     }:
         _require_exact_keys(release, _RELEASE_TOP_KEYS, "release.json")
@@ -472,7 +482,8 @@ def validate_release(path: str) -> dict:
     ):
         raise ValueError("release_author must be a safe bounded identity")
     if release_keys in {
-        _RELEASE_TOP_KEYS, _PRE_IMAGE_PUBLICATION_RELEASE_TOP_KEYS,
+        _RELEASE_TOP_KEYS, _PRE_IMAGE_REFS_RELEASE_TOP_KEYS,
+        _PRE_IMAGE_PUBLICATION_RELEASE_TOP_KEYS,
         _PRE_INGRESS_RELEASE_TOP_KEYS,
     }:
         if release.get("deployment_class") not in _RELEASE_DEPLOYMENT_CLASSES:
@@ -481,7 +492,10 @@ def validate_release(path: str) -> dict:
         _require_sha256(
             release.get("notes_markdown_sha256"), "notes_markdown_sha256"
         )
-    if release_keys in {_RELEASE_TOP_KEYS, _PRE_IMAGE_PUBLICATION_RELEASE_TOP_KEYS} \
+    if release_keys in {
+            _RELEASE_TOP_KEYS, _PRE_IMAGE_REFS_RELEASE_TOP_KEYS,
+            _PRE_IMAGE_PUBLICATION_RELEASE_TOP_KEYS,
+    } \
             and release.get("ingress_mode") not in _RELEASE_INGRESS_MODES:
         raise ValueError("ingress_mode is invalid")
 
@@ -522,10 +536,28 @@ def validate_release(path: str) -> dict:
         _require_digest(images.get(img), "images.%s" % img)
 
     if release_keys == _RELEASE_TOP_KEYS:
+        image_refs = release.get("image_refs")
+        _require_exact_keys(image_refs, _RELEASE_IMAGE_REFS, "image_refs")
+        for image in sorted(_RELEASE_IMAGE_REFS):
+            reference = _require_str(
+                image_refs.get(image), "image_refs.%s" % image
+            )
+            if not reference.endswith("@" + images[image]) \
+                    or not re.fullmatch(
+                        r"[a-z0-9]+(?:[._-][a-z0-9]+)*(?::[0-9]+)?"
+                        r"(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)*"
+                        r"@sha256:[0-9a-f]{64}", reference
+                    ):
+                raise ValueError(
+                    "image_refs.%s must be an immutable matching reference" % image
+                )
+
+    if release_keys in {_RELEASE_TOP_KEYS, _PRE_IMAGE_REFS_RELEASE_TOP_KEYS}:
         image_publication = release.get("image_publication")
         _require_exact_keys(
             image_publication,
-            _RELEASE_IMAGE_PUBLICATION_KEYS,
+            _RELEASE_IMAGE_PUBLICATION_KEYS if release_keys == _RELEASE_TOP_KEYS
+            else _PRE_ATTESTATION_IMAGE_PUBLICATION_KEYS,
             "image_publication",
         )
         _require_sha256(
@@ -555,6 +587,27 @@ def validate_release(path: str) -> dict:
             raise ValueError(
                 "image_publication.registry_digest differs from images.menhir"
             )
+        if release_keys == _RELEASE_TOP_KEYS:
+            if image_publication.get("source_repository") != "Archolith/menhir":
+                raise ValueError(
+                    "image_publication.source_repository is not canonical"
+                )
+            if image_publication.get("source_commit") != repos["menhir"]:
+                raise ValueError(
+                    "image_publication.source_commit differs from repository authority"
+                )
+            for key in (
+                "sbom_sha256", "scan_evidence_sha256",
+                "attestation_bundle_sha256", "attestation_trusted_root_sha256",
+            ):
+                _require_sha256(
+                    image_publication.get(key), "image_publication.%s" % key
+                )
+            if image_publication["sbom_sha256"] != release.get("sbom_sha256"):
+                raise ValueError("image publication SBOM digest differs from release")
+            if image_publication["scan_evidence_sha256"] != release.get(
+                    "scan_evidence_sha256"):
+                raise ValueError("image publication scan digest differs from release")
 
     _require_sha256(release.get("wheel_manifest_sha256"), "wheel_manifest_sha256")
     # Dockerfile wheel-hash manifest is mandatory (blocker 7).

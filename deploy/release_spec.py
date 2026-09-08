@@ -45,20 +45,22 @@ INPUT_KEYS = frozenset({
 EVIDENCE_KEYS = frozenset({
     "wheelhouse", "sbom", "scan", "image_publication",
     "image_metadata", "image_identity", "image_archive",
+    "publication_attestation", "attestation_trusted_root",
 })
 IMAGE_KEYS = frozenset({"digest", "ref"})
 PUBLICATION_KEYS = frozenset({
-    "schema", "validation_identity_sha256", "source_commit", "image_tag",
+    "schema", "source_repository", "validation_identity_sha256",
+    "source_commit", "image_tag",
     "image_id", "config_sha256", "image_archive_sha256",
     "registry_digest", "image_ref", "candidate_tag", "candidate_ref",
     "idempotent_existing_candidate", "evidence",
 })
 IMAGE_METADATA_KEYS = frozenset({
-    "schema", "source_commit", "image_tag", "image_id", "config_sha256",
+    "schema", "source_repository", "source_commit", "image_tag", "image_id", "config_sha256",
     "image_archive_sha256", "python_base", "labels", "evidence",
 })
 IMAGE_IDENTITY_KEYS = frozenset({
-    "schema", "source_commit", "image_tag", "image_id", "config_sha256",
+    "schema", "source_repository", "source_commit", "image_tag", "image_id", "config_sha256",
     "image_archive", "metadata", "evidence",
 })
 IMAGE_LABEL_KEYS = frozenset({
@@ -101,6 +103,7 @@ SECRET_VALUE_RE = re.compile(
     r"\b(?:sk|ghp|github_pat)_[A-Za-z0-9_-]{16,}",
     re.I,
 )
+CANONICAL_GITHUB_REPOSITORY = "Archolith/menhir"
 
 
 def _git(repository: str, path: str) -> dict[str, str]:
@@ -160,7 +163,7 @@ ARTIFACT_SOURCES: dict[str, dict[str, str]] = {
 for _name in (
     "backup", "backup-status", "candidate-accept", "candidate-deploy",
     "generation-inspect", "lib.sh", "logs", "promote", "recover",
-    "release-inspect", "release-run", "restore-production",
+    "release-inspect", "restore-production",
     "restore-rehearsal", "rollback", "status", "verify-artifacts", "worker",
 ):
     ARTIFACT_SOURCES[f"/srv/menhir/production/bin/{_name}"] = _git(
@@ -284,6 +287,45 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _sha256_bytes(value: bytes) -> str:
+    return hashlib.sha256(value).hexdigest()
+
+
+def _capture_bytes(path: Path, label: str) -> bytes:
+    return _regular(path, label).read_bytes()
+
+
+def _verify_github_attestation(
+    *, subject: bytes, bundle: bytes, trusted_root: bytes,
+    repository: str, source_commit: str,
+) -> None:
+    """Cryptographically verify captured publication bytes without network lookup."""
+    with tempfile.TemporaryDirectory(prefix="menhir-attestation-") as temporary:
+        root = Path(temporary)
+        subject_path = root / "release-image-publication.json"
+        bundle_path = root / "publication-attestation.json"
+        trusted_root_path = root / "trusted-root.jsonl"
+        subject_path.write_bytes(subject)
+        bundle_path.write_bytes(bundle)
+        trusted_root_path.write_bytes(trusted_root)
+        command = [
+            "gh", "attestation", "verify", str(subject_path),
+            "--repo", repository,
+            "--bundle", str(bundle_path),
+            "--custom-trusted-root", str(trusted_root_path),
+            "--source-digest", source_commit,
+            "--signer-workflow", f"{repository}/.github/workflows/release-image.yml",
+            "--deny-self-hosted-runners",
+            "--format", "json",
+        ]
+        try:
+            subprocess.run(command, check=True, capture_output=True, text=True)
+        except (OSError, subprocess.CalledProcessError) as exc:
+            raise ReleaseSpecError(
+                "GitHub publication attestation verification failed"
+            ) from exc
+
+
 def _require_sha256(value: Any, label: str, *, prefixed: bool = False) -> str:
     pattern = DIGEST_RE if prefixed else SHA256_RE
     if not isinstance(value, str) or pattern.fullmatch(value) is None:
@@ -300,6 +342,8 @@ def validate_image_publication(
     archive_path: Path,
     sbom_path: Path,
     scan_path: Path,
+    publication_attestation_path: Path,
+    attestation_trusted_root_path: Path,
     menhir_commit: str,
     menhir_digest: str,
     menhir_ref: str,
@@ -309,18 +353,29 @@ def validate_image_publication(
     oauth_wheel_sha256: str,
 ) -> dict[str, str]:
     """Revalidate the complete CI image publication chain for release authoring."""
+    publication_raw = _capture_bytes(publication_path, "image publication")
+    metadata_raw = _capture_bytes(metadata_path, "image validation metadata")
+    identity_raw = _capture_bytes(identity_path, "image validation identity")
+    sbom_raw = _capture_bytes(sbom_path, "SBOM evidence")
+    scan_raw = _capture_bytes(scan_path, "vulnerability scan evidence")
+    attestation_raw = _capture_bytes(
+        publication_attestation_path, "publication attestation bundle"
+    )
+    trusted_root_raw = _capture_bytes(
+        attestation_trusted_root_path, "attestation trusted root"
+    )
     publication = _exact(
-        _load_json(publication_path, "image publication"),
+        _load_json_bytes(publication_raw, "image publication"),
         PUBLICATION_KEYS,
         "image publication",
     )
     metadata = _exact(
-        _load_json(metadata_path, "image validation metadata"),
+        _load_json_bytes(metadata_raw, "image validation metadata"),
         IMAGE_METADATA_KEYS,
         "image validation metadata",
     )
     identity = _exact(
-        _load_json(identity_path, "image validation identity"),
+        _load_json_bytes(identity_raw, "image validation identity"),
         IMAGE_IDENTITY_KEYS,
         "image validation identity",
     )
@@ -331,7 +386,7 @@ def validate_image_publication(
     if identity.get("schema") != 2:
         raise ReleaseSpecError("image validation identity schema must be 2")
 
-    identity_sha = _sha256(identity_path)
+    identity_sha = _sha256_bytes(identity_raw)
     if publication.get("validation_identity_sha256") != identity_sha:
         raise ReleaseSpecError(
             "image publication does not bind the validation identity"
@@ -343,7 +398,7 @@ def validate_image_publication(
     )
     if metadata_binding != {
         "artifact_path": "release-image-metadata.json",
-        "sha256": _sha256(metadata_path),
+        "sha256": _sha256_bytes(metadata_raw),
     }:
         raise ReleaseSpecError(
             "image validation identity does not bind the validation metadata"
@@ -382,6 +437,8 @@ def validate_image_publication(
         ),
         "image_archive_sha256": archive_sha,
     }
+    if publication.get("source_repository") != CANONICAL_GITHUB_REPOSITORY:
+        raise ReleaseSpecError("image publication source repository is not canonical")
     for document, label in (
         (metadata, "image validation metadata"),
         (publication, "image publication"),
@@ -389,11 +446,25 @@ def validate_image_publication(
         for key, expected in expected_common.items():
             if document.get(key) != expected:
                 raise ReleaseSpecError(f"{label} {key} is not release-bound")
+        if document.get("source_repository") != CANONICAL_GITHUB_REPOSITORY:
+            raise ReleaseSpecError(f"{label} source repository is not canonical")
     for key in ("source_commit", "image_tag", "image_id", "config_sha256"):
         if identity.get(key) != expected_common[key]:
             raise ReleaseSpecError(
                 f"image validation identity {key} is not release-bound"
             )
+    if identity.get("source_repository") != CANONICAL_GITHUB_REPOSITORY:
+        raise ReleaseSpecError(
+            "image validation identity source repository is not canonical"
+        )
+
+    _verify_github_attestation(
+        subject=publication_raw,
+        bundle=attestation_raw,
+        trusted_root=trusted_root_raw,
+        repository=CANONICAL_GITHUB_REPOSITORY,
+        source_commit=menhir_commit,
+    )
 
     if metadata.get("python_base") != base_ref:
         raise ReleaseSpecError(
@@ -450,25 +521,27 @@ def validate_image_publication(
     }
     evidence_specs = {
         "sbom": (
-            sbom_path,
+            sbom_raw,
             "release-image-evidence/sbom.syft.json",
             "syft",
             build_release_image.validate_sbom,
         ),
         "vulnerability_scan": (
-            scan_path,
+            scan_raw,
             "release-image-evidence/scan.grype.json",
             "grype",
             build_release_image.validate_vulnerability_scan,
         ),
     }
-    for kind, (path, artifact_path, scanner, validator) in evidence_specs.items():
+    evidence_digests: dict[str, str] = {}
+    for kind, (raw, artifact_path, scanner, validator) in evidence_specs.items():
         entry = _exact(
             metadata_evidence.get(kind),
             IMAGE_EVIDENCE_ENTRY_KEYS,
             f"image validation metadata evidence.{kind}",
         )
-        digest = _sha256(path)
+        digest = _sha256_bytes(raw)
+        evidence_digests[kind] = digest
         if entry.get("artifact_path") != artifact_path:
             raise ReleaseSpecError(f"{kind} evidence artifact path is not canonical")
         if entry.get("sha256") != digest or identity_evidence.get(kind) != digest:
@@ -484,7 +557,7 @@ def validate_image_publication(
                 entry.get("scanner_image"), scanner
             )
             parsed_validation = validator(
-                path.read_bytes(), expected_common["image_id"]
+                raw, expected_common["image_id"]
             )
         except build_release_image.BuildImageError as exc:
             raise ReleaseSpecError(f"{kind} evidence is invalid: {exc}") from exc
@@ -493,12 +566,18 @@ def validate_image_publication(
                 f"{kind} evidence validation is not report-bound"
             )
     return {
-        "publication_sha256": _sha256(publication_path),
+        "publication_sha256": _sha256_bytes(publication_raw),
+        "source_repository": CANONICAL_GITHUB_REPOSITORY,
+        "source_commit": menhir_commit,
         "validation_identity_sha256": identity_sha,
         "image_id": expected_common["image_id"],
         "config_sha256": expected_common["config_sha256"],
         "image_archive_sha256": archive_sha,
         "registry_digest": menhir_digest,
+        "sbom_sha256": evidence_digests["sbom"],
+        "scan_evidence_sha256": evidence_digests["vulnerability_scan"],
+        "attestation_bundle_sha256": _sha256_bytes(attestation_raw),
+        "attestation_trusted_root_sha256": _sha256_bytes(trusted_root_raw),
     }
 
 
@@ -835,6 +914,14 @@ def prepare_release_spec(
     image_archive = _regular(
         evidence_values["image_archive"], "evidence.image_archive"
     )
+    publication_attestation = _regular(
+        evidence_values["publication_attestation"],
+        "evidence.publication_attestation",
+    )
+    attestation_trusted_root = _regular(
+        evidence_values["attestation_trusted_root"],
+        "evidence.attestation_trusted_root",
+    )
     baseline = _regular(
         inputs["baseline_production_env"], "baseline_production_env"
     )
@@ -902,6 +989,8 @@ def prepare_release_spec(
         archive_path=image_archive,
         sbom_path=sbom,
         scan_path=scan,
+        publication_attestation_path=publication_attestation,
+        attestation_trusted_root_path=attestation_trusted_root,
         menhir_commit=menhir_commit,
         menhir_digest=images["menhir"],
         menhir_ref=image_refs["menhir"],
@@ -1026,6 +1115,8 @@ def prepare_release_spec(
                 "image_metadata": str(image_metadata),
                 "image_identity": str(image_identity),
                 "image_archive": str(image_archive),
+                "publication_attestation": str(publication_attestation),
+                "attestation_trusted_root": str(attestation_trusted_root),
                 "provenance": final("provenance.json"),
             },
             "rendered": rendered,

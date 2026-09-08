@@ -50,6 +50,7 @@ EVIDENCE = frozenset({
     "oauth_wheel", "wheelhouse", "wheel_manifest",
     "dockerfile_wheel_manifest", "sbom", "scan", "image_publication",
     "image_metadata", "image_identity", "image_archive", "provenance",
+    "publication_attestation", "attestation_trusted_root",
 })
 RENDERED = frozenset({
     "menhir_compose_sha256", "yawn_compose_sha256", "caddy_sha256",
@@ -411,8 +412,12 @@ def _validate_provenance(
     oauth_sha: str,
     wheel_manifest_sha: str,
     docker_manifest_sha: str,
-) -> None:
-    value = _load_json(path, "provenance")
+) -> str:
+    raw = path.read_bytes()
+    try:
+        value = json.loads(raw.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError("invalid provenance JSON") from exc
     expected_keys = frozenset({
         "schema", "repos", "repo_remotes", "images", "oauth_wheel_sha256",
         "wheel_manifest_sha256", "dockerfile_wheel_manifest_sha256",
@@ -429,6 +434,7 @@ def _validate_provenance(
     }
     if value != expected:
         raise ValueError("provenance does not bind the exact release inputs")
+    return hashlib.sha256(raw).hexdigest()
 
 
 def author_release(
@@ -511,7 +517,7 @@ def author_release(
         docker_manifest_sha,
         oauth_sha,
     )
-    _validate_provenance(
+    provenance_sha = _validate_provenance(
         evidence["provenance"], repos, repo_remotes, images, oauth_sha,
         wheel_manifest_sha, docker_manifest_sha,
     )
@@ -522,6 +528,8 @@ def author_release(
         archive_path=evidence["image_archive"],
         sbom_path=evidence["sbom"],
         scan_path=evidence["scan"],
+        publication_attestation_path=evidence["publication_attestation"],
+        attestation_trusted_root_path=evidence["attestation_trusted_root"],
         menhir_commit=repos["menhir"],
         menhir_digest=images["menhir"],
         menhir_ref=image_refs["menhir"],
@@ -663,12 +671,13 @@ def author_release(
             "wheel_sha256": oauth_sha,
         },
         "images": images,
+        "image_refs": image_refs,
         "image_publication": image_publication,
         "wheel_manifest_sha256": wheel_manifest_sha,
         "dockerfile_wheel_manifest_sha256": docker_manifest_sha,
-        "sbom_sha256": _sha256(evidence["sbom"]),
-        "scan_evidence_sha256": _sha256(evidence["scan"]),
-        "provenance_sha256": _sha256(evidence["provenance"]),
+        "sbom_sha256": image_publication["sbom_sha256"],
+        "scan_evidence_sha256": image_publication["scan_evidence_sha256"],
+        "provenance_sha256": provenance_sha,
         "rendered": rendered,
         "network": network,
         "rollback_anchors": rollback,

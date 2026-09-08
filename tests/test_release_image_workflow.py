@@ -115,7 +115,18 @@ def test_validation_builds_a_frozen_wheelhouse_from_the_clean_checkout() -> None
     assert "python -m pip wheel" in validate
     assert "--no-cache-dir" in validate
     assert "--no-deps" in validate
-    assert "uv build --no-cache --wheel --out-dir deploy/wheelhouse" in validate
+    assert "uv build" not in validate
+    assert "--no-hashes" not in validate
+    assert validate.count("--require-hashes") >= 3
+    assert "build-backend-requirements.txt" in validate
+    assert "setuptools==83.0.0 --hash=sha256:" in validate
+    assert "wheel==0.46.2 --hash=sha256:" in validate
+    assert "--no-build-isolation" in validate
+    assert "export PIP_NO_INDEX=1" in validate
+    assert "git archive --format=tar" in validate
+    assert "offline wheelhouse closure is missing" in validate
+    assert "export PYTHONHASHSEED=0" in validate
+    assert "export TZ=UTC" in validate
     assert 'wheelhouse / "SHA256SUMS"' in validate
     assert '--expected-commit "$SOURCE_COMMIT"' in validate
     assert '["diff", "--quiet"]' in BUILDER_TEXT
@@ -265,6 +276,24 @@ def test_attestations_follow_publication_and_use_verified_digest() -> None:
     assert "subject-path: release-image-publication.json" in publish
     assert "attest-build-provenance" not in validate
     assert TEXT.count("actions/attest-build-provenance@") == 2
+
+
+def test_attestation_is_verified_against_canonical_repo_and_source_sha() -> None:
+    validate = _block("validate", 2)
+    publish = _block("publish", 2)
+    assert "if: $" + "{{ github.repository == 'Archolith/menhir' }}" in validate
+    assert "checkout origin is not the canonical Archolith/menhir repository" in validate
+    assert "Capture and verify canonical GitHub attestation trust" in publish
+    assert "gh attestation trusted-root" in publish
+    assert '--repo "$SOURCE_REPOSITORY"' in publish
+    assert '--source-digest "$SOURCE_COMMIT"' in publish
+    assert "--signer-repo" not in publish
+    assert '--signer-workflow "$SOURCE_REPOSITORY/.github/workflows/release-image.yml"' in publish
+    assert "--custom-trusted-root release-image-attestation-trusted-root.jsonl" in publish
+    assert "--deny-self-hosted-runners" in publish
+    assert publish.index("Capture and verify canonical GitHub attestation trust") < publish.index(
+        "Upload publication metadata and bound evidence"
+    )
 
 
 def test_third_party_actions_are_pinned_to_full_commit_ids() -> None:

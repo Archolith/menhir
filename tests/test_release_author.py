@@ -19,6 +19,13 @@ MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 
 
+@pytest.fixture(autouse=True)
+def _verified_attestation(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        MODULE.release_spec, "_verify_github_attestation", lambda **_kwargs: None
+    )
+
+
 def _sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -160,6 +167,7 @@ def _image_publication_bundle(
     metadata = root / "release-image-metadata.json"
     _write_json(metadata, {
         "schema": 3,
+        "source_repository": MODULE.release_spec.CANONICAL_GITHUB_REPOSITORY,
         "source_commit": commit,
         "image_tag": image_tag,
         "image_id": image_id,
@@ -181,6 +189,7 @@ def _image_publication_bundle(
     identity = root / "release-image-identity.json"
     _write_json(identity, {
         "schema": 2,
+        "source_repository": MODULE.release_spec.CANONICAL_GITHUB_REPOSITORY,
         "source_commit": commit,
         "image_tag": image_tag,
         "image_id": image_id,
@@ -199,6 +208,7 @@ def _image_publication_bundle(
     publication = root / "release-image-publication.json"
     _write_json(publication, {
         "schema": 2,
+        "source_repository": MODULE.release_spec.CANONICAL_GITHUB_REPOSITORY,
         "validation_identity_sha256": _sha(identity),
         "source_commit": commit,
         "image_tag": image_tag,
@@ -212,6 +222,10 @@ def _image_publication_bundle(
         "idempotent_existing_candidate": False,
         "evidence": identity_evidence,
     })
+    attestation = root / "release-image-publication.attestation.json"
+    attestation.write_bytes(b'{"signed":"test fixture"}\n')
+    trusted_root = root / "release-image-attestation-trusted-root.jsonl"
+    trusted_root.write_bytes(b'{"trusted":"test fixture"}\n')
     return {
         "sbom": str(sbom.resolve()),
         "scan": str(scan.resolve()),
@@ -219,6 +233,8 @@ def _image_publication_bundle(
         "image_metadata": str(metadata.resolve()),
         "image_identity": str(identity.resolve()),
         "image_archive": str(archive.resolve()),
+        "publication_attestation": str(attestation.resolve()),
+        "attestation_trusted_root": str(trusted_root.resolve()),
     }
 
 
@@ -433,11 +449,14 @@ def test_authors_canonical_release_from_clean_exact_inputs(tmp_path: Path) -> No
     assert release["deployment_class"] == spec["deployment_class"]
     assert release["notes_json_sha256"] == spec["notes_json_sha256"]
     assert release["notes_markdown_sha256"] == spec["notes_markdown_sha256"]
+    assert release["image_refs"]["caddy"] == spec["image_refs"]["caddy"]
     metadata = json.loads(
         Path(spec["evidence"]["image_metadata"]).read_text(encoding="ascii")
     )
     assert release["image_publication"] == {
         "publication_sha256": _sha(Path(spec["evidence"]["image_publication"])),
+        "source_repository": "Archolith/menhir",
+        "source_commit": release["repos"]["menhir"],
         "validation_identity_sha256": _sha(
             Path(spec["evidence"]["image_identity"])
         ),
@@ -445,6 +464,14 @@ def test_authors_canonical_release_from_clean_exact_inputs(tmp_path: Path) -> No
         "config_sha256": metadata["config_sha256"],
         "image_archive_sha256": _sha(Path(spec["evidence"]["image_archive"])),
         "registry_digest": spec["images"]["menhir"],
+        "sbom_sha256": _sha(Path(spec["evidence"]["sbom"])),
+        "scan_evidence_sha256": _sha(Path(spec["evidence"]["scan"])),
+        "attestation_bundle_sha256": _sha(
+            Path(spec["evidence"]["publication_attestation"])
+        ),
+        "attestation_trusted_root_sha256": _sha(
+            Path(spec["evidence"]["attestation_trusted_root"])
+        ),
     }
     assert release["oauth_wheel_sha256"] == _sha(
         Path(json.loads(spec_path.read_text())["evidence"]["oauth_wheel"])
@@ -521,6 +548,19 @@ def test_release_schema_rejects_invalid_persisted_image_publication(
         MODULE.menhir_schema.validate_release(str(tampered))
 
 
+def test_release_schema_rejects_mutable_or_digest_mismatched_caddy_ref(
+    tmp_path: Path,
+) -> None:
+    spec_path, output, _ = _fixture(tmp_path)
+    release = _author(spec_path, output)
+    release["image_refs"]["caddy"] = "ghcr.io/archolith/caddy:latest"
+    tampered = tmp_path / "tampered-caddy-ref.json"
+    _write_json(tampered, release)
+
+    with pytest.raises(ValueError, match="image_refs.caddy"):
+        MODULE.menhir_schema.validate_release(str(tampered))
+
+
 @pytest.mark.parametrize("kind", ["sbom", "vulnerability_scan"])
 def test_author_refuses_ci_evidence_for_wrong_subject(
     tmp_path: Path, kind: str,
@@ -572,7 +612,7 @@ def test_legacy_release_remains_readable(tmp_path: Path) -> None:
     output.chmod(0o600)
     for key in (
         "deployment_class", "ingress_mode", "notes_json_sha256", "notes_markdown_sha256",
-        "image_publication",
+        "image_publication", "image_refs",
     ):
         release.pop(key)
     release["security_review"]["authority_sha256"] = (

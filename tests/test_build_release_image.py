@@ -4,6 +4,7 @@ import hashlib
 import importlib.util
 import json
 import subprocess
+from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -29,6 +30,7 @@ REGISTRY_DIGEST = "sha256:" + "4" * 64
 PYTHON_BASE = "python@sha256:" + "5" * 64
 SYFT_IMAGE = "docker.io/anchore/syft@sha256:" + "6" * 64
 GRYPE_IMAGE = "docker.io/anchore/grype@sha256:" + "7" * 64
+SOURCE_REPOSITORY = "Archolith/menhir"
 
 
 def _json_bytes(value: dict[str, Any]) -> bytes:
@@ -140,6 +142,7 @@ def _validation_bundle(
     }
     metadata = {
         "schema": 3,
+        "source_repository": SOURCE_REPOSITORY,
         "source_commit": COMMIT,
         "image_tag": IMAGE_TAG,
         "image_id": IMAGE_ID,
@@ -153,6 +156,7 @@ def _validation_bundle(
     _write_json(metadata_path, metadata)
     identity = {
         "schema": 2,
+        "source_repository": SOURCE_REPOSITORY,
         "source_commit": COMMIT,
         "image_tag": IMAGE_TAG,
         "image_id": IMAGE_ID,
@@ -177,6 +181,7 @@ def _validation_bundle(
         version=VERSION,
         image=IMAGE,
         python_base=PYTHON_BASE,
+        source_repository=SOURCE_REPOSITORY,
         metadata=metadata_path,
         identity=identity_path,
         image_archive=archive,
@@ -188,6 +193,7 @@ def _validation_bundle(
 
 def _publication_metadata() -> dict[str, Any]:
     return {
+        "source_repository": SOURCE_REPOSITORY,
         "source_commit": COMMIT,
         "image_tag": IMAGE_TAG,
         "image_id": IMAGE_ID,
@@ -209,6 +215,32 @@ def test_rejects_changed_wheel_bytes(tmp_path: Path) -> None:
         MODULE.oauth_wheel_sha256(wheelhouse)
 
 
+def test_rejects_unmanifested_wheelhouse_entries(tmp_path: Path) -> None:
+    wheelhouse = _wheelhouse(tmp_path / "wheelhouse")
+    (wheelhouse / "injected-1.0-py3-none-any.whl").write_bytes(b"untracked")
+    with pytest.raises(MODULE.BuildImageError, match="manifest closure mismatch"):
+        MODULE.oauth_wheel_sha256(wheelhouse)
+
+
+def test_git_commit_rejects_untracked_live_tree_input(tmp_path: Path) -> None:
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "config", "user.email", "test@example.com"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "config", "user.name", "Test"], check=True,
+    )
+    tracked = tmp_path / "tracked.txt"
+    tracked.write_text("committed\n", encoding="ascii")
+    subprocess.run(["git", "-C", str(tmp_path), "add", "tracked.txt"], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "commit", "-qm", "fixture"], check=True)
+    (tmp_path / "untracked.txt").write_text("must not build\n", encoding="ascii")
+
+    with pytest.raises(MODULE.BuildImageError, match="untracked files"):
+        MODULE.git_commit(tmp_path)
+
+
 def test_build_command_contains_all_derived_labels(tmp_path: Path) -> None:
     command = MODULE.build_command(
         repo=tmp_path,
@@ -219,12 +251,16 @@ def test_build_command_contains_all_derived_labels(tmp_path: Path) -> None:
         version=VERSION,
         wheel_manifest="c" * 64,
         oauth_wheel="d" * 64,
+        source_date_epoch="1700000000",
     )
     joined = "\n".join(command)
     assert f"RELEASE_COMMIT={COMMIT}" in joined
     assert f"RELEASE_VERSION={VERSION}" in joined
     assert "WHEEL_MANIFEST_SHA256=" + "c" * 64 in joined
     assert "OAUTH_WHEEL_SHA256=" + "d" * 64 in joined
+    assert "SOURCE_DATE_EPOCH=1700000000" in joined
+    assert "--network\nnone" in joined
+    assert "--provenance=false" in command
     assert command[-2:] == [IMAGE_TAG, str(tmp_path)]
 
 
@@ -403,6 +439,7 @@ def test_build_emits_validation_schema_3_and_identity_schema_2(
         image=IMAGE,
         version=VERSION,
         python_base=PYTHON_BASE,
+        source_repository=SOURCE_REPOSITORY,
         output=output,
         identity=identity_path,
         image_archive=archive,
@@ -413,7 +450,12 @@ def test_build_emits_validation_schema_3_and_identity_schema_2(
             Path(command[command.index("--output") + 1]).write_bytes(b"sealed release image")
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
-    monkeypatch.setattr(MODULE, "git_commit", lambda _repo: COMMIT)
+    monkeypatch.setattr(MODULE, "git_commit", lambda _repo, **_kwargs: COMMIT)
+    monkeypatch.setattr(MODULE, "git_source_date_epoch", lambda *_args: "1700000000")
+    monkeypatch.setattr(
+        MODULE, "committed_build_context",
+        lambda _repo, _commit, dockerfile, _wheelhouse: nullcontext((_repo, dockerfile)),
+    )
     monkeypatch.setattr(MODULE.subprocess, "run", fake_run)
     monkeypatch.setattr(
         MODULE,
@@ -440,7 +482,7 @@ def test_verification_revalidates_reports_and_reuses_the_exact_sealed_archive(
 ) -> None:
     args, metadata, identity = _validation_bundle(tmp_path / "release-candidate")
     calls: list[list[str]] = []
-    monkeypatch.setattr(MODULE, "git_commit", lambda _repo: COMMIT)
+    monkeypatch.setattr(MODULE, "git_commit", lambda _repo, **_kwargs: COMMIT)
     monkeypatch.setattr(
         MODULE.subprocess,
         "run",
@@ -464,7 +506,7 @@ def test_verification_rejects_an_sbom_for_a_different_candidate(
     args, _metadata, _identity = _validation_bundle(
         tmp_path / "release-candidate", sbom_image_id="sha256:" + "a" * 64,
     )
-    monkeypatch.setattr(MODULE, "git_commit", lambda _repo: COMMIT)
+    monkeypatch.setattr(MODULE, "git_commit", lambda _repo, **_kwargs: COMMIT)
     with pytest.raises(MODULE.BuildImageError, match="expected candidate image"):
         MODULE.verify_validation_bundle(args, load_image=False)
 
@@ -475,9 +517,35 @@ def test_verification_rejects_evidence_bound_to_another_archive(
     args, _metadata, _identity = _validation_bundle(
         tmp_path / "release-candidate", evidence_archive_sha256="a" * 64,
     )
-    monkeypatch.setattr(MODULE, "git_commit", lambda _repo: COMMIT)
+    monkeypatch.setattr(MODULE, "git_commit", lambda _repo, **_kwargs: COMMIT)
     with pytest.raises(MODULE.BuildImageError, match="wrong candidate subject"):
         MODULE.verify_validation_bundle(args, load_image=False)
+
+
+def test_verification_hashes_and_parses_the_same_captured_evidence_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    args, metadata, _identity = _validation_bundle(tmp_path / "release-candidate")
+    sbom_path = tmp_path / "release-candidate" / MODULE.EVIDENCE_FILES["sbom"]
+    original_read = MODULE._read_bytes
+
+    def capture_then_mutate(path: Path, label: str) -> bytes:
+        raw = original_read(path, label)
+        if path == sbom_path:
+            path.write_bytes(b'{"substituted":true}')
+        return raw
+
+    monkeypatch.setattr(MODULE, "_read_bytes", capture_then_mutate)
+    monkeypatch.setattr(MODULE, "git_commit", lambda _repo, **_kwargs: COMMIT)
+    monkeypatch.setattr(
+        MODULE,
+        "inspect_image",
+        lambda _tag, _expected: (IMAGE_ID, metadata["labels"], CONFIG_SHA256),
+    )
+
+    actual, _ = MODULE.verify_validation_bundle(args, load_image=False)
+    assert actual == metadata
+    assert sbom_path.read_bytes() == b'{"substituted":true}'
 
 
 def test_remote_manifest_rejects_malformed_digest(monkeypatch: pytest.MonkeyPatch) -> None:

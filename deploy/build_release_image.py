@@ -4,12 +4,15 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import hashlib
 import json
 import os
 import re
 import secrets
+import shutil
 import subprocess
+import tarfile
 import tempfile
 from pathlib import Path
 from typing import Any, Sequence
@@ -35,6 +38,7 @@ SCANNER_REPOSITORIES = {
 }
 SEVERITIES = ("Unknown", "Negligible", "Low", "Medium", "High", "Critical")
 MAX_EVIDENCE_BYTES = 256 * 1024 * 1024
+CANONICAL_SOURCE_REPOSITORY = "Archolith/menhir"
 
 
 class BuildImageError(RuntimeError):
@@ -49,11 +53,16 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def sha256_bytes(value: bytes) -> str:
+    return hashlib.sha256(value).hexdigest()
+
+
 def oauth_wheel_sha256(wheelhouse: Path) -> str:
     manifest = wheelhouse / "SHA256SUMS"
     if not manifest.is_file() or manifest.is_symlink():
         raise BuildImageError(f"wheel manifest is missing or unsafe: {manifest}")
     matches: list[str] = []
+    manifested: set[str] = set()
     for number, raw in enumerate(manifest.read_text(encoding="ascii").splitlines(), 1):
         parts = raw.split(maxsplit=1)
         if len(parts) != 2 or SHA256_RE.fullmatch(parts[0]) is None:
@@ -61,6 +70,9 @@ def oauth_wheel_sha256(wheelhouse: Path) -> str:
         relative = parts[1].lstrip("* ")
         if "/" in relative or "\\" in relative or relative in {"", ".", ".."}:
             raise BuildImageError(f"unsafe wheel path on SHA256SUMS line {number}")
+        if relative in manifested:
+            raise BuildImageError(f"duplicate wheel manifest entry: {relative}")
+        manifested.add(relative)
         wheel = wheelhouse / relative
         if not wheel.is_file() or wheel.is_symlink():
             raise BuildImageError(f"manifest wheel is missing or unsafe: {relative}")
@@ -70,17 +82,36 @@ def oauth_wheel_sha256(wheelhouse: Path) -> str:
         normalized = relative.lower().replace("-", "_")
         if normalized.startswith("archolith_oauth_") and normalized.endswith(".whl"):
             matches.append(actual)
+    actual = set()
+    for entry in wheelhouse.iterdir():
+        if entry.name == "SHA256SUMS":
+            continue
+        if entry.is_symlink() or not entry.is_file() or entry.suffix != ".whl":
+            raise BuildImageError(f"unexpected or unsafe wheelhouse entry: {entry.name}")
+        actual.add(entry.name)
+    if actual != manifested:
+        raise BuildImageError(
+            "wheel manifest closure mismatch: "
+            f"missing={sorted(manifested - actual)}, extra={sorted(actual - manifested)}"
+        )
     if len(matches) != 1:
         raise BuildImageError("wheelhouse must contain exactly one archolith_oauth wheel")
     return matches[0]
 
 
-def git_commit(repo: Path) -> str:
+def git_commit(repo: Path, *, allow_untracked: bool = False) -> str:
     for args, label in [(["diff", "--quiet"], "tracked worktree"),
                         (["diff", "--cached", "--quiet"], "index")]:
         result = subprocess.run(["git", "-C", str(repo), *args], check=False)
         if result.returncode != 0:
             raise BuildImageError(f"Git {label} is not clean")
+    if not allow_untracked:
+        result = subprocess.run(
+            ["git", "-C", str(repo), "status", "--porcelain=v1", "--untracked-files=all"],
+            check=True, capture_output=True, text=True,
+        )
+        if result.stdout:
+            raise BuildImageError("Git worktree contains untracked files")
     result = subprocess.run(
         ["git", "-C", str(repo), "rev-parse", "HEAD"],
         check=True, capture_output=True, text=True,
@@ -91,12 +122,69 @@ def git_commit(repo: Path) -> str:
     return commit
 
 
+def git_source_date_epoch(repo: Path, commit: str) -> str:
+    result = subprocess.run(
+        ["git", "-C", str(repo), "show", "-s", "--format=%ct", commit],
+        check=True, capture_output=True, text=True,
+    )
+    value = result.stdout.strip()
+    if re.fullmatch(r"[1-9][0-9]{8,}", value) is None:
+        raise BuildImageError("Git commit timestamp is malformed")
+    return value
+
+
+def _repository_relative(repo: Path, path: Path, label: str) -> Path:
+    try:
+        relative = path.resolve(strict=True).relative_to(repo.resolve(strict=True))
+    except (OSError, ValueError) as exc:
+        raise BuildImageError(f"{label} must be inside the repository") from exc
+    if not relative.parts or any(part in {"", ".", ".."} for part in relative.parts):
+        raise BuildImageError(f"{label} is not a canonical repository path")
+    return relative
+
+
+@contextmanager
+def committed_build_context(
+    repo: Path, commit: str, dockerfile: Path, wheelhouse: Path,
+):
+    """Yield a Docker context made from the commit plus the verified wheelhouse."""
+    dockerfile_relative = _repository_relative(repo, dockerfile, "Dockerfile")
+    wheelhouse_relative = _repository_relative(repo, wheelhouse, "wheelhouse")
+    oauth_wheel_sha256(wheelhouse)
+    with tempfile.TemporaryDirectory(prefix="menhir-release-context-") as temporary:
+        root = Path(temporary)
+        archive_path = root / "source.tar"
+        context = root / "context"
+        context.mkdir()
+        subprocess.run(
+            ["git", "-C", str(repo), "archive", "--format=tar", "--output",
+             str(archive_path), commit],
+            check=True,
+        )
+        with tarfile.open(archive_path, mode="r:") as archive:
+            archive.extractall(context, filter="data")
+        staged_wheelhouse = context / wheelhouse_relative
+        if staged_wheelhouse.exists() or staged_wheelhouse.is_symlink():
+            raise BuildImageError("committed source unexpectedly contains deploy/wheelhouse")
+        staged_wheelhouse.mkdir(parents=True)
+        for entry in wheelhouse.iterdir():
+            shutil.copyfile(entry, staged_wheelhouse / entry.name, follow_symlinks=False)
+        oauth_wheel_sha256(staged_wheelhouse)
+        staged_dockerfile = context / dockerfile_relative
+        if not staged_dockerfile.is_file() or staged_dockerfile.is_symlink():
+            raise BuildImageError("committed Dockerfile is missing or unsafe")
+        yield context, staged_dockerfile
+
+
 def build_command(*, repo: Path, dockerfile: Path, image_tag: str, python_base: str,
                   commit: str, version: str, wheel_manifest: str,
-                  oauth_wheel: str) -> list[str]:
+                  oauth_wheel: str, source_date_epoch: str) -> list[str]:
     return [
         "docker", "build", "--file", str(dockerfile),
+        "--network", "none", "--pull=false", "--no-cache",
+        "--platform", "linux/amd64", "--provenance=false", "--sbom=false",
         "--build-arg", f"PYTHON_BASE={python_base}",
+        "--build-arg", f"SOURCE_DATE_EPOCH={source_date_epoch}",
         "--build-arg", f"RELEASE_COMMIT={commit}",
         "--build-arg", f"RELEASE_VERSION={version}",
         "--build-arg", f"WHEEL_MANIFEST_SHA256={wheel_manifest}",
@@ -306,7 +394,7 @@ def _write_evidence(path: Path, raw: bytes) -> str:
         handle.write(raw)
         handle.flush()
         os.fsync(handle.fileno())
-    return sha256_file(path)
+    return sha256_bytes(raw)
 
 
 def generate_evidence(*, artifact_root: Path, archive: Path, archive_sha256: str,
@@ -349,10 +437,17 @@ def atomic_json(path: Path, value: dict[str, Any]) -> None:
             os.unlink(temporary)
 
 
-def _read_json(path: Path, label: str) -> dict[str, Any]:
+def _read_bytes(path: Path, label: str) -> bytes:
     if not path.is_file() or path.is_symlink():
         raise BuildImageError(f"{label} is missing or unsafe")
-    value = json.loads(path.read_text(encoding="ascii"))
+    return path.read_bytes()
+
+
+def _read_json_bytes(raw: bytes, label: str) -> dict[str, Any]:
+    try:
+        value = json.loads(raw.decode("ascii"))
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise BuildImageError(f"{label} is not valid ASCII JSON") from exc
     if not isinstance(value, dict):
         raise BuildImageError(f"{label} must contain a JSON object")
     return value
@@ -395,7 +490,7 @@ def create_validation_bundle(args: argparse.Namespace) -> dict[str, Any]:
     wheelhouse = (repo / args.wheelhouse).resolve()
     syft_image = _validate_scanner_image(args.syft_image, "syft")
     grype_image = _validate_scanner_image(args.grype_image, "grype")
-    commit = git_commit(repo)
+    commit = git_commit(repo, allow_untracked=True)
     if args.expected_commit and commit != args.expected_commit:
         raise BuildImageError("checked-out commit does not match the resolved validation commit")
     if not dockerfile.is_file() or not wheelhouse.is_dir():
@@ -412,11 +507,16 @@ def create_validation_bundle(args: argparse.Namespace) -> dict[str, Any]:
         "wheel_manifest_sha256": wheel_manifest,
         "oauth_wheel_sha256": oauth_wheel,
     }
-    subprocess.run(build_command(
-        repo=repo, dockerfile=dockerfile, image_tag=image_tag,
-        python_base=args.python_base, commit=commit, version=args.version,
-        wheel_manifest=wheel_manifest, oauth_wheel=oauth_wheel,
-    ), check=True)
+    source_date_epoch = git_source_date_epoch(repo, commit)
+    with committed_build_context(repo, commit, dockerfile, wheelhouse) as (
+        build_repo, build_dockerfile,
+    ):
+        subprocess.run(build_command(
+            repo=build_repo, dockerfile=build_dockerfile, image_tag=image_tag,
+            python_base=args.python_base, commit=commit, version=args.version,
+            wheel_manifest=wheel_manifest, oauth_wheel=oauth_wheel,
+            source_date_epoch=source_date_epoch,
+        ), check=True)
     image_id, labels, config_sha256 = inspect_image(image_tag, expected)
 
     archive_output = args.image_archive.absolute()
@@ -437,6 +537,7 @@ def create_validation_bundle(args: argparse.Namespace) -> dict[str, Any]:
     )
     metadata = {
         "schema": 3,
+        "source_repository": args.source_repository,
         "source_commit": commit,
         "image_tag": image_tag,
         "image_id": image_id,
@@ -450,6 +551,7 @@ def create_validation_bundle(args: argparse.Namespace) -> dict[str, Any]:
     atomic_json(metadata_path, metadata)
     identity = {
         "schema": 2,
+        "source_repository": args.source_repository,
         "source_commit": commit,
         "image_tag": image_tag,
         "image_id": image_id,
@@ -490,10 +592,12 @@ def verify_validation_bundle(args: argparse.Namespace, *, load_image: bool) -> t
     if args.identity.resolve() != identity_path or args.image_archive.resolve() != archive:
         raise BuildImageError("identity or archive input is not the fixed validation artifact")
     expected_identity = _require_sha256(args.expected_identity_sha256, "expected identity SHA-256")
-    if sha256_file(identity_path) != expected_identity:
+    identity_raw = _read_bytes(identity_path, "identity manifest")
+    metadata_raw = _read_bytes(metadata_path, "validation metadata")
+    if sha256_bytes(identity_raw) != expected_identity:
         raise BuildImageError("downloaded identity manifest digest does not match validation output")
-    identity = _read_json(identity_path, "identity manifest")
-    metadata = _read_json(metadata_path, "validation metadata")
+    identity = _read_json_bytes(identity_raw, "identity manifest")
+    metadata = _read_json_bytes(metadata_raw, "validation metadata")
     if identity.get("schema") != 2 or metadata.get("schema") != 3:
         raise BuildImageError("unsupported release image metadata schema")
 
@@ -503,7 +607,7 @@ def verify_validation_bundle(args: argparse.Namespace, *, load_image: bool) -> t
         raise BuildImageError("identity manifest artifact bindings are malformed")
     if identity_metadata.get("artifact_path") != "release-image-metadata.json":
         raise BuildImageError("identity manifest names an unexpected metadata artifact")
-    if sha256_file(metadata_path) != _require_sha256(identity_metadata.get("sha256"), "metadata SHA-256"):
+    if sha256_bytes(metadata_raw) != _require_sha256(identity_metadata.get("sha256"), "metadata SHA-256"):
         raise BuildImageError("downloaded validation metadata digest does not match identity")
     if identity_archive.get("artifact_path") != "release-image.tar":
         raise BuildImageError("identity manifest names an unexpected image archive")
@@ -514,8 +618,10 @@ def verify_validation_bundle(args: argparse.Namespace, *, load_image: bool) -> t
         raise BuildImageError("validation metadata and identity disagree on image archive")
 
     image_tag = f"{args.image}:{args.version}"
-    commit = git_commit(args.repo.resolve())
+    commit = git_commit(args.repo.resolve(), allow_untracked=True)
     for field, actual, expected in (
+        ("source repository", metadata.get("source_repository"), args.source_repository),
+        ("identity source repository", identity.get("source_repository"), args.source_repository),
         ("source commit", metadata.get("source_commit"), commit),
         ("identity source commit", identity.get("source_commit"), commit),
         ("image tag", metadata.get("image_tag"), image_tag),
@@ -548,7 +654,8 @@ def verify_validation_bundle(args: argparse.Namespace, *, load_image: bool) -> t
         if identity_digest != digest:
             raise BuildImageError(f"{kind} evidence digest does not match identity")
         evidence_file = _verify_artifact_file(artifact_root, artifact_path, kind)
-        if sha256_file(evidence_file) != digest:
+        evidence_raw = _read_bytes(evidence_file, f"{kind} evidence")
+        if sha256_bytes(evidence_raw) != digest:
             raise BuildImageError(f"downloaded {kind} evidence digest does not match identity")
         scanner, validator = validators[kind]
         _validate_scanner_image(entry.get("scanner_image"), scanner)
@@ -558,7 +665,7 @@ def verify_validation_bundle(args: argparse.Namespace, *, load_image: bool) -> t
         }
         if entry.get("subject") != expected_subject:
             raise BuildImageError(f"{kind} evidence names the wrong candidate subject")
-        validation = validator(evidence_file.read_bytes(), expected_subject["image_id"])
+        validation = validator(evidence_raw, expected_subject["image_id"])
         if entry.get("validation") != validation:
             raise BuildImageError(f"{kind} parsed validation does not match its report")
 
@@ -671,6 +778,7 @@ def publish_bundle(args: argparse.Namespace) -> dict[str, Any]:
     repository = metadata["image_tag"].rpartition(":")[0]
     publication = {
         "schema": 2,
+        "source_repository": metadata["source_repository"],
         "validation_identity_sha256": args.expected_identity_sha256,
         "source_commit": metadata["source_commit"],
         "image_tag": metadata["image_tag"],
@@ -701,6 +809,8 @@ def _validate_common_args(args: argparse.Namespace) -> None:
         raise BuildImageError("python base must be digest-pinned")
     if args.expected_commit and re.fullmatch(r"[0-9a-f]{40}", args.expected_commit) is None:
         raise BuildImageError("expected commit must be a full commit digest")
+    if args.source_repository != CANONICAL_SOURCE_REPOSITORY:
+        raise BuildImageError("source repository must be the canonical Archolith/menhir repository")
 
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
@@ -725,6 +835,7 @@ def parser() -> argparse.ArgumentParser:
     value.add_argument("--dockerfile", type=Path, default=Path("deploy/Dockerfile"))
     value.add_argument("--wheelhouse", type=Path, default=Path("deploy/wheelhouse"))
     value.add_argument("--expected-commit")
+    value.add_argument("--source-repository", required=True)
     value.add_argument("--output", type=Path)
     value.add_argument("--metadata", type=Path)
     value.add_argument("--identity", type=Path)

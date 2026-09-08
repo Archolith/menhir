@@ -93,6 +93,7 @@ concurrency:
 jobs:
   validate:
     name: Build and seal candidate without publishing
+    if: ${{ github.repository == 'Archolith/menhir' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -122,6 +123,12 @@ jobs:
           ).stdout.strip()
           if re.fullmatch(r"[0-9a-f]{40}", commit) is None:
               raise SystemExit("checkout did not resolve to a full commit SHA")
+          remote = subprocess.run(
+              ["git", "remote", "get-url", "origin"],
+              check=True, capture_output=True, text=True,
+          ).stdout.strip().removesuffix(".git")
+          if remote != "https://github.com/Archolith/menhir":
+              raise SystemExit("checkout origin is not the canonical Archolith/menhir repository")
           with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="ascii") as output:
               output.write(f"commit_sha={commit}\n")
           PY
@@ -143,22 +150,72 @@ jobs:
           rm -rf -- deploy/wheelhouse
           mkdir -p deploy/wheelhouse
           export SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"
+          export PYTHONHASHSEED=0
+          export TZ=UTC
           uv export \
             --frozen \
             --no-group dev \
             --no-emit-project \
-            --no-hashes \
+            --no-emit-package archolith-mcp-framework \
+            --no-emit-package archolith-oauth \
             --output-file "$RUNNER_TEMP/release-requirements.txt"
+          cat > "$RUNNER_TEMP/build-backend-requirements.txt" <<'EOF'
+          packaging==25.0 --hash=sha256:29572ef2b1f17581046b3a2227d5c611fb25ec70ca1ba8554b24b0e69331a484
+          setuptools==83.0.0 --hash=sha256:29b23c360f22f414dc7336bb39178cc7bcbf6021ed2733cde173f09dba19abb3
+          wheel==0.46.2 --hash=sha256:33ae60725d69eaa249bc1982e739943c23b34b58d51f1cb6253453773aca6e65
+          EOF
+          mkdir -p "$RUNNER_TEMP/build-backend-wheelhouse"
+          python -m pip download \
+            --disable-pip-version-check \
+            --no-cache-dir \
+            --only-binary=:all: \
+            --require-hashes \
+            --requirement "$RUNNER_TEMP/build-backend-requirements.txt" \
+            --dest "$RUNNER_TEMP/build-backend-wheelhouse"
+          python -m pip install \
+            --disable-pip-version-check \
+            --no-cache-dir \
+            --no-index \
+            --only-binary=:all: \
+            --require-hashes \
+            --find-links "$RUNNER_TEMP/build-backend-wheelhouse" \
+            --requirement "$RUNNER_TEMP/build-backend-requirements.txt"
           python -m pip wheel \
             --disable-pip-version-check \
             --no-cache-dir \
             --no-deps \
+            --only-binary=:all: \
+            --require-hashes \
             --requirement "$RUNNER_TEMP/release-requirements.txt" \
             --wheel-dir deploy/wheelhouse
-          uv build --no-cache --wheel --out-dir deploy/wheelhouse
+          export PIP_NO_INDEX=1
+          python -m pip wheel \
+            --disable-pip-version-check \
+            --no-cache-dir \
+            --no-deps \
+            --no-build-isolation \
+            --wheel-dir deploy/wheelhouse \
+            "git+https://github.com/Archolith/archolith-mcp-framework.git@0a7c300cf50d724a2d5a8e8c1e664c7e8a5fa2eb" \
+            "git+https://github.com/Archolith/archolith_oauth.git@f77e2dbc7c7c85199aa05986b8d2126b54d1b056"
+          git archive --format=tar --output "$RUNNER_TEMP/menhir-source.tar" HEAD
+          mkdir "$RUNNER_TEMP/menhir-source"
+          tar -xf "$RUNNER_TEMP/menhir-source.tar" -C "$RUNNER_TEMP/menhir-source"
+          python -m pip wheel \
+            --disable-pip-version-check \
+            --no-cache-dir \
+            --no-deps \
+            --no-build-isolation \
+            --wheel-dir deploy/wheelhouse \
+            "$RUNNER_TEMP/menhir-source"
           python - <<'PY'
           import hashlib
+          import re
+          import zipfile
+          from email.parser import BytesParser
           from pathlib import Path
+
+          from packaging.markers import default_environment
+          from packaging.requirements import Requirement
 
           wheelhouse = Path("deploy/wheelhouse")
           wheels = sorted(wheelhouse.glob("*.whl"), key=lambda path: path.name)
@@ -169,6 +226,31 @@ jobs:
               if not wheel.is_file() or wheel.is_symlink() or not wheel.name.isascii():
                   raise SystemExit(f"unsafe wheelhouse output: {wheel.name!r}")
               entries.append(f"{hashlib.sha256(wheel.read_bytes()).hexdigest()}  {wheel.name}")
+          available = set()
+          metadata = []
+          for wheel in wheels:
+              with zipfile.ZipFile(wheel) as archive:
+                  names = [name for name in archive.namelist()
+                           if name.endswith(".dist-info/METADATA") and name.count("/") == 1]
+                  if len(names) != 1:
+                      raise SystemExit(f"wheel has invalid METADATA closure: {wheel.name}")
+                  parsed = BytesParser().parsebytes(archive.read(names[0]))
+              name = parsed.get("Name")
+              if not name:
+                  raise SystemExit(f"wheel has no distribution name: {wheel.name}")
+              available.add(re.sub(r"[-_.]+", "-", name).lower())
+              metadata.append((wheel.name, parsed))
+          environment = default_environment()
+          for filename, parsed in metadata:
+              for raw in parsed.get_all("Requires-Dist", []):
+                  requirement = Requirement(raw)
+                  if requirement.marker and not requirement.marker.evaluate(environment):
+                      continue
+                  required = re.sub(r"[-_.]+", "-", requirement.name).lower()
+                  if required not in available:
+                      raise SystemExit(
+                          f"offline wheelhouse closure is missing {requirement.name} required by {filename}"
+                      )
           (wheelhouse / "SHA256SUMS").write_text(
               "\n".join(entries) + "\n", encoding="ascii",
           )
@@ -177,6 +259,7 @@ jobs:
       - name: Acquire digest-pinned scanners
         env:
           GRYPE_IMAGE: ${{ inputs.grype_image }}
+          PYTHON_BASE: ${{ inputs.python_base }}
           SYFT_IMAGE: ${{ inputs.syft_image }}
         run: |
           set -euo pipefail
@@ -197,6 +280,7 @@ jobs:
           PY
           docker pull "$SYFT_IMAGE"
           docker pull "$GRYPE_IMAGE"
+          docker pull "$PYTHON_BASE"
 
       - name: Build, validate, and seal release image
         env:
@@ -204,6 +288,7 @@ jobs:
           IMAGE: ${{ inputs.image }}
           PYTHON_BASE: ${{ inputs.python_base }}
           SOURCE_COMMIT: ${{ steps.source.outputs.commit_sha }}
+          SOURCE_REPOSITORY: ${{ github.repository }}
           SYFT_IMAGE: ${{ inputs.syft_image }}
           VERSION: ${{ inputs.version }}
         run: |
@@ -214,6 +299,7 @@ jobs:
             --python-base "$PYTHON_BASE" \
             --syft-image "$SYFT_IMAGE" \
             --grype-image "$GRYPE_IMAGE" \
+            --source-repository "$SOURCE_REPOSITORY" \
             --expected-commit "$SOURCE_COMMIT" \
             --output release-image-metadata.json \
             --identity release-image-identity.json \
@@ -294,6 +380,7 @@ jobs:
           EXPECTED_IDENTITY_SHA256: ${{ needs.validate.outputs.identity_sha256 }}
           IMAGE: ${{ inputs.image }}
           PYTHON_BASE: ${{ inputs.python_base }}
+          SOURCE_REPOSITORY: ${{ github.repository }}
           VERSION: ${{ inputs.version }}
         run: |
           python deploy/build_release_image.py \
@@ -301,6 +388,7 @@ jobs:
             --version "$VERSION" \
             --image "$IMAGE" \
             --python-base "$PYTHON_BASE" \
+            --source-repository "$SOURCE_REPOSITORY" \
             --metadata release-candidate/release-image-metadata.json \
             --identity release-candidate/release-image-identity.json \
             --image-archive release-candidate/release-image.tar \
@@ -318,6 +406,7 @@ jobs:
           EXPECTED_IDENTITY_SHA256: ${{ needs.validate.outputs.identity_sha256 }}
           IMAGE: ${{ inputs.image }}
           PYTHON_BASE: ${{ inputs.python_base }}
+          SOURCE_REPOSITORY: ${{ github.repository }}
           VERSION: ${{ inputs.version }}
         run: |
           python deploy/build_release_image.py \
@@ -325,6 +414,7 @@ jobs:
             --version "$VERSION" \
             --image "$IMAGE" \
             --python-base "$PYTHON_BASE" \
+            --source-repository "$SOURCE_REPOSITORY" \
             --metadata release-candidate/release-image-metadata.json \
             --identity release-candidate/release-image-identity.json \
             --image-archive release-candidate/release-image.tar \
@@ -335,6 +425,7 @@ jobs:
         id: release
         env:
           EXPECTED_IMAGE: ${{ inputs.image }}
+          EXPECTED_SOURCE_REPOSITORY: ${{ github.repository }}
           EXPECTED_VERSION: ${{ inputs.version }}
         run: |
           python - <<'PY'
@@ -352,6 +443,8 @@ jobs:
           image_tag = metadata.get("image_tag")
           if metadata.get("schema") != 2:
               raise SystemExit("publication metadata schema is unsupported")
+          if metadata.get("source_repository") != os.environ["EXPECTED_SOURCE_REPOSITORY"]:
+              raise SystemExit("publication metadata source repository does not match inputs")
           if not isinstance(digest, str) or re.fullmatch(r"sha256:[0-9a-f]{64}", digest) is None:
               raise SystemExit("publication metadata has no registry manifest digest")
           if not isinstance(archive_sha256, str) or re.fullmatch(r"[0-9a-f]{64}", archive_sha256) is None:
@@ -372,6 +465,39 @@ jobs:
               output.write(f"image_ref={image_ref}\n")
           PY
 
+      - name: Attest published image
+        id: image-attestation
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        with:
+          subject-name: ${{ inputs.image }}
+          subject-digest: ${{ steps.release.outputs.registry_digest }}
+          push-to-registry: true
+
+      - name: Attest publication metadata
+        id: publication-attestation
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        with:
+          subject-path: release-image-publication.json
+
+      - name: Capture and verify canonical GitHub attestation trust
+        env:
+          ATTESTATION_BUNDLE: ${{ steps.publication-attestation.outputs.bundle-path }}
+          SOURCE_COMMIT: ${{ needs.validate.outputs.commit_sha }}
+          SOURCE_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          test "$SOURCE_REPOSITORY" = "Archolith/menhir"
+          cp -- "$ATTESTATION_BUNDLE" release-image-publication.attestation.json
+          gh attestation trusted-root > release-image-attestation-trusted-root.jsonl
+          gh attestation verify release-image-publication.json \
+            --repo "$SOURCE_REPOSITORY" \
+            --bundle release-image-publication.attestation.json \
+            --custom-trusted-root release-image-attestation-trusted-root.jsonl \
+            --source-digest "$SOURCE_COMMIT" \
+            --signer-workflow "$SOURCE_REPOSITORY/.github/workflows/release-image.yml" \
+            --deny-self-hosted-runners \
+            --format json > release-image-publication.attestation-verification.json
+
       - name: Name publication metadata artifact
         id: artifact-name
         run: echo "value=release-image-publication-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
@@ -382,21 +508,12 @@ jobs:
           name: ${{ steps.artifact-name.outputs.value }}
           path: |
             release-image-publication.json
+            release-image-publication.attestation.json
+            release-image-attestation-trusted-root.jsonl
+            release-image-publication.attestation-verification.json
             release-candidate/release-image-metadata.json
             release-candidate/release-image-identity.json
             release-candidate/release-image-evidence/
           if-no-files-found: error
           include-hidden-files: false
           retention-days: 90
-
-      - name: Attest published image
-        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
-        with:
-          subject-name: ${{ inputs.image }}
-          subject-digest: ${{ steps.release.outputs.registry_digest }}
-          push-to-registry: true
-
-      - name: Attest publication metadata
-        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
-        with:
-          subject-path: release-image-publication.json
