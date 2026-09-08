@@ -94,7 +94,16 @@ _LEGACY_RELEASE_TOP_KEYS = frozenset({
 _PRE_INGRESS_RELEASE_TOP_KEYS = _LEGACY_RELEASE_TOP_KEYS | frozenset({
     "deployment_class", "notes_json_sha256", "notes_markdown_sha256",
 })
-_RELEASE_TOP_KEYS = _PRE_INGRESS_RELEASE_TOP_KEYS | frozenset({"ingress_mode"})
+_PRE_IMAGE_PUBLICATION_RELEASE_TOP_KEYS = (
+    _PRE_INGRESS_RELEASE_TOP_KEYS | frozenset({"ingress_mode"})
+)
+_RELEASE_TOP_KEYS = (
+    _PRE_IMAGE_PUBLICATION_RELEASE_TOP_KEYS | frozenset({"image_publication"})
+)
+_RELEASE_IMAGE_PUBLICATION_KEYS = frozenset({
+    "publication_sha256", "validation_identity_sha256", "image_id",
+    "config_sha256", "image_archive_sha256", "registry_digest",
+})
 _RELEASE_SECURITY_REVIEW_KEYS = frozenset({
     "schema", "kind", "review_id", "release_author", "reviewer",
     "reviewed_utc", "authority_sha256", "verdict", "unresolved_findings",
@@ -450,7 +459,8 @@ def validate_release(path: str) -> dict:
         raise ValueError("release.json must be a JSON object")
     release_keys = set(release)
     if release_keys not in {
-        _RELEASE_TOP_KEYS, _PRE_INGRESS_RELEASE_TOP_KEYS, _LEGACY_RELEASE_TOP_KEYS,
+        _RELEASE_TOP_KEYS, _PRE_IMAGE_PUBLICATION_RELEASE_TOP_KEYS,
+        _PRE_INGRESS_RELEASE_TOP_KEYS, _LEGACY_RELEASE_TOP_KEYS,
     }:
         _require_exact_keys(release, _RELEASE_TOP_KEYS, "release.json")
     if release.get("schema") != SCHEMA_VERSION:
@@ -461,14 +471,17 @@ def validate_release(path: str) -> dict:
         r"[A-Za-z0-9][A-Za-z0-9._@+-]*", release_author
     ):
         raise ValueError("release_author must be a safe bounded identity")
-    if release_keys in {_RELEASE_TOP_KEYS, _PRE_INGRESS_RELEASE_TOP_KEYS}:
+    if release_keys in {
+        _RELEASE_TOP_KEYS, _PRE_IMAGE_PUBLICATION_RELEASE_TOP_KEYS,
+        _PRE_INGRESS_RELEASE_TOP_KEYS,
+    }:
         if release.get("deployment_class") not in _RELEASE_DEPLOYMENT_CLASSES:
             raise ValueError("deployment_class is invalid")
         _require_sha256(release.get("notes_json_sha256"), "notes_json_sha256")
         _require_sha256(
             release.get("notes_markdown_sha256"), "notes_markdown_sha256"
         )
-    if release_keys == _RELEASE_TOP_KEYS \
+    if release_keys in {_RELEASE_TOP_KEYS, _PRE_IMAGE_PUBLICATION_RELEASE_TOP_KEYS} \
             and release.get("ingress_mode") not in _RELEASE_INGRESS_MODES:
         raise ValueError("ingress_mode is invalid")
 
@@ -507,6 +520,41 @@ def validate_release(path: str) -> dict:
     _require_exact_keys(images, _RELEASE_IMAGES, "images")
     for img in sorted(_RELEASE_IMAGES):
         _require_digest(images.get(img), "images.%s" % img)
+
+    if release_keys == _RELEASE_TOP_KEYS:
+        image_publication = release.get("image_publication")
+        _require_exact_keys(
+            image_publication,
+            _RELEASE_IMAGE_PUBLICATION_KEYS,
+            "image_publication",
+        )
+        _require_sha256(
+            image_publication.get("publication_sha256"),
+            "image_publication.publication_sha256",
+        )
+        _require_sha256(
+            image_publication.get("validation_identity_sha256"),
+            "image_publication.validation_identity_sha256",
+        )
+        _require_digest(
+            image_publication.get("image_id"), "image_publication.image_id"
+        )
+        _require_sha256(
+            image_publication.get("config_sha256"),
+            "image_publication.config_sha256",
+        )
+        _require_sha256(
+            image_publication.get("image_archive_sha256"),
+            "image_publication.image_archive_sha256",
+        )
+        registry_digest = _require_digest(
+            image_publication.get("registry_digest"),
+            "image_publication.registry_digest",
+        )
+        if registry_digest != images["menhir"]:
+            raise ValueError(
+                "image_publication.registry_digest differs from images.menhir"
+            )
 
     _require_sha256(release.get("wheel_manifest_sha256"), "wheel_manifest_sha256")
     # Dockerfile wheel-hash manifest is mandatory (blocker 7).

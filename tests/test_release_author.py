@@ -23,6 +23,12 @@ def _sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _write_json(path: Path, value: dict) -> None:
+    path.write_text(
+        json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="ascii"
+    )
+
+
 def _record_line(name: str, payload: bytes) -> str:
     digest = base64.urlsafe_b64encode(
         hashlib.sha256(payload).digest()
@@ -88,6 +94,134 @@ def _wheel(path: Path) -> Path:
     return wheel
 
 
+def _image_publication_bundle(
+    root: Path,
+    *,
+    commit: str,
+    release_id: str,
+    menhir_ref: str,
+    menhir_digest: str,
+    base_ref: str,
+    wheel_manifest_sha256: str,
+    oauth_wheel_sha256: str,
+) -> dict[str, str]:
+    root.mkdir()
+    archive = root / "release-image.tar"
+    archive.write_bytes(b"sealed Menhir image archive")
+    archive_sha = _sha(archive)
+    image_id = "sha256:" + "5" * 64
+    config_sha = "6" * 64
+    version = release_id.removeprefix("menhir-prod-")
+    repository = menhir_ref.rpartition("@")[0]
+    image_tag = f"{repository}:{version}"
+    subject = {"image_id": image_id, "image_archive_sha256": archive_sha}
+    sbom = root / "sbom.syft.json"
+    scan = root / "scan.grype.json"
+    _write_json(sbom, {
+        "descriptor": {"name": "syft", "version": "1.51.1"},
+        "source": {"type": "image", "target": {"id": image_id}},
+        "schema": {
+            "version": "16.0.0",
+            "url": "https://raw.githubusercontent.com/anchore/syft/main/schema/json/schema-16.0.0.json",
+        },
+        "artifacts": [{"id": "pkg-1", "name": "menhir"}],
+        "artifactRelationships": [],
+    })
+    _write_json(scan, {
+        "descriptor": {
+            "name": "grype",
+            "version": "0.118.0",
+            "db": {"built": "2026-09-08T00:00:00Z", "checksum": "sha256:db"},
+        },
+        "source": {"type": "image", "target": {"imageID": image_id}},
+        "matches": [],
+        "ignoredMatches": [],
+    })
+    builder = MODULE.release_spec.build_release_image
+    evidence = {
+        "required": True,
+        "sbom": {
+            "artifact_path": "release-image-evidence/sbom.syft.json",
+            "sha256": _sha(sbom),
+            "scanner_image": "docker.io/anchore/syft@sha256:" + "a" * 64,
+            "subject": subject,
+            "validation": builder.validate_sbom(sbom.read_bytes(), image_id),
+        },
+        "vulnerability_scan": {
+            "artifact_path": "release-image-evidence/scan.grype.json",
+            "sha256": _sha(scan),
+            "scanner_image": "docker.io/anchore/grype@sha256:" + "b" * 64,
+            "subject": subject,
+            "validation": builder.validate_vulnerability_scan(
+                scan.read_bytes(), image_id
+            ),
+        },
+    }
+    metadata = root / "release-image-metadata.json"
+    _write_json(metadata, {
+        "schema": 3,
+        "source_commit": commit,
+        "image_tag": image_tag,
+        "image_id": image_id,
+        "config_sha256": config_sha,
+        "image_archive_sha256": archive_sha,
+        "python_base": base_ref,
+        "labels": {
+            "commit": commit,
+            "version": version,
+            "wheel_manifest_sha256": wheel_manifest_sha256,
+            "oauth_wheel_sha256": oauth_wheel_sha256,
+        },
+        "evidence": evidence,
+    })
+    identity_evidence = {
+        "sbom": evidence["sbom"]["sha256"],
+        "vulnerability_scan": evidence["vulnerability_scan"]["sha256"],
+    }
+    identity = root / "release-image-identity.json"
+    _write_json(identity, {
+        "schema": 2,
+        "source_commit": commit,
+        "image_tag": image_tag,
+        "image_id": image_id,
+        "config_sha256": config_sha,
+        "image_archive": {
+            "artifact_path": "release-image.tar",
+            "sha256": archive_sha,
+        },
+        "metadata": {
+            "artifact_path": "release-image-metadata.json",
+            "sha256": _sha(metadata),
+        },
+        "evidence": identity_evidence,
+    })
+    candidate_tag = f"{repository}:candidate-{archive_sha}"
+    publication = root / "release-image-publication.json"
+    _write_json(publication, {
+        "schema": 2,
+        "validation_identity_sha256": _sha(identity),
+        "source_commit": commit,
+        "image_tag": image_tag,
+        "image_id": image_id,
+        "config_sha256": config_sha,
+        "image_archive_sha256": archive_sha,
+        "registry_digest": menhir_digest,
+        "image_ref": menhir_ref,
+        "candidate_tag": candidate_tag,
+        "candidate_ref": f"{candidate_tag}@{menhir_digest}",
+        "idempotent_existing_candidate": False,
+        "evidence": identity_evidence,
+    })
+    return {
+        "sbom": str(sbom.resolve()),
+        "scan": str(scan.resolve()),
+        "image_publication": str(publication.resolve()),
+        "image_metadata": str(metadata.resolve()),
+        "image_identity": str(identity.resolve()),
+        "image_archive": str(archive.resolve()),
+    }
+
+
 def _fixture(tmp_path: Path) -> tuple[Path, Path, dict]:
     repo_names = ("menhir", "archolith_oauth", "yawn_deploy", "yawn_vps")
     repos: dict[str, str] = {}
@@ -126,6 +260,10 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, dict]:
     images = {name: "sha256:" + str(index) * 64 for index, name in enumerate(
         ("menhir", "neo4j", "caddy", "base"), start=1
     )}
+    image_refs = {
+        name: f"ghcr.io/archolith/{name}@{digest}"
+        for name, digest in images.items()
+    }
     provenance = tmp_path / "provenance.json"
     provenance.write_text(json.dumps({
         "schema": 1,
@@ -144,10 +282,16 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, dict]:
         "dockerfile_wheel_manifest": str(docker_manifest.resolve()),
         "provenance": str(provenance.resolve()),
     }
-    for name in ("sbom", "scan"):
-        path = tmp_path / f"{name}.json"
-        path.write_text('{"ok":true}\n', encoding="ascii")
-        evidence[name] = str(path.resolve())
+    evidence.update(_image_publication_bundle(
+        tmp_path / "image-publication",
+        commit=commits["menhir"],
+        release_id="menhir-prod-0.2.0-1",
+        menhir_ref=image_refs["menhir"],
+        menhir_digest=images["menhir"],
+        base_ref=image_refs["base"],
+        wheel_manifest_sha256=_sha(docker_manifest),
+        oauth_wheel_sha256=_sha(oauth_wheel),
+    ))
 
     rendered: dict[str, str] = {}
     policy_payload = json.loads(
@@ -184,6 +328,7 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, dict]:
         "notes_markdown_sha256": "e" * 64,
         "repositories": repos,
         "images": images,
+        "image_refs": image_refs,
         "evidence": evidence,
         "rendered": rendered,
         "network": {
@@ -207,6 +352,38 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, dict]:
     spec_path = tmp_path / "release-spec.json"
     spec_path.write_text(json.dumps(spec), encoding="utf-8")
     return spec_path, tmp_path / "release.json", spec
+
+
+def _rebind_metadata_identity(spec: dict) -> None:
+    metadata = Path(spec["evidence"]["image_metadata"])
+    identity = Path(spec["evidence"]["image_identity"])
+    publication = Path(spec["evidence"]["image_publication"])
+    identity_value = json.loads(identity.read_text(encoding="ascii"))
+    identity_value["metadata"]["sha256"] = _sha(metadata)
+    _write_json(identity, identity_value)
+    publication_value = json.loads(publication.read_text(encoding="ascii"))
+    publication_value["validation_identity_sha256"] = _sha(identity)
+    _write_json(publication, publication_value)
+
+
+def _retarget_publication(spec: dict) -> None:
+    version = spec["release_id"].removeprefix("menhir-prod-")
+    repository = spec["image_refs"]["menhir"].rpartition("@")[0]
+    image_tag = f"{repository}:{version}"
+    metadata = Path(spec["evidence"]["image_metadata"])
+    metadata_value = json.loads(metadata.read_text(encoding="ascii"))
+    metadata_value["image_tag"] = image_tag
+    metadata_value["labels"]["version"] = version
+    _write_json(metadata, metadata_value)
+    identity = Path(spec["evidence"]["image_identity"])
+    identity_value = json.loads(identity.read_text(encoding="ascii"))
+    identity_value["image_tag"] = image_tag
+    _write_json(identity, identity_value)
+    publication = Path(spec["evidence"]["image_publication"])
+    publication_value = json.loads(publication.read_text(encoding="ascii"))
+    publication_value["image_tag"] = image_tag
+    _write_json(publication, publication_value)
+    _rebind_metadata_identity(spec)
 
 
 def _security_review(spec_path: Path, output: Path) -> Path:
@@ -256,6 +433,19 @@ def test_authors_canonical_release_from_clean_exact_inputs(tmp_path: Path) -> No
     assert release["deployment_class"] == spec["deployment_class"]
     assert release["notes_json_sha256"] == spec["notes_json_sha256"]
     assert release["notes_markdown_sha256"] == spec["notes_markdown_sha256"]
+    metadata = json.loads(
+        Path(spec["evidence"]["image_metadata"]).read_text(encoding="ascii")
+    )
+    assert release["image_publication"] == {
+        "publication_sha256": _sha(Path(spec["evidence"]["image_publication"])),
+        "validation_identity_sha256": _sha(
+            Path(spec["evidence"]["image_identity"])
+        ),
+        "image_id": metadata["image_id"],
+        "config_sha256": metadata["config_sha256"],
+        "image_archive_sha256": _sha(Path(spec["evidence"]["image_archive"])),
+        "registry_digest": spec["images"]["menhir"],
+    }
     assert release["oauth_wheel_sha256"] == _sha(
         Path(json.loads(spec_path.read_text())["evidence"]["oauth_wheel"])
     )
@@ -288,6 +478,62 @@ def test_authors_canonical_release_from_clean_exact_inputs(tmp_path: Path) -> No
         capture_output=True,
         text=True,
     ).stdout.strip()
+
+
+def test_author_revalidates_publication_registry_digest(tmp_path: Path) -> None:
+    spec_path, output, spec = _fixture(tmp_path)
+    publication = Path(spec["evidence"]["image_publication"])
+    document = json.loads(publication.read_text(encoding="ascii"))
+    document["registry_digest"] = "sha256:" + "f" * 64
+    _write_json(publication, document)
+
+    with pytest.raises(ValueError, match="registry digest"):
+        MODULE.author_release(spec_path, output, review_request=True)
+
+
+def test_author_refuses_arbitrary_unbound_sbom(tmp_path: Path) -> None:
+    spec_path, output, spec = _fixture(tmp_path)
+    Path(spec["evidence"]["sbom"]).write_text(
+        '{"arbitrary":"sbom"}\n', encoding="ascii"
+    )
+
+    with pytest.raises(ValueError, match="sbom evidence digest"):
+        MODULE.author_release(spec_path, output, review_request=True)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    (
+        ("publication_sha256", "bad", "publication_sha256"),
+        ("registry_digest", "sha256:" + "f" * 64, "images.menhir"),
+    ),
+)
+def test_release_schema_rejects_invalid_persisted_image_publication(
+    tmp_path: Path, field: str, value: str, message: str,
+) -> None:
+    spec_path, output, _ = _fixture(tmp_path)
+    release = _author(spec_path, output)
+    release["image_publication"][field] = value
+    tampered = tmp_path / f"tampered-{field}.json"
+    _write_json(tampered, release)
+
+    with pytest.raises(ValueError, match=message):
+        MODULE.menhir_schema.validate_release(str(tampered))
+
+
+@pytest.mark.parametrize("kind", ["sbom", "vulnerability_scan"])
+def test_author_refuses_ci_evidence_for_wrong_subject(
+    tmp_path: Path, kind: str,
+) -> None:
+    spec_path, output, spec = _fixture(tmp_path)
+    metadata = Path(spec["evidence"]["image_metadata"])
+    document = json.loads(metadata.read_text(encoding="ascii"))
+    document["evidence"][kind]["subject"]["image_archive_sha256"] = "f" * 64
+    _write_json(metadata, document)
+    _rebind_metadata_identity(spec)
+
+    with pytest.raises(ValueError, match="wrong release subject"):
+        MODULE.author_release(spec_path, output, review_request=True)
 
 
 def test_accepts_yawn_env_as_digest_without_copying_secret_file(tmp_path: Path) -> None:
@@ -326,6 +572,7 @@ def test_legacy_release_remains_readable(tmp_path: Path) -> None:
     output.chmod(0o600)
     for key in (
         "deployment_class", "ingress_mode", "notes_json_sha256", "notes_markdown_sha256",
+        "image_publication",
     ):
         release.pop(key)
     release["security_review"]["authority_sha256"] = (
@@ -548,6 +795,7 @@ def test_non_initial_release_pins_complete_prior_release_digest(tmp_path: Path) 
     spec_path, prior_output, spec = _fixture(tmp_path)
     prior = _author(spec_path, prior_output)
     spec["release_id"] = "menhir-prod-0.2.0-2"
+    _retarget_publication(spec)
     spec["initial_release"] = False
     spec["prior_release"] = str(prior_output.resolve())
     spec["initial_host_state"] = None

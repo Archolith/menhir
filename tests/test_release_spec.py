@@ -58,6 +58,140 @@ def _write_json(path: Path, value: dict) -> None:
     )
 
 
+def _image_publication_bundle(
+    root: Path,
+    *,
+    commit: str,
+    release_id: str,
+    menhir_ref: str,
+    menhir_digest: str,
+    base_ref: str,
+    wheel_manifest_sha256: str,
+    oauth_wheel_sha256: str,
+) -> dict[str, str]:
+    root.mkdir()
+    archive = root / "release-image.tar"
+    archive.write_bytes(b"sealed Menhir image archive")
+    archive_sha = hashlib.sha256(archive.read_bytes()).hexdigest()
+    image_id = "sha256:" + "5" * 64
+    config_sha = "6" * 64
+    version = release_id.removeprefix("menhir-prod-")
+    repository = menhir_ref.rpartition("@")[0]
+    image_tag = f"{repository}:{version}"
+    subject = {
+        "image_id": image_id,
+        "image_archive_sha256": archive_sha,
+    }
+    sbom = root / "sbom.syft.json"
+    scan = root / "scan.grype.json"
+    _write_json(sbom, {
+        "descriptor": {"name": "syft", "version": "1.51.1"},
+        "source": {"type": "image", "target": {"id": image_id}},
+        "schema": {
+            "version": "16.0.0",
+            "url": "https://raw.githubusercontent.com/anchore/syft/main/schema/json/schema-16.0.0.json",
+        },
+        "artifacts": [{"id": "pkg-1", "name": "menhir"}],
+        "artifactRelationships": [],
+    })
+    _write_json(scan, {
+        "descriptor": {
+            "name": "grype",
+            "version": "0.118.0",
+            "db": {"built": "2026-09-08T00:00:00Z", "checksum": "sha256:db"},
+        },
+        "source": {"type": "image", "target": {"imageID": image_id}},
+        "matches": [],
+        "ignoredMatches": [],
+    })
+    evidence = {
+        "required": True,
+        "sbom": {
+            "artifact_path": "release-image-evidence/sbom.syft.json",
+            "sha256": MODULE._sha256(sbom),
+            "scanner_image": "docker.io/anchore/syft@sha256:" + "a" * 64,
+            "subject": subject,
+            "validation": MODULE.build_release_image.validate_sbom(
+                sbom.read_bytes(), image_id
+            ),
+        },
+        "vulnerability_scan": {
+            "artifact_path": "release-image-evidence/scan.grype.json",
+            "sha256": MODULE._sha256(scan),
+            "scanner_image": "docker.io/anchore/grype@sha256:" + "b" * 64,
+            "subject": subject,
+            "validation": MODULE.build_release_image.validate_vulnerability_scan(
+                scan.read_bytes(), image_id
+            ),
+        },
+    }
+    metadata = root / "release-image-metadata.json"
+    _write_json(metadata, {
+        "schema": 3,
+        "source_commit": commit,
+        "image_tag": image_tag,
+        "image_id": image_id,
+        "config_sha256": config_sha,
+        "image_archive_sha256": archive_sha,
+        "python_base": base_ref,
+        "labels": {
+            "commit": commit,
+            "version": version,
+            "wheel_manifest_sha256": wheel_manifest_sha256,
+            "oauth_wheel_sha256": oauth_wheel_sha256,
+        },
+        "evidence": evidence,
+    })
+    identity = root / "release-image-identity.json"
+    _write_json(identity, {
+        "schema": 2,
+        "source_commit": commit,
+        "image_tag": image_tag,
+        "image_id": image_id,
+        "config_sha256": config_sha,
+        "image_archive": {
+            "artifact_path": "release-image.tar",
+            "sha256": archive_sha,
+        },
+        "metadata": {
+            "artifact_path": "release-image-metadata.json",
+            "sha256": MODULE._sha256(metadata),
+        },
+        "evidence": {
+            "sbom": evidence["sbom"]["sha256"],
+            "vulnerability_scan": evidence["vulnerability_scan"]["sha256"],
+        },
+    })
+    publication = root / "release-image-publication.json"
+    candidate_tag = f"{repository}:candidate-{archive_sha}"
+    _write_json(publication, {
+        "schema": 2,
+        "validation_identity_sha256": MODULE._sha256(identity),
+        "source_commit": commit,
+        "image_tag": image_tag,
+        "image_id": image_id,
+        "config_sha256": config_sha,
+        "image_archive_sha256": archive_sha,
+        "registry_digest": menhir_digest,
+        "image_ref": menhir_ref,
+        "candidate_tag": candidate_tag,
+        "candidate_ref": f"{candidate_tag}@{menhir_digest}",
+        "idempotent_existing_candidate": False,
+        "evidence": {
+            "sbom": evidence["sbom"]["sha256"],
+            "vulnerability_scan": evidence["vulnerability_scan"]["sha256"],
+        },
+    })
+    return {
+        "sbom": str(sbom.resolve()),
+        "scan": str(scan.resolve()),
+        "image_publication": str(publication.resolve()),
+        "image_metadata": str(metadata.resolve()),
+        "image_identity": str(identity.resolve()),
+        "image_archive": str(archive.resolve()),
+    }
+
+
 @pytest.fixture
 def release_fixture(tmp_path: Path, monkeypatch):
     policy = {"version": 2, "access_contract": {}, "clients": {}}
@@ -103,15 +237,14 @@ def release_fixture(tmp_path: Path, monkeypatch):
             "Name: archolith-oauth\nVersion: 1.0\n",
         )
         archive.writestr("archolith_oauth/__init__.py", "")
-    (wheelhouse / "SHA256SUMS").write_text(
+    wheel_manifest = wheelhouse / "SHA256SUMS"
+    wheel_manifest.write_text(
         hashlib.sha256(wheel.read_bytes()).hexdigest() + "  " + wheel.name + "\n",
         encoding="ascii",
     )
-    sbom = tmp_path / "sbom.json"
-    scan = tmp_path / "scan.json"
     prior = tmp_path / "prior-release.json"
     route = tmp_path / "prior-route.json"
-    for path in (sbom, scan, prior, route):
+    for path in (prior, route):
         path.write_text("{}\n", encoding="ascii")
     baseline = tmp_path / "production.env"
     baseline.write_text(
@@ -151,6 +284,23 @@ def release_fixture(tmp_path: Path, monkeypatch):
     }
     operations_path = tmp_path / "operations.json"
     _write_json(operations_path, operations)
+    images = {
+        name: {
+            "digest": "sha256:" + str(index) * 64,
+            "ref": f"ghcr.io/archolith/{name}@sha256:" + str(index) * 64,
+        }
+        for index, name in enumerate(sorted(MODULE.IMAGES), start=1)
+    }
+    publication_evidence = _image_publication_bundle(
+        tmp_path / "image-publication",
+        commit=commits["menhir"],
+        release_id="menhir-prod-1.2.3-9",
+        menhir_ref=images["menhir"]["ref"],
+        menhir_digest=images["menhir"]["digest"],
+        base_ref=images["base"]["ref"],
+        wheel_manifest_sha256=MODULE._sha256(wheel_manifest),
+        oauth_wheel_sha256=MODULE._sha256(wheel),
+    )
     inputs = {
         "schema": 1,
         "release_id": "menhir-prod-1.2.3-9",
@@ -158,20 +308,10 @@ def release_fixture(tmp_path: Path, monkeypatch):
         "ingress_mode": "cloudflared",
         "release_workspace_root": str(workspace.resolve()),
         "repositories": repos,
-        "images": {
-            name: {
-                "digest": "sha256:" + str(index) * 64,
-                "ref": (
-                    f"registry.example/{name}:1@sha256:"
-                    + str(index) * 64
-                ),
-            }
-            for index, name in enumerate(sorted(MODULE.IMAGES), start=1)
-        },
+        "images": images,
         "evidence": {
             "wheelhouse": str(wheelhouse.resolve()),
-            "sbom": str(sbom.resolve()),
-            "scan": str(scan.resolve()),
+            **publication_evidence,
         },
         "baseline_production_env": str(baseline.resolve()),
         "operations_policy": str(operations_path.resolve()),
@@ -203,11 +343,24 @@ def release_fixture(tmp_path: Path, monkeypatch):
         "operations_path": operations_path,
         "baseline": baseline,
         "policy_digest": policy["canonical_digest"],
+        "publication_evidence": publication_evidence,
     }
 
 
 def _save(fixture) -> None:
     _write_json(fixture["inputs_path"], fixture["inputs"])
+
+
+def _rebind_metadata_identity(paths: dict[str, str]) -> None:
+    metadata = Path(paths["image_metadata"])
+    identity = Path(paths["image_identity"])
+    publication = Path(paths["image_publication"])
+    identity_value = json.loads(identity.read_text(encoding="ascii"))
+    identity_value["metadata"]["sha256"] = MODULE._sha256(metadata)
+    _write_json(identity, identity_value)
+    publication_value = json.loads(publication.read_text(encoding="ascii"))
+    publication_value["validation_identity_sha256"] = MODULE._sha256(identity)
+    _write_json(publication, publication_value)
 
 
 def test_prepares_deterministic_release_author_spec(release_fixture) -> None:
@@ -231,12 +384,65 @@ def test_prepares_deterministic_release_author_spec(release_fixture) -> None:
         for item in (fixture["workspace"] / "release-spec-inputs").iterdir()
     }
     assert first["repositories"] == fixture["repos"]
+    assert first["image_refs"] == {
+        name: row["ref"] for name, row in fixture["inputs"]["images"].items()
+    }
+    for key, path in fixture["publication_evidence"].items():
+        assert first["evidence"][key] == path
     assert first["initial_release"] is False
     env = Path(first["rendered"]["production_env_sha256"]).read_text(
         encoding="ascii"
     )
     assert f"MENHIR_RELEASE_COMMIT={fixture['commits']['menhir']}" in env
     assert "MENHIR_CLIENT_POLICY_DIGEST=" + fixture["policy_digest"] in env
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    (
+        ("registry_digest", "sha256:" + "f" * 64, "registry digest"),
+        ("image_ref", "ghcr.io/attacker/menhir@sha256:" + "3" * 64, "image_ref"),
+        ("validation_identity_sha256", "0" * 64, "validation identity"),
+    ),
+)
+def test_refuses_publication_not_bound_to_release_or_validation_identity(
+    release_fixture, field: str, value: str, message: str,
+) -> None:
+    fixture = release_fixture
+    publication = Path(fixture["publication_evidence"]["image_publication"])
+    document = json.loads(publication.read_text(encoding="ascii"))
+    document[field] = value
+    _write_json(publication, document)
+
+    with pytest.raises(MODULE.ReleaseSpecError, match=message):
+        MODULE.prepare_release_spec(fixture["inputs_path"], fixture["output"])
+
+
+def test_refuses_image_archive_not_bound_to_validation_identity(
+    release_fixture,
+) -> None:
+    fixture = release_fixture
+    archive = Path(fixture["publication_evidence"]["image_archive"])
+    archive.write_bytes(b"arbitrary replacement archive")
+
+    with pytest.raises(MODULE.ReleaseSpecError, match="image archive"):
+        MODULE.prepare_release_spec(fixture["inputs_path"], fixture["output"])
+
+
+@pytest.mark.parametrize("kind", ["sbom", "vulnerability_scan"])
+def test_refuses_sbom_or_grype_metadata_for_wrong_subject(
+    release_fixture, kind: str,
+) -> None:
+    fixture = release_fixture
+    paths = fixture["publication_evidence"]
+    metadata = Path(paths["image_metadata"])
+    document = json.loads(metadata.read_text(encoding="ascii"))
+    document["evidence"][kind]["subject"]["image_id"] = "sha256:" + "f" * 64
+    _write_json(metadata, document)
+    _rebind_metadata_identity(paths)
+
+    with pytest.raises(MODULE.ReleaseSpecError, match="wrong release subject"):
+        MODULE.prepare_release_spec(fixture["inputs_path"], fixture["output"])
 
 
 def test_refuses_dirty_and_non_tip_repositories(release_fixture) -> None:

@@ -20,16 +20,19 @@ from pathlib import Path
 from typing import Any
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(SCRIPT_DIR))
 sys.path.insert(0, str(SCRIPT_DIR / "lib"))
 sys.path.insert(0, str(SCRIPT_DIR.parent / "src"))
 
 import menhir_schema  # noqa: E402
+import release_spec  # noqa: E402
 import verify_wheelhouse  # noqa: E402
 from menhir.access_contract import validate_access_contract  # noqa: E402
 
 
 SPEC_KEYS = frozenset({
-    "schema", "release_id", "release_author", "repositories", "images", "evidence",
+    "schema", "release_id", "release_author", "repositories", "images",
+    "image_refs", "evidence",
     "rendered", "network", "initial_release", "prior_release",
     "prior_route", "initial_prior_images", "secret_version_ids",
     "artifact_sources",
@@ -45,7 +48,8 @@ REPOSITORIES = frozenset({"menhir", "archolith_oauth", "yawn_deploy", "yawn_vps"
 IMAGES = frozenset({"menhir", "neo4j", "caddy", "base"})
 EVIDENCE = frozenset({
     "oauth_wheel", "wheelhouse", "wheel_manifest",
-    "dockerfile_wheel_manifest", "sbom", "scan", "provenance",
+    "dockerfile_wheel_manifest", "sbom", "scan", "image_publication",
+    "image_metadata", "image_identity", "image_archive", "provenance",
 })
 RENDERED = frozenset({
     "menhir_compose_sha256", "yawn_compose_sha256", "caddy_sha256",
@@ -476,6 +480,14 @@ def author_release(
     for name, digest in images.items():
         if not isinstance(digest, str) or not DIGEST_RE.fullmatch(digest):
             raise ValueError(f"images.{name} must be a sha256 digest")
+    image_refs = _exact(spec.get("image_refs"), IMAGES, "image_refs")
+    for name, reference in image_refs.items():
+        if not isinstance(reference, str) \
+                or release_spec.IMAGE_REF_RE.fullmatch(reference) is None \
+                or not reference.endswith("@" + images[name]):
+            raise ValueError(
+                f"image_refs.{name} must be an immutable matching reference"
+            )
 
     evidence_values = _exact(spec.get("evidence"), EVIDENCE, "evidence")
     evidence = {
@@ -502,6 +514,21 @@ def author_release(
     _validate_provenance(
         evidence["provenance"], repos, repo_remotes, images, oauth_sha,
         wheel_manifest_sha, docker_manifest_sha,
+    )
+    image_publication = release_spec.validate_image_publication(
+        publication_path=evidence["image_publication"],
+        metadata_path=evidence["image_metadata"],
+        identity_path=evidence["image_identity"],
+        archive_path=evidence["image_archive"],
+        sbom_path=evidence["sbom"],
+        scan_path=evidence["scan"],
+        menhir_commit=repos["menhir"],
+        menhir_digest=images["menhir"],
+        menhir_ref=image_refs["menhir"],
+        base_ref=image_refs["base"],
+        release_id=release_id,
+        wheel_manifest_sha256=docker_manifest_sha,
+        oauth_wheel_sha256=oauth_sha,
     )
 
     rendered_values = _exact(spec.get("rendered"), RENDERED, "rendered")
@@ -636,6 +663,7 @@ def author_release(
             "wheel_sha256": oauth_sha,
         },
         "images": images,
+        "image_publication": image_publication,
         "wheel_manifest_sha256": wheel_manifest_sha,
         "dockerfile_wheel_manifest_sha256": docker_manifest_sha,
         "sbom_sha256": _sha256(evidence["sbom"]),
