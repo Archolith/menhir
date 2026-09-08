@@ -2,10 +2,15 @@
 artifact_schema: 1
 artifact_uuid: f4a95baf-e708-4571-ad6f-fef7ae4b072e
 artifact_type: plan
-artifact_status: IMPLEMENTING
+artifact_status: SUPERSEDED
 ---
 
 # Menhir deployment reliability
+
+> **Disposition (2026-09-08):** Superseded by
+> [Menhir deployment control-plane architecture reset](../../plans/menhir-deployment-control-plane-architecture-reset-2026-09-08.md).
+> This record remains historical evidence of the incremental remediation and does not authorize
+> further implementation or deployment.
 
 ## Why
 

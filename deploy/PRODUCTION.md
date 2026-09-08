@@ -1,5 +1,10 @@
 # Menhir production deployment contract
 
+> **FROZEN — NOT EXECUTION AUTHORITY (2026-09-08).** This describes the v1 contract being replaced
+> under the
+> [deployment control-plane architecture reset](../.agent/plans/menhir-deployment-control-plane-architecture-reset-2026-09-08.md).
+> Preserve it as migration evidence; do not use it to authorize a new release or production mutation.
+
 The operator sequence is in [LIVE_VPS_PLAYBOOK.md](LIVE_VPS_PLAYBOOK.md). This
 document defines the host, authority, backup, candidate, writer-fence, and
 recovery invariants enforced by the fixed scripts.

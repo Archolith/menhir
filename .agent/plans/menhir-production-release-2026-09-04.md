@@ -2,10 +2,16 @@
 artifact_schema: 1
 artifact_uuid: 7e14721a-2902-4eab-85ce-32381dd4d522
 artifact_type: plan
-artifact_status: PROPOSED
+artifact_status: DEFERRED
 ---
 
 # Menhir production release — canonical self and accumulated candidate
+
+> **Disposition (2026-09-08):** Deferred until the
+> [deployment control-plane architecture reset](menhir-deployment-control-plane-architecture-reset-2026-09-08.md)
+> is implemented and accepted. This plan preserves product-release requirements but does not
+> authorize the existing deployment machinery or any production action. Re-plan its execution
+> against the completed control-plane protocol before reactivation.
 
 ## Decision
 

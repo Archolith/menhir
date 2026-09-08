@@ -2,10 +2,16 @@
 artifact_schema: 1
 artifact_uuid: a6b498e0-f409-424a-b516-84b96cc5703e
 artifact_type: plan
-artifact_status: PROPOSED
+artifact_status: DEFERRED
 ---
 
 # Menhir full production migration to Contabo
+
+> **Disposition (2026-09-08):** Deferred and retained only as historical migration/topology
+> rationale while the
+> [deployment control-plane architecture reset](menhir-deployment-control-plane-architecture-reset-2026-09-08.md)
+> is active. Its Caddy ownership and Yawn mutation language is not current execution authority.
+> Re-plan any genuine residual after the reset rather than resuming these procedures.
 
 > **Backup contract correction (2026-08-31):** this plan never had owner authority to
 > require a cloud/object-store backup service. The release backup is an encrypted,

@@ -1,5 +1,10 @@
 # Live VPS deployment playbook
 
+> **FROZEN — DO NOT RUN (2026-09-08).** These v1 procedures are inputs to the
+> [deployment control-plane architecture reset](../.agent/plans/menhir-deployment-control-plane-architecture-reset-2026-09-08.md),
+> not current deployment authority. Production remains blocked until the replacement's serial code,
+> clean-host, CI, and owner gates are complete.
+
 This is the operator playbook for `https://memory.ctharvey.me`. Menhir's legacy
 writer and its replacement run on the same VPS. The release machinery therefore
 uses a Docker-authoritative same-host fence; it does not require a fictional

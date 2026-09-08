@@ -1,5 +1,31 @@
 # Changelog
 
+## 2026-09-08 - Reset deployment control-plane architecture
+
+- Reopen the control-plane execution plan from `REVIEWED` to `PROPOSED` after a later full-plan pass
+  found three P1 and three P2 design gaps, invalidating the prior `PLAN SOUND` conclusion.
+- Add a separate non-executable architecture specification that closes final ownership, the complete
+  protocol-record inventory, descriptor-safe intake, one-mutator/five-reader privilege boundaries,
+  replay/adoption, bootstrap handoff, Cloudflared-only ingress, `yawn.deploy` contraction, retention,
+  wrapper interfaces, and serial phase invalidation before implementation planning can resume.
+- Keep every implementation phase blocked until the architecture receives a fresh no-context review,
+  moves to `COMPLETE`, and the execution plan is re-derived and independently reviewed.
+- Replace the incremental deployment-reliability plan with one serial, phase-gated architecture
+  plan covering Menhir, shared operator wrappers, and Yawn's read-only integration.
+- Preserve proven release, staging, backup, restore, and lane mutation primitives while assigning
+  authority parsing, admission, journaling, rollback, receipt adoption, and live-state equality to
+  one root transaction kernel.
+- Define canonical release, staging, signed approval, transaction, installed-artifact, and protocol
+  sources of truth; prohibit product releases from replacing their own trusted control plane.
+- Require a complete writer/bypass census, crash and concurrency matrices, clean-host rehearsal,
+  obsolete-path contraction, exact-sha CI, and independent full-phase/final reviews before any
+  production gate is considered.
+- Freeze the v1 operator documents, defer the incompatible production-release and Contabo plans,
+  and incorporate the fresh no-context plan review's sequencing, pre-state, signing/bootstrap,
+  release-input, transport-provenance, access-contract, and retention corrections.
+- Record the earlier review's repository-census and owner-key-custody closure as superseded review
+  history rather than current acceptance. No implementation or production action is authorized.
+
 ## 2026-09-08 - Bind the complete deployment trust chain
 
 - Require release specification, authoring, and install-bundle construction to revalidate one CI

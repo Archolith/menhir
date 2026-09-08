@@ -7,12 +7,13 @@ reference may constrain a current design, preserve negative benchmark evidence, 
 option, or supply research consumed by an active plan. Executable ownership belongs in
 [`../plans/`](../plans/); completed and superseded work belongs in [`../archive/`](../archive/).
 
-This index routes all 13 Markdown references and the one intentionally unverified PDF exactly once.
+This index routes all 14 Markdown references and the one intentionally unverified PDF exactly once.
 
 ## Current design laws and inventories
 
 | Document | Use it for |
 |---|---|
+| [`menhir-deployment-control-plane-architecture-spec-2026-09-08.md`](menhir-deployment-control-plane-architecture-spec-2026-09-08.md) | Non-executable source of truth for deployment ownership, protocol records, ingress, intake, replay, bootstrap, and serial phase derivation; consumed by the blocked control-plane reset plan. |
 | [`fold-algebra.md`](fold-algebra.md) | Reducer laws, replay, ordering, batch/incremental equivalence, and anchor-plus-delta behavior. |
 | [`ingest-primitive-family.md`](ingest-primitive-family.md) | Existing write-time primitives, the completed MVP cut, and deliberately deferred primitive families. |
 | [`write-time-aggregation-hardening-addendum.md`](write-time-aggregation-hardening-addendum.md) | Safety qualifications, corroboration lineage, invalidation, and evidence requirements for aggregation. |

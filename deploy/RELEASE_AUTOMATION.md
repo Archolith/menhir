@@ -1,5 +1,11 @@
 # Release automation
 
+> **FROZEN — NOT EXECUTION AUTHORITY (2026-09-08).** The current v1 commands below are retained for
+> architecture inventory and historical recovery analysis only. Do not author, approve, promote, or
+> adopt a release through them while the
+> [deployment control-plane architecture reset](../.agent/plans/menhir-deployment-control-plane-architecture-reset-2026-09-08.md)
+> is active. The replacement protocol becomes authoritative only after its serial gates pass.
+
 Menhir has two independent automation boundaries:
 
 - **Product release:** `prepare -> review when required -> finalize -> publish`. It builds,

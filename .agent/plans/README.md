@@ -1,6 +1,6 @@
 # Current plan index
 
-Status: current execution routing index, audited 2026-08-11.
+Status: current execution routing index, audited 2026-09-08.
 
 This directory contains executable ownership: active plans, partially implemented plans with a
 named residual, and owner decisions that still control whether work exists. Lower-priority work is
@@ -14,10 +14,8 @@ This index routes the current execution owners listed below exactly once.
 
 | Document | Current ownership |
 |---|---|
-| [`menhir-deployment-reliability-2026-09-07.md`](menhir-deployment-reliability-2026-09-07.md) | Make product publication, deployment-class preflight, isolated rehearsal, and personal promotion deterministic after the 0.2.0-13 incident. |
+| [`menhir-deployment-control-plane-architecture-reset-2026-09-08.md`](menhir-deployment-control-plane-architecture-reset-2026-09-08.md) | `PROPOSED` and execution-blocked while the linked non-executable architecture specification closes and passes fresh review; only then may serial implementation phases be re-derived. |
 | [`menhir-core-promotion-restack-2026-08-31.md`](menhir-core-promotion-restack-2026-08-31.md) | Restack core-promotion PRs #11–#42 from the bottom branch, preserve tranche boundaries, and repair definition-scoped bounded recovery in tranches 5 and 9. |
-| [`menhir-production-release-2026-09-04.md`](menhir-production-release-2026-09-04.md) | Prepare and deploy the complete accumulated Menhir candidate with production-model/image parity, mechanically classified maintenance controls, canonical-self enforcement, one public synthetic canary, and pre-authored rollback. |
-| [`menhir-contabo-full-production-migration-2026-08-25.md`](menhir-contabo-full-production-migration-2026-08-25.md) | Move the complete OAuth/MCP/runtime/Neo4j stack to Contabo through an isolated Menhir Compose project, a transactional shared-Caddy integration, immutable releases, bounded VPS operations, verified state transfer, and rollback-safe graph/OAuth authority. |
 | [`menhir-research-execution-ladder.md`](menhir-research-execution-ladder.md) | Dependency-ordered research → code → bench sequence. Read-side rungs are closed; Track W6 is the remaining write-side rung. |
 | [`menhir-work-artifact-reconciliation-2026-08-11.md`](menhir-work-artifact-reconciliation-2026-08-11.md) | Add read-only corpus parity auditing, hash/Git-backed source reconciliation, bounded move detectors, and a separately approved live-graph repair. |
 | [`menhir-conflict-detection-signal-2026-08-09.md`](menhir-conflict-detection-signal-2026-08-09.md) | Separate fused-retrieval score semantics from cosine conflict thresholds. |
@@ -27,6 +25,17 @@ This index routes the current execution owners listed below exactly once.
 | [`menhir-projection-realization-coverage-implementation.md`](menhir-projection-realization-coverage-implementation.md) | Projection parity and realization-observation coverage implementation. |
 | [`menhir-unbounded-graph-writes-2026-08-09.md`](menhir-unbounded-graph-writes-2026-08-09.md) | Bound raw graph-write payload retention rather than only enrichment input. |
 | [`menhir-view-evidence-lifecycle-2026-08-28.md`](menhir-view-evidence-lifecycle-2026-08-28.md) | Keep current View contributors alive under automatic lifecycle work, invalidate dependent Views on explicit erasure, and exclude stale/internal/orphaned Views from recall. |
+
+## Deferred, non-executable deployment dependencies
+
+These records remain at their stable paths because tests and historical records consume them. Their
+`DEFERRED` lifecycle and disposition banners remove execution authority while the control-plane reset
+is active.
+
+| Document | Deferred disposition |
+|---|---|
+| [`menhir-production-release-2026-09-04.md`](menhir-production-release-2026-09-04.md) | Preserve product-release requirements; re-plan execution against the accepted replacement control plane. |
+| [`menhir-contabo-full-production-migration-2026-08-25.md`](menhir-contabo-full-production-migration-2026-08-25.md) | Historical migration/topology rationale only; Caddy/Yawn mutation language is non-authoritative. |
 
 ## Partially implemented
 

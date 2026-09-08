@@ -5,7 +5,7 @@
 **Model:** gpt-5.6-sol
 **Session:** unavailable
 **Status:** PARTIAL
-**Plan / Ticket:** C:\Users\thron\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion\.agent\plans\menhir-deployment-reliability-2026-09-07.md
+**Plan / Ticket:** C:\Users\thron\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion\.agent\archive\plans\menhir-deployment-reliability-2026-09-07.md (superseded historical plan)
 **Worktree:** C:\Users\thron\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion
 **Branch:** fix/deployment-reliability-20260907
 **Commits:** Menhir 62a536854b69b25611ab70faea8ea080869ee824 through b94cc33, including modular remediation commits 5d212d1, 3f3f619, 3797047, 402745e, and b94cc33; shared operator scripts through cadeb28e; Yawn VPS compatibility fix 585f0ff
@@ -83,7 +83,7 @@ unrelated history. No new product release was invented merely to exercise a muta
 |------|-----|
 | `.agent/CHANGELOG.md` | Record the deployment-reliability change. |
 | `.agent/plans/README.md` | Index the reliability plan. |
-| `.agent/plans/menhir-deployment-reliability-2026-09-07.md` | Define acceptance, rehearsal evidence, lane readiness, and infrastructure follow-up. |
+| `.agent/archive/plans/menhir-deployment-reliability-2026-09-07.md` | Historical acceptance, rehearsal evidence, lane readiness, and infrastructure follow-up; superseded by the control-plane architecture reset. |
 | `.agent/reviews/menhir-release-0.2.0-13-postmortem.md` | Reconstruct the three-version incident and remediation status. |
 | `.agent/scripts-index.md` | Document `next-id`, publication, and personal rehearsal entry points. |
 | `deploy/LIVE_VPS_PLAYBOOK.md` | Correct live ingress topology and operator sequence. |
