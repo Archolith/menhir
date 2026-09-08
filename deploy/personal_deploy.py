@@ -28,6 +28,7 @@ STATE_NAME = "personal-deploy.json"
 STAGING_RECEIPT_NAME = "staging-receipt.json"
 APPROVAL_NAME = "promotion-approval.json"
 PROMOTION_RECEIPT_NAME = "promotion-receipt.json"
+ROOT_TRANSACTION_RECEIPT_NAME = "root-transaction-receipt.json"
 RELEASE_STATE_NAME = "release-flow.json"
 RELEASE_NAME = "release.json"
 BUNDLE_NAME = "install-bundle"
@@ -91,7 +92,7 @@ PROMOTION_KEYS = frozenset({
     "bundle_sha256", "staging_receipt_sha256", "approval_sha256",
     "deployment_class", "ingress_mode", "started_utc", "completed_utc",
     "elapsed_seconds", "promotion_wrapper_sha256", "operator_wrapper_sha256",
-    "transaction_kind",
+    "transaction_kind", "transaction_receipt_sha256", "transaction",
 })
 
 
@@ -617,6 +618,40 @@ def _validate_promotion_receipt(
             raise PersonalDeployError(f"promotion receipt {key} is invalid")
     if receipt.get("transaction_kind") != state["deployment_class"]:
         raise PersonalDeployError("promotion receipt transaction kind mismatch")
+    transaction = receipt.get("transaction")
+    if not isinstance(transaction, dict):
+        raise PersonalDeployError("promotion receipt lacks the root transaction")
+    transaction_path = path.with_name(ROOT_TRANSACTION_RECEIPT_NAME)
+    if _sha256(_regular_file(transaction_path, "root transaction receipt")) \
+            != receipt.get("transaction_receipt_sha256"):
+        raise PersonalDeployError("promotion receipt root transaction digest mismatch")
+    if _load_json(transaction_path, "root transaction receipt") != transaction:
+        raise PersonalDeployError("embedded root transaction differs from its receipt")
+    expected_kind = {
+        "app-only": "menhir-app-only-transaction",
+        "security-config": "menhir-security-config-transaction",
+        "maintenance": "menhir-maintenance-transaction",
+    }[state["deployment_class"]]
+    if transaction.get("schema") != 1 or transaction.get("kind") != expected_kind \
+            or transaction.get("result") != "passed" or transaction.get("stage") != "complete" \
+            or transaction.get("candidate_release_id") != state["release_id"] \
+            or transaction.get("candidate_release_sha256") != state["release_sha256"]:
+        raise PersonalDeployError("root transaction is not bound to the promoted release")
+    if not isinstance(transaction.get("runner_sha256"), str) \
+            or SHA256_RE.fullmatch(transaction["runner_sha256"]) is None:
+        raise PersonalDeployError("root transaction runner digest is invalid")
+    transaction_started = _utc(transaction.get("started_utc"), "transaction started_utc")
+    transaction_completed = _utc(transaction.get("completed_utc"), "transaction completed_utc")
+    if transaction_started < started or transaction_completed > completed \
+            or transaction_completed < transaction_started:
+        raise PersonalDeployError("root transaction timestamps escape the promotion window")
+    if state["deployment_class"] in {"app-only", "security-config"} \
+            and transaction.get("database_container_id") \
+            != transaction.get("database_container_id_after"):
+        raise PersonalDeployError("root transaction does not prove unchanged Neo4j")
+    if transaction.get("ingress_container_id") \
+            != transaction.get("ingress_container_id_after"):
+        raise PersonalDeployError("root transaction does not prove unchanged Cloudflared")
     return receipt
 
 
@@ -639,6 +674,7 @@ def _promotion_command(workspace: Path, state: dict[str, Any], wrapper: Path) ->
         "-Approval", str(workspace / APPROVAL_NAME),
         "-ExpectedApprovalSha256", state["approval_sha256"],
         "-SourceRepository", str(Path(__file__).resolve().parent.parent),
+        "-TransactionReceipt", str(workspace / ROOT_TRANSACTION_RECEIPT_NAME),
         "-ResultReceipt", str(workspace / PROMOTION_RECEIPT_NAME),
     ]
 
@@ -673,7 +709,9 @@ def promote_flow(
         raise PersonalDeployError("only an approved release can be promoted")
     if not execute:
         return command
-    if receipt_path.exists() or receipt_path.is_symlink():
+    transaction_path = workspace / ROOT_TRANSACTION_RECEIPT_NAME
+    if receipt_path.exists() or receipt_path.is_symlink() \
+            or transaction_path.exists() or transaction_path.is_symlink():
         raise PersonalDeployError("promotion receipt path must not already exist")
     (command_runner or (lambda value: subprocess.run(value, check=True)))(command)
     if not receipt_path.exists():

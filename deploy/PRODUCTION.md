@@ -20,9 +20,10 @@ read-only public canary; it does not debug automation or recreate CI evidence.
 Routine `app-only` releases do not create a fresh backup, rehearse a restore, traverse the complete
 production database, or start the full maintenance candidate transaction. They verify scheduled
 backup/restore freshness and automatically restore the prior application on failed acceptance.
-The same bounded model is the contract for non-migrating `security-config` releases, but the current
-personal promotion coordinator conservatively routes that class through the maintenance transaction
-until its focused production runner is implemented. Full state protection remains mandatory for
+The same bounded model is implemented for non-migrating `security-config` releases by a dedicated
+config/application transaction. It atomically replaces only the reviewed authority files, restarts
+the gateway and app, proves Neo4j and Cloudflared identities unchanged, and restores the prior set
+on failure. Full state protection remains mandatory for
 mechanically classified maintenance and recovery work.
 
 Product release and personal deployment are separate trust boundaries. The product workflow may
@@ -126,7 +127,7 @@ does not rebuild or re-review it.
 ## One-time scaffold and routine verification
 
 Host users/groups, fixed directories, networks, backup identity, secret ownership,
-systemd units, sudoers, Caddy topology, operations gateway, a read-only admission
+systemd units, sudoers, Cloudflared topology, operations gateway, a read-only admission
 audit, desktop archival, and restore evidence are scaffolded once. Successful
 bootstrap writes a root-owned receipt binding that host contract.
 
@@ -252,7 +253,7 @@ The routine app-only transaction performs:
 2. mechanical app-only classification and scaffold/backup-freshness checks;
 3. deployment lock and current writer census;
 4. exact Menhir image pull;
-5. app-container-only replacement while Neo4j and Caddy remain running;
+5. app-container-only replacement while Neo4j and Cloudflared remain running;
 6. bounded readiness, liveness, JWKS, OAuth identity, and authenticated MCP probes;
 7. durable success receipt or automatic restoration of the prior app digest.
 
@@ -274,19 +275,19 @@ Its stages are:
 3. run restore rehearsal;
 4. start the readonly candidate;
 5. accept health, OAuth, MCP, read/recall, refusal, and authority-before/after;
-6. apply the immutable Caddy transaction;
+6. retain and verify the immutable Cloudflared ingress;
 7. promote after a second writer-census validation;
 8. verify public production health, OAuth discovery, MCP, recall, and mutation.
 
 Each stage stops on nonzero status. A retry resumes the same release and
 generation. A different release record does not inherit state from the old run.
 
-## Route and public acceptance
+## Ingress and public acceptance
 
-Caddy validates the immutable candidate bundle, release digests, network
-subnet/gateway, TLS and Authenticated Origin Pull files, listeners, upstreams,
-and public allow/deny paths before reload. It keeps a rollback bundle and
-transaction journal and reconciles interrupted reloads.
+Deployments do not rewrite ingress. Preflight proves the sole running Cloudflared Compose peer on
+the production network; completion receipts prove its container identity is unchanged; and public
+acceptance verifies readiness, OAuth discovery, authentication boundaries, and MCP behavior through
+the canonical URL.
 
 External signed workers are not a mandatory release dependency. They were
 designed for a different topology and made normal releases impossible. The

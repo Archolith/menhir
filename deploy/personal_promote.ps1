@@ -12,6 +12,7 @@ param(
     [Parameter(Mandatory = $true)][string]$Approval,
     [Parameter(Mandatory = $true)][string]$ExpectedApprovalSha256,
     [Parameter(Mandatory = $true)][string]$SourceRepository,
+    [Parameter(Mandatory = $true)][string]$TransactionReceipt,
     [Parameter(Mandatory = $true)][string]$ResultReceipt
 )
 
@@ -19,6 +20,9 @@ $ErrorActionPreference = "Stop"
 $promotionStartedAt = [DateTimeOffset]::UtcNow
 if (Test-Path -LiteralPath $ResultReceipt) {
     throw "Promotion receipt path must not already exist."
+}
+if (Test-Path -LiteralPath $TransactionReceipt) {
+    throw "Root transaction receipt path must not already exist."
 }
 
 function Get-FileSha256 {
@@ -304,10 +308,12 @@ if ($approvedAt -lt $completedAt) {
 }
 
 $operatorWrapper = if ($Mode -eq "SecurityConfig") {
-    if (-not $env:MENHIR_SECURITY_CONFIG_DEPLOY_WRAPPER) {
-        throw "Security-config promotion requires MENHIR_SECURITY_CONFIG_DEPLOY_WRAPPER; it may not fall back to maintenance."
+    if ($env:MENHIR_SECURITY_CONFIG_DEPLOY_WRAPPER) {
+        $env:MENHIR_SECURITY_CONFIG_DEPLOY_WRAPPER
     }
-    $env:MENHIR_SECURITY_CONFIG_DEPLOY_WRAPPER
+    else {
+        Join-Path $PSScriptRoot "personal_security_config.ps1"
+    }
 }
 elseif ($env:MENHIR_OPERATOR_DEPLOY_WRAPPER) {
     $env:MENHIR_OPERATOR_DEPLOY_WRAPPER
@@ -322,12 +328,44 @@ if (-not (Test-Path -LiteralPath $operatorWrapper -PathType Leaf)) {
 $global:LASTEXITCODE = 0
 & $operatorWrapper -Mode $Mode -BundlePath $bundle `
     -ExpectedBundleSha256 $ExpectedBundleSha256 -Release $Release `
-    -SourceRepository $SourceRepository
+    -SourceRepository $SourceRepository -TransactionReceipt $TransactionReceipt
 $powerShellSucceeded = $?
 if (-not $powerShellSucceeded -or $LASTEXITCODE -ne 0) {
     throw "Menhir production transaction failed."
 }
+if (-not (Test-Path -LiteralPath $TransactionReceipt -PathType Leaf)) {
+    throw "Production transaction returned without a root receipt."
+}
+$transactionItem = Get-Item -LiteralPath $TransactionReceipt -Force
+if ($transactionItem.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+    throw "Root transaction receipt must not be a reparse point."
+}
+$transaction = Get-Content -LiteralPath $transactionItem.FullName -Raw | ConvertFrom-Json
+$expectedTransactionKind = switch ($authorityClass) {
+    "app-only" { "menhir-app-only-transaction" }
+    "security-config" { "menhir-security-config-transaction" }
+    default { "menhir-maintenance-transaction" }
+}
+if ($transaction.schema -ne 1 -or $transaction.kind -ne $expectedTransactionKind -or
+    $transaction.result -ne "passed" -or $transaction.stage -ne "complete" -or
+    $transaction.candidate_release_id -ne $Release -or
+    $transaction.candidate_release_sha256 -ne $ExpectedReleaseSha256 -or
+    [string]$transaction.runner_sha256 -notmatch '^[0-9a-f]{64}$' -or
+    $transaction.ingress_container_id -ne $transaction.ingress_container_id_after) {
+    throw "Root transaction receipt is not bound to this promotion."
+}
+if ($Mode -ne "Maintenance" -and
+    $transaction.database_container_id -ne $transaction.database_container_id_after) {
+    throw "Root transaction receipt does not prove unchanged Neo4j."
+}
 $promotionCompletedAt = [DateTimeOffset]::UtcNow
+$transactionStartedAt = Assert-UtcTimestamp -Value $transaction.started_utc -Label "Transaction start"
+$transactionCompletedAt = Assert-UtcTimestamp -Value $transaction.completed_utc -Label "Transaction completion"
+if ($transactionStartedAt -lt $promotionStartedAt -or
+    $transactionCompletedAt -lt $transactionStartedAt -or
+    $transactionCompletedAt -gt $promotionCompletedAt) {
+    throw "Root transaction timestamps escape the promotion window."
+}
 $elapsedSeconds = [Math]::Ceiling(($promotionCompletedAt - $promotionStartedAt).TotalSeconds)
 $budget = if ($Mode -eq "AppOnly") { 300 } else { 600 }
 if ($elapsedSeconds -gt $budget) {
@@ -350,5 +388,7 @@ $receipt = [ordered]@{
     promotion_wrapper_sha256 = Get-FileSha256 -Path $PSCommandPath
     operator_wrapper_sha256 = Get-FileSha256 -Path $operatorWrapper
     transaction_kind = $authorityClass
+    transaction_receipt_sha256 = Get-FileSha256 -Path $TransactionReceipt
+    transaction = $transaction
 }
-$receipt | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $ResultReceipt -Encoding ascii
+$receipt | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $ResultReceipt -Encoding ascii

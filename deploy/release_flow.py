@@ -999,7 +999,11 @@ def deployment_command(
     state: dict[str, Any],
 ) -> list[str]:
     wrapper = _regular_file(DEFAULT_WRAPPER, "deployment wrapper")
-    mode = "AppOnly" if state["deployment_class"] == "app-only" else "Maintenance"
+    mode = {
+        "app-only": "AppOnly",
+        "security-config": "SecurityConfig",
+        "maintenance": "Maintenance",
+    }[state["deployment_class"]]
     return [
         "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
         "-File", str(wrapper), "-Mode", mode,

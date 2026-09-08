@@ -329,7 +329,7 @@ def test_deploy_requires_exact_release_confirmation(
         MODULE.deploy_flow(workspace, "menhir-prod-0.2.0-12", execute=False)
 
 
-def test_deploy_dry_run_preserves_state_and_selects_maintenance(
+def test_deploy_dry_run_preserves_state_and_selects_security_config(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     workspace, state = _write_staged_workspace(tmp_path)
@@ -342,7 +342,7 @@ def test_deploy_dry_run_preserves_state_and_selects_maintenance(
     )
 
     assert isinstance(command, list)
-    assert command[command.index("-Mode") + 1] == "Maintenance"
+    assert command[command.index("-Mode") + 1] == "SecurityConfig"
     assert (
         command[command.index("-ExpectedBundleSha256") + 1]
         == state["bundle_sha256"]

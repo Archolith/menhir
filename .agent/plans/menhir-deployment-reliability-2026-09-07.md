@@ -122,24 +122,23 @@ a successful maintenance rehearsal, and the plan does not claim one.
 |---|---|---|
 | Packaged product | Ready in branch | Use `next-id -> prepare -> review -> finalize -> publish`; prepare enforces the generated label and publication archives exact prepared fragments. |
 | Personal app-only | Ready in branch | Use `rehearse -> approve -> promote`; one human approval remains intentional and the direct gate independently verifies authority and preflight evidence. |
-| Security configuration | Separated, transaction pending | It is mechanically classified and no longer inherits maintenance route/DB behavior. Promotion fails closed unless the dedicated operator wrapper is installed; the ten-minute transaction remains a required follow-up. |
-| Maintenance | Fail-closed on current ingress drift | Declare Cloudflared or Caddy in release authority, remove the inactive duplicate path, and test that mode's rollback before the next maintenance release. |
+| Security configuration | Implemented and tested | It is mechanically classified and uses the dedicated config/application root transaction. The receipt proves unchanged Neo4j and Cloudflared identities and the complete prior config set is the rollback anchor. |
+| Maintenance | Cloudflared contract aligned | Release authority and the maintenance journal retain Cloudflared; the inactive duplicate Caddy path and writers are removed. The root receipt binds the unchanged ingress identity. |
 | Recovery | Existing contract retained | Continue scheduled encrypted backups and current-generation restore evidence; do not exercise during routine app-only release. |
 
 ## Infrastructure follow-up
 
-After the current scripts are deterministic, express persistent host state with Ansible and verify it
-with pytest-testinfra over SSH. Keep the release transaction in the existing digest-bound coordinator.
-Use Ansible check/diff for drift previews, and later move image build/publication to a GitHub reusable
-workflow with container provenance attestation. Molecule is optional for disposable role tests; it is
-not required for the immediate single-host rehearsal.
+Persistent host prerequisites are expressed in the bounded Ansible role and verified with
+pytest-testinfra over SSH. Keep release transactions in the digest-bound coordinators. Use Ansible
+check/diff before convergence. Image validation/publication is defined in the reusable GitHub
+workflow with provenance attestations; production promotion remains a separate owner-approved step.
 
 Recommended adoption order:
 
-1. **Now:** keep the tested Python/PowerShell transaction, use the lockfile-backed environment for
-   release tests, and make its receipts complete.
-2. **Next infrastructure change:** use Ansible check/diff mode for root-owned directories, systemd,
-   Docker networks, Cloudflared/Caddy selection, TLS file types, and scheduled audit units.
+1. **Routine code change:** keep classification tests current whenever a new protected source or
+   authority surface is added.
+2. **Infrastructure change:** preview the bounded Ansible role in check/diff mode, then converge only
+   reviewed root-owned directories, systemd, tmpfiles, and retired ingress writers.
 3. **Verification:** run pytest-testinfra over SSH after Ansible convergence; use Molecule only for
    disposable role tests.
 4. **Publication:** move image build and package publication into a reusable GitHub workflow with

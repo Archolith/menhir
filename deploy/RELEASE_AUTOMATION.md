@@ -204,9 +204,11 @@ limited to 300 seconds; security configuration and maintenance are limited to 60
 wrapper that exits zero without writing the exact receipt is a failed promotion.
 
 Security configuration is a distinct mode throughout selection, staging, approval, and promotion.
-It is never converted to maintenance. Until the dedicated operator transaction is installed,
-promotion fails closed and requires `MENHIR_SECURITY_CONFIG_DEPLOY_WRAPPER`; do not point that
-variable at the maintenance wrapper.
+It is never converted to maintenance. The repository-owned `personal_security_config.ps1` wrapper
+and root-owned `menhir_security_config.py` transaction install only the bounded auth/config set and
+fail closed on database, ingress, host, secret-rotation, or other maintenance changes. An optional
+`MENHIR_SECURITY_CONFIG_DEPLOY_WRAPPER` may name a reviewed equivalent; it may not point at the
+maintenance wrapper.
 
 ## Before starting
 
@@ -344,8 +346,8 @@ python deploy/personal_deploy.py promote `
 approval; recomputes the sealed production preflight; rechecks all staging results and their 24-hour
 freshness; derives the only permitted promotion mode from the immutable release class; verifies image
 and deployment-class bindings; and only then invokes the existing production transaction. `app-only` selects the
-bounded app replacement. `security-config` currently uses the conservative maintenance runner until
-its focused production runner is implemented. `maintenance` uses the full resumable backup,
+bounded app replacement. `security-config` selects the dedicated bounded config/application runner.
+`maintenance` uses the full resumable backup,
 restore, candidate, fence, route, and promotion transaction.
 
 The deployment class is mechanical and is part of the reviewed immutable release authority. It
@@ -360,8 +362,7 @@ special files stop before production mutation. State is resumable: rerunning a c
 validates its saved evidence and does not repeat it.
 
 For maintenance installs, the bundle installer reloads systemd definitions and
-restarts the operations gateway and Caddy reconcile path only when each service
-was already active. A failed activation restores the prior files, reloads the
+restarts the operations gateway only when it was already active. A failed activation restores the prior files, reloads the
 restored definitions, and attempts to return those services to their prior
 active state before failing the deployment.
 

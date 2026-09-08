@@ -8,6 +8,13 @@ Cmnd_Alias MENHIR_APP_ONLY = \
     /srv/menhir/scaffold/bin/menhir_app_only.py deploy *, \
     /srv/menhir/scaffold/bin/menhir_app_only.py recover, \
     /srv/menhir/scaffold/bin/menhir_app_only.py live, \
-    /srv/menhir/scaffold/bin/menhir_app_only.py check
+    /srv/menhir/scaffold/bin/menhir_app_only.py check, \
+    /srv/menhir/scaffold/bin/menhir_app_only.py receipt
 
-%menhir-operators ALL=(root) NOPASSWD: MENHIR_SCAFFOLD_READ, MENHIR_APP_ONLY
+Cmnd_Alias MENHIR_SECURITY_CONFIG = \
+    /srv/menhir/scaffold/bin/menhir_security_config.py classify *, \
+    /srv/menhir/scaffold/bin/menhir_security_config.py deploy *, \
+    /srv/menhir/scaffold/bin/menhir_security_config.py recover, \
+    /srv/menhir/scaffold/bin/menhir_security_config.py receipt
+
+%menhir-operators ALL=(root) NOPASSWD: MENHIR_SCAFFOLD_READ, MENHIR_APP_ONLY, MENHIR_SECURITY_CONFIG

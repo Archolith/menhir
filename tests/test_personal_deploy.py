@@ -388,6 +388,9 @@ def test_one_approval_unlocks_promotion_preview(tmp_path: Path) -> None:
     assert command[command.index("-ExpectedStagingReceiptSha256") + 1] == approved["staging_receipt_sha256"]
     assert command[command.index("-ExpectedApprovalSha256") + 1] == approved["approval_sha256"]
     assert command[command.index("-ExpectedReleaseSha256") + 1] == approved["release_sha256"]
+    assert command[command.index("-TransactionReceipt") + 1].endswith(
+        MODULE.ROOT_TRANSACTION_RECEIPT_NAME
+    )
     assert MODULE.status_flow(deployment)["phase"] == "approved"
 
 
@@ -457,6 +460,23 @@ def test_promotion_runs_once_and_records_bound_receipt(tmp_path: Path) -> None:
     def run(command: list[str]) -> None:
         seen.append(command)
         now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        transaction = {
+            "schema": 1,
+            "kind": "menhir-security-config-transaction",
+            "runner_sha256": "c" * 64,
+            "result": "passed",
+            "stage": "complete",
+            "candidate_release_id": approved["release_id"],
+            "candidate_release_sha256": approved["release_sha256"],
+            "database_container_id": "database-1",
+            "database_container_id_after": "database-1",
+            "ingress_container_id": "cloudflared-1",
+            "ingress_container_id_after": "cloudflared-1",
+            "started_utc": now,
+            "completed_utc": now,
+        }
+        transaction_path = Path(command[command.index("-TransactionReceipt") + 1])
+        transaction_path.write_text(json.dumps(transaction), encoding="utf-8")
         receipt_path = Path(command[command.index("-ResultReceipt") + 1])
         receipt_path.write_text(json.dumps({
             "schema": 1,
@@ -475,6 +495,8 @@ def test_promotion_runs_once_and_records_bound_receipt(tmp_path: Path) -> None:
             "promotion_wrapper_sha256": "a" * 64,
             "operator_wrapper_sha256": "b" * 64,
             "transaction_kind": approved["deployment_class"],
+            "transaction_receipt_sha256": MODULE._sha256(transaction_path),
+            "transaction": transaction,
         }), encoding="utf-8")
 
     promoted = MODULE.promote_flow(

@@ -114,7 +114,17 @@ def _fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[list[str]
     fake = tmp_path / "fake-deploy.ps1"
     fake.write_text(
         "param([string]$Mode,[string]$BundlePath,[string]$ExpectedBundleSha256,"
-        "[string]$Release,[string]$SourceRepository)\n"
+        "[string]$Release,[string]$SourceRepository,[string]$TransactionReceipt)\n"
+        "$kind = if ($Mode -eq 'AppOnly') { 'menhir-app-only-transaction' } "
+        "elseif ($Mode -eq 'SecurityConfig') { 'menhir-security-config-transaction' } "
+        "else { 'menhir-maintenance-transaction' }\n"
+        "$receipt = [ordered]@{schema=1;kind=$kind;result='passed';stage='complete';"
+        "runner_sha256=('c' * 64);started_utc=[DateTime]::UtcNow.ToString('o');"
+        "completed_utc=[DateTime]::UtcNow.ToString('o');"
+        "candidate_release_id=$Release;candidate_release_sha256=$env:MENHIR_TEST_RELEASE_SHA;"
+        "database_container_id='database-1';database_container_id_after='database-1';"
+        "ingress_container_id='cloudflared-1';ingress_container_id_after='cloudflared-1'}\n"
+        "$receipt | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $TransactionReceipt -Encoding ascii\n"
         "[IO.File]::WriteAllText($env:MENHIR_TEST_PROMOTION_MARKER, \"$Mode|$Release\")\n",
         encoding="utf-8",
     )
@@ -126,10 +136,12 @@ def _fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[list[str]
         "-ExpectedReleaseSha256", release_sha, "-StagingReceipt", str(staging_path),
         "-ExpectedStagingReceiptSha256", staging_sha, "-Approval", str(approval_path),
         "-ExpectedApprovalSha256", _sha(approval_path), "-SourceRepository", str(tmp_path),
+        "-TransactionReceipt", str(tmp_path / "root-transaction.json"),
         "-ResultReceipt", str(tmp_path / "promotion-result.json"),
     ]
     monkeypatch.setenv("MENHIR_OPERATOR_DEPLOY_WRAPPER", str(fake))
     monkeypatch.setenv("MENHIR_TEST_PROMOTION_MARKER", str(marker))
+    monkeypatch.setenv("MENHIR_TEST_RELEASE_SHA", release_sha)
     return command, marker, staging_path
 
 

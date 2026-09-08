@@ -460,6 +460,27 @@ def inspect_container(name: str) -> dict[str, Any]:
     return value[0]
 
 
+def inspect_cloudflared() -> dict[str, Any]:
+    """Return the sole running Cloudflared peer on the production network."""
+
+    network = json.loads(run(["docker", "network", "inspect", "menhir-proxy"], 20))
+    if not isinstance(network, list) or len(network) != 1:
+        raise AppOnlyError("production network inspection is ambiguous")
+    peers: list[dict[str, Any]] = []
+    for row in (network[0].get("Containers") or {}).values():
+        container_id = row.get("Name")
+        if not isinstance(container_id, str) or not container_id:
+            continue
+        inspected = inspect_container(container_id)
+        labels = inspected.get("Config", {}).get("Labels", {}) or {}
+        if labels.get("com.docker.compose.service") == "cloudflared" \
+                and inspected.get("State", {}).get("Running") is True:
+            peers.append(inspected)
+    if len(peers) != 1:
+        raise AppOnlyError("expected exactly one running Cloudflared ingress peer")
+    return peers[0]
+
+
 def wait_app(image_digest: str, release_id: str, database_id: str, deadline_seconds: int) -> None:
     deadline = time.monotonic() + deadline_seconds
     while time.monotonic() < deadline:
@@ -708,7 +729,19 @@ def rollforward(transaction: dict[str, Any]) -> None:
         transaction["candidate_release_id"], transaction["database_container_id"],
     )
     restore_authority(transaction, True)
-    write_stage(transaction, "complete", completed_utc=now_iso(), recovered=True)
+    accepted_app = inspect_container("menhir-prod-app")
+    accepted_database = inspect_container("menhir-prod-neo4j")
+    accepted_ingress = inspect_cloudflared()
+    if accepted_database.get("Id") != transaction["database_container_id"]:
+        raise AppOnlyError("Neo4j changed during app-only recovery")
+    if accepted_ingress.get("Id") != transaction["ingress_container_id"]:
+        raise AppOnlyError("Cloudflared changed during app-only recovery")
+    write_stage(
+        transaction, "complete", completed_utc=now_iso(), recovered=True,
+        result="passed", candidate_app_container_id=accepted_app.get("Id"),
+        database_container_id_after=accepted_database.get("Id"),
+        ingress_container_id_after=accepted_ingress.get("Id"),
+    )
     run([str(SCAFFOLD), "verify", "--app-only"], 30)
     finalize_transaction(transaction)
 
@@ -746,9 +779,11 @@ def deploy(bundle_id: str) -> dict[str, Any]:
         os.replace(candidate_release, tx / "candidate-release.json")
         app = inspect_container("menhir-prod-app")
         database = inspect_container("menhir-prod-neo4j")
+        ingress = inspect_cloudflared()
         transaction = {
             "schema": 1,
             "kind": "menhir-app-only-transaction",
+            "runner_sha256": sha256(Path(__file__)),
             "transaction_id": tx_id,
             "transaction_root": str(tx),
             "bundle_id": bundle_id,
@@ -760,6 +795,7 @@ def deploy(bundle_id: str) -> dict[str, Any]:
             "candidate_image": classification["candidate_image"],
             "prior_app_container_id": app.get("Id"),
             "database_container_id": database.get("Id"),
+            "ingress_container_id": ingress.get("Id"),
             "started_utc": now_iso(),
         }
         write_stage(transaction, "classified")
@@ -777,9 +813,21 @@ def deploy(bundle_id: str) -> dict[str, Any]:
             bundle["env"]["MENHIR_PUBLIC_BASE_URL"], classification["candidate_release_id"],
             classification["candidate_image"], str(database.get("Id")),
         )
-        write_stage(transaction, "accepted", accepted_utc=now_iso())
+        accepted_app = inspect_container("menhir-prod-app")
+        accepted_database = inspect_container("menhir-prod-neo4j")
+        accepted_ingress = inspect_cloudflared()
+        if accepted_database.get("Id") != transaction["database_container_id"]:
+            raise AppOnlyError("Neo4j changed during app-only transaction")
+        if accepted_ingress.get("Id") != transaction["ingress_container_id"]:
+            raise AppOnlyError("Cloudflared changed during app-only transaction")
+        write_stage(
+            transaction, "accepted", accepted_utc=now_iso(),
+            candidate_app_container_id=accepted_app.get("Id"),
+            database_container_id_after=accepted_database.get("Id"),
+            ingress_container_id_after=accepted_ingress.get("Id"),
+        )
         restore_authority(transaction, True)
-        write_stage(transaction, "complete", completed_utc=now_iso())
+        write_stage(transaction, "complete", completed_utc=now_iso(), result="passed")
         run([str(SCAFFOLD), "verify", "--app-only"], 30)
         finalize_transaction(transaction)
         return transaction
@@ -839,6 +887,19 @@ def check_live() -> dict[str, Any]:
         lock.close()
 
 
+def last_receipt() -> dict[str, Any]:
+    require_root_file(LAST, "last app-only transaction receipt")
+    value = strict_load(LAST)
+    if value.get("schema") != 1 or value.get("kind") != "menhir-app-only-transaction" \
+            or value.get("stage") != "complete" or value.get("result") != "passed":
+        raise AppOnlyError("last app-only transaction receipt is not complete")
+    if value.get("database_container_id") != value.get("database_container_id_after"):
+        raise AppOnlyError("last app-only receipt does not prove unchanged Neo4j")
+    if value.get("ingress_container_id") != value.get("ingress_container_id_after"):
+        raise AppOnlyError("last app-only receipt does not prove unchanged Cloudflared")
+    return value
+
+
 def accept_current() -> dict[str, Any]:
     """Accept the current release while a maintenance stage journal is active."""
 
@@ -870,6 +931,7 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("live")
     commands.add_parser("check")
     commands.add_parser("accept-current")
+    commands.add_parser("receipt")
     return result
 
 
@@ -889,6 +951,8 @@ def main(argv: list[str]) -> int:
             value = live_info()
         elif args.command == "check":
             value = check_live()
+        elif args.command == "receipt":
+            value = last_receipt()
         else:
             value = accept_current()
     except AppOnlyError as exc:

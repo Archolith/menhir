@@ -4,6 +4,7 @@ import datetime as dt
 import importlib.util
 import io
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -26,6 +27,13 @@ APP_SPEC = importlib.util.spec_from_file_location("menhir_app_only", APP_ONLY_SC
 assert APP_SPEC is not None and APP_SPEC.loader is not None
 app_only = importlib.util.module_from_spec(APP_SPEC)
 APP_SPEC.loader.exec_module(app_only)
+sys.modules["menhir_app_only"] = app_only
+
+SECURITY_SCRIPT = Path(__file__).resolve().parents[1] / "deploy" / "scaffold" / "menhir_security_config.py"
+SECURITY_SPEC = importlib.util.spec_from_file_location("menhir_security_config", SECURITY_SCRIPT)
+assert SECURITY_SPEC is not None and SECURITY_SPEC.loader is not None
+security_config = importlib.util.module_from_spec(SECURITY_SPEC)
+SECURITY_SPEC.loader.exec_module(security_config)
 
 
 def contract() -> dict:
@@ -438,6 +446,41 @@ def test_app_only_classifier_accepts_only_image_release_metadata() -> None:
     )
     assert result["classification"] == "app-only"
     assert result["candidate_release_id"] == "release-2"
+
+
+def test_security_config_classifier_accepts_only_bounded_auth_changes(tmp_path: Path) -> None:
+    live, candidate, live_env, candidate_env, live_sha = release_pair()
+    live["ingress_mode"] = "cloudflared"
+    candidate["ingress_mode"] = "cloudflared"
+    candidate["deployment_class"] = "security-config"
+    policy = tmp_path / "client-policy.json"
+    policy.write_text('{"canonical_digest":"policy-digest","version":2}', encoding="ascii")
+    del live["artifacts"]["/srv/menhir/production/release/production.env"]
+    del candidate["artifacts"]["/srv/menhir/production/release/production.env"]
+    candidate_env["MENHIR_CLIENT_POLICY_DIGEST"] = "policy-digest"
+    live_env["MENHIR_CLIENT_POLICY_DIGEST"] = "0" * 64
+    (tmp_path / "production.env").write_text("unused", encoding="ascii")
+
+    result = security_config.classify_release(
+        live, candidate, live_sha, live_env, candidate_env, tmp_path,
+    )
+
+    assert result["classification"] == "security-config"
+    assert result["candidate_release_id"] == "release-2"
+
+
+def test_security_config_classifier_refuses_database_image_change(tmp_path: Path) -> None:
+    live, candidate, live_env, candidate_env, live_sha = release_pair()
+    live["ingress_mode"] = "cloudflared"
+    candidate["ingress_mode"] = "cloudflared"
+    candidate["deployment_class"] = "security-config"
+    candidate["images"]["neo4j"] = "sha256:" + "9" * 64
+    (tmp_path / "client-policy.json").write_text('{"version":2}', encoding="ascii")
+
+    with pytest.raises(security_config.Error, match="cannot change image: neo4j"):
+        security_config.classify_release(
+            live, candidate, live_sha, live_env, candidate_env, tmp_path,
+        )
 
 
 @pytest.mark.parametrize("mutation,match", [
