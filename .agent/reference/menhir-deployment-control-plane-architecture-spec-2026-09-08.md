@@ -189,7 +189,7 @@ never silently grants roll-forward.
 | I-12 | Exactly one privileged mutating entry point exists; read-only commands are separately enumerated. | Atomic sudoers replacement and installed-artifact census | Installation/cutover fails closed |
 | I-13 | Cloudflared is the sole Menhir ingress; no shared Caddy route or peer remains. | Infrastructure adapter plus source/host negative census | Refuse convergence/acceptance |
 | I-14 | App, database, OAuth/MCP, ingress, backup, and restore behavior changes only when a signed lane plan explicitly declares it. | Adapter pre/postcondition verifier | Roll back or block |
-| I-15 | A signed attempt can cause at most one mutation transaction. | Kernel attempt index under global lock | Resume/adopt exact match; reject every mismatch |
+| I-15 | A signed attempt can cause at most one mutation transaction. | Kernel O_EXCL attempt-anchor publication under global lock | Resume/adopt exact match; reject every mismatch |
 | I-16 | v1 cannot start, queue, or resume after bootstrap claims the handoff fence. | Bootstrap fence, caller drain, all-lock acquisition, process census, and tombstones | Bootstrap aborts or restores v1 exactly |
 | I-17 | Unknown writers and legacy/absent states are first-class failures, not omitted cases. | Machine-readable source/install/host census | Gate remains open |
 
@@ -236,6 +236,7 @@ retirement impact before implementation.
 | `trust-store.v2` | Bootstrap transaction | Signer display, kernel, bootstrap verifier | Content digest binds keys, validity, revocation, overlap and generation | Product cannot alter; current and previous generations retained |
 | `lane-plan.v2` | Typed compiler | Kernel and named adapter | Binds subject type/lane, members, commands by symbolic operation, pre/postconditions, rollback scope | Exact lane/adapter; stored with transaction |
 | `package-manifest.v2` | Release or bootstrap compiler | Staging, kernel/bootstrap | Merkle-style member list with canonical relative path, type, size, mode and SHA-256 | No extra members; content-addressed retention |
+| `transport-manifest.v2` | Approval client | PowerShell transport and root intake | Binds a flat exact filename/size/SHA-256 list for all submission records and payload files; carries no semantic authority | Exact v2; wrapper may parse only this generated transport shape; retained in intake evidence |
 | `intake-receipt.v2` | Root intake capture | Kernel, status/adoption | Binds upload ID, source descriptor facts, root-copy member manifest, capture chronology | Local root evidence; retained with transaction |
 | `attempt-anchor.v2` | Root kernel | Kernel recovery, replay, census | Sole authoritative O_EXCL attempt reservation; binds first upload, ticket/signature, subject, package, adapter and kernel | Written/fsynced before mutation; immutable; indexes rebuild from anchors |
 | `transaction-journal.v2` | Root kernel | Kernel recovery and read model | Hash-chained durable transitions for app-only, security-config, maintenance, infrastructure, GC, or archive, bound to attempt anchor | Never auto-deleted; unknown/nonterminal blocks |
@@ -298,6 +299,42 @@ uses `C:\Users\thron\IdeaProjects\projects\archolith\archolith_oauth`; other che
 origin are acceptable object sources only when their requested commit and object database pass the
 same immutable checks. The stale `ctharvey/archolith_oauth` package-metadata URL is not an alternate
 accepted repository identity.
+
+## Typed subjects and authorization families
+
+`deployment-subject.v2` is the common discriminant. Its exact `subject_type` enum and payload are:
+
+| Subject type | Exactly one target digest | Package manifest | Authorization family | Allowed lane |
+|---|---|---|---|---|
+| `product-release` | `release-envelope.v2` | Required product package | `deployment-ticket.v2` | `app-only`, `security-config`, or `maintenance` as allowed by the envelope |
+| `infrastructure` | `infrastructure-package.v2` | Required infrastructure package | `deployment-ticket.v2` | `infrastructure` |
+| `control-plane` | `control-plane-package.v2` | Required control-plane package | `bootstrap-authorization.v2` only | Bootstrap state machine, never a normal lane |
+| `gc` | `gc-plan.v2` | Forbidden; referenced objects are already root-owned | `deployment-ticket.v2` | `gc` |
+| `archive` | `archive-plan.v2` | Forbidden; referenced objects are already root-owned | `deployment-ticket.v2` | `archive` |
+
+Every staging receipt, preflight receipt, authorization, attempt anchor, journal and terminal receipt
+carries the complete subject digest and exact subject type. Product fields cannot appear for another
+type. GC/archive staging is a pure disposable simulation of the plan against a fixture package store;
+production preflight binds the real under-lock reachability roots and destination identity.
+
+`deployment-ticket.v2` is valid only for the five normal subject/lane combinations above. It binds
+the successful staging receipt, production preflight, full pre-state, lane plan, attempt, installed
+kernel/adapter and signer identities. `bootstrap-authorization.v2` is valid only for
+`control-plane`; it binds its successful staging receipt, bootstrap preflight, expected installation
+pre-state/absence, accepted v1 bridge generation, trust action, bootstrap attempt and signer. The
+domain separators are distinct (`MENHIR-DEPLOYMENT-TICKET-V2\0` and
+`MENHIR-BOOTSTRAP-AUTHORIZATION-V2\0`), so a signature for one family cannot authorize the other.
+
+The approval client emits a flat submission directory and `transport-manifest.v2`. The product
+manifest names exactly: subject record, its required target record/package where applicable,
+package manifest where required, staging receipt, production-preflight receipt, deployment ticket
+and detached owner signature. The bootstrap manifest names exactly: control-plane
+subject/package/manifest, successful staging receipt, production-preflight receipt, bootstrap
+authorization and detached owner signature. The transport manifest is not signed authority; root
+uses it to bound descriptor capture, then requires every captured digest to be transitively bound by
+the signed semantic records. Every cross-record digest and subject type must agree before
+reservation. First install additionally uses the unrestricted-root out-of-band digest/fingerprint
+confirmation; it does not relax the record bindings.
 
 ## Release compiler and supply-chain design
 
@@ -393,9 +430,11 @@ The kernel performs intake before semantic parsing as one descriptor-based opera
 2. open the upload directory relative to that descriptor using `openat2` resolution constraints
    (`RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS`) or an explicitly tested
    equivalent; never resolve an absolute/canonicalized caller path and reopen it;
-3. enumerate a bounded exact member allowlist from the held directory descriptor; reject extra,
-   missing, nested, case-colliding, link, device, socket, FIFO, sparse/oversized, multi-link, wrong
-   owner/group/mode, or changed entries;
+3. enumerate a bounded flat member set from the held directory descriptor and record each
+   name/inode fact; require exactly one fixed-name transport manifest, safely copy/parse that member
+   first, and require its bounded name set to equal the enumeration. Reject extra, missing, nested,
+   case-colliding, link, device, socket, FIFO, sparse/oversized, multi-link, wrong owner/group/mode,
+   or changed entries. Semantic subject-specific allowlists are checked after the full root copy;
 4. open every member relative to the held directory descriptor with `O_NOFOLLOW`, verify `fstat`
    device/inode/mount identity, type, owner/group/mode, link count, size and change/modify times, and
    keep every source descriptor open; cross-mount resolution is forbidden;
@@ -452,41 +491,90 @@ Bootstrap is never exposed in product sudoers. First install and control-plane u
 explicit unrestricted-root ceremony at a fixed local executable with a fixed package path or
 content-addressed package ID, never a caller-provided remote shell program.
 
-## Product transaction state machine
+## Deployment transaction state machine and durable commit primitive
 
-The transaction directory is addressed by the signed attempt ID and indexed under the global lock.
-It contains the durable intake receipt, canonical records, stored package/adapter, snapshot manifest,
-append-only hash-chained journal, and terminal receipt. Legal forward states are:
+The common transaction applies to `app-only`, `security-config`, `maintenance`, `infrastructure`,
+`gc`, and `archive`. Bootstrap has its own state machine. Descriptor-safe capture and full semantic
+verification first create a root-owned prepared directory. Under the global lock, the kernel writes
+and fsyncs `attempt-anchor.v2` inside that directory, fsyncs the directory, then publishes it as
+`transactions/<attempt-id>` with a no-replace atomic rename and fsyncs the transactions parent. That
+single namespace publication is the authoritative attempt/upload reservation. If the destination
+already exists, only its anchor may decide replay. A crash before publication has no attempt; a crash
+after publication has one complete anchor. No later upload may fill or replace a partial anchor.
 
-`captured -> admitted -> locked -> revalidated -> snapshotted -> rollback-armed -> applying -> verifying -> committed`
+The attempt directory contains the intake receipt, canonical authority, stored package/adapter,
+snapshot manifest, immutable numbered journal records, terminal/adoption receipts, and an atomic
+`HEAD` file. Each journal record binds the prior record digest. The validated record named by `HEAD`
+is the sole current-state authority. Directory listings and convenience indexes are derived and
+rebuildable from attempt anchors plus validated journal heads.
 
-Failure/recovery states are:
+| Current state | Event/condition | Next state | Mutation rule |
+|---|---|---|---|
+| No published anchor | Valid capture and unused attempt under global lock | `reserved` | None; publish complete attempt anchor atomically |
+| `reserved` | Global then lane lock acquired | `locked` | None |
+| `reserved` or `locked` | Invalid/expired/revoked authority, incompatible recovery, or lock refusal before any mutation | `refused` | Terminal non-mutating receipt |
+| `locked` | Installed state and every authority digest valid | `revalidated` | None |
+| `locked` or `revalidated` | Pre-state mismatch or pre-mutation refusal | `refused` | Terminal non-mutating receipt |
+| `revalidated` | Exact restorable prior state durably captured | `snapshotted` | Snapshot writes only; no managed-state mutation |
+| `snapshotted` | Snapshot and restoration prerequisites independently verified | `rollback-armed` | Journal transition fsynced before first managed-state mutation |
+| `snapshotted` | Verification/refusal before rollback arming | `refused` | Terminal non-mutating receipt; retained snapshot may be collected only by normal reachability rules |
+| `rollback-armed` | First symbolic adapter operation is about to run | `applying` | An operation-intent record is fsynced before invocation |
+| `rollback-armed` | Failure/interruption before first adapter operation | `rollback-pending` | Rollback verifies exact prior state even if no managed bytes changed |
+| `applying` | All operations have durable evidence | `verifying` | No new operation after transition except fixed verification |
+| `applying` or `verifying` | Operation failure, interruption, changed undeclared state, or revoked authority | `rollback-pending` | No further roll-forward unless the recovery policy below expressly permits it |
+| `rollback-pending` | Stored snapshot/adapter/kernel compatible | `rolling-back` | Each rollback intent/result is journaled and fsynced |
+| `rolling-back` | Exact prior state proven | `rolled-back` | Terminal receipt and transition |
+| `rolling-back` | Exact restoration cannot be proven | `blocked` | Locks release only after durable blocked record; new mutation attempts remain refused |
+| `verifying` | All postconditions and undeclared-state equality proven | `committed` | Terminal receipt and transition |
+| Any nonterminal | Journal/package/snapshot uncertainty or incompatible safe recovery | `blocked` | No unrecorded action |
+| `refused`, `rolled-back`, or `committed` | Any submit/recovery event | Same terminal state | Observation/adoption only; never mutate |
 
-`applying|verifying -> rollback-pending -> rolling-back -> rolled-back`
-
-Any state may transition to `blocked` only with a durable reason and recovery requirements when the
-kernel cannot prove safe continuation or exact rollback. `committed` and `rolled-back` are terminal.
-There is no transition out of a terminal state and no journal deletion transition.
+`refused`, `rolled-back`, and `committed` are terminal. `blocked` is nonterminal but only a
+journal-declared recovery action may leave it. There is no transition out of a terminal state and no
+journal deletion transition.
 
 Atomicity and ordering are mandatory:
 
-1. descriptor-safe capture and complete cryptographic admission occur without mutation;
-2. acquire the global admission lock, then the lane lock, in one fixed order with nonblocking
-   bounded acquisition; bootstrap uses the larger fixed order below;
-3. check attempt index, recovery compatibility, installed manifest, all authority, ticket time,
-   trust/revocation and package/adapter/kernel digests;
+1. descriptor-safe capture, parse, signature/package verification and prepared-directory fsync occur
+   without managed-state mutation;
+2. acquire the global admission lock, atomically reserve the complete attempt anchor, then acquire
+   the lane lock in the one fixed order with nonblocking bounded acquisition; bootstrap uses the
+   larger fixed order below;
+3. validate recovery compatibility, installed manifest, subject/ticket/staging/preflight authority,
+   signer/key policy, package/adapter/kernel digests and the time policy below;
 4. recompute full live state under the held locks and compare each component to preflight/ticket;
-5. create and fsync the pre-mutation snapshot and prove its restoration commands/objects exist;
-6. append and fsync `rollback-armed`; only then may the adapter's first mutating operation execute;
-7. append/fsync before and after every adapter operation whose repetition is not intrinsically safe;
+5. create/fsync `snapshot-manifest.v2` and prove every restoration prerequisite exists;
+6. append/fsync `rollback-armed`; only then may an adapter mutation intent be recorded and executed;
+7. append/fsync operation intent before, and `adapter-operation-evidence.v2` after, every operation.
+   A crash with intent but no result invokes the operation's schema-declared probe; the adapter may
+   mark complete, run a declared idempotent retry, or roll back—never guess;
 8. verify lane postconditions and undeclared-state equality while still holding locks;
-9. atomically publish/fsync terminal receipt, journal head and attempt index before releasing locks.
+9. write/fsync the terminal receipt first, write/fsync the terminal journal record that binds its
+   digest second, then atomically replace/fsync `HEAD` last. Only `HEAD` commits terminal state. A
+   crash before the head update leaves an ignored orphan and resumes from the prior authoritative
+   state; no three-file atomicity is assumed;
+10. rebuildable lookup/status indexes may update only after the authoritative head commits and are
+    never consulted over anchors/journal heads for admission or replay.
 
-Journal writes use a new file plus file `fsync`, atomic rename, and parent-directory `fsync`; the
-record links the prior transition digest. Snapshots record absence as well as bytes, metadata,
-enablement/activity states, Docker identities, routes and backup selections. Rollback restores exact
-prior state, including deleting only newly created declared objects and recreating prior absence. A
-failed exact comparison ends `blocked`, never “best effort success.”
+Journal/receipt/head writes use a new file plus file `fsync`, no-replace creation where immutable,
+atomic rename where replacing `HEAD`, and parent-directory `fsync`. Snapshots record absence as well
+as bytes, metadata, enablement/activity states, Docker identities, routes and backup selections.
+Rollback restores exact prior state, including deleting only newly created declared objects and
+recreating prior absence. A failed exact comparison ends `blocked`, never “best effort success.”
+
+Ticket time and revocation have state-specific semantics:
+
+- first publication of an attempt anchor and every transition through `rollback-armed` require the
+  ticket to be unexpired and its key currently valid/unrevoked;
+- an attempt that expires or is revoked before `rollback-armed` transitions to non-mutating
+  `refused` once its locks are reacquired;
+- after `rollback-armed`, safety recovery may run after expiry from stored root authority. Rollback
+  is always permitted. Roll-forward is permitted only when the key is not revoked, the ticket was
+  valid at the durable `rollback-armed` transition, and the pending operation's registered probe
+  proves continuation/retry is required and idempotent;
+- revocation after `rollback-armed` forces rollback. If exact rollback is impossible, the attempt is
+  `blocked` for audited unrestricted-root recovery; revocation never grants a new roll-forward;
+- terminal replay and adoption are read-only and may run after ticket expiry or revocation.
 
 ## Replay, retry, resume, and adoption matrix
 
@@ -496,20 +584,22 @@ repeat under both locks using root-owned state.
 
 | Existing state for attempt | Incoming bytes/identity | Required result |
 |---|---|---|
-| No attempt index | Valid ticket/package/signature and unused upload ID | Create one transaction after capture/admission |
+| No attempt anchor | Valid ticket/package/signature and unused upload ID | Atomically publish one complete prepared attempt directory and `attempt-anchor.v2` under the global lock |
 | Nonterminal | Same ticket, signature, package, adapter, kernel compatibility and first-bound upload ID | Resume/recover from stored root bytes and journal; never re-copy for execution |
 | Nonterminal | Same ticket under a different upload ID, or any byte/digest/lane/kernel/adapter mismatch | Refuse as replay/substitution; leave original transaction unchanged |
 | `committed` | Exact same identities and first-bound upload ID | Recompute live state under locks; return adoption receipt only if equal to terminal receipt |
 | `rolled-back` | Exact same identities and first-bound upload ID | Return the terminal rollback receipt; never mutate again |
+| `refused` | Exact same identities and first-bound upload ID | Return the terminal non-mutation receipt; never retry under this attempt ID |
 | Terminal | Any identity/upload mismatch | Refuse; never create a second transaction |
 | `blocked` | Exact same identities and first-bound upload ID | Run only the journal-declared compatible recovery action from stored bytes, or remain blocked |
 | Any state | Same ticket bytes but changed caller receipt/destination/wrapper | Ignore caller receipt as authority; kernel result is unchanged |
 | Any state | Reused attempt ID with a newly signed or edited ticket | Refuse permanently as attempt collision |
 
-Adoption is observation, not a journal transition and not success inferred by a desktop wrapper. It
-checks release authority, configuration, app, database, ingress, OAuth/MCP policy, backup/restore,
-installed control plane, and lane-specific state against the terminal receipt while locks are held.
-Any mismatch returns a refusal requiring a new preflight/ticket; it never repairs or repeats mutation.
+Adoption is observation, not a journal transition and not success inferred by a desktop wrapper. The
+kernel writes `adoption-receipt.v2` after checking subject authority, configuration, app, database,
+ingress, OAuth/MCP policy, backup/restore, installed control plane, and lane-specific state against
+the terminal receipt while locks are held. Any mismatch returns a refusal requiring a new
+preflight/ticket; it never repairs or repeats mutation.
 
 ## Lane adapter contract
 
@@ -525,7 +615,7 @@ The kernel supplies fixed, already-open package members and symbolic operations.
 caller strings or paths and cannot parse tickets, signatures, envelopes, journals, receipt
 destinations, locks, retention rules, or trust stores. They cannot update themselves.
 
-Four lanes exist:
+Six non-bootstrap lanes exist:
 
 | Lane | May change | Must remain equal unless separately declared |
 |---|---|---|
@@ -533,6 +623,8 @@ Four lanes exist:
 | `security-config` | Declared effective app/OAuth/MCP security config and required app restart | Images except declared app restart identity, Neo4j data, Cloudflared route/config, backup/restore, kernel/trust/sudoers |
 | `maintenance` | Declared app/database maintenance sequence, backup and restore rehearsal state | Cloudflared, gateway public boundary, OAuth/MCP contract, kernel/trust/sudoers except explicitly declared product state |
 | `infrastructure` | Declared units, timers, firewall, gateway bind, Cloudflared config/container, directories and read wrappers | Application behavior/data, OAuth/MCP semantics, backup formats/content, kernel/trust/sudoers |
+| `gc` | Only unreferenced scratch/package objects named by the kernel-generated and under-lock-recomputed GC plan | Every semantic record and active/current/previous/rollback/snapshot root; all runtime state |
+| `archive` | Exact eligible evidence objects copied to one registered durable destination and, only after verification, the plan's explicit source disposition | Active/current/previous/rollback/snapshot roots, deployment/runtime behavior and unlisted evidence |
 
 Changes to kernel, protocol package, trust store, sudoers, bootstrap recovery, or adapter installation
 are not an infrastructure lane; they require bootstrap.
@@ -551,33 +643,45 @@ ingress, policy, backup, kernel, or configuration state is not adoptable success
 
 ## Bootstrap and v1-to-v2 handoff
 
+Bootstrap requires one deliberately narrow **v1 handoff bridge** before cutover. Every deployed v1
+mutating entry must first be converted, through the currently authorized v1 transaction mechanism,
+to acquire the same v1 global lock before any lane lock, use nonblocking lock acquisition, check one
+fixed root-owned handoff fence both before and after lock acquisition, and refuse when the fence is
+present. The bridge adds no v2 mutation, trust, package, receipt or fallback behavior. Its source,
+installed manifest, disposable-host rehearsal and complete writer census are an independently
+reviewed gate. If any v1 writer cannot be bridged or enumerated, v2 bootstrap is impossible and
+remains blocked; break-glass is incident recovery, not an architecture substitute.
+
 Bootstrap is a separate root transaction with states:
 
-`authorized -> fenced -> callers-disabled -> drained -> all-locks-held -> snapshotted -> staged -> verified -> activated -> v1-retired -> absence-verified -> committed`
+`authorized -> bridge-verified -> v1-drained -> all-locks-held -> snapshotted -> fenced -> callers-disabled -> staged -> verified -> activated -> v1-retired -> absence-verified -> committed`
 
 Failure transitions enter `rollback-pending -> rolling-back -> rolled-back` or `blocked`. Its package
 contains the complete offline kernel environment, schemas, adapters, read wrappers, units, sudoers,
 trust-store action and installed/obsolete manifests. Product packages cannot contain these members.
 
-The handoff protocol explicitly covers callers that began before, during, and after activation:
+The handoff protocol explicitly covers callers that began before, during, and after the fence:
 
-1. refuse bootstrap if any unknown or nonterminal v1/v2 transaction cannot be resolved by its
-   installed recovery code;
-2. verify the signed bootstrap authorization and package completely before first mutation;
-3. atomically create and fsync a root-owned handoff epoch/fence. Every submission service and
-   discoverable v1 entry is disabled or replaced with a fail-closed tombstone before lock drain;
-4. enumerate all v1 caller processes, service activations, sockets, workers, timers, shell sessions
-   and lock waiters by executable identity and cgroup. A caller already running or queued is allowed
-   to finish only if it is the one proven active transaction being resolved before the fence. Every
-   other queued/pre-lock caller must be stopped and proven absent. If the deployed v1 cannot be
-   distinguished or safely drained, bootstrap refuses and requires audited break-glass remediation;
-5. acquire v1 global/lane locks and v2 bootstrap/global/all-lane locks in the documented fixed order,
-   nonblocking with bounded retries. Hold every descriptor through commit or rollback;
-6. repeat the complete process/unit/socket/timer/lock-waiter census after all locks are held. Any
-   process other than bootstrap that could later acquire a v1 or v2 mutation lock aborts cutover;
-7. snapshot exact presence/absence, bytes, owner/group/mode, ACL, unit enablement/activity, trust,
+1. verify the bootstrap subject, successful control-plane staging receipt, production preflight,
+   owner authorization/signature and package completely before first mutation;
+2. verify the exact accepted v1 handoff bridge installed on every censused mutator. Reject an
+   unknown bridge, blocking lock behavior, unbridged writer, old fence, or unknown transaction;
+3. if a known v1 transaction is active, allow it to reach a verified terminal state **before any
+   fence exists**. Bootstrap takes no lock and writes nothing during this bounded drain. Unknown,
+   blocked or unsafe recovery refuses bootstrap;
+4. acquire the bridged v1 global admission lock first. A v1 caller that already owns it finishes
+   before bootstrap can proceed; a caller starting after bootstrap owns it fails nonblocking. Then
+   acquire every v1 lane lock followed by v2 bootstrap/global/all-lane locks in the documented fixed
+   order. Hold every descriptor through commit or rollback;
+5. enumerate all v1/v2 caller processes, service activations, sockets, workers, timers, shell
+   sessions and lock waiters by executable identity and cgroup. Because the bridge forbids waiting,
+   any queued process or possible future lock acquirer is a hard refusal;
+6. snapshot exact presence/absence, bytes, owner/group/mode, ACL, unit enablement/activity, trust,
    sudoers, kernel environments, adapters, journals, package stores, locks and manifests. Fsync and
    independently verify rollback authority;
+7. while every lock remains held, atomically create/fsync the root-owned handoff epoch/fence. From
+   this transition onward no v1 mutation may begin or continue. Disable submission services and
+   atomically replace every discoverable v1 entry with a fail-closed tombstone;
 8. stage v2 at a versioned path; verify its offline environment and package manifest. On first
    install, root confirms the owner public-key fingerprint and package digest out of band. On
    upgrade, the installed trusted key verifies the package and declared rotation;
@@ -586,30 +690,42 @@ The handoff protocol explicitly covers callers that began before, during, and af
 10. prove obsolete source/host paths, units, timers, aliases, workers, sockets, sudoers fragments,
     routes, locks and Menhir-owned Yawn/Caddy authorities absent; publish and fsync the terminal and
     absence receipts before releasing locks;
-11. after the fence exists, any v1 caller started before removal, during activation, or after
-    activation must fail and can never continue when locks are released. Focused tests launch all
-    three timings and assert zero post-fence v1 mutation.
+11. a v1 caller launched immediately before fence publication either finished before bootstrap
+    acquired the global lock or already failed nonblocking; callers launched during activation or
+    after activation see the fence/tombstone and fail. Focused tests exercise all three timings and
+    assert zero post-fence v1 mutation and zero queued waiter.
 
 If any post-snapshot step fails, rollback uses the stored bootstrap code to restore the exact v1
-installation and prior absence/presence states before removing the fence or releasing locks. If
-exact restoration cannot be proven, the fence remains, product submit remains disabled, and the
-bootstrap transaction is `blocked`. A half-v2/half-v1 “available” state is forbidden.
+installation and prior absence/presence states while all locks and the fence remain. Only after the
+bridge, v1 entries, units, sudoers and state are exactly restored may rollback remove/fsync the fence
+and release locks. If exact restoration cannot be proven, the fence remains, product submit remains
+disabled, and the bootstrap transaction is `blocked`. A half-v2/half-v1 “available” state is
+forbidden.
 
 ## Cloudflared, operations gateway, and `yawn.deploy` contraction
 
-Cloudflared owns all public `memory.ctharvey.me` routing. Its committed allowlist must include the
-approved product paths and the operations resource:
+Cloudflared owns all public `memory.ctharvey.me` routing. Route order and path behavior are frozen:
 
-- product: `/mcp-http`, `/oauth/authorize`, `/oauth/token`, `/oauth/register`, approved
-  `/.well-known/*`, `/livez`, and `/readyz` paths;
-- operations: `/ops/mcp`, `/ops/mcp/*`, and the corresponding protected-resource discovery path;
-- everything else: terminal 404.
+| Order | External matcher | Upstream | Upstream path | Backend authentication expectation |
+|---|---|---|---|---|
+| 1 | Exact `/ops/mcp` and prefix `/ops/mcp/` | `http://172.30.0.1:8000` | Preserve the complete external path; no strip or rewrite | Gateway requires the operations OAuth bearer policy and audience `https://memory.ctharvey.me/ops/mcp` |
+| 2 | Exact `/.well-known/oauth-protected-resource/ops/mcp` | `http://172.30.0.1:8000` | Preserve unchanged | Gateway publishes protected-resource metadata; no bearer required for discovery |
+| 3 | Exact `/mcp-http` and prefix `/mcp-http/` | `http://menhir-prod-app:8099` | Preserve unchanged | Menhir MCP OAuth challenge/token policy; suffixes remain routed for current compatibility but the app may return 404 |
+| 4 | Exact `/oauth/authorize`, `/oauth/token`, `/oauth/register` | `http://menhir-prod-app:8099` | Preserve unchanged | Menhir OAuth endpoint-specific client/user policy |
+| 5 | Exact `/.well-known/jwks.json` | `http://menhir-prod-app:8099` | Preserve unchanged | Public discovery |
+| 6 | Exact `/.well-known/oauth-authorization-server` and prefix `/.well-known/oauth-authorization-server/` | `http://menhir-prod-app:8099` | Preserve unchanged | Public discovery; dynamic suffix is an application-defined RFC metadata route |
+| 7 | Exact `/.well-known/oauth-protected-resource` and prefix `/.well-known/oauth-protected-resource/`, except the order-2 exact operations path | `http://menhir-prod-app:8099` | Preserve unchanged | Public discovery; dynamic suffix is an application-defined RFC metadata route |
+| 8 | Exact `/livez` and `/readyz` | `http://menhir-prod-app:8099` | Preserve unchanged | Current health-endpoint policy |
+| 9 | Same hostname, every other path | Cloudflared `http_status:404` | None | Denied before any origin |
+| 10 | Every other hostname | Cloudflared `http_status:404` | None | Denied before any origin |
 
-Product routes proxy to `menhir-prod-app:8099`. Operations routes proxy to the host inspection
-gateway at `172.30.0.1:8000` with the required path translation defined in the infrastructure lane.
-The gateway listener is host-bound only to `172.30.0.1`, and firewall/peer validation admits only
-the running Cloudflared Compose service whose container, image, labels, alias and network attachment
-match the signed infrastructure state. The address alone is not identity.
+Cloudflared performs no path rewrite. The infrastructure package changes the Yawn operations gateway
+from its current Caddy-dependent `/ops` stripping assumption to a native ASGI mount at `/ops/mcp`
+and native discovery handling at `/.well-known/oauth-protected-resource/ops/mcp`. Internal `/mcp`
+is not exposed through Cloudflared and is not an accepted public alias. The gateway listener is
+host-bound only to `172.30.0.1`, and firewall/peer validation admits only the running Cloudflared
+Compose service whose container, image, labels, alias and network attachment match the signed
+infrastructure state. The address alone is not identity.
 
 The final `menhir-proxy` network contains only the Cloudflared and Menhir app roles plus the host
 gateway endpoint. Shared Yawn Caddy is not attached. Its certificate mounts and Authenticated Origin
@@ -632,41 +748,59 @@ Packages are stored by digest. The kernel computes reachability under the common
 - every retained snapshot/rollback manifest;
 - every terminal receipt whose declared retention still requires executable recovery material.
 
-GC is a kernel transaction. It cannot accept a caller removal list. It writes `gc-plan.v2`, fsyncs
-the terminal/journal/snapshot/package references first, recomputes reachability under locks, removes
-only unreferenced scratch/package objects, and emits `gc-receipt.v2`. Receipt, journal, ticket,
+GC is the common signed `gc` lane. A read-only kernel planner writes `gc-plan.v2` from current
+anchors; the owner rehearses and authorizes that plan through `deployment-subject.v2`, staging,
+preflight and `deployment-ticket.v2`, then submits it through the one mutating entry. The adapter
+cannot accept a caller removal list. It starts the common attempt anchor/journal/snapshot protocol,
+recomputes reachability under locks, requires the recomputed plan digest equal the authorized plan,
+fsyncs terminal/journal/snapshot/package references first, removes only unreferenced scratch/package
+objects, and emits both `gc-receipt.v2` and the common terminal receipt. Receipt, journal, ticket,
 signature, envelope, staging, preflight, snapshot manifest, bootstrap and absence evidence are never
 automatically deleted.
 
-Moving durable evidence or deleting an expired local copy requires a separate signed archival lane.
-The archive authorization names exact digests and destination. The adapter copies, fsyncs, reads back,
-verifies and receipts the destination before any source disposition. Active/nonterminal/current/
-previous/rollback material is categorically ineligible.
+Moving durable evidence or deleting an expired local copy uses the common signed `archive` lane. A
+read-only kernel planner creates `archive-plan.v2`; the owner rehearses and authorizes it through the
+same subject/staging/preflight/ticket protocol and submits it through the one mutating entry. The
+plan names exact digests, a destination identity from the installed allowlist, and source
+disposition. The common journal/snapshot wraps the adapter, which copies, fsyncs, reads back, verifies
+and emits `archive-receipt.v2` plus the terminal receipt before any source disposition.
+Active/nonterminal/current/previous/rollback material is categorically ineligible.
 
 ## Shared PowerShell interfaces
 
 The final interfaces are exact and versioned:
 
-- `deploy-menhir.ps1 -PackagePath <existing-file> -TicketPath <existing-file> -SignaturePath
-  <existing-file> -ReceiptPath <nonexistent-file>`
+- `deploy-menhir.ps1 -SubmissionDirectory <existing-directory> -TransportManifestPath
+  <existing-file-in-that-directory> -ExpectedManifestSha256 <64-lower-hex> -TargetHost
+  <explicit-nonroot-endpoint> -ReceiptPath <nonexistent-file>`
 - `deploy-menhir-app-only.ps1` is removed. App-only uses `deploy-menhir.ps1` with lane authority only
   inside the signed ticket.
-- `menhir-scaffold.ps1 -PackagePath <existing-file> -ExpectedPackageSha256 <64-lower-hex>
-  -BootstrapHost <explicit-root-endpoint>` is bootstrap transport only and cannot be called by a
-  product ticket.
+- `menhir-scaffold.ps1 -SubmissionDirectory <existing-directory> -TransportManifestPath
+  <existing-file-in-that-directory> -ExpectedManifestSha256 <64-lower-hex> -BootstrapHost
+  <explicit-root-endpoint> -ReceiptPath <nonexistent-file>` is bootstrap transport only and cannot
+  be called by a deployment ticket. The manifest necessarily transports the control-plane package,
+  staging receipt, production preflight, bootstrap authorization, and detached signature.
 
-The product wrapper hashes files before upload, creates one random upload ID, transfers to the fixed
-inbox layout, invokes only `menhir-txn submit <upload-id>`, receives a root terminal/adoption response,
-and creates the caller receipt path atomically without overwriting. It may log observed wrapper and
-transport versions locally, but those are not root claims or approval inputs. A missing/extra
-parameter, wildcard/path ambiguity, existing receipt destination, changed local file during hashing
-or transfer, failed remote invocation, malformed response, or digest mismatch fails locally without
-claiming success.
+The wrappers consume only the generated `transport-manifest.v2` shape: a bounded flat filename,
+size, and digest list. They do not parse subject, ticket, lane, authority or package semantics. The
+product wrapper hashes every listed file before and after upload, rejects unlisted local/remote
+members, creates one random upload ID, transfers to the fixed inbox layout, invokes only
+`menhir-txn submit <upload-id>`, receives a root terminal/adoption response, and creates the caller
+receipt path atomically without overwriting. It may log observed wrapper and transport versions
+locally, but those are not root claims or approval inputs. A missing/extra parameter, wildcard/path
+ambiguity, existing receipt destination, changed local file during hashing or transfer, failed
+remote invocation, malformed response, or digest mismatch fails locally without claiming success.
 
-The scaffold wrapper sends one already built package and expected digest to an explicit unrestricted
-root endpoint. It does not construct remote commands from package content, select a host implicitly,
-install files, edit sudoers, recover, or decide success. Windows PowerShell 5.1 and PowerShell 7 must
-consume the same golden argument and byte-transfer fixtures.
+The scaffold wrapper sends the exact manifest-listed bootstrap submission to an explicit
+unrestricted-root endpoint and invokes only the fixed bootstrap loader with the upload ID. On first
+install, unrestricted root obtains that small loader from the same control-plane package and
+executes it only after manually confirming both loader-member and complete-package digests against
+the owner's out-of-band display; on upgrade, the installed loader digest must match the current
+installed-artifact manifest. This first-install exception is within the documented unrestricted-root
+trust boundary and does not allow a product caller to invoke bootstrap. The wrapper does not
+construct remote commands from package content, select a host implicitly, install files, edit
+sudoers, recover, or decide success. Windows PowerShell 5.1 and PowerShell 7 consume the same golden
+argument, manifest, detached-signature, and byte-transfer fixtures.
 
 ## Read-only Yawn contract
 
@@ -698,11 +832,14 @@ strictly serial deliverables; it may split a deliverable further but may not com
    behavior. It must be impossible to reach snapshot/apply.
 6. **Product kernel and adapters.** Implement descriptor-safe intake, locks, state machine, four
    lanes, rollback, replay/adoption and retention on disposable hosts. No bootstrap/cutover.
-7. **Bootstrap and installation.** Implement signed control-plane installation, handoff fence,
-   sudoers/read wrappers and crash recovery on disposable v1 fixtures. No repository contraction.
-8. **Cross-repository contraction.** Convert shared/Yawn interfaces and remove `yawn.deploy` Menhir
+7. **v1 handoff bridge.** Change only the censused v1 mutators to one global-first, nonblocking-lock,
+   double-fence-check contract; prove it on disposable v1 fixtures. Add no v2 mutation or cutover.
+8. **Bootstrap and installation.** Implement signed control-plane installation, all-lock handoff,
+   fence, sudoers/read wrappers and crash recovery against the accepted bridge. No repository
+   contraction.
+9. **Cross-repository contraction.** Convert shared/Yawn interfaces and remove `yawn.deploy` Menhir
    ownership plus all v1 source/install paths in one coordinated compatibility break.
-9. **Integrated clean-host acceptance.** Run complete non-production author/stage/preflight/sign/
+10. **Integrated clean-host acceptance.** Run complete non-production author/stage/preflight/sign/
    submit/retry/adopt/recover/rollback/bootstrap/converge flow and unchanged-behavior checks.
 
 For each gate:
