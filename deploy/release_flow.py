@@ -369,9 +369,31 @@ def _candidate_deployment_class(spec: dict[str, Any]) -> str:
     if not isinstance(repository_paths, dict) or set(repository_paths) != REPOSITORIES \
             or not isinstance(prior_value, str):
         raise ReleaseFlowError("release spec cannot be classified")
-    prior_repos = _load_json(Path(prior_value), "prior release").get("repos")
+    prior_release = _load_json(Path(prior_value), "prior release")
+    prior_repos = prior_release.get("repos")
     if not isinstance(prior_repos, dict) or set(prior_repos) != REPOSITORIES:
         raise ReleaseFlowError("prior release repositories are invalid")
+
+    current_secrets = spec.get("secret_version_ids")
+    prior_secrets = prior_release.get("secret_version_ids")
+    if isinstance(current_secrets, dict) and isinstance(prior_secrets, dict):
+        if any(
+            name != "client-policy" and current_secrets.get(name) != prior_secrets.get(name)
+            for name in set(current_secrets) | set(prior_secrets)
+        ):
+            return "maintenance"
+    rendered = spec.get("rendered")
+    prior_rendered = prior_release.get("rendered")
+    changed_operations = False
+    if isinstance(rendered, dict) and isinstance(prior_rendered, dict):
+        oauth_public = rendered.get("oauth_public_key_sha256")
+        if isinstance(oauth_public, str) \
+                and _sha256(Path(oauth_public)) != prior_rendered.get("oauth_public_key_sha256"):
+            return "maintenance"
+        operations = rendered.get("operations_policy_sha256")
+        changed_operations = isinstance(operations, str) and (
+            _sha256(Path(operations)) != prior_rendered.get("operations_policy_sha256")
+        )
 
     heads: dict[str, str] = {}
     changed_oauth = False
@@ -386,7 +408,7 @@ def _candidate_deployment_class(spec: dict[str, Any]) -> str:
     menhir_base = prior_repos["menhir"]
     menhir_head = heads["menhir"]
     if menhir_base == menhir_head:
-        return "security-config" if changed_oauth else "maintenance"
+        return "security-config" if changed_oauth or changed_operations else "maintenance"
     changed = _git(
         Path(repository_paths["menhir"]),
         "diff", "--name-only", "--diff-filter=ACDMRTUXB",

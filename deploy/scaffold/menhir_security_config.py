@@ -50,10 +50,10 @@ MODES = {
 ALLOWED_ENV_CHANGES = app.ALLOWED_ENV_CHANGES | {"MENHIR_CLIENT_POLICY_DIGEST"}
 ALLOWED_RENDERED_CHANGES = {
     "production_env_sha256", "policy_sha256", "operations_policy_sha256",
-    "oauth_public_key_sha256",
 }
 ALLOWED_CONFIG_DESTINATIONS = set(DESTINATIONS.values()) - {
     "/srv/menhir/production/release/release.json",
+    "/etc/yawn-vps/menhir-oauth-public.pem",
 }
 
 
@@ -232,6 +232,9 @@ def classify_release(
     for key in set(live_secrets) | set(candidate_secrets):
         if key != "client-policy" and candidate_secrets.get(key) != live_secrets.get(key):
             raise Error(f"security-config cannot rotate secret: {key}")
+    policy_digest = app.strict_load(bundle / "client-policy.json").get("canonical_digest")
+    if candidate_secrets.get("client-policy") != "sha256-" + str(policy_digest):
+        raise Error("client-policy secret version is not bound to its canonical digest")
     live_artifacts = live.get("artifacts")
     candidate_artifacts = candidate.get("artifacts")
     if not isinstance(live_artifacts, dict) or not isinstance(candidate_artifacts, dict) \

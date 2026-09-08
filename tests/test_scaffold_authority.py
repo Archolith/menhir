@@ -459,6 +459,8 @@ def test_security_config_classifier_accepts_only_bounded_auth_changes(tmp_path: 
     del candidate["artifacts"]["/srv/menhir/production/release/production.env"]
     candidate_env["MENHIR_CLIENT_POLICY_DIGEST"] = "policy-digest"
     live_env["MENHIR_CLIENT_POLICY_DIGEST"] = "0" * 64
+    live["secret_version_ids"] = {"client-policy": "sha256-old-policy"}
+    candidate["secret_version_ids"] = {"client-policy": "sha256-policy-digest"}
     (tmp_path / "production.env").write_text("unused", encoding="ascii")
 
     result = security_config.classify_release(
