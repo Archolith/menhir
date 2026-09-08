@@ -716,8 +716,15 @@ def test_app_only_refuses_unapproved_uploaded_release_before_production_access(
     monkeypatch.setattr(app_only, "run", lambda *_args, **_kwargs: "")
     monkeypatch.setattr(app_only, "STATUS", tmp_path)
     monkeypatch.setattr(
-        app_only, "classify_bundle",
-        lambda *_args: ({}, {"candidate_release_sha256": "2" * 64}),
+        app_only, "load_bundle",
+        lambda *_args, **_kwargs: {"path": tmp_path, "release": {}},
+    )
+
+    def refuse_authority(*_args, **_kwargs):
+        raise app_only.AppOnlyError("uploaded release differs from owner-approved authority")
+
+    monkeypatch.setattr(
+        app_only, "validate_promotion_authority", refuse_authority,
     )
     monkeypatch.setattr(
         app_only, "require_root_file",
@@ -763,6 +770,9 @@ def test_app_only_complete_recovery_only_finalizes(
     monkeypatch.setattr(app_only, "require_root_file", lambda *_args: None)
     monkeypatch.setattr(app_only, "strict_load", lambda _path: transaction)
     monkeypatch.setattr(app_only, "require_runner_sha256", lambda *_args: "1" * 64)
+    monkeypatch.setattr(
+        app_only, "validate_active_transaction_authority", lambda *_args, **_kwargs: None,
+    )
     monkeypatch.setattr(app_only, "finalize_transaction", finalized.append)
     monkeypatch.setattr(app_only, "rollforward", lambda _tx: pytest.fail("complete recovery replayed deploy"))
     monkeypatch.setattr(app_only, "rollback", lambda _tx: pytest.fail("complete recovery rolled back"))
@@ -783,7 +793,11 @@ def test_security_config_complete_recovery_only_finalizes(
     monkeypatch.setattr(security_config.app, "acquire_lock", _TestLock)
     monkeypatch.setattr(security_config.app, "require_root_file", lambda *_args: None)
     monkeypatch.setattr(security_config.app, "strict_load", lambda _path: transaction)
-    monkeypatch.setattr(security_config.app, "require_runner_sha256", lambda *_args: "1" * 64)
+    monkeypatch.setattr(security_config, "require_runner_authority", lambda *_args: "1" * 64)
+    monkeypatch.setattr(
+        security_config.app, "validate_active_transaction_authority",
+        lambda *_args, **_kwargs: None,
+    )
     monkeypatch.setattr(security_config, "finalize", finalized.append)
     monkeypatch.setattr(security_config, "rollback", lambda _tx: pytest.fail("complete recovery rolled back"))
 
