@@ -800,6 +800,33 @@ def test_cutover_disables_legacy_restart_before_quiesce_and_backup():
     assert source.index(disable) < source.index(quiesce)
 
 
+def test_backup_generation_inherited_lock_is_exact_and_fail_closed():
+    source = (Path(__file__).resolve().parents[1] / "deploy" / "backup-generation.sh").read_text()
+    validation = source[
+        source.index('maintenance_lock_inherited="${MENHIR_MAINTENANCE_LOCK_INHERITED:-0}"'):
+        source.index('WRAPPER="${MENHIR_BACKUP_LOCAL_WRAPPER')
+    ]
+    lock = source[
+        source.index('if [ "$maintenance_lock_inherited" = 1 ]; then'):
+        source.index("# Unique, no-collision generation id")
+    ]
+    inherited, default = lock.split("else", 1)
+
+    assert '0|1) ;;' in validation
+    assert "MENHIR_MAINTENANCE_LOCK_INHERITED must be 0 or 1" in validation
+    assert '[ "$LOCK" = "$fixed_maintenance_lock" ]' in inherited
+    assert '[ -f "$LOCK" ] && [ ! -L "$LOCK" ]' in inherited
+    assert '[ -e /proc/self/fd/9 ]' in inherited
+    assert "stat -c '%d:%i' -- \"$LOCK\"" in inherited
+    assert "stat -Lc '%d:%i' -- /proc/self/fd/9" in inherited
+    assert '[ "$lock_fd_identity" = "$lock_path_identity" ]' in inherited
+    assert "flock -n 9" in inherited
+    assert 'exec 9>"${LOCK}"' not in inherited
+    assert 'mkdir -p "$(dirname "$LOCK")"' in default
+    assert 'exec 9>"${LOCK}"' in default
+    assert "flock -n 9" in default
+
+
 def test_runtime_image_does_not_require_retired_remote_fence_secret():
     source = (Path(__file__).resolve().parents[1] / "deploy" / "Dockerfile").read_text()
     assert "source-fence-token" not in source

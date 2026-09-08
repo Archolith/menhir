@@ -484,6 +484,15 @@ maintenance transaction and acquires the same host-wide admission fence used by 
 security-config. That fence remains owned through installation, backup, cutover and final
 acceptance; every lane refuses a conflicting owner or incomplete transaction.
 
+The wrapper invokes the verified root installer immediately after beginning maintenance; it does
+not count encrypted archives, overlay live backup helpers, or run the first-backup generator.
+After validating the exact maintenance binding, acquiring the mutation lock, fsyncing the exact
+prior-state snapshot, and durably arming its journal, the installer stops the read-only operations
+gateway, refuses active legacy workers, and enters its journaled `bootstrap-backup` phase. An
+interrupted cleanup is resumed with the fixed verified helper overlay before retained archives are
+recounted. If none remains, the installer creates the bootstrap backup under inherited lock FD 9
+before installing release, environment, or deploy authority.
+
 For maintenance installs, the bundle installer reloads systemd definitions and
 restarts the read-only operations gateway only when it was already active. An
 upgrade from an older host retires Yawn's alternate mutation lane inside this

@@ -1,3 +1,12 @@
+## 2026-09-08 - transact first-backup bootstrap before release installation
+
+- Moved first encrypted-backup bootstrap out of the desktop wrapper and into the root release
+  installer's already-bound, locked, snapshotted, durably journaled transaction.
+- Added cleanup-resume-before-recount behavior, fixed verified helper overlays through the same
+  atomic install primitive as the full release, and fail-closed inherited FD 9 lock validation.
+- Added bootstrap-phase rollback/recovery and ordering contracts so candidate helpers cannot become
+  a retry baseline and general release authority remains unchanged until the backup is complete.
+
 ## 2026-09-07 - define the staged promotion deployment model
 
 - Bound every privileged lane to the approved release, bundle, root runner, and staged Cloudflared

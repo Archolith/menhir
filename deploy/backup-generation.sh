@@ -45,6 +45,7 @@
 #   MENHIR_PROD_POLICY_DIR=${MENHIR_PROD_ROOT}/policy
 #   MENHIR_BACKUP_ROOT=/srv/menhir/backups
 #   MENHIR_MAINTENANCE_LOCK=/run/lock/menhir-production.lock
+#   MENHIR_MAINTENANCE_LOCK_INHERITED=0
 #   MENHIR_BACKUP_LOCAL_WRAPPER=/usr/local/sbin/menhir-backup-local
 #   MENHIR_IMAGE, NEO4J_IMAGE (required, digest-pinned)
 set -euo pipefail
@@ -68,7 +69,13 @@ STATE_DIR="${MENHIR_PROD_STATE_DIR:-${MENHIR_PROD_ROOT}/state}"
 SECRETS_DIR="${MENHIR_PROD_SECRETS_DIR:-${MENHIR_PROD_ROOT}/secrets}"
 POLICY_DIR="${MENHIR_PROD_POLICY_DIR:-${MENHIR_PROD_ROOT}/policy}"
 BACKUP_ROOT="${MENHIR_BACKUP_ROOT:-/srv/menhir/backups}"
-LOCK="${MENHIR_MAINTENANCE_LOCK:-/run/lock/menhir-production.lock}"
+fixed_maintenance_lock="/run/lock/menhir-production.lock"
+LOCK="${MENHIR_MAINTENANCE_LOCK:-$fixed_maintenance_lock}"
+maintenance_lock_inherited="${MENHIR_MAINTENANCE_LOCK_INHERITED:-0}"
+case "$maintenance_lock_inherited" in
+    0|1) ;;
+    *) echo "MENHIR_MAINTENANCE_LOCK_INHERITED must be 0 or 1" >&2; exit 1 ;;
+esac
 WRAPPER="${MENHIR_BACKUP_LOCAL_WRAPPER:-/usr/local/sbin/menhir-backup-local}"
 PRODUCTION_ENV="/srv/menhir/production/release/production.env"
 
@@ -159,9 +166,23 @@ GENERATIONS_ROOT="${BACKUP_ROOT}/generations"
 mkdir -p "${BACKUP_ROOT}" "${GENERATIONS_ROOT}"
 
 # One fixed host-wide maintenance lock shared by release/backup/restore/rollback.
-mkdir -p "$(dirname "$LOCK")"
-exec 9>"${LOCK}"
-flock -n 9 || { echo "maintenance lock is held: ${LOCK}" >&2; exit 1; }
+if [ "$maintenance_lock_inherited" = 1 ]; then
+    [ "$LOCK" = "$fixed_maintenance_lock" ] \
+        || { echo "inherited maintenance lock requires the fixed lock path" >&2; exit 1; }
+    [ -f "$LOCK" ] && [ ! -L "$LOCK" ] \
+        || { echo "fixed maintenance lock is not a regular non-symlink file" >&2; exit 1; }
+    [ -e /proc/self/fd/9 ] \
+        || { echo "inherited maintenance lock descriptor 9 is not open" >&2; exit 1; }
+    lock_path_identity="$(stat -c '%d:%i' -- "$LOCK")"
+    lock_fd_identity="$(stat -Lc '%d:%i' -- /proc/self/fd/9)"
+    [ "$lock_fd_identity" = "$lock_path_identity" ] \
+        || { echo "inherited maintenance lock descriptor does not match the fixed lock path" >&2; exit 1; }
+    flock -n 9 || { echo "inherited maintenance lock is not held: ${LOCK}" >&2; exit 1; }
+else
+    mkdir -p "$(dirname "$LOCK")"
+    exec 9>"${LOCK}"
+    flock -n 9 || { echo "maintenance lock is held: ${LOCK}" >&2; exit 1; }
+fi
 
 # Unique, no-collision generation id (mktemp -d cannot collide or traverse).
 target="$(mktemp -d "${GENERATIONS_ROOT}/generation.XXXXXXXXXX")"

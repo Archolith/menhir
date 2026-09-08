@@ -452,6 +452,47 @@ def test_installer_snapshots_every_retirement_surface_before_arming() -> None:
     assert 'for path in "${retired_caddy_routes[@]}"' in retirement
 
 
+def test_installer_bootstrap_backup_is_armed_atomic_and_precedes_full_install() -> None:
+    source = MODULE_PATH.with_name("release-install.sh").read_text(encoding="ascii")
+    execution_start = source.index('validate_destination_parents\ncase "$phase" in')
+    execution = source[execution_start:]
+    armed = execution.index("transaction_active=1")
+    stop_gateway = execution.index("systemctl stop menhir-oauth-operations.service", armed)
+    worker_guard = execution.index("assert_no_active_legacy_workers\n", stop_gateway)
+    bootstrap_phase = execution.index("journal_action phase bootstrap-backup", worker_guard)
+    cleanup_exists = execution.index('if [ -e "$cleanup_journal" ]', bootstrap_phase)
+    cleanup_overlay = execution.index("install_bootstrap_helpers", cleanup_exists)
+    cleanup_resume = execution.index(
+        "/usr/local/sbin/menhir-backup-local --resume-cleanup", cleanup_overlay
+    )
+    recount = execution.index('archive_count="$(count_encrypted_archives)"', cleanup_resume)
+    new_backup = execution.index('if [ "$archive_count" -eq 0 ]', recount)
+    backup_overlay = execution.index("install_bootstrap_helpers", new_backup)
+    inherited_backup = execution.index("MENHIR_MAINTENANCE_LOCK_INHERITED=1", backup_overlay)
+    retirement_phase = execution.index("journal_action phase retiring-caddy", inherited_backup)
+    install_phase = execution.index("journal_action phase installing", retirement_phase)
+    full_install = execution.index('install_artifact "$mode" "$destination"', install_phase)
+
+    assert armed < stop_gateway < worker_guard < bootstrap_phase
+    assert bootstrap_phase < cleanup_exists < cleanup_overlay < cleanup_resume < recount
+    assert recount < new_backup < backup_overlay < inherited_backup < retirement_phase
+    assert retirement_phase < install_phase < full_install
+    assert source.index("journal_action phase armed") \
+        < source.index("journal_action phase bootstrap-backup", execution_start)
+    assert 'candidate_backup_generation="${rootfs}/srv/menhir/production/bin/backup-generation.sh"' \
+        in source
+    assert 'source="${rootfs}${destination}"' in source
+    assert 'MENHIR_SAME_HOST_CUTOVER=0' in execution[backup_overlay:retirement_phase]
+    assert 'bootstrap_job="install-bootstrap-${bootstrap_job_digest}"' in source
+    for mode, destination in (
+        ("0644", "/srv/menhir/production/bin/menhir_schema.py"),
+        ("0644", "/srv/menhir/production/bin/backup_cleanup_txn.py"),
+        ("0755", "/usr/local/sbin/menhir-backup-local"),
+    ):
+        assert f"install_artifact {mode} {destination}" in source
+    assert source.count('install -o root -g root -m "$mode" "$source" "$temporary"') == 1
+
+
 def test_installer_refuses_active_transient_worker_before_lane_retirement() -> None:
     source = MODULE_PATH.with_name("release-install.sh").read_text(encoding="ascii")
     guard = source[
@@ -511,8 +552,8 @@ def test_installer_journals_and_fsyncs_each_mutation_boundary() -> None:
     journal = source[source.index("journal_action() {"):source.index("validate_destination_parents() {")]
 
     for phase in (
-        "snapshotting", "armed", "retiring-caddy", "installing", "verifying",
-        "rolling-back", "rolled-back", "committed",
+        "snapshotting", "armed", "bootstrap-backup", "retiring-caddy", "installing",
+        "verifying", "rolling-back", "rolled-back", "committed",
     ):
         assert f'"{phase}"' in journal
     for durability_step in (
@@ -522,8 +563,8 @@ def test_installer_journals_and_fsyncs_each_mutation_boundary() -> None:
         assert durability_step in journal
     assert source.index("journal_action phase retiring-caddy") \
         < source.index("retire_obsolete_writers\n")
-    assert source.index("journal_action phase installing") \
-        < source.index('install -o root -g root -m "$mode" "$source" "$temporary"')
+    installing = source.index("journal_action phase installing")
+    assert installing < source.index('install_artifact "$mode" "$destination"', installing)
     verifying = source.index("journal_action phase verifying")
     assert verifying < source.index(
         "/srv/menhir/production/bin/verify-artifacts", verifying
@@ -534,7 +575,10 @@ def test_installer_journals_and_fsyncs_each_mutation_boundary() -> None:
 
 @pytest.mark.parametrize(
     "crash_phase",
-    ["armed", "retiring-caddy", "installing", "verifying", "rolling-back"],
+    [
+        "armed", "bootstrap-backup", "retiring-caddy", "installing", "verifying",
+        "rolling-back",
+    ],
 )
 def test_crash_in_any_mutating_phase_recovers_without_rebaselining(
     crash_phase: str,
@@ -543,7 +587,7 @@ def test_crash_in_any_mutating_phase_recovers_without_rebaselining(
     retirement = source.index("retire_obsolete_writers() {")
     recovery_start = source.rindex('case "$phase" in', 0, retirement)
     recovery = source[recovery_start:retirement]
-    crash_arm = "armed|retiring-caddy|installing|verifying|rolling-back)"
+    crash_arm = "armed|bootstrap-backup|retiring-caddy|installing|verifying|rolling-back)"
 
     assert crash_phase in crash_arm
     assert crash_arm in recovery
@@ -601,7 +645,8 @@ def test_install_journal_transition_graph_rejects_unsafe_recovery_edges() -> Non
 
     assert transitions is not None
     for crash_phase in (
-        "armed", "retiring-caddy", "installing", "verifying", "rolling-back",
+        "armed", "bootstrap-backup", "retiring-caddy", "installing", "verifying",
+        "rolling-back",
     ):
         assert "rolling-back" in transitions[crash_phase]
     assert transitions["committed"] == {"committed"}

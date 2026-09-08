@@ -144,10 +144,15 @@ authorized root SSH bootstrap endpoint, acquire the shared admission lock and th
 mutation lock, and leave one durable `active-install` recovery target if interrupted. Desktop
 archive scheduling is a separate backup phase, not a side effect of convergence.
 Old hosts are upgraded only through the release installer's durable transaction.
-After both canonical locks are held it stops the gateway, refuses if any active
-`menhir-op-*` transient worker remains, snapshots and removes the obsolete unit
-template/worker/public submit wrappers, verifies absence, and restores exact prior
-files and template state on rollback or recovery.
+After the existing admission holder is validated and the production mutation lock is held, the
+installer creates and fsyncs its exact prior-state snapshot and durably arms the install journal.
+Only then does it stop the gateway and refuse any active `menhir-op-*` transient worker. If the host
+has no encrypted generation, its journaled `bootstrap-backup` phase atomically overlays the fixed
+verified schema, cleanup, and local-encryption helpers, resumes any interrupted cleanup, recounts
+retained archives, and creates the first backup while inheriting the same lock on FD 9. The
+bootstrap remains before release, environment, and deploy artifact installation. The installer
+then removes obsolete unit template/worker/public submit wrappers, verifies absence, and restores
+all helper, retired-file, and template state from the true snapshot on rollback or recovery.
 
 Every deployment verifies the receipt and referenced files, permissions, service
 health, and digests. Verification must be read-only and fast. It does not recreate

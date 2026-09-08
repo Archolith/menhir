@@ -138,6 +138,14 @@ admission fence consulted by app-only and security-config for that entire interv
 deployment must refuse while another lane owns the fence; the operator must reconcile or explicitly
 close that operation first.
 
+On a host with no retained encrypted generation, the desktop wrapper still proceeds directly from
+`begin-maintenance` to the verified bundle installer. The installer owns first-backup bootstrap only
+after its mutation lock, exact fsynced snapshot, durable journal arm, gateway stop, and transient
+worker refusal. If a backup cleanup journal exists, it atomically overlays the three verified
+bootstrap helpers, resumes cleanup, and recounts archives before deciding whether a new backup is
+needed. The backup generator inherits the installer's already-held FD 9 and verifies that descriptor
+against `/run/lock/menhir-production.lock`; it never releases or reacquires the lock.
+
 Backups are a continuously maintained host invariant, not work recreated for every
 application release. Keep at least two age-encrypted generations under
 `/srv/menhir/backups/encrypted`, archive verified copies on the operator desktop, and

@@ -151,17 +151,25 @@ def test_personal_promoter_binds_maintenance_to_approval_and_attempt() -> None:
 
 
 @pytest.mark.skipif(not SHARED_WRAPPER.exists(), reason="shared wrapper is outside CI checkout")
-def test_shared_wrapper_begins_before_all_bootstrap_and_install_mutations() -> None:
+def test_shared_wrapper_begins_maintenance_then_delegates_bootstrap_to_installer() -> None:
     wrapper = SHARED_WRAPPER.read_text(encoding="utf-8")
     begin = wrapper.index("begin-maintenance $admissionArguments")
-    bootstrap = wrapper.index('$temporaryBin = "$trustedBundle/rootfs')
     installer = wrapper.index("sudo -n bash '$trustedBundle/install.sh'")
     release_run = wrapper.index(
         'Invoke-Vps "sudo -n env MENHIR_ROOT_RUNNER_SHA256=', installer,
     )
     complete = wrapper.index("complete-maintenance $admissionArguments", release_run)
+    preinstall = wrapper[begin:installer]
 
-    assert begin < bootstrap < installer < release_run < complete
+    assert begin < installer < release_run < complete
+    assert "$bootstrapJob" not in wrapper
+    assert "$temporaryBin" not in preinstall
+    assert "find /srv/menhir/backups/encrypted" not in preinstall
+    assert "menhir_schema.py" not in preinstall
+    assert "backup_cleanup_txn.py" not in preinstall
+    assert "menhir-backup-local" not in preinstall
+    assert "backup-generation.sh" not in preinstall
+    assert "sudo -n install" not in preinstall
     assert "MENHIR_PROMOTION_ATTEMPT_ID='$PromotionAttemptId'" in wrapper
     assert '"started_utc": state.get("started_utc")' in wrapper
     assert '"completed_utc": state.get("completed_utc")' in wrapper

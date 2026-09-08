@@ -209,6 +209,9 @@ journal="${transaction_root}/journal.json"
 snapshot_root="${transaction_root}/snapshot"
 snapshot_entries="${snapshot_root}/entries.list"
 mutation_lock="/run/lock/menhir-production.lock"
+cleanup_journal="/var/lib/menhir-production/backup-local-cleanup-journal.json"
+encrypted_backup_root="/srv/menhir/backups/encrypted"
+candidate_backup_generation="${rootfs}/srv/menhir/production/bin/backup-generation.sh"
 transaction_active=0
 transaction_step="validating maintenance admission"
 
@@ -296,6 +299,11 @@ PY
 [ -n "$approval_sha" ] && [ -n "$promotion_attempt_id" ] \
     && [ -n "$approved_utc" ] && [ -n "$promotion_started_utc" ] \
     || { echo "maintenance journal binding is incomplete" >&2; exit 1; }
+bootstrap_job_digest="$(printf 'release_id=%s\nrelease_sha256=%s\nrunner_sha256=%s\napproval_sha256=%s\npromotion_attempt_id=%s\napproved_utc=%s\npromotion_started_utc=%s\n' \
+    "$release_id" "$release_sha" "$runner_sha" "$approval_sha" \
+    "$promotion_attempt_id" "$approved_utc" "$promotion_started_utc" \
+    | sha256sum | cut -d' ' -f1)"
+bootstrap_job="install-bootstrap-${bootstrap_job_digest}"
 admission_args=(
     --release-id "$release_id"
     --release-manifest-sha256 "$release_sha"
@@ -387,6 +395,48 @@ for path in reversed(directories):
 PY
 }
 
+install_artifact() { # mode destination
+    local mode="$1" destination="$2" source parent temporary
+    source="${rootfs}${destination}"
+    parent="$(dirname "$destination")"
+    mkdir -p -- "$parent"
+    temporary="${parent}/.${destination##*/}.install.$$"
+    [ ! -e "$temporary" ] && [ ! -L "$temporary" ] || {
+        echo "temporary install path already exists: $temporary" >&2
+        return 1
+    }
+    install -o root -g root -m "$mode" "$source" "$temporary"
+    mv -fT -- "$temporary" "$destination"
+    fsync_directory "$parent"
+}
+
+install_bootstrap_helpers() {
+    install_artifact 0644 /srv/menhir/production/bin/menhir_schema.py
+    install_artifact 0644 /srv/menhir/production/bin/backup_cleanup_txn.py
+    install_artifact 0755 /usr/local/sbin/menhir-backup-local
+}
+
+count_encrypted_archives() {
+    python3 - "$encrypted_backup_root" <<'PY'
+import os
+import stat
+import sys
+
+root = sys.argv[1]
+try:
+    info = os.lstat(root)
+except FileNotFoundError:
+    print(0)
+    raise SystemExit
+if not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode):
+    raise SystemExit("encrypted backup root must be a non-symlink directory")
+print(sum(
+    1 for entry in os.scandir(root)
+    if entry.name.endswith(".tar.gz.age") and entry.is_file(follow_symlinks=False)
+))
+PY
+}
+
 journal_action() { # init|inspect|phase [phase] [journal-path]
     local action="$1" phase="${2:-}" target="${3:-$journal}"
     python3 - "$action" "$target" "$phase" "$release_id" "$release_sha" \
@@ -401,8 +451,8 @@ import tempfile
 
 action, path, requested, release_id, release_sha, runner_sha, approval_sha, attempt_id, approved_utc, promotion_started_utc, operations = sys.argv[1:]
 phases = {
-    "snapshotting", "armed", "retiring-caddy", "installing", "verifying",
-    "rolling-back", "rolled-back", "committed",
+    "snapshotting", "armed", "bootstrap-backup", "retiring-caddy", "installing",
+    "verifying", "rolling-back", "rolled-back", "committed",
 }
 keys = {
     "schema", "kind", "release_id", "release_sha256", "runner_sha256",
@@ -489,7 +539,8 @@ elif action == "phase":
     current = value["phase"]
     allowed = {
         "snapshotting": {"snapshotting", "armed"},
-        "armed": {"armed", "retiring-caddy", "rolling-back"},
+        "armed": {"armed", "bootstrap-backup", "rolling-back"},
+        "bootstrap-backup": {"bootstrap-backup", "retiring-caddy", "rolling-back"},
         "retiring-caddy": {"retiring-caddy", "installing", "rolling-back"},
         "installing": {"installing", "verifying", "rolling-back"},
         "verifying": {"verifying", "committed", "rolling-back"},
@@ -868,7 +919,7 @@ case "$phase" in
         create_snapshot
         phase=armed
         ;;
-    armed|retiring-caddy|installing|verifying|rolling-back)
+    armed|bootstrap-backup|retiring-caddy|installing|verifying|rolling-back)
         validate_snapshot_census
         transaction_active=1
         rollback_install
@@ -963,6 +1014,25 @@ if [ "$operations_was_active" -eq 1 ]; then
 fi
 assert_no_active_legacy_workers
 
+transaction_step="recovering or creating the first encrypted backup"
+assert_maintenance
+journal_action phase bootstrap-backup
+if [ -e "$cleanup_journal" ] || [ -L "$cleanup_journal" ]; then
+    require_safe_root_file "$cleanup_journal" "backup cleanup journal"
+    install_bootstrap_helpers
+    /usr/local/sbin/menhir-backup-local --resume-cleanup
+fi
+archive_count="$(count_encrypted_archives)"
+[[ "$archive_count" =~ ^[0-9]+$ ]] \
+    || { echo "could not determine retained encrypted backup count" >&2; exit 1; }
+if [ "$archive_count" -eq 0 ]; then
+    install_bootstrap_helpers
+    MENHIR_MAINTENANCE_LOCK_INHERITED=1 \
+        MENHIR_OPERATION_JOB_ID="$bootstrap_job" \
+        MENHIR_SAME_HOST_CUTOVER=0 \
+        "$candidate_backup_generation"
+fi
+
 transaction_step="retiring obsolete production writers"
 journal_action phase retiring-caddy
 assert_maintenance
@@ -974,17 +1044,7 @@ assert_maintenance
 journal_action phase installing
 while IFS=$'\t' read -r mode destination; do
     [ -n "$destination" ] || continue
-    source="${rootfs}${destination}"
-    parent="$(dirname "$destination")"
-    mkdir -p -- "$parent"
-    temporary="${parent}/.${destination##*/}.install.$$"
-    [ ! -e "$temporary" ] && [ ! -L "$temporary" ] || {
-        echo "temporary install path already exists: $temporary" >&2
-        exit 1
-    }
-    install -o root -g root -m "$mode" "$source" "$temporary"
-    mv -fT -- "$temporary" "$destination"
-    fsync_directory "$parent"
+    install_artifact "$mode" "$destination"
 done < "$install_plan"
 
 transaction_step="verifying installed release"
