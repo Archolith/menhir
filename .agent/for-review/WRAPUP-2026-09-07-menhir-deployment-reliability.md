@@ -36,10 +36,11 @@ on the VPS. App-only, security-config, and maintenance promotions now retain a r
 receipt bound to the release, root runner, wrapper digests, elapsed time, and ingress/database
 identities. OAuth key rotation mechanically escalates to maintenance.
 
-This wrapup remains `PARTIAL` only because the mechanical wrapup validator is unavailable and the
-Menhir branch/GitHub protected publication environment could not be pushed/configured with the
-currently invalid desktop GitHub credential. The implementation and live control-plane rehearsal
-are complete; no new product release was invented merely to exercise a mutating cutover.
+This wrapup remains `PARTIAL` only because the mechanical wrapup validator is unavailable, the
+protected publication environment is not configured, and the shared operator-scripts commit cannot
+be safely pushed from a master branch that is 13 commits ahead and three behind its remote. The
+Menhir branch itself is pushed. The implementation and live control-plane rehearsal are complete;
+no new product release was invented merely to exercise a mutating cutover.
 
 ## Files Changed
 
@@ -128,15 +129,17 @@ are complete; no new product release was invented merely to exercise a mutating 
 1. The next genuine app-only or security-config release is still the first mutating use of the new
    root receipt contract; unit, wrapper, scaffold, staging, rollback simulation, and live
    non-interference checks passed, but no synthetic production release was created.
-2. The desktop GitHub credential is invalid, so this branch and the protected
-   `menhir-release-publication` environment are not yet remote-active.
+2. The Menhir branch is remote-active, but PR creation/protected-environment configuration still
+   needs explicit external-publication authorization. Shared operator scripts commit `b2fbde79`
+   remains local because its master branch is 13 ahead and three behind `origin/master`.
 3. The repository artifact corpus has 22 pre-existing validation findings unrelated to this work.
 4. Unrestricted root/SSH remains the intentional recovery authority outside normal fail-closed paths.
 
 ## Follow-Up Tasks
 
-1. Reauthenticate GitHub, push this branch and shared-scripts commit, and configure the protected
-   `menhir-release-publication` environment before enabling publication.
+1. Open the pushed Menhir branch as a PR and configure the protected
+   `menhir-release-publication` environment before enabling publication. Reconcile the shared
+   scripts repository separately, then publish commit `b2fbde79` without dragging unrelated commits.
 2. Use the documented `rehearse -> approve -> promote` path for the next real release and retain both
    receipt files as the first mutating production evidence.
 3. Keep OAuth signing-key rotation in maintenance until a separate coordinated private/public-key
