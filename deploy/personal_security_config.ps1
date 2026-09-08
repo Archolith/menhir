@@ -139,7 +139,7 @@ try {
             $existingReceipt.runner_sha256 -eq $ExpectedRootRunnerSha256) {
             [IO.File]::WriteAllText(
                 $TransactionReceipt,
-                ($existingReceipt | ConvertTo-Json -Depth 8),
+                $existingReceiptJson,
                 [Text.UTF8Encoding]::new($false)
             )
             exit 0
@@ -197,7 +197,7 @@ try {
     }
     [IO.File]::WriteAllText(
         $TransactionReceipt,
-        ($receipt | ConvertTo-Json -Depth 8),
+        $receiptJson,
         [Text.UTF8Encoding]::new($false)
     )
 }

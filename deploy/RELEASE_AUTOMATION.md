@@ -26,6 +26,26 @@ release trains. A deployment-tool, host, sibling-repository, database, or ingres
 selects `maintenance`; do not combine it with an otherwise routine application update and then
 expect the five-minute app-only path.
 
+### Release-readiness audit discipline
+
+Release-engineering changes close only after this fixed sequence:
+
+1. run one independent full-system audit across product publication, every personal deployment
+   lane, root/scaffold authority, recovery, operator wrappers, documentation, and infrastructure
+   prerequisites;
+2. remediate every actionable finding against one pinned commit;
+3. run focused tests and fix-delta review while iterating, without treating either as the final
+   release-readiness verdict;
+4. rerun the complete test/rehearsal matrix; and
+5. give a fresh independent reviewer the entire integrated system at the final commit and require
+   a full-system verdict.
+
+The final reviewer must not inherit a narrowed finding list or stop after confirming prior fixes.
+A delta-only `PASS` proves only that its named corrections work; it cannot authorize merge,
+scaffold convergence, publication, or production promotion. If the final full audit finds another
+issue, repair it and repeat steps 4-5 once against the new pinned commit. Audit and test loops do
+not create new product versions unless product bytes or immutable release evidence changed.
+
 Before an owner is asked to approve promotion, product publication must archive the current release's exact
 fragments, bind deployment class/changelog/source/image identity, complete exact-image staging with
 cold-cache transfer, pass a class-specific read-only live preflight, and render one preview naming
@@ -161,6 +181,10 @@ PowerShell 5 leaves the same value as a string. Timestamp gates must accept both
 require `Utc` kind for a deserialized `DateTime`, or require an explicit `Z`, successful invariant
 round-trip parse, and zero offset for a string. Tests must execute the promotion gate under both
 shells using a Python-generated timestamp such as `2026-09-07T15:51:00.882184Z`.
+Operator wrappers may parse a root receipt for validation, but the receipt file consumed by the
+Python coordinator must be written from the validated raw JSON string. Piping the parsed object
+back through `ConvertTo-Json` can silently rewrite UTC timestamps into the workstation's local
+offset after production has already changed.
 
 Neo4j `SHOW INDEXES` includes volatile usage statistics. In particular, `lastRead` and `readCount`
 change during the mandatory read-only recall probe. They are observations, not schema authority,

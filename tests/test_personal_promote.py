@@ -268,3 +268,7 @@ def test_security_config_adopts_matching_root_receipt_before_upload() -> None:
     assert adoption < credentials < deployment
     assert "$existingReceipt.candidate_release_sha256 -eq $ExpectedReleaseSha256" in wrapper
     assert "$existingReceipt.ingress_container_id_after -eq $ExpectedIngressContainerId" in wrapper
+    assert "$existingReceiptJson," in wrapper
+    assert "$receiptJson," in wrapper
+    assert "($existingReceipt | ConvertTo-Json" not in wrapper
+    assert "($receipt | ConvertTo-Json" not in wrapper
