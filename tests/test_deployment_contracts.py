@@ -1279,7 +1279,7 @@ def test_scaffold_installs_and_audits_fixed_root_staging_runner():
         'install -o root -g root -m 0755 "${staged_bundle}/personal_stage_vps.py" '
         + runner
     ) in install
-    assert "visudo -c -f \"${transaction_root}/candidate.sudoers\"" in install
+    assert "visudo -c -f \"${preflight_root}/candidate.sudoers\"" in install
     assert "rollback()" in install
     assert "restore_file" in install
     assert {
@@ -1295,6 +1295,107 @@ def test_scaffold_installs_and_audits_fixed_root_staging_runner():
         "path": "/srv/menhir/staging-transactions",
         "uid": 0,
     } in contract["directories"]
+
+
+def test_scaffold_install_requires_shared_admission_before_any_host_mutation():
+    install = (
+        REPO_ROOT / "deploy" / "scaffold" / "install.sh"
+    ).read_text(encoding="ascii")
+
+    admission = 'exec 9>>"$admission_lock"'
+    mutation = 'exec 8>>"$production_lock"'
+    active = "write_state mutating"
+    first_host_write = (
+        "install -d -o root -g root -m 0755 "
+        "/srv/menhir/scaffold /srv/menhir/scaffold/bin"
+    )
+    assert install.index(admission) < install.index(mutation)
+    assert install.index(mutation) < install.index(active)
+    assert install.index(active) < install.index(first_host_write)
+    assert "flock -n 9" in install
+    assert "flock -n 8" in install
+
+
+def test_scaffold_install_has_one_durable_recovery_target_not_mtime_selection():
+    install = (
+        REPO_ROOT / "deploy" / "scaffold" / "install.sh"
+    ).read_text(encoding="ascii")
+
+    assert 'active_root="${transactions_root}/active-install"' in install
+    assert "--recover selects the one durable active transaction" in install
+    assert "load_active_state" in install
+    assert "recover_active" in install
+    assert "rollback-started" in install
+    assert "rollback-failed" in install
+    assert "write_state committed" in install
+    assert "find " not in install
+    assert "sort -t" not in install
+    assert "stat -c %Y" not in install
+
+
+def test_scaffold_rollback_rejects_unreproducible_unit_states_and_verifies_restoration():
+    install = (
+        REPO_ROOT / "deploy" / "scaffold" / "install.sh"
+    ).read_text(encoding="ascii")
+
+    accepted = (
+        "not-found:|loaded:disabled|loaded:enabled|loaded:enabled-runtime|"
+        "loaded:static|masked:masked|masked:masked-runtime"
+    )
+    assert accepted in install
+    for unsupported in ("alias", "indirect", "linked", "linked-runtime"):
+        assert f"loaded:{unsupported}" not in install
+    assert "verify_restored_unit()" in install
+    assert "for property in LoadState UnitFileState ActiveState" in install
+    assert install.index('verify_restored_unit "$unit"') < install.index(
+        "archive_transaction rolled-back"
+    )
+
+
+SHARED_SCAFFOLD_WRAPPER = Path(
+    os.environ.get(
+        "MENHIR_SHARED_SCAFFOLD_WRAPPER",
+        r"C:\Users\thron\IdeaProjects\scripts\menhir-scaffold.ps1",
+    )
+)
+
+
+@pytest.mark.skipif(
+    not SHARED_SCAFFOLD_WRAPPER.is_file(),
+    reason="shared operator workspace is not present",
+)
+def test_shared_scaffold_wrapper_maps_reviewed_repo_and_bootstraps_outside_old_sudoers():
+    wrapper = SHARED_SCAFFOLD_WRAPPER.read_text(encoding="utf-8")
+
+    assert (
+        '"personal_stage_vps.py" = Join-Path $RepositoryRoot '
+        '"deploy\\personal_stage_vps.py"'
+    ) in wrapper
+    assert (
+        '"install.sh" = Join-Path $RepositoryRoot '
+        '"deploy\\scaffold\\install.sh"'
+    ) in wrapper
+    assert "-BootstrapHost" in wrapper
+    assert "installed sudoers cannot authorize their own replacement" in wrapper
+    install_branch = wrapper[wrapper.index('{ $_ -in @("Install", "Recover") }'):]
+    assert 'Invoke-Vps "sudo -n bash' not in install_branch
+    assert 'Invoke-Vps "sudo -n install' not in install_branch
+
+
+@pytest.mark.skipif(
+    not SHARED_SCAFFOLD_WRAPPER.is_file(),
+    reason="shared operator workspace is not present",
+)
+def test_shared_scaffold_wrapper_keeps_desktop_archive_as_an_explicit_phase():
+    wrapper = SHARED_SCAFFOLD_WRAPPER.read_text(encoding="utf-8")
+
+    archive_branch = wrapper[
+        wrapper.index('"InstallArchiveTask" {'):
+        wrapper.index('{ $_ -in @("Install", "Recover") }')
+    ]
+    install_branch = wrapper[wrapper.index('{ $_ -in @("Install", "Recover") }'):]
+    assert "Install-DesktopArchiveTask" in archive_branch
+    assert "Install-DesktopArchiveTask" not in install_branch
 
 
 def test_scaffold_sudoers_has_no_user_owned_python_execution():

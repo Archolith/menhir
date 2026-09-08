@@ -216,7 +216,7 @@ PowerShell -File C:\Users\thron\IdeaProjects\scripts\deploy-menhir.ps1 `
   -Release <release-id> `
   -ExpectedReleaseSha256 <release-json-digest> `
   -ExpectedIngressContainerId <container-id-from-staging-preflight> `
-  -SourceRepository C:\Users\thron\IdeaProjects\projects\archolith\menhir `
+  -SourceRepository (Resolve-Path .) `
   -ExpectedRootRunnerSha256 <approved-root-runner-digest> `
   -TransactionReceipt C:\absolute\empty-root-transaction-receipt.json
 ```
@@ -388,10 +388,19 @@ Install it once from the workspace root and use the read-only commands thereafte
 
 ```powershell
 PowerShell -File C:\Users\thron\IdeaProjects\scripts\menhir-scaffold.ps1 `
-  -Mode Install -SourceRoot (Resolve-Path deploy/scaffold)
+  -Mode Install -SourceRoot (Resolve-Path .) -BootstrapHost root@reviewed-host-alias
 PowerShell -File C:\Users\thron\IdeaProjects\scripts\menhir-scaffold.ps1 -Mode Status
 PowerShell -File C:\Users\thron\IdeaProjects\scripts\menhir-scaffold.ps1 -Mode AppOnly
 ```
+
+Run these commands from the exact reviewed repository root. `SourceRoot` is that root, not
+`deploy/scaffold`: the bundle source map takes the staging runner from `deploy/` and all other
+scaffold payloads from `deploy/scaffold/`. A clean host or an upgrade from an older narrow sudo
+policy requires the explicit, separately authorized `BootstrapHost`; the installed Menhir sudo
+policy never authorizes replacing itself. If installation is interrupted, run `-Mode Recover`
+with the same reviewed source root and bootstrap host before retrying. Install the desktop archive
+task separately with `-Mode InstallArchiveTask` only when the backup/archive phase is being
+commissioned.
 
 `AppOnly` is the admission gate the fast deployment wrapper calls before
 its first mutation. It validates the root-owned contract/receipt, exact runtime,
@@ -453,8 +462,10 @@ address alone is not proof that the peer is Caddy.
 
 ## What `release-run.sh` proves
 
-The desktop maintenance wrapper invokes the fixed `menhir_release_run()` operation;
-the app-only path never invokes it.
+The canonical desktop path is `personal_deploy.py promote` to
+`personal_promote.ps1`, with the maintenance branch entering the shared desktop wrapper before
+that wrapper invokes root-internal `release-run.sh`. There is no operator-facing MCP or sudo
+release-run lane. The app-only path never invokes `release-run.sh`.
 
 Before installation, the desktop gate creates the root-owned maintenance transaction and acquires
 the shared admission fence. The first release stage then captures the exact running legacy app and database container IDs,

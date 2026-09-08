@@ -114,7 +114,10 @@ def test_playbook_preserves_canonical_repositories_and_network_authority() -> No
 
 def test_playbook_orders_the_release_lifecycle() -> None:
     source = PLAYBOOK.read_text(encoding="utf-8")
-    assert "`menhir_release_run()`" in source
+    assert "personal_deploy.py promote" in source
+    assert "personal_promote.ps1" in source
+    assert "root-internal `release-run.sh`" in source
+    assert "menhir_release_run()" not in source
     assert "release-run.json" in source
     for stage in (
         "capture legacy writer + backup + retire writer",

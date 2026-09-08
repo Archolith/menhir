@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "python": "3.12",
+  "tools": {
+    "ansible-core": "2.19.3",
+    "pytest-testinfra": "10.2.2"
+  }
+}

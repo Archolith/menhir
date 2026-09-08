@@ -131,6 +131,13 @@ systemd units, sudoers, Cloudflared topology, operations gateway, a read-only ad
 audit, desktop archival, and restore evidence are scaffolded once. Successful
 bootstrap writes a root-owned receipt binding that host contract.
 
+Scaffold convergence starts from the exact reviewed repository root. The operator passes that root
+as `SourceRoot`; it must not pass `deploy/scaffold`, because the fixed source map also includes
+`deploy/personal_stage_vps.py`. Initial installation and old-policy replacement use a separately
+authorized root SSH bootstrap endpoint, acquire the shared admission lock and then the production
+mutation lock, and leave one durable `active-install` recovery target if interrupted. Desktop
+archive scheduling is a separate backup phase, not a side effect of convergence.
+
 Every deployment verifies the receipt and referenced files, permissions, service
 health, and digests. Verification must be read-only and fast. It does not recreate
 accounts or networks, recursively rewrite ownership, enable/restart unrelated units,

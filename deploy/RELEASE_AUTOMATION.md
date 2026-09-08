@@ -283,17 +283,28 @@ runner digest come from those bytes, then verify the resulting host contract:
 ```powershell
 Push-Location C:\absolute\reviewed-menhir-checkout
 PowerShell -File C:\Users\thron\IdeaProjects\scripts\menhir-scaffold.ps1 `
-  -Mode Install -SourceRoot (Resolve-Path deploy/scaffold)
+  -Mode Install -SourceRoot (Resolve-Path .) -BootstrapHost root@reviewed-host-alias
 PowerShell -File C:\Users\thron\IdeaProjects\scripts\menhir-scaffold.ps1 -Mode Status
 Pop-Location
 ```
 
+`SourceRoot` is always the reviewed repository root. The source map deliberately takes
+`personal_stage_vps.py` from `deploy/` and the remaining scaffold files from
+`deploy/scaffold/`; passing `deploy/scaffold` itself is invalid. `BootstrapHost` is a
+separately authorized root SSH endpoint because a clean host has no Menhir sudo policy and an old
+policy cannot authorize its own replacement.
+
 `Install` validates the exact scaffold-bundle manifest, copies its user-owned upload into
 `/srv/menhir/scaffold-transactions`, independently compares every trusted-copy file with the
 desktop-approved digest, prevalidates sudoers, and transactionally installs root-owned executables
-and units. A failure restores prior files and systemd state before exiting. It then captures the
-host contract and finishes with verification. `Status` provides the separate read-only operator
-check. Do not fold this convergence into `prepare`, `finalize`, `publish`, staging, or promotion.
+and units under both production locks. An interruption leaves one explicit
+`active-install` transaction; rerun with `-Mode Recover -SourceRoot (Resolve-Path .)
+-BootstrapHost root@reviewed-host-alias` before retrying. A failure restores prior files and exact
+supported systemd state before archiving rollback evidence. It then captures the host contract and
+finishes with verification. `Status` provides the separate read-only operator check.
+`InstallArchiveTask` is a distinct desktop-backup phase and is not implied by host convergence.
+Do not fold convergence or archive scheduling into `prepare`, `finalize`, `publish`, staging,
+or promotion.
 
 ## Before starting
 

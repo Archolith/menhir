@@ -55,6 +55,7 @@
     - >-
       not (menhir_retired_unit_stopped_state.msg | default('')).startswith(
       'Could not find the requested service')
+  when: not ansible_check_mode
 
 - name: Verify retired Caddy route writers are stopped
   ansible.builtin.assert:
@@ -68,6 +69,7 @@
   loop_control:
     label: "{{ item.item }}"
   when: >-
+    not ansible_check_mode and
     not (item.msg | default('')).startswith(
     'Could not find the requested service')
 
@@ -90,9 +92,11 @@
   ansible.builtin.systemd_service:
     daemon_reload: true
   changed_when: false
+  when: not ansible_check_mode
 
 - name: Inspect systemd services after retired definition removal
   ansible.builtin.service_facts:
+  when: not ansible_check_mode
 
 - name: Verify retired Caddy route writer units are absent
   ansible.builtin.assert:
@@ -100,6 +104,7 @@
       - item not in ansible_facts.services
     fail_msg: "Retired Caddy route writer unit remains loaded."
   loop: "{{ menhir_host_retired_units }}"
+  when: not ansible_check_mode
 
 - name: Inspect retired Caddy route writer scripts
   ansible.builtin.stat:
@@ -110,6 +115,7 @@
     - /srv/menhir/production/bin/caddy-route-apply
     - /srv/menhir/production/bin/caddy-route-rollback
   register: menhir_retired_script_state
+  when: not ansible_check_mode
 
 - name: Verify retired Caddy route writer scripts are absent
   ansible.builtin.assert:
@@ -120,6 +126,7 @@
   loop: "{{ menhir_retired_script_state.results }}"
   loop_control:
     label: "{{ item.item }}"
+  when: not ansible_check_mode
 
 - name: Create persistent Menhir directories
   ansible.builtin.file:

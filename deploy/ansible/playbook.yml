@@ -3,7 +3,105 @@
   hosts: menhir_hosts
   become: true
   gather_facts: false
-  roles:
-    - role: menhir_host
-      tags:
-        - menhir_host
+  vars:
+    menhir_infrastructure_admission_unit: >-
+      menhir-infrastructure-admission-{{
+      menhir_infrastructure_operation_id | default('check-mode') }}.service
+  tasks:
+    - name: Require an immutable infrastructure operation id for convergence
+      ansible.builtin.assert:
+        that:
+          - >-
+            ansible_check_mode or (
+            menhir_infrastructure_operation_id is defined and
+            menhir_infrastructure_operation_id is
+            regex('^[a-f0-9]{32}$'))
+        fail_msg: >-
+          Mutating convergence requires
+          -e menhir_infrastructure_operation_id=<32 lowercase hex>.
+
+    - name: Converge while holding both Menhir production locks
+      block:
+        - name: Start the root infrastructure admission holder
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/systemd-run
+              - "--unit={{ menhir_infrastructure_admission_unit }}"
+              - --collect
+              - --property=Type=exec
+              - --property=Restart=no
+              - /usr/bin/flock
+              - -n
+              - -E
+              - "75"
+              - /run/lock/menhir-production-admission.lock
+              - /usr/bin/flock
+              - -n
+              - -E
+              - "76"
+              - /run/lock/menhir-production.lock
+              - /usr/bin/sleep
+              - infinity
+          changed_when: true
+          when: not ansible_check_mode
+
+        - name: Verify this infrastructure admission holder is active
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/systemctl
+              - is-active
+              - --quiet
+              - "{{ menhir_infrastructure_admission_unit }}"
+          changed_when: false
+          register: menhir_infrastructure_admission_active
+          retries: 20
+          delay: 1
+          until: menhir_infrastructure_admission_active.rc == 0
+          when: not ansible_check_mode
+
+        - name: Verify the shared admission lock is held
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/flock
+              - -n
+              - -E
+              - "75"
+              - /run/lock/menhir-production-admission.lock
+              - /usr/bin/true
+          changed_when: false
+          failed_when: menhir_infrastructure_admission_probe.rc != 75
+          register: menhir_infrastructure_admission_probe
+          when: not ansible_check_mode
+
+        - name: Verify the shared mutation lock is held
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/flock
+              - -n
+              - -E
+              - "75"
+              - /run/lock/menhir-production.lock
+              - /usr/bin/true
+          changed_when: false
+          failed_when: menhir_infrastructure_mutation_probe.rc != 75
+          register: menhir_infrastructure_mutation_probe
+          when: not ansible_check_mode
+
+        - name: Apply the bounded Menhir host role
+          ansible.builtin.include_role:
+            name: menhir_host
+            apply:
+              tags:
+                - menhir_host
+          tags:
+            - menhir_host
+      always:
+        - name: Release the root infrastructure admission holder
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/systemctl
+              - stop
+              - "{{ menhir_infrastructure_admission_unit }}"
+          changed_when: true
+          failed_when: false
+          when: not ansible_check_mode

@@ -1,6 +1,7 @@
 """Static contracts for the bounded Menhir Ansible host role."""
 
 import hashlib
+import json
 import re
 from pathlib import Path
 
@@ -120,10 +121,25 @@ def test_playbook_targets_only_the_host_prerequisite_role():
     assert play["hosts"] == "menhir_hosts"
     assert play["become"] is True
     assert play["gather_facts"] is False
-    assert play["roles"] == [
-        {"role": "menhir_host", "tags": ["menhir_host"]}
-    ]
-    assert not ({"tasks", "pre_tasks", "post_tasks"} & set(play))
+    assert "roles" not in play
+    assert not ({"pre_tasks", "post_tasks"} & set(play))
+    tasks = play["tasks"]
+    assert tasks[0]["name"] == (
+        "Require an immutable infrastructure operation id for convergence"
+    )
+    fenced = tasks[1]
+    assert fenced["name"] == "Converge while holding both Menhir production locks"
+    included = next(
+        task for task in fenced["block"]
+        if "ansible.builtin.include_role" in task
+    )
+    assert included["ansible.builtin.include_role"] == {
+        "name": "menhir_host",
+        "apply": {"tags": ["menhir_host"]},
+    }
+    assert fenced["always"][0]["name"] == (
+        "Release the root infrastructure admission holder"
+    )
 
 
 def test_configuration_uses_local_inventory_and_has_no_dependencies():
@@ -133,6 +149,80 @@ def test_configuration_uses_local_inventory_and_has_no_dependencies():
     assert "roles_path = roles" in configuration
     assert "host_key_checking = True" in configuration
     assert requirements == {"roles": [], "collections": []}
+
+
+def test_operator_toolchain_manifest_is_exactly_pinned():
+    manifest = json.loads(
+        (ANSIBLE / "operator-toolchain.json").read_text(encoding="ascii")
+    )
+    assert manifest == {
+        "schema": 1,
+        "python": "3.12",
+        "tools": {
+            "ansible-core": "2.19.3",
+            "pytest-testinfra": "10.2.2",
+        },
+    }
+
+
+def test_ansible_convergence_holds_shared_locks_in_global_order():
+    play = load_yaml(ANSIBLE / "playbook.yml")[0]
+    fenced = play["tasks"][1]
+    block = fenced["block"]
+    holder = next(
+        task for task in block
+        if task["name"] == "Start the root infrastructure admission holder"
+    )
+    argv = holder["ansible.builtin.command"]["argv"]
+    admission = argv.index("/run/lock/menhir-production-admission.lock")
+    mutation = argv.index("/run/lock/menhir-production.lock")
+    assert admission < mutation
+    assert argv[admission - 4:admission] == ["/usr/bin/flock", "-n", "-E", "75"]
+    assert argv[mutation - 4:mutation] == ["/usr/bin/flock", "-n", "-E", "76"]
+
+    mutation_probe = next(
+        index for index, task in enumerate(block)
+        if task["name"] == "Verify the shared mutation lock is held"
+    )
+    include_role = next(
+        index for index, task in enumerate(block)
+        if "ansible.builtin.include_role" in task
+    )
+    assert mutation_probe < include_role
+    assert fenced["always"][0]["when"] == "not ansible_check_mode"
+
+
+def test_ansible_check_mode_skips_lock_mutation_and_post_mutation_observation():
+    play = load_yaml(ANSIBLE / "playbook.yml")[0]
+    fenced = play["tasks"][1]
+    control_tasks = [
+        task for task in fenced["block"]
+        if task["name"] != "Apply the bounded Menhir host role"
+    ] + fenced["always"]
+    assert control_tasks
+    assert all(
+        task.get("when") == "not ansible_check_mode"
+        for task in control_tasks
+    )
+
+    role_tasks = load_yaml(
+        ANSIBLE / "roles" / "menhir_host" / "tasks" / "main.yml"
+    )
+    post_mutation_observations = {
+        "Inspect stopped Caddy route writers",
+        "Verify retired Caddy route writers are stopped",
+        "Apply retired systemd definition removal",
+        "Inspect systemd services after retired definition removal",
+        "Verify retired Caddy route writer units are absent",
+        "Inspect retired Caddy route writer scripts",
+        "Verify retired Caddy route writer scripts are absent",
+    }
+    selected = [
+        task for task in role_tasks
+        if task["name"] in post_mutation_observations
+    ]
+    assert {task["name"] for task in selected} == post_mutation_observations
+    assert all("not ansible_check_mode" in str(task["when"]) for task in selected)
 
 
 def test_group_vars_define_exact_root_directory_and_unit_contracts():
@@ -370,8 +460,10 @@ def test_release_installer_converges_retired_caddy_writers_only():
     assert "systemctl daemon-reload" in installer
     assert "/srv/yawn/releases/menhir-route-candidate" in installer
     assert "/srv/yawn/projects/yawn.deploy" not in installer
-    assert installer.index("retire_caddy_writers\n") \
-        < installer.index("mutated=1")
+    assert installer.index("create_snapshot\n") \
+        < installer.index("journal_action phase retiring-caddy")
+    assert installer.index("journal_action phase retiring-caddy") \
+        < installer.index("retire_caddy_writers\n")
     assert installer.index("--property=ActiveState") \
         < installer.index('rm -f -- "/etc/systemd/system/${unit}"')
 

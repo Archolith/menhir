@@ -31,15 +31,30 @@ root with a fixed mode.
 
 ## Entry points
 
+The operator environment is an external prerequisite. Before entering an offline release window,
+provision Python 3.12 with exactly `ansible-core==2.19.3` and
+`pytest-testinfra==10.2.2`; `operator-toolchain.json` is the machine-readable authority.
+These tools are intentionally not added to the product environment or `uv.lock`.
+
 From `deploy/ansible`:
 
-```text
+```powershell
 ansible-playbook -i inventory.yml --check --diff playbook.yml
-ansible-playbook -i inventory.yml --diff playbook.yml
+$operationId = [Guid]::NewGuid().ToString("N")
+ansible-playbook -i inventory.yml --diff `
+  -e "menhir_infrastructure_operation_id=$operationId" playbook.yml
 ```
 
-The first command is the review entry point. The second applies only the host
-prerequisites after the check-mode diff has been reviewed. No external Ansible
+The first command is the real read-only review entry point: it neither creates an admission holder
+nor performs post-mutation assertions against changes that check mode only predicts. The second
+applies only the host prerequisites after the diff has been reviewed. It starts a root transient
+holder that acquires `menhir-production-admission.lock` and then
+`menhir-production.lock`, verifies both are held, retains them through the role, and releases
+them in the play's `always` block. A controller crash deliberately leaves that holder fail-closed;
+inspect the exact `menhir-infrastructure-admission-<operation-id>.service` and stop it only after
+proving the corresponding Ansible run is no longer active.
+
+No external Ansible
 collections or roles are required; `requirements.yml` records that empty
 dependency set.
 
