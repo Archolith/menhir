@@ -4,17 +4,22 @@
   "category": "operations",
   "deployment_class": "maintenance",
   "summary": "Make production promotion consume complete staging evidence instead of debugging release automation live.",
-  "details": "Commits 9b37082a23d544dc9458b5ef47c03da6da5c684a, ae6055e61cff6ae4d036cf6900286c8d390d14bc, 3e412a9510211147e8b5ae480cf5ad8d81039197, and 5ae772d294bd9280160e4611bd81d3a6ab71d73a define, implement, and test two independent workflows. Product release builds, verifies, documents, and publishes immutable artifacts without production access. Personal deployment selects one finalized digest, exercises the exact images through disposable production-equivalent staging, binds one owner approval to the complete receipt, and promotes through a second evidence-verifying wrapper. The legacy direct deploy execution path is disabled. Staging proves OAuth authorization code with PKCE, MCP read/write/deny behavior, restart persistence, production non-interference, and simulated automatic rollback before emitting a receipt.",
-  "operator_impact": "Use release_flow.py only to prepare and finalize the product release. For this owner's instance, use personal_deploy.py rehearse, approve, and promote; review the release notes and staging receipt before the one bound approval. App-only promotion remains bounded. Security-config is distinct and fails closed until its dedicated operator transaction is installed; it never falls back to maintenance.",
+  "details": "The deployment-reliability series defines, implements, and tests separate product-release and personal-promotion workflows. Product release builds, verifies, documents, and publishes immutable artifacts without production access. Personal deployment selects one finalized digest, exercises the exact images through disposable production-equivalent staging, binds one owner approval to the complete receipt, and promotes through a second evidence-verifying wrapper. Cloudflared is the sole Menhir ingress authority. App-only and security-config use bounded root transactions with automatic rollback; maintenance retains the full backup/rehearsal path. Every successful promotion binds the exact root transaction receipt, runner digest, wrapper digests, elapsed time, and before/after database and ingress identities.",
+  "operator_impact": "Use release_flow.py to prepare, finalize, and publish the product release. For this owner's instance, use personal_deploy.py rehearse, approve, and promote; review the release notes and staging receipt before the one bound approval. App-only has a five-minute target, security-config has a dedicated ten-minute config/application lane, and database, key-rotation, host, or topology changes mechanically escalate to maintenance.",
   "repositories": {
     "menhir": [
       "9b37082a23d544dc9458b5ef47c03da6da5c684a",
       "ae6055e61cff6ae4d036cf6900286c8d390d14bc",
       "3e412a9510211147e8b5ae480cf5ad8d81039197",
-      "5ae772d294bd9280160e4611bd81d3a6ab71d73a"
+      "5ae772d294bd9280160e4611bd81d3a6ab71d73a",
+      "fb62b5e35b72a3ef9f1f1be83eecff0a7cbf12e8",
+      "409b6096d700ee1e1647c62b689485aedfbeb36d",
+      "f7f8475d6b58e4f7717a9fba5009b2890fde329f"
     ]
   },
   "security_scopes": [
+    "authentication-and-oauth-authority",
+    "authorization-and-client-tool-policy",
     "backup-restore-and-rollback",
     "host-privilege-and-command-wrappers",
     "network-and-ingress-boundaries",
