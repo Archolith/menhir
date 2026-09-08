@@ -66,6 +66,7 @@ ALLOWED_RELEASE_SCALARS = (
 )
 STAGING_RECEIPT_NAME = "staging-receipt.json"
 APPROVAL_NAME = "promotion-approval.json"
+STAGING_RECEIPT_MAX_AGE = dt.timedelta(hours=24)
 STAGING_KEYS = {
     "schema", "kind", "result", "release_id", "release_sha256",
     "bundle_sha256", "deployment_class", "ingress_mode", "images",
@@ -530,10 +531,13 @@ def validate_promotion_authority(
     preflight_observed = parse_utc(preflight.get("observed_utc"), "preflight observation")
     approved = parse_utc(approved_utc, "approval time")
     promotion_started = parse_utc(promotion_started_utc, "promotion start")
+    host_now = dt.datetime.now(dt.timezone.utc)
+    if staging_completed < host_now - STAGING_RECEIPT_MAX_AGE:
+        raise AppOnlyError("staging receipt is more than 24 hours old")
     if staging_completed < staging_started or preflight_observed > staging_started \
             or approved < staging_completed \
             or promotion_started < approved \
-            or promotion_started > dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=1):
+            or promotion_started > host_now + dt.timedelta(minutes=1):
         raise AppOnlyError("promotion authority chronology is invalid")
     staging_runner = staging.get("runner_sha256")
     if not isinstance(staging_runner, str) or HEX64.fullmatch(staging_runner) is None:

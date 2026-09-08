@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import importlib.util
 import io
 import json
@@ -467,6 +468,117 @@ def release_pair() -> tuple[dict, dict, dict, dict, str]:
         "MENHIR_RELEASE_ID": candidate["release_id"],
     })
     return live, candidate, live_env, candidate_env, live_sha
+
+
+def promotion_authority_fixture(
+    tmp_path: Path, completed: dt.datetime,
+) -> tuple[Path, dict, dict[str, str]]:
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    release = {
+        "release_id": "release-2",
+        "deployment_class": "app-only",
+        "ingress_mode": "cloudflared",
+        "images": {
+            "menhir": "sha256:" + "1" * 64,
+            "neo4j": "sha256:" + "2" * 64,
+        },
+    }
+    release_path = bundle / "release.json"
+    release_path.write_text(json.dumps(release), encoding="ascii")
+    release_sha256 = app_only.sha256(release_path)
+    bundle_sha256 = "3" * 64
+    ingress_container_id = "4" * 64
+    staging_started = completed - dt.timedelta(minutes=5)
+    preflight = {
+        "schema": 1,
+        "kind": "menhir-production-readiness-preflight",
+        "result": "passed",
+        "observed_utc": (staging_started - dt.timedelta(minutes=1)).isoformat(),
+        "deployment_class": "app-only",
+        "candidate_release_id": release["release_id"],
+        "ingress_mode": "cloudflared",
+        "checks": {
+            "network_roles": {
+                "ingress": {"identities": [{"container_id": ingress_container_id}]},
+            },
+        },
+    }
+    preflight["canonical_sha256"] = hashlib.sha256(json.dumps(
+        preflight, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
+    ).encode("ascii")).hexdigest()
+    staging = {
+        "schema": 1,
+        "kind": "menhir-personal-staging",
+        "result": "passed",
+        "release_id": release["release_id"],
+        "release_sha256": release_sha256,
+        "bundle_sha256": bundle_sha256,
+        "deployment_class": "app-only",
+        "ingress_mode": "cloudflared",
+        "images": release["images"],
+        "runner_sha256": "5" * 64,
+        "started_utc": staging_started.isoformat(),
+        "completed_utc": completed.isoformat(),
+        "test_identities": {},
+        "checks": {name: True for name in app_only.STAGING_CHECKS},
+        "production_preflight": preflight,
+    }
+    staging_path = bundle / app_only.STAGING_RECEIPT_NAME
+    staging_path.write_text(json.dumps(staging), encoding="ascii")
+    staging_sha256 = app_only.sha256(staging_path)
+    approved = dt.datetime.now(dt.timezone.utc)
+    approval = {
+        "schema": 1,
+        "kind": "menhir-personal-promotion-approval",
+        "release_id": release["release_id"],
+        "release_sha256": release_sha256,
+        "bundle_sha256": bundle_sha256,
+        "staging_receipt_sha256": staging_sha256,
+        "approved_by": "owner",
+        "approved_utc": approved.isoformat(),
+        "promotion_wrapper_sha256": "6" * 64,
+        "operator_wrapper_sha256": "7" * 64,
+        "root_runner_sha256": "8" * 64,
+    }
+    approval_path = bundle / app_only.APPROVAL_NAME
+    approval_path.write_text(json.dumps(approval), encoding="ascii")
+    authority = {
+        "deployment_class": "app-only",
+        "expected_runner_sha256": approval["root_runner_sha256"],
+        "expected_release_sha256": release_sha256,
+        "expected_bundle_sha256": bundle_sha256,
+        "expected_staging_receipt_sha256": staging_sha256,
+        "expected_approval_sha256": app_only.sha256(approval_path),
+        "expected_ingress_container_id": ingress_container_id,
+        "promotion_attempt_id": "9" * 32,
+        "approved_utc": approval["approved_utc"],
+        "promotion_started_utc": approved.isoformat(),
+    }
+    return bundle, release, authority
+
+
+def test_privileged_promotion_authority_refuses_stale_staging_receipt(
+    tmp_path: Path,
+) -> None:
+    completed = dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=25)
+    bundle, release, authority = promotion_authority_fixture(tmp_path, completed)
+
+    with pytest.raises(
+        app_only.AppOnlyError, match="staging receipt is more than 24 hours old",
+    ):
+        app_only.validate_promotion_authority(bundle, release, **authority)
+
+
+def test_privileged_promotion_authority_accepts_recent_staging_receipt(
+    tmp_path: Path,
+) -> None:
+    completed = dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=1)
+    bundle, release, authority = promotion_authority_fixture(tmp_path, completed)
+
+    result = app_only.validate_promotion_authority(bundle, release, **authority)
+
+    assert result["staging_completed_utc"] == completed.isoformat()
 
 
 def test_app_only_classifier_accepts_only_image_release_metadata() -> None:
