@@ -26,13 +26,14 @@ Current repository anchors at the time this status was written:
 | Shared workspace | `6c9a9086716312e7c17051adfc82e7b52905e0b9` | Only the three Menhir PowerShell wrappers are in scope |
 | Yawn VPS | `b1191b85962f83812ab805fe8d467dd96312741d` | Menhir integration must end read-only; unrelated sealed/admin changes stay excluded |
 | Archolith OAuth | `8b9d8eb3a3016f48359b93c3d15ae95c2c47bef8` | Immutable OAuth source input only |
-| Yawn deploy | `4937657b9ebde7d3ca128f8924da724203c37a81` | Still contains conflicting Menhir Caddy routes and transaction ownership that must be retired |
+| Yawn deploy | `4937657b9ebde7d3ca128f8924da724203c37a81` | Retains `memory.ctharvey.me` ingress by ADR 0002; still holds Menhir lock/release/journal/GC ownership in source that must be retired |
 
 The long architecture specification at
 [`../reference/menhir-deployment-control-plane-architecture-spec-2026-09-08.md`](../reference/menhir-deployment-control-plane-architecture-spec-2026-09-08.md)
 is an `OPEN`, rejected design draft. It is not execution authority. Its independent review returned
-`ARCHITECTURE NEEDS REVISION` with six P1 and two P2 issues. Do not implement from it and do not
-interpret partial corrections as acceptance.
+`ARCHITECTURE NEEDS REVISION` with six P1 and two P2 issues, of which **P1 #5 is now closed by
+[ADR 0002](../adr/0002-menhir-production-ingress-ownership.md)**, leaving five P1 and two P2. Do
+not implement from it and do not interpret partial corrections as acceptance.
 
 No production deployment, host mutation, release, merge, or key enrollment is authorized by this
 plan. Existing production behavior remains the operational baseline until a replacement completes
@@ -76,10 +77,17 @@ These are architecture issues, not deferred implementation details.
    not queue and mutate after the fence. The design likely requires a separately reviewed v1 handoff
    bridge that makes every old writer global-lock-first, nonblocking, and fence-aware before
    bootstrap can begin.
-5. **Ingress ownership is still split in source.** Cloudflared is intended to be the sole Menhir
-   ingress, but `yawn.deploy` still owns Menhir Caddy app/operations routes, network attachment,
-   release lock, transaction journal, tests, and bundle retention. The exact Cloudflared route table
-   and `/ops/mcp` path behavior are not yet accepted.
+5. ~~**Ingress ownership is still split in source.**~~ **CLOSED by
+   [ADR 0002](../adr/0002-menhir-production-ingress-ownership.md) (2026-09-08).** The shared
+   `yawn.deploy` Caddy remains the sole `memory.ctharvey.me` ingress and Cloudflared-sole-ingress is
+   withdrawn. Menhir routes in the shared Caddyfile are correct tenancy, not split authority. The
+   `/ops` `strip_prefix` contract stands and the native ASGI mount change is withdrawn.
+
+   What remains is not an architecture issue but a bounded deletion: `yawn.deploy` still holds a
+   Menhir release lock (`/run/lock/menhir-production.lock`), phase journal, release authority,
+   `caddy-release.sh`, `caddy-route-apply`, `caddy-route-rollback` and their tests **in source
+   only** — Menhir's ansible already removes them from the host and asserts their absence. Menhir
+   also still carries a non-target `deploy/docker-compose.cloudflared.yml`.
 6. **Owner-key custody is not a closed protocol.** Key format/encryption, Windows ACLs, passphrase
    input, key-ID derivation, signer/approval-client identity, enrollment, offline backup, rotation,
    revocation, loss, compromise, and post-revocation transaction behavior require one normative
@@ -99,8 +107,8 @@ These are architecture issues, not deferred implementation details.
 
 The existing deployment implementation remains unaccepted as a whole. Earlier reviews established
 that it contains duplicated semantic authorities and cross-repository mutation paths. This status
-update does not assert that the eight architecture issues above are the complete set of code defects,
-and it does not restart another full implementation review. Code findings will be evaluated only in
+update does not assert that the seven remaining architecture issues above are the complete set of
+code defects, and it does not restart another full implementation review. Code findings will be evaluated only in
 the bounded phase that owns the affected path.
 
 ## Working rule
@@ -217,14 +225,21 @@ clear.
 
 ### Phase 10 — Cross-repository contraction
 
-Convert the shared PowerShell scripts to transport only, convert Yawn to versioned read-only
-responses, and remove all Menhir Caddy/lock/release/GC ownership from `yawn.deploy`. Delete every v1
-writer, alias, unit, timer, sudoers entry, fallback, and manual mutation procedure identified in
-Phase 0.
+Reduced by [ADR 0002](../adr/0002-menhir-production-ingress-ownership.md). This is no longer an
+ingress migration; it is deletion plus interface work.
 
-Gate: all repositories agree on exact arguments, records, return codes, paths, privilege boundaries,
-and ingress ownership; source and clean-install negative censuses pass; complete phase review is
-clear.
+Convert the shared PowerShell scripts to transport only, convert Yawn to versioned read-only
+responses, and remove Menhir **lock, release-authority, journal, and GC** ownership from
+`yawn.deploy` — `caddy-release.sh`, `caddy-route-apply`, `caddy-route-rollback`,
+`/run/lock/menhir-production.lock`, the phase journal, and their tests. **Keep** the
+`memory.ctharvey.me` vhost, its certificate mounts, and the `menhir-proxy` attachment. Remove the
+non-target `deploy/docker-compose.cloudflared.yml` and `cloudflared*.example` from Menhir. Delete
+every v1 writer, alias, unit, timer, sudoers entry, fallback, and manual mutation procedure
+identified in Phase 0.
+
+Gate: all repositories agree on exact arguments, records, return codes, paths, and privilege
+boundaries; the ingress positive assertions still hold and the retired-writer negative censuses pass
+in both source and a clean install; complete phase review is clear.
 
 ### Phase 11 — Integrated acceptance
 
