@@ -216,6 +216,8 @@ substitution of the promotion wrapper, operator wrapper, or root runner is forbi
 a root-runner digest argument that the fixed privileged executable verifies against its own bytes
 before taking the transaction lock; security-config enforces the same pre-mutation gate, and
 maintenance verifies the trusted bundle copy before installing or invoking its release runner.
+Interrupted app-only and security-config recovery rechecks the current root runner against the
+approved digest retained in the root-owned active transaction before rollback or rollforward.
 A valid receipt repeats the same runner binding as completion evidence. App-only has
 a 300-second foreground budget and security-config has a 600-second foreground budget. Maintenance
 is resumable and has no short foreground budget. A wrapper that exits zero without writing the

@@ -595,6 +595,55 @@ def test_security_config_refuses_unapproved_root_runner_before_lock(
         security_config.deploy("a" * 32, "0" * 64)
 
 
+class _TestLock:
+    def close(self) -> None:
+        pass
+
+
+def test_app_only_recovery_refuses_changed_root_runner_before_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    active = tmp_path / "app-only-active.json"
+    active.write_text("{}", encoding="ascii")
+    monkeypatch.setattr(app_only, "ACTIVE", active)
+    monkeypatch.setattr(app_only, "acquire_lock", _TestLock)
+    monkeypatch.setattr(app_only, "require_root_file", lambda *_args: None)
+    monkeypatch.setattr(app_only, "strict_load", lambda _path: {
+        "kind": "menhir-app-only-transaction",
+        "runner_sha256": "0" * 64,
+        "stage": "accepted",
+    })
+    monkeypatch.setattr(
+        app_only, "rollforward",
+        lambda _transaction: pytest.fail("runner mismatch reached rollforward"),
+    )
+
+    with pytest.raises(app_only.AppOnlyError, match="owner-approved authority"):
+        app_only.recover()
+
+
+def test_security_config_recovery_refuses_changed_root_runner_before_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    active = tmp_path / "security-config-active.json"
+    active.write_text("{}", encoding="ascii")
+    monkeypatch.setattr(security_config, "ACTIVE", active)
+    monkeypatch.setattr(security_config.app, "acquire_lock", _TestLock)
+    monkeypatch.setattr(security_config.app, "require_root_file", lambda *_args: None)
+    monkeypatch.setattr(security_config.app, "strict_load", lambda _path: {
+        "kind": "menhir-security-config-transaction",
+        "runner_sha256": "0" * 64,
+        "stage": "applying",
+    })
+    monkeypatch.setattr(
+        security_config, "rollback",
+        lambda _transaction: pytest.fail("runner mismatch reached rollback"),
+    )
+
+    with pytest.raises(security_config.Error, match="owner-approved authority"):
+        security_config.recover()
+
+
 def test_probe_token_is_jit_minted_without_persistent_credential(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

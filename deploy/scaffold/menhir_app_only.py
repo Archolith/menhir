@@ -775,8 +775,8 @@ def require_no_incomplete_transactions() -> None:
             )
 
 
-def require_runner_sha256(expected: str, path: Path = Path(__file__)) -> str:
-    if HEX64.fullmatch(expected) is None:
+def require_runner_sha256(expected: object, path: Path = Path(__file__)) -> str:
+    if not isinstance(expected, str) or HEX64.fullmatch(expected) is None:
         raise AppOnlyError("expected root runner SHA-256 is malformed")
     actual = sha256(path)
     if actual != expected:
@@ -883,6 +883,7 @@ def recover() -> dict[str, Any]:
         transaction = strict_load(ACTIVE)
         if transaction.get("kind") != "menhir-app-only-transaction":
             raise AppOnlyError("active app-only transaction schema mismatch")
+        require_runner_sha256(transaction.get("runner_sha256"))
         if transaction.get("stage") in {"accepted", "complete"}:
             rollforward(transaction)
         else:

@@ -407,6 +407,7 @@ def recover() -> dict[str, Any]:
         transaction = app.strict_load(ACTIVE)
         if transaction.get("kind") != "menhir-security-config-transaction":
             raise Error("active security-config transaction schema mismatch")
+        app.require_runner_sha256(transaction.get("runner_sha256"), Path(__file__))
         rollback(transaction)
         return transaction
     finally:
