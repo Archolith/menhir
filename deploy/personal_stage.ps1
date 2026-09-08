@@ -113,10 +113,9 @@ if ($menhirImageRows.Count -ne 1) {
     throw "Bundled production environment must contain exactly one MENHIR_IMAGE."
 }
 $menhirImage = $menhirImageRows[0].Substring("MENHIR_IMAGE=".Length).Trim("'`"")
-if ($menhirImage -notmatch '^ghcr\.io/[a-z0-9._/-]+:[a-zA-Z0-9._-]+@sha256:[0-9a-f]{64}$') {
+if ($menhirImage -notmatch '^ghcr\.io/[a-z0-9._/-]+(?::[a-zA-Z0-9._-]+)?@sha256:[0-9a-f]{64}$') {
     throw "Bundled MENHIR_IMAGE is not an immutable GHCR reference."
 }
-$menhirImageTag = $menhirImage.Split("@", 2)[0]
 $runner = Join-Path $PSScriptRoot "personal_stage_vps.py"
 if (-not (Test-Path -LiteralPath $runner -PathType Leaf)) {
     throw "VPS staging runner is missing: $runner"
@@ -130,8 +129,12 @@ $remoteBundle = "$remoteRoot/bundle"
 $remoteReceipt = "$remoteRoot/staging-receipt.json"
 $localTemp = "$receiptPath.$uploadId.tmp"
 $localImageTar = "$receiptPath.$uploadId.image.tar"
+$localImageIdentity = "$receiptPath.$uploadId.image-identity.json"
 $remoteImageTar = "$remoteRoot/menhir-image.tar"
+$remoteImageIdentity = "$remoteRoot/menhir-image-identity.json"
 $installedRunner = "/srv/menhir/scaffold/bin/menhir_stage_vps.py"
+$temporaryImageTag = "menhir-stage-export:$uploadId"
+$temporaryImageTagCreated = $false
 
 function Invoke-Vps {
     param([Parameter(Mandatory = $true)][string]$Command)
@@ -142,14 +145,69 @@ function Invoke-Vps {
 }
 
 try {
-    & docker image inspect $menhirImage *> $null
+    $menhirImageInspectOutput = @(& docker image inspect $menhirImage)
     if ($LASTEXITCODE -ne 0) {
         & docker pull $menhirImage
         if ($LASTEXITCODE -ne 0) {
             throw "Could not obtain the selected Menhir image locally."
         }
+        $menhirImageInspectOutput = @(& docker image inspect $menhirImage)
+        if ($LASTEXITCODE -ne 0) {
+            throw "Could not inspect the selected Menhir image after pulling it."
+        }
     }
-    & docker save --output $localImageTar $menhirImageTag
+    $menhirImageInspect = @(($menhirImageInspectOutput -join [Environment]::NewLine) | ConvertFrom-Json)
+    if ($menhirImageInspect.Count -ne 1) {
+        throw "Selected Menhir image inspection was ambiguous."
+    }
+    $menhirImageValue = $menhirImageInspect[0]
+    $menhirImageId = [string]$menhirImageValue.Id
+    if ($menhirImageId -notmatch '^sha256:[0-9a-f]{64}$') {
+        throw "Selected Menhir image has an invalid local image ID."
+    }
+    $selectedDigest = $menhirImage.Split("@", 2)[1]
+    $matchingRepoDigests = @($menhirImageValue.RepoDigests | Where-Object {
+        $_ -is [string] -and $_.EndsWith("@$selectedDigest", [StringComparison]::Ordinal)
+    })
+    if ($matchingRepoDigests.Count -lt 1) {
+        throw "Selected Menhir image inspection is not bound to the requested registry digest."
+    }
+    if ($null -eq $menhirImageValue.Config -or
+        $null -eq $menhirImageValue.RootFS -or
+        $menhirImageValue.RootFS.Type -ne "layers" -or
+        @($menhirImageValue.RootFS.Layers).Count -lt 1 -or
+        @($menhirImageValue.RootFS.Layers | Where-Object {
+            $_ -isnot [string] -or $_ -notmatch '^sha256:[0-9a-f]{64}$'
+        }).Count -ne 0) {
+        throw "Selected Menhir image has invalid configuration or layer identity metadata."
+    }
+    $identity = [ordered]@{
+        schema = 1
+        image_ref = $menhirImage
+        image_id = $menhirImageId
+        export_tag = $temporaryImageTag
+        config = $menhirImageValue.Config
+        rootfs = $menhirImageValue.RootFS
+    }
+    $utf8NoBom = [Text.UTF8Encoding]::new($false)
+    [IO.File]::WriteAllText(
+        $localImageIdentity,
+        (($identity | ConvertTo-Json -Depth 100) + "`n"),
+        $utf8NoBom
+    )
+    $menhirImageIdentitySha256 = Get-FileSha256 -Path $localImageIdentity
+
+    & docker image tag $menhirImageId $temporaryImageTag
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not create the temporary Menhir image export tag."
+    }
+    $temporaryImageTagCreated = $true
+    $taggedImageId = @(& docker image inspect --format '{{.Id}}' $temporaryImageTag)
+    if ($LASTEXITCODE -ne 0 -or $taggedImageId.Count -ne 1 -or
+        $taggedImageId[0].Trim() -ne $menhirImageId) {
+        throw "Temporary Menhir image export tag does not resolve to the selected image ID."
+    }
+    & docker save --output $localImageTar $temporaryImageTag
     if ($LASTEXITCODE -ne 0) {
         throw "Could not export the selected Menhir image."
     }
@@ -163,7 +221,11 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "Could not upload the selected Menhir image."
     }
-    Invoke-Vps "sudo -n /usr/bin/python3 '$installedRunner' --upload-root '$remoteRoot' --expected-bundle-sha256 '$ExpectedBundleSha256' --expected-release-id '$ExpectedReleaseId' --expected-release-sha256 '$ExpectedReleaseSha256' --expected-menhir-image-archive-sha256 '$menhirImageArchiveSha256' --deployment-class '$DeploymentClass' --expected-runner-sha256 '$runnerSha'"
+    & $helpers.Scp -Source $localImageIdentity -Destination "${remoteHost}:$remoteImageIdentity"
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not upload the selected Menhir image identity."
+    }
+    Invoke-Vps "sudo -n /usr/bin/python3 '$installedRunner' --upload-root '$remoteRoot' --expected-bundle-sha256 '$ExpectedBundleSha256' --expected-release-id '$ExpectedReleaseId' --expected-release-sha256 '$ExpectedReleaseSha256' --expected-menhir-image-archive-sha256 '$menhirImageArchiveSha256' --expected-menhir-image-identity-sha256 '$menhirImageIdentitySha256' --deployment-class '$DeploymentClass' --expected-runner-sha256 '$runnerSha'"
     & $helpers.Scp -Source "${remoteHost}:$remoteReceipt" -Destination $localTemp
     if ($LASTEXITCODE -ne 0) {
         throw "Could not retrieve the staging receipt."
@@ -176,6 +238,15 @@ finally {
     }
     if (Test-Path -LiteralPath $localImageTar) {
         Remove-Item -LiteralPath $localImageTar -Force
+    }
+    if (Test-Path -LiteralPath $localImageIdentity) {
+        Remove-Item -LiteralPath $localImageIdentity -Force
+    }
+    if ($temporaryImageTagCreated) {
+        & docker image rm $temporaryImageTag *> $null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "Could not remove the temporary Menhir image export tag: $temporaryImageTag"
+        }
     }
     try {
         Invoke-Vps "rm -rf -- '$remoteRoot'"

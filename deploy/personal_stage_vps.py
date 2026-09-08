@@ -47,6 +47,7 @@ STAGING_SUBJECT = "menhir-admin"
 STAGING_NAMESPACE = "menhir-staging"
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 IMAGE_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+EXPORT_TAG_RE = re.compile(r"^menhir-stage-export:[0-9a-f]{32}$")
 RELEASE_ID_RE = re.compile(r"^menhir-prod-[0-9]+\.[0-9]+\.[0-9]+-[0-9]+$")
 UPLOAD_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 DEPLOYMENT_CLASSES = frozenset({"app-only", "security-config", "maintenance"})
@@ -250,7 +251,7 @@ def _open_upload_root(upload_root: Path) -> int:
     return descriptor
 
 
-def _copy_uploaded_inputs(upload_root: Path) -> tuple[Path, Path, Path]:
+def _copy_uploaded_inputs(upload_root: Path) -> tuple[Path, Path, Path, Path]:
     upload = _open_upload_root(upload_root)
     transaction = TRANSACTION_ROOT / upload_root.name
     try:
@@ -266,6 +267,7 @@ def _copy_uploaded_inputs(upload_root: Path) -> tuple[Path, Path, Path]:
         evidence.mkdir(mode=0o700)
         bundle = inputs / "bundle"
         archive = inputs / "menhir-image.tar"
+        image_identity = inputs / "menhir-image-identity.json"
         flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
         bundle_source = os.open(
             "bundle", flags | getattr(os, "O_DIRECTORY", 0), dir_fd=upload,
@@ -279,7 +281,12 @@ def _copy_uploaded_inputs(upload_root: Path) -> tuple[Path, Path, Path]:
             _copy_regular_descriptor(archive_source, archive)
         finally:
             os.close(archive_source)
-        return bundle, archive, transaction
+        identity_source = os.open("menhir-image-identity.json", flags, dir_fd=upload)
+        try:
+            _copy_regular_descriptor(identity_source, image_identity)
+        finally:
+            os.close(identity_source)
+        return bundle, archive, image_identity, transaction
     except Exception as exc:
         if transaction.exists():
             resolved = transaction.resolve()
@@ -1614,58 +1621,137 @@ def _runtime_contract(root: Path, runtime_images: dict[str, str], subnet: str) -
         raise StageError("staging proxy network shape differs from its contract")
 
 
+def _inspect_image(reference: str) -> dict[str, Any]:
+    try:
+        value = json.loads(_run("docker", "image", "inspect", reference).stdout)
+    except json.JSONDecodeError as exc:
+        raise StageError(f"image inspection is invalid: {reference}") from exc
+    if not isinstance(value, list) or len(value) != 1 \
+            or not isinstance(value[0], dict):
+        raise StageError(f"image inspection is invalid: {reference}")
+    identity = value[0].get("Id")
+    if not isinstance(identity, str) or IMAGE_RE.fullmatch(identity) is None:
+        raise StageError(f"image ID is invalid: {reference}")
+    return value[0]
+
+
+def _release_image_publication(release: dict[str, Any]) -> dict[str, str]:
+    value = release.get("image_publication")
+    required = {
+        "image_id",
+        "config_sha256",
+        "validation_identity_sha256",
+        "publication_sha256",
+        "image_archive_sha256",
+        "registry_digest",
+    }
+    if not isinstance(value, dict) or not required.issubset(value):
+        raise StageError("release has no complete CI image publication identity")
+    for field in (
+        "config_sha256",
+        "validation_identity_sha256",
+        "publication_sha256",
+        "image_archive_sha256",
+    ):
+        if not isinstance(value.get(field), str) \
+                or SHA256_RE.fullmatch(value[field]) is None:
+            raise StageError(f"release CI image publication {field} is malformed")
+    for field in ("image_id", "registry_digest"):
+        if not isinstance(value.get(field), str) \
+                or IMAGE_RE.fullmatch(value[field]) is None:
+            raise StageError(f"release CI image publication {field} is malformed")
+    if value["registry_digest"] != release["images"]["menhir"]:
+        raise StageError("release CI registry digest differs from image authority")
+    return {field: value[field] for field in required}
+
+
+def _load_transferred_menhir(
+    archive: Path,
+    identity_path: Path,
+    expected_identity_sha256: str,
+    source_environment: dict[str, str],
+    release: dict[str, Any],
+) -> tuple[str, str]:
+    _safe_file(identity_path, "transferred Menhir image identity")
+    if _sha256(identity_path) != expected_identity_sha256:
+        raise StageError("transferred Menhir image identity digest mismatch")
+    expected = _load_json(identity_path, "transferred Menhir image identity")
+    if set(expected) != {
+        "schema", "image_ref", "image_id", "export_tag", "config", "rootfs",
+    } or expected.get("schema") != 1:
+        raise StageError("transferred Menhir image identity schema is invalid")
+    image_ref = expected.get("image_ref")
+    image_id = expected.get("image_id")
+    export_tag = expected.get("export_tag")
+    config = expected.get("config")
+    rootfs = expected.get("rootfs")
+    publication = _release_image_publication(release)
+    if image_ref != source_environment["MENHIR_IMAGE"] \
+            or not image_ref.endswith("@" + release["images"]["menhir"]):
+        raise StageError("transferred Menhir image reference differs from release authority")
+    if not isinstance(image_id, str) or IMAGE_RE.fullmatch(image_id) is None \
+            or not isinstance(export_tag, str) \
+            or EXPORT_TAG_RE.fullmatch(export_tag) is None:
+        raise StageError("transferred Menhir image identity is malformed")
+    if not isinstance(config, dict) or not isinstance(rootfs, dict) \
+            or set(rootfs) != {"Type", "Layers"} \
+            or rootfs.get("Type") != "layers" \
+            or not isinstance(rootfs.get("Layers"), list) \
+            or not rootfs["Layers"] \
+            or any(
+                not isinstance(layer, str) or IMAGE_RE.fullmatch(layer) is None
+                for layer in rootfs["Layers"]
+            ):
+        raise StageError("transferred Menhir image config or layer identity is malformed")
+    if image_id != publication["image_id"]:
+        raise StageError("transferred Menhir image ID differs from CI publication identity")
+    if _canonical_json_sha256(config) != publication["config_sha256"]:
+        raise StageError("transferred Menhir image config differs from CI publication identity")
+
+    _run("docker", "load", "--input", str(archive), timeout=600)
+    try:
+        observed = _inspect_image(image_id)
+        if observed.get("Id") != image_id:
+            raise StageError("transferred Menhir image ID differs from published identity")
+        if observed.get("Config") != config:
+            raise StageError("transferred Menhir image config differs from published identity")
+        if observed.get("RootFS") != rootfs:
+            raise StageError("transferred Menhir image layers differ from published identity")
+        labels = config.get("Labels", {})
+        expected_labels = {
+            "org.opencontainers.image.revision": release["repos"]["menhir"],
+            "org.archolith.menhir.wheel-manifest.sha256": release[
+                "dockerfile_wheel_manifest_sha256"
+            ],
+            "org.archolith.oauth.wheel.sha256": release["oauth_wheel_sha256"],
+        }
+        if not isinstance(labels, dict) or any(
+            labels.get(name) != value for name, value in expected_labels.items()
+        ):
+            raise StageError("transferred Menhir image labels differ from release authority")
+    except Exception:
+        _run("docker", "image", "rm", export_tag, check=False)
+        raise
+    source_environment["MENHIR_IMAGE"] = image_id
+    return image_id, export_tag
+
+
 def _ensure_images(
     source_environment: dict[str, str],
     release: dict[str, Any],
+    menhir_image_id: str,
 ) -> dict[str, str]:
-    # The desktop wrapper loads the exact application image for private
-    # registries. Pull immutable references only when they are not already
-    # present, then verify every image before creating disposable state.
-    menhir = source_environment["MENHIR_IMAGE"]
-    present = _run("docker", "image", "inspect", menhir, check=False)
-    if present.returncode != 0:
-        transferred_tag = menhir.split("@", 1)[0]
-        transferred = _run(
-            "docker", "image", "inspect", transferred_tag, check=False,
-        )
-        if transferred.returncode == 0:
-            menhir = transferred_tag
-            source_environment["MENHIR_IMAGE"] = transferred_tag
-        else:
-            _run("docker", "pull", source_environment["MENHIR_IMAGE"])
-
+    # The transferred Menhir image is already verified and selected by ID.
+    # Pull only the remaining immutable references when absent.
     neo4j = source_environment["NEO4J_IMAGE"]
     if _run("docker", "image", "inspect", neo4j, check=False).returncode != 0:
         _run("docker", "pull", neo4j)
 
-    def image_id(reference: str) -> str:
-        value = json.loads(_run("docker", "image", "inspect", reference).stdout)
-        if not isinstance(value, list) or len(value) != 1 \
-                or not isinstance(value[0], dict):
-            raise StageError(f"image inspection is invalid: {reference}")
-        identity = value[0].get("Id")
-        if not isinstance(identity, str) or IMAGE_RE.fullmatch(identity) is None:
-            raise StageError(f"image ID is invalid: {reference}")
-        return identity
-
     runtime_images = {
-        "menhir": image_id(menhir),
-        "neo4j": image_id(neo4j),
-        "caddy": image_id(release["images"]["caddy"]),
+        "menhir": menhir_image_id,
+        "neo4j": _inspect_image(neo4j)["Id"],
+        "caddy": _inspect_image(release["images"]["caddy"])["Id"],
     }
-    menhir_value = json.loads(_run("docker", "image", "inspect", menhir).stdout)[0]
-    labels = menhir_value.get("Config", {}).get("Labels", {})
-    expected_labels = {
-        "org.opencontainers.image.revision": release["repos"]["menhir"],
-        "org.archolith.menhir.wheel-manifest.sha256": release[
-            "dockerfile_wheel_manifest_sha256"
-        ],
-        "org.archolith.oauth.wheel.sha256": release["oauth_wheel_sha256"],
-    }
-    if not isinstance(labels, dict) or any(
-        labels.get(name) != value for name, value in expected_labels.items()
-    ):
-        raise StageError("transferred Menhir image labels differ from release authority")
     return runtime_images
 
 
@@ -1681,6 +1767,11 @@ def run_stage(args: argparse.Namespace) -> dict[str, Any]:
             SHA256_RE,
             "Menhir image archive digest",
         ),
+        (
+            args.expected_menhir_image_identity_sha256,
+            SHA256_RE,
+            "Menhir image identity digest",
+        ),
     ):
         if pattern.fullmatch(value) is None:
             raise StageError(f"invalid expected {label}")
@@ -1688,8 +1779,9 @@ def run_stage(args: argparse.Namespace) -> dict[str, Any]:
         raise StageError("invalid deployment class")
     runner_digest = _verified_runner_digest(args.expected_runner_sha256)
     upload_root = args.upload_root
-    bundle, archive, transaction = _copy_uploaded_inputs(upload_root)
+    bundle, archive, image_identity, transaction = _copy_uploaded_inputs(upload_root)
     receipt = transaction / "staging-receipt.json"
+    transferred_export_tag: str | None = None
     try:
         _safe_file(bundle / "bundle-manifest.json", "bundle manifest")
         release, source_environment, _ = _validate_bundle(
@@ -1714,8 +1806,17 @@ def run_stage(args: argparse.Namespace) -> dict[str, Any]:
         _safe_file(archive, "transferred Menhir image archive")
         if _sha256(archive) != args.expected_menhir_image_archive_sha256:
             raise StageError("transferred Menhir image archive digest mismatch")
-        _run("docker", "load", "--input", str(archive), timeout=600)
-        runtime_images = _ensure_images(source_environment, release)
+        _safe_file(image_identity, "transferred Menhir image identity")
+        menhir_image_id, transferred_export_tag = _load_transferred_menhir(
+            archive,
+            image_identity,
+            args.expected_menhir_image_identity_sha256,
+            source_environment,
+            release,
+        )
+        runtime_images = _ensure_images(
+            source_environment, release, menhir_image_id,
+        )
 
         run_id = secrets.token_hex(6)
         root = STAGING_ROOT / run_id
@@ -1726,6 +1827,8 @@ def run_stage(args: argparse.Namespace) -> dict[str, Any]:
         environment: dict[str, str] | None = None
         checks = {name: False for name in CHECKS}
     except Exception:
+        if transferred_export_tag is not None:
+            _run("docker", "image", "rm", transferred_export_tag, check=False)
         inputs = transaction / "inputs"
         if inputs.exists():
             resolved_inputs = inputs.resolve()
@@ -1872,6 +1975,8 @@ def run_stage(args: argparse.Namespace) -> dict[str, Any]:
             if resolved.parent != STAGING_ROOT or not resolved.name:
                 raise StageError("refusing unsafe staging cleanup")
             shutil.rmtree(resolved)
+        if transferred_export_tag is not None:
+            _run("docker", "image", "rm", transferred_export_tag, check=False)
         inputs = transaction / "inputs"
         if inputs.exists():
             resolved_inputs = inputs.resolve()
@@ -1888,6 +1993,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--expected-release-id", required=True)
     parser.add_argument("--expected-release-sha256", required=True)
     parser.add_argument("--expected-menhir-image-archive-sha256", required=True)
+    parser.add_argument("--expected-menhir-image-identity-sha256", required=True)
     parser.add_argument("--deployment-class", required=True)
     parser.add_argument("--expected-runner-sha256", required=True)
     return parser

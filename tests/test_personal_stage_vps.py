@@ -205,8 +205,8 @@ def test_runner_never_contains_production_data_mount() -> None:
     assert '"down", "--volumes", "--remove-orphans"' in source
 
 
-def test_transferred_private_image_uses_tag_and_checks_release_labels(
-    monkeypatch: pytest.MonkeyPatch,
+def test_transferred_private_image_verifies_published_identity_config_and_layers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[tuple[str, ...]] = []
     expected_id = "sha256:" + "4" * 64
@@ -214,51 +214,202 @@ def test_transferred_private_image_uses_tag_and_checks_release_labels(
     wheel_manifest = "b" * 64
     oauth_wheel = "c" * 64
 
+    labels = {
+        "org.opencontainers.image.revision": commit,
+        "org.archolith.menhir.wheel-manifest.sha256": wheel_manifest,
+        "org.archolith.oauth.wheel.sha256": oauth_wheel,
+    }
+    config = {"Labels": labels, "Env": ["PATH=/usr/local/bin"], "User": "10001"}
+    rootfs = {"Type": "layers", "Layers": ["sha256:" + "6" * 64]}
+    export_tag = "menhir-stage-export:" + "7" * 32
+    menhir = "ghcr.io/archolith/menhir@sha256:" + "1" * 64
+    identity = tmp_path / "menhir-image-identity.json"
+    identity.write_text(json.dumps({
+        "schema": 1,
+        "image_ref": menhir,
+        "image_id": expected_id,
+        "export_tag": export_tag,
+        "config": config,
+        "rootfs": rootfs,
+    }), encoding="utf-8")
+    archive = tmp_path / "menhir-image.tar"
+    archive.write_bytes(b"archive")
+
     def fake_run(*args: str, **kwargs: object) -> SimpleNamespace:
         calls.append(args)
-        reference = args[-1]
-        optional = kwargs.get("check") is False
-        if optional and "@sha256:" in reference and "menhir:0.2.0-12" in reference:
-            return SimpleNamespace(returncode=1, stdout="")
-        identity = expected_id if "menhir:0.2.0-12" in reference else "sha256:" + "5" * 64
-        labels = {
-            "org.opencontainers.image.revision": commit,
-            "org.archolith.menhir.wheel-manifest.sha256": wheel_manifest,
-            "org.archolith.oauth.wheel.sha256": oauth_wheel,
-        }
+        if args[:2] == ("docker", "load") or args[:3] == ("docker", "image", "rm"):
+            return SimpleNamespace(returncode=0, stdout="")
         return SimpleNamespace(
             returncode=0,
-            stdout=json.dumps([{"Id": identity, "Config": {"Labels": labels}}]),
+            stdout=json.dumps([{"Id": expected_id, "Config": config, "RootFS": rootfs}]),
         )
 
     monkeypatch.setattr(MODULE, "_run", fake_run)
-    menhir = "ghcr.io/archolith/menhir:0.2.0-12@sha256:" + "1" * 64
-    neo4j = "ghcr.io/archolith/menhir-neo4j:5.26.30-1@sha256:" + "2" * 64
-    caddy = "sha256:" + "3" * 64
-
-    environment = {"MENHIR_IMAGE": menhir, "NEO4J_IMAGE": neo4j}
-    runtime = MODULE._ensure_images(
+    environment = {"MENHIR_IMAGE": menhir}
+    observed, imported_tag = MODULE._load_transferred_menhir(
+        archive,
+        identity,
+        MODULE._sha256(identity),
         environment,
         {
-            "images": {"caddy": caddy},
+            "images": {"menhir": "sha256:" + "1" * 64},
+            "image_publication": {
+                "image_id": expected_id,
+                "config_sha256": MODULE._canonical_json_sha256(config),
+                "validation_identity_sha256": "8" * 64,
+                "publication_sha256": "9" * 64,
+                "image_archive_sha256": "0" * 64,
+                "registry_digest": "sha256:" + "1" * 64,
+            },
             "repos": {"menhir": commit},
             "dockerfile_wheel_manifest_sha256": wheel_manifest,
             "oauth_wheel_sha256": oauth_wheel,
         },
     )
 
-    assert environment["MENHIR_IMAGE"] == menhir.split("@", 1)[0]
-    assert runtime["menhir"] == expected_id
-    assert ("docker", "pull", menhir) not in calls
+    assert observed == expected_id
+    assert imported_tag == export_tag
+    assert environment["MENHIR_IMAGE"] == expected_id
     assert calls == [
-        ("docker", "image", "inspect", menhir),
-        ("docker", "image", "inspect", menhir.split("@", 1)[0]),
-        ("docker", "image", "inspect", neo4j),
-        ("docker", "image", "inspect", menhir.split("@", 1)[0]),
-        ("docker", "image", "inspect", neo4j),
-        ("docker", "image", "inspect", caddy),
-        ("docker", "image", "inspect", menhir.split("@", 1)[0]),
+        ("docker", "load", "--input", str(archive)),
+        ("docker", "image", "inspect", expected_id),
     ]
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement", "message"),
+    (
+        ("Config", {"Labels": {}}, "config differs"),
+        ("RootFS", {"Type": "layers", "Layers": ["sha256:" + "8" * 64]},
+         "layers differ"),
+    ),
+)
+def test_transferred_private_image_rejects_config_or_layer_substitution_and_cleans_tag(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    replacement: dict[str, object],
+    message: str,
+) -> None:
+    image_id = "sha256:" + "4" * 64
+    digest = "sha256:" + "1" * 64
+    export_tag = "menhir-stage-export:" + "7" * 32
+    labels = {
+        "org.opencontainers.image.revision": "a" * 40,
+        "org.archolith.menhir.wheel-manifest.sha256": "b" * 64,
+        "org.archolith.oauth.wheel.sha256": "c" * 64,
+    }
+    config = {"Labels": labels, "Env": ["PATH=/usr/local/bin"]}
+    rootfs = {"Type": "layers", "Layers": ["sha256:" + "6" * 64]}
+    identity = tmp_path / "menhir-image-identity.json"
+    identity.write_text(json.dumps({
+        "schema": 1,
+        "image_ref": "ghcr.io/archolith/menhir@" + digest,
+        "image_id": image_id,
+        "export_tag": export_tag,
+        "config": config,
+        "rootfs": rootfs,
+    }), encoding="utf-8")
+    archive = tmp_path / "menhir-image.tar"
+    archive.write_bytes(b"archive")
+    calls: list[tuple[str, ...]] = []
+
+    def fake_run(*args: str, **_kwargs: object) -> SimpleNamespace:
+        calls.append(args)
+        observed = {"Id": image_id, "Config": config, "RootFS": rootfs}
+        observed[field] = replacement
+        return SimpleNamespace(returncode=0, stdout=json.dumps([observed]))
+
+    monkeypatch.setattr(MODULE, "_run", fake_run)
+    environment = {"MENHIR_IMAGE": "ghcr.io/archolith/menhir@" + digest}
+    release = {
+        "images": {"menhir": digest},
+        "image_publication": {
+            "image_id": image_id,
+            "config_sha256": MODULE._canonical_json_sha256(config),
+            "validation_identity_sha256": "8" * 64,
+            "publication_sha256": "9" * 64,
+            "image_archive_sha256": "0" * 64,
+            "registry_digest": digest,
+        },
+        "repos": {"menhir": "a" * 40},
+        "dockerfile_wheel_manifest_sha256": "b" * 64,
+        "oauth_wheel_sha256": "c" * 64,
+    }
+
+    with pytest.raises(MODULE.StageError, match=message):
+        MODULE._load_transferred_menhir(
+            archive, identity, MODULE._sha256(identity), environment, release,
+        )
+    assert calls[-1] == ("docker", "image", "rm", export_tag)
+
+
+@pytest.mark.parametrize(
+    ("forge", "message"),
+    (
+        ("image_id", "image ID differs from CI publication"),
+        ("config", "config differs from CI publication"),
+    ),
+)
+def test_locally_forged_identity_with_expected_labels_is_rejected_by_release_authority(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    forge: str,
+    message: str,
+) -> None:
+    registry_digest = "sha256:" + "1" * 64
+    ci_image_id = "sha256:" + "4" * 64
+    local_image_id = "sha256:" + "5" * 64 if forge == "image_id" else ci_image_id
+    labels = {
+        "org.opencontainers.image.revision": "a" * 40,
+        "org.archolith.menhir.wheel-manifest.sha256": "b" * 64,
+        "org.archolith.oauth.wheel.sha256": "c" * 64,
+    }
+    ci_config = {"Labels": labels, "Env": ["PATH=/usr/local/bin"]}
+    local_config = (
+        {"Labels": labels, "Env": ["PATH=/forged/bin"]}
+        if forge == "config" else ci_config
+    )
+    rootfs = {"Type": "layers", "Layers": ["sha256:" + "6" * 64]}
+    identity = tmp_path / "menhir-image-identity.json"
+    identity.write_text(json.dumps({
+        "schema": 1,
+        "image_ref": "ghcr.io/archolith/menhir@" + registry_digest,
+        "image_id": local_image_id,
+        "export_tag": "menhir-stage-export:" + "7" * 32,
+        "config": local_config,
+        "rootfs": rootfs,
+    }), encoding="utf-8")
+    archive = tmp_path / "menhir-image.tar"
+    archive.write_bytes(b"self-consistent forged archive")
+    environment = {
+        "MENHIR_IMAGE": "ghcr.io/archolith/menhir@" + registry_digest,
+    }
+    release = {
+        "images": {"menhir": registry_digest},
+        "image_publication": {
+            "image_id": ci_image_id,
+            "config_sha256": MODULE._canonical_json_sha256(ci_config),
+            "validation_identity_sha256": "8" * 64,
+            "publication_sha256": "9" * 64,
+            "image_archive_sha256": "0" * 64,
+            "registry_digest": registry_digest,
+        },
+        "repos": {"menhir": "a" * 40},
+        "dockerfile_wheel_manifest_sha256": "b" * 64,
+        "oauth_wheel_sha256": "c" * 64,
+    }
+
+    def forged_docker(*_args: str, **_kwargs: object) -> SimpleNamespace:
+        return SimpleNamespace(returncode=0, stdout=json.dumps([{
+            "Id": local_image_id, "Config": local_config, "RootFS": rootfs,
+        }]))
+
+    monkeypatch.setattr(MODULE, "_run", forged_docker)
+    with pytest.raises(MODULE.StageError, match=message):
+        MODULE._load_transferred_menhir(
+            archive, identity, MODULE._sha256(identity), environment, release,
+        )
 
 
 def test_desktop_wrapper_transfers_private_registry_image_before_remote_stage() -> None:
@@ -266,13 +417,24 @@ def test_desktop_wrapper_transfers_private_registry_image_before_remote_stage() 
         encoding="utf-8"
     )
 
-    assert "docker save --output $localImageTar $menhirImageTag" in wrapper
+    assert "(?::[a-zA-Z0-9._-]+)?@sha256" in wrapper
+    assert "docker image tag $menhirImageId $temporaryImageTag" in wrapper
+    assert "docker save --output $localImageTar $temporaryImageTag" in wrapper
+    assert "docker save --output $localImageTar $menhirImageTag" not in wrapper
+    assert "docker image rm $temporaryImageTag" in wrapper
+    assert "config = $menhirImageValue.Config" in wrapper
+    assert "rootfs = $menhirImageValue.RootFS" in wrapper
     assert "--expected-menhir-image-archive-sha256 '$menhirImageArchiveSha256'" in wrapper
+    assert "--expected-menhir-image-identity-sha256 '$menhirImageIdentitySha256'" in wrapper
     assert "sudo -n /usr/bin/python3 '$installedRunner'" in wrapper
     assert "/srv/menhir/scaffold/bin/menhir_stage_vps.py" in wrapper
     assert "-Source $runner -Destination" not in wrapper
     assert "sudo -n docker load" not in wrapper
     assert "'$remoteRunner'" not in wrapper
+    runner = MODULE_PATH.read_text(encoding="utf-8")
+    assert runner.count(
+        '_run("docker", "image", "rm", transferred_export_tag, check=False)'
+    ) == 2
 
 
 def test_runtime_self_hash_uses_fixed_installed_runner(
@@ -342,8 +504,9 @@ def test_runner_parser_accepts_only_bounded_upload_root_arguments() -> None:
         "--expected-release-id", "menhir-prod-0.2.0-13",
         "--expected-release-sha256", "2" * 64,
         "--expected-menhir-image-archive-sha256", "3" * 64,
+        "--expected-menhir-image-identity-sha256", "4" * 64,
         "--deployment-class", "app-only",
-        "--expected-runner-sha256", "4" * 64,
+        "--expected-runner-sha256", "5" * 64,
     ]
     parsed = MODULE._parser().parse_args(values)
     assert parsed.upload_root.name == "a" * 32
@@ -745,10 +908,14 @@ def test_early_staging_failure_removes_root_owned_inputs(
     bundle.mkdir(parents=True)
     archive = inputs / "menhir-image.tar"
     archive.write_bytes(b"archive")
+    image_identity = inputs / "menhir-image-identity.json"
+    image_identity.write_text("{}", encoding="ascii")
     monkeypatch.setattr(MODULE.os, "geteuid", lambda: 0, raising=False)
     monkeypatch.setattr(MODULE, "_verified_runner_digest", lambda _digest: "1" * 64)
     monkeypatch.setattr(
-        MODULE, "_copy_uploaded_inputs", lambda _root: (bundle, archive, transaction),
+        MODULE,
+        "_copy_uploaded_inputs",
+        lambda _root: (bundle, archive, image_identity, transaction),
     )
     monkeypatch.setattr(
         MODULE, "_safe_file", lambda *_args: (_ for _ in ()).throw(MODULE.StageError("early")),
@@ -758,7 +925,8 @@ def test_early_staging_failure_removes_root_owned_inputs(
         expected_release_sha256="2" * 64,
         expected_release_id="menhir-prod-0.2.0-14",
         expected_menhir_image_archive_sha256="3" * 64,
-        expected_runner_sha256="4" * 64,
+        expected_menhir_image_identity_sha256="4" * 64,
+        expected_runner_sha256="5" * 64,
         deployment_class="security-config",
         upload_root=tmp_path / "upload",
     )
