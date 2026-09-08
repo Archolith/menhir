@@ -160,7 +160,7 @@
       - (menhir_scaffold_audit_executable.stat.mode | default('')) == '0755'
       - >-
         (menhir_scaffold_audit_executable.stat.checksum | default('')) ==
-        'f83f03b90594ebefa7452c418253b7e38647cae9ecafc009482a1aa3c1905eab'
+        '33b746f26fed20a6f1ea5081f7b3f8b0aafeb6821f6dec7315ce54f5bca1c012'
     fail_msg: >-
       Refusing to install or enable the scaffold audit timer without the exact
       root-owned mode-0755 non-symlink scaffold executable.
