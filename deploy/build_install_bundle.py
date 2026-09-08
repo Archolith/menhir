@@ -21,10 +21,12 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR / "lib"))
 
 import menhir_schema  # noqa: E402
+import release_spec  # noqa: E402
 
 
 SPEC_KEYS = frozenset({
     "schema", "release_id", "release_author", "repositories", "images",
+    "image_refs",
     "evidence", "rendered", "network", "initial_release", "prior_release",
     "prior_route", "initial_prior_images", "secret_version_ids",
     "artifact_sources", "initial_host_state", "deployment_class",
@@ -39,6 +41,9 @@ EVIDENCE_DIGESTS = {
     "scan": "scan_evidence_sha256",
     "provenance": "provenance_sha256",
 }
+PUBLICATION_EVIDENCE = frozenset({
+    "image_publication", "image_metadata", "image_identity", "image_archive",
+})
 RENDERED_DESTINATIONS = {
     "/srv/menhir/production/release/production.env": "production_env_sha256",
     "/etc/yawn-vps/menhir-oauth-policy.json": "operations_policy_sha256",
@@ -273,6 +278,17 @@ def _validate_spec_relationship(
     ):
         if spec.get(key) != release.get(key):
             raise ValueError(f"release spec {key} differs from release authority")
+    image_refs = _exact_keys(
+        spec.get("image_refs"), set(release["images"]), "release spec image_refs"
+    )
+    for name, digest in release["images"].items():
+        reference = image_refs[name]
+        if not isinstance(reference, str) \
+                or release_spec.IMAGE_REF_RE.fullmatch(reference) is None \
+                or not reference.endswith("@" + digest):
+            raise ValueError(
+                f"release spec image_refs.{name} differs from image authority"
+            )
     repositories = _exact_keys(
         spec.get("repositories"), REPOSITORIES, "release spec repositories"
     )
@@ -302,7 +318,11 @@ def _validate_spec_relationship(
             raise ValueError(f"release spec rendered.{key} digest drift")
         rendered_paths[key] = path
 
-    evidence_keys = frozenset(EVIDENCE_DIGESTS) | frozenset({"wheelhouse"})
+    evidence_keys = (
+        frozenset(EVIDENCE_DIGESTS)
+        | frozenset({"wheelhouse"})
+        | PUBLICATION_EVIDENCE
+    )
     evidence = _exact_keys(
         spec.get("evidence"), evidence_keys, "release spec evidence"
     )
@@ -311,6 +331,34 @@ def _validate_spec_relationship(
         path = _regular_file(evidence.get(key), f"release spec evidence.{key}")
         if _sha256_file(path) != release[release_key]:
             raise ValueError(f"release spec evidence.{key} digest drift")
+    publication = release_spec.validate_image_publication(
+        publication_path=_regular_file(
+            evidence["image_publication"],
+            "release spec evidence.image_publication",
+        ),
+        metadata_path=_regular_file(
+            evidence["image_metadata"], "release spec evidence.image_metadata",
+        ),
+        identity_path=_regular_file(
+            evidence["image_identity"], "release spec evidence.image_identity",
+        ),
+        archive_path=_regular_file(
+            evidence["image_archive"], "release spec evidence.image_archive",
+        ),
+        sbom_path=_regular_file(evidence["sbom"], "release spec evidence.sbom"),
+        scan_path=_regular_file(evidence["scan"], "release spec evidence.scan"),
+        menhir_commit=release["repos"]["menhir"],
+        menhir_digest=release["images"]["menhir"],
+        menhir_ref=image_refs["menhir"],
+        base_ref=image_refs["base"],
+        release_id=release["release_id"],
+        wheel_manifest_sha256=release["dockerfile_wheel_manifest_sha256"],
+        oauth_wheel_sha256=release["oauth_wheel_sha256"],
+    )
+    if publication != release.get("image_publication"):
+        raise ValueError(
+            "release spec image publication differs from release authority"
+        )
 
     initial = spec.get("initial_release")
     if initial is not release["rollback_anchors"]["initial_release"]:

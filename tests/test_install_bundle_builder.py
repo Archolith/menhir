@@ -158,6 +158,32 @@ def test_rejects_rendered_digest_drift(tmp_path: Path) -> None:
         MODULE.build_install_bundle(release_path, spec_path, tmp_path / "bundle")
 
 
+def test_revalidates_ci_publication_chain_before_bundling(tmp_path: Path) -> None:
+    release_path, spec_path, spec = _release_fixture(tmp_path)
+    publication = Path(spec["evidence"]["image_publication"])
+    value = json.loads(publication.read_text(encoding="ascii"))
+    value["registry_digest"] = "sha256:" + "f" * 64
+    publication.write_text(json.dumps(value), encoding="ascii")
+
+    with pytest.raises(ValueError, match="registry digest"):
+        MODULE.build_install_bundle(release_path, spec_path, tmp_path / "bundle")
+
+
+def test_rejects_publication_evidence_drift_after_release_authoring(
+    tmp_path: Path,
+) -> None:
+    release_path, spec_path, spec = _release_fixture(tmp_path)
+    publication_path = Path(spec["evidence"]["image_publication"])
+    publication = json.loads(publication_path.read_text(encoding="ascii"))
+    publication["registry_digest"] = "sha256:" + "f" * 64
+    publication_path.write_text(json.dumps(publication), encoding="ascii")
+
+    with pytest.raises(ValueError, match="registry digest|publication"):
+        MODULE.build_install_bundle(
+            release_path, spec_path, tmp_path / "bundle"
+        )
+
+
 @pytest.mark.parametrize(
     ("key", "value"),
     (
