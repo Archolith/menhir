@@ -58,6 +58,8 @@ backups/
 .tmp_pytest_cache/
 .pytest_tmp/
 pytest-cache-files-*/
+.pytest-*/
+.venv-*/
 src/uvicorn_*_log.txt
 
 # Full-deployment secrets (never commit)
