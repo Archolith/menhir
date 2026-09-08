@@ -1,13 +1,13 @@
 # WRAPUP — Menhir deployment reliability
 
 **Date:** 2026-09-08
-**Agent:** Codex  
-**Model:** gpt-5.6-sol  
-**Session:** unavailable  
-**Status:** PARTIAL  
-**Plan / Ticket:** C:\Users\thron\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion\.agent\plans\menhir-deployment-reliability-2026-09-07.md  
-**Worktree:** C:\Users\thron\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion  
-**Branch:** fix/deployment-reliability-20260907  
+**Agent:** Codex
+**Model:** gpt-5.6-sol
+**Session:** unavailable
+**Status:** PARTIAL
+**Plan / Ticket:** C:\Users\thron\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion\.agent\plans\menhir-deployment-reliability-2026-09-07.md
+**Worktree:** C:\Users\thron\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion
+**Branch:** fix/deployment-reliability-20260907
 **Commits:** Menhir 62a536854b69b25611ab70faea8ea080869ee824 through 4787ebbdd8fda4e1392a148d7c9f99bbab28fb4e, including audit remediations c616cb1ca21d1b376632e8cebf3b5d2a4199a793, b63fe7ae39933cd1eeccf542ca5609c50fcfaa65, and 4787ebbdd8fda4e1392a148d7c9f99bbab28fb4e; shared operator scripts b2fbde79f0e43de798fd813c26c6e74cb277de7a, 09b3748a061a79dd84b511e21b66503a0d3a11d1, and 819d86bce3e47704be064008dfa40961dd32c4f0
 **Verification Scope:** Menhir remediation diff 2f9f9b3e1d0dc31f9307c766383fa9f1722bb274..4787ebbdd8fda4e1392a148d7c9f99bbab28fb4e; shared wrapper diffs 09b3748a061a79dd84b511e21b66503a0d3a11d1^..819d86bce3e47704be064008dfa40961dd32c4f0; prior installed scaffold receipt and unchanged live 0.2.0-13 checks are historical evidence only and do not claim the new remediation commits are deployed
 **Docs Updated:** C:\Users\thron\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion\deploy\RELEASE_AUTOMATION.md; C:\Users\thron\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion\deploy\LIVE_VPS_PLAYBOOK.md; C:\Users\thron\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion\deploy\PRODUCTION.md; C:\Users\thron\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion\deploy\release.json.example; C:\Users\thron\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion\.agent\scripts-index.md; C:\Users\thron\IdeaProjects\scripts\README.md
