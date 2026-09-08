@@ -1,0 +1,47 @@
+{
+  "_comment": [
+    "Scan roots for the Menhir production mutation census.",
+    "Every repository that can contribute a path which mutates the Menhir",
+    "production host must appear here. Adding a repository is a deliberate",
+    "act; omitting one is how the fourth PowerShell wrapper stayed invisible.",
+    "Paths are absolute because these repositories are separate checkouts,",
+    "not submodules of one another."
+  ],
+  "repos": [
+    {
+      "name": "menhir",
+      "root": "C:/Users/thron/Documents/Codex/2026-09-06/inve/work/menhir-doc-staged-promotion",
+      "exclude": [
+        "src/**",
+        "tests/**",
+        "docs/**",
+        "spikes/**",
+        "results/**",
+        ".agent/**",
+        "pipeline/**",
+        "CHANGELOG*.md",
+        "sbom.json"
+      ]
+    },
+    {
+      "name": "shared-scripts",
+      "root": "C:/Users/thron/IdeaProjects/scripts",
+      "exclude": []
+    },
+    {
+      "name": "yawn.deploy",
+      "root": "C:/Users/thron/IdeaProjects/projects/yawn/yawn.deploy",
+      "exclude": [
+        ".agent/**"
+      ]
+    },
+    {
+      "name": "yawn.vps",
+      "root": "C:/Users/thron/IdeaProjects/projects/yawn/yawn.vps",
+      "exclude": [
+        ".agent/**",
+        "tests/**"
+      ]
+    }
+  ]
+}

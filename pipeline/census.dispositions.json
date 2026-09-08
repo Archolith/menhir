@@ -1,0 +1,22 @@
+{
+  "_schema": "menhir.census.dispositions.v1",
+  "_comment": [
+    "One disposition per census entry point. Keys are entry-point ids from",
+    "pipeline/census.report.json. The census fails while any entry point is",
+    "unclassified, which is the mechanical 'no unclassified item' check.",
+    "",
+    "disposition must be exactly one of:",
+    "  preserve - stays as-is and is a legitimate part of the target system",
+    "  replace  - its behaviour moves into the new pipeline; the old path dies",
+    "  retire   - deleted outright, with absence asserted after cutover",
+    "",
+    "owner is the repository or person accountable for carrying it out.",
+    "note records why, so the judgement survives the person who made it.",
+    "",
+    "Filling this in is a deliberate act per entry point. Do not bulk-assign:",
+    "the value of this file is that someone looked at each one. A 'retire'",
+    "entry becomes a stale-disposition id once the path is gone, and that is",
+    "the proof of retirement rather than an assumption of it."
+  ],
+  "dispositions": {}
+}
