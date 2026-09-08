@@ -95,7 +95,7 @@ def test_playbook_preserves_canonical_repositories_and_network_authority() -> No
         "generic `vps_deploy`/`remote-deploy.sh` path is not authorized",
         "fixed command",
         "172.30.0.1:8000",
-        "Caddy at `172.30.0.2` is the only admitted peer",
+        "`menhir-prod-cloudflared`",
         "https://memory.ctharvey.me/ops/mcp",
         "issuer `https://memory.ctharvey.me`",
         "`https://memory.ctharvey.me/ops/mcp`",
@@ -106,6 +106,7 @@ def test_playbook_preserves_canonical_repositories_and_network_authority() -> No
 
     assert "blocked before first bootstrap" not in source
     assert "currently dispatches through the Windows-only" not in source
+    assert "Caddy at `172.30.0.2` is the only admitted peer" not in source
     production = PRODUCTION.read_text(encoding="utf-8")
     assert "--subnet 172.30.0.0/24" in production
     assert "--gateway 172.30.0.1" in production
@@ -121,7 +122,7 @@ def test_playbook_orders_the_release_lifecycle() -> None:
         "restore rehearsal",
         "readonly candidate",
         "candidate acceptance",
-        "transactional Caddy route",
+        "retain and verify Cloudflared ingress",
         "promotion under a second writer-census check",
         "public production acceptance",
     ):
