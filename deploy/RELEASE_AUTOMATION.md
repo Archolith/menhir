@@ -144,6 +144,12 @@ authority. Do not copy an image digest and independently choose scanner files, a
 the registry digest from Docker's local image ID; a registry manifest digest and a local image
 configuration ID are different authorities.
 
+Offline GitHub attestation verification treats the publication trusted root as evidence, not as its
+own authority. Release authoring accepts that root only when the SHA-256 of its exact raw bytes
+matches the repository-reviewed pin in `release_spec.py`, before writing verification inputs or
+invoking `gh`. A Sigstore or GitHub trusted-root rotation requires acquiring the replacement root
+independently of the publication bundle and reviewing an update to that repository pin.
+
 A staging failure writes no passing receipt and grants no promotion authority. Before using a
 changed staging or scaffold runner, converge the reviewed host scaffold from the exact checkout and
 verify the installed scaffold. This is a separate host-infrastructure operation, not product

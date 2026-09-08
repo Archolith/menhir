@@ -437,16 +437,22 @@ def test_github_attestation_verifier_pins_repo_workflow_and_source_sha(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[list[str]] = []
+    trusted_root = b"trusted root"
 
     def fake_run(command: list[str], **_kwargs):
         calls.append(command)
         return subprocess.CompletedProcess(command, 0, stdout="[]", stderr="")
 
+    monkeypatch.setattr(
+        MODULE,
+        "REVIEWED_GITHUB_ATTESTATION_TRUSTED_ROOT_SHA256",
+        hashlib.sha256(trusted_root).hexdigest(),
+    )
     monkeypatch.setattr(MODULE.subprocess, "run", fake_run)
     VERIFY_GITHUB_ATTESTATION(
         subject=b"publication",
         bundle=b"signed bundle",
-        trusted_root=b"trusted root",
+        trusted_root=trusted_root,
         repository=MODULE.CANONICAL_GITHUB_REPOSITORY,
         source_commit="a" * 40,
     )
@@ -461,6 +467,44 @@ def test_github_attestation_verifier_pins_repo_workflow_and_source_sha(
     )
     assert "--custom-trusted-root" in command
     assert "--deny-self-hosted-runners" in command
+    assert command[command.index("--format") + 1] == "json"
+
+
+@pytest.mark.parametrize("trusted_root", [b"", b"arbitrary trusted root"])
+def test_github_attestation_verifier_rejects_unreviewed_trusted_root_before_io(
+    trusted_root: bytes, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reviewed_root = b"reviewed trusted root"
+
+    def fail_temporary_directory(*_args, **_kwargs):
+        pytest.fail("temporary directory must not be created")
+
+    def fail_run(*_args, **_kwargs):
+        pytest.fail("subprocess must not be called")
+
+    monkeypatch.setattr(
+        MODULE,
+        "REVIEWED_GITHUB_ATTESTATION_TRUSTED_ROOT_SHA256",
+        hashlib.sha256(reviewed_root).hexdigest(),
+    )
+    monkeypatch.setattr(
+        MODULE.tempfile, "TemporaryDirectory", fail_temporary_directory
+    )
+    monkeypatch.setattr(MODULE.subprocess, "run", fail_run)
+
+    with pytest.raises(
+        MODULE.ReleaseSpecError,
+        match=(
+            "^GitHub attestation trusted root does not match reviewed authority$"
+        ),
+    ):
+        VERIFY_GITHUB_ATTESTATION(
+            subject=b"publication",
+            bundle=b"signed bundle",
+            trusted_root=trusted_root,
+            repository=MODULE.CANONICAL_GITHUB_REPOSITORY,
+            source_commit="a" * 40,
+        )
 
 
 def test_refuses_image_archive_not_bound_to_validation_identity(

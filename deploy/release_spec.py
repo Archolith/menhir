@@ -104,6 +104,9 @@ SECRET_VALUE_RE = re.compile(
     re.I,
 )
 CANONICAL_GITHUB_REPOSITORY = "Archolith/menhir"
+REVIEWED_GITHUB_ATTESTATION_TRUSTED_ROOT_SHA256 = (
+    "65ca537f6ed8a47fd0e560c421baa1f6c1efb8b25fc200d8c5c02c0e92eb2b9c"
+)
 
 
 def _git(repository: str, path: str) -> dict[str, str]:
@@ -300,6 +303,13 @@ def _verify_github_attestation(
     repository: str, source_commit: str,
 ) -> None:
     """Cryptographically verify captured publication bytes without network lookup."""
+    if (
+        _sha256_bytes(trusted_root)
+        != REVIEWED_GITHUB_ATTESTATION_TRUSTED_ROOT_SHA256
+    ):
+        raise ReleaseSpecError(
+            "GitHub attestation trusted root does not match reviewed authority"
+        )
     with tempfile.TemporaryDirectory(prefix="menhir-attestation-") as temporary:
         root = Path(temporary)
         subject_path = root / "release-image-publication.json"
