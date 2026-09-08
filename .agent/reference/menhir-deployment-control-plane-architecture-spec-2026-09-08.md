@@ -860,8 +860,11 @@ strictly serial deliverables; it may split a deliverable further but may not com
    live-state model. No signing or mutation.
 5. **Signing and non-mutating authorization.** Implement key custody, trust and kernel authorize-only
    behavior. It must be impossible to reach snapshot/apply.
-6. **Product kernel and adapters.** Implement descriptor-safe intake, locks, state machine, four
-   lanes, rollback, replay/adoption and retention on disposable hosts. No bootstrap/cutover.
+6. **Product kernel and adapters.** Implement descriptor-safe intake, locks, state machine, the six
+   non-bootstrap lanes (`app-only`, `security-config`, `maintenance`, `infrastructure`, `gc`,
+   `archive`), rollback, replay/adoption and retention on disposable hosts. `gc` and `archive` are
+   signed lanes and therefore depend on gates 4 and 5, not on kernel-internal cleanup. No
+   bootstrap/cutover.
 7. **v1 handoff bridge.** Change only the censused v1 mutators to one global-first, nonblocking-lock,
    double-fence-check contract; prove it on disposable v1 fixtures. Add no v2 mutation or cutover.
 8. **Bootstrap and installation.** Implement signed control-plane installation, all-lock handoff,
@@ -931,15 +934,23 @@ inside control-plane implementation.
 | Check | Status | Evidence required |
 |---|---|---|
 | Repository and host ownership closed | READY FOR REVIEW | Fresh reviewer checks all five repository boundaries and the typed 2/2/1 repository-input decisions |
+| Canonical repository identity registry closed | READY FOR REVIEW | Fresh reviewer confirms package type selects a fixed registry row and that caller-supplied URLs are never a trust anchor |
+| Typed subjects and authorization families closed | READY FOR REVIEW | Fresh reviewer confirms every subject type has exactly one target/manifest/authorization/lane binding and that the two domain separators cannot cross-authorize |
 | Protocol/record registry exhaustive | READY FOR REVIEW | Fresh reviewer maps every producer/consumer/state artifact and finds no missing authority record |
-| Descriptor-safe intake closed | READY FOR REVIEW | Fresh reviewer validates the open-descriptor/fsync design and race matrix |
+| Descriptor-safe intake closed | READY FOR REVIEW | Fresh reviewer validates the open-descriptor/fsync design, the post-copy source recheck, and the race matrix |
+| Attempt reservation and durable commit primitive closed | READY FOR REVIEW | Fresh reviewer confirms one O_EXCL attempt anchor, one authoritative `HEAD`, complete transition table, and per-state expiry/revocation rules |
 | Replay/adoption closed | READY FOR REVIEW | Fresh reviewer executes the decision table against all terminal/nonterminal cases |
-| Bootstrap handoff closed | READY FOR REVIEW | Fresh reviewer checks pre-fence/activation/post-activation and queued-caller exclusion |
+| Owner key custody closed | READY FOR REVIEW | Fresh reviewer confirms format, ACL, passphrase, key ID, enrollment, rotation overlap, revocation, loss and compromise are one normative contract |
+| v1 handoff bridge and bootstrap closed | READY FOR REVIEW | Fresh reviewer checks bridge-before-fence ordering, pre-fence/activation/post-activation callers, and queued-caller exclusion |
 | Ingress and `yawn.deploy` ownership closed | CLOSED by ADR 0002 (2026-09-08) | `yawn.deploy` retains the vhost; Menhir installs no ingress writer and no second ingress |
 | Privileged/read-only boundaries closed | READY FOR REVIEW | Fresh reviewer verifies one mutator plus five exact read operations |
 | Phase ownership and invalidation closed | READY FOR REVIEW | Fresh reviewer maps each invariant/test to one serial phase |
 | Fresh no-context architecture review | PENDING | Independent report with no open P0-P2 findings |
 | Owner acceptance | PENDING | Explicit lifecycle decision after review |
+
+Every row except the ADR-closed one reached `READY FOR REVIEW` through the 2026-09-08 architecture
+revision preserved in commit `2a51408`. None of them has been independently reviewed since. Treat
+this ledger as the entry condition for the fresh review, not as evidence that the designs are sound.
 
 No implementation plan is sound until the last two rows close. If review finds a defect, edit this
 specification as one architecture revision, reset every affected row to `READY FOR REVIEW`, and

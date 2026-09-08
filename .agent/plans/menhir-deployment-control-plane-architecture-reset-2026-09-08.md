@@ -30,10 +30,10 @@ Current repository anchors at the time this status was written:
 
 The long architecture specification at
 [`../reference/menhir-deployment-control-plane-architecture-spec-2026-09-08.md`](../reference/menhir-deployment-control-plane-architecture-spec-2026-09-08.md)
-is an `OPEN`, rejected design draft. It is not execution authority. Its independent review returned
-`ARCHITECTURE NEEDS REVISION` with six P1 and two P2 issues, of which **P1 #5 is now closed by
-[ADR 0002](../adr/0002-menhir-production-ingress-ownership.md)**, leaving five P1 and two P2. Do
-not implement from it and do not interpret partial corrections as acceptance.
+is `OPEN` and is not execution authority. Its independent review returned `ARCHITECTURE NEEDS
+REVISION` with six P1 and two P2 issues. **All eight are now closed in the specification text** (see
+Architecture issue status below), but none of those closures has been independently reviewed. Do not
+implement from the specification until it reaches `COMPLETE`.
 
 No production deployment, host mutation, release, merge, or key enrollment is authorized by this
 plan. Existing production behavior remains the operational baseline until a replacement completes
@@ -56,60 +56,45 @@ That creates a predictable cycle:
 The remedy is not another full-system patch. Work must be reduced to small serial phases with one
 owner, one artifact set, one bounded review, and an enforced stop between phases.
 
-## Open issues
+## Architecture issue status
 
-These are architecture issues, not deferred implementation details.
+All eight issues from the `ARCHITECTURE NEEDS REVISION` review are now closed **in the
+specification text**. Seven were closed by the 2026-09-08 architecture revision preserved in Menhir
+commit `2a51408`; the eighth was closed by owner decision in
+[ADR 0002](../adr/0002-menhir-production-ingress-ownership.md).
 
-### P1
+The review's issue list predates that revision. It described a version of the specification that no
+longer exists, which is why this plan previously reported five P1 and two P2 as open.
 
-1. **Authorization is not type-complete.** Product releases, infrastructure packages, and
-   control-plane/bootstrap packages do not yet share a fully defined subject and evidence binding.
-   Bootstrap transport does not yet have a final non-circular package, staging, preflight,
-   authorization, and detached-signature contract.
-2. **The durable-record and lane inventory is incomplete.** Snapshot/rollback manifests, adoption
-   evidence, attempt/upload reservation, adapter operation evidence, and GC/archive transaction
-   records need explicit owners, schemas, consumers, digest rules, retention, and lane routing.
-3. **At-most-once mutation and crash recovery are underspecified.** The design needs one durable
-   attempt reservation, one authoritative journal-head/commit primitive, complete pre-mutation and
-   post-mutation failure transitions, and distinct expiry/revocation rules for initial admission,
-   roll-forward, rollback, replay, and adoption.
-4. **The v1-to-v2 bootstrap fence is not yet realizable.** A caller that started before cutover must
-   not queue and mutate after the fence. The design likely requires a separately reviewed v1 handoff
-   bridge that makes every old writer global-lock-first, nonblocking, and fence-aware before
-   bootstrap can begin.
-5. ~~**Ingress ownership is still split in source.**~~ **CLOSED by
-   [ADR 0002](../adr/0002-menhir-production-ingress-ownership.md) (2026-09-08).** The shared
-   `yawn.deploy` Caddy remains the sole `memory.ctharvey.me` ingress and Cloudflared-sole-ingress is
-   withdrawn. Menhir routes in the shared Caddyfile are correct tenancy, not split authority. The
-   `/ops` `strip_prefix` contract stands and the native ASGI mount change is withdrawn.
+| # | Issue | Status | Closing section |
+|---|---|---|---|
+| P1 1 | Authorization is not type-complete | Closed | Typed subjects and authorization families: five-value `subject_type` enum with one target/manifest/authorization/lane binding each, and distinct domain separators so a deployment ticket cannot authorize bootstrap |
+| P1 2 | Durable-record and lane inventory incomplete | Closed | Protocol registry declared exhaustive for v2, with producer, consumers, digest binding, compatibility and retention per record; indexes declared rebuildable from anchors and journal heads |
+| P1 3 | At-most-once mutation and crash recovery underspecified | Closed | O_EXCL attempt-anchor publication as sole reservation, `HEAD` as sole commit primitive, full state transition table, per-state ticket expiry and revocation rules |
+| P1 4 | v1-to-v2 bootstrap fence not realizable | Closed as design | Separate v1 handoff bridge gate; bootstrap reordered so the fence is published while all locks are held, after drain and snapshot |
+| P1 5 | Ingress ownership split in source | Closed | ADR 0002 — `yawn.deploy` retains the vhost; Menhir installs no ingress writer |
+| P1 6 | Owner-key custody not a closed protocol | Closed | Owner key, signer, and trust-store contract — format, ACL, passphrase, key ID, enrollment, rotation overlap, revocation, loss and compromise |
+| P2 1 | Intake needs a post-copy source check | Closed | Intake step 7 — re-`fstat` every held source descriptor and re-enumerate the directory for the same name-to-inode set |
+| P2 2 | Canonical repository identities unowned | Closed | Canonical repository identity registry — closed five-row registry; the stale `ctharvey/archolith_oauth` metadata URL is explicitly non-authoritative |
 
-   What remains is not an architecture issue but a bounded deletion: `yawn.deploy` still holds a
-   Menhir release lock (`/run/lock/menhir-production.lock`), phase journal, release authority,
-   `caddy-release.sh`, `caddy-route-apply`, `caddy-route-rollback` and their tests **in source
-   only** — Menhir's ansible already removes them from the host and asserts their absence. Menhir
-   also still carries a non-target `deploy/docker-compose.cloudflared.yml`.
-6. **Owner-key custody is not a closed protocol.** Key format/encryption, Windows ACLs, passphrase
-   input, key-ID derivation, signer/approval-client identity, enrollment, offline backup, rotation,
-   revocation, loss, compromise, and post-revocation transaction behavior require one normative
-   contract.
+### What closed does and does not mean
 
-### P2
+Closed here means the specification now says what the issue asked it to say. It does **not** mean the
+designs have been independently checked. Seven architecture closures were written in one sitting and
+have had no review since. They are the entry condition for the fresh no-context review the
+acceptance ledger requires, not a substitute for it.
 
-1. **Descriptor-safe intake needs a post-copy source check.** Held descriptors protect copied bytes,
-   but the final design must also repeat source `fstat` and directory enumeration if it claims that
-   mutation during capture is detected rather than merely harmless.
-2. **Canonical repository identities are unowned.** Package type must select a fixed registry of
-   repository IDs, normalized origins, object formats, and attestation identities. The current OAuth
-   checkout origin and its package metadata already disagree, proving caller-supplied URLs are not a
-   sufficient trust anchor.
+The verdict is therefore unchanged: **implementation and production work remain frozen.** What
+changed is the reason. The blocker is no longer open architecture questions; it is that the answers
+are unreviewed.
 
 ### Current implementation uncertainty
 
 The existing deployment implementation remains unaccepted as a whole. Earlier reviews established
-that it contains duplicated semantic authorities and cross-repository mutation paths. This status
-update does not assert that the seven remaining architecture issues above are the complete set of
-code defects, and it does not restart another full implementation review. Code findings will be evaluated only in
-the bounded phase that owns the affected path.
+that it contains duplicated semantic authorities and cross-repository mutation paths. Closing the
+architecture issues does not close any code defect, and this status does not restart a full
+implementation review. Code findings will be evaluated only in the bounded phase that owns the
+affected path.
 
 ## Working rule
 
@@ -127,9 +112,29 @@ close a kernel/schema defect with wrapper logic, documentation, or a happy-path 
 
 ## Serial recovery plan
 
+These 14 phases derive from the specification's 10 serial gates. The specification permits splitting
+a gate further but forbids combining adjacent gates, so the mapping is recorded here for verification:
+
+| Spec gate | Plan phase |
+|---|---|
+| 1 Census and frozen contract | 0 |
+| 2 Canonical protocol | 1 |
+| 3 Immutable compilers | 2 |
+| 4 Staging and read-only preflight | 3 |
+| 5 Signing and non-mutating authorization | 4 |
+| 6 Product kernel and adapters | 5, 6, 7, 8, 9 (split by lane) |
+| 7 v1 handoff bridge | 10 |
+| 8 Bootstrap and installation | 11 |
+| 9 Cross-repository contraction | 12 |
+| 10 Integrated clean-host acceptance | 13 |
+
+No plan phase spans two spec gates. Gate 7 and gate 8 are deliberately separate phases; an earlier
+version of this plan combined them, which the specification does not allow.
+
 ### Phase 0 — Repository census and freeze
 
-**This is the only phase currently eligible to start. It is documentation and static analysis only.**
+**No phase is eligible to start until the specification is `COMPLETE`.** Phase 0 is first in line and
+is documentation and static analysis only.
 
 Create one machine-readable census across Menhir, the three shared wrappers, Yawn VPS, Archolith
 OAuth, and Yawn deploy. Enumerate every release input, schema/record, builder, deploy/scaffold entry,
@@ -181,8 +186,12 @@ complete phase review is clear.
 ### Phase 5 — Transaction kernel with fake adapters
 
 Implement descriptor-safe intake, attempt reservation, locks, durable journal/head, snapshots,
-rollback arming, crash recovery, replay/adoption, GC retention, and archival against fake disposable
+rollback arming, crash recovery, replay/adoption, and retention reachability against fake disposable
 state only. No real app, database, security, infrastructure, bootstrap, or wrapper integration.
+
+Note that `gc` and `archive` are signed lanes in the specification, not kernel-internal cleanup.
+Only their reachability computation and retention rules belong here; their authorized execution is
+Phase 9.
 
 Gate: every durable and mutation kill point, concurrency case, replay row, post-copy intake race, and
 exact rollback case passes; complete phase review is clear.
@@ -190,8 +199,8 @@ exact rollback case passes; complete phase review is clear.
 ### Phase 6 — App-only lane
 
 Connect only the app-only adapter to the accepted kernel on a disposable host. Preserve Neo4j,
-Cloudflared, configuration, OAuth/MCP, backup/restore, and control-plane identities exactly. Do not
-add other lanes.
+ingress, configuration, OAuth/MCP, backup/restore, and control-plane identities exactly. Do not add
+other lanes.
 
 Gate: full app-only success, refusal, interruption, rollback, retry, and adoption pass; only then
 retire the old app-only path in the disposable installation; complete phase review is clear.
@@ -212,18 +221,41 @@ formally reopened.
 
 Gate: backup/restore and database crash/rollback matrices pass; complete phase review is clear.
 
-### Phase 9 — Infrastructure, v1 bridge, and bootstrap
+### Phase 9 — GC and archive lanes
 
-First implement and independently close the minimal v1 handoff bridge. Then, as a separate commit and
-review gate, implement infrastructure convergence and signed bootstrap on disposable v1 hosts. Hold
-all old/new locks through cutover or exact rollback, atomically replace sudoers, and prove every old
+Add the `gc` and `archive` lanes as fully signed subjects: kernel read-only planner, owner rehearsal
+and authorization through the same subject/staging/preflight/ticket protocol, adapter execution under
+the common attempt anchor, journal and snapshot, and their plan/receipt records. The adapters accept
+no caller removal list, and the recomputed plan digest must equal the authorized plan under locks.
+
+Gate: refusal to collect active, current, previous, rollback and snapshot roots; destination
+verification before any source disposition; complete phase review is clear.
+
+### Phase 10 — v1 handoff bridge
+
+Change only the censused v1 mutators to acquire the v1 global lock before any lane lock, use
+nonblocking acquisition, and check one fixed root-owned handoff fence both before and after lock
+acquisition, refusing when it is present. Add no v2 mutation, trust, package, receipt, or fallback
+behavior. Prove it on disposable v1 fixtures with a complete writer census.
+
+This is a separate gate from bootstrap and may not be combined with it. If any v1 writer cannot be
+bridged or enumerated, v2 bootstrap is impossible and remains blocked.
+
+Gate: every censused v1 mutator carries the accepted bridge; blocking acquisition and unbridged
+writers are detected; complete phase review is clear.
+
+### Phase 11 — Infrastructure convergence and bootstrap
+
+Implement infrastructure convergence and signed bootstrap on disposable v1 hosts against the accepted
+bridge. Hold all old and new locks through cutover or exact rollback, publish the fence only while
+every lock is held and after drain and snapshot, atomically replace sudoers, and prove every old
 writer absent.
 
 Gate: callers started before, during, and after the fence cannot mutate after it; first install,
 upgrade, interruption, exact restoration, and least-privilege tests pass; complete phase review is
 clear.
 
-### Phase 10 — Cross-repository contraction
+### Phase 12 — Cross-repository contraction
 
 Reduced by [ADR 0002](../adr/0002-menhir-production-ingress-ownership.md). This is no longer an
 ingress migration; it is deletion plus interface work.
@@ -241,11 +273,11 @@ Gate: all repositories agree on exact arguments, records, return codes, paths, a
 boundaries; the ingress positive assertions still hold and the retired-writer negative censuses pass
 in both source and a clean install; complete phase review is clear.
 
-### Phase 11 — Integrated acceptance
+### Phase 13 — Integrated acceptance
 
 Run the full non-production flow from exact clean checkouts on disposable hosts, then required CI on
 the exact pushed revisions. Verify application/API behavior, Neo4j persistence, OAuth/MCP contracts,
-Cloudflared allow/deny behavior, backup/restore, and unrelated Yawn behavior remain unchanged.
+ingress allow/deny behavior, backup/restore, and unrelated Yawn behavior remain unchanged.
 
 Gate: exact-revision CI and clean-host acceptance are green and one independent full-system review
 has no open P0-P2 code defect. This makes the work eligible for a separate production decision; it
@@ -253,13 +285,29 @@ does not authorize deployment.
 
 ## Immediate next action
 
-Do Phase 0 only. Do not revise the full architecture, implement a P1 fix, or start another
-full-system review in parallel. The owner should receive the completed census and its bounded review
-before deciding whether Phase 1 may begin.
+**Commission one fresh no-context architecture review of the specification.** That is the only open
+action. Every architecture issue is now closed in the text and none of those closures has been
+independently checked, so review is what the work is waiting on — not more design and not Phase 0.
+
+Give the reviewer the specification, ADR 0002, and this plan. Tell them explicitly:
+
+- the seven non-ADR closures were written on 2026-09-08 and preserved in Menhir commit `2a51408`;
+  they are new and unreviewed, and are the intended focus;
+- decisions recorded in the specification's closed-decisions table are out of scope. A finding that
+  re-litigates one must be raised as a proposed ADR supersession, not filed as a defect;
+- findings must be scoped to the specification as written. Re-deriving the original review's issue
+  list against the superseded version is the specific failure this plan exists to stop.
+
+If the review is clear, move the specification to `COMPLETE` without changing its UUID, record owner
+acceptance, and only then start Phase 0. If it is not clear, edit the specification as one
+architecture revision, reset the affected acceptance-ledger rows, and review the complete document
+again. Do not patch this plan first.
+
+Do not revise the architecture, implement a fix, or start a phase in parallel with the review.
 
 ## Operational gates kept separate from code defects
 
-Even after Phase 11, production requires separate confirmation of current backups and restore
+Even after Phase 13, production requires separate confirmation of current backups and restore
 evidence, host capacity, installed trust/kernel identity, final CI revisions, signed release and
 staging evidence, owner authorization, and a maintenance window. Those are operational go/no-go
 inputs and must never be used to hide or waive a code defect.
