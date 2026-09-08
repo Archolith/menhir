@@ -42,19 +42,50 @@ all disposable-host and CI gates and receives a separate production decision.
 ## What went wrong
 
 The system does not need to be rebuilt from scratch. The current code has useful release,
-attestation, staging, backup, restore, health-check, and rollback primitives. The failure is that
-release meaning, approval, admission, locking, recovery, receipt adoption, and installation are
-interpreted in several Python, Bash, and PowerShell paths across multiple repositories.
+attestation, staging, backup, restore, health-check, and rollback primitives.
 
-That creates a predictable cycle:
+The failure has a specific, verifiable shape: **no schema enumerated the complete set of facts a
+piece of evidence must bind, so completeness was discovered one field per review cycle.** Each
+individual fix is correct. The set never converges, because a reviewer can always find one more
+unbound field and nothing defines when binding is finished.
 
-1. a review finds one path that can bypass or reinterpret an invariant;
-2. a local fix adds another guard or record;
-3. another path still has the old interpretation;
-4. the next full review reports a new P1 at that seam.
+Two independent ratchets in the branch history demonstrate this. Each is seven commits re-editing
+the same file, each adding exactly one more identity field or predicate:
 
-The remedy is not another full-system patch. Work must be reduced to small serial phases with one
-owner, one artifact set, one bounded review, and an enforced stop between phases.
+**Staging identity** (`deploy/personal_stage_vps.py`):
+
+| Commit | Added |
+|---|---|
+| `4cc70e4` | pull fresh images before inspection |
+| `8f7f1de` | verify every image before creating disposable state |
+| `20a6587` | bind the transferred image by image **ID** |
+| `a64f821` | bind **wheel-manifest SHA-256** labels |
+| `038aa08` | bind the **dockerfile wheel manifest SHA-256** |
+| `8f4846a` | bind the **CI image identity** record |
+| `5d212d1` | bind the **proxy image digest** and archive lineage |
+
+**Authority** (`deploy/personal_promote.ps1`, `deploy/scaffold/menhir_app_only.py`):
+
+| Commit | Added |
+|---|---|
+| `2fefd79` | harden the runner invocation |
+| `5b8db26` | check the runner **name**; read deployment class from release authority |
+| `b63fe7a` | bind the **runner SHA-256** |
+| `4787ebb` | bind the runner SHA-256 into the **transaction** for recovery |
+| `b94cc33` | add an **approval record** and a privileged-lane to root-runner mapping |
+| `d3b7f2f` | bind **bundle, release, and ingress container** identities |
+| `8489172` | add a **staging-receipt freshness** window |
+
+The commonly cited cause — the same rule interpreted differently in several Python, Bash, and
+PowerShell paths across repositories — is real and compounds the problem, but it is not what drove
+the churn. Ingress ownership, which earlier drafts of this status treated as the primary generator,
+accounts for two of roughly forty-six remediation commits; where it appears in the ratchet it is one
+bound field among many. It needed a decision ([ADR 0002](../adr/0002-menhir-production-ingress-ownership.md))
+because no amount of code could close it, but it was not the engine.
+
+The remedy is therefore not another full-system patch and not more careful review. It is a schema
+that declares the complete binding set **before** implementation, so that "is this evidence
+sufficiently bound?" has a mechanical answer instead of a reviewer's judgement.
 
 ## Architecture issue status
 
@@ -76,6 +107,20 @@ longer exists, which is why this plan previously reported five P1 and two P2 as 
 | P1 6 | Owner-key custody not a closed protocol | Closed | Owner key, signer, and trust-store contract — format, ACL, passphrase, key ID, enrollment, rotation overlap, revocation, loss and compromise |
 | P2 1 | Intake needs a post-copy source check | Closed | Intake step 7 — re-`fstat` every held source descriptor and re-enumerate the directory for the same name-to-inode set |
 | P2 2 | Canonical repository identities unowned | Closed | Canonical repository identity registry — closed five-row registry; the stale `ctharvey/archolith_oauth` metadata URL is explicitly non-authoritative |
+
+### Two closures are churn-critical
+
+P1 1 and P1 2 are not peers of the other six. They are the two that answer the question the ratchets
+above kept failing to answer: **what is the complete set of facts this evidence must bind?** P1 1
+gives each subject type one declared binding set; P1 2 gives each record a declared digest/binding
+rule, producer, and consumers.
+
+If those two binding sets are incomplete or wrong, the ratchet resumes on the first implementation
+phase that touches evidence, and no downstream gate will catch it — a reviewer will simply find one
+more unbound field, exactly as before. Everything else in the specification is downstream of them.
+
+Review them first and hardest. The specific test is not "is this section well written" but "can I
+name a fact that a real attacker or a real crash would need bound, that this binding set omits?"
 
 ### What closed does and does not mean
 
@@ -293,6 +338,10 @@ Give the reviewer the specification, ADR 0002, and this plan. Tell them explicit
 
 - the seven non-ADR closures were written on 2026-09-08 and preserved in Menhir commit `2a51408`;
   they are new and unreviewed, and are the intended focus;
+- **P1 1 and P1 2 carry the most weight.** They define the complete binding sets whose absence
+  produced the two ratchets in "What went wrong". Review them first, and judge them by whether a
+  fact that a real attacker or crash would need bound is missing from a binding set — not by
+  whether the prose is sound;
 - decisions recorded in the specification's closed-decisions table are out of scope. A finding that
   re-litigates one must be raised as a proposed ADR supersession, not filed as a defect;
 - findings must be scoped to the specification as written. Re-deriving the original review's issue
