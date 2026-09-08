@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-09-08 - Bind the complete deployment trust chain
+
+- Require release specification, authoring, and install-bundle construction to revalidate one CI
+  publication identity through the sealed image archive, Syft SBOM, Grype report, registry digest,
+  and immutable `release.json` publication binding.
+- Make digest-only GHCR references stage directly: export the exact resolved image ID through a
+  nonce-scoped temporary tag and reject transferred configuration or layer identity that differs
+  from the CI-bound release authority.
+- Create and hold a root-owned cross-lane maintenance admission fence before bootstrap or installer
+  mutation; preserve immutable approval, attempt, start, and completion chronology across crash
+  recovery and receipt adoption.
+- Add integrated tamper, substitution, concurrency, and pre-approval regression coverage; refresh
+  the exact Ansible scaffold-runner digest and deployment examples.
+
 ## 2026-09-07 - Make Menhir releases rehearsable and deployment-bound
 
 - Remediate the independent release audit: execute staging, scaffold, and maintenance payloads only

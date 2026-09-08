@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "release_id": "menhir-prod-0.2.0-9",
+  "release_id": "menhir-prod-0.2.0-14",
   "release_author": "release-operator@example.com",
   "ingress_mode": "cloudflared",
   "release_workspace_root": "C:\\absolute\\release-workspace",
@@ -13,7 +13,7 @@
   "images": {
     "menhir": {
       "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
-      "ref": "ghcr.io/archolith/menhir:0.2.0@sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      "ref": "ghcr.io/archolith/menhir@sha256:1111111111111111111111111111111111111111111111111111111111111111"
     },
     "neo4j": {
       "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
@@ -30,8 +30,12 @@
   },
   "evidence": {
     "wheelhouse": "C:\\absolute\\evidence\\wheelhouse",
-    "sbom": "C:\\absolute\\evidence\\sbom.json",
-    "scan": "C:\\absolute\\evidence\\scan.json"
+    "sbom": "C:\\absolute\\release-image-evidence\\sbom.syft.json",
+    "scan": "C:\\absolute\\release-image-evidence\\scan.grype.json",
+    "image_publication": "C:\\absolute\\release-image-publication.json",
+    "image_metadata": "C:\\absolute\\release-image-metadata.json",
+    "image_identity": "C:\\absolute\\release-image-identity.json",
+    "image_archive": "C:\\absolute\\release-image.tar"
   },
   "baseline_production_env": "C:\\absolute\\evidence\\production.env",
   "operations_policy": "C:\\absolute\\evidence\\menhir-oauth-policy.json",

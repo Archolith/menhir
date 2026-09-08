@@ -54,6 +54,20 @@ Out of scope:
    the new class-specific live preflight is then exercised independently against the unchanged host.
 6. Documentation names the current Cloudflared topology, the release-class decision, the expected
    operator commands, timing budgets, refusal states, and recovery handoff.
+7. Release authoring accepts only scanner and image evidence that is transitively bound to one
+   immutable CI publication identity. A digest, SBOM, or scan from another publication must fail
+   before release authority is written.
+8. The canonical digest-qualified image reference emitted by publication enters isolated staging
+   without operator reconstruction. Export is anchored to the resolved local image ID, and the VPS
+   verifies the archive's CI-bound configuration and layers rather than labels alone.
+9. Maintenance creates its root-owned transaction and acquires the same cross-lane admission fence
+   before the installer can mutate production. The fence remains held through installation, backup,
+   cutover, and acceptance, and every production lane refuses conflicting ownership.
+10. Maintenance receipts preserve immutable root start/completion timestamps and initiating
+    approval/promotion-attempt identity. Adoption never synthesizes chronology and rejects work that
+    predates approval or belongs to another attempt.
+11. Closure requires a fresh independent full-system audit after remediation. A focused or delta-only
+    review is useful during implementation but cannot establish release readiness.
 
 ## Proposed design
 
@@ -95,11 +109,15 @@ Extend the existing two state machines instead of adding a parallel deployer:
 
 - focused unit tests for release publication, fragment selection, resumability, confirmation derivation,
   and deployment-class preflight;
+- integrated negative tests for wrong-image scanner evidence, digest-only publication-to-staging,
+  mutable-tag substitution, maintenance mutation before admission, pre-approval adoption, and
+  cross-lane concurrency;
 - the complete deployment contract test group and routine unit suite;
 - artifact validation and changelog checks;
 - the retained successful isolated staging receipt for exact image 0.2.0-13 plus a fresh execution of
   the new read-only preflight against that unchanged production host;
 - read-only live infrastructure audit before and after the rehearsal.
+- a fresh independent full-system A-L audit of the exact final Menhir and shared-wrapper commits.
 
 ## Rehearsal result (2026-09-07)
 

@@ -123,10 +123,12 @@ it verifies ingress identity but does not require or mutate route assets. For ma
 rejects missing candidate files, directory-valued TLS paths, or fixed-IP collisions before any
 backup, fence, or writer shutdown.
 
-`/var/lib/menhir-production/release-run.json` is an unfinished maintenance
-transaction when its stage is not `complete`. A normal app-only deployment must refuse
-to start while such a transaction is active; the operator must reconcile or explicitly
-close that maintenance operation first.
+`/var/lib/menhir-production/release-run.json` is the root-owned maintenance transaction. It is
+created and bound to the owner-approved promotion attempt before the installer's first mutation,
+and its stage remains unfinished until final acceptance. Maintenance holds the same host-wide
+admission fence consulted by app-only and security-config for that entire interval. A normal
+deployment must refuse while another lane owns the fence; the operator must reconcile or explicitly
+close that operation first.
 
 Backups are a continuously maintained host invariant, not work recreated for every
 application release. Keep at least two age-encrypted generations under
@@ -265,14 +267,23 @@ PowerShell -File C:\Users\thron\IdeaProjects\scripts\deploy-menhir.ps1 `
   -ExpectedReleaseSha256 <release-json-digest> `
   -ExpectedIngressContainerId <container-id-from-staging-preflight> `
   -ExpectedRootRunnerSha256 <approved-root-runner-digest> `
+  -ApprovalSha256 <approval-file-digest> `
+  -ApprovedUtc <approval-utc> `
+  -PromotionAttemptId <persisted-promotion-attempt-id> `
+  -PromotionStartedUtc <persisted-promotion-start-utc> `
   -TransactionReceipt C:\absolute\empty-root-transaction-receipt.json
 ```
 
-An explicit bundle and its `bundle_sha256` from `release-flow.json` are required;
+These approval and attempt values normally come from `personal_deploy.py promote --execute`; do
+not invent or refresh them for a retry. An explicit bundle and its `bundle_sha256` from
+`release-flow.json` are required;
 timestamp-based discovery is not release authority. The personal promotion gate supplies both only
 after it verifies the exact staging receipt and owner approval.
 A repeated maintenance call resumes the exact release and generation from
-`/var/lib/menhir-production/release-run.json`; it never starts another release silently.
+`/var/lib/menhir-production/release-run.json`; it never starts another release silently. The
+journal preserves its original start/completion timestamps and initiating approval/promotion
+identity. A later promotion can adopt only that exact chronology and identity; it cannot relabel a
+pre-approval direct maintenance run as current work.
 
 The transaction reports eight named stages and stops at the first failed invariant:
 
@@ -445,7 +456,8 @@ address alone is not proof that the peer is Caddy.
 The desktop maintenance wrapper invokes the fixed `menhir_release_run()` operation;
 the app-only path never invokes it.
 
-The first stage captures the exact running legacy app and database container IDs,
+Before installation, the desktop gate creates the root-owned maintenance transaction and acquires
+the shared admission fence. The first release stage then captures the exact running legacy app and database container IDs,
 image IDs, Compose project/service labels, runtime mode, restart policies, networks, host
 machine identity, release ID, and release digest. While holding the shared host
 lock it quiesces the stack, creates and verifies the complete encrypted local backup,
@@ -513,5 +525,6 @@ dedicated bounded config/application transaction and ten-minute foreground budge
 classified `maintenance` changes always require the full state-protection path. Every successful
 promotion retains both the root transaction receipt and the outer approval/staging-bound receipt.
 If the desktop process dies after root completion, rerun the same promotion workspace: the wrapper
-adopts the release-bound root receipt and does not repeat production mutation. A completed recovery
+adopts the release-bound root receipt only when its immutable timestamps, approval, and promotion
+attempt match that workspace, and does not repeat production mutation. A completed recovery
 stage is finalized only; it is never replayed.

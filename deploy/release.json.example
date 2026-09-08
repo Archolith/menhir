@@ -31,6 +31,14 @@
     "caddy": "sha256:<64-lowercase-hex>",
     "base": "sha256:<64-lowercase-hex>"
   },
+  "image_publication": {
+    "publication_sha256": "<64-lowercase-hex>",
+    "validation_identity_sha256": "<64-lowercase-hex>",
+    "image_id": "sha256:<64-lowercase-hex>",
+    "config_sha256": "<64-lowercase-hex>",
+    "image_archive_sha256": "<64-lowercase-hex>",
+    "registry_digest": "<same-as-images.menhir>"
+  },
   "wheel_manifest_sha256": "<64-lowercase-hex>",
   "dockerfile_wheel_manifest_sha256": "<64-lowercase-hex>",
   "sbom_sha256": "<64-lowercase-hex>",

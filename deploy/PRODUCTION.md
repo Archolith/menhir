@@ -262,11 +262,15 @@ schema are unchanged. The previous app image/config must remain locally availabl
 during the observation window.
 
 The existing `release-run.sh` is the full `maintenance` transaction, not the routine
-app-only path. It accepts no arguments and holds a separate orchestration lock.
+app-only path. The owner-approved wrapper creates its root-owned journal and acquires the shared
+cross-lane admission fence before the installer can mutate production. Maintenance retains that
+ownership through installation, backup, cutover and acceptance; app-only and security-config
+consult the same authority and refuse while it is active.
 
-`release-run.sh` accepts no arguments and holds a separate orchestration lock.
-It records the exact release digest, generation, and completed stage in
-`/var/lib/menhir-production/release-run.json`.
+`release-run.sh` accepts no arguments. Its journal records the exact release digest, generation,
+completed stage, immutable root start/completion timestamps, and initiating approval and promotion
+attempt in `/var/lib/menhir-production/release-run.json`. Recovery and adoption preserve those
+values; they never synthesize a new chronology for earlier work.
 
 Its stages are:
 
