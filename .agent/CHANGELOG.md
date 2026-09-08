@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-09-08 - Replace the rejected architecture draft with a bounded recovery plan
+
+- Rewrite the active deployment plan as one concise current-status record: `NOT READY`, six open P1
+  architecture issues, two open P2 issues, and no implementation or production authority.
+- Make repository census and freeze the only eligible next phase. Separate protocol, compilers,
+  staging, authorize-only admission, fake-adapter transaction machinery, each real lane, bootstrap,
+  cross-repository contraction, and final acceptance into serial gates.
+- Require each phase to close its complete scope and P0-P2 review before the next phase receives a
+  commit; findings reopen their earliest owning phase instead of moving forward.
+
 ## 2026-09-08 - Reset deployment control-plane architecture
 
 - Reopen the control-plane execution plan from `REVIEWED` to `PROPOSED` after a later full-plan pass

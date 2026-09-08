@@ -14,7 +14,7 @@ This index routes the current execution owners listed below exactly once.
 
 | Document | Current ownership |
 |---|---|
-| [`menhir-deployment-control-plane-architecture-reset-2026-09-08.md`](menhir-deployment-control-plane-architecture-reset-2026-09-08.md) | `PROPOSED` and execution-blocked while the linked non-executable architecture specification closes and passes fresh review; only then may serial implementation phases be re-derived. |
+| [`menhir-deployment-control-plane-architecture-reset-2026-09-08.md`](menhir-deployment-control-plane-architecture-reset-2026-09-08.md) | Current `NOT READY` status, eight open architecture issues, and a serial recovery plan. Only the repository-census Phase 0 is eligible to start; all implementation remains blocked. |
 | [`menhir-core-promotion-restack-2026-08-31.md`](menhir-core-promotion-restack-2026-08-31.md) | Restack core-promotion PRs #11–#42 from the bottom branch, preserve tranche boundaries, and repair definition-scoped bounded recovery in tranches 5 and 9. |
 | [`menhir-research-execution-ladder.md`](menhir-research-execution-ladder.md) | Dependency-ordered research → code → bench sequence. Read-side rungs are closed; Track W6 is the remaining write-side rung. |
 | [`menhir-work-artifact-reconciliation-2026-08-11.md`](menhir-work-artifact-reconciliation-2026-08-11.md) | Add read-only corpus parity auditing, hash/Git-backed source reconciliation, bounded move detectors, and a separately approved live-graph repair. |
