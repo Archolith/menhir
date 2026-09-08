@@ -1,6 +1,6 @@
 # WRAPUP — Menhir deployment reliability
 
-**Date:** 2026-09-07  
+**Date:** 2026-09-08
 **Agent:** Codex  
 **Model:** gpt-5.6-sol  
 **Session:** unavailable  
@@ -8,10 +8,10 @@
 **Plan / Ticket:** C:\Users\thron\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion\.agent\plans\menhir-deployment-reliability-2026-09-07.md  
 **Worktree:** C:\Users\thron\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion  
 **Branch:** fix/deployment-reliability-20260907  
-**Commits:** 62a536854b69b25611ab70faea8ea080869ee824; 476f5efc944e64f8aa9ac5b9c0adae7f1590810c; 5b8db26d0f7649575b1f28d79425a6de96c5e65c; 06658b0693e4c4c8407bf5de2588894f7d653a31; fb62b5e35b72a3ef9f1f1be83eecff0a7cbf12e8; 409b6096d700ee1e1647c62b689485aedfbeb36d; f7f8475d6b58e4f7717a9fba5009b2890fde329f; d4ec1974fe150f0aa95060e2a5c97edaa678443e; shared operator scripts b2fbde79f0e43de798fd813c26c6e74cb277de7a
-**Verification Scope:** Menhir commits 62a5368 through d4ec197, shared operator-scripts commit b2fbde79, the installed scaffold receipt captured 2026-09-08T02:45:30Z, and the unchanged live 0.2.0-13 runtime checks recorded below
-**Docs Updated:** C:\Users\thron\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion\deploy\RELEASE_AUTOMATION.md; C:\Users\thron\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion\deploy\LIVE_VPS_PLAYBOOK.md; C:\Users\thron\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion\deploy\PRODUCTION.md; C:\Users\thron\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion\deploy\release.json.example; C:\Users\thron\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion\.agent\scripts-index.md  
-**Changelog Updated:** C:\Users\thron\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion\.agent\CHANGELOG.md
+**Commits:** Menhir 62a536854b69b25611ab70faea8ea080869ee824 through 4787ebbdd8fda4e1392a148d7c9f99bbab28fb4e, including audit remediations c616cb1ca21d1b376632e8cebf3b5d2a4199a793, b63fe7ae39933cd1eeccf542ca5609c50fcfaa65, and 4787ebbdd8fda4e1392a148d7c9f99bbab28fb4e; shared operator scripts b2fbde79f0e43de798fd813c26c6e74cb277de7a, 09b3748a061a79dd84b511e21b66503a0d3a11d1, and 819d86bce3e47704be064008dfa40961dd32c4f0
+**Verification Scope:** Menhir remediation diff 2f9f9b3e1d0dc31f9307c766383fa9f1722bb274..4787ebbdd8fda4e1392a148d7c9f99bbab28fb4e; shared wrapper diffs 09b3748a061a79dd84b511e21b66503a0d3a11d1^..819d86bce3e47704be064008dfa40961dd32c4f0; prior installed scaffold receipt and unchanged live 0.2.0-13 checks are historical evidence only and do not claim the new remediation commits are deployed
+**Docs Updated:** C:\Users\thron\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion\deploy\RELEASE_AUTOMATION.md; C:\Users\thron\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion\deploy\LIVE_VPS_PLAYBOOK.md; C:\Users\thron\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion\deploy\PRODUCTION.md; C:\Users\thron\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion\deploy\release.json.example; C:\Users\thron\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion\.agent\scripts-index.md; C:\Users\thron\IdeaProjects\scripts\README.md
+**Changelog Updated:** C:\Users\thron\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion\.agent\CHANGELOG.md; C:\Users\thron\IdeaProjects\.agent\CHANGELOG.md
 
 ---
 
@@ -25,10 +25,19 @@ requires a class-specific live preflight in the staging receipt. Current-generat
 rehearsal evidence is accepted by the readiness audit. The live app-only preflight and production
 health audit pass.
 
-A single independent acceptance audit was scoped to the implementation commits. Its three concrete
-findings were closed without reopening the broader audit: prepare now enforces generated release-label
-sequence, the coordinator refuses the incomplete direct VPS staging entry point, and the direct
-promotion gate derives mode from immutable authority and recomputes the preflight seal.
+The 2026-09-08 full independent Sol audit found twelve additional release-safety defects. Commit
+`c616cb1` remediates them by making classification positive-only, requiring published release
+authority, using fixed root-owned staging code and trusted install copies, enforcing cross-lane
+admission, publishing the exact CI-validated image with mandatory evidence, converging host/ingress
+state, and making promotions recoverable from completed root receipts.
+
+The first remediation re-audit found one remaining issue: app-only and security-config runner
+digests were compared only after production mutation. Commits `b63fe7a` and shared `819d86b` pass the
+approval-bound digest into every operator path and make the privileged runner verify itself before
+mutation; maintenance verifies both the trusted bundle copy and installed runner. The targeted
+re-audit then found recovery was also mutation-capable. Commit `4787ebb` makes recovery compare the
+current runner with the approved digest in the root-owned active transaction before rollback or
+rollforward. The same Sol reviewer returned `PASS` on that exact fix delta.
 
 Cloudflared is now the sole installed Menhir ingress authority; the duplicate Caddy route and both
 reconciliation units are retired. A dedicated ten-minute `security-config` transaction is installed
@@ -36,11 +45,13 @@ on the VPS. App-only, security-config, and maintenance promotions now retain a r
 receipt bound to the release, root runner, wrapper digests, elapsed time, and ingress/database
 identities. OAuth key rotation mechanically escalates to maintenance.
 
-This wrapup remains `PARTIAL` only because the mechanical wrapup validator is unavailable, the
-protected publication environment is not configured, and the shared operator-scripts commit cannot
-be safely pushed from a master branch that is 13 commits ahead and three behind its remote. The
-Menhir branch itself is pushed. The implementation and live control-plane rehearsal are complete;
-no new product release was invented merely to exercise a mutating cutover.
+This wrapup remains `PARTIAL` because the mechanical wrapup validator is unavailable, the protected
+publication environment is not configured, and the newly audited commits have not been pushed,
+merged, or installed on production. After this wrapup commit, the Menhir branch is four commits
+ahead of its remote. The shared workspace branch is fifteen commits ahead and three behind its
+remote, so the two shared
+wrapper commits must be reconciled without dragging unrelated history. No new product release was
+invented merely to exercise a mutating cutover.
 
 ## Files Changed
 
@@ -71,6 +82,14 @@ no new product release was invented merely to exercise a mutating cutover.
 | `deploy/scaffold/contract.production.json`, `deploy/scaffold/install.sh`, `deploy/scaffold/menhir-scaffold.sudoers` | Install, attest, and narrowly authorize both root runners. |
 | `deploy/ansible/**` | Converge bounded host prerequisites and verify them over SSH without owning application releases. |
 | `.github/workflows/release-image.yml` | Validate and publish release images with a protected environment and attestations. |
+| `deploy/build_release_image.py` | Carry the exact validated image archive and mandatory evidence into immutable publication without rebuilding. |
+| `deploy/changes/unreleased/staged-promotion-deployment.json` | Describe the audited release and personal-promotion behavior in generated release notes. |
+| `deploy/lib/validate_durable_inventory.py` | Keep the existing inventory validator lint-clean while the release checks exercise it. |
+| `deploy/personal_stage.ps1`, `deploy/personal_stage_vps.py` | Invoke a fixed root-owned staging runner, copy hostile inputs through no-follow descriptors, and prove exact Cloudflared non-interference. |
+| `deploy/ansible/group_vars/all.yml`, `deploy/ansible/roles/menhir_host/**`, `deploy/ansible/tests/test_host_state.py` | Converge trusted transaction directories, retired Caddy writers, and the exact audit service executable. |
+| `C:\Users\thron\IdeaProjects\scripts\deploy-menhir-app-only.ps1` | Fail closed on source classification and pass the approved runner digest into the privileged app transaction. |
+| `C:\Users\thron\IdeaProjects\scripts\deploy-menhir.ps1` | Execute maintenance only from a revalidated root-owned copy and gate the trusted/installed release runner before cutover. |
+| `C:\Users\thron\IdeaProjects\scripts\menhir-scaffold.ps1` | Install the complete scaffold, including the fixed staging runner, from a trusted root-owned copy. |
 | `tests/test_install_bundle_builder.py` | Cover authority/spec binding refusal. |
 | `tests/test_personal_deploy.py` | Cover rehearsal, preflight, legacy refusal, and derived confirmation behavior. |
 | `tests/test_personal_promote.py` | Cover PowerShell preflight promotion gates. |
@@ -79,6 +98,7 @@ no new product release was invented merely to exercise a mutating cutover.
 | `tests/test_release_flow.py` | Cover label generation, authority agreement, publication atomicity, drift, and recovery. |
 | `tests/test_scaffold_authority.py` | Cover current, stale, mismatched, and tampered rehearsal evidence. |
 | `tests/test_ansible_host_state.py`, `tests/test_deployment_contracts.py`, `tests/test_release_image_workflow.py`, `tests/test_release_spec.py` | Cover host convergence, Cloudflared authority, workflow permissions/attestations, and release classification. |
+| `tests/test_build_release_image.py`, `tests/test_build_install_bundle.py` | Cover exact-artifact publication and install-bundle bindings. |
 
 ## Verification
 
@@ -102,6 +122,16 @@ no new product release was invented merely to exercise a mutating cutover.
 - Public endpoint snapshot from the VPS — `PASS` — `/readyz` 200, OAuth metadata 200, unauthenticated `/mcp-http` 401.
 - Fresh full isolated 0.2.0-13 staging under the new coordinator — `NOT RUN` — 0.2.0-13 is a legacy authority and cannot be relabeled as a new immutable release; its retained exact-image staging receipt already passed all 17 behavioral checks and the new Cloudflared preflight passed separately.
 - Mechanical wrapup validator — `NOT RUN` — no `artifact_validate(artifact_type="wrapups")` tool is available in this harness; repository-wide artifact validation was run and is reported above.
+- First fresh Sol release audit of pre-remediation commit `2f9f9b3` — `FAIL` — 12 findings covering root execution authority, fail-open classification, publication identity, cross-lane admission, ingress/host convergence, and crash recovery.
+- Focused integrated remediation suite before the final runner-authority corrections — `PASS` — 199 passed, 4 skipped; subsequent delta suites are listed below.
+- Final integrated deployment suite — `FAIL (environment-limited)` — 284 passed, 7 skipped, one shell test could not traverse the Windows checkout through WSL and returned `E_ACCESSDENIED`; the changed shell scripts separately passed Git Bash syntax validation.
+- `python -m pytest -q --noconftest ... tests/test_scaffold_authority.py tests/test_personal_promote.py` after pre-mutation runner gating — `PASS` — 48 passed, zero failed.
+- Contract and personal-deployment suite excluding only the known WSL-mount test — `PASS` — 108 passed, 3 skipped, zero failed.
+- `python -m pytest -q --noconftest ... tests/test_scaffold_authority.py` after recovery gating — `PASS` — 44 passed, zero failed.
+- Targeted Ruff, `git diff --check`, Python compilation, Bash syntax, and PowerShell parser checks on the remediation surface — `PASS` — all checks passed.
+- Fresh Sol review of `2f9f9b3..c616cb1` plus shared `09b3748a` — `FAIL` — F6 remained partial because app/security runner identity was detected only after mutation.
+- Fresh Sol review of `c616cb1..b63fe7a` plus shared `09b3748a..819d86b` — `FAIL` — normal promotion was gated, but mutation-capable recovery had not rechecked runner identity.
+- Exact Sol re-review of `b63fe7a..4787ebb` — `PASS` — both recovery paths verify current runner bytes against the root-owned active transaction before rollback or rollforward, with tests directly proving mutation is not reached on mismatch.
 
 ## Claim Cross-Check
 
@@ -126,24 +156,38 @@ no new product release was invented merely to exercise a mutating cutover.
 
 ## Risks / Gaps
 
-1. The next genuine app-only or security-config release is still the first mutating use of the new
-   root receipt contract; unit, wrapper, scaffold, staging, rollback simulation, and live
-   non-interference checks passed, but no synthetic production release was created.
-2. The Menhir branch is remote-active, but PR creation/protected-environment configuration still
-   needs explicit external-publication authorization. Shared operator scripts commit `b2fbde79`
-   remains local because its master branch is 13 ahead and three behind `origin/master`.
-3. The repository artifact corpus has 22 pre-existing validation findings unrelated to this work.
-4. Unrestricted root/SSH remains the intentional recovery authority outside normal fail-closed paths.
+1. The newly reviewed remediation commits are not yet deployed. Production remains on its previously
+   verified scaffold until the branch is merged, a real release is published, and scaffold
+   convergence installs the newly hash-gated runners.
+2. The next genuine app-only or security-config release is still the first mutating use of the new
+   root receipt and pre-mutation runner contract; simulations and static checks passed, but no
+   synthetic production release was created.
+3. PR creation/protected-environment configuration remains outstanding. Shared operator scripts
+   must be reconciled from a master branch that is fifteen commits ahead and three behind its remote.
+4. The repository artifact corpus has 22 pre-existing validation findings unrelated to this work.
+5. Unrestricted root/SSH remains the intentional recovery authority outside normal fail-closed paths.
 
 ## Follow-Up Tasks
 
-1. Open the pushed Menhir branch as a PR and configure the protected
-   `menhir-release-publication` environment before enabling publication. Reconcile the shared
-   scripts repository separately, then publish commit `b2fbde79` without dragging unrelated commits.
-2. Use the documented `rehearse -> approve -> promote` path for the next real release and retain both
+1. Push/open the Menhir branch as a PR, reconcile the two shared wrapper commits without unrelated
+   workspace history, and configure the protected `menhir-release-publication` environment.
+2. After merge, run scaffold convergence and its read-only verification before the next release.
+3. Use the documented `rehearse -> approve -> promote` path for the next real release and retain both
    receipt files as the first mutating production evidence.
-3. Keep OAuth signing-key rotation in maintenance until a separate coordinated private/public-key
+4. Keep OAuth signing-key rotation in maintenance until a separate coordinated private/public-key
    rotation transaction is designed and rehearsed.
+
+## Review Findings
+
+- 2026-09-08, full fresh Sol audit: `FAIL`, twelve findings; remediated in `c616cb1` and shared
+  `09b3748a`.
+- 2026-09-08, fresh remediation-delta audit: `FAIL`, F6 partial because privileged runner identity
+  was checked after mutation; remediated in `b63fe7a` and shared `819d86b`.
+- 2026-09-08, targeted runner-gate audit: `FAIL`, recovery remained mutation-capable without a
+  self-hash check; remediated in `4787ebb`.
+- 2026-09-08, exact recovery-fix re-review: `PASS`, current runner identity is verified against the
+  root-owned active transaction before rollback or rollforward. No further finding was reported in
+  the scoped fix delta.
 
 ## Invariant Verification
 
