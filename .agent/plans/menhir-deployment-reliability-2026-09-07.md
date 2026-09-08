@@ -66,8 +66,25 @@ Out of scope:
 10. Maintenance receipts preserve immutable root start/completion timestamps and initiating
     approval/promotion-attempt identity. Adoption never synthesizes chronology and rejects work that
     predates approval or belongs to another attempt.
-11. Closure requires a fresh independent full-system audit after remediation. A focused or delta-only
-    review is useful during implementation but cannot establish release readiness.
+11. Closure requires focused local tests/static checks for each changed module and a green required
+    CI suite on the exact pushed commit. A full-system audit is exceptional and runs only when the
+    owner explicitly requests one; it is not an automatic or repeating release gate.
+12. Every privileged production mutator, including app-only and security-config, validates the
+    initiating approval, staging receipt, execution digests, promotion attempt, and chronology at the
+    root boundary. No directly callable sudo path can bypass that authority.
+13. Retry/adoption validates the currently live release, environment, images, approval, and attempt
+    while holding the shared locks. An older completed receipt can never report success after another
+    release has advanced production.
+14. Release and scaffold installation acquire the system admission fence before mutation and retain a
+    durable, crash-recoverable transaction. Retirement and unit changes are snapshotted before the first
+    write and are either restored exactly or rolled forward explicitly.
+15. Image provenance is anchored in verified CI attestations and canonical repository identity;
+    untracked working-tree inputs, unhashed dependency acquisition, and mutable evidence reads cannot
+    enter a release authority.
+16. A reviewed clean checkout exposes one executable, resumable infrastructure convergence path from
+    bootstrap privilege through installed runner verification, backup/rehearsal evidence, desktop
+    archive verification, and app-only admission. Check mode must describe real drift without requiring
+    the unapplied post-state.
 
 ## Proposed design
 
@@ -84,6 +101,33 @@ Extend the existing two state machines instead of adding a parallel deployer:
 - The production topology contract describes roles (ingress peer, application, database), not a stale
   assumption that the ingress peer must be Caddy. Maintenance route mutation is allowed only when the
   bundle and live host expose a compatible route transaction; otherwise it refuses before mutation.
+
+## Modular acceptance model
+
+The deployment system is reviewed and rehearsed as five bounded modules plus one integration gate.
+No module may infer or reconstruct authority owned by another module. Each module must validate its
+input, emit a versioned immutable output, and refuse before mutation when that contract is absent or
+inconsistent.
+
+| Module | Owns | Required input | Authoritative output |
+|---|---|---|---|
+| 1. Build and provenance | Clean-checkout image build, SBOM, vulnerability scan, registry publication | Reviewed source commit and pinned build inputs | CI publication document binding image ID, config, layers, scanners, archive, and registry digest |
+| 2. Publication and staging | Release authoring, install bundle, release-note publication, disposable VPS rehearsal | Complete Module 1 evidence and reviewed release inputs | Published release workspace, exact install bundle, and staging receipt bound to the release/bundle/image/preflight |
+| 3. Approval and promotion | Owner approval, immutable promotion attempt, desktop-to-root handoff | Published Module 2 state and passing staging receipt | Approval document plus promotion receipt importing the exact root transaction receipt |
+| 4. VPS transactions | Cross-lane admission, mutation serialization, backup, cutover, rollback, recovery | Module 3 approval/attempt binding and exact trusted bundle | Root-owned terminal transaction receipt with preserved chronology and runtime identities |
+| 5. Infrastructure convergence | Scaffold executables, sudoers, host directories, systemd policy, drift verification | Exact reviewed infrastructure checkout and explicit infrastructure operation | Root-owned scaffold receipt and read-only host verification |
+| 6. Integration gate | Interface compatibility and operator rehearsal across Modules 1-5 | Exact commits and all focused module test results | Green required CI on the exact pushed SHA and one clean-checkout, non-production rehearsal report |
+
+The shared production-admission fence is an interface owned jointly by Modules 4 and 5. Product
+transactions and infrastructure convergence must acquire the same exclusive fence before their first
+mutation and retain it until their terminal receipt or rollback is durable. A module-local lock is not
+sufficient evidence of system-wide serialization.
+
+Module reviews may run in parallel. Remediation and local tests remain scoped to the affected module.
+After push, required CI runs the complete suite on the integrated commit. CI failure is reproduced
+with the failing test and affected neighbors locally, then fixed and pushed as a new SHA; the full
+suite is not repeatedly run on the maintainer machine. A passing module test never overrides a
+failing integration gate.
 
 ## Alternatives considered
 
@@ -112,12 +156,47 @@ Extend the existing two state machines instead of adding a parallel deployer:
 - integrated negative tests for wrong-image scanner evidence, digest-only publication-to-staging,
   mutable-tag substitution, maintenance mutation before admission, pre-approval adoption, and
   cross-lane concurrency;
-- the complete deployment contract test group and routine unit suite;
+- focused deployment contract tests for every changed module, followed by the complete required CI
+  suite on the exact pushed commit;
 - artifact validation and changelog checks;
 - the retained successful isolated staging receipt for exact image 0.2.0-13 plus a fresh execution of
   the new read-only preflight against that unchanged production host;
 - read-only live infrastructure audit before and after the rehearsal.
-- a fresh independent full-system A-L audit of the exact final Menhir and shared-wrapper commits.
+- an independent full-system audit only if the owner explicitly requests one for exceptional risk.
+
+## Full-system audit disposition (2026-09-08)
+
+The independent audit of Menhir `1487247` and shared operator commit `2aded37e` returned `FAIL`.
+The findings are the remediation ledger; none may be waived by a passing component test.
+
+| Canonical blocker | Owning modules | Closure evidence required |
+|---|---|---|
+| P1-1 Fast-lane privileged boundaries do not enforce owner approval | 3, 4 | Direct invocation before approval and cross-attempt replay both refuse before mutation; root receipt binds approval and attempt |
+| P1-2 Caddy immutable image authority is lost before staging | 1 | `release.json` retains the digest-qualified reference; clean-host staging pulls and verifies the exact proxy image/container |
+| P1-3 Completed fast-lane receipts can be adopted after live state advances | 3, 4 | Adoption runs under both locks and rejects a receipt whose live release, environment, app, database, or ingress state is no longer current |
+| P1-4 Not every privileged mutator participates in the shared admission protocol | 4, 5 | Release install, scaffold install, Ansible convergence, app-only, security-config, and maintenance pass adversarial interleaving tests |
+| P1-5 Caddy retirement occurs outside release-install rollback | 4 | All retired files/routes/unit state are snapshotted and rollback is durably armed before the first disable/delete |
+
+The same audit recorded two P2s (unverified dependency-lock hashes and incomplete scaffold unit-state
+rollback) and one P3 (mtime-based bundle discovery contradicts the handbook). These historical
+findings define the remediation ledger; closure now depends on their focused regression evidence and
+required CI, not a repeating independent-audit loop.
+
+| ID | Priority | Owning module | Required remediation |
+|---|---:|---|---|
+| F1 | P1 | 3 / 4 | Make app-only and security-config root boundaries verify and persist owner approval, staging receipt, wrapper/runner identities, promotion attempt, and immutable chronology. |
+| F2 | P1 | 1 / 2 | Preserve the immutable Caddy repository digest reference through release authority and prove the staging proxy runs that exact image. |
+| F3 | P1 | 3 / 4 | Adopt a completed fast-lane receipt only under both locks and only while its exact release/environment/container state remains live. |
+| F4 | P1 | 4 / 5 | Require admission-before-mutation for release installation, scaffold installation, and Ansible convergence; a maintenance helper must prove the active binding. |
+| F5 | P1 | 4 | Snapshot and arm rollback for retired Caddy units/files/routes before the first retirement mutation, then verify restoration on failure. |
+| F6 | P2 | 1 | Retain package hashes from the lock through wheel download/build, including build-isolation dependencies and index authority. |
+| F7 | P2 | 5 | Either exactly restore every accepted systemd unit state or reject states the scaffold rollback cannot reproduce. |
+| F8 | P3 | 5 | Remove modification-time bundle selection; require the immutable bundle path explicitly. |
+
+Closure sequence: implement the disjoint module fixes, run focused adversarial tests and static checks
+per module, push the exact integrated commits, require green CI on those SHAs, and run one
+clean-checkout non-production rehearsal. Production, merge, and release remain prohibited until CI,
+rehearsal evidence, and the external infrastructure prerequisites are satisfied.
 
 ## Rehearsal result (2026-09-07)
 

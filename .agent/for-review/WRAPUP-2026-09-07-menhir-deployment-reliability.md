@@ -8,14 +8,34 @@
 **Plan / Ticket:** C:\Users\thron\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion\.agent\plans\menhir-deployment-reliability-2026-09-07.md
 **Worktree:** C:\Users\thron\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion
 **Branch:** fix/deployment-reliability-20260907
-**Commits:** Menhir 62a536854b69b25611ab70faea8ea080869ee824 through 4787ebbdd8fda4e1392a148d7c9f99bbab28fb4e, including audit remediations c616cb1ca21d1b376632e8cebf3b5d2a4199a793, b63fe7ae39933cd1eeccf542ca5609c50fcfaa65, and 4787ebbdd8fda4e1392a148d7c9f99bbab28fb4e; shared operator scripts b2fbde79f0e43de798fd813c26c6e74cb277de7a, 09b3748a061a79dd84b511e21b66503a0d3a11d1, and 819d86bce3e47704be064008dfa40961dd32c4f0
-**Verification Scope:** Menhir remediation diff 2f9f9b3e1d0dc31f9307c766383fa9f1722bb274..4787ebbdd8fda4e1392a148d7c9f99bbab28fb4e; shared wrapper diffs 09b3748a061a79dd84b511e21b66503a0d3a11d1^..819d86bce3e47704be064008dfa40961dd32c4f0; prior installed scaffold receipt and unchanged live 0.2.0-13 checks are historical evidence only and do not claim the new remediation commits are deployed
+**Commits:** Menhir 62a536854b69b25611ab70faea8ea080869ee824 through b94cc33, including modular remediation commits 5d212d1, 3f3f619, 3797047, 402745e, and b94cc33; shared operator scripts through cadeb28e; Yawn VPS compatibility fix 585f0ff
+**Verification Scope:** Focused local verification of every changed deployment module and its direct contracts; the complete suite is assigned to required CI on the exact pushed SHA under the revised local-testing policy. Live checks are read-only evidence for the unchanged 0.2.0-13 infrastructure and do not claim the remediated runners are installed.
 **Docs Updated:** C:\Users\thron\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion\deploy\RELEASE_AUTOMATION.md; C:\Users\thron\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion\deploy\LIVE_VPS_PLAYBOOK.md; C:\Users\thron\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion\deploy\PRODUCTION.md; C:\Users\thron\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion\deploy\release.json.example; C:\Users\thron\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion\.agent\scripts-index.md; C:\Users\thron\IdeaProjects\scripts\README.md
 **Changelog Updated:** C:\Users\thron\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion\.agent\CHANGELOG.md; C:\Users\thron\IdeaProjects\.agent\CHANGELOG.md
 
 ---
 
 ## Summary
+
+**Audit correction:** the earlier `PASS` below was only an exact fix-delta review. It was not a
+valid full-system acceptance result. A subsequent independent full audit invalidated that
+conclusion and found ten additional release-safety classes: timestamp reserialization, wrapper
+interface mismatch, missing pre-mutation release and ingress bindings, scaffold TOCTOU and
+non-transactional installation, untrusted scanner evidence, absent clean-checkout wheelhouse
+construction, mutation-capable completed-transaction recovery, retained root input payloads, and
+mutable-tag ambiguity. Commit `8e6adf1` and shared commit `857d8276` remediate those findings. A new
+independent full-system audit is required before this work can be called release-ready; a delta-only
+review is no longer accepted as the closing gate.
+
+The next full-system audit of Menhir `6a33d22` and shared `69ff1853` correctly returned `FAIL` with
+four P1 defects and two P2 coverage/documentation defects: scanner evidence was not transitively
+bound into release authority, digest-only publication output could not safely enter staging,
+maintenance mutation started before cross-lane admission, and maintenance adoption synthesized
+current chronology for older work. Commits `efb6974`, `8f4846a`, `d3b7f2f`, `572dccc`, `ae543f1`,
+and shared `076fe95f` close those contracts. Release specification, authoring, and bundle construction
+now revalidate one CI chain; staging compares the exact image/config/layers with immutable release
+authority; and maintenance persists owner approval/attempt/timestamps while a root-owned admission
+holder fences every lane before bootstrap or install mutation.
 
 The 0.2.0-11 through 0.2.0-13 deployment incident is reconstructed in a durable postmortem. The
 normal release path now generates the next label, binds deployment class and both generated
@@ -45,13 +65,17 @@ on the VPS. App-only, security-config, and maintenance promotions now retain a r
 receipt bound to the release, root runner, wrapper digests, elapsed time, and ingress/database
 identities. OAuth key rotation mechanically escalates to maintenance.
 
-This wrapup remains `PARTIAL` because the mechanical wrapup validator is unavailable, the protected
-publication environment is not configured, and the newly audited commits have not been pushed,
-merged, or installed on production. After this wrapup commit, the Menhir branch is four commits
-ahead of its remote. The shared workspace branch is fifteen commits ahead and three behind its
-remote, so the two shared
-wrapper commits must be reconciled without dragging unrelated history. No new product release was
-invented merely to exercise a mutating cutover.
+The final modular remediation closes the five P1, two P2, and one P3 items from the 2026-09-08 audit:
+immutable Caddy lineage survives staging, release installation and Caddy retirement are one durable
+transaction, every mutator shares admission, fast-lane approval/adoption is root-validated and
+live-state-bound, dependency provenance is pinned, scaffold rollback rejects unrestorable states,
+and bundle selection is explicit. These changes are in Menhir `5d212d1..b94cc33`, shared operator
+commit `cadeb28e`, and Yawn VPS commit `585f0ff`.
+
+This wrapup remains `PARTIAL` because required CI has not yet run on the unpushed integrated commits,
+the protected publication environment is not configured, and the remediated code has not been
+merged or installed on production. The shared workspace commits must be reconciled without dragging
+unrelated history. No new product release was invented merely to exercise a mutating cutover.
 
 ## Files Changed
 
@@ -101,6 +125,58 @@ invented merely to exercise a mutating cutover.
 | `tests/test_build_release_image.py`, `tests/test_build_install_bundle.py` | Cover exact-artifact publication and install-bundle bindings. |
 
 ## Verification
+
+- Revised local verification policy — focused tests and matching static checks run locally; required
+  CI owns the complete suite after push and blocks promotion until green on the exact release SHA.
+- Current modular remediation — `PASS` locally: promotion/admission 41 passed; staging 34 passed with
+  1 platform skip; release installer 49 passed with 2 skips; infrastructure contracts 113 passed
+  with 3 skips; release specification/authoring 60 passed with 1 skip; image builder 31 passed; image
+  workflow 18 passed. Ruff, Python compilation, both PowerShell parsers, Bash syntax, and diff checks
+  passed for their changed surfaces.
+- A complete local suite was intentionally stopped without a reported test failure when the owner
+  changed the standing policy. Required CI on the exact pushed commits is outstanding and is the
+  integration verdict; this wrapup does not claim that CI result in advance.
+
+- Final non-overlapping release/deployment matrix after the second full-audit remediation — `PASS`
+  — 481 passed, 8 platform skips, zero failed in 658.29 seconds. Fail-fast was enabled. The matrix
+  includes release flow/spec/authoring, CI publication evidence, install-bundle construction,
+  personal coordination/promotion/staging, all three root transaction lanes, scaffold/Ansible host
+  authority, backup/restore contracts, runtime surface, release notes, and production dependency pins.
+- The first integration attempt stopped at the first failing install-bundle schema bridge; the
+  focused file then passed 34 tests with 2 skips and a new post-authoring publication-tamper case
+  passed independently. The next full attempt stopped at the expected scaffold executable digest
+  guard after 358 passes; all three authoritative pins were regenerated, the local host contract
+  passed 12 tests, and the complete 481-test matrix was rerun from zero.
+- Focused publication/spec/author/bundle verification — `PASS` — 143 passed, 4 skips for the combined
+  release/spec/author/contract set; staging plus maintenance admission — `PASS` — 35 passed, 1 skip.
+- Final static checks at `1487247` — `PASS` — Ruff, Python compilation, Bandit high-severity scan,
+  Windows PowerShell 5 and PowerShell 7 parsing, Git Bash syntax, YAML parsing, JSON example parsing,
+  `git diff --check`, and branch gitleaks scan (24 commits, no leaks).
+- Full integrated deployment suite at Menhir `8e6adf1` — `PASS` — 340 passed, 6 platform skips,
+  zero failed in 519.40 seconds. This covers release flow/authoring, bundle construction, personal
+  coordination/promotion/staging, privileged scaffold authority, image evidence/publication, the
+  GitHub workflow contract, and deployment contracts.
+- Detached clean-checkout wheelhouse rehearsal at exact commit `8e6adf1` — `PASS` — frozen lock
+  export and offline-wheelhouse construction produced 93 wheels, including Menhir and both
+  commit-pinned Archolith dependencies, without access to the original worktree's untracked
+  wheelhouse. The disposable worktree was removed after verification.
+- Focused post-integration control-plane suite — `PASS` — 79 passed, 1 platform skip, zero failed.
+- Extended host/backup/restore/release-spec/playbook/dependency suite after correcting two stale
+  Caddy-era assertions to the Cloudflared-only contract — `PASS` — 78 passed, 2 platform skips,
+  zero failed. Production runtime surface — `PASS` — 36 passed. Scaffold API suite — `PASS` —
+  2 passed. The non-overlapping release/deployment total is 456 passed.
+- Ruff, Python compilation, PowerShell parsing for repository and shared wrappers, Git Bash syntax
+  for the transactional installer, YAML parsing, and `git diff --check` — `PASS`.
+- Bandit high-severity scan of the changed Python deployment surface — `PASS`; branch gitleaks scan
+  — `PASS`, no leaks found.
+- Real pinned Syft scan of the exact local Docker archive — `PASS` — the report identified the
+  exact candidate image and 190 packages. Real pinned Grype execution also identified the exact
+  candidate, loaded its vulnerability database, and correctly blocked the existing 0.2.0-13 image
+  because it currently has 8 Critical findings.
+- Read-only live infrastructure verification — `PASS` for current operations — scaffold static
+  verification passes, backup/archive/restore-drill evidence is current, app and Neo4j are healthy,
+  Cloudflared is running, the scaffold audit timer is active/enabled, `/readyz` and OAuth metadata
+  return 200, and unauthenticated `/mcp-http` returns 401.
 
 - `python -m pytest tests/test_release_flow.py tests/test_release_author.py tests/test_install_bundle_builder.py tests/test_personal_deploy.py tests/test_personal_promote.py tests/test_personal_stage_vps.py tests/test_scaffold_authority.py -q` with third-party plugin autoload disabled — `PASS` — 162 passed, 3 skipped, zero failed in 511.53 seconds.
 - `python -m pytest tests/test_personal_deploy.py -q` with third-party plugin autoload disabled after adding legacy-absence coverage — `PASS` — 20 passed, zero failed in 1.31 seconds.
@@ -156,20 +232,25 @@ invented merely to exercise a mutating cutover.
 
 ## Risks / Gaps
 
-1. The newly reviewed remediation commits are not yet deployed. Production remains on its previously
+1. The newly reviewed remediation commits are not yet deployed. The installed app/security/root
+   scaffold runner hashes predate the final `1487247` system, so scaffold convergence is a mandatory prerequisite before
+   the next promotion. Production remains on its previously
    verified scaffold until the branch is merged, a real release is published, and scaffold
    convergence installs the newly hash-gated runners.
 2. The next genuine app-only or security-config release is still the first mutating use of the new
    root receipt and pre-mutation runner contract; simulations and static checks passed, but no
    synthetic production release was created.
 3. PR creation/protected-environment configuration remains outstanding. Shared operator scripts
-   must be reconciled from a master branch that is fifteen commits ahead and three behind its remote.
+   must be reconciled from a master branch that is 19 commits ahead and three behind its remote.
 4. The repository artifact corpus has 22 pre-existing validation findings unrelated to this work.
 5. Unrestricted root/SSH remains the intentional recovery authority outside normal fail-closed paths.
+6. The current 0.2.0-13 application image has 8 Critical findings under the pinned current Grype
+   database. The new publication pipeline correctly refuses it; the next release must update the
+   affected base image or dependencies before it can pass the unchanged Critical gate.
 
 ## Follow-Up Tasks
 
-1. Push/open the Menhir branch as a PR, reconcile the two shared wrapper commits without unrelated
+1. Push/open the Menhir branch as a PR, reconcile the four shared deployment commits without unrelated
    workspace history, and configure the protected `menhir-release-publication` environment.
 2. After merge, run scaffold convergence and its read-only verification before the next release.
 3. Use the documented `rehearse -> approve -> promote` path for the next real release and retain both
@@ -178,6 +259,17 @@ invented merely to exercise a mutating cutover.
    rotation transaction is designed and rehearsed.
 
 ## Review Findings
+
+- The previous exact recovery-fix `PASS` was a delta verdict only and is explicitly withdrawn as a
+  full-system release-readiness claim.
+- 2026-09-08, independent full-system audit of Menhir `6a33d22` plus shared `69ff1853`:
+  `FAIL`, four P1 findings and two P2 findings covering unbound publication evidence, an unusable
+  digest-only staging handoff, maintenance mutation before admission, synthetic adoption chronology,
+  and missing integrated tests/docs. Remediated in the commits listed above.
+- 2026-09-08, independent full-system audit of Menhir `1487247` plus shared `2aded37e`: `FAIL` with
+  five P1, two P2, and one P3 findings. The modular remediation above addresses that ledger.
+- A further independent audit was canceled at the owner's direction. Under the revised policy it is
+  not a routine release requirement; required CI on the exact pushed SHA is the outstanding gate.
 
 - 2026-09-08, full fresh Sol audit: `FAIL`, twelve findings; remediated in `c616cb1` and shared
   `09b3748a`.
@@ -194,11 +286,12 @@ invented merely to exercise a mutating cutover.
 ```text
 Invariant: Every normal personal promotion of a Menhir product release must use the exact reviewed deployment class, generated changelog digests, passing class-specific production preflight, staging receipt, and owner approval bound to that release.
 Authority and refusal outcome: release.json plus release-flow/personal-deployment receipts; selection, staging, approval, or promotion exits nonzero before production mutation.
+Publication authority: release specification, final authoring, and install-bundle construction each revalidate the CI publication document, validation identity/metadata, sealed archive, Syft and Grype subjects, registry digest, and persisted release.json image_publication binding; any broken edge refuses before bundle or production mutation.
 System boundary: Menhir product release coordinator, release author/bundle builder, personal coordinator, desktop staging/promotion wrappers, VPS staging runner, scaffold readiness, app-only/security-config/maintenance root runners, and unrestricted root/SSH recovery administration.
 In-repo paths: release_flow prepare/finalize/publish, personal_deploy rehearse/approve/promote, personal_promote.ps1, personal_security_config.ps1, personal_stage_vps.py, menhir_app_only.py, menhir_security_config.py, release-run.sh, and menhir_scaffold.py; census based on source search because the structure index was stale.
 External paths: three committed shared desktop wrappers at b2fbde79 and root/SSH recovery administration; controls/evidence: fixed sudoers commands, root runner digests, owner approval, and live scaffold verification.
 Enforcement point: release_flow._verify_next_release_id, personal_deploy._release_binding and _validate_staging_receipt, plus personal_promote.ps1; required context: prior release ID, release/state digests, deployment class, changelog digests, preflight, staging receipt, and approval.
-Atomicity: release publication uses a nonce-bound staged directory and atomic renames; personal state uses atomic replacement; each production lane uses the host-wide lock, root-owned staged files, durable journals, and class-specific rollback.
+Atomicity: release publication uses a nonce-bound staged directory and atomic renames; personal state uses atomic replacement; each production lane acquires the same admission lock before its mutation lock, uses root-owned staged files and durable journals, and retains class-specific rollback. Maintenance starts a root-owned admission holder before bootstrap or installer mutation and preserves its immutable approval, attempt, start, and completion chronology through recovery/adoption.
 Accommodations: legacy release authorities remain readable by schema/audit but are refused for new personal selection; tested yes.
 NULL/absent behavior: missing current class, changelog, preflight, receipt, or approval fields fail closed; tested yes.
 Staging: exact 0.2.0-13 behavioral rehearsal retained; class-specific preflight and root classifiers are tested; the live scaffold update was rehearsed without replacing the running app.

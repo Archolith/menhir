@@ -22,6 +22,14 @@ writer fencing where the selected class requires it, and bounded rollback remain
 release containing several features is tested and reviewed as one candidate; a focused feature
 test is not evidence for unrelated changes shipping in the same image.
 
+On the maintainer machine, verification is limited to the tests and static checks relevant to the
+changed modules and their direct integration boundaries. The complete repository suite belongs to
+required CI after push and must pass on the exact commit used to build the release. A CI failure is
+reproduced with focused local tests, fixed, and pushed as a new commit; the full local suite is not
+used as a repetitive deployment gate. Production promotion is forbidden while required CI for the
+release SHA is absent, pending, or failing. A full-system audit is exceptional and owner-requested,
+not an automatic or repeating release step.
+
 ## Required release method
 
 Product publication and this owner's production deployment are two independent workflows with an

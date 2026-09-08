@@ -26,25 +26,22 @@ release trains. A deployment-tool, host, sibling-repository, database, or ingres
 selects `maintenance`; do not combine it with an otherwise routine application update and then
 expect the five-minute app-only path.
 
-### Release-readiness audit discipline
+### Local verification and CI ownership
 
-Release-engineering changes close only after this fixed sequence:
+Local verification is deliberately change-scoped. Run the affected tests for each changed module,
+its direct integration contracts, and the matching lint/static checks. Do not run the complete
+repository suite on the maintainer machine during routine implementation or deployment.
 
-1. run one independent full-system audit across product publication, every personal deployment
-   lane, root/scaffold authority, recovery, operator wrappers, documentation, and infrastructure
-   prerequisites;
-2. remediate every actionable finding against one pinned commit;
-3. run focused tests and fix-delta review while iterating, without treating either as the final
-   release-readiness verdict;
-4. rerun the complete test/rehearsal matrix; and
-5. give a fresh independent reviewer the entire integrated system at the final commit and require
-   a full-system verdict.
+After the reviewed commits are pushed, required CI owns the complete suite and records its result
+against the exact source SHA. Product publication and personal production promotion remain blocked
+until every required CI check for that SHA is green. If CI reports a failure, reproduce that failing
+test and its affected neighbors locally, fix them, and push a new SHA; CI then performs the next
+complete run. Do not compensate by repeatedly running the full suite locally.
 
-The final reviewer must not inherit a narrowed finding list or stop after confirming prior fixes.
-A delta-only `PASS` proves only that its named corrections work; it cannot authorize merge,
-scaffold convergence, publication, or production promotion. If the final full audit finds another
-issue, repair it and repeat steps 4-5 once against the new pinned commit. Audit and test loops do
-not create new product versions unless product bytes or immutable release evidence changed.
+Independent full-system audits are not a routine release step and must not start automatically or
+repeat as a remediation loop. Run one only when the owner explicitly requests it for an exceptional
+system-wide risk. Normal review remains risk-scaled: ordinary source review plus CI for application
+changes, and the security review described below for sensitive release surfaces.
 
 Before an owner is asked to approve promotion, product publication must archive the current release's exact
 fragments, bind deployment class/changelog/source/image identity, complete exact-image staging with
@@ -321,7 +318,8 @@ or promotion.
    staging or production rehearsal reuses the same immutable label. `prepare` independently verifies
    that this is the generated next label and refuses skipped sequences or version regressions.
 2. Commit and push every repository included in the release. Each checkout
-   must be clean and at an exact remote-tracking tip.
+   must be clean and at an exact remote-tracking tip. Wait for the required CI suite on each exact
+   source SHA; do not continue to release preparation while any required check is missing or red.
 3. Add one JSON change fragment under `deploy/changes/unreleased/` for every
    production-impacting change. See [changes/README.md](changes/README.md).
 4. Produce the immutable image references and the complete CI publication set:
