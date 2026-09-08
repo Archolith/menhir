@@ -97,7 +97,10 @@ def test_compose_override_uses_only_disposable_root_and_exact_image_digests(
             "menhir": "sha256:" + "1" * 64,
             "neo4j": "sha256:" + "2" * 64,
             "caddy": "sha256:" + "3" * 64,
-        }
+        },
+        "image_refs": {
+            "caddy": "caddy:2.10.2-alpine@sha256:" + "3" * 64,
+        },
     }
 
     base, override = MODULE._compose_files(
@@ -111,7 +114,7 @@ def test_compose_override_uses_only_disposable_root_and_exact_image_digests(
 
     assert base == compose.resolve()
     assert release["images"]["menhir"] in text
-    assert release["images"]["caddy"] in text
+    assert release["image_refs"]["caddy"] in text
     assert str(root.resolve()) in text
     assert "/srv/menhir/production/state" not in text
     assert "127.0.0.1::443" in text
@@ -234,15 +237,21 @@ def test_transferred_private_image_verifies_published_identity_config_and_layers
     }), encoding="utf-8")
     archive = tmp_path / "menhir-image.tar"
     archive.write_bytes(b"archive")
+    archive_sha256 = MODULE._sha256(archive)
+    export_inspections = 0
 
     def fake_run(*args: str, **kwargs: object) -> SimpleNamespace:
+        nonlocal export_inspections
         calls.append(args)
         if args[:2] == ("docker", "load") or args[:3] == ("docker", "image", "rm"):
             return SimpleNamespace(returncode=0, stdout="")
-        return SimpleNamespace(
-            returncode=0,
-            stdout=json.dumps([{"Id": expected_id, "Config": config, "RootFS": rootfs}]),
-        )
+        assert args == ("docker", "image", "inspect", export_tag)
+        export_inspections += 1
+        if export_inspections == 1:
+            return SimpleNamespace(returncode=1, stdout="")
+        return SimpleNamespace(returncode=0, stdout=json.dumps([{
+            "Id": expected_id, "Config": config, "RootFS": rootfs,
+        }]))
 
     monkeypatch.setattr(MODULE, "_run", fake_run)
     environment = {"MENHIR_IMAGE": menhir}
@@ -258,7 +267,7 @@ def test_transferred_private_image_verifies_published_identity_config_and_layers
                 "config_sha256": MODULE._canonical_json_sha256(config),
                 "validation_identity_sha256": "8" * 64,
                 "publication_sha256": "9" * 64,
-                "image_archive_sha256": "0" * 64,
+                "image_archive_sha256": archive_sha256,
                 "registry_digest": "sha256:" + "1" * 64,
             },
             "repos": {"menhir": commit},
@@ -271,24 +280,26 @@ def test_transferred_private_image_verifies_published_identity_config_and_layers
     assert imported_tag == export_tag
     assert environment["MENHIR_IMAGE"] == expected_id
     assert calls == [
+        ("docker", "image", "inspect", export_tag),
         ("docker", "load", "--input", str(archive)),
-        ("docker", "image", "inspect", expected_id),
+        ("docker", "image", "inspect", export_tag),
     ]
 
 
 @pytest.mark.parametrize(
     ("field", "replacement", "message"),
     (
+        ("Id", "sha256:" + "8" * 64, "ID differs"),
         ("Config", {"Labels": {}}, "config differs"),
         ("RootFS", {"Type": "layers", "Layers": ["sha256:" + "8" * 64]},
          "layers differ"),
     ),
 )
-def test_transferred_private_image_rejects_config_or_layer_substitution_and_cleans_tag(
+def test_transferred_private_image_rejects_identity_substitution_and_cleans_tag(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     field: str,
-    replacement: dict[str, object],
+    replacement: object,
     message: str,
 ) -> None:
     image_id = "sha256:" + "4" * 64
@@ -312,10 +323,19 @@ def test_transferred_private_image_rejects_config_or_layer_substitution_and_clea
     }), encoding="utf-8")
     archive = tmp_path / "menhir-image.tar"
     archive.write_bytes(b"archive")
+    archive_sha256 = MODULE._sha256(archive)
     calls: list[tuple[str, ...]] = []
+    export_inspections = 0
 
     def fake_run(*args: str, **_kwargs: object) -> SimpleNamespace:
+        nonlocal export_inspections
         calls.append(args)
+        if args[:2] == ("docker", "load") or args[:3] == ("docker", "image", "rm"):
+            return SimpleNamespace(returncode=0, stdout="")
+        assert args == ("docker", "image", "inspect", export_tag)
+        export_inspections += 1
+        if export_inspections == 1:
+            return SimpleNamespace(returncode=1, stdout="")
         observed = {"Id": image_id, "Config": config, "RootFS": rootfs}
         observed[field] = replacement
         return SimpleNamespace(returncode=0, stdout=json.dumps([observed]))
@@ -329,7 +349,7 @@ def test_transferred_private_image_rejects_config_or_layer_substitution_and_clea
             "config_sha256": MODULE._canonical_json_sha256(config),
             "validation_identity_sha256": "8" * 64,
             "publication_sha256": "9" * 64,
-            "image_archive_sha256": "0" * 64,
+            "image_archive_sha256": archive_sha256,
             "registry_digest": digest,
         },
         "repos": {"menhir": "a" * 40},
@@ -342,6 +362,178 @@ def test_transferred_private_image_rejects_config_or_layer_substitution_and_clea
             archive, identity, MODULE._sha256(identity), environment, release,
         )
     assert calls[-1] == ("docker", "image", "rm", export_tag)
+
+
+def _lineage_fixture(tmp_path: Path) -> dict[str, object]:
+    image_id = "sha256:" + "4" * 64
+    digest = "sha256:" + "1" * 64
+    export_tag = "menhir-stage-export:" + "7" * 32
+    labels = {
+        "org.opencontainers.image.revision": "a" * 40,
+        "org.archolith.menhir.wheel-manifest.sha256": "b" * 64,
+        "org.archolith.oauth.wheel.sha256": "c" * 64,
+    }
+    config = {"Labels": labels, "Env": ["PATH=/usr/local/bin"]}
+    rootfs = {"Type": "layers", "Layers": ["sha256:" + "6" * 64]}
+    archive = tmp_path / "menhir-image.tar"
+    archive.write_bytes(b"archive presented to docker load")
+    identity = tmp_path / "menhir-image-identity.json"
+    identity.write_text(json.dumps({
+        "schema": 1,
+        "image_ref": "ghcr.io/archolith/menhir@" + digest,
+        "image_id": image_id,
+        "export_tag": export_tag,
+        "config": config,
+        "rootfs": rootfs,
+    }), encoding="utf-8")
+    return {
+        "archive": archive,
+        "identity": identity,
+        "environment": {"MENHIR_IMAGE": "ghcr.io/archolith/menhir@" + digest},
+        "export_tag": export_tag,
+        "image_id": image_id,
+        "observed": {"Id": image_id, "Config": config, "RootFS": rootfs},
+        "release": {
+            "images": {"menhir": digest},
+            "image_publication": {
+                "image_id": image_id,
+                "config_sha256": MODULE._canonical_json_sha256(config),
+                "validation_identity_sha256": "8" * 64,
+                "publication_sha256": "9" * 64,
+                "image_archive_sha256": MODULE._sha256(archive),
+                "registry_digest": digest,
+            },
+            "repos": {"menhir": "a" * 40},
+            "dockerfile_wheel_manifest_sha256": "b" * 64,
+            "oauth_wheel_sha256": "c" * 64,
+        },
+    }
+
+
+def test_transferred_archive_rejects_preexisting_randomized_export_tag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _lineage_fixture(tmp_path)
+    calls: list[tuple[str, ...]] = []
+
+    def fake_run(*args: str, **_kwargs: object) -> SimpleNamespace:
+        calls.append(args)
+        assert args == ("docker", "image", "inspect", fixture["export_tag"])
+        return SimpleNamespace(returncode=0, stdout=json.dumps([fixture["observed"]]))
+
+    monkeypatch.setattr(MODULE, "_run", fake_run)
+    with pytest.raises(MODULE.StageError, match="existed before archive load"):
+        MODULE._load_transferred_menhir(
+            fixture["archive"],
+            fixture["identity"],
+            MODULE._sha256(fixture["identity"]),
+            fixture["environment"],
+            fixture["release"],
+        )
+    assert calls == [("docker", "image", "inspect", fixture["export_tag"])]
+
+
+def test_unrelated_archive_fails_even_when_expected_image_preexists(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _lineage_fixture(tmp_path)
+    calls: list[tuple[str, ...]] = []
+    export_inspections = 0
+
+    def fake_run(*args: str, **_kwargs: object) -> SimpleNamespace:
+        nonlocal export_inspections
+        calls.append(args)
+        if args == ("docker", "image", "inspect", fixture["export_tag"]):
+            export_inspections += 1
+            return SimpleNamespace(returncode=1, stdout="")
+        if args == ("docker", "load", "--input", str(fixture["archive"])):
+            return SimpleNamespace(returncode=0, stdout="Loaded unrelated image\n")
+        if args == ("docker", "image", "inspect", fixture["image_id"]):
+            return SimpleNamespace(returncode=0, stdout=json.dumps([fixture["observed"]]))
+        if args == ("docker", "image", "rm", fixture["export_tag"]):
+            return SimpleNamespace(returncode=1, stdout="")
+        raise AssertionError(args)
+
+    monkeypatch.setattr(MODULE, "_run", fake_run)
+    with pytest.raises(MODULE.StageError, match="did not introduce its export tag"):
+        MODULE._load_transferred_menhir(
+            fixture["archive"],
+            fixture["identity"],
+            MODULE._sha256(fixture["identity"]),
+            fixture["environment"],
+            fixture["release"],
+        )
+    assert export_inspections == 2
+    assert ("docker", "image", "inspect", fixture["image_id"]) not in calls
+
+
+def test_missing_caddy_is_pulled_by_immutable_reference_and_verified(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    digest = "sha256:" + "3" * 64
+    reference = "caddy:2.10.2-alpine@" + digest
+    calls: list[tuple[str, ...]] = []
+
+    def fake_run(*args: str, **_kwargs: object) -> SimpleNamespace:
+        calls.append(args)
+        if args == ("docker", "image", "inspect", reference):
+            return SimpleNamespace(returncode=1, stdout="")
+        if args == ("docker", "pull", reference):
+            return SimpleNamespace(returncode=0, stdout="")
+        raise AssertionError(args)
+
+    monkeypatch.setattr(MODULE, "_run", fake_run)
+    monkeypatch.setattr(MODULE, "_inspect_image", lambda value: {
+        "Id": "sha256:" + "4" * 64,
+        "RepoDigests": [value],
+    })
+
+    assert MODULE._verified_digest_image(reference, digest, "Caddy") \
+        == "sha256:" + "4" * 64
+    assert calls == [
+        ("docker", "image", "inspect", reference),
+        ("docker", "pull", reference),
+    ]
+
+
+def test_caddy_pull_rejects_repository_digest_substitution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    digest = "sha256:" + "3" * 64
+    reference = "caddy:2.10.2-alpine@" + digest
+    monkeypatch.setattr(
+        MODULE,
+        "_run",
+        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout=""),
+    )
+    monkeypatch.setattr(MODULE, "_inspect_image", lambda _value: {
+        "Id": "sha256:" + "4" * 64,
+        "RepoDigests": ["caddy@sha256:" + "5" * 64],
+    })
+
+    with pytest.raises(MODULE.StageError, match="requested RepoDigest"):
+        MODULE._verified_digest_image(reference, digest, "Caddy")
+
+
+def test_transferred_archive_must_match_ci_publication_digest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _lineage_fixture(tmp_path)
+    fixture["release"]["image_publication"]["image_archive_sha256"] = "0" * 64
+    monkeypatch.setattr(
+        MODULE,
+        "_run",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("Docker called")),
+    )
+
+    with pytest.raises(MODULE.StageError, match="archive differs from CI publication"):
+        MODULE._load_transferred_menhir(
+            fixture["archive"],
+            fixture["identity"],
+            MODULE._sha256(fixture["identity"]),
+            fixture["environment"],
+            fixture["release"],
+        )
 
 
 @pytest.mark.parametrize(
@@ -382,6 +574,7 @@ def test_locally_forged_identity_with_expected_labels_is_rejected_by_release_aut
     }), encoding="utf-8")
     archive = tmp_path / "menhir-image.tar"
     archive.write_bytes(b"self-consistent forged archive")
+    archive_sha256 = MODULE._sha256(archive)
     environment = {
         "MENHIR_IMAGE": "ghcr.io/archolith/menhir@" + registry_digest,
     }
@@ -392,7 +585,7 @@ def test_locally_forged_identity_with_expected_labels_is_rejected_by_release_aut
             "config_sha256": MODULE._canonical_json_sha256(ci_config),
             "validation_identity_sha256": "8" * 64,
             "publication_sha256": "9" * 64,
-            "image_archive_sha256": "0" * 64,
+            "image_archive_sha256": archive_sha256,
             "registry_digest": registry_digest,
         },
         "repos": {"menhir": "a" * 40},

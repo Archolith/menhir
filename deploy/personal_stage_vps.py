@@ -47,6 +47,12 @@ STAGING_SUBJECT = "menhir-admin"
 STAGING_NAMESPACE = "menhir-staging"
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 IMAGE_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+IMAGE_REF_RE = re.compile(
+    r"^[a-z0-9]+(?:[._-][a-z0-9]+)*(?::[0-9]+)?"
+    r"(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)*"
+    r"(?::[A-Za-z0-9][A-Za-z0-9._-]{0,127})?"
+    r"@sha256:[0-9a-f]{64}$"
+)
 EXPORT_TAG_RE = re.compile(r"^menhir-stage-export:[0-9a-f]{32}$")
 RELEASE_ID_RE = re.compile(r"^menhir-prod-[0-9]+\.[0-9]+\.[0-9]+-[0-9]+$")
 UPLOAD_ID_RE = re.compile(r"^[0-9a-f]{32}$")
@@ -483,6 +489,7 @@ def _validate_bundle(
         for name in ("menhir", "neo4j", "caddy")
     ):
         raise StageError("release image authority is invalid")
+    _caddy_image_ref(release)
     env_path = bundle / "rootfs/srv/menhir/production/release/production.env"
     environment = _parse_env(env_path.resolve())
     for name, key in (("menhir", "MENHIR_IMAGE"), ("neo4j", "NEO4J_IMAGE")):
@@ -689,7 +696,7 @@ def _compose_files(
         target: /probe/fake_openai.py
         read_only: true
   staging-proxy:
-    image: "{release['images']['caddy']}"
+    image: "{_caddy_image_ref(release)}"
     container_name: menhir-stage-{root.name}-proxy
     restart: "no"
     mem_limit: 256m
@@ -1601,8 +1608,11 @@ def _todo_persists(port: int, token: str, unique: str) -> None:
 def _runtime_contract(root: Path, runtime_images: dict[str, str], subnet: str) -> None:
     app = _inspect(f"menhir-stage-{root.name}-app")
     neo4j = _inspect(f"menhir-stage-{root.name}-neo4j")
+    proxy = _inspect(f"menhir-stage-{root.name}-proxy")
     if app.get("Image") != runtime_images["menhir"] \
-            or neo4j.get("Image") != runtime_images["neo4j"]:
+            or neo4j.get("Image") != runtime_images["neo4j"] \
+            or proxy.get("Image") != runtime_images["caddy"] \
+            or proxy.get("Config", {}).get("Image") != runtime_images["caddy_ref"]:
         raise StageError("staging containers differ from release image authority")
     if app.get("HostConfig", {}).get("Memory") != 2 * 1024**3 \
             or neo4j.get("HostConfig", {}).get("Memory") != 4 * 1024**3:
@@ -1621,9 +1631,9 @@ def _runtime_contract(root: Path, runtime_images: dict[str, str], subnet: str) -
         raise StageError("staging proxy network shape differs from its contract")
 
 
-def _inspect_image(reference: str) -> dict[str, Any]:
+def _decode_image_inspection(reference: str, output: str) -> dict[str, Any]:
     try:
-        value = json.loads(_run("docker", "image", "inspect", reference).stdout)
+        value = json.loads(output)
     except json.JSONDecodeError as exc:
         raise StageError(f"image inspection is invalid: {reference}") from exc
     if not isinstance(value, list) or len(value) != 1 \
@@ -1633,6 +1643,37 @@ def _inspect_image(reference: str) -> dict[str, Any]:
     if not isinstance(identity, str) or IMAGE_RE.fullmatch(identity) is None:
         raise StageError(f"image ID is invalid: {reference}")
     return value[0]
+
+
+def _inspect_image(reference: str) -> dict[str, Any]:
+    output = _run("docker", "image", "inspect", reference).stdout
+    return _decode_image_inspection(reference, output)
+
+
+def _caddy_image_ref(release: dict[str, Any]) -> str:
+    images = release.get("images")
+    image_refs = release.get("image_refs")
+    digest = images.get("caddy") if isinstance(images, dict) else None
+    reference = image_refs.get("caddy") if isinstance(image_refs, dict) else None
+    if not isinstance(digest, str) or IMAGE_RE.fullmatch(digest) is None \
+            or not isinstance(reference, str) \
+            or IMAGE_REF_RE.fullmatch(reference) is None \
+            or not reference.endswith("@" + digest):
+        raise StageError("release Caddy image reference is not immutable and digest-bound")
+    return reference
+
+
+def _verified_digest_image(reference: str, digest: str, label: str) -> str:
+    if _run("docker", "image", "inspect", reference, check=False).returncode != 0:
+        _run("docker", "pull", reference)
+    observed = _inspect_image(reference)
+    repo_digests = observed.get("RepoDigests")
+    if not isinstance(repo_digests, list) or not any(
+        isinstance(value, str) and value.endswith("@" + digest)
+        for value in repo_digests
+    ):
+        raise StageError(f"{label} image is not bound to its requested RepoDigest")
+    return observed["Id"]
 
 
 def _release_image_publication(release: dict[str, Any]) -> dict[str, str]:
@@ -1707,10 +1748,19 @@ def _load_transferred_menhir(
         raise StageError("transferred Menhir image ID differs from CI publication identity")
     if _canonical_json_sha256(config) != publication["config_sha256"]:
         raise StageError("transferred Menhir image config differs from CI publication identity")
+    _safe_file(archive, "transferred Menhir image archive")
+    if _sha256(archive) != publication["image_archive_sha256"]:
+        raise StageError("transferred Menhir image archive differs from CI publication identity")
 
-    _run("docker", "load", "--input", str(archive), timeout=600)
+    before = _run("docker", "image", "inspect", export_tag, check=False)
+    if before.returncode == 0:
+        raise StageError("transferred Menhir export tag existed before archive load")
     try:
-        observed = _inspect_image(image_id)
+        _run("docker", "load", "--input", str(archive), timeout=600)
+        loaded = _run("docker", "image", "inspect", export_tag, check=False)
+        if loaded.returncode != 0:
+            raise StageError("transferred Menhir archive did not introduce its export tag")
+        observed = _decode_image_inspection(export_tag, loaded.stdout)
         if observed.get("Id") != image_id:
             raise StageError("transferred Menhir image ID differs from published identity")
         if observed.get("Config") != config:
@@ -1746,11 +1796,15 @@ def _ensure_images(
     neo4j = source_environment["NEO4J_IMAGE"]
     if _run("docker", "image", "inspect", neo4j, check=False).returncode != 0:
         _run("docker", "pull", neo4j)
+    caddy_ref = _caddy_image_ref(release)
 
     runtime_images = {
         "menhir": menhir_image_id,
         "neo4j": _inspect_image(neo4j)["Id"],
-        "caddy": _inspect_image(release["images"]["caddy"])["Id"],
+        "caddy": _verified_digest_image(
+            caddy_ref, release["images"]["caddy"], "Caddy",
+        ),
+        "caddy_ref": caddy_ref,
     }
     return runtime_images
 
