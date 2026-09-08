@@ -4,7 +4,8 @@
 
 - Remediate the independent release audit: execute staging, scaffold, and maintenance payloads only
   from root-owned transaction copies; bind approval and promotion to fixed operator and root-runner
-  hashes; recover promotions from completed transaction receipts instead of repeating mutation.
+  hashes; make each privileged runner verify its approved digest before mutation; recover promotions
+  from completed transaction receipts instead of repeating mutation.
 - Make deployment classification fail closed, require published release authority, enforce
   cross-lane transaction admission, compare the exact Cloudflared identity, and converge retired
   Caddy writers plus the exact scaffold-audit executable before enabling its timer.

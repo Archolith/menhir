@@ -246,3 +246,10 @@ def test_promotion_gate_refuses_mode_downgrade_from_release_authority(
     assert result.returncode != 0
     assert "mode differs from the immutable release authority" in result.stderr
     assert not result_path.exists()
+
+
+def test_promotion_passes_approved_root_runner_to_operator_wrapper() -> None:
+    text = WRAPPER.read_text(encoding="utf-8")
+
+    invocation = text[text.index("& $operatorWrapper"):text.index("$powerShellSucceeded")]
+    assert "-ExpectedRootRunnerSha256 $ExpectedRootRunnerSha256" in invocation

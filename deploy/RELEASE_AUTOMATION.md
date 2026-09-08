@@ -213,6 +213,10 @@ coordinator. Owner approval and the promotion receipt bind the release, bundle, 
 promotion wrapper digest, selected operator-wrapper digest, root-runner digest, deployment class,
 ingress mode, attempt identity, and timing. These executables have fixed paths: environment or CLI
 substitution of the promotion wrapper, operator wrapper, or root runner is forbidden. App-only has
+a root-runner digest argument that the fixed privileged executable verifies against its own bytes
+before taking the transaction lock; security-config enforces the same pre-mutation gate, and
+maintenance verifies the trusted bundle copy before installing or invoking its release runner.
+A valid receipt repeats the same runner binding as completion evidence. App-only has
 a 300-second foreground budget and security-config has a 600-second foreground budget. Maintenance
 is resumable and has no short foreground budget. A wrapper that exits zero without writing the
 exact receipt is a failed promotion.

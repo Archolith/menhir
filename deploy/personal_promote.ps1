@@ -346,7 +346,8 @@ if (-not $adoptExistingTransaction) {
     $global:LASTEXITCODE = 0
     & $operatorWrapper -Mode $Mode -BundlePath $bundle `
         -ExpectedBundleSha256 $ExpectedBundleSha256 -Release $Release `
-        -SourceRepository $SourceRepository -TransactionReceipt $TransactionReceipt
+        -SourceRepository $SourceRepository -ExpectedRootRunnerSha256 $ExpectedRootRunnerSha256 `
+        -TransactionReceipt $TransactionReceipt
     $powerShellSucceeded = $?
     if (-not $powerShellSucceeded -or $LASTEXITCODE -ne 0) {
         throw "Menhir production transaction failed."

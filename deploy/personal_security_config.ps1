@@ -6,6 +6,7 @@ param(
     [Parameter(Mandatory = $true)][string]$ExpectedBundleSha256,
     [Parameter(Mandatory = $true)][string]$Release,
     [Parameter(Mandatory = $true)][string]$SourceRepository,
+    [Parameter(Mandatory = $true)][ValidatePattern('^[0-9a-f]{64}$')][string]$ExpectedRootRunnerSha256,
     [Parameter(Mandatory = $true)][string]$TransactionReceipt
 )
 
@@ -161,14 +162,15 @@ try {
     & $sshScript "chmod 0700 '$remoteBundle' && chmod 0600 '$remoteBundle'/*"
     if ($LASTEXITCODE -ne 0) { throw "Could not restrict the security-config upload." }
     $remoteRunner = "/srv/menhir/scaffold/bin/menhir_security_config.py"
-    $receiptJson = (& $sshScript "sudo -n $remoteRunner deploy $uploadId" | Out-String).Trim()
+    $receiptJson = (& $sshScript "sudo -n $remoteRunner deploy $uploadId $ExpectedRootRunnerSha256" | Out-String).Trim()
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($receiptJson)) {
         throw "Security-config root transaction failed."
     }
     $receipt = $receiptJson | ConvertFrom-Json
     if ($receipt.kind -ne "menhir-security-config-transaction" -or
         $receipt.result -ne "passed" -or $receipt.stage -ne "complete" -or
-        $receipt.candidate_release_id -ne $Release) {
+        $receipt.candidate_release_id -ne $Release -or
+        $receipt.runner_sha256 -ne $ExpectedRootRunnerSha256) {
         throw "Security-config root transaction returned an invalid receipt."
     }
     [IO.File]::WriteAllText(

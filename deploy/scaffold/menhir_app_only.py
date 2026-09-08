@@ -775,7 +775,17 @@ def require_no_incomplete_transactions() -> None:
             )
 
 
-def deploy(bundle_id: str) -> dict[str, Any]:
+def require_runner_sha256(expected: str, path: Path = Path(__file__)) -> str:
+    if HEX64.fullmatch(expected) is None:
+        raise AppOnlyError("expected root runner SHA-256 is malformed")
+    actual = sha256(path)
+    if actual != expected:
+        raise AppOnlyError("root runner differs from the owner-approved authority")
+    return actual
+
+
+def deploy(bundle_id: str, expected_runner_sha256: str) -> dict[str, Any]:
+    runner_sha256 = require_runner_sha256(expected_runner_sha256)
     lock = acquire_lock()
     transaction: dict[str, Any] | None = None
     try:
@@ -798,7 +808,7 @@ def deploy(bundle_id: str) -> dict[str, Any]:
         transaction = {
             "schema": 1,
             "kind": "menhir-app-only-transaction",
-            "runner_sha256": sha256(Path(__file__)),
+            "runner_sha256": runner_sha256,
             "transaction_id": tx_id,
             "transaction_root": str(tx),
             "bundle_id": bundle_id,
@@ -942,6 +952,7 @@ def parser() -> argparse.ArgumentParser:
     classify.add_argument("bundle_id")
     deploy_command = commands.add_parser("deploy")
     deploy_command.add_argument("bundle_id")
+    deploy_command.add_argument("expected_runner_sha256")
     commands.add_parser("recover")
     commands.add_parser("live")
     commands.add_parser("check")
@@ -959,7 +970,7 @@ def main(argv: list[str]) -> int:
         if args.command == "classify":
             _, value = classify_bundle(args.bundle_id)
         elif args.command == "deploy":
-            value = deploy(args.bundle_id)
+            value = deploy(args.bundle_id, args.expected_runner_sha256)
         elif args.command == "recover":
             value = recover()
         elif args.command == "live":

@@ -333,7 +333,8 @@ def rollback(transaction: dict[str, Any]) -> None:
     finalize(transaction)
 
 
-def deploy(bundle_id: str) -> dict[str, Any]:
+def deploy(bundle_id: str, expected_runner_sha256: str) -> dict[str, Any]:
+    runner_sha256 = app.require_runner_sha256(expected_runner_sha256, Path(__file__))
     lock = app.acquire_lock()
     transaction: dict[str, Any] | None = None
     try:
@@ -352,7 +353,7 @@ def deploy(bundle_id: str) -> dict[str, Any]:
         transaction = {
             "schema": 1,
             "kind": "menhir-security-config-transaction",
-            "runner_sha256": app.sha256(Path(__file__)),
+            "runner_sha256": runner_sha256,
             "transaction_id": tx_id,
             "transaction_root": str(tx),
             "bundle_id": bundle_id,
@@ -432,6 +433,7 @@ def parser() -> argparse.ArgumentParser:
     classify.add_argument("bundle_id")
     deploy_command = commands.add_parser("deploy")
     deploy_command.add_argument("bundle_id")
+    deploy_command.add_argument("expected_runner_sha256")
     commands.add_parser("recover")
     commands.add_parser("receipt")
     return result
@@ -446,7 +448,7 @@ def main(argv: list[str]) -> int:
         if args.command == "classify":
             _, value = classify_bundle(args.bundle_id)
         elif args.command == "deploy":
-            value = deploy(args.bundle_id)
+            value = deploy(args.bundle_id, args.expected_runner_sha256)
         elif args.command == "recover":
             value = recover()
         else:

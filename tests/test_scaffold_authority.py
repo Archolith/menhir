@@ -571,6 +571,30 @@ def test_app_replacement_primitive_has_one_authoritative_implementation() -> Non
     assert matching == ["menhir_app_only.py"]
 
 
+def test_app_only_refuses_unapproved_root_runner_before_lock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        app_only, "acquire_lock",
+        lambda: pytest.fail("runner mismatch reached transaction lock"),
+    )
+
+    with pytest.raises(app_only.AppOnlyError, match="owner-approved authority"):
+        app_only.deploy("a" * 32, "0" * 64)
+
+
+def test_security_config_refuses_unapproved_root_runner_before_lock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        security_config.app, "acquire_lock",
+        lambda: pytest.fail("runner mismatch reached transaction lock"),
+    )
+
+    with pytest.raises(security_config.Error, match="owner-approved authority"):
+        security_config.deploy("a" * 32, "0" * 64)
+
+
 def test_probe_token_is_jit_minted_without_persistent_credential(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
