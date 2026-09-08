@@ -124,7 +124,7 @@ def test_app_and_security_lanes_explicitly_share_admission_authority() -> None:
         "/run/lock/menhir-production-admission.lock"
     )
     assert "ADMISSION_LOCK = app.ADMISSION_LOCK" in security
-    assert security.count("lock = acquire_security_config_admission()") == 2
+    assert security.count("lock = acquire_security_config_admission()") == 3
     assert "for path in (ADMISSION_LOCK, MUTATION_LOCK)" in APP_ONLY_PATH.read_text(
         encoding="utf-8"
     )

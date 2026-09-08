@@ -9,6 +9,13 @@ param(
     [Parameter(Mandatory = $true)][ValidatePattern('^[0-9a-f]{64}$')][string]$ExpectedIngressContainerId,
     [Parameter(Mandatory = $true)][string]$SourceRepository,
     [Parameter(Mandatory = $true)][ValidatePattern('^[0-9a-f]{64}$')][string]$ExpectedRootRunnerSha256,
+    [Parameter(Mandatory = $true)][string]$Approval,
+    [Parameter(Mandatory = $true)][ValidatePattern('^[0-9a-f]{64}$')][string]$ExpectedApprovalSha256,
+    [Parameter(Mandatory = $true)][string]$StagingReceipt,
+    [Parameter(Mandatory = $true)][ValidatePattern('^[0-9a-f]{64}$')][string]$ExpectedStagingReceiptSha256,
+    [Parameter(Mandatory = $true)][ValidatePattern('^[0-9a-f]{32}$')][string]$PromotionAttemptId,
+    [Parameter(Mandatory = $true)][string]$ApprovedUtc,
+    [Parameter(Mandatory = $true)][string]$PromotionStartedUtc,
     [Parameter(Mandatory = $true)][string]$TransactionReceipt
 )
 
@@ -78,6 +85,16 @@ function Get-DockerCredential {
 if (Test-Path -LiteralPath $TransactionReceipt) {
     throw "Root transaction receipt path must not already exist."
 }
+foreach ($authority in @(
+    @{ Path = $Approval; Sha256 = $ExpectedApprovalSha256; Label = "Approval" },
+    @{ Path = $StagingReceipt; Sha256 = $ExpectedStagingReceiptSha256; Label = "Staging receipt" }
+)) {
+    $item = Get-Item -LiteralPath $authority.Path -Force
+    if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
+        (Get-FileSha256 $item.FullName) -ne $authority.Sha256) {
+        throw "$($authority.Label) does not match the promotion authority."
+    }
+}
 $scripts = Join-Path $env:USERPROFILE "IdeaProjects\scripts"
 $sshScript = Join-Path $scripts "vps-ssh.ps1"
 $scpScript = Join-Path $scripts "vps-scp.ps1"
@@ -127,7 +144,8 @@ try {
         $releaseValue.ingress_mode -ne "cloudflared") {
         throw "Release is not the approved Cloudflared security-config authority."
     }
-    $existingReceiptJson = (& $sshScript "sudo -n $remoteRunner receipt" 2>$null | Out-String).Trim()
+    $authorityArguments = "$ExpectedRootRunnerSha256 $ExpectedReleaseSha256 $ExpectedIngressContainerId $ExpectedBundleSha256 $ExpectedStagingReceiptSha256 $ExpectedApprovalSha256 $PromotionAttemptId '$ApprovedUtc' '$PromotionStartedUtc'"
+    $existingReceiptJson = (& $sshScript "sudo -n $remoteRunner adopt $authorityArguments" 2>$null | Out-String).Trim()
     $existingReceiptExit = $LASTEXITCODE
     if ($existingReceiptExit -eq 0 -and -not [string]::IsNullOrWhiteSpace($existingReceiptJson)) {
         $existingReceipt = $existingReceiptJson | ConvertFrom-Json
@@ -136,7 +154,10 @@ try {
             $existingReceipt.candidate_release_id -eq $Release -and
             $existingReceipt.candidate_release_sha256 -eq $ExpectedReleaseSha256 -and
             $existingReceipt.ingress_container_id_after -eq $ExpectedIngressContainerId -and
-            $existingReceipt.runner_sha256 -eq $ExpectedRootRunnerSha256) {
+            $existingReceipt.bundle_sha256 -eq $ExpectedBundleSha256 -and
+            $existingReceipt.staging_receipt_sha256 -eq $ExpectedStagingReceiptSha256 -and
+            $existingReceipt.approval_sha256 -eq $ExpectedApprovalSha256 -and
+            $existingReceipt.promotion_attempt_id -eq $PromotionAttemptId) {
             [IO.File]::WriteAllText(
                 $TransactionReceipt,
                 $existingReceiptJson,
@@ -145,6 +166,8 @@ try {
             exit 0
         }
     }
+    Copy-Item -LiteralPath $StagingReceipt -Destination (Join-Path $temporary "staging-receipt.json")
+    Copy-Item -LiteralPath $Approval -Destination (Join-Path $temporary "promotion-approval.json")
     Copy-Item -LiteralPath $sourceManifestPath -Destination (Join-Path $temporary "source-manifest.json")
 
     $credentialHelper = Get-Command docker-credential-desktop -ErrorAction Stop
@@ -183,7 +206,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Could not upload the security-config bundle." }
     & $sshScript "chmod 0700 '$remoteBundle' && chmod 0600 '$remoteBundle'/*"
     if ($LASTEXITCODE -ne 0) { throw "Could not restrict the security-config upload." }
-    $receiptJson = (& $sshScript "sudo -n $remoteRunner deploy $uploadId $ExpectedRootRunnerSha256 $ExpectedReleaseSha256 $ExpectedIngressContainerId" | Out-String).Trim()
+    $receiptJson = (& $sshScript "sudo -n $remoteRunner deploy $uploadId $authorityArguments" | Out-String).Trim()
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($receiptJson)) {
         throw "Security-config root transaction failed."
     }

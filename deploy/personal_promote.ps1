@@ -347,25 +347,34 @@ if (-not (Test-Path -LiteralPath $operatorWrapper -PathType Leaf)) {
 if ((Get-FileSha256 -Path $operatorWrapper) -ne $ExpectedOperatorWrapperSha256) {
     throw "Operator wrapper differs from the owner-approved authority."
 }
+$operatorMode = if ($Mode -eq "AppOnly") { "Deploy" } else { $Mode }
 
 if (-not $adoptExistingTransaction) {
     $global:LASTEXITCODE = 0
     if ($Mode -eq "Maintenance") {
-        & $operatorWrapper -Mode $Mode -BundlePath $bundle `
+        & $operatorWrapper -Mode $operatorMode -BundlePath $bundle `
             -ExpectedBundleSha256 $ExpectedBundleSha256 -Release $Release `
             -ExpectedReleaseSha256 $ExpectedReleaseSha256 `
             -ExpectedIngressContainerId $expectedIngressContainerId `
             -SourceRepository $SourceRepository -ExpectedRootRunnerSha256 $ExpectedRootRunnerSha256 `
             -ApprovalSha256 $ExpectedApprovalSha256 -ApprovedUtc $approvedAt.UtcDateTime.ToString("o") `
             -PromotionAttemptId $PromotionAttemptId -PromotionStartedUtc $promotionStartedAt.UtcDateTime.ToString("o") `
+            -Approval $Approval -StagingReceipt $StagingReceipt `
+            -ExpectedStagingReceiptSha256 $ExpectedStagingReceiptSha256 `
+            -ExpectedPromotionWrapperSha256 $ExpectedPromotionWrapperSha256 `
+            -ExpectedOperatorWrapperSha256 $ExpectedOperatorWrapperSha256 `
             -TransactionReceipt $TransactionReceipt
     }
     else {
-        & $operatorWrapper -Mode $Mode -BundlePath $bundle `
+        & $operatorWrapper -Mode $operatorMode -BundlePath $bundle `
             -ExpectedBundleSha256 $ExpectedBundleSha256 -Release $Release `
             -ExpectedReleaseSha256 $ExpectedReleaseSha256 `
             -ExpectedIngressContainerId $expectedIngressContainerId `
             -SourceRepository $SourceRepository -ExpectedRootRunnerSha256 $ExpectedRootRunnerSha256 `
+            -Approval $Approval -ExpectedApprovalSha256 $ExpectedApprovalSha256 `
+            -StagingReceipt $StagingReceipt -ExpectedStagingReceiptSha256 $ExpectedStagingReceiptSha256 `
+            -PromotionAttemptId $PromotionAttemptId -ApprovedUtc ([string]$approvalValue.approved_utc) `
+            -PromotionStartedUtc $PromotionStartedUtc `
             -TransactionReceipt $TransactionReceipt
     }
     $powerShellSucceeded = $?
@@ -399,10 +408,18 @@ if ($Mode -ne "Maintenance" -and
     $transaction.database_container_id -ne $transaction.database_container_id_after) {
     throw "Root transaction receipt does not prove unchanged Neo4j."
 }
-if ($Mode -eq "Maintenance" -and (
+$transactionApprovedAt = Assert-UtcTimestamp -Value $transaction.approved_utc -Label "Transaction approval"
+$transactionPromotionStartedAt = Assert-UtcTimestamp -Value $transaction.promotion_started_utc -Label "Transaction promotion start"
+if ($transaction.bundle_sha256 -ne $ExpectedBundleSha256 -or
+    $transaction.staging_receipt_sha256 -ne $ExpectedStagingReceiptSha256 -or
     $transaction.approval_sha256 -ne $ExpectedApprovalSha256 -or
-    $transaction.promotion_attempt_id -ne $PromotionAttemptId)) {
-    throw "Root maintenance transaction belongs to another approval or promotion attempt."
+    $transaction.approved_by -ne $approvalValue.approved_by -or
+    $transactionApprovedAt -ne $approvedAt -or
+    $transaction.promotion_wrapper_sha256 -ne $ExpectedPromotionWrapperSha256 -or
+    $transaction.operator_wrapper_sha256 -ne $ExpectedOperatorWrapperSha256 -or
+    $transaction.promotion_attempt_id -ne $PromotionAttemptId -or
+    $transactionPromotionStartedAt -ne $promotionStartedAt) {
+    throw "Root transaction belongs to another approval or promotion attempt."
 }
 $promotionCompletedAt = [DateTimeOffset]::UtcNow
 $transactionStartedAt = Assert-UtcTimestamp -Value $transaction.started_utc -Label "Transaction start"

@@ -58,6 +58,22 @@ ALLOWED_CONFIG_DESTINATIONS = set(DESTINATIONS.values()) - {
 }
 
 
+def runner_authority_sha256() -> str:
+    return app.composite_sha256((
+        ("menhir_app_only.py", Path(app.__file__).resolve()),
+        ("menhir_security_config.py", Path(__file__).resolve()),
+    ))
+
+
+def require_runner_authority(expected: object) -> str:
+    if not isinstance(expected, str) or app.HEX64.fullmatch(expected) is None:
+        raise Error("expected root runner SHA-256 is malformed")
+    actual = runner_authority_sha256()
+    if actual != expected:
+        raise Error("root runner composite differs from the owner-approved authority")
+    return actual
+
+
 def acquire_security_config_admission() -> app.DeploymentLocks:
     """Acquire the same cross-lane authority used by app-only and maintenance."""
     if ADMISSION_LOCK != Path("/run/lock/menhir-production-admission.lock"):
@@ -117,7 +133,9 @@ def validate_source_manifest(
             raise Error(f"source install-bundle does not bind {destination}")
 
 
-def load_bundle(bundle_id: str, destination: Path | None = None) -> dict[str, Any]:
+def load_bundle(
+    bundle_id: str, destination: Path | None = None, *, require_authority: bool = True,
+) -> dict[str, Any]:
     if not BUNDLE_ID.fullmatch(bundle_id):
         raise Error("bundle id must be 32 lowercase hexadecimal characters")
     bundle = UPLOAD_ROOT / f"security-{bundle_id}"
@@ -129,6 +147,8 @@ def load_bundle(bundle_id: str, destination: Path | None = None) -> dict[str, An
             or stat.S_IMODE(info.st_mode) & 0o077:
         raise Error("uploaded security-config bundle must be private and owned by thron")
     names = set(TARGETS) | {"source-manifest.json", "docker-config.json"}
+    if require_authority:
+        names |= {app.STAGING_RECEIPT_NAME, app.APPROVAL_NAME}
     for name in names:
         require_candidate_file(bundle / name, name)
     require_candidate_file(bundle / "security-config-manifest.json", "security-config-manifest.json")
@@ -266,10 +286,12 @@ def classify_release(
     }
 
 
-def classify_bundle(bundle_id: str, destination: Path | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
+def classify_bundle(
+    bundle_id: str, destination: Path | None = None, *, require_authority: bool = True,
+) -> tuple[dict[str, Any], dict[str, Any]]:
     for path, label in ((app.LIVE_RELEASE, "live release"), (app.LIVE_ENV, "live environment")):
         app.require_root_file(path, label)
-    bundle = load_bundle(bundle_id, destination)
+    bundle = load_bundle(bundle_id, destination, require_authority=require_authority)
     app.validate_release_file(bundle["path"] / "release.json")
     result = classify_release(
         app.strict_load(app.LIVE_RELEASE), bundle["release"], app.sha256(app.LIVE_RELEASE),
@@ -346,8 +368,14 @@ def deploy(
     expected_runner_sha256: str,
     expected_release_sha256: str,
     expected_ingress_container_id: str,
+    expected_bundle_sha256: str = "",
+    expected_staging_receipt_sha256: str = "",
+    expected_approval_sha256: str = "",
+    promotion_attempt_id: str = "",
+    approved_utc: str = "",
+    promotion_started_utc: str = "",
 ) -> dict[str, Any]:
-    runner_sha256 = app.require_runner_sha256(expected_runner_sha256, Path(__file__))
+    runner_sha256 = require_runner_authority(expected_runner_sha256)
     if app.HEX64.fullmatch(expected_release_sha256) is None:
         raise Error("expected release SHA-256 is malformed")
     if app.HEX64.fullmatch(expected_ingress_container_id) is None:
@@ -356,9 +384,36 @@ def deploy(
     transaction: dict[str, Any] | None = None
     try:
         app.require_no_incomplete_transactions()
+        uploaded = load_bundle(bundle_id)
+        authority = app.validate_promotion_authority(
+            uploaded["path"], uploaded["release"],
+            deployment_class="security-config",
+            expected_runner_sha256=runner_sha256,
+            expected_release_sha256=expected_release_sha256,
+            expected_bundle_sha256=expected_bundle_sha256,
+            expected_staging_receipt_sha256=expected_staging_receipt_sha256,
+            expected_approval_sha256=expected_approval_sha256,
+            expected_ingress_container_id=expected_ingress_container_id,
+            promotion_attempt_id=promotion_attempt_id,
+            approved_utc=approved_utc,
+            promotion_started_utc=promotion_started_utc,
+        )
         tx_id = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ-") + bundle_id
         tx = STATUS / "security-config" / tx_id
         bundle, classification = classify_bundle(bundle_id, tx)
+        app.validate_promotion_authority(
+            bundle["path"], bundle["release"],
+            deployment_class="security-config",
+            expected_runner_sha256=runner_sha256,
+            expected_release_sha256=expected_release_sha256,
+            expected_bundle_sha256=expected_bundle_sha256,
+            expected_staging_receipt_sha256=expected_staging_receipt_sha256,
+            expected_approval_sha256=expected_approval_sha256,
+            expected_ingress_container_id=expected_ingress_container_id,
+            promotion_attempt_id=promotion_attempt_id,
+            approved_utc=approved_utc,
+            promotion_started_utc=promotion_started_utc,
+        )
         if classification["candidate_release_sha256"] != expected_release_sha256:
             app.discard_unstarted_transaction(
                 tx, "security-config", status_root=STATUS,
@@ -390,6 +445,7 @@ def deploy(
             "prior_app_container_id": before_app.get("Id"),
             "database_container_id": database.get("Id"),
             "ingress_container_id": ingress.get("Id"),
+            **authority,
             "started_utc": app.now_iso(),
         }
         write_stage(transaction, "classified")
@@ -422,6 +478,59 @@ def deploy(
         lock.close()
 
 
+def assert_live_equality(transaction: dict[str, Any]) -> None:
+    root = app._transaction_root(transaction, "security-config")
+    for name, target in TARGETS.items():
+        app.require_root_file(target, f"live {name}")
+        candidate = root / f"candidate-{name}"
+        app.require_root_file(candidate, f"transaction candidate {name}")
+        if app.sha256(target) != app.sha256(candidate):
+            raise Error(f"completed security-config receipt no longer matches live {name}")
+    current_app, current_database, current_ingress = assert_unchanged(transaction)
+    image_ref = str(current_app.get("Config", {}).get("Image", ""))
+    if current_app.get("Id") != transaction.get("candidate_app_container_id") \
+            or not image_ref.endswith("@" + str(transaction.get("candidate_image"))) \
+            or current_database.get("Id") != transaction.get("database_container_id_after") \
+            or current_ingress.get("Id") != transaction.get("ingress_container_id_after"):
+        raise Error("completed security-config receipt no longer matches live containers")
+
+
+def adopt(
+    expected_runner_sha256: str,
+    expected_release_sha256: str,
+    expected_ingress_container_id: str,
+    expected_bundle_sha256: str,
+    expected_staging_receipt_sha256: str,
+    expected_approval_sha256: str,
+    promotion_attempt_id: str,
+    approved_utc: str,
+    promotion_started_utc: str,
+) -> dict[str, Any]:
+    runner_sha256 = require_runner_authority(expected_runner_sha256)
+    lock = acquire_security_config_admission()
+    try:
+        app.require_no_incomplete_transactions()
+        transaction = last_receipt()
+        app.validate_transaction_authority(
+            transaction,
+            lane="security-config",
+            expected_kind="menhir-security-config-transaction",
+            expected_runner_sha256=runner_sha256,
+            expected_release_sha256=expected_release_sha256,
+            expected_bundle_sha256=expected_bundle_sha256,
+            expected_staging_receipt_sha256=expected_staging_receipt_sha256,
+            expected_approval_sha256=expected_approval_sha256,
+            expected_ingress_container_id=expected_ingress_container_id,
+            promotion_attempt_id=promotion_attempt_id,
+            approved_utc=approved_utc,
+            promotion_started_utc=promotion_started_utc,
+        )
+        assert_live_equality(transaction)
+        return transaction
+    finally:
+        lock.close()
+
+
 def recover() -> dict[str, Any]:
     if not ACTIVE.exists():
         raise Error("there is no incomplete security-config transaction")
@@ -431,7 +540,13 @@ def recover() -> dict[str, Any]:
         transaction = app.strict_load(ACTIVE)
         if transaction.get("kind") != "menhir-security-config-transaction":
             raise Error("active security-config transaction schema mismatch")
-        app.require_runner_sha256(transaction.get("runner_sha256"), Path(__file__))
+        runner_sha256 = require_runner_authority(transaction.get("runner_sha256"))
+        app.validate_active_transaction_authority(
+            transaction,
+            lane="security-config",
+            expected_kind="menhir-security-config-transaction",
+            expected_runner_sha256=runner_sha256,
+        )
         if transaction.get("stage") == "complete":
             finalize(transaction)
         else:
@@ -464,6 +579,20 @@ def parser() -> argparse.ArgumentParser:
     deploy_command.add_argument("expected_runner_sha256")
     deploy_command.add_argument("expected_release_sha256")
     deploy_command.add_argument("expected_ingress_container_id")
+    for name in (
+        "expected_bundle_sha256", "expected_staging_receipt_sha256",
+        "expected_approval_sha256", "promotion_attempt_id", "approved_utc",
+        "promotion_started_utc",
+    ):
+        deploy_command.add_argument(name)
+    adopt_command = commands.add_parser("adopt")
+    for name in (
+        "expected_runner_sha256", "expected_release_sha256",
+        "expected_ingress_container_id", "expected_bundle_sha256",
+        "expected_staging_receipt_sha256", "expected_approval_sha256",
+        "promotion_attempt_id", "approved_utc", "promotion_started_utc",
+    ):
+        adopt_command.add_argument(name)
     commands.add_parser("recover")
     commands.add_parser("receipt")
     return result
@@ -476,13 +605,31 @@ def main(argv: list[str]) -> int:
     args = parser().parse_args(argv)
     try:
         if args.command == "classify":
-            _, value = classify_bundle(args.bundle_id)
+            _, value = classify_bundle(args.bundle_id, require_authority=False)
         elif args.command == "deploy":
             value = deploy(
                 args.bundle_id,
                 args.expected_runner_sha256,
                 args.expected_release_sha256,
                 args.expected_ingress_container_id,
+                args.expected_bundle_sha256,
+                args.expected_staging_receipt_sha256,
+                args.expected_approval_sha256,
+                args.promotion_attempt_id,
+                args.approved_utc,
+                args.promotion_started_utc,
+            )
+        elif args.command == "adopt":
+            value = adopt(
+                args.expected_runner_sha256,
+                args.expected_release_sha256,
+                args.expected_ingress_container_id,
+                args.expected_bundle_sha256,
+                args.expected_staging_receipt_sha256,
+                args.expected_approval_sha256,
+                args.promotion_attempt_id,
+                args.approved_utc,
+                args.promotion_started_utc,
             )
         elif args.command == "recover":
             value = recover()

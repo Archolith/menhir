@@ -119,6 +119,7 @@ def _fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[list[str]
         "approved_by": "owner",
         "approved_utc": now,
     }), encoding="utf-8")
+    approval_sha = _sha(approval_path)
     transaction_path = tmp_path / "root-transaction.json"
     transaction_path.write_text(json.dumps({
         "schema": 1,
@@ -134,6 +135,15 @@ def _fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[list[str]
         "database_container_id_after": "database-1",
         "ingress_container_id": "c" * 64,
         "ingress_container_id_after": "c" * 64,
+        "bundle_sha256": bundle_sha,
+        "staging_receipt_sha256": staging_sha,
+        "approval_sha256": approval_sha,
+        "approved_by": "owner",
+        "approved_utc": now,
+        "promotion_wrapper_sha256": promotion_sha,
+        "operator_wrapper_sha256": operator_sha,
+        "promotion_attempt_id": "a" * 32,
+        "promotion_started_utc": now,
     }), encoding="utf-8")
     result_path = tmp_path / "promotion-result.json"
     command = [

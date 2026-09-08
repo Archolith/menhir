@@ -178,6 +178,13 @@ def _tree_sha256(root: Path) -> str:
     return digest.hexdigest()
 
 
+def _composite_sha256(parts: tuple[tuple[str, Path], ...]) -> str:
+    digest = hashlib.sha256()
+    for label, path in parts:
+        digest.update(f"{label}\0{_sha256(path)}\n".encode("ascii"))
+    return digest.hexdigest()
+
+
 def _atomic_json(path: Path, value: dict[str, Any]) -> None:
     descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     try:
@@ -275,14 +282,18 @@ def _operator_wrapper(deployment_class: str) -> Path:
 
 
 def _root_runner_sha256(release: dict[str, Any], deployment_class: str) -> str:
-    if deployment_class in {"app-only", "security-config"}:
-        filename = (
-            "menhir_app_only.py"
-            if deployment_class == "app-only"
-            else "menhir_security_config.py"
-        )
+    if deployment_class == "app-only":
         return _sha256(_regular_file(
-            SCRIPT_DIR / "scaffold" / filename, "root deployment runner"
+            SCRIPT_DIR / "scaffold" / "menhir_app_only.py", "root deployment runner"
+        ))
+    if deployment_class == "security-config":
+        return _composite_sha256((
+            ("menhir_app_only.py", _regular_file(
+                SCRIPT_DIR / "scaffold" / "menhir_app_only.py", "root deployment dependency"
+            )),
+            ("menhir_security_config.py", _regular_file(
+                SCRIPT_DIR / "scaffold" / "menhir_security_config.py", "root deployment runner"
+            )),
         ))
     artifacts = release.get("artifacts")
     row = artifacts.get("/srv/menhir/production/bin/release-run.sh") \
@@ -751,9 +762,26 @@ def _validate_promotion_receipt(
         raise PersonalDeployError("root transaction runner digest is invalid")
     if transaction["runner_sha256"] != state["root_runner_sha256"]:
         raise PersonalDeployError("root transaction runner differs from approved authority")
+    approval = _load_json(path.with_name(APPROVAL_NAME), "promotion approval")
+    common_authority = {
+        "bundle_sha256": state["bundle_sha256"],
+        "staging_receipt_sha256": state["staging_receipt_sha256"],
+        "approval_sha256": approval_sha,
+        "approved_by": approval["approved_by"],
+        "approved_utc": approval["approved_utc"],
+        "promotion_wrapper_sha256": state["promotion_wrapper_sha256"],
+        "operator_wrapper_sha256": state["operator_wrapper_sha256"],
+        "promotion_attempt_id": state["promotion_attempt_id"],
+        "promotion_started_utc": state["promotion_started_utc"],
+    }
+    for key, expected in common_authority.items():
+        if transaction.get(key) != expected:
+            raise PersonalDeployError(f"root transaction {key} mismatch")
     transaction_started = _utc(transaction.get("started_utc"), "transaction started_utc")
     transaction_completed = _utc(transaction.get("completed_utc"), "transaction completed_utc")
-    if transaction_started < started or transaction_completed > completed \
+    approved = _utc(approval.get("approved_utc"), "approval approved_utc")
+    if transaction_started < started or transaction_started < approved \
+            or transaction_completed > completed \
             or transaction_completed < transaction_started:
         raise PersonalDeployError("root transaction timestamps escape the promotion window")
     if receipt.get("started_utc") != state["promotion_started_utc"]:

@@ -156,6 +156,23 @@ def _stage(tmp_path: Path) -> tuple[Path, Path, dict]:
     return deployment, runner, state
 
 
+def _root_authority(deployment: Path, state: dict) -> dict:
+    approval = json.loads(
+        (deployment / MODULE.APPROVAL_NAME).read_text(encoding="utf-8")
+    )
+    return {
+        "bundle_sha256": state["bundle_sha256"],
+        "staging_receipt_sha256": state["staging_receipt_sha256"],
+        "approval_sha256": state["approval_sha256"],
+        "approved_by": approval["approved_by"],
+        "approved_utc": approval["approved_utc"],
+        "promotion_wrapper_sha256": state["promotion_wrapper_sha256"],
+        "operator_wrapper_sha256": state["operator_wrapper_sha256"],
+        "promotion_attempt_id": state["promotion_attempt_id"],
+        "promotion_started_utc": state["promotion_started_utc"],
+    }
+
+
 def test_select_binds_exact_finalized_release(tmp_path: Path) -> None:
     product, deployment, state = _selected(tmp_path)
 
@@ -499,6 +516,7 @@ def test_promotion_runs_once_and_records_bound_receipt(tmp_path: Path) -> None:
             "ingress_container_id_after": "cloudflared-1",
             "started_utc": now,
             "completed_utc": now,
+            **_root_authority(deployment, current),
         }
         transaction_path = Path(command[command.index("-TransactionReceipt") + 1])
         transaction_path.write_text(json.dumps(transaction), encoding="utf-8")
@@ -570,6 +588,7 @@ def test_promotion_retry_adopts_receipts_after_coordinator_crash(tmp_path: Path)
             "ingress_container_id_after": "cloudflared-1",
             "started_utc": now,
             "completed_utc": now,
+            **_root_authority(deployment, current),
         }
         transaction_path = Path(command[command.index("-TransactionReceipt") + 1])
         transaction_path.write_text(json.dumps(transaction), encoding="utf-8")
@@ -631,3 +650,87 @@ def test_receipt_tampering_blocks_approval_and_promotion(tmp_path: Path) -> None
             staged["staging_receipt_sha256"],
             "owner",
         )
+
+
+def test_security_root_authority_binds_shim_and_imported_dependency(tmp_path: Path) -> None:
+    dependency = tmp_path / "menhir_app_only.py"
+    shim = tmp_path / "menhir_security_config.py"
+    dependency.write_text("dependency one\n", encoding="ascii")
+    shim.write_text("shim one\n", encoding="ascii")
+    first = MODULE._composite_sha256((
+        ("menhir_app_only.py", dependency),
+        ("menhir_security_config.py", shim),
+    ))
+
+    dependency.write_text("dependency two\n", encoding="ascii")
+    second = MODULE._composite_sha256((
+        ("menhir_app_only.py", dependency),
+        ("menhir_security_config.py", shim),
+    ))
+    shim.write_text("shim two\n", encoding="ascii")
+    third = MODULE._composite_sha256((
+        ("menhir_app_only.py", dependency),
+        ("menhir_security_config.py", shim),
+    ))
+
+    assert len({first, second, third}) == 3
+
+
+def test_promotion_rejects_root_receipt_without_exact_approval_binding(
+    tmp_path: Path,
+) -> None:
+    deployment, _, staged = _stage(tmp_path)
+    MODULE.approve_flow(
+        deployment,
+        staged["release_id"],
+        staged["staging_receipt_sha256"],
+        "owner",
+    )
+
+    def run(command: list[str]) -> None:
+        current = MODULE.status_flow(deployment)
+        now = current["promotion_started_utc"]
+        transaction_path = Path(command[command.index("-TransactionReceipt") + 1])
+        transaction = {
+            "schema": 1,
+            "kind": "menhir-security-config-transaction",
+            "runner_sha256": current["root_runner_sha256"],
+            "result": "passed",
+            "stage": "complete",
+            "candidate_release_id": current["release_id"],
+            "candidate_release_sha256": current["release_sha256"],
+            "database_container_id": "database-1",
+            "database_container_id_after": "database-1",
+            "ingress_container_id": "cloudflared-1",
+            "ingress_container_id_after": "cloudflared-1",
+            "started_utc": now,
+            "completed_utc": now,
+            **_root_authority(deployment, current),
+        }
+        transaction.pop("promotion_attempt_id")
+        transaction_path.write_text(json.dumps(transaction), encoding="utf-8")
+        receipt_path = Path(command[command.index("-ResultReceipt") + 1])
+        receipt_path.write_text(json.dumps({
+            "schema": 1,
+            "kind": "menhir-personal-promotion",
+            "result": "passed",
+            "release_id": current["release_id"],
+            "release_sha256": current["release_sha256"],
+            "bundle_sha256": current["bundle_sha256"],
+            "staging_receipt_sha256": current["staging_receipt_sha256"],
+            "approval_sha256": current["approval_sha256"],
+            "deployment_class": current["deployment_class"],
+            "ingress_mode": current["ingress_mode"],
+            "started_utc": now,
+            "completed_utc": now,
+            "elapsed_seconds": 0,
+            "promotion_wrapper_sha256": current["promotion_wrapper_sha256"],
+            "operator_wrapper_sha256": current["operator_wrapper_sha256"],
+            "root_runner_sha256": current["root_runner_sha256"],
+            "promotion_attempt_id": current["promotion_attempt_id"],
+            "transaction_kind": current["deployment_class"],
+            "transaction_receipt_sha256": MODULE._sha256(transaction_path),
+        }), encoding="utf-8")
+
+    with pytest.raises(MODULE.PersonalDeployError, match="promotion_attempt_id mismatch"):
+        MODULE.promote_flow(deployment, execute=True, command_runner=run)
