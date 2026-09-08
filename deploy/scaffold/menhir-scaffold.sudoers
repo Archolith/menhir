@@ -17,4 +17,7 @@ Cmnd_Alias MENHIR_SECURITY_CONFIG = \
     /srv/menhir/scaffold/bin/menhir_security_config.py recover, \
     /srv/menhir/scaffold/bin/menhir_security_config.py receipt
 
-%menhir-operators ALL=(root) NOPASSWD: MENHIR_SCAFFOLD_READ, MENHIR_APP_ONLY, MENHIR_SECURITY_CONFIG
+Cmnd_Alias MENHIR_PERSONAL_STAGE = \
+    /usr/bin/python3 /srv/menhir/scaffold/bin/menhir_stage_vps.py *
+
+%menhir-operators ALL=(root) NOPASSWD: MENHIR_SCAFFOLD_READ, MENHIR_APP_ONLY, MENHIR_SECURITY_CONFIG, MENHIR_PERSONAL_STAGE

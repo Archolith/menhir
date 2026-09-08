@@ -431,6 +431,8 @@ def evaluate_evidence(
         failures.append("an unfinished maintenance transaction is active")
     if evidence.get("app_only_stage") not in (None, "complete"):
         failures.append("an unfinished app-only transaction is active")
+    if evidence.get("security_config_stage") not in (None, "complete"):
+        failures.append("an unfinished security-config transaction is active")
     if evidence.get("candidate_containers"):
         failures.append("candidate containers remain on the host")
     if not evidence.get("runtime_healthy"):
@@ -583,6 +585,13 @@ def operational_evidence(
     if app_only_active.exists():
         require_safe_root_file(app_only_active, "active app-only transaction")
         app_only_stage = strict_load(app_only_active).get("stage")
+    security_config_stage = None
+    security_config_active = STATUS_ROOT / "security-config-active.json"
+    if security_config_active.exists():
+        require_safe_root_file(
+            security_config_active, "active security-config transaction"
+        )
+        security_config_stage = strict_load(security_config_active).get("stage")
     return {
         "encrypted_generations": len(retained_generations),
         "retained_generations": retained_generations,
@@ -595,6 +604,7 @@ def operational_evidence(
         "restore_drill_source": drill.get("source"),
         "maintenance_stage": stage,
         "app_only_stage": app_only_stage,
+        "security_config_stage": security_config_stage,
         "candidate_containers": candidates,
         "runtime_healthy": runtime_healthy,
         "public_ready": public_ready(contract["runtime"]["public_ready_url"]),

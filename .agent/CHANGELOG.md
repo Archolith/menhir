@@ -2,6 +2,14 @@
 
 ## 2026-09-07 - Make Menhir releases rehearsable and deployment-bound
 
+- Remediate the independent release audit: execute staging, scaffold, and maintenance payloads only
+  from root-owned transaction copies; bind approval and promotion to fixed operator and root-runner
+  hashes; recover promotions from completed transaction receipts instead of repeating mutation.
+- Make deployment classification fail closed, require published release authority, enforce
+  cross-lane transaction admission, compare the exact Cloudflared identity, and converge retired
+  Caddy writers plus the exact scaffold-audit executable before enabling its timer.
+- Publish the exact CI-built image by immutable digest, make SBOM and vulnerability evidence
+  mandatory, and reject mutable release tags or any rebuild between validation and publication.
 - Add an explicit, resumable product-publication transaction that archives only the release-note
   fragments frozen during preparation and records their exact digests without touching production.
 - Generate the next release label from the prior immutable authority, and bind the mechanically

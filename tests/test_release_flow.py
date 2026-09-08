@@ -208,7 +208,7 @@ def test_deployment_class_accepts_only_menhir_application_source(
         base = _commit(repo, "base.txt", "base\n")
         prior_repos[name] = base
         if name == "menhir":
-            _commit(repo, "src/menhir/change.py", "VALUE = 1\n")
+            _commit(repo, "src/menhir/explorer/static/change.css", "body {}\n")
         repositories[name] = str(repo.resolve())
     prior = tmp_path / "prior-release.json"
     prior.write_text(json.dumps({"repos": prior_repos}), encoding="ascii")
@@ -220,6 +220,31 @@ def test_deployment_class_accepts_only_menhir_application_source(
     assert MODULE._deployment_class(
         [{"deployment_class": "app-only"}], spec
     ) == "app-only"
+
+
+@pytest.mark.parametrize(
+    "changed_path",
+    (
+        "src/menhir/api/auth_code_store.py",
+        "src/menhir/api/client_token_store.py",
+        "src/menhir/api/production_routes.py",
+        "src/menhir/core/runtime.py",
+        "src/menhir/infrastructure/neo4j.py",
+        "src/menhir/infrastructure/memory_graph_adapter.py",
+        "src/menhir/unknown.py",
+    ),
+)
+def test_deployment_class_defaults_sensitive_or_unknown_source_to_maintenance(
+    tmp_path: Path,
+    changed_path: str,
+) -> None:
+    spec, _ = _coverage_fixture(tmp_path)
+    menhir = Path(spec["repositories"]["menhir"])
+    _commit(menhir, changed_path, "VALUE = 1\n")
+
+    assert MODULE._deployment_class(
+        [{"deployment_class": "app-only"}], spec
+    ) == "maintenance"
 
 
 def _write_staged_workspace(tmp_path: Path, phase: str = "bundled") -> tuple[Path, dict]:
@@ -666,6 +691,7 @@ def test_prepare_authors_review_request_and_binds_outputs(
                 **spec,
                 "release_id": "menhir-prod-0.2.0-11",
                 "release_author": "release-operator",
+                "ingress_mode": "cloudflared",
             }),
             encoding="utf-8",
         )
@@ -700,6 +726,7 @@ def test_prepare_authors_review_request_and_binds_outputs(
 
     assert state["phase"] == "review_requested"
     assert state["deployment_class"] == "maintenance"
+    assert state["ingress_mode"] == "cloudflared"
     prepared_spec = json.loads((workspace / MODULE.SPEC_NAME).read_text(encoding="utf-8"))
     assert prepared_spec["deployment_class"] == state["deployment_class"]
     assert prepared_spec["notes_json_sha256"] == state["notes_json_sha256"]

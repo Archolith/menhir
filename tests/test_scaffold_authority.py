@@ -74,6 +74,7 @@ def valid_evidence(now: dt.datetime) -> dict:
         "retained_generations": ["generation.a", "generation.previous"],
         "maintenance_stage": None,
         "app_only_stage": None,
+        "security_config_stage": None,
         "candidate_containers": [],
         "runtime_healthy": True,
         "public_ready": True,
@@ -131,6 +132,36 @@ def test_unfinished_app_only_transaction_is_refused() -> None:
     assert "an unfinished app-only transaction is active" in scaffold.evaluate_evidence(
         contract()["backup_policy"], evidence, now,
     )
+
+
+def test_unfinished_security_config_transaction_is_refused() -> None:
+    now = dt.datetime(2026, 9, 1, tzinfo=dt.timezone.utc)
+    evidence = valid_evidence(now)
+    evidence["security_config_stage"] = "applying"
+    assert "an unfinished security-config transaction is active" in scaffold.evaluate_evidence(
+        contract()["backup_policy"], evidence, now,
+    )
+
+
+@pytest.mark.parametrize("lane", ("app-only", "security-config", "maintenance"))
+def test_shared_transaction_admission_refuses_every_incomplete_lane(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    lane: str,
+) -> None:
+    paths = {
+        "app-only": tmp_path / "app-only-active.json",
+        "security-config": tmp_path / "security-config-active.json",
+        "maintenance": tmp_path / "release-run.json",
+    }
+    paths[lane].write_text('{"stage":"applying"}\n', encoding="ascii")
+    monkeypatch.setattr(app_only, "ACTIVE", paths["app-only"])
+    monkeypatch.setattr(app_only, "SECURITY_CONFIG_ACTIVE", paths["security-config"])
+    monkeypatch.setattr(app_only, "MAINTENANCE_ACTIVE", paths["maintenance"])
+    monkeypatch.setattr(app_only, "require_root_file", lambda path, label: None)
+
+    with pytest.raises(app_only.AppOnlyError, match=f"incomplete {lane} transaction"):
+        app_only.require_no_incomplete_transactions()
 
 
 def test_fresh_retained_desktop_archive_can_lag_latest_backup() -> None:
@@ -446,6 +477,28 @@ def test_app_only_classifier_accepts_only_image_release_metadata() -> None:
     )
     assert result["classification"] == "app-only"
     assert result["candidate_release_id"] == "release-2"
+
+
+@pytest.mark.parametrize(
+    "path,expected",
+    (
+        ("src/menhir/explorer/static/explorer.css", True),
+        ("src/menhir/explorer/templates/index.html", True),
+        ("src/menhir/api/auth_code_store.py", False),
+        ("src/menhir/api/client_token_store.py", False),
+        ("src/menhir/api/production_routes.py", False),
+        ("src/menhir/infrastructure/neo4j.py", False),
+        ("src/menhir/infrastructure/memory_graph_adapter.py", False),
+        ("src/menhir/unknown.py", False),
+    ),
+)
+def test_root_app_only_source_policy_fails_closed(path: str, expected: bool) -> None:
+    assert app_only.is_app_only_source_path(path) is expected
+
+
+def test_root_transaction_timestamps_use_canonical_utc() -> None:
+    assert app_only.now_iso().endswith("Z")
+    assert "+00:00" not in app_only.now_iso()
 
 
 def test_security_config_classifier_accepts_only_bounded_auth_changes(tmp_path: Path) -> None:

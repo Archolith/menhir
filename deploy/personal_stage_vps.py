@@ -35,6 +35,11 @@ from typing import Any
 
 
 STAGING_ROOT = Path("/srv/menhir/staging")
+TRANSACTION_ROOT = Path("/srv/menhir/staging-transactions")
+UPLOAD_ROOT = Path("/home/thron/.menhir-stage-upload")
+INSTALLED_RUNNER = Path("/srv/menhir/scaffold/bin/menhir_stage_vps.py")
+OPERATOR_UID = 1000
+OPERATOR_GID = 1000
 STAGING_HOST = "memory.ctharvey.me"
 STAGING_BASE = f"https://{STAGING_HOST}"
 STAGING_CLIENT = "menhir-staging-probe"
@@ -43,6 +48,7 @@ STAGING_NAMESPACE = "menhir-staging"
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 IMAGE_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 RELEASE_ID_RE = re.compile(r"^menhir-prod-[0-9]+\.[0-9]+\.[0-9]+-[0-9]+$")
+UPLOAD_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 DEPLOYMENT_CLASSES = frozenset({"app-only", "security-config", "maintenance"})
 PREFLIGHT_SCHEMA = 1
 PRODUCTION_ROOT = Path("/srv/menhir/production")
@@ -117,6 +123,190 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _runner_stat(path: Path) -> os.stat_result:
+    return path.lstat()
+
+
+def _verified_runner_digest(expected: str) -> str:
+    if SHA256_RE.fullmatch(expected) is None:
+        raise StageError("invalid expected runner digest")
+    runner = Path(__file__)
+    if not runner.is_absolute() or runner != INSTALLED_RUNNER:
+        raise StageError("staging runner is not executing from its fixed installed path")
+    try:
+        info = _runner_stat(runner)
+    except OSError as exc:
+        raise StageError("installed staging runner is missing") from exc
+    if not stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode) \
+            or info.st_uid != 0 or info.st_gid != 0 \
+            or stat.S_IMODE(info.st_mode) != 0o755:
+        raise StageError("installed staging runner ownership or mode is unsafe")
+    observed = _sha256(runner)
+    if observed != expected:
+        raise StageError("installed staging runner digest mismatch")
+    return observed
+
+
+def _root_directory(path: Path, mode: int, create: bool = False) -> None:
+    if create:
+        try:
+            path.mkdir(mode=mode)
+        except FileExistsError:
+            pass
+    try:
+        info = path.lstat()
+    except OSError as exc:
+        raise StageError(f"root transaction directory is missing: {path}") from exc
+    if not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode) \
+            or info.st_uid != 0 or info.st_gid != 0 \
+            or stat.S_IMODE(info.st_mode) != mode:
+        raise StageError(f"root transaction directory is unsafe: {path}")
+
+
+def _copy_regular_descriptor(source: int, destination: Path) -> None:
+    before = os.fstat(source)
+    if not stat.S_ISREG(before.st_mode):
+        raise StageError("uploaded input changed to a non-regular file")
+    descriptor = os.open(
+        destination,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+        0o600,
+    )
+    try:
+        with os.fdopen(descriptor, "wb") as target:
+            descriptor = -1
+            with os.fdopen(os.dup(source), "rb") as origin:
+                shutil.copyfileobj(origin, target, 1024 * 1024)
+            target.flush()
+            os.fsync(target.fileno())
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+    after = os.fstat(source)
+    stable = ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns")
+    if any(getattr(before, name) != getattr(after, name) for name in stable):
+        destination.unlink(missing_ok=True)
+        raise StageError("uploaded input changed while it was copied")
+    _chown(destination, 0, 0)
+    os.chmod(destination, 0o600)
+
+
+def _copy_directory_descriptor(source: int, destination: Path) -> None:
+    destination.mkdir(mode=0o700)
+    _chown(destination, 0, 0)
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    directory_flag = getattr(os, "O_DIRECTORY", 0)
+    try:
+        names = sorted(os.listdir(source))
+    except OSError as exc:
+        raise StageError("uploaded bundle directory cannot be enumerated") from exc
+    for name in names:
+        if not name or name in {".", ".."} or "/" in name or "\x00" in name:
+            raise StageError("uploaded bundle contains an invalid entry name")
+        try:
+            info = os.stat(name, dir_fd=source, follow_symlinks=False)
+            if stat.S_ISDIR(info.st_mode):
+                child = os.open(name, flags | directory_flag, dir_fd=source)
+                try:
+                    opened = os.fstat(child)
+                    if not stat.S_ISDIR(opened.st_mode) \
+                            or (opened.st_dev, opened.st_ino) != (info.st_dev, info.st_ino):
+                        raise StageError("uploaded bundle directory was replaced")
+                    _copy_directory_descriptor(child, destination / name)
+                finally:
+                    os.close(child)
+            elif stat.S_ISREG(info.st_mode):
+                child = os.open(name, flags, dir_fd=source)
+                try:
+                    opened = os.fstat(child)
+                    if not stat.S_ISREG(opened.st_mode) \
+                            or (opened.st_dev, opened.st_ino) != (info.st_dev, info.st_ino):
+                        raise StageError("uploaded bundle file was replaced")
+                    _copy_regular_descriptor(child, destination / name)
+                finally:
+                    os.close(child)
+            else:
+                raise StageError(f"uploaded bundle contains unsafe entry: {name}")
+        except OSError as exc:
+            raise StageError(f"uploaded bundle entry changed during copy: {name}") from exc
+
+
+def _open_upload_root(upload_root: Path) -> int:
+    if not upload_root.is_absolute() or UPLOAD_ID_RE.fullmatch(upload_root.name) is None \
+            or upload_root.parent != UPLOAD_ROOT:
+        raise StageError("upload root is outside the bounded staging upload area")
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) \
+        | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(upload_root, flags)
+    except OSError as exc:
+        raise StageError("staging upload root is missing or unsafe") from exc
+    info = os.fstat(descriptor)
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != OPERATOR_UID:
+        os.close(descriptor)
+        raise StageError("staging upload root has an invalid owner or type")
+    return descriptor
+
+
+def _copy_uploaded_inputs(upload_root: Path) -> tuple[Path, Path, Path]:
+    upload = _open_upload_root(upload_root)
+    transaction = TRANSACTION_ROOT / upload_root.name
+    try:
+        _root_directory(TRANSACTION_ROOT, 0o700)
+        try:
+            transaction.mkdir(mode=0o700)
+        except FileExistsError as exc:
+            raise StageError("root staging transaction already exists") from exc
+        _chown(transaction, 0, 0)
+        inputs = transaction / "inputs"
+        evidence = transaction / "evidence"
+        inputs.mkdir(mode=0o700)
+        evidence.mkdir(mode=0o700)
+        bundle = inputs / "bundle"
+        archive = inputs / "menhir-image.tar"
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        bundle_source = os.open(
+            "bundle", flags | getattr(os, "O_DIRECTORY", 0), dir_fd=upload,
+        )
+        try:
+            _copy_directory_descriptor(bundle_source, bundle)
+        finally:
+            os.close(bundle_source)
+        archive_source = os.open("menhir-image.tar", flags, dir_fd=upload)
+        try:
+            _copy_regular_descriptor(archive_source, archive)
+        finally:
+            os.close(archive_source)
+        return bundle, archive, transaction
+    except OSError as exc:
+        raise StageError("uploaded staging inputs changed during root copy") from exc
+    finally:
+        os.close(upload)
+
+
+def _publish_receipt(upload_root: Path, value: dict[str, Any]) -> None:
+    upload = _open_upload_root(upload_root)
+    descriptor = -1
+    try:
+        descriptor = os.open(
+            "staging-receipt.json",
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+            dir_fd=upload,
+        )
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
+            descriptor = -1
+            json.dump(value, handle, indent=2, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+            os.fchown(handle.fileno(), OPERATOR_UID, OPERATOR_GID)
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        os.close(upload)
 
 
 def _tree_sha256(root: Path) -> str:
@@ -743,16 +933,31 @@ def _json_response(port: int, path: str) -> dict[str, Any]:
     return value
 
 
-def _production_snapshot() -> dict[str, str]:
-    snapshot: dict[str, str] = {}
-    authority = PRODUCTION_RELEASE
-    if authority.is_file() and not authority.is_symlink():
-        snapshot["release_sha256"] = _sha256(authority)
+def _production_snapshot() -> dict[str, Any]:
+    live_release = _load_json(PRODUCTION_RELEASE, "live production release authority")
+    live_network = live_release.get("network")
+    if not isinstance(live_network, dict):
+        raise StageError("live production network authority is invalid")
+    network_name = live_network.get("external_network")
+    peers = live_network.get("peers")
+    if not isinstance(network_name, str) or not network_name \
+            or not isinstance(peers, list) or not peers:
+        raise StageError("live production network authority is invalid")
+    expected_peers = {_ipv4(value, "trusted ingress peer") for value in peers}
+    network = _network_inspect(network_name)
+    ingress = _cloudflared_ingress_preflight(network, expected_peers)
+    containers: dict[str, str] = {}
     for name in ("menhir-prod-app", "menhir-prod-neo4j"):
-        result = _run("docker", "inspect", "--format", "{{.Id}}", name, check=False)
-        if result.returncode == 0 and result.stdout.strip():
-            snapshot[name] = result.stdout.strip()
-    return snapshot
+        value = _inspect(name)
+        container_id = value.get("Id")
+        if not isinstance(container_id, str) or not container_id:
+            raise StageError("production container identity is absent")
+        containers[name] = container_id
+    return {
+        "release_sha256": _sha256(PRODUCTION_RELEASE),
+        "containers": containers,
+        "cloudflared": ingress["identities"],
+    }
 
 
 def _available_memory_bytes() -> int:
@@ -983,27 +1188,86 @@ def _maintenance_route_preflight(
 def _cloudflared_ingress_preflight(
     network: dict[str, Any], expected_peers: set[str],
 ) -> dict[str, Any]:
+    network_name = network.get("Name")
+    network_id = network.get("Id")
+    if not isinstance(network_name, str) or not network_name \
+            or not isinstance(network_id, str) or not network_id:
+        raise StageError("production proxy network identity is invalid")
     occupants = {
         row["ipv4"]: row for row in _network_containers(network)
         if row["ipv4"] in expected_peers
     }
     if set(occupants) != expected_peers:
         raise StageError("production Cloudflared ingress role is absent")
-    containers: list[str] = []
+    identities: list[dict[str, Any]] = []
     for address in sorted(expected_peers):
         row = occupants[address]
         value = _inspect(row["name"])
-        labels = value.get("Config", {}).get("Labels", {})
+        config = value.get("Config", {})
+        labels = config.get("Labels", {})
         state = value.get("State", {})
+        container_id = value.get("Id")
+        image_id = value.get("Image")
+        image_reference = config.get("Image")
+        networks = value.get("NetworkSettings", {}).get("Networks", {})
+        attachment = networks.get(network_name) if isinstance(networks, dict) else None
         if not isinstance(labels, dict) \
+                or labels.get("com.docker.compose.project") != "menhir-prod" \
                 or labels.get("com.docker.compose.service") != "cloudflared" \
                 or state.get("Running") is not True or state.get("Status") != "running":
             raise StageError("production ingress peer is not the running Cloudflared role")
-        containers.append(row["name"])
+        if not isinstance(container_id, str) or not container_id \
+                or container_id != row["id"] \
+                or not isinstance(image_id, str) or not image_id \
+                or not isinstance(image_reference, str) or not image_reference:
+            raise StageError("production Cloudflared container identity is invalid")
+        if not isinstance(attachment, dict):
+            raise StageError("production Cloudflared network attachment is absent")
+        aliases = attachment.get("Aliases")
+        if aliases is None:
+            aliases = []
+        if not isinstance(aliases, list) or any(
+            not isinstance(alias, str) for alias in aliases
+        ):
+            raise StageError("production Cloudflared network aliases are invalid")
+        attachment_identity = {
+            "network_id": attachment.get("NetworkID"),
+            "endpoint_id": attachment.get("EndpointID"),
+            "gateway": attachment.get("Gateway"),
+            "ipv4_address": _ipv4(
+                attachment.get("IPAddress"), "production Cloudflared address",
+            ),
+            "ipv4_prefix_length": attachment.get("IPPrefixLen"),
+            "ipv6_gateway": attachment.get("IPv6Gateway"),
+            "ipv6_address": attachment.get("GlobalIPv6Address"),
+            "ipv6_prefix_length": attachment.get("GlobalIPv6PrefixLen"),
+            "mac_address": attachment.get("MacAddress"),
+            "aliases": sorted(aliases),
+        }
+        if attachment_identity["network_id"] != network_id \
+                or attachment_identity["ipv4_address"] != address \
+                or not isinstance(attachment_identity["endpoint_id"], str) \
+                or not attachment_identity["endpoint_id"]:
+            raise StageError("production Cloudflared network attachment is invalid")
+        identities.append({
+            "container_id": container_id,
+            "container_name": row["name"],
+            "image_id": image_id,
+            "image_reference": image_reference,
+            "compose_labels": {
+                "project": labels["com.docker.compose.project"],
+                "service": labels["com.docker.compose.service"],
+            },
+            "network": {
+                "name": network_name,
+                "attachment": attachment_identity,
+            },
+        })
     return {
         "mode": "cloudflared",
-        "containers": containers,
-        "peer_count": len(containers),
+        "containers": [identity["container_name"] for identity in identities],
+        "identities": identities,
+        "peer_count": len(identities),
     }
 
 
@@ -1404,7 +1668,6 @@ def run_stage(args: argparse.Namespace) -> dict[str, Any]:
     for value, pattern, label in (
         (args.expected_bundle_sha256, SHA256_RE, "bundle digest"),
         (args.expected_release_sha256, SHA256_RE, "release digest"),
-        (args.runner_sha256, SHA256_RE, "runner digest"),
         (args.expected_release_id, RELEASE_ID_RE, "release ID"),
         (
             args.expected_menhir_image_archive_sha256,
@@ -1416,11 +1679,11 @@ def run_stage(args: argparse.Namespace) -> dict[str, Any]:
             raise StageError(f"invalid expected {label}")
     if args.deployment_class not in DEPLOYMENT_CLASSES:
         raise StageError("invalid deployment class")
-    bundle = args.bundle.resolve()
-    receipt = args.receipt.resolve()
+    runner_digest = _verified_runner_digest(args.expected_runner_sha256)
+    upload_root = args.upload_root
+    bundle, archive, transaction = _copy_uploaded_inputs(upload_root)
+    receipt = transaction / "staging-receipt.json"
     _safe_file(bundle / "bundle-manifest.json", "bundle manifest")
-    if receipt.exists() or receipt.is_symlink():
-        raise StageError("staging receipt already exists")
     release, source_environment, _ = _validate_bundle(
         bundle,
         args.expected_bundle_sha256,
@@ -1430,14 +1693,22 @@ def run_stage(args: argparse.Namespace) -> dict[str, Any]:
     production_preflight = _production_preflight(
         bundle, release, args.deployment_class,
     )
+    _atomic_json(
+        transaction / "evidence/production-preflight.json", production_preflight,
+    )
+    production_before = _production_snapshot()
+    preflight_ingress = production_preflight["checks"]["network_roles"][
+        "ingress"
+    ]["identities"]
+    if production_before["cloudflared"] != preflight_ingress:
+        raise StageError("production Cloudflared identity changed after preflight")
     started = _now()
-    archive = args.menhir_image_archive.resolve()
     _safe_file(archive, "transferred Menhir image archive")
     if _sha256(archive) != args.expected_menhir_image_archive_sha256:
         raise StageError("transferred Menhir image archive digest mismatch")
+    _run("docker", "load", "--input", str(archive), timeout=600)
     runtime_images = _ensure_images(source_environment, release)
 
-    production_before = _production_snapshot()
     run_id = secrets.token_hex(6)
     root = STAGING_ROOT / run_id
     project = f"menhir-stage-{run_id}"
@@ -1475,7 +1746,6 @@ def run_stage(args: argparse.Namespace) -> dict[str, Any]:
         checks.update({
             "artifact_identity": True,
             "production_memory_limits": True,
-            "production_network_shape": True,
             "oauth_policy_shape": True,
             "isolated_disposable_data": True,
             "non_production_credentials": True,
@@ -1516,8 +1786,38 @@ def run_stage(args: argparse.Namespace) -> dict[str, Any]:
         _wait_healthy((app, neo4j))
         _todo_persists(port, token, unique)
         checks["automatic_rollback"] = True
-        if _production_snapshot() != production_before:
-            raise StageError("production authority or container identity changed during staging")
+        _compose(
+            base, override, project, environment,
+            "down", "--volumes", "--remove-orphans",
+        )
+        base = None
+        override = None
+        environment = None
+        resolved = root.resolve()
+        if resolved.parent != STAGING_ROOT or not resolved.name:
+            raise StageError("refusing unsafe staging cleanup")
+        shutil.rmtree(resolved)
+        production_after = _production_snapshot()
+        if production_after != production_before:
+            raise StageError(
+                "production authority or Cloudflared identity changed during staging"
+            )
+        unsealed_preflight = dict(production_preflight)
+        unsealed_preflight.pop("canonical_sha256", None)
+        ingress_evidence = unsealed_preflight["checks"]["network_roles"][
+            "ingress"
+        ]
+        ingress_evidence["non_interference"] = {
+            "before": production_before["cloudflared"],
+            "after": production_after["cloudflared"],
+            "verified": True,
+        }
+        production_preflight = _seal_preflight(unsealed_preflight)
+        _atomic_json(
+            transaction / "evidence/production-preflight.json",
+            production_preflight,
+        )
+        checks["production_network_shape"] = True
         if any(value is not True for value in checks.values()):
             raise StageError(f"staging suite incomplete: {checks}")
         result = {
@@ -1533,7 +1833,7 @@ def run_stage(args: argparse.Namespace) -> dict[str, Any]:
                 "menhir": release["images"]["menhir"],
                 "neo4j": release["images"]["neo4j"],
             },
-            "runner_sha256": args.runner_sha256,
+            "runner_sha256": runner_digest,
             "started_utc": started,
             "completed_utc": _now(),
             "test_identities": {
@@ -1545,6 +1845,7 @@ def run_stage(args: argparse.Namespace) -> dict[str, Any]:
             "checks": checks,
         }
         _atomic_json(receipt, result)
+        _publish_receipt(upload_root, result)
         return result
     finally:
         if base is not None and override is not None and environment is not None:
@@ -1554,19 +1855,24 @@ def run_stage(args: argparse.Namespace) -> dict[str, Any]:
             if resolved.parent != STAGING_ROOT or not resolved.name:
                 raise StageError("refusing unsafe staging cleanup")
             shutil.rmtree(resolved)
+        inputs = transaction / "inputs"
+        if inputs.exists():
+            resolved_inputs = inputs.resolve()
+            if resolved_inputs.parent != transaction.resolve() \
+                    or resolved_inputs.name != "inputs":
+                raise StageError("refusing unsafe root transaction input cleanup")
+            shutil.rmtree(resolved_inputs)
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--bundle", type=Path, required=True)
+    parser.add_argument("--upload-root", type=Path, required=True)
     parser.add_argument("--expected-bundle-sha256", required=True)
     parser.add_argument("--expected-release-id", required=True)
     parser.add_argument("--expected-release-sha256", required=True)
-    parser.add_argument("--menhir-image-archive", type=Path, required=True)
     parser.add_argument("--expected-menhir-image-archive-sha256", required=True)
     parser.add_argument("--deployment-class", required=True)
-    parser.add_argument("--runner-sha256", required=True)
-    parser.add_argument("--receipt", type=Path, required=True)
+    parser.add_argument("--expected-runner-sha256", required=True)
     return parser
 
 

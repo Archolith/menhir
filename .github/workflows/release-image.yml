@@ -12,7 +12,7 @@ on:
         required: true
         type: string
       ref:
-        description: Git ref to build; defaults to the triggering commit
+        description: Git ref to validate; defaults to the triggering commit
         required: false
         type: string
         default: ""
@@ -21,26 +21,26 @@ on:
         required: true
         type: string
       push:
-        description: Publish after validation and environment approval
+        description: Publish the sealed candidate after validation and approval
         required: false
         type: boolean
         default: false
       sbom_path:
-        description: Optional repository-relative SBOM file to retain with metadata
+        description: Repository-relative SBOM; required when push is true
         required: false
         type: string
         default: ""
       scan_path:
-        description: Optional repository-relative scan result to retain with metadata
+        description: Repository-relative vulnerability scan; required when push is true
         required: false
         type: string
         default: ""
     outputs:
       validation_metadata_artifact:
-        description: Artifact containing no-push validation metadata and optional evidence
+        description: Artifact containing the sealed image, identity, metadata, and evidence
         value: ${{ jobs.validate.outputs.metadata_artifact }}
       publication_metadata_artifact:
-        description: Artifact containing publication metadata and optional evidence
+        description: Artifact containing publication metadata and bound evidence
         value: ${{ jobs.publish.outputs.metadata_artifact }}
       image_ref:
         description: Published digest-pinned image reference; empty when push is false
@@ -59,7 +59,7 @@ on:
         required: true
         type: string
       ref:
-        description: Git ref to build; defaults to the triggering commit
+        description: Git ref to validate; defaults to the triggering commit
         required: false
         type: string
         default: ""
@@ -68,17 +68,17 @@ on:
         required: true
         type: string
       push:
-        description: Publish after validation and environment approval
+        description: Publish the sealed candidate after validation and approval
         required: false
         type: boolean
         default: false
       sbom_path:
-        description: Optional repository-relative SBOM file to retain with metadata
+        description: Repository-relative SBOM; required when push is true
         required: false
         type: string
         default: ""
       scan_path:
-        description: Optional repository-relative scan result to retain with metadata
+        description: Repository-relative vulnerability scan; required when push is true
         required: false
         type: string
         default: ""
@@ -86,15 +86,21 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: release-image-${{ inputs.image }}-${{ inputs.version }}
+  cancel-in-progress: false
+
 jobs:
   validate:
-    name: Build and validate without publishing
+    name: Build and seal candidate without publishing
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read
     outputs:
       metadata_artifact: ${{ steps.artifact-name.outputs.value }}
+      commit_sha: ${{ steps.source.outputs.commit_sha }}
+      identity_sha256: ${{ steps.identity.outputs.sha256 }}
     steps:
       - name: Checkout requested source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -102,77 +108,98 @@ jobs:
           ref: ${{ inputs.ref || github.sha }}
           persist-credentials: false
 
+      - name: Resolve exact validation commit
+        id: source
+        run: |
+          python - <<'PY'
+          import os
+          import re
+          import subprocess
+          from pathlib import Path
+
+          commit = subprocess.run(
+              ["git", "rev-parse", "HEAD"], check=True, capture_output=True, text=True,
+          ).stdout.strip()
+          if re.fullmatch(r"[0-9a-f]{40}", commit) is None:
+              raise SystemExit("checkout did not resolve to a full commit SHA")
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="ascii") as output:
+              output.write(f"commit_sha={commit}\n")
+          PY
+
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
 
-      - name: Validate GHCR repository input
-        env:
-          IMAGE: ${{ inputs.image }}
-        run: |
-          python - <<'PY'
-          import os
-
-          image = os.environ["IMAGE"]
-          remainder = image.removeprefix("ghcr.io/")
-          if remainder == image or "/" not in remainder or "@" in image or ":" in remainder:
-              raise SystemExit("image must be an untagged ghcr.io repository")
-          PY
-
-      - name: Build and validate release image without push
+      - name: Build, validate, and seal release image
         env:
           IMAGE: ${{ inputs.image }}
           PYTHON_BASE: ${{ inputs.python_base }}
+          PUSH: ${{ inputs.push }}
+          SBOM_PATH: ${{ inputs.sbom_path }}
+          SCAN_PATH: ${{ inputs.scan_path }}
+          SOURCE_COMMIT: ${{ steps.source.outputs.commit_sha }}
           VERSION: ${{ inputs.version }}
         run: |
+          evidence_args=()
+          if [[ -n "$SBOM_PATH" ]]; then
+            evidence_args+=(--sbom "$SBOM_PATH")
+          fi
+          if [[ -n "$SCAN_PATH" ]]; then
+            evidence_args+=(--scan "$SCAN_PATH")
+          fi
+          if [[ "$PUSH" == "true" ]]; then
+            evidence_args+=(--require-evidence)
+          fi
           python deploy/build_release_image.py \
+            --mode build \
             --version "$VERSION" \
             --image "$IMAGE" \
             --python-base "$PYTHON_BASE" \
-            --output release-image-metadata.json
+            --expected-commit "$SOURCE_COMMIT" \
+            --output release-image-metadata.json \
+            --identity release-image-identity.json \
+            --image-archive release-image.tar \
+            "${evidence_args[@]}"
 
-      - name: Validate optional evidence inputs
-        env:
-          SBOM_PATH: ${{ inputs.sbom_path }}
-          SCAN_PATH: ${{ inputs.scan_path }}
+      - name: Bind sealed identity to validation outputs
+        id: identity
         run: |
           python - <<'PY'
+          import hashlib
           import os
+          import re
           from pathlib import Path
 
-          root = Path.cwd().resolve()
-          for variable in ("SBOM_PATH", "SCAN_PATH"):
-              value = os.environ[variable].strip()
-              if not value:
-                  continue
-              candidate = (root / value).resolve()
-              try:
-                  candidate.relative_to(root)
-              except ValueError:
-                  raise SystemExit(f"{variable} must remain inside the checkout")
-              if not candidate.is_file():
-                  raise SystemExit(f"{variable} does not name a regular file")
+          path = Path("release-image-identity.json")
+          if not path.is_file() or path.is_symlink():
+              raise SystemExit("identity manifest is missing or unsafe")
+          digest = hashlib.sha256(path.read_bytes()).hexdigest()
+          if re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+              raise SystemExit("identity manifest digest is malformed")
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="ascii") as output:
+              output.write(f"sha256={digest}\n")
           PY
 
-      - name: Name validation metadata artifact
+      - name: Name validation artifact
         id: artifact-name
         run: echo "value=release-image-validation-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
 
-      - name: Upload validation metadata and optional evidence
+      - name: Upload sealed candidate and evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ${{ steps.artifact-name.outputs.value }}
           path: |
+            release-image.tar
             release-image-metadata.json
-            ${{ inputs.sbom_path }}
-            ${{ inputs.scan_path }}
+            release-image-identity.json
+            release-image-evidence/
           if-no-files-found: error
-          include-hidden-files: true
+          include-hidden-files: false
           retention-days: 30
 
   publish:
-    name: Publish approved release image
+    name: Publish approved sealed candidate
     needs: validate
     if: ${{ inputs.push && (github.event_name == 'workflow_dispatch' || github.event_name == 'push') }}
     runs-on: ubuntu-latest
@@ -188,10 +215,10 @@ jobs:
       image_ref: ${{ steps.release.outputs.image_ref }}
       registry_digest: ${{ steps.release.outputs.registry_digest }}
     steps:
-      - name: Checkout requested source
+      - name: Checkout exact validated commit
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          ref: ${{ inputs.ref || github.sha }}
+          ref: ${{ needs.validate.outputs.commit_sha }}
           persist-credentials: false
 
       - name: Set up Python
@@ -199,18 +226,29 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Validate GHCR repository input
-        env:
-          IMAGE: ${{ inputs.image }}
-        run: |
-          python - <<'PY'
-          import os
+      - name: Download sealed validation candidate
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ${{ needs.validate.outputs.metadata_artifact }}
+          path: release-candidate
 
-          image = os.environ["IMAGE"]
-          remainder = image.removeprefix("ghcr.io/")
-          if remainder == image or "/" not in remainder or "@" in image or ":" in remainder:
-              raise SystemExit("image must be an untagged ghcr.io repository")
-          PY
+      - name: Verify identity, evidence, and loaded image before login
+        env:
+          EXPECTED_IDENTITY_SHA256: ${{ needs.validate.outputs.identity_sha256 }}
+          IMAGE: ${{ inputs.image }}
+          PYTHON_BASE: ${{ inputs.python_base }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          python deploy/build_release_image.py \
+            --mode verify \
+            --version "$VERSION" \
+            --image "$IMAGE" \
+            --python-base "$PYTHON_BASE" \
+            --metadata release-candidate/release-image-metadata.json \
+            --identity release-candidate/release-image-identity.json \
+            --image-archive release-candidate/release-image.tar \
+            --expected-identity-sha256 "$EXPECTED_IDENTITY_SHA256" \
+            --require-evidence
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
@@ -219,20 +257,26 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build, validate, and push release image
+      - name: Publish candidate without moving an existing release tag
         env:
+          EXPECTED_IDENTITY_SHA256: ${{ needs.validate.outputs.identity_sha256 }}
           IMAGE: ${{ inputs.image }}
           PYTHON_BASE: ${{ inputs.python_base }}
           VERSION: ${{ inputs.version }}
         run: |
           python deploy/build_release_image.py \
+            --mode publish \
             --version "$VERSION" \
             --image "$IMAGE" \
             --python-base "$PYTHON_BASE" \
-            --output release-image-metadata.json \
-            --push
+            --metadata release-candidate/release-image-metadata.json \
+            --identity release-candidate/release-image-identity.json \
+            --image-archive release-candidate/release-image.tar \
+            --expected-identity-sha256 "$EXPECTED_IDENTITY_SHA256" \
+            --require-evidence \
+            --output release-image-publication.json
 
-      - name: Bind publication outputs to builder metadata
+      - name: Bind publication outputs to verified metadata
         id: release
         env:
           EXPECTED_IMAGE: ${{ inputs.image }}
@@ -244,56 +288,34 @@ jobs:
           import re
           from pathlib import Path
 
-          metadata = json.loads(Path("release-image-metadata.json").read_text(encoding="ascii"))
+          metadata = json.loads(Path("release-image-publication.json").read_text(encoding="ascii"))
           digest = metadata.get("registry_digest")
           image_ref = metadata.get("image_ref")
-          expected = f"{os.environ['EXPECTED_IMAGE']}:{os.environ['EXPECTED_VERSION']}@{digest}"
           if not isinstance(digest, str) or re.fullmatch(r"sha256:[0-9a-f]{64}", digest) is None:
-              raise SystemExit("builder metadata has no registry manifest digest")
+              raise SystemExit("publication metadata has no registry manifest digest")
+          expected = f"{os.environ['EXPECTED_IMAGE']}:{os.environ['EXPECTED_VERSION']}@{digest}"
           if image_ref != expected:
-              raise SystemExit("builder metadata image reference does not match workflow inputs")
-          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
+              raise SystemExit("publication metadata image reference does not match inputs")
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="ascii") as output:
               output.write(f"registry_digest={digest}\n")
               output.write(f"image_ref={image_ref}\n")
-          PY
-
-      - name: Validate optional evidence inputs
-        env:
-          SBOM_PATH: ${{ inputs.sbom_path }}
-          SCAN_PATH: ${{ inputs.scan_path }}
-        run: |
-          python - <<'PY'
-          import os
-          from pathlib import Path
-
-          root = Path.cwd().resolve()
-          for variable in ("SBOM_PATH", "SCAN_PATH"):
-              value = os.environ[variable].strip()
-              if not value:
-                  continue
-              candidate = (root / value).resolve()
-              try:
-                  candidate.relative_to(root)
-              except ValueError:
-                  raise SystemExit(f"{variable} must remain inside the checkout")
-              if not candidate.is_file():
-                  raise SystemExit(f"{variable} does not name a regular file")
           PY
 
       - name: Name publication metadata artifact
         id: artifact-name
         run: echo "value=release-image-publication-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
 
-      - name: Upload publication metadata and optional evidence
+      - name: Upload publication metadata and bound evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ${{ steps.artifact-name.outputs.value }}
           path: |
-            release-image-metadata.json
-            ${{ inputs.sbom_path }}
-            ${{ inputs.scan_path }}
+            release-image-publication.json
+            release-candidate/release-image-metadata.json
+            release-candidate/release-image-identity.json
+            release-candidate/release-image-evidence/
           if-no-files-found: error
-          include-hidden-files: true
+          include-hidden-files: false
           retention-days: 90
 
       - name: Attest published image
@@ -306,4 +328,4 @@ jobs:
       - name: Attest publication metadata
         uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
         with:
-          subject-path: release-image-metadata.json
+          subject-path: release-image-publication.json

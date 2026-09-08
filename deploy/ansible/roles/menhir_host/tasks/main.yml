@@ -7,12 +7,14 @@
         menhir_host_directories | map(attribute='path') | list ==
         ['/srv/menhir', '/srv/menhir/production', '/srv/menhir/backups',
         '/srv/menhir/backups/encrypted', '/srv/menhir/scaffold',
-        '/srv/menhir/scaffold/bin', '/var/lib/menhir-production',
+        '/srv/menhir/scaffold/bin', '/srv/menhir/staging-transactions',
+        '/srv/menhir/install-transactions',
+        '/srv/menhir/scaffold-transactions', '/var/lib/menhir-production',
         '/var/log/menhir-production', '/etc/menhir', '/etc/yawn-vps']
       - >-
         menhir_host_directories | map(attribute='mode') | list ==
-        ['0755', '0755', '0755', '0700', '0755', '0755', '0755',
-        '0755', '0700', '0755']
+        ['0755', '0755', '0755', '0700', '0755', '0755', '0700',
+        '0700', '0700', '0755', '0755', '0700', '0755']
       - >-
         menhir_host_units | map(attribute='name') | list ==
         ['menhir-scaffold-audit.service', 'menhir-scaffold-audit.timer']
@@ -35,14 +37,89 @@
     enabled: false
     state: stopped
   loop: "{{ menhir_host_retired_units }}"
-  failed_when: false
+  register: menhir_retired_unit_stop
+  failed_when:
+    - menhir_retired_unit_stop.failed | default(false)
+    - >-
+      not (menhir_retired_unit_stop.msg | default('')).startswith(
+      'Could not find the requested service')
+
+- name: Inspect stopped Caddy route writers
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+  loop: "{{ menhir_host_retired_units }}"
+  register: menhir_retired_unit_stopped_state
+  changed_when: false
+  failed_when:
+    - menhir_retired_unit_stopped_state.failed | default(false)
+    - >-
+      not (menhir_retired_unit_stopped_state.msg | default('')).startswith(
+      'Could not find the requested service')
+
+- name: Verify retired Caddy route writers are stopped
+  ansible.builtin.assert:
+    that:
+      - (item.status | default({})).get('ActiveState') == 'inactive'
+      - (item.status | default({})).get('SubState') == 'dead'
+    fail_msg: >-
+      Refusing to remove a retired Caddy writer definition while its unit is
+      not inactive and dead.
+  loop: "{{ menhir_retired_unit_stopped_state.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: >-
+    not (item.msg | default('')).startswith(
+    'Could not find the requested service')
+
+- name: Remove retired Caddy route writer scripts
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /srv/menhir/production/bin/caddy-release.sh
+    - /srv/menhir/production/bin/caddy-route-apply
+    - /srv/menhir/production/bin/caddy-route-rollback
 
 - name: Remove retired Caddy route writer definitions
   ansible.builtin.file:
     path: "/etc/systemd/system/{{ item }}"
     state: absent
   loop: "{{ menhir_host_retired_units }}"
-  notify: Reload systemd
+
+- name: Apply retired systemd definition removal
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  changed_when: false
+
+- name: Inspect systemd services after retired definition removal
+  ansible.builtin.service_facts:
+
+- name: Verify retired Caddy route writer units are absent
+  ansible.builtin.assert:
+    that:
+      - item not in ansible_facts.services
+    fail_msg: "Retired Caddy route writer unit remains loaded."
+  loop: "{{ menhir_host_retired_units }}"
+
+- name: Inspect retired Caddy route writer scripts
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+  loop:
+    - /srv/menhir/production/bin/caddy-release.sh
+    - /srv/menhir/production/bin/caddy-route-apply
+    - /srv/menhir/production/bin/caddy-route-rollback
+  register: menhir_retired_script_state
+
+- name: Verify retired Caddy route writer scripts are absent
+  ansible.builtin.assert:
+    that:
+      - not item.stat.exists
+      - not (item.stat.islnk | default(false))
+    fail_msg: "Retired Caddy route writer script remains present."
+  loop: "{{ menhir_retired_script_state.results }}"
+  loop_control:
+    label: "{{ item.item }}"
 
 - name: Create persistent Menhir directories
   ansible.builtin.file:
@@ -64,6 +141,29 @@
     owner: root
     group: root
     mode: "0644"
+
+- name: Inspect the scaffold audit executable
+  ansible.builtin.stat:
+    path: /srv/menhir/scaffold/bin/menhir_scaffold.py
+    follow: false
+    checksum_algorithm: sha256
+  register: menhir_scaffold_audit_executable
+
+- name: Require the exact safe scaffold audit executable
+  ansible.builtin.assert:
+    that:
+      - menhir_scaffold_audit_executable.stat.exists | default(false)
+      - menhir_scaffold_audit_executable.stat.isreg | default(false)
+      - not (menhir_scaffold_audit_executable.stat.islnk | default(false))
+      - (menhir_scaffold_audit_executable.stat.uid | default(-1)) == 0
+      - (menhir_scaffold_audit_executable.stat.gid | default(-1)) == 0
+      - (menhir_scaffold_audit_executable.stat.mode | default('')) == '0755'
+      - >-
+        (menhir_scaffold_audit_executable.stat.checksum | default('')) ==
+        'f83f03b90594ebefa7452c418253b7e38647cae9ecafc009482a1aa3c1905eab'
+    fail_msg: >-
+      Refusing to install or enable the scaffold audit timer without the exact
+      root-owned mode-0755 non-symlink scaffold executable.
 
 - name: Install Menhir audit units
   ansible.builtin.template:

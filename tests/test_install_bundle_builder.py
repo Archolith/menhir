@@ -246,6 +246,9 @@ def test_validator_rejects_manifest_digest_drift(tmp_path: Path) -> None:
 
 def test_fixed_destination_mode_policy() -> None:
     assert MODULE._destination_mode(
+        "/srv/menhir/scaffold/bin/menhir_stage_vps.py"
+    ) == "0755"
+    assert MODULE._destination_mode(
         "/srv/menhir/production/release/release.json"
     ) == "0400"
     assert MODULE._destination_mode(
@@ -312,7 +315,10 @@ def test_installer_keeps_scaffold_and_cutover_out_of_routine_install() -> None:
     assert "/srv/menhir/production/bin/verify-artifacts" in source
     assert "systemctl daemon-reload" in source
     assert "systemctl restart menhir-oauth-operations.service" in source
-    assert "menhir-caddy-reconcile" not in source
+    assert "menhir-caddy-reconcile.path" in source
+    assert "menhir-caddy-reconcile.service" in source
+    assert "retire_caddy_writers" in source
+    assert "retired Caddy writer remains loaded or active" in source
     assert "production cutover was not started" in source
 
 

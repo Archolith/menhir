@@ -10,6 +10,9 @@ DIRECTORIES = {
     "/srv/menhir/backups/encrypted": 0o700,
     "/srv/menhir/scaffold": 0o755,
     "/srv/menhir/scaffold/bin": 0o755,
+    "/srv/menhir/staging-transactions": 0o700,
+    "/srv/menhir/install-transactions": 0o700,
+    "/srv/menhir/scaffold-transactions": 0o700,
     "/var/lib/menhir-production": 0o755,
     "/var/log/menhir-production": 0o755,
     "/etc/menhir": 0o700,
@@ -21,6 +24,16 @@ FILES = {
     "/etc/systemd/system/menhir-scaffold-audit.service": 0o644,
     "/etc/systemd/system/menhir-scaffold-audit.timer": 0o644,
 }
+
+RETIRED_CADDY_WRITER_SCRIPTS = (
+    "/srv/menhir/production/bin/caddy-release.sh",
+    "/srv/menhir/production/bin/caddy-route-apply",
+    "/srv/menhir/production/bin/caddy-route-rollback",
+)
+
+SCAFFOLD_AUDIT_SHA256 = (
+    "f83f03b90594ebefa7452c418253b7e38647cae9ecafc009482a1aa3c1905eab"
+)
 
 
 @pytest.mark.parametrize("path,mode", DIRECTORIES.items())
@@ -39,6 +52,16 @@ def test_root_owned_file_contract(host, path, mode):
     assert managed_file.user == "root"
     assert managed_file.group == "root"
     assert managed_file.mode == mode
+
+
+def test_scaffold_audit_executable_is_exact_and_safe(host):
+    executable = host.file("/srv/menhir/scaffold/bin/menhir_scaffold.py")
+    assert executable.is_file
+    assert not executable.is_symlink
+    assert executable.user == "root"
+    assert executable.group == "root"
+    assert executable.mode == 0o755
+    assert executable.sha256sum == SCAFFOLD_AUDIT_SHA256
 
 
 @pytest.mark.parametrize(
@@ -64,10 +87,19 @@ def test_no_failed_menhir_units(host):
     ("menhir-caddy-reconcile.path", "menhir-caddy-reconcile.service"),
 )
 def test_legacy_caddy_writer_is_absent(host, unit):
-    assert not host.file(f"/etc/systemd/system/{unit}").exists
+    definition = host.file(f"/etc/systemd/system/{unit}")
+    assert not definition.exists
+    assert not definition.is_symlink
     enabled = host.run(f"systemctl is-enabled {unit}")
     active = host.run(f"systemctl is-active {unit}")
     assert enabled.rc == 4
     assert enabled.stdout.strip() == "not-found"
     assert active.rc in {3, 4}
     assert active.stdout.strip() in {"inactive", "unknown"}
+
+
+@pytest.mark.parametrize("path", RETIRED_CADDY_WRITER_SCRIPTS)
+def test_legacy_caddy_writer_script_is_absent(host, path):
+    script = host.file(path)
+    assert not script.exists
+    assert not script.is_symlink

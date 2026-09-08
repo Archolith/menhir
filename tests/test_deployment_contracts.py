@@ -18,8 +18,7 @@ import json
 import os
 import shutil
 import subprocess
-import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -890,9 +889,11 @@ def test_authority_local_digest_is_deterministic(tmp_path):
 def test_authority_local_digest_is_order_independent(tmp_path):
     a = tmp_path / "a"
     b = tmp_path / "b"
-    a.mkdir(); b.mkdir()
+    a.mkdir()
+    b.mkdir()
     for root in (a, b):
-        (root / "x").mkdir(); (root / "y").mkdir()
+        (root / "x").mkdir()
+        (root / "y").mkdir()
         (root / "x" / "1").write_bytes(b"one")
         (root / "y" / "2").write_bytes(b"two")
     # Create x/1 and y/2 in the opposite creation order so traversal order
@@ -962,7 +963,8 @@ def test_authority_local_digest_rejects_symlink_root(tmp_path):
 def test_authority_local_set_binds_labels_and_every_disjoint_root(tmp_path):
     oauth = tmp_path / "oauth-root"
     telemetry = tmp_path / "telemetry-root"
-    oauth.mkdir(); telemetry.mkdir()
+    oauth.mkdir()
+    telemetry.mkdir()
     (oauth / "authority.db").write_bytes(b"oauth")
     (telemetry / "authority.db").write_bytes(b"telemetry")
     roots = {"oauth": str(oauth), "telemetry": str(telemetry)}
@@ -1262,3 +1264,43 @@ def test_neo4j_component_authority_changes_digest(monkeypatch):
 def test_neo4j_edition_detection_fails_closed(monkeypatch, components):
     with pytest.raises(ValueError):
         _run_fake_neo4j_authority(monkeypatch, components)
+
+
+def test_scaffold_installs_and_audits_fixed_root_staging_runner():
+    scaffold = REPO_ROOT / "deploy" / "scaffold"
+    install = (scaffold / "install.sh").read_text(encoding="ascii")
+    contract = json.loads(
+        (scaffold / "contract.production.json").read_text(encoding="ascii")
+    )
+    runner = "/srv/menhir/scaffold/bin/menhir_stage_vps.py"
+
+    assert '"personal_stage_vps.py"' in install
+    assert (
+        'install -o root -g root -m 0755 "${bundle}/personal_stage_vps.py" '
+        + runner
+    ) in install
+    assert {
+        "digest": True,
+        "gid": 0,
+        "mode": "0755",
+        "path": runner,
+        "uid": 0,
+    } in contract["files"]
+    assert {
+        "gid": 0,
+        "mode": "0700",
+        "path": "/srv/menhir/staging-transactions",
+        "uid": 0,
+    } in contract["directories"]
+
+
+def test_scaffold_sudoers_has_no_user_owned_python_execution():
+    source = (
+        REPO_ROOT / "deploy" / "scaffold" / "menhir-scaffold.sudoers"
+    ).read_text(encoding="ascii")
+
+    assert (
+        "/usr/bin/python3 /srv/menhir/scaffold/bin/menhir_stage_vps.py *"
+    ) in source
+    assert "/home/thron" not in source
+    assert "python3 *" not in source

@@ -38,6 +38,8 @@ SCAFFOLD = Path("/srv/menhir/scaffold/bin/menhir_scaffold.py")
 LOCK = Path("/run/lock/menhir-production.lock")
 ACTIVE = STATUS / "app-only-active.json"
 LAST = STATUS / "app-only-last.json"
+SECURITY_CONFIG_ACTIVE = STATUS / "security-config-active.json"
+MAINTENANCE_ACTIVE = STATUS / "release-run.json"
 PROBE_CLIENT_ID = "menhir-deploy-probe"
 ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:+/-]{0,255}")
 BUNDLE_ID = re.compile(r"[a-f0-9]{32}")
@@ -45,13 +47,9 @@ DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
 HEX64 = re.compile(r"[0-9a-f]{64}")
 ENV_KEY = re.compile(r"[A-Z][A-Z0-9_]*")
 ALLOWED_ENV_CHANGES = {"MENHIR_IMAGE", "MENHIR_RELEASE_COMMIT", "MENHIR_RELEASE_ID"}
-PROTECTED_SOURCE_PATTERNS = tuple(re.compile(value) for value in (
-    r"^deploy/", r"^\.github/",
-    r"^(pyproject\.toml|uv\.lock|poetry\.lock|requirements[^/]*)$",
-    r"^src/menhir/config/", r"^src/menhir/api/(auth|client_policy|oauth[^/]*)\.py$",
-    r"^src/menhir/core/(bootstrap|runtime|runtime_preflight)\.py$",
-    r"^src/menhir/infrastructure/(schema|migration_batches|embedding_dimensions)\.py$",
-    r"^src/menhir/infrastructure/telemetry/schema_migrations\.py$",
+APP_ONLY_SOURCE_PATTERNS = tuple(re.compile(value) for value in (
+    r"^src/menhir/explorer/static/[^/]+$",
+    r"^src/menhir/explorer/templates/[^/]+$",
 ))
 ALLOWED_RELEASE_SCALARS = (
     ("release_id",),
@@ -71,7 +69,12 @@ class AppOnlyError(RuntimeError):
 
 
 def now_iso() -> str:
-    return dt.datetime.now(dt.timezone.utc).isoformat()
+    return dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def is_app_only_source_path(path: str) -> bool:
+    """Return whether a source path is proven safe for the no-backup lane."""
+    return any(pattern.fullmatch(path) for pattern in APP_ONLY_SOURCE_PATTERNS)
 
 
 def strict_load(path: Path) -> dict[str, Any]:
@@ -355,11 +358,7 @@ def recompute_source_classification(
         not path or path.startswith("/") or ".." in path.split("/") for path in changed
     ):
         raise AppOnlyError("trusted source diff is empty or invalid")
-    forbidden = sorted(
-        path for path in changed if any(pattern.search(path) for pattern in PROTECTED_SOURCE_PATTERNS)
-    )
-    if not any(path.startswith("src/") for path in changed):
-        raise AppOnlyError("trusted source diff changes no application source path")
+    forbidden = sorted(path for path in changed if not is_app_only_source_path(path))
     return changed, forbidden
 
 
@@ -759,12 +758,28 @@ def acquire_lock() -> Any:
     return handle
 
 
+def require_no_incomplete_transactions() -> None:
+    """Reject a new mutation while any deployment lane has unfinished state."""
+    for path, kind in (
+        (ACTIVE, "app-only"),
+        (SECURITY_CONFIG_ACTIVE, "security-config"),
+        (MAINTENANCE_ACTIVE, "maintenance"),
+    ):
+        if not path.exists():
+            continue
+        require_root_file(path, f"active {kind} transaction")
+        stage = strict_load(path).get("stage")
+        if kind != "maintenance" or stage != "complete":
+            raise AppOnlyError(
+                f"an incomplete {kind} transaction exists; recover it before deploying"
+            )
+
+
 def deploy(bundle_id: str) -> dict[str, Any]:
-    if ACTIVE.exists():
-        raise AppOnlyError("an incomplete app-only transaction exists; run recover")
     lock = acquire_lock()
     transaction: dict[str, Any] | None = None
     try:
+        require_no_incomplete_transactions()
         run([str(SCAFFOLD), "verify", "--app-only"], 30)
         tx_id = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ-") + bundle_id
         tx = STATUS / "app-only" / tx_id

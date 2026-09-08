@@ -65,11 +65,15 @@ The first release exercised through this path exposed two assumptions that a war
   pull work.
 
 `personal_stage.ps1` therefore resolves the digest-pinned image locally, exports the selected tag,
-hashes the archive, transfers it over the existing authenticated SSH channel, and loads it into
-isolated staging. `personal_stage_vps.py` accepts the transferred tag only when the archive digest
-matches and the loaded revision, Menhir wheel-manifest, and OAuth-wheel labels match the finalized
-release authority. The staging receipt continues to bind the registry manifest digest from the
-finalized release.
+hashes the archive, and transfers the archive and install bundle over the existing authenticated
+SSH channel. It does not upload Python or execute uploaded Python as root. Sudo may execute only
+`/usr/bin/python3 /srv/menhir/scaffold/bin/menhir_stage_vps.py`. That fixed root-owned runner first
+verifies its path, owner, mode, and runtime `__file__` digest against the caller's expected digest,
+then copies each hostile user-owned upload through no-follow descriptors into a new root-owned
+transaction directory and revalidates the copied bytes before Docker uses them. It accepts the
+transferred image only when the archive digest and loaded revision, Menhir wheel-manifest, and
+OAuth-wheel labels match the finalized release authority. The staging receipt binds the verified
+installed-runner digest and finalized registry manifest digest.
 
 This distinction matters because `docker save`/`docker load` preserves the image configuration and
 tag but does not reproduce the registry's `tag@digest` lookup metadata on another Docker host.
@@ -109,12 +113,19 @@ Copy `image_ref` and `registry_digest` from that output into release inputs. Do 
 either from Docker's local image ID; a registry manifest digest and a local image configuration ID
 are different authorities. Isolated staging repeats label verification as a fail-closed backstop.
 
-A staging failure writes no passing receipt and grants no promotion authority. After correcting a
-personal-deployment runner, rerun `stage` against the same selected immutable product release and
-empty receipt path; do not rebuild the application release unless application artifacts changed.
-Every staging attempt snapshots production authority and container identity and must leave both
-unchanged. Future cold-cache tests must remove or avoid the candidate app image so this path is not
-accidentally validated only by a previously cached image.
+A staging failure writes no passing receipt and grants no promotion authority. Before using a
+changed staging or scaffold runner, converge the reviewed host scaffold from the exact checkout and
+verify the installed scaffold. This is a separate host-infrastructure operation, not product
+promotion and not a reason to rebuild the application release. Then rerun staging against the same
+selected immutable product release and an empty receipt path. Every staging attempt snapshots
+production authority and exact Cloudflared container, image, Compose-label, and network-attachment
+identity and must leave them unchanged. Future cold-cache tests must remove or avoid the candidate
+app image so this path is not accidentally validated only by a previously cached image.
+
+The root staging transaction retains the sealed preflight and authoritative receipt after the
+operator upload and disposable staging resources are removed. Its `inputs/` tree, including the
+large image archive and bundle copy, is always deleted; retained root evidence must not become a
+second payload archive.
 
 Windows operator wrappers must not assume profile-loaded PowerShell hashing commands or Unix mode
 preservation. Use an embedded .NET SHA-256 implementation, verify the complete uploaded bundle by
@@ -198,17 +209,38 @@ the exact release before approval can be recorded. Direct execution through
 `release_flow.py deploy --execute` is disabled so the old handoff cannot bypass staging or approval.
 
 Promotion success is reported by the executing PowerShell gate, not synthesized by the Python
-coordinator. Its receipt binds the release, bundle, staging receipt, owner approval, deployment
-class, ingress mode, both wrapper digests, start/completion times, and elapsed time. App-only is
-limited to 300 seconds; security configuration and maintenance are limited to 600 seconds. A
-wrapper that exits zero without writing the exact receipt is a failed promotion.
+coordinator. Owner approval and the promotion receipt bind the release, bundle, staging receipt,
+promotion wrapper digest, selected operator-wrapper digest, root-runner digest, deployment class,
+ingress mode, attempt identity, and timing. These executables have fixed paths: environment or CLI
+substitution of the promotion wrapper, operator wrapper, or root runner is forbidden. App-only has
+a 300-second foreground budget and security-config has a 600-second foreground budget. Maintenance
+is resumable and has no short foreground budget. A wrapper that exits zero without writing the
+exact receipt is a failed promotion.
 
 Security configuration is a distinct mode throughout selection, staging, approval, and promotion.
 It is never converted to maintenance. The repository-owned `personal_security_config.ps1` wrapper
 and root-owned `menhir_security_config.py` transaction install only the bounded auth/config set and
-fail closed on database, ingress, host, secret-rotation, or other maintenance changes. An optional
-`MENHIR_SECURITY_CONFIG_DEPLOY_WRAPPER` may name a reviewed equivalent; it may not point at the
-maintenance wrapper.
+fail closed on database, ingress, host, secret-rotation, or other maintenance changes. No
+environment variable or command-line option may substitute another security-config wrapper.
+
+### Converge reviewed host infrastructure
+
+When any staging or scaffold runner changes, perform the scaffold install/convergence separately
+from product promotion. Start in the exact reviewed checkout so the scaffold bundle and installed
+runner digest come from those bytes, then verify the resulting host contract:
+
+```powershell
+Push-Location C:\absolute\reviewed-menhir-checkout
+PowerShell -File C:\Users\thron\IdeaProjects\scripts\menhir-scaffold.ps1 `
+  -Mode Install -SourceRoot (Resolve-Path deploy/scaffold)
+PowerShell -File C:\Users\thron\IdeaProjects\scripts\menhir-scaffold.ps1 -Mode Status
+Pop-Location
+```
+
+`Install` validates the exact scaffold-bundle manifest, copies its user-owned upload into
+`/srv/menhir/scaffold-transactions`, installs fixed root-owned non-writable executables, captures the
+host contract, and finishes with verification. `Status` provides the separate read-only operator
+check. Do not fold this convergence into `prepare`, `finalize`, `publish`, staging, or promotion.
 
 ## Before starting
 
@@ -314,13 +346,15 @@ python deploy/personal_deploy.py status `
 
 Omit `--execute` to preview the exact staging command. Repeating `rehearse` resumes the same
 digest-bound state and does not repeat a completed stage. Staging first runs a read-only production
-preflight; only then does it upload the exact bundle into a random private VPS directory, create disposable Neo4j,
-OAuth, policy, ingress, and telemetry authority under `/srv/menhir/staging`, and uses only
-non-production credentials. It verifies production-equivalent image digests, memory limits,
-network shape, OAuth authorization code with PKCE, MCP discovery/list/recall, an allowed synthetic
-write, an exact policy denial, restart persistence, and simulated automatic rollback. It compares
-the production release and container identities before and after, removes staging, and writes a
-receipt only if every check passes.
+preflight; only then does it upload the exact bundle and image archive into a random private VPS
+directory. Sudo invokes only the fixed installed runner, which verifies itself, root-copies and
+revalidates those inputs, and creates disposable Neo4j, OAuth, policy, ingress, and telemetry
+authority under `/srv/menhir/staging` using only non-production credentials. It verifies
+production-equivalent image digests, memory limits, network shape, OAuth authorization code with
+PKCE, MCP discovery/list/recall, an allowed synthetic write, an exact policy denial, restart
+persistence, and simulated automatic rollback. It compares production and Cloudflared identity
+before and after cleanup and writes a receipt only if every check passes. The transaction retains
+only the root receipt and sealed evidence, not its copied bundle or image archive.
 
 Review `release-notes.md` and `staging-receipt.json`. Then bind one owner approval. The coordinator
 derives the already-validated release ID and staging digest; the operator supplies only an identity:
@@ -345,21 +379,35 @@ python deploy/personal_deploy.py promote `
 `personal_promote.ps1` independently rehashes the bundle, release authority, staging receipt, and
 approval; recomputes the sealed production preflight; rechecks all staging results and their 24-hour
 freshness; derives the only permitted promotion mode from the immutable release class; verifies image
-and deployment-class bindings; and only then invokes the existing production transaction. `app-only` selects the
-bounded app replacement. `security-config` selects the dedicated bounded config/application runner.
-`maintenance` uses the full resumable backup,
-restore, candidate, fence, route, and promotion transaction.
+and deployment-class bindings; and only then invokes the fixed selected production transaction.
+`app-only` selects the bounded app replacement. `security-config` selects the dedicated bounded
+config/application runner. `maintenance` uses the full resumable backup, restore, candidate, fence,
+route, and promotion transaction.
+
+Immediately before first execution, the coordinator persists `phase: promoting`, a random
+`promotion_attempt_id`, and `promotion_started_utc`. If the coordinator or shell crashes, rerun the
+same `promote --execute` command. The retry reuses that persisted attempt rather than creating a new
+one; if the matching root transaction receipt already exists, the promotion gate validates and
+adopts it, then writes the outer promotion receipt without rerunning production mutation.
 
 The deployment class is mechanical and is part of the reviewed immutable release authority. It
-selects `AppOnly` only when every staged fragment is
-`app-only`, no sibling repository changed, and the Menhir diff contains only application source
-outside protected authentication, runtime, schema, configuration, and deployment paths. A fragment
-can escalate but cannot de-escalate the result.
+selects `app-only` only when every staged fragment is `app-only`, no sibling repository changed, and
+every changed Menhir source path is on the explicit explorer allowlist:
+`src/menhir/explorer/static/[^/]+` or `src/menhir/explorer/templates/[^/]+`. Any unknown or
+unclassified source path selects `maintenance`; absence from a protected-path list is not app-only
+authority. A fragment can escalate but cannot de-escalate the result.
 
 The bundle's complete tree digest is checked locally, by the staging runner, by the promotion gate,
 and again by the maintenance transaction before installation. Missing, extra, changed, linked, or
 special files stop before production mutation. State is resumable: rerunning a completed stage
 validates its saved evidence and does not repeat it.
+
+Maintenance and scaffold wrappers treat their VPS upload directories as hostile transport only.
+Before root execution, each copies the exact allowlisted upload into a fresh root-owned transaction
+directory (`/srv/menhir/install-transactions` for maintenance and
+`/srv/menhir/scaffold-transactions` for scaffold convergence), then verifies the copied manifest,
+file census, digests, modes, and release or contract bindings. Root code never executes from a
+user-owned upload path.
 
 For maintenance installs, the bundle installer reloads systemd definitions and
 restarts the operations gateway only when it was already active. A failed activation restores the prior files, reloads the

@@ -44,7 +44,7 @@ def _fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[list[str]
     release_path.parent.mkdir(parents=True)
     release_path.write_text(json.dumps({
         "release_id": release_id,
-        "deployment_class": "app-only",
+        "deployment_class": "security-config",
         "ingress_mode": "cloudflared",
         "notes_json_sha256": "5" * 64,
         "notes_markdown_sha256": "6" * 64,
@@ -58,7 +58,7 @@ def _fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[list[str]
         "kind": "menhir-production-readiness-preflight",
         "result": "passed",
         "observed_utc": now,
-        "deployment_class": "app-only",
+        "deployment_class": "security-config",
         "ingress_mode": "cloudflared",
         "candidate_release_id": release_id,
         "checks": {
@@ -85,7 +85,7 @@ def _fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[list[str]
         "release_id": release_id,
         "release_sha256": release_sha,
         "bundle_sha256": bundle_sha,
-        "deployment_class": "app-only",
+        "deployment_class": "security-config",
         "ingress_mode": "cloudflared",
         "images": {"menhir": release_sha_image, "neo4j": neo4j_sha_image},
         "runner_sha256": "3" * 64,
@@ -100,6 +100,9 @@ def _fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[list[str]
         "production_preflight": preflight,
     }), encoding="utf-8")
     staging_sha = _sha(staging_path)
+    promotion_sha = _sha(WRAPPER)
+    operator_sha = _sha(WRAPPER.with_name("personal_security_config.ps1"))
+    root_runner_sha = _sha(WRAPPER.parent / "scaffold" / "menhir_security_config.py")
     approval_path = tmp_path / "approval.json"
     approval_path.write_text(json.dumps({
         "schema": 1,
@@ -108,82 +111,88 @@ def _fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[list[str]
         "release_sha256": release_sha,
         "bundle_sha256": bundle_sha,
         "staging_receipt_sha256": staging_sha,
+        "promotion_wrapper_sha256": promotion_sha,
+        "operator_wrapper_sha256": operator_sha,
+        "root_runner_sha256": root_runner_sha,
         "approved_by": "owner",
         "approved_utc": now,
     }), encoding="utf-8")
-    fake = tmp_path / "fake-deploy.ps1"
-    fake.write_text(
-        "param([string]$Mode,[string]$BundlePath,[string]$ExpectedBundleSha256,"
-        "[string]$Release,[string]$SourceRepository,[string]$TransactionReceipt)\n"
-        "$kind = if ($Mode -eq 'AppOnly') { 'menhir-app-only-transaction' } "
-        "elseif ($Mode -eq 'SecurityConfig') { 'menhir-security-config-transaction' } "
-        "else { 'menhir-maintenance-transaction' }\n"
-        "$receipt = [ordered]@{schema=1;kind=$kind;result='passed';stage='complete';"
-        "runner_sha256=('c' * 64);started_utc=[DateTime]::UtcNow.ToString('o');"
-        "completed_utc=[DateTime]::UtcNow.ToString('o');"
-        "candidate_release_id=$Release;candidate_release_sha256=$env:MENHIR_TEST_RELEASE_SHA;"
-        "database_container_id='database-1';database_container_id_after='database-1';"
-        "ingress_container_id='cloudflared-1';ingress_container_id_after='cloudflared-1'}\n"
-        "$receipt | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $TransactionReceipt -Encoding ascii\n"
-        "[IO.File]::WriteAllText($env:MENHIR_TEST_PROMOTION_MARKER, \"$Mode|$Release\")\n",
-        encoding="utf-8",
-    )
-    marker = tmp_path / "called.txt"
+    transaction_path = tmp_path / "root-transaction.json"
+    transaction_path.write_text(json.dumps({
+        "schema": 1,
+        "kind": "menhir-security-config-transaction",
+        "result": "passed",
+        "stage": "complete",
+        "runner_sha256": root_runner_sha,
+        "started_utc": now,
+        "completed_utc": now,
+        "candidate_release_id": release_id,
+        "candidate_release_sha256": release_sha,
+        "database_container_id": "database-1",
+        "database_container_id_after": "database-1",
+        "ingress_container_id": "cloudflared-1",
+        "ingress_container_id_after": "cloudflared-1",
+    }), encoding="utf-8")
+    result_path = tmp_path / "promotion-result.json"
     command = [
         "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(WRAPPER),
-        "-Mode", "AppOnly", "-BundlePath", str(bundle),
+        "-Mode", "SecurityConfig", "-BundlePath", str(bundle),
         "-ExpectedBundleSha256", bundle_sha, "-Release", release_id,
         "-ExpectedReleaseSha256", release_sha, "-StagingReceipt", str(staging_path),
         "-ExpectedStagingReceiptSha256", staging_sha, "-Approval", str(approval_path),
         "-ExpectedApprovalSha256", _sha(approval_path), "-SourceRepository", str(tmp_path),
-        "-TransactionReceipt", str(tmp_path / "root-transaction.json"),
-        "-ResultReceipt", str(tmp_path / "promotion-result.json"),
+        "-ExpectedPromotionWrapperSha256", promotion_sha,
+        "-ExpectedOperatorWrapperSha256", operator_sha,
+        "-ExpectedRootRunnerSha256", root_runner_sha,
+        "-PromotionAttemptId", "a" * 32,
+        "-PromotionStartedUtc", now,
+        "-TransactionReceipt", str(transaction_path),
+        "-ResultReceipt", str(result_path),
     ]
-    monkeypatch.setenv("MENHIR_OPERATOR_DEPLOY_WRAPPER", str(fake))
-    monkeypatch.setenv("MENHIR_TEST_PROMOTION_MARKER", str(marker))
-    monkeypatch.setenv("MENHIR_TEST_RELEASE_SHA", release_sha)
-    return command, marker, staging_path
+    return command, result_path, staging_path
 
 
 @pytest.mark.skipif(shutil.which("powershell.exe") is None, reason="requires Windows PowerShell")
 def test_promotion_gate_validates_evidence_before_calling_transaction(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    command, marker, _ = _fixture(tmp_path, monkeypatch)
+    command, result_path, _ = _fixture(tmp_path, monkeypatch)
     result = subprocess.run(command, text=True, capture_output=True, check=False)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert marker.read_text(encoding="utf-8") == "AppOnly|menhir-prod-0.2.0-12"
+    receipt = json.loads(result_path.read_text(encoding="utf-8-sig"))
+    assert receipt["transaction_kind"] == "security-config"
 
 
 @pytest.mark.skipif(shutil.which("pwsh.exe") is None, reason="requires PowerShell 7")
 def test_promotion_gate_accepts_json_timestamps_under_powershell_7(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    command, marker, _ = _fixture(tmp_path, monkeypatch)
+    command, result_path, _ = _fixture(tmp_path, monkeypatch)
     command[0] = shutil.which("pwsh.exe") or "pwsh.exe"
 
     result = subprocess.run(command, text=True, capture_output=True, check=False)
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert marker.read_text(encoding="utf-8") == "AppOnly|menhir-prod-0.2.0-12"
+    receipt = json.loads(result_path.read_text(encoding="utf-8-sig"))
+    assert receipt["promotion_attempt_id"] == "a" * 32
 
 
 @pytest.mark.skipif(shutil.which("powershell.exe") is None, reason="requires Windows PowerShell")
 def test_promotion_gate_blocks_tampered_receipt_before_transaction(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    command, marker, staging = _fixture(tmp_path, monkeypatch)
+    command, result_path, staging = _fixture(tmp_path, monkeypatch)
     staging.write_text(staging.read_text(encoding="utf-8") + " ", encoding="utf-8")
     result = subprocess.run(command, text=True, capture_output=True, check=False)
     assert result.returncode != 0
-    assert not marker.exists()
+    assert not result_path.exists()
 
 
 @pytest.mark.skipif(shutil.which("pwsh.exe") is None, reason="requires PowerShell 7")
 def test_promotion_gate_recomputes_preflight_seal_after_outer_rebinding(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    command, marker, staging = _fixture(tmp_path, monkeypatch)
+    command, result_path, staging = _fixture(tmp_path, monkeypatch)
     command[0] = shutil.which("pwsh.exe") or "pwsh.exe"
     value = json.loads(staging.read_text(encoding="utf-8"))
     value["production_preflight"]["checks"]["headroom"]["disk_free_bytes"] += 1
@@ -200,14 +209,14 @@ def test_promotion_gate_recomputes_preflight_seal_after_outer_rebinding(
 
     assert result.returncode != 0
     assert "preflight seal is invalid" in result.stderr
-    assert not marker.exists()
+    assert not result_path.exists()
 
 
 @pytest.mark.skipif(shutil.which("pwsh.exe") is None, reason="requires PowerShell 7")
 def test_promotion_gate_refuses_mode_downgrade_from_release_authority(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    command, marker, staging = _fixture(tmp_path, monkeypatch)
+    command, result_path, staging = _fixture(tmp_path, monkeypatch)
     command[0] = shutil.which("pwsh.exe") or "pwsh.exe"
     bundle = Path(command[command.index("-BundlePath") + 1])
     release_path = bundle / "rootfs/srv/menhir/production/release/release.json"
@@ -236,4 +245,4 @@ def test_promotion_gate_refuses_mode_downgrade_from_release_authority(
 
     assert result.returncode != 0
     assert "mode differs from the immutable release authority" in result.stderr
-    assert not marker.exists()
+    assert not result_path.exists()

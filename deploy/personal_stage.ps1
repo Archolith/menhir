@@ -121,30 +121,17 @@ $runner = Join-Path $PSScriptRoot "personal_stage_vps.py"
 if (-not (Test-Path -LiteralPath $runner -PathType Leaf)) {
     throw "VPS staging runner is missing: $runner"
 }
-$wrapperSha = Get-FileSha256 -Path $PSCommandPath
-$vpsRunnerSha = Get-FileSha256 -Path $runner
-$runnerIdentity = [Security.Cryptography.IncrementalHash]::CreateHash(
-    [Security.Cryptography.HashAlgorithmName]::SHA256
-)
-$identityUtf8 = [Text.UTF8Encoding]::new($false, $true)
-try {
-    $runnerIdentity.AppendData($identityUtf8.GetBytes("personal_stage.ps1`0$wrapperSha`n"))
-    $runnerIdentity.AppendData($identityUtf8.GetBytes("personal_stage_vps.py`0$vpsRunnerSha`n"))
-    $runnerSha = ([BitConverter]::ToString($runnerIdentity.GetHashAndReset())).Replace("-", "").ToLowerInvariant()
-}
-finally {
-    $runnerIdentity.Dispose()
-}
+$runnerSha = Get-FileSha256 -Path $runner
 $helpers = Resolve-OperatorScripts
 $remoteHost = if ($env:YAWN_VPS_HOST) { $env:YAWN_VPS_HOST } else { "thron@147.93.132.141" }
 $uploadId = [Guid]::NewGuid().ToString("N")
 $remoteRoot = "/home/thron/.menhir-stage-upload/$uploadId"
 $remoteBundle = "$remoteRoot/bundle"
-$remoteRunner = "$remoteRoot/personal_stage_vps.py"
 $remoteReceipt = "$remoteRoot/staging-receipt.json"
 $localTemp = "$receiptPath.$uploadId.tmp"
 $localImageTar = "$receiptPath.$uploadId.image.tar"
 $remoteImageTar = "$remoteRoot/menhir-image.tar"
+$installedRunner = "/srv/menhir/scaffold/bin/menhir_stage_vps.py"
 
 function Invoke-Vps {
     param([Parameter(Mandatory = $true)][string]$Command)
@@ -172,17 +159,11 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "Could not upload the selected install bundle."
     }
-    & $helpers.Scp -Source $runner -Destination "${remoteHost}:$remoteRunner"
-    if ($LASTEXITCODE -ne 0) {
-        throw "Could not upload the staging runner."
-    }
     & $helpers.Scp -Source $localImageTar -Destination "${remoteHost}:$remoteImageTar"
     if ($LASTEXITCODE -ne 0) {
         throw "Could not upload the selected Menhir image."
     }
-    Invoke-Vps "sudo -n docker load --input '$remoteImageTar'"
-    Invoke-Vps "chmod 0600 '$remoteRunner' && sudo -n python3 '$remoteRunner' --bundle '$remoteBundle' --expected-bundle-sha256 '$ExpectedBundleSha256' --expected-release-id '$ExpectedReleaseId' --expected-release-sha256 '$ExpectedReleaseSha256' --menhir-image-archive '$remoteImageTar' --expected-menhir-image-archive-sha256 '$menhirImageArchiveSha256' --deployment-class '$DeploymentClass' --runner-sha256 '$runnerSha' --receipt '$remoteReceipt'"
-    Invoke-Vps "sudo -n chown thron:thron '$remoteReceipt' && chmod 0600 '$remoteReceipt'"
+    Invoke-Vps "sudo -n /usr/bin/python3 '$installedRunner' --upload-root '$remoteRoot' --expected-bundle-sha256 '$ExpectedBundleSha256' --expected-release-id '$ExpectedReleaseId' --expected-release-sha256 '$ExpectedReleaseSha256' --expected-menhir-image-archive-sha256 '$menhirImageArchiveSha256' --deployment-class '$DeploymentClass' --expected-runner-sha256 '$runnerSha'"
     & $helpers.Scp -Source "${remoteHost}:$remoteReceipt" -Destination $localTemp
     if ($LASTEXITCODE -ne 0) {
         throw "Could not retrieve the staging receipt."

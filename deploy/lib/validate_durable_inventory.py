@@ -232,11 +232,15 @@ def write_report(path: Path, live: dict) -> None:
     fd, temporary = tempfile.mkstemp(prefix=".durable-census-", dir=path.parent)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(value, handle, sort_keys=True); handle.write("\n")
-            handle.flush(); os.fsync(handle.fileno())
-        os.chmod(temporary, 0o400); os.replace(temporary, path)
+            json.dump(value, handle, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temporary, 0o400)
+        os.replace(temporary, path)
     finally:
-        if os.path.exists(temporary): os.unlink(temporary)
+        if os.path.exists(temporary):
+            os.unlink(temporary)
 
 def main(argv: list[str]) -> int:
     if len(argv) not in {3, 6}:

@@ -334,11 +334,10 @@ def rollback(transaction: dict[str, Any]) -> None:
 
 
 def deploy(bundle_id: str) -> dict[str, Any]:
-    if ACTIVE.exists():
-        raise Error("an incomplete security-config transaction exists; run recover")
     lock = app.acquire_lock()
     transaction: dict[str, Any] | None = None
     try:
+        app.require_no_incomplete_transactions()
         tx_id = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ-") + bundle_id
         tx = STATUS / "security-config" / tx_id
         bundle, classification = classify_bundle(bundle_id, tx)

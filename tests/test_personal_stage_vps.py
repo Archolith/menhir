@@ -200,7 +200,8 @@ def test_runner_never_contains_production_data_mount() -> None:
 
     assert 'STAGING_ROOT = Path("/srv/menhir/staging")' in source
     assert 'source: /srv/menhir/production/state' not in source
-    assert 'production authority or container identity changed during staging' in source
+    assert 'production authority or Cloudflared identity changed during staging' in source
+    assert 'refusing unsafe root transaction input cleanup' in source
     assert '"down", "--volumes", "--remove-orphans"' in source
 
 
@@ -266,9 +267,88 @@ def test_desktop_wrapper_transfers_private_registry_image_before_remote_stage() 
     )
 
     assert "docker save --output $localImageTar $menhirImageTag" in wrapper
-    assert "sudo -n docker load --input '$remoteImageTar'" in wrapper
     assert "--expected-menhir-image-archive-sha256 '$menhirImageArchiveSha256'" in wrapper
-    assert wrapper.index("docker load --input") < wrapper.index("sudo -n python3 '$remoteRunner'")
+    assert "sudo -n /usr/bin/python3 '$installedRunner'" in wrapper
+    assert "/srv/menhir/scaffold/bin/menhir_stage_vps.py" in wrapper
+    assert "-Source $runner -Destination" not in wrapper
+    assert "sudo -n docker load" not in wrapper
+    assert "'$remoteRunner'" not in wrapper
+
+
+def test_runtime_self_hash_uses_fixed_installed_runner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner = tmp_path / "menhir_stage_vps.py"
+    runner.write_text("#!/usr/bin/env python3\n", encoding="ascii")
+    runner.chmod(0o755)
+    expected = MODULE._sha256(runner)
+    monkeypatch.setattr(MODULE, "__file__", str(runner))
+    monkeypatch.setattr(MODULE, "INSTALLED_RUNNER", runner)
+    actual = runner.lstat()
+    monkeypatch.setattr(
+        MODULE,
+        "_runner_stat",
+        lambda _path: SimpleNamespace(
+            st_mode=(actual.st_mode & ~0o777) | 0o755,
+            st_uid=0,
+            st_gid=0,
+        ),
+    )
+
+    assert MODULE._verified_runner_digest(expected) == expected
+    with pytest.raises(MODULE.StageError, match="digest mismatch"):
+        MODULE._verified_runner_digest("0" * 64)
+
+
+def test_root_copy_detects_uploaded_file_replacement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "upload"
+    source.write_bytes(b"trusted")
+    destination = tmp_path / "root-copy"
+    descriptor = os.open(source, os.O_RDONLY)
+    original = MODULE.os.fstat
+    calls = 0
+
+    def changed_after_copy(value):
+        nonlocal calls
+        calls += 1
+        info = original(value)
+        if calls == 1:
+            return info
+        return SimpleNamespace(
+            st_mode=info.st_mode,
+            st_dev=info.st_dev,
+            st_ino=info.st_ino,
+            st_size=info.st_size + 1,
+            st_mtime_ns=info.st_mtime_ns,
+            st_ctime_ns=info.st_ctime_ns,
+        )
+
+    monkeypatch.setattr(MODULE.os, "fstat", changed_after_copy)
+    try:
+        with pytest.raises(MODULE.StageError, match="changed while it was copied"):
+            MODULE._copy_regular_descriptor(descriptor, destination)
+    finally:
+        os.close(descriptor)
+    assert not destination.exists()
+    assert "dir_fd=source" in MODULE_PATH.read_text(encoding="utf-8")
+
+
+def test_runner_parser_accepts_only_bounded_upload_root_arguments() -> None:
+    values = [
+        "--upload-root", "/home/thron/.menhir-stage-upload/" + "a" * 32,
+        "--expected-bundle-sha256", "1" * 64,
+        "--expected-release-id", "menhir-prod-0.2.0-13",
+        "--expected-release-sha256", "2" * 64,
+        "--expected-menhir-image-archive-sha256", "3" * 64,
+        "--deployment-class", "app-only",
+        "--expected-runner-sha256", "4" * 64,
+    ]
+    parsed = MODULE._parser().parse_args(values)
+    assert parsed.upload_root.name == "a" * 32
+    with pytest.raises(SystemExit):
+        MODULE._parser().parse_args([*values, "--receipt", "/tmp/receipt"])
 
 
 @pytest.fixture
@@ -343,18 +423,38 @@ def production_preflight_host(
         }},
     }
     ingress = {
+        "Id": "ingress-id",
+        "Image": "sha256:" + "4" * 64,
         "State": {"Running": True, "Status": "running"},
-        "Config": {"Labels": {
-            "com.docker.compose.project": "menhir-prod",
-            "com.docker.compose.service": "cloudflared",
-        }},
+        "Config": {
+            "Image": "cloudflare/cloudflared:2026.8.0@sha256:" + "5" * 64,
+            "Labels": {
+                "com.docker.compose.project": "menhir-prod",
+                "com.docker.compose.service": "cloudflared",
+            },
+        },
+        "NetworkSettings": {"Networks": {"menhir-proxy": {
+            "NetworkID": "proxy-network-id",
+            "EndpointID": "ingress-endpoint-id",
+            "Gateway": "172.30.0.1",
+            "IPAddress": "172.30.0.2",
+            "IPPrefixLen": 24,
+            "IPv6Gateway": "",
+            "GlobalIPv6Address": "",
+            "GlobalIPv6PrefixLen": 0,
+            "MacAddress": "02:42:ac:1e:00:02",
+            "Aliases": ["cloudflared"],
+        }}},
     }
+    app["Id"] = "app-id"
+    neo4j["Id"] = "neo4j-id"
     inspect_values = {
         "menhir-prod-app": app,
         "menhir-prod-neo4j": neo4j,
         "menhir-prod-cloudflared": ingress,
     }
     network = [{
+        "Id": "proxy-network-id",
         "Name": "menhir-proxy",
         "Containers": {
             "app-id": {
@@ -415,6 +515,14 @@ def test_app_only_preflight_does_not_require_route_assets_and_is_sanitized(
     assert report["kind"] == "menhir-production-readiness-preflight"
     assert report["checks"]["maintenance_route"] == {"applicable": False}
     assert report["checks"]["network_roles"]["ingress_peer_count"] == 1
+    identity = report["checks"]["network_roles"]["ingress"]["identities"][0]
+    assert identity["container_id"] == "ingress-id"
+    assert identity["image_id"] == "sha256:" + "4" * 64
+    assert identity["compose_labels"] == {
+        "project": "menhir-prod", "service": "cloudflared",
+    }
+    assert identity["network"]["attachment"]["endpoint_id"] \
+        == "ingress-endpoint-id"
     assert "caddy" not in json.dumps(report).lower()
     assert "swordfish" not in json.dumps(report)
     digest = report["canonical_sha256"]
@@ -594,6 +702,29 @@ def test_preflight_rejects_non_cloudflared_ingress_role(
             production_preflight_host["candidate_release"],
             "maintenance",
         )
+
+
+def test_cloudflared_identity_snapshot_changes_on_image_or_attachment_drift(
+    production_preflight_host: dict[str, object],
+) -> None:
+    network = production_preflight_host["network"][0]
+    ingress = production_preflight_host["inspect_values"]["menhir-prod-cloudflared"]
+    before = MODULE._cloudflared_ingress_preflight(
+        network, {"172.30.0.2"},
+    )["identities"]
+
+    ingress["Image"] = "sha256:" + "9" * 64
+    ingress["NetworkSettings"]["Networks"]["menhir-proxy"][
+        "EndpointID"
+    ] = "replacement-endpoint-id"
+    after = MODULE._cloudflared_ingress_preflight(
+        network, {"172.30.0.2"},
+    )["identities"]
+
+    assert after != before
+    source = MODULE_PATH.read_text(encoding="utf-8")
+    assert "if production_after != production_before:" in source
+    assert 'ingress_evidence["non_interference"]' in source
 
 
 def test_preflight_runs_before_image_loading_or_disposable_tree_creation() -> None:

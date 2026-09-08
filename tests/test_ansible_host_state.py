@@ -1,5 +1,6 @@
 """Static contracts for the bounded Menhir Ansible host role."""
 
+import hashlib
 import re
 from pathlib import Path
 
@@ -16,6 +17,9 @@ EXPECTED_DIRECTORIES = {
     "/srv/menhir/backups/encrypted": "0700",
     "/srv/menhir/scaffold": "0755",
     "/srv/menhir/scaffold/bin": "0755",
+    "/srv/menhir/staging-transactions": "0700",
+    "/srv/menhir/install-transactions": "0700",
+    "/srv/menhir/scaffold-transactions": "0700",
     "/var/lib/menhir-production": "0755",
     "/var/log/menhir-production": "0755",
     "/etc/menhir": "0700",
@@ -26,6 +30,21 @@ EXPECTED_TEMPLATES = {
     "menhir-scaffold-audit.service": "menhir-scaffold-audit.service.j2",
     "menhir-scaffold-audit.timer": "menhir-scaffold-audit.timer.j2",
 }
+
+RETIRED_CADDY_WRITER_UNITS = {
+    "menhir-caddy-reconcile.path",
+    "menhir-caddy-reconcile.service",
+}
+
+RETIRED_CADDY_WRITER_SCRIPTS = {
+    "/srv/menhir/production/bin/caddy-release.sh",
+    "/srv/menhir/production/bin/caddy-route-apply",
+    "/srv/menhir/production/bin/caddy-route-rollback",
+}
+
+SCAFFOLD_AUDIT_SHA256 = (
+    "f83f03b90594ebefa7452c418253b7e38647cae9ecafc009482a1aa3c1905eab"
+)
 
 FORBIDDEN_ACTIONS = {
     "command",
@@ -157,6 +176,8 @@ def test_role_uses_idempotent_modules_and_never_recurses_permissions():
         "ansible.builtin.file",
         "ansible.builtin.template",
         "ansible.builtin.meta",
+        "ansible.builtin.service_facts",
+        "ansible.builtin.stat",
         "ansible.builtin.systemd_service",
     }
 
@@ -164,6 +185,10 @@ def test_role_uses_idempotent_modules_and_never_recurses_permissions():
         value for name, value in actions if name == "ansible.builtin.file"
     ]
     assert directory_tasks == [
+        {
+            "path": "{{ item }}",
+            "state": "absent",
+        },
         {
             "path": "/etc/systemd/system/{{ item }}",
             "state": "absent",
@@ -212,6 +237,12 @@ def test_role_uses_idempotent_modules_and_never_recurses_permissions():
         },
         {
             "name": "{{ item }}",
+        },
+        {
+            "daemon_reload": True,
+        },
+        {
+            "name": "{{ item }}",
             "enabled": True,
             "state": "started",
         }
@@ -240,6 +271,109 @@ def test_systemd_reload_is_handler_driven():
     assert any(
         task.get("ansible.builtin.meta") == "flush_handlers" for task in tasks
     )
+
+
+def test_retired_caddy_writers_fail_closed_and_are_verified_absent():
+    tasks = load_yaml(
+        ANSIBLE / "roles" / "menhir_host" / "tasks" / "main.yml"
+    )
+    stop = next(
+        task for task in tasks
+        if task.get("name") == "Disable retired Caddy route writers"
+    )
+    assert stop["failed_when"] is not False
+    assert "Could not find the requested service" in str(stop["failed_when"])
+    inspect = next(
+        task for task in tasks
+        if task.get("name") == "Inspect stopped Caddy route writers"
+    )
+    assert inspect["changed_when"] is False
+    assert "Could not find the requested service" in str(inspect["failed_when"])
+
+    names = [task["name"] for task in tasks]
+    assert names.index("Verify retired Caddy route writers are stopped") \
+        < names.index("Remove retired Caddy route writer definitions")
+    assert names.index("Remove retired Caddy route writer definitions") \
+        < names.index("Apply retired systemd definition removal")
+    assert names.index("Apply retired systemd definition removal") \
+        < names.index("Verify retired Caddy route writer units are absent")
+    assert any(
+        "ansible.builtin.service_facts" in task for task in tasks
+    )
+
+    script_removal = next(
+        task for task in tasks
+        if task.get("name") == "Remove retired Caddy route writer scripts"
+    )
+    assert set(script_removal["loop"]) == RETIRED_CADDY_WRITER_SCRIPTS
+
+
+def test_scaffold_timer_requires_the_exact_safe_executable():
+    tasks = load_yaml(
+        ANSIBLE / "roles" / "menhir_host" / "tasks" / "main.yml"
+    )
+    names = [task["name"] for task in tasks]
+    inspection = next(
+        task for task in tasks
+        if task.get("name") == "Inspect the scaffold audit executable"
+    )
+    assert inspection["ansible.builtin.stat"] == {
+        "path": "/srv/menhir/scaffold/bin/menhir_scaffold.py",
+        "follow": False,
+        "checksum_algorithm": "sha256",
+    }
+    precondition = next(
+        task for task in tasks
+        if task.get("name") == "Require the exact safe scaffold audit executable"
+    )
+    conditions = " ".join(precondition["ansible.builtin.assert"]["that"])
+    required_terms = (
+        "isreg", "islnk", "uid", "gid", "0755", SCAFFOLD_AUDIT_SHA256,
+    )
+    for required in required_terms:
+        assert required in conditions
+    assert names.index("Require the exact safe scaffold audit executable") \
+        < names.index("Install Menhir audit units")
+    assert names.index("Require the exact safe scaffold audit executable") \
+        < names.index("Enable and start Menhir host monitors")
+    scaffold = ROOT / "deploy" / "scaffold" / "menhir_scaffold.py"
+    assert hashlib.sha256(scaffold.read_bytes()).hexdigest() \
+        == SCAFFOLD_AUDIT_SHA256
+
+    template = (
+        ANSIBLE / "roles" / "menhir_host" / "templates"
+        / "menhir-scaffold-audit.service.j2"
+    ).read_text(encoding="ascii")
+    assert (
+        "ConditionPathIsExecutable=/srv/menhir/scaffold/bin/menhir_scaffold.py"
+        in template
+    )
+
+
+def test_release_installer_converges_retired_caddy_writers_only():
+    root = ROOT / "deploy"
+    installer = (root / "release-install.sh").read_text(encoding="ascii")
+    census = load_yaml(root / "installed-artifacts.json")
+    retired_destinations = RETIRED_CADDY_WRITER_SCRIPTS | {
+        f"/etc/systemd/system/{unit}" for unit in RETIRED_CADDY_WRITER_UNITS
+    }
+    assert all(
+        path.rsplit("/", 1)[-1] in installer
+        for path in retired_destinations
+    )
+    assert all(
+        path not in census["destinations"] for path in retired_destinations
+    )
+    assert "systemctl disable --now" in installer
+    assert "--property=ActiveState" in installer
+    assert "--property=SubState" in installer
+    assert "systemctl daemon-reload" in installer
+    assert "/srv/yawn/releases/menhir-route-candidate" in installer
+    assert "/srv/yawn/projects/yawn.deploy" not in installer
+    assert installer.index("retire_caddy_writers\n") \
+        < installer.index("mutated=1")
+    assert installer.index("--property=ActiveState") \
+        < installer.index('rm -f -- "/etc/systemd/system/${unit}"')
 
 
 def test_inventory_is_placeholder_only_and_contains_no_secret_material():

@@ -38,7 +38,11 @@ REPOSITORIES = frozenset({"menhir", "archolith_oauth", "yawn_deploy", "yawn_vps"
 CLASS_ORDER = {"app-only": 0, "security-config": 1, "maintenance": 2}
 SECURITY_CONFIG_PATHS = tuple(re.compile(pattern) for pattern in (
     r"^src/menhir/config/",
-    r"^src/menhir/api/(auth|client_policy|oauth[^/]*)\.py$",
+    r"^src/menhir/api/client_policy\.py$",
+))
+APP_ONLY_SOURCE_PATHS = tuple(re.compile(pattern) for pattern in (
+    r"^src/menhir/explorer/static/[^/]+$",
+    r"^src/menhir/explorer/templates/[^/]+$",
 ))
 MAINTENANCE_PATHS = tuple(re.compile(pattern) for pattern in (
     r"^deploy/",
@@ -407,25 +411,25 @@ def _candidate_deployment_class(spec: dict[str, Any]) -> str:
 
     menhir_base = prior_repos["menhir"]
     menhir_head = heads["menhir"]
+    changed_client_policy = isinstance(current_secrets, dict) \
+        and isinstance(prior_secrets, dict) \
+        and current_secrets.get("client-policy") != prior_secrets.get("client-policy")
     if menhir_base == menhir_head:
-        return "security-config" if changed_oauth or changed_operations else "maintenance"
+        if changed_oauth:
+            return "maintenance"
+        return "security-config" if changed_operations or changed_client_policy else "maintenance"
     changed = _git(
         Path(repository_paths["menhir"]),
         "diff", "--name-only", "--diff-filter=ACDMRTUXB",
         menhir_base, menhir_head,
     ).stdout.splitlines()
-    if not changed or any(not path.startswith("src/") for path in changed) \
-            or any(
-                pattern.search(path)
-                for path in changed for pattern in MAINTENANCE_PATHS
-            ):
+    if not changed or changed_oauth:
         return "maintenance"
-    if changed_oauth or any(
-        pattern.search(path)
-        for path in changed for pattern in SECURITY_CONFIG_PATHS
-    ):
+    if all(any(pattern.search(path) for pattern in APP_ONLY_SOURCE_PATHS) for path in changed):
+        return "app-only"
+    if all(any(pattern.search(path) for pattern in SECURITY_CONFIG_PATHS) for path in changed):
         return "security-config"
-    return "app-only"
+    return "maintenance"
 
 
 def _deployment_class(fragments: list[Any], spec: dict[str, Any]) -> str:
@@ -742,7 +746,11 @@ def prepare_flow(inputs_path: Path, workspace: Path, fragments_dir: Path) -> dic
         if _snapshot_fragments(fragments_dir) != fragment_bindings:
             raise ReleaseFlowError("prepared fragment set changed while release notes were rendered")
 
+        if spec.get("ingress_mode") != "cloudflared":
+            raise ReleaseFlowError("generated release spec must declare Cloudflared ingress")
         for key in RELEASE_AUTHORITY_BINDINGS:
+            if key == "ingress_mode":
+                continue
             if key in spec:
                 raise ReleaseFlowError(f"generated release spec unexpectedly supplies {key}")
         spec.update({
@@ -775,6 +783,7 @@ def prepare_flow(inputs_path: Path, workspace: Path, fragments_dir: Path) -> dic
             "release_author": release.get("release_author"),
             "workspace": str(workspace),
             "deployment_class": deployment_class,
+            "ingress_mode": spec["ingress_mode"],
             "inputs_sha256": _sha256(inputs_path),
             "spec_sha256": _sha256(spec_path),
             "notes_json_sha256": notes_json_sha256,

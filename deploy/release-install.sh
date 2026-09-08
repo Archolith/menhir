@@ -216,6 +216,18 @@ created_list="${backup_dir}/created.list"
 : > "$created_list"
 mutated=0
 operations_was_active=0
+retired_caddy_units=(
+    menhir-caddy-reconcile.path
+    menhir-caddy-reconcile.service
+)
+retired_caddy_scripts=(
+    /srv/menhir/production/bin/caddy-release.sh
+    /srv/menhir/production/bin/caddy-route-apply
+    /srv/menhir/production/bin/caddy-route-rollback
+)
+retired_caddy_routes=(
+    /srv/yawn/releases/menhir-route-candidate
+)
 if systemctl is-active --quiet menhir-oauth-operations.service; then
     operations_was_active=1
 fi
@@ -246,6 +258,77 @@ rollback_install() {
     exit "$status"
 }
 trap rollback_install EXIT
+
+retire_caddy_writers() {
+    local unit path parent load_state active_state sub_state
+    for unit in "${retired_caddy_units[@]}"; do
+        load_state="$(systemctl show "$unit" --property=LoadState --value)"
+        active_state="$(systemctl show "$unit" --property=ActiveState --value)"
+        sub_state="$(systemctl show "$unit" --property=SubState --value)"
+        if [ "$load_state" = "not-found" ]; then
+            if [ "$active_state" != "inactive" ] || [ "$sub_state" != "dead" ]; then
+                echo "definition-free Caddy writer remains active: $unit" >&2
+                return 1
+            fi
+            continue
+        fi
+        systemctl disable --now "$unit"
+        active_state="$(systemctl show "$unit" --property=ActiveState --value)"
+        sub_state="$(systemctl show "$unit" --property=SubState --value)"
+        if [ "$active_state" != "inactive" ] || [ "$sub_state" != "dead" ]; then
+            echo "retired Caddy writer did not stop cleanly: $unit" >&2
+            return 1
+        fi
+    done
+
+    for unit in "${retired_caddy_units[@]}"; do
+        rm -f -- "/etc/systemd/system/${unit}"
+    done
+    for path in "${retired_caddy_scripts[@]}"; do
+        rm -f -- "$path"
+    done
+    for path in "${retired_caddy_routes[@]}"; do
+        for parent in /srv /srv/yawn /srv/yawn/releases; do
+            if [ -L "$parent" ]; then
+                echo "retired Menhir route parent is a symlink: $parent" >&2
+                return 1
+            fi
+        done
+        rm -rf -- "$path"
+    done
+    systemctl daemon-reload
+
+    for unit in "${retired_caddy_units[@]}"; do
+        path="/etc/systemd/system/${unit}"
+        if [ -e "$path" ] || [ -L "$path" ]; then
+            echo "retired Caddy writer definition remains present: $path" >&2
+            return 1
+        fi
+        load_state="$(systemctl show "$unit" --property=LoadState --value)"
+        active_state="$(systemctl show "$unit" --property=ActiveState --value)"
+        sub_state="$(systemctl show "$unit" --property=SubState --value)"
+        if [ "$load_state" != "not-found" ] \
+                || [ "$active_state" != "inactive" ] \
+                || [ "$sub_state" != "dead" ]; then
+            echo "retired Caddy writer remains loaded or active: $unit" >&2
+            return 1
+        fi
+    done
+    for path in "${retired_caddy_scripts[@]}"; do
+        if [ -e "$path" ] || [ -L "$path" ]; then
+            echo "retired Caddy writer script remains present: $path" >&2
+            return 1
+        fi
+    done
+    for path in "${retired_caddy_routes[@]}"; do
+        if [ -e "$path" ] || [ -L "$path" ]; then
+            echo "retired Menhir Caddy route remains present: $path" >&2
+            return 1
+        fi
+    done
+}
+
+retire_caddy_writers
 
 while IFS=$'\t' read -r mode destination; do
     [ -n "$destination" ] || continue

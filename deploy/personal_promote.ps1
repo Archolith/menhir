@@ -12,18 +12,21 @@ param(
     [Parameter(Mandatory = $true)][string]$Approval,
     [Parameter(Mandatory = $true)][string]$ExpectedApprovalSha256,
     [Parameter(Mandatory = $true)][string]$SourceRepository,
+    [Parameter(Mandatory = $true)][string]$ExpectedPromotionWrapperSha256,
+    [Parameter(Mandatory = $true)][string]$ExpectedOperatorWrapperSha256,
+    [Parameter(Mandatory = $true)][string]$ExpectedRootRunnerSha256,
+    [Parameter(Mandatory = $true)][string]$PromotionAttemptId,
+    [Parameter(Mandatory = $true)][string]$PromotionStartedUtc,
     [Parameter(Mandatory = $true)][string]$TransactionReceipt,
     [Parameter(Mandatory = $true)][string]$ResultReceipt
 )
 
 $ErrorActionPreference = "Stop"
-$promotionStartedAt = [DateTimeOffset]::UtcNow
+$promotionStartedAt = [DateTimeOffset]::MinValue
 if (Test-Path -LiteralPath $ResultReceipt) {
     throw "Promotion receipt path must not already exist."
 }
-if (Test-Path -LiteralPath $TransactionReceipt) {
-    throw "Root transaction receipt path must not already exist."
-}
+$adoptExistingTransaction = Test-Path -LiteralPath $TransactionReceipt
 
 function Get-FileSha256 {
     param([Parameter(Mandatory = $true)][string]$Path)
@@ -114,10 +117,10 @@ function Assert-UtcTimestamp {
     )
     $parsed = [DateTimeOffset]::MinValue
     if ($Value -is [DateTime]) {
-        if ($Value.Kind -ne [DateTimeKind]::Utc) {
+        if ($Value.Kind -eq [DateTimeKind]::Unspecified) {
             throw "$Label must be an ISO-8601 UTC timestamp."
         }
-        $parsed = [DateTimeOffset]::new($Value)
+        $parsed = [DateTimeOffset]::new($Value).ToUniversalTime()
     }
     elseif ($Value -is [DateTimeOffset]) {
         $parsed = $Value
@@ -130,7 +133,11 @@ function Assert-UtcTimestamp {
             [Globalization.DateTimeStyles]::RoundtripKind,
             [ref]$parsed
         )
-        if (-not $text.EndsWith("Z", [StringComparison]::Ordinal) -or -not $parsedOk) {
+        $explicitUtc = (
+            $text.EndsWith("Z", [StringComparison]::Ordinal) -or
+            $text.EndsWith("+00:00", [StringComparison]::Ordinal)
+        )
+        if (-not $explicitUtc -or -not $parsedOk) {
             throw "$Label must be an ISO-8601 UTC timestamp."
         }
     }
@@ -151,11 +158,19 @@ $digests = @(
     $ExpectedBundleSha256,
     $ExpectedReleaseSha256,
     $ExpectedStagingReceiptSha256,
-    $ExpectedApprovalSha256
+    $ExpectedApprovalSha256,
+    $ExpectedPromotionWrapperSha256,
+    $ExpectedOperatorWrapperSha256,
+    $ExpectedRootRunnerSha256
 )
 if ($digests.Where({ $_ -notmatch '^[0-9a-f]{64}$' }).Count -ne 0 -or
-    $Release -notmatch '^menhir-prod-[0-9]+\.[0-9]+\.[0-9]+-[0-9]+$') {
+    $Release -notmatch '^menhir-prod-[0-9]+\.[0-9]+\.[0-9]+-[0-9]+$' -or
+    $PromotionAttemptId -notmatch '^[0-9a-f]{32}$') {
     throw "Personal promotion identity is invalid."
+}
+$promotionStartedAt = Assert-UtcTimestamp -Value $PromotionStartedUtc -Label "Promotion start"
+if ((Get-FileSha256 -Path $PSCommandPath) -ne $ExpectedPromotionWrapperSha256) {
+    throw "Promotion wrapper differs from the owner-approved authority."
 }
 
 $bundle = (Resolve-Path -LiteralPath $BundlePath).Path
@@ -199,7 +214,8 @@ Assert-ExactProperties -Value $staging -Label "Staging receipt" -Expected @(
 )
 Assert-ExactProperties -Value $approvalValue -Label "Promotion approval" -Expected @(
     "schema", "kind", "release_id", "release_sha256", "bundle_sha256",
-    "staging_receipt_sha256", "approved_by", "approved_utc"
+    "staging_receipt_sha256", "approved_by", "approved_utc",
+    "promotion_wrapper_sha256", "operator_wrapper_sha256", "root_runner_sha256"
 )
 
 $expectedClass = $authorityClass
@@ -299,6 +315,9 @@ if ($approvalValue.schema -ne 1 -or
     $approvalValue.release_sha256 -ne $ExpectedReleaseSha256 -or
     $approvalValue.bundle_sha256 -ne $ExpectedBundleSha256 -or
     $approvalValue.staging_receipt_sha256 -ne $ExpectedStagingReceiptSha256 -or
+    $approvalValue.promotion_wrapper_sha256 -ne $ExpectedPromotionWrapperSha256 -or
+    $approvalValue.operator_wrapper_sha256 -ne $ExpectedOperatorWrapperSha256 -or
+    $approvalValue.root_runner_sha256 -ne $ExpectedRootRunnerSha256 -or
     [string]$approvalValue.approved_by -notmatch '^[A-Za-z0-9._@+-]{1,128}$') {
     throw "Owner approval is not bound to this staged release."
 }
@@ -308,15 +327,10 @@ if ($approvedAt -lt $completedAt) {
 }
 
 $operatorWrapper = if ($Mode -eq "SecurityConfig") {
-    if ($env:MENHIR_SECURITY_CONFIG_DEPLOY_WRAPPER) {
-        $env:MENHIR_SECURITY_CONFIG_DEPLOY_WRAPPER
-    }
-    else {
-        Join-Path $PSScriptRoot "personal_security_config.ps1"
-    }
+    Join-Path $PSScriptRoot "personal_security_config.ps1"
 }
-elseif ($env:MENHIR_OPERATOR_DEPLOY_WRAPPER) {
-    $env:MENHIR_OPERATOR_DEPLOY_WRAPPER
+elseif ($Mode -eq "AppOnly") {
+    Join-Path $env:USERPROFILE "IdeaProjects\scripts\deploy-menhir-app-only.ps1"
 }
 else {
     Join-Path $env:USERPROFILE "IdeaProjects\scripts\deploy-menhir.ps1"
@@ -324,14 +338,19 @@ else {
 if (-not (Test-Path -LiteralPath $operatorWrapper -PathType Leaf)) {
     throw "Existing Menhir production transaction wrapper was not found: $operatorWrapper"
 }
+if ((Get-FileSha256 -Path $operatorWrapper) -ne $ExpectedOperatorWrapperSha256) {
+    throw "Operator wrapper differs from the owner-approved authority."
+}
 
-$global:LASTEXITCODE = 0
-& $operatorWrapper -Mode $Mode -BundlePath $bundle `
-    -ExpectedBundleSha256 $ExpectedBundleSha256 -Release $Release `
-    -SourceRepository $SourceRepository -TransactionReceipt $TransactionReceipt
-$powerShellSucceeded = $?
-if (-not $powerShellSucceeded -or $LASTEXITCODE -ne 0) {
-    throw "Menhir production transaction failed."
+if (-not $adoptExistingTransaction) {
+    $global:LASTEXITCODE = 0
+    & $operatorWrapper -Mode $Mode -BundlePath $bundle `
+        -ExpectedBundleSha256 $ExpectedBundleSha256 -Release $Release `
+        -SourceRepository $SourceRepository -TransactionReceipt $TransactionReceipt
+    $powerShellSucceeded = $?
+    if (-not $powerShellSucceeded -or $LASTEXITCODE -ne 0) {
+        throw "Menhir production transaction failed."
+    }
 }
 if (-not (Test-Path -LiteralPath $TransactionReceipt -PathType Leaf)) {
     throw "Production transaction returned without a root receipt."
@@ -351,6 +370,7 @@ if ($transaction.schema -ne 1 -or $transaction.kind -ne $expectedTransactionKind
     $transaction.candidate_release_id -ne $Release -or
     $transaction.candidate_release_sha256 -ne $ExpectedReleaseSha256 -or
     [string]$transaction.runner_sha256 -notmatch '^[0-9a-f]{64}$' -or
+    $transaction.runner_sha256 -ne $ExpectedRootRunnerSha256 -or
     $transaction.ingress_container_id -ne $transaction.ingress_container_id_after) {
     throw "Root transaction receipt is not bound to this promotion."
 }
@@ -367,8 +387,8 @@ if ($transactionStartedAt -lt $promotionStartedAt -or
     throw "Root transaction timestamps escape the promotion window."
 }
 $elapsedSeconds = [Math]::Ceiling(($promotionCompletedAt - $promotionStartedAt).TotalSeconds)
-$budget = if ($Mode -eq "AppOnly") { 300 } else { 600 }
-if ($elapsedSeconds -gt $budget) {
+$budget = if ($Mode -eq "AppOnly") { 300 } elseif ($Mode -eq "SecurityConfig") { 600 } else { $null }
+if ($null -ne $budget -and $elapsedSeconds -gt $budget) {
     throw "Menhir production transaction exceeded its foreground time budget."
 }
 $receipt = [ordered]@{
@@ -382,11 +402,13 @@ $receipt = [ordered]@{
     approval_sha256 = $ExpectedApprovalSha256
     deployment_class = $authorityClass
     ingress_mode = $authorityIngress
-    started_utc = $promotionStartedAt.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss.fffffffZ")
+    started_utc = $PromotionStartedUtc
     completed_utc = $promotionCompletedAt.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss.fffffffZ")
     elapsed_seconds = [int]$elapsedSeconds
     promotion_wrapper_sha256 = Get-FileSha256 -Path $PSCommandPath
     operator_wrapper_sha256 = Get-FileSha256 -Path $operatorWrapper
+    root_runner_sha256 = $ExpectedRootRunnerSha256
+    promotion_attempt_id = $PromotionAttemptId
     transaction_kind = $authorityClass
     transaction_receipt_sha256 = Get-FileSha256 -Path $TransactionReceipt
     transaction = $transaction

@@ -16,6 +16,12 @@ menhir_host_directories:
     mode: "0755"
   - path: /srv/menhir/scaffold/bin
     mode: "0755"
+  - path: /srv/menhir/staging-transactions
+    mode: "0700"
+  - path: /srv/menhir/install-transactions
+    mode: "0700"
+  - path: /srv/menhir/scaffold-transactions
+    mode: "0700"
   - path: /var/lib/menhir-production
     mode: "0755"
   - path: /var/log/menhir-production

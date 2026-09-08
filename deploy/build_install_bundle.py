@@ -46,6 +46,7 @@ RENDERED_DESTINATIONS = {
     "/etc/yawn-vps/menhir-python-runtime.sha256": "python_runtime_digest_sha256",
 }
 RELEASE_DESTINATION = "/srv/menhir/production/release/release.json"
+STAGING_RUNNER_DESTINATION = "/srv/menhir/scaffold/bin/menhir_stage_vps.py"
 MANIFEST_NAME = "bundle-manifest.json"
 INSTALLER_NAME = "install.sh"
 INSTALLER_SOURCE_NAME = "release-install.sh"
@@ -154,6 +155,8 @@ def _canonical_destination(value: Any, allowed: frozenset[str], label: str) -> s
 
 
 def _destination_mode(destination: str) -> str:
+    if destination == STAGING_RUNNER_DESTINATION:
+        return "0755"
     if destination == RELEASE_DESTINATION \
             or destination == "/srv/menhir/production/release/production.env":
         return "0400"

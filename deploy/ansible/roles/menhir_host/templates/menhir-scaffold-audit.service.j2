@@ -2,6 +2,7 @@
 Description=Verify Menhir app-only deployment admission evidence
 Requires=docker.service
 After=docker.service network-online.target
+ConditionPathIsExecutable=/srv/menhir/scaffold/bin/menhir_scaffold.py
 
 [Service]
 Type=oneshot
