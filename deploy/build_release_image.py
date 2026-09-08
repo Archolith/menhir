@@ -8,7 +8,7 @@ import hashlib
 import json
 import os
 import re
-import shutil
+import secrets
 import subprocess
 import tempfile
 from pathlib import Path
@@ -26,9 +26,15 @@ LABELS = {
     "oauth_wheel_sha256": "org.archolith.oauth.wheel.sha256",
 }
 EVIDENCE_FILES = {
-    "sbom": "release-image-evidence/sbom",
-    "vulnerability_scan": "release-image-evidence/scan",
+    "sbom": "release-image-evidence/sbom.syft.json",
+    "vulnerability_scan": "release-image-evidence/scan.grype.json",
 }
+SCANNER_REPOSITORIES = {
+    "syft": frozenset({"anchore/syft", "docker.io/anchore/syft"}),
+    "grype": frozenset({"anchore/grype", "docker.io/anchore/grype"}),
+}
+SEVERITIES = ("Unknown", "Negligible", "Low", "Medium", "High", "Critical")
+MAX_EVIDENCE_BYTES = 256 * 1024 * 1024
 
 
 class BuildImageError(RuntimeError):
@@ -125,58 +131,205 @@ def inspect_image(image_tag: str, expected: dict[str, str]) -> tuple[str, dict[s
     return image_id, actual, hashlib.sha256(encoded).hexdigest()
 
 
-def _safe_relative_file(root: Path, value: str, label: str) -> Path:
-    relative = Path(value)
-    if (not value or relative.is_absolute() or "\\" in value
-            or any(part in {"", ".", ".."} for part in relative.parts)):
-        raise BuildImageError(f"{label} must be a normalized repository-relative path")
-    current = root
-    for part in relative.parts:
-        current = current / part
-        if current.is_symlink():
-            raise BuildImageError(f"{label} must not traverse a symlink")
+def _validate_scanner_image(value: Any, scanner: str) -> str:
+    if not isinstance(value, str):
+        raise BuildImageError(f"{scanner} scanner image is required")
+    repository, separator, digest = value.rpartition("@")
+    if (not separator or repository not in SCANNER_REPOSITORIES[scanner]
+            or DIGEST_RE.fullmatch(digest) is None):
+        raise BuildImageError(
+            f"{scanner} scanner must use its official image pinned by SHA-256 digest"
+        )
+    return value
+
+
+def _scanner_descriptor(document: dict[str, Any], scanner: str) -> str:
+    descriptor = document.get("descriptor")
+    if not isinstance(descriptor, dict):
+        raise BuildImageError(f"{scanner} report descriptor is missing")
+    name = descriptor.get("name")
+    version = descriptor.get("version")
+    if not isinstance(name, str) or name.lower() != scanner:
+        raise BuildImageError(f"{scanner} report names an unexpected scanner")
+    if not isinstance(version, str) or not version or len(version) > 128:
+        raise BuildImageError(f"{scanner} report version is missing or malformed")
+    return version
+
+
+def _scanner_source_image_id(
+    document: dict[str, Any], scanner: str, expected_image_id: str,
+) -> str:
+    source = document.get("source")
+    if not isinstance(source, dict) or source.get("type") != "image":
+        raise BuildImageError(f"{scanner} report source is not a container image")
+    candidates: list[Any] = []
+    for field in ("metadata", "target"):
+        nested = source.get(field)
+        if isinstance(nested, dict):
+            candidates.extend((nested.get("id"), nested.get("imageID")))
+    candidates.extend((source.get("imageID"), source.get("id")))
+    image_ids = {
+        value for value in candidates
+        if isinstance(value, str) and DIGEST_RE.fullmatch(value) is not None
+    }
+    if expected_image_id not in image_ids:
+        raise BuildImageError(
+            f"{scanner} report does not identify the expected candidate image"
+        )
+    return expected_image_id
+
+
+def _parse_report(raw: bytes, scanner: str) -> dict[str, Any]:
+    if not raw or len(raw) > MAX_EVIDENCE_BYTES:
+        raise BuildImageError(f"{scanner} report is empty or too large")
     try:
-        candidate = current.resolve(strict=True)
-        candidate.relative_to(root)
-    except (FileNotFoundError, ValueError):
-        raise BuildImageError(f"{label} must remain inside the checkout") from None
-    if not candidate.is_file() or candidate.is_symlink():
-        raise BuildImageError(f"{label} does not name a regular file")
-    return candidate
+        document = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise BuildImageError(f"{scanner} report is not valid UTF-8 JSON") from exc
+    if not isinstance(document, dict):
+        raise BuildImageError(f"{scanner} report must contain a JSON object")
+    return document
 
 
-def _copy_evidence(source: Path, destination: Path) -> str:
-    if destination.parent.is_symlink():
+def validate_sbom(raw: bytes, expected_image_id: str) -> dict[str, Any]:
+    document = _parse_report(raw, "syft")
+    version = _scanner_descriptor(document, "syft")
+    source_image_id = _scanner_source_image_id(document, "syft", expected_image_id)
+    artifacts = document.get("artifacts")
+    relationships = document.get("artifactRelationships")
+    schema = document.get("schema")
+    if (not isinstance(artifacts, list) or not isinstance(relationships, list)
+            or not isinstance(schema, dict)):
+        raise BuildImageError("Syft SBOM structure is malformed")
+    if not artifacts:
+        raise BuildImageError("Syft SBOM contains no packages")
+    schema_url = schema.get("url")
+    if (not isinstance(schema.get("version"), str)
+            or not isinstance(schema_url, str)
+            or "anchore/syft" not in schema_url):
+        raise BuildImageError("Syft SBOM schema identity is missing")
+    return {
+        "format": "syft-json",
+        "scanner_version": version,
+        "source_image_id": source_image_id,
+        "package_count": len(artifacts),
+    }
+
+
+def validate_vulnerability_scan(raw: bytes, expected_image_id: str) -> dict[str, Any]:
+    document = _parse_report(raw, "grype")
+    version = _scanner_descriptor(document, "grype")
+    source_image_id = _scanner_source_image_id(document, "grype", expected_image_id)
+    descriptor = document["descriptor"]
+    database = descriptor.get("db")
+    if not isinstance(database, dict) or not database:
+        raise BuildImageError("Grype report has no vulnerability database identity")
+    counts = {severity: 0 for severity in SEVERITIES}
+    for field in ("matches", "ignoredMatches"):
+        matches = document.get(field, [] if field == "ignoredMatches" else None)
+        if not isinstance(matches, list):
+            raise BuildImageError(f"Grype report {field} is malformed")
+        for number, match in enumerate(matches, 1):
+            vulnerability = match.get("vulnerability") if isinstance(match, dict) else None
+            severity = vulnerability.get("severity") if isinstance(vulnerability, dict) else None
+            if severity not in counts:
+                raise BuildImageError(
+                    f"Grype report {field} entry {number} has an invalid severity"
+                )
+            counts[severity] += 1
+    if counts["Critical"]:
+        raise BuildImageError(
+            f"vulnerability policy rejected {counts['Critical']} critical finding(s)"
+        )
+    return {
+        "format": "grype-json",
+        "scanner_version": version,
+        "source_image_id": source_image_id,
+        "database_sha256": hashlib.sha256(json.dumps(
+            database, ensure_ascii=True, separators=(",", ":"), sort_keys=True,
+        ).encode("ascii")).hexdigest(),
+        "severity_counts": counts,
+        "policy": {"maximum_allowed_severity": "High", "passed": True},
+    }
+
+
+def _run_scanner(*, scanner: str, image: str, archive: Path) -> bytes:
+    mount = f"type=bind,src={archive.parent},dst=/candidate,readonly"
+    command = [
+        "docker", "run", "--rm", "--pull", "never", "--read-only",
+        "--cap-drop", "ALL", "--security-opt", "no-new-privileges=true",
+        "--mount", mount,
+        "--env", "HOME=/tmp",
+    ]
+    database_volume: str | None = None
+    if scanner == "syft":
+        command.extend((
+            "--tmpfs", "/tmp:rw,nosuid,nodev,size=268435456",
+            "--network", "none", "--env", "SYFT_CHECK_FOR_APP_UPDATE=false",
+        ))
+    else:
+        database_volume = "menhir-grype-db-" + secrets.token_hex(12)
+        subprocess.run(
+            ["docker", "volume", "create", "--name", database_volume],
+            check=True, capture_output=True,
+        )
+        command.extend((
+            "--mount", f"type=volume,src={database_volume},dst=/tmp",
+            "--env", "GRYPE_DB_CACHE_DIR=/tmp/grype/db",
+            "--env", "GRYPE_CHECK_FOR_APP_UPDATE=false",
+        ))
+    command.extend((
+        image, f"docker-archive:/candidate/{archive.name}",
+        "--output", "syft-json" if scanner == "syft" else "json",
+    ))
+    try:
+        completed = subprocess.run(command, check=False, capture_output=True)
+        if completed.returncode != 0:
+            error = completed.stderr.decode("utf-8", errors="replace").strip()
+            raise BuildImageError(f"{scanner} scanner failed: {error[-2000:]}")
+        return completed.stdout
+    finally:
+        if database_volume is not None:
+            subprocess.run(
+                ["docker", "volume", "rm", "--force", database_volume],
+                check=False, capture_output=True,
+            )
+
+
+def _write_evidence(path: Path, raw: bytes) -> str:
+    if path.parent.is_symlink():
         raise BuildImageError("evidence destination must not traverse a symlink")
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        destination.parent.resolve(strict=True).relative_to(destination.parent.parent.resolve())
-    except ValueError:
-        raise BuildImageError("evidence destination escaped the artifact directory") from None
-    if destination.exists() or destination.is_symlink():
-        raise BuildImageError(f"evidence destination already exists: {destination}")
-    with source.open("rb") as incoming, destination.open("xb") as outgoing:
-        shutil.copyfileobj(incoming, outgoing)
-        outgoing.flush()
-        os.fsync(outgoing.fileno())
-    return sha256_file(destination)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists() or path.is_symlink():
+        raise BuildImageError(f"evidence destination already exists: {path}")
+    with path.open("xb") as handle:
+        handle.write(raw)
+        handle.flush()
+        os.fsync(handle.fileno())
+    return sha256_file(path)
 
 
-def stage_evidence(*, repo: Path, artifact_root: Path, sbom: str | None,
-                   scan: str | None, required: bool) -> dict[str, Any]:
-    supplied = {"sbom": sbom, "vulnerability_scan": scan}
-    if required and not all(supplied.values()):
-        raise BuildImageError("SBOM and vulnerability scan evidence are required for publication")
-    result: dict[str, Any] = {"required": required}
-    for kind, value in supplied.items():
-        if not value:
-            result[kind] = None
-            continue
-        source = _safe_relative_file(repo, value, kind)
+def generate_evidence(*, artifact_root: Path, archive: Path, archive_sha256: str,
+                      image_id: str, syft_image: str,
+                      grype_image: str) -> dict[str, Any]:
+    result: dict[str, Any] = {"required": True}
+    specifications = (
+        ("sbom", "syft", syft_image, validate_sbom),
+        ("vulnerability_scan", "grype", grype_image, validate_vulnerability_scan),
+    )
+    for kind, scanner, scanner_image, validator in specifications:
+        raw = _run_scanner(scanner=scanner, image=scanner_image, archive=archive)
+        summary = validator(raw, image_id)
         artifact_path = EVIDENCE_FILES[kind]
         result[kind] = {
             "artifact_path": artifact_path,
-            "sha256": _copy_evidence(source, artifact_root / artifact_path),
+            "sha256": _write_evidence(artifact_root / artifact_path, raw),
+            "scanner_image": scanner_image,
+            "subject": {
+                "image_id": image_id,
+                "image_archive_sha256": archive_sha256,
+            },
+            "validation": summary,
         }
     return result
 
@@ -221,13 +374,27 @@ def _verify_artifact_file(root: Path, relative: str, label: str) -> Path:
     }
     if relative not in allowed:
         raise BuildImageError(f"{label} has an unexpected artifact path")
-    return _safe_relative_file(root, relative, label)
+    current = root
+    for part in Path(relative).parts:
+        current = current / part
+        if current.is_symlink():
+            raise BuildImageError(f"{label} must not traverse a symlink")
+    try:
+        candidate = current.resolve(strict=True)
+        candidate.relative_to(root)
+    except (FileNotFoundError, ValueError):
+        raise BuildImageError(f"{label} escaped the validation artifact") from None
+    if not candidate.is_file() or candidate.is_symlink():
+        raise BuildImageError(f"{label} is missing or unsafe")
+    return candidate
 
 
 def create_validation_bundle(args: argparse.Namespace) -> dict[str, Any]:
     repo = args.repo.resolve()
     dockerfile = (repo / args.dockerfile).resolve()
     wheelhouse = (repo / args.wheelhouse).resolve()
+    syft_image = _validate_scanner_image(args.syft_image, "syft")
+    grype_image = _validate_scanner_image(args.grype_image, "grype")
     commit = git_commit(repo)
     if args.expected_commit and commit != args.expected_commit:
         raise BuildImageError("checked-out commit does not match the resolved validation commit")
@@ -263,12 +430,13 @@ def create_validation_bundle(args: argparse.Namespace) -> dict[str, Any]:
         raise BuildImageError("docker did not create a safe image archive")
     archive_sha256 = sha256_file(archive)
     artifact_root = args.output.resolve().parent
-    evidence = stage_evidence(
-        repo=repo, artifact_root=artifact_root, sbom=args.sbom,
-        scan=args.scan, required=args.require_evidence,
+    evidence = generate_evidence(
+        artifact_root=artifact_root, archive=archive,
+        archive_sha256=archive_sha256, image_id=image_id,
+        syft_image=syft_image, grype_image=grype_image,
     )
     metadata = {
-        "schema": 2,
+        "schema": 3,
         "source_commit": commit,
         "image_tag": image_tag,
         "image_id": image_id,
@@ -281,7 +449,7 @@ def create_validation_bundle(args: argparse.Namespace) -> dict[str, Any]:
     metadata_path = args.output.resolve()
     atomic_json(metadata_path, metadata)
     identity = {
-        "schema": 1,
+        "schema": 2,
         "source_commit": commit,
         "image_tag": image_tag,
         "image_id": image_id,
@@ -326,7 +494,7 @@ def verify_validation_bundle(args: argparse.Namespace, *, load_image: bool) -> t
         raise BuildImageError("downloaded identity manifest digest does not match validation output")
     identity = _read_json(identity_path, "identity manifest")
     metadata = _read_json(metadata_path, "validation metadata")
-    if identity.get("schema") != 1 or metadata.get("schema") != 2:
+    if identity.get("schema") != 2 or metadata.get("schema") != 3:
         raise BuildImageError("unsupported release image metadata schema")
 
     identity_metadata = identity.get("metadata")
@@ -361,18 +529,19 @@ def verify_validation_bundle(args: argparse.Namespace, *, load_image: bool) -> t
     identity_evidence = identity.get("evidence")
     if not isinstance(evidence, dict) or not isinstance(identity_evidence, dict):
         raise BuildImageError("evidence bindings are malformed")
-    evidence_required = evidence.get("required") is True
-    if args.require_evidence and not evidence_required:
+    if set(evidence) != {"required", *EVIDENCE_FILES}:
+        raise BuildImageError("validation metadata contains unexpected evidence fields")
+    if set(identity_evidence) != set(EVIDENCE_FILES):
+        raise BuildImageError("identity manifest contains unexpected evidence fields")
+    if evidence.get("required") is not True:
         raise BuildImageError("validation did not mark release evidence as mandatory")
+    validators = {
+        "sbom": ("syft", validate_sbom),
+        "vulnerability_scan": ("grype", validate_vulnerability_scan),
+    }
     for kind, artifact_path in EVIDENCE_FILES.items():
         entry = evidence.get(kind)
         identity_digest = identity_evidence.get(kind)
-        if entry is None:
-            if evidence_required or args.require_evidence:
-                raise BuildImageError(f"required {kind} evidence is missing")
-            if identity_digest is not None:
-                raise BuildImageError(f"identity unexpectedly binds absent {kind} evidence")
-            continue
         if not isinstance(entry, dict) or entry.get("artifact_path") != artifact_path:
             raise BuildImageError(f"{kind} evidence metadata is malformed")
         digest = _require_sha256(entry.get("sha256"), f"{kind} evidence SHA-256")
@@ -381,6 +550,17 @@ def verify_validation_bundle(args: argparse.Namespace, *, load_image: bool) -> t
         evidence_file = _verify_artifact_file(artifact_root, artifact_path, kind)
         if sha256_file(evidence_file) != digest:
             raise BuildImageError(f"downloaded {kind} evidence digest does not match identity")
+        scanner, validator = validators[kind]
+        _validate_scanner_image(entry.get("scanner_image"), scanner)
+        expected_subject = {
+            "image_id": metadata.get("image_id"),
+            "image_archive_sha256": expected_archive,
+        }
+        if entry.get("subject") != expected_subject:
+            raise BuildImageError(f"{kind} evidence names the wrong candidate subject")
+        validation = validator(evidence_file.read_bytes(), expected_subject["image_id"])
+        if entry.get("validation") != validation:
+            raise BuildImageError(f"{kind} parsed validation does not match its report")
 
     labels = metadata.get("labels")
     if not isinstance(labels, dict):
@@ -438,50 +618,70 @@ def remote_manifest_digest(image_tag: str) -> str | None:
     return _require_sha256(digest, "remote manifest digest", prefixed=True)
 
 
-def publish_immutable(image_tag: str, archive_sha256: str) -> tuple[str, bool, str]:
+def _verify_remote_candidate(
+    *, repository: str, digest: str, metadata: dict[str, Any],
+) -> None:
+    digest_ref = f"{repository}@{digest}"
+    subprocess.run(["docker", "pull", digest_ref], check=True)
+    remote_id, remote_labels, remote_config = inspect_image(
+        digest_ref, metadata["labels"],
+    )
+    if remote_id != metadata["image_id"]:
+        raise BuildImageError("registry candidate image ID differs from the sealed candidate")
+    if remote_config != metadata["config_sha256"]:
+        raise BuildImageError("registry candidate config differs from the sealed candidate")
+    if remote_labels != metadata["labels"]:
+        raise BuildImageError("registry candidate labels differ from the sealed candidate")
+    if remote_manifest_digest(digest_ref) != digest:
+        raise BuildImageError("digest-pinned registry candidate did not verify")
+
+
+def publish_candidate(metadata: dict[str, Any]) -> tuple[str, bool, str]:
+    image_tag = metadata["image_tag"]
     repository, separator, _version = image_tag.rpartition(":")
     if not separator:
         raise BuildImageError("release image tag is malformed")
-    candidate_tag = f"{repository}:candidate-{archive_sha256[:32]}"
+    candidate_tag = f"{repository}:candidate-{metadata['image_archive_sha256']}"
     subprocess.run(["docker", "image", "tag", image_tag, candidate_tag], check=True)
-    candidate_digest = _push_digest(candidate_tag)
-    existing = remote_manifest_digest(image_tag)
+    existing = remote_manifest_digest(candidate_tag)
     if existing is not None:
-        if existing != candidate_digest:
-            raise BuildImageError(
-                f"release tag already exists at {existing}; candidate is {candidate_digest}"
-            )
-        return candidate_digest, True, candidate_tag
+        _verify_remote_candidate(
+            repository=repository, digest=existing, metadata=metadata,
+        )
+        return existing, True, candidate_tag
 
-    existing = remote_manifest_digest(image_tag)
+    existing = remote_manifest_digest(candidate_tag)
     if existing is not None:
-        if existing != candidate_digest:
-            raise BuildImageError("release tag changed during immutable-tag check")
-        return candidate_digest, True, candidate_tag
-    published_digest = _push_digest(image_tag)
-    if published_digest != candidate_digest:
-        raise BuildImageError("release-tag push digest differs from the staged candidate")
-    if remote_manifest_digest(image_tag) != candidate_digest:
-        raise BuildImageError("release tag does not resolve to the staged candidate digest")
-    return candidate_digest, False, candidate_tag
+        _verify_remote_candidate(
+            repository=repository, digest=existing, metadata=metadata,
+        )
+        return existing, True, candidate_tag
+    published_digest = _push_digest(candidate_tag)
+    if remote_manifest_digest(candidate_tag) != published_digest:
+        raise BuildImageError("candidate tag changed during registry verification")
+    _verify_remote_candidate(
+        repository=repository, digest=published_digest, metadata=metadata,
+    )
+    return published_digest, False, candidate_tag
 
 
 def publish_bundle(args: argparse.Namespace) -> dict[str, Any]:
-    metadata, identity = verify_validation_bundle(args, load_image=False)
-    digest, idempotent, candidate_tag = publish_immutable(
-        metadata["image_tag"], metadata["image_archive_sha256"],
-    )
+    metadata, identity = verify_validation_bundle(args, load_image=True)
+    digest, idempotent, candidate_tag = publish_candidate(metadata)
+    repository = metadata["image_tag"].rpartition(":")[0]
     publication = {
-        "schema": 1,
+        "schema": 2,
         "validation_identity_sha256": args.expected_identity_sha256,
         "source_commit": metadata["source_commit"],
         "image_tag": metadata["image_tag"],
         "image_id": metadata["image_id"],
         "config_sha256": metadata["config_sha256"],
+        "image_archive_sha256": metadata["image_archive_sha256"],
         "registry_digest": digest,
-        "image_ref": f"{metadata['image_tag']}@{digest}",
+        "image_ref": f"{repository}@{digest}",
         "candidate_tag": candidate_tag,
-        "idempotent_existing_tag": idempotent,
+        "candidate_ref": f"{candidate_tag}@{digest}",
+        "idempotent_existing_candidate": idempotent,
         "evidence": identity["evidence"],
     }
     if not args.output:
@@ -530,9 +730,8 @@ def parser() -> argparse.ArgumentParser:
     value.add_argument("--identity", type=Path)
     value.add_argument("--image-archive", type=Path)
     value.add_argument("--expected-identity-sha256")
-    value.add_argument("--sbom")
-    value.add_argument("--scan")
-    value.add_argument("--require-evidence", action="store_true")
+    value.add_argument("--syft-image")
+    value.add_argument("--grype-image")
     return value
 
 

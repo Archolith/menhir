@@ -1,5 +1,12 @@
 ## 2026-09-07 - define the staged promotion deployment model
 
+- Bound every privileged lane to the approved release, bundle, root runner, and staged Cloudflared
+  identity before mutation; added durable root-receipt adoption and no-replay completed recovery.
+- Made image evidence executable policy: Syft and Grype now inspect the exact sealed archive, critical
+  findings fail publication, clean CI builds the frozen wheelhouse, and publication emits a
+  digest-only reference through a collision-resistant candidate tag.
+- Made scaffold convergence preflighted and transactional, including an independent trusted-copy
+  digest check, sudoers validation, prior file/unit snapshots, and automatic rollback.
 - Made production a promotion-only target: the exact finalized image must first pass one complete
   production-equivalent staging workflow with isolated data, OAuth/MCP behavior, restart, and
   automatic rollback evidence.

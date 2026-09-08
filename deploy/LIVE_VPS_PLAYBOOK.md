@@ -210,7 +210,13 @@ promotion. Do not call it directly for a normal release. The underlying interfac
 PowerShell -File C:\Users\thron\IdeaProjects\scripts\deploy-menhir.ps1 `
   -Mode AppOnly `
   -BundlePath <reviewed-install-bundle> `
-  -SourceRepository C:\Users\thron\IdeaProjects\projects\archolith\menhir
+  -ExpectedBundleSha256 <digest-from-release-flow-state> `
+  -Release <release-id> `
+  -ExpectedReleaseSha256 <release-json-digest> `
+  -ExpectedIngressContainerId <container-id-from-staging-preflight> `
+  -SourceRepository C:\Users\thron\IdeaProjects\projects\archolith\menhir `
+  -ExpectedRootRunnerSha256 <approved-root-runner-digest> `
+  -TransactionReceipt C:\absolute\empty-root-transaction-receipt.json
 ```
 
 The wrapper must enforce these default app-only admission limits from scaffold policy:
@@ -254,7 +260,12 @@ verified desktop archive, and fixed resumable VPS transaction:
 ```powershell
 PowerShell -File C:\Users\thron\IdeaProjects\scripts\deploy-menhir.ps1 `
   -BundlePath <reviewed-install-bundle> `
-  -ExpectedBundleSha256 <digest-from-release-flow-state>
+  -ExpectedBundleSha256 <digest-from-release-flow-state> `
+  -Release <release-id> `
+  -ExpectedReleaseSha256 <release-json-digest> `
+  -ExpectedIngressContainerId <container-id-from-staging-preflight> `
+  -ExpectedRootRunnerSha256 <approved-root-runner-digest> `
+  -TransactionReceipt C:\absolute\empty-root-transaction-receipt.json
 ```
 
 An explicit bundle and its `bundle_sha256` from `release-flow.json` are required;
@@ -365,7 +376,8 @@ The scaffold is the only setup-heavy step. It is not recreated for routine relea
 Install it once from the workspace root and use the read-only commands thereafter:
 
 ```powershell
-PowerShell -File C:\Users\thron\IdeaProjects\scripts\menhir-scaffold.ps1 -Mode Install
+PowerShell -File C:\Users\thron\IdeaProjects\scripts\menhir-scaffold.ps1 `
+  -Mode Install -SourceRoot (Resolve-Path deploy/scaffold)
 PowerShell -File C:\Users\thron\IdeaProjects\scripts\menhir-scaffold.ps1 -Mode Status
 PowerShell -File C:\Users\thron\IdeaProjects\scripts\menhir-scaffold.ps1 -Mode AppOnly
 ```
@@ -500,3 +512,6 @@ bound approval, preview promotion, and execute that same promotion. `security-co
 dedicated bounded config/application transaction and ten-minute foreground budget. Mechanically
 classified `maintenance` changes always require the full state-protection path. Every successful
 promotion retains both the root transaction receipt and the outer approval/staging-bound receipt.
+If the desktop process dies after root completion, rerun the same promotion workspace: the wrapper
+adopts the release-bound root receipt and does not repeat production mutation. A completed recovery
+stage is finalized only; it is never replayed.

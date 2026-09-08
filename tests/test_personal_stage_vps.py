@@ -736,6 +736,38 @@ def test_preflight_runs_before_image_loading_or_disposable_tree_creation() -> No
     assert '"production_preflight": production_preflight' in runner
 
 
+def test_early_staging_failure_removes_root_owned_inputs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transaction = tmp_path / "transaction"
+    inputs = transaction / "inputs"
+    bundle = inputs / "bundle"
+    bundle.mkdir(parents=True)
+    archive = inputs / "menhir-image.tar"
+    archive.write_bytes(b"archive")
+    monkeypatch.setattr(MODULE.os, "geteuid", lambda: 0, raising=False)
+    monkeypatch.setattr(MODULE, "_verified_runner_digest", lambda _digest: "1" * 64)
+    monkeypatch.setattr(
+        MODULE, "_copy_uploaded_inputs", lambda _root: (bundle, archive, transaction),
+    )
+    monkeypatch.setattr(
+        MODULE, "_safe_file", lambda *_args: (_ for _ in ()).throw(MODULE.StageError("early")),
+    )
+    args = SimpleNamespace(
+        expected_bundle_sha256="1" * 64,
+        expected_release_sha256="2" * 64,
+        expected_release_id="menhir-prod-0.2.0-14",
+        expected_menhir_image_archive_sha256="3" * 64,
+        expected_runner_sha256="4" * 64,
+        deployment_class="security-config",
+        upload_root=tmp_path / "upload",
+    )
+
+    with pytest.raises(MODULE.StageError, match="early"):
+        MODULE.run_stage(args)
+    assert not inputs.exists()
+
+
 def test_staging_sidecars_have_bounded_memory() -> None:
     source = MODULE_PATH.read_text(encoding="utf-8")
 

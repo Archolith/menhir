@@ -4,7 +4,7 @@ on:
   workflow_call:
     inputs:
       version:
-        description: Release version and image tag (<major>.<minor>.<patch>-<sequence>)
+        description: Release version embedded in image labels (<major>.<minor>.<patch>-<sequence>)
         required: true
         type: string
       image:
@@ -25,16 +25,16 @@ on:
         required: false
         type: boolean
         default: false
-      sbom_path:
-        description: Repository-relative SBOM; required when push is true
+      syft_image:
+        description: Digest-pinned Syft v1.51.1 Linux amd64 scanner image
         required: false
         type: string
-        default: ""
-      scan_path:
-        description: Repository-relative vulnerability scan; required when push is true
+        default: "docker.io/anchore/syft@sha256:600896ff278677fb13b16dc35999452f4e79636fc098c9fee6ce3cffef9858e2"
+      grype_image:
+        description: Digest-pinned Grype v0.118.0 Linux amd64 scanner image
         required: false
         type: string
-        default: ""
+        default: "docker.io/anchore/grype@sha256:461c87fefcd20d133f4d99db4623608637eecb439045f9fc8d6eebbb4149e766"
     outputs:
       validation_metadata_artifact:
         description: Artifact containing the sealed image, identity, metadata, and evidence
@@ -51,7 +51,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Release version and image tag (<major>.<minor>.<patch>-<sequence>)
+        description: Release version embedded in image labels (<major>.<minor>.<patch>-<sequence>)
         required: true
         type: string
       image:
@@ -72,16 +72,16 @@ on:
         required: false
         type: boolean
         default: false
-      sbom_path:
-        description: Repository-relative SBOM; required when push is true
+      syft_image:
+        description: Digest-pinned Syft v1.51.1 Linux amd64 scanner image
         required: false
         type: string
-        default: ""
-      scan_path:
-        description: Repository-relative vulnerability scan; required when push is true
+        default: "docker.io/anchore/syft@sha256:600896ff278677fb13b16dc35999452f4e79636fc098c9fee6ce3cffef9858e2"
+      grype_image:
+        description: Digest-pinned Grype v0.118.0 Linux amd64 scanner image
         required: false
         type: string
-        default: ""
+        default: "docker.io/anchore/grype@sha256:461c87fefcd20d133f4d99db4623608637eecb439045f9fc8d6eebbb4149e766"
 
 permissions:
   contents: read
@@ -131,36 +131,93 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Set up pinned wheelhouse builder
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.11.28"
+          enable-cache: false
+
+      - name: Build locked offline wheelhouse
+        run: |
+          set -euo pipefail
+          rm -rf -- deploy/wheelhouse
+          mkdir -p deploy/wheelhouse
+          export SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"
+          uv export \
+            --frozen \
+            --no-group dev \
+            --no-emit-project \
+            --no-hashes \
+            --output-file "$RUNNER_TEMP/release-requirements.txt"
+          python -m pip wheel \
+            --disable-pip-version-check \
+            --no-cache-dir \
+            --no-deps \
+            --requirement "$RUNNER_TEMP/release-requirements.txt" \
+            --wheel-dir deploy/wheelhouse
+          uv build --no-cache --wheel --out-dir deploy/wheelhouse
+          python - <<'PY'
+          import hashlib
+          from pathlib import Path
+
+          wheelhouse = Path("deploy/wheelhouse")
+          wheels = sorted(wheelhouse.glob("*.whl"), key=lambda path: path.name)
+          if not wheels:
+              raise SystemExit("locked wheelhouse build produced no wheels")
+          entries = []
+          for wheel in wheels:
+              if not wheel.is_file() or wheel.is_symlink() or not wheel.name.isascii():
+                  raise SystemExit(f"unsafe wheelhouse output: {wheel.name!r}")
+              entries.append(f"{hashlib.sha256(wheel.read_bytes()).hexdigest()}  {wheel.name}")
+          (wheelhouse / "SHA256SUMS").write_text(
+              "\n".join(entries) + "\n", encoding="ascii",
+          )
+          PY
+
+      - name: Acquire digest-pinned scanners
+        env:
+          GRYPE_IMAGE: ${{ inputs.grype_image }}
+          SYFT_IMAGE: ${{ inputs.syft_image }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os
+          import re
+
+          allowed = {
+              "GRYPE_IMAGE": {"anchore/grype", "docker.io/anchore/grype"},
+              "SYFT_IMAGE": {"anchore/syft", "docker.io/anchore/syft"},
+          }
+          for variable, repositories in allowed.items():
+              value = os.environ[variable]
+              repository, separator, digest = value.rpartition("@")
+              if (not separator or repository not in repositories
+                      or re.fullmatch(r"sha256:[0-9a-f]{64}", digest) is None):
+                  raise SystemExit(f"{variable} must use the official image pinned by digest")
+          PY
+          docker pull "$SYFT_IMAGE"
+          docker pull "$GRYPE_IMAGE"
+
       - name: Build, validate, and seal release image
         env:
+          GRYPE_IMAGE: ${{ inputs.grype_image }}
           IMAGE: ${{ inputs.image }}
           PYTHON_BASE: ${{ inputs.python_base }}
-          PUSH: ${{ inputs.push }}
-          SBOM_PATH: ${{ inputs.sbom_path }}
-          SCAN_PATH: ${{ inputs.scan_path }}
           SOURCE_COMMIT: ${{ steps.source.outputs.commit_sha }}
+          SYFT_IMAGE: ${{ inputs.syft_image }}
           VERSION: ${{ inputs.version }}
         run: |
-          evidence_args=()
-          if [[ -n "$SBOM_PATH" ]]; then
-            evidence_args+=(--sbom "$SBOM_PATH")
-          fi
-          if [[ -n "$SCAN_PATH" ]]; then
-            evidence_args+=(--scan "$SCAN_PATH")
-          fi
-          if [[ "$PUSH" == "true" ]]; then
-            evidence_args+=(--require-evidence)
-          fi
           python deploy/build_release_image.py \
             --mode build \
             --version "$VERSION" \
             --image "$IMAGE" \
             --python-base "$PYTHON_BASE" \
+            --syft-image "$SYFT_IMAGE" \
+            --grype-image "$GRYPE_IMAGE" \
             --expected-commit "$SOURCE_COMMIT" \
             --output release-image-metadata.json \
             --identity release-image-identity.json \
-            --image-archive release-image.tar \
-            "${evidence_args[@]}"
+            --image-archive release-image.tar
 
       - name: Bind sealed identity to validation outputs
         id: identity
@@ -247,8 +304,7 @@ jobs:
             --metadata release-candidate/release-image-metadata.json \
             --identity release-candidate/release-image-identity.json \
             --image-archive release-candidate/release-image.tar \
-            --expected-identity-sha256 "$EXPECTED_IDENTITY_SHA256" \
-            --require-evidence
+            --expected-identity-sha256 "$EXPECTED_IDENTITY_SHA256"
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
@@ -257,7 +313,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Publish candidate without moving an existing release tag
+      - name: Publish exact candidate digest
         env:
           EXPECTED_IDENTITY_SHA256: ${{ needs.validate.outputs.identity_sha256 }}
           IMAGE: ${{ inputs.image }}
@@ -273,7 +329,6 @@ jobs:
             --identity release-candidate/release-image-identity.json \
             --image-archive release-candidate/release-image.tar \
             --expected-identity-sha256 "$EXPECTED_IDENTITY_SHA256" \
-            --require-evidence \
             --output release-image-publication.json
 
       - name: Bind publication outputs to verified metadata
@@ -291,11 +346,27 @@ jobs:
           metadata = json.loads(Path("release-image-publication.json").read_text(encoding="ascii"))
           digest = metadata.get("registry_digest")
           image_ref = metadata.get("image_ref")
+          archive_sha256 = metadata.get("image_archive_sha256")
+          candidate_tag = metadata.get("candidate_tag")
+          candidate_ref = metadata.get("candidate_ref")
+          image_tag = metadata.get("image_tag")
+          if metadata.get("schema") != 2:
+              raise SystemExit("publication metadata schema is unsupported")
           if not isinstance(digest, str) or re.fullmatch(r"sha256:[0-9a-f]{64}", digest) is None:
               raise SystemExit("publication metadata has no registry manifest digest")
-          expected = f"{os.environ['EXPECTED_IMAGE']}:{os.environ['EXPECTED_VERSION']}@{digest}"
+          if not isinstance(archive_sha256, str) or re.fullmatch(r"[0-9a-f]{64}", archive_sha256) is None:
+              raise SystemExit("publication metadata has no image archive digest")
+          expected = f"{os.environ['EXPECTED_IMAGE']}@{digest}"
           if image_ref != expected:
               raise SystemExit("publication metadata image reference does not match inputs")
+          expected_image_tag = f"{os.environ['EXPECTED_IMAGE']}:{os.environ['EXPECTED_VERSION']}"
+          if image_tag != expected_image_tag:
+              raise SystemExit("publication metadata validation tag does not match inputs")
+          expected_candidate_tag = f"{os.environ['EXPECTED_IMAGE']}:candidate-{archive_sha256}"
+          if candidate_tag != expected_candidate_tag:
+              raise SystemExit("publication metadata candidate tag is not archive-bound")
+          if candidate_ref != f"{candidate_tag}@{digest}":
+              raise SystemExit("publication metadata candidate reference is not digest-bound")
           with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="ascii") as output:
               output.write(f"registry_digest={digest}\n")
               output.write(f"image_ref={image_ref}\n")

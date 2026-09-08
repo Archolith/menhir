@@ -333,8 +333,17 @@ def rollback(transaction: dict[str, Any]) -> None:
     finalize(transaction)
 
 
-def deploy(bundle_id: str, expected_runner_sha256: str) -> dict[str, Any]:
+def deploy(
+    bundle_id: str,
+    expected_runner_sha256: str,
+    expected_release_sha256: str,
+    expected_ingress_container_id: str,
+) -> dict[str, Any]:
     runner_sha256 = app.require_runner_sha256(expected_runner_sha256, Path(__file__))
+    if app.HEX64.fullmatch(expected_release_sha256) is None:
+        raise Error("expected release SHA-256 is malformed")
+    if app.HEX64.fullmatch(expected_ingress_container_id) is None:
+        raise Error("expected Cloudflared container ID is malformed")
     lock = app.acquire_lock()
     transaction: dict[str, Any] | None = None
     try:
@@ -342,6 +351,11 @@ def deploy(bundle_id: str, expected_runner_sha256: str) -> dict[str, Any]:
         tx_id = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ-") + bundle_id
         tx = STATUS / "security-config" / tx_id
         bundle, classification = classify_bundle(bundle_id, tx)
+        if classification["candidate_release_sha256"] != expected_release_sha256:
+            app.discard_unstarted_transaction(
+                tx, "security-config", status_root=STATUS,
+            )
+            raise Error("uploaded release differs from the owner-approved authority")
         for name, target in TARGETS.items():
             app.require_root_file(target, f"live {name}")
             app.atomic_bytes(tx / f"prior-{name}", target.read_bytes(), 0o400)
@@ -350,6 +364,8 @@ def deploy(bundle_id: str, expected_runner_sha256: str) -> dict[str, Any]:
         before_app = app.inspect_container("menhir-prod-app")
         database = app.inspect_container("menhir-prod-neo4j")
         ingress = app.inspect_cloudflared()
+        if ingress.get("Id") != expected_ingress_container_id:
+            raise Error("Cloudflared changed since the approved staging preflight")
         transaction = {
             "schema": 1,
             "kind": "menhir-security-config-transaction",
@@ -408,7 +424,10 @@ def recover() -> dict[str, Any]:
         if transaction.get("kind") != "menhir-security-config-transaction":
             raise Error("active security-config transaction schema mismatch")
         app.require_runner_sha256(transaction.get("runner_sha256"), Path(__file__))
-        rollback(transaction)
+        if transaction.get("stage") == "complete":
+            finalize(transaction)
+        else:
+            rollback(transaction)
         return transaction
     finally:
         lock.close()
@@ -435,6 +454,8 @@ def parser() -> argparse.ArgumentParser:
     deploy_command = commands.add_parser("deploy")
     deploy_command.add_argument("bundle_id")
     deploy_command.add_argument("expected_runner_sha256")
+    deploy_command.add_argument("expected_release_sha256")
+    deploy_command.add_argument("expected_ingress_container_id")
     commands.add_parser("recover")
     commands.add_parser("receipt")
     return result
@@ -449,7 +470,12 @@ def main(argv: list[str]) -> int:
         if args.command == "classify":
             _, value = classify_bundle(args.bundle_id)
         elif args.command == "deploy":
-            value = deploy(args.bundle_id, args.expected_runner_sha256)
+            value = deploy(
+                args.bundle_id,
+                args.expected_runner_sha256,
+                args.expected_release_sha256,
+                args.expected_ingress_container_id,
+            )
         elif args.command == "recover":
             value = recover()
         else:

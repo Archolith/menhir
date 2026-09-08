@@ -5,6 +5,8 @@ param(
     [Parameter(Mandatory = $true)][string]$BundlePath,
     [Parameter(Mandatory = $true)][string]$ExpectedBundleSha256,
     [Parameter(Mandatory = $true)][string]$Release,
+    [Parameter(Mandatory = $true)][ValidatePattern('^[0-9a-f]{64}$')][string]$ExpectedReleaseSha256,
+    [Parameter(Mandatory = $true)][ValidatePattern('^[0-9a-f]{64}$')][string]$ExpectedIngressContainerId,
     [Parameter(Mandatory = $true)][string]$SourceRepository,
     [Parameter(Mandatory = $true)][ValidatePattern('^[0-9a-f]{64}$')][string]$ExpectedRootRunnerSha256,
     [Parameter(Mandatory = $true)][string]$TransactionReceipt
@@ -104,6 +106,7 @@ $temporary = Join-Path ([IO.Path]::GetTempPath()) "menhir-security-config-$uploa
 $remoteRoot = "/home/thron/.menhir-security-config-upload"
 $remoteBundle = "$remoteRoot/security-$uploadId"
 $remoteHost = if ($env:YAWN_VPS_HOST) { $env:YAWN_VPS_HOST } else { "thron@147.93.132.141" }
+$remoteRunner = "/srv/menhir/scaffold/bin/menhir_security_config.py"
 [IO.Directory]::CreateDirectory($temporary) | Out-Null
 try {
     foreach ($name in $selected.Keys) {
@@ -118,10 +121,29 @@ try {
         Copy-Item -LiteralPath $source -Destination (Join-Path $temporary $name)
     }
     $releaseValue = Get-Content -LiteralPath (Join-Path $temporary "release.json") -Raw | ConvertFrom-Json
-    if ($releaseValue.release_id -ne $Release -or
+    if ((Get-FileSha256 (Join-Path $temporary "release.json")) -ne $ExpectedReleaseSha256 -or
+        $releaseValue.release_id -ne $Release -or
         $releaseValue.deployment_class -ne "security-config" -or
         $releaseValue.ingress_mode -ne "cloudflared") {
         throw "Release is not the approved Cloudflared security-config authority."
+    }
+    $existingReceiptJson = (& $sshScript "sudo -n $remoteRunner receipt" 2>$null | Out-String).Trim()
+    $existingReceiptExit = $LASTEXITCODE
+    if ($existingReceiptExit -eq 0 -and -not [string]::IsNullOrWhiteSpace($existingReceiptJson)) {
+        $existingReceipt = $existingReceiptJson | ConvertFrom-Json
+        if ($existingReceipt.kind -eq "menhir-security-config-transaction" -and
+            $existingReceipt.result -eq "passed" -and $existingReceipt.stage -eq "complete" -and
+            $existingReceipt.candidate_release_id -eq $Release -and
+            $existingReceipt.candidate_release_sha256 -eq $ExpectedReleaseSha256 -and
+            $existingReceipt.ingress_container_id_after -eq $ExpectedIngressContainerId -and
+            $existingReceipt.runner_sha256 -eq $ExpectedRootRunnerSha256) {
+            [IO.File]::WriteAllText(
+                $TransactionReceipt,
+                ($existingReceipt | ConvertTo-Json -Depth 8),
+                [Text.UTF8Encoding]::new($false)
+            )
+            exit 0
+        }
     }
     Copy-Item -LiteralPath $sourceManifestPath -Destination (Join-Path $temporary "source-manifest.json")
 
@@ -161,8 +183,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Could not upload the security-config bundle." }
     & $sshScript "chmod 0700 '$remoteBundle' && chmod 0600 '$remoteBundle'/*"
     if ($LASTEXITCODE -ne 0) { throw "Could not restrict the security-config upload." }
-    $remoteRunner = "/srv/menhir/scaffold/bin/menhir_security_config.py"
-    $receiptJson = (& $sshScript "sudo -n $remoteRunner deploy $uploadId $ExpectedRootRunnerSha256" | Out-String).Trim()
+    $receiptJson = (& $sshScript "sudo -n $remoteRunner deploy $uploadId $ExpectedRootRunnerSha256 $ExpectedReleaseSha256 $ExpectedIngressContainerId" | Out-String).Trim()
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($receiptJson)) {
         throw "Security-config root transaction failed."
     }
@@ -170,6 +191,7 @@ try {
     if ($receipt.kind -ne "menhir-security-config-transaction" -or
         $receipt.result -ne "passed" -or $receipt.stage -ne "complete" -or
         $receipt.candidate_release_id -ne $Release -or
+        $receipt.candidate_release_sha256 -ne $ExpectedReleaseSha256 -or
         $receipt.runner_sha256 -ne $ExpectedRootRunnerSha256) {
         throw "Security-config root transaction returned an invalid receipt."
     }

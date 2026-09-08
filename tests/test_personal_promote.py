@@ -63,7 +63,9 @@ def _fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[list[str]
         "candidate_release_id": release_id,
         "checks": {
             "live_services": {},
-            "network_roles": {},
+            "network_roles": {
+                "ingress": {"identities": [{"container_id": "c" * 64}]},
+            },
             "release_journal": {},
             "headroom": {
                 "disk_free_bytes": 9,
@@ -130,8 +132,8 @@ def _fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[list[str]
         "candidate_release_sha256": release_sha,
         "database_container_id": "database-1",
         "database_container_id_after": "database-1",
-        "ingress_container_id": "cloudflared-1",
-        "ingress_container_id_after": "cloudflared-1",
+        "ingress_container_id": "c" * 64,
+        "ingress_container_id_after": "c" * 64,
     }), encoding="utf-8")
     result_path = tmp_path / "promotion-result.json"
     command = [
@@ -175,6 +177,7 @@ def test_promotion_gate_accepts_json_timestamps_under_powershell_7(
     assert result.returncode == 0, result.stdout + result.stderr
     receipt = json.loads(result_path.read_text(encoding="utf-8-sig"))
     assert receipt["promotion_attempt_id"] == "a" * 32
+    assert "transaction" not in receipt
 
 
 @pytest.mark.skipif(shutil.which("powershell.exe") is None, reason="requires Windows PowerShell")
@@ -253,3 +256,15 @@ def test_promotion_passes_approved_root_runner_to_operator_wrapper() -> None:
 
     invocation = text[text.index("& $operatorWrapper"):text.index("$powerShellSucceeded")]
     assert "-ExpectedRootRunnerSha256 $ExpectedRootRunnerSha256" in invocation
+    assert "-ExpectedReleaseSha256 $ExpectedReleaseSha256" in invocation
+    assert "-ExpectedIngressContainerId $expectedIngressContainerId" in invocation
+
+
+def test_security_config_adopts_matching_root_receipt_before_upload() -> None:
+    wrapper = WRAPPER.with_name("personal_security_config.ps1").read_text(encoding="utf-8")
+    adoption = wrapper.index("$existingReceiptJson")
+    credentials = wrapper.index("Get-Command docker-credential-desktop")
+    deployment = wrapper.index("$remoteRunner deploy")
+    assert adoption < credentials < deployment
+    assert "$existingReceipt.candidate_release_sha256 -eq $ExpectedReleaseSha256" in wrapper
+    assert "$existingReceipt.ingress_container_id_after -eq $ExpectedIngressContainerId" in wrapper

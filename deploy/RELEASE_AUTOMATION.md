@@ -98,18 +98,26 @@ particular, the Docker label
 `wheel_manifest_sha256` is the release provenance digest for the wheel records. The build command
 derives the Git commit, hashes `deploy/wheelhouse/SHA256SUMS`, verifies every listed wheel, extracts
 the single OAuth wheel digest, supplies all Docker build arguments, verifies the resulting image
-labels, optionally publishes the image, and writes machine-readable metadata.
+labels, generates and validates a Syft SBOM plus Grype report for the exact sealed archive, and
+writes machine-readable metadata. Publication is a separate reuse-only operation.
 
 ```powershell
 python deploy/build_release_image.py `
+  --mode build `
   --version 0.2.0-14 `
   --image ghcr.io/archolith/menhir `
   --python-base ghcr.io/archolith/menhir-python-base:<tag>@sha256:<digest> `
-  --output C:\absolute\menhir-image.json `
-  --push
+  --syft-image docker.io/anchore/syft@sha256:<reviewed-digest> `
+  --grype-image docker.io/anchore/grype@sha256:<reviewed-digest> `
+  --output C:\absolute\release-image-metadata.json `
+  --identity C:\absolute\release-image-identity.json `
+  --image-archive C:\absolute\release-image.tar
 ```
 
-Copy `image_ref` and `registry_digest` from that output into release inputs. Do not reconstruct
+Use `--mode publish` with those exact three outputs and the identity-file SHA-256. It pushes a
+collision-resistant `candidate-<full-archive-sha256>` tag, verifies the registry copy, and emits
+only a digest-qualified `image_ref`; it never moves a normal version tag. Copy `image_ref` and
+`registry_digest` from the publication output into release inputs. Do not reconstruct
 either from Docker's local image ID; a registry manifest digest and a local image configuration ID
 are different authorities. Isolated staging repeats label verification as a fail-closed backstop.
 
@@ -123,9 +131,10 @@ identity and must leave them unchanged. Future cold-cache tests must remove or a
 app image so this path is not accidentally validated only by a previously cached image.
 
 The root staging transaction retains the sealed preflight and authoritative receipt after the
-operator upload and disposable staging resources are removed. Its `inputs/` tree, including the
-large image archive and bundle copy, is always deleted; retained root evidence must not become a
-second payload archive.
+operator upload and disposable staging resources are removed. Once the root-owned input copy is
+created, every later success or failure deletes its `inputs/` tree, including the large image
+archive and bundle copy. A failure while creating that copy removes the partial transaction.
+Retained root evidence must not become a second payload archive.
 
 Windows operator wrappers must not assume profile-loaded PowerShell hashing commands or Unix mode
 preservation. Use an embedded .NET SHA-256 implementation, verify the complete uploaded bundle by
@@ -218,6 +227,10 @@ before taking the transaction lock; security-config enforces the same pre-mutati
 maintenance verifies the trusted bundle copy before installing or invoking its release runner.
 Interrupted app-only and security-config recovery rechecks the current root runner against the
 approved digest retained in the root-owned active transaction before rollback or rollforward.
+An already `complete` transaction is finalized without replaying replacement or rollback. If the
+desktop receipt was lost after root completion, each operator wrapper first adopts the matching
+root receipt; maintenance likewise adopts an exact live release plus completed journal instead of
+reinstalling it.
 A valid receipt repeats the same runner binding as completion evidence. App-only has
 a 300-second foreground budget and security-config has a 600-second foreground budget. Maintenance
 is resumable and has no short foreground budget. A wrapper that exits zero without writing the
@@ -244,8 +257,10 @@ Pop-Location
 ```
 
 `Install` validates the exact scaffold-bundle manifest, copies its user-owned upload into
-`/srv/menhir/scaffold-transactions`, installs fixed root-owned non-writable executables, captures the
-host contract, and finishes with verification. `Status` provides the separate read-only operator
+`/srv/menhir/scaffold-transactions`, independently compares every trusted-copy file with the
+desktop-approved digest, prevalidates sudoers, and transactionally installs root-owned executables
+and units. A failure restores prior files and systemd state before exiting. It then captures the
+host contract and finishes with verification. `Status` provides the separate read-only operator
 check. Do not fold this convergence into `prepare`, `finalize`, `publish`, staging, or promotion.
 
 ## Before starting

@@ -1276,9 +1276,12 @@ def test_scaffold_installs_and_audits_fixed_root_staging_runner():
 
     assert '"personal_stage_vps.py"' in install
     assert (
-        'install -o root -g root -m 0755 "${bundle}/personal_stage_vps.py" '
+        'install -o root -g root -m 0755 "${staged_bundle}/personal_stage_vps.py" '
         + runner
     ) in install
+    assert "visudo -c -f \"${transaction_root}/candidate.sudoers\"" in install
+    assert "rollback()" in install
+    assert "restore_file" in install
     assert {
         "digest": True,
         "gid": 0,

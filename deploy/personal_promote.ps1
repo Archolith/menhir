@@ -285,6 +285,12 @@ if ($preflight.schema -ne 1 -or
     [long]$preflight.checks.headroom.memory_available_bytes -lt [long]$preflight.checks.headroom.memory_required_bytes) {
     throw "Production readiness preflight is not bound to this promotion."
 }
+$approvedIngressIdentities = @($preflight.checks.network_roles.ingress.identities)
+if ($approvedIngressIdentities.Count -ne 1 -or
+    [string]$approvedIngressIdentities[0].container_id -notmatch '^[0-9a-f]{64}$') {
+    throw "Production readiness preflight has no unique Cloudflared identity."
+}
+$expectedIngressContainerId = [string]$approvedIngressIdentities[0].container_id
 $requiredChecks = @(
     "artifact_identity", "production_memory_limits", "production_network_shape",
     "oauth_policy_shape", "ingress_request_handling", "isolated_disposable_data",
@@ -346,6 +352,8 @@ if (-not $adoptExistingTransaction) {
     $global:LASTEXITCODE = 0
     & $operatorWrapper -Mode $Mode -BundlePath $bundle `
         -ExpectedBundleSha256 $ExpectedBundleSha256 -Release $Release `
+        -ExpectedReleaseSha256 $ExpectedReleaseSha256 `
+        -ExpectedIngressContainerId $expectedIngressContainerId `
         -SourceRepository $SourceRepository -ExpectedRootRunnerSha256 $ExpectedRootRunnerSha256 `
         -TransactionReceipt $TransactionReceipt
     $powerShellSucceeded = $?
@@ -412,6 +420,5 @@ $receipt = [ordered]@{
     promotion_attempt_id = $PromotionAttemptId
     transaction_kind = $authorityClass
     transaction_receipt_sha256 = Get-FileSha256 -Path $TransactionReceipt
-    transaction = $transaction
 }
 $receipt | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $ResultReceipt -Encoding ascii

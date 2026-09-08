@@ -580,7 +580,7 @@ def test_app_only_refuses_unapproved_root_runner_before_lock(
     )
 
     with pytest.raises(app_only.AppOnlyError, match="owner-approved authority"):
-        app_only.deploy("a" * 32, "0" * 64)
+        app_only.deploy("a" * 32, "0" * 64, "1" * 64, "c" * 64)
 
 
 def test_security_config_refuses_unapproved_root_runner_before_lock(
@@ -592,7 +592,91 @@ def test_security_config_refuses_unapproved_root_runner_before_lock(
     )
 
     with pytest.raises(security_config.Error, match="owner-approved authority"):
-        security_config.deploy("a" * 32, "0" * 64)
+        security_config.deploy("a" * 32, "0" * 64, "1" * 64, "c" * 64)
+
+
+def test_app_only_refuses_unapproved_uploaded_release_before_production_access(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(app_only, "require_runner_sha256", lambda *_args: "0" * 64)
+    monkeypatch.setattr(app_only, "acquire_lock", _TestLock)
+    monkeypatch.setattr(app_only, "require_no_incomplete_transactions", lambda: None)
+    monkeypatch.setattr(app_only, "run", lambda *_args, **_kwargs: "")
+    monkeypatch.setattr(app_only, "STATUS", tmp_path)
+    monkeypatch.setattr(
+        app_only, "classify_bundle",
+        lambda *_args: ({}, {"candidate_release_sha256": "2" * 64}),
+    )
+    monkeypatch.setattr(
+        app_only, "require_root_file",
+        lambda *_args: pytest.fail("release mismatch reached production authority"),
+    )
+
+    with pytest.raises(app_only.AppOnlyError, match="owner-approved authority"):
+        app_only.deploy("a" * 32, "0" * 64, "1" * 64, "c" * 64)
+
+
+def test_security_config_refuses_unapproved_uploaded_release_before_production_access(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        security_config.app, "require_runner_sha256", lambda *_args: "0" * 64,
+    )
+    monkeypatch.setattr(security_config.app, "acquire_lock", _TestLock)
+    monkeypatch.setattr(security_config.app, "require_no_incomplete_transactions", lambda: None)
+    monkeypatch.setattr(security_config, "STATUS", tmp_path)
+    monkeypatch.setattr(
+        security_config, "classify_bundle",
+        lambda *_args: ({}, {"candidate_release_sha256": "2" * 64}),
+    )
+    monkeypatch.setattr(
+        security_config.app, "require_root_file",
+        lambda *_args: pytest.fail("release mismatch reached production authority"),
+    )
+
+    with pytest.raises(security_config.Error, match="owner-approved authority"):
+        security_config.deploy("a" * 32, "0" * 64, "1" * 64, "c" * 64)
+
+
+def test_app_only_complete_recovery_only_finalizes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    active = tmp_path / "app-only-active.json"
+    active.write_text("{}", encoding="ascii")
+    transaction = {"kind": "menhir-app-only-transaction", "runner_sha256": "1" * 64,
+                   "stage": "complete"}
+    finalized: list[dict[str, object]] = []
+    monkeypatch.setattr(app_only, "ACTIVE", active)
+    monkeypatch.setattr(app_only, "acquire_lock", _TestLock)
+    monkeypatch.setattr(app_only, "require_root_file", lambda *_args: None)
+    monkeypatch.setattr(app_only, "strict_load", lambda _path: transaction)
+    monkeypatch.setattr(app_only, "require_runner_sha256", lambda *_args: "1" * 64)
+    monkeypatch.setattr(app_only, "finalize_transaction", finalized.append)
+    monkeypatch.setattr(app_only, "rollforward", lambda _tx: pytest.fail("complete recovery replayed deploy"))
+    monkeypatch.setattr(app_only, "rollback", lambda _tx: pytest.fail("complete recovery rolled back"))
+
+    assert app_only.recover() is transaction
+    assert finalized == [transaction]
+
+
+def test_security_config_complete_recovery_only_finalizes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    active = tmp_path / "security-active.json"
+    active.write_text("{}", encoding="ascii")
+    transaction = {"kind": "menhir-security-config-transaction", "runner_sha256": "1" * 64,
+                   "stage": "complete"}
+    finalized: list[dict[str, object]] = []
+    monkeypatch.setattr(security_config, "ACTIVE", active)
+    monkeypatch.setattr(security_config.app, "acquire_lock", _TestLock)
+    monkeypatch.setattr(security_config.app, "require_root_file", lambda *_args: None)
+    monkeypatch.setattr(security_config.app, "strict_load", lambda _path: transaction)
+    monkeypatch.setattr(security_config.app, "require_runner_sha256", lambda *_args: "1" * 64)
+    monkeypatch.setattr(security_config, "finalize", finalized.append)
+    monkeypatch.setattr(security_config, "rollback", lambda _tx: pytest.fail("complete recovery rolled back"))
+
+    assert security_config.recover() is transaction
+    assert finalized == [transaction]
 
 
 class _TestLock:

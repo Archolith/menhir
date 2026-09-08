@@ -100,7 +100,7 @@ PROMOTION_KEYS = frozenset({
     "deployment_class", "ingress_mode", "started_utc", "completed_utc",
     "elapsed_seconds", "promotion_wrapper_sha256", "operator_wrapper_sha256",
     "root_runner_sha256", "promotion_attempt_id", "transaction_kind",
-    "transaction_receipt_sha256", "transaction",
+    "transaction_receipt_sha256",
 })
 
 
@@ -193,15 +193,15 @@ def _atomic_json(path: Path, value: dict[str, Any]) -> None:
 
 
 def _utc(value: Any, label: str) -> datetime:
-    if not isinstance(value, str) or not value.endswith("Z"):
-        raise PersonalDeployError(f"{label} must be a UTC timestamp ending in Z")
+    if not isinstance(value, str):
+        raise PersonalDeployError(f"{label} must be an explicit UTC timestamp")
     try:
-        parsed = datetime.fromisoformat(value[:-1] + "+00:00")
+        parsed = datetime.fromisoformat(value[:-1] + "+00:00" if value.endswith("Z") else value)
     except ValueError as exc:
         raise PersonalDeployError(f"{label} is invalid") from exc
-    if parsed.tzinfo != timezone.utc:
+    if parsed.tzinfo is None or parsed.utcoffset() != timedelta(0):
         raise PersonalDeployError(f"{label} must be UTC")
-    return parsed
+    return parsed.astimezone(timezone.utc)
 
 
 def _now() -> str:
@@ -731,15 +731,11 @@ def _validate_promotion_receipt(
         raise PersonalDeployError("promotion exceeded its foreground time budget")
     if receipt.get("transaction_kind") != state["deployment_class"]:
         raise PersonalDeployError("promotion receipt transaction kind mismatch")
-    transaction = receipt.get("transaction")
-    if not isinstance(transaction, dict):
-        raise PersonalDeployError("promotion receipt lacks the root transaction")
     transaction_path = path.with_name(ROOT_TRANSACTION_RECEIPT_NAME)
     if _sha256(_regular_file(transaction_path, "root transaction receipt")) \
             != receipt.get("transaction_receipt_sha256"):
         raise PersonalDeployError("promotion receipt root transaction digest mismatch")
-    if _load_json(transaction_path, "root transaction receipt") != transaction:
-        raise PersonalDeployError("embedded root transaction differs from its receipt")
+    transaction = _load_json(transaction_path, "root transaction receipt")
     expected_kind = {
         "app-only": "menhir-app-only-transaction",
         "security-config": "menhir-security-config-transaction",

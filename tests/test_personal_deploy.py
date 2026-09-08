@@ -523,7 +523,6 @@ def test_promotion_runs_once_and_records_bound_receipt(tmp_path: Path) -> None:
             "promotion_attempt_id": current["promotion_attempt_id"],
             "transaction_kind": approved["deployment_class"],
             "transaction_receipt_sha256": MODULE._sha256(transaction_path),
-            "transaction": transaction,
         }), encoding="utf-8")
 
     promoted = MODULE.promote_flow(
@@ -595,7 +594,6 @@ def test_promotion_retry_adopts_receipts_after_coordinator_crash(tmp_path: Path)
             "promotion_attempt_id": current["promotion_attempt_id"],
             "transaction_kind": current["deployment_class"],
             "transaction_receipt_sha256": MODULE._sha256(transaction_path),
-            "transaction": transaction,
         }), encoding="utf-8")
         raise RuntimeError("simulated coordinator crash")
 
@@ -609,6 +607,16 @@ def test_promotion_retry_adopts_receipts_after_coordinator_crash(tmp_path: Path)
         command_runner=lambda _: pytest.fail("recovery reran production mutation"),
     )
     assert isinstance(recovered, dict) and recovered["phase"] == "promoted"
+
+
+def test_utc_accepts_powershell_utc_offset_serialization() -> None:
+    parsed = MODULE._utc("2026-09-08T12:34:56+00:00", "PowerShell timestamp")
+    assert parsed.isoformat() == "2026-09-08T12:34:56+00:00"
+
+
+def test_utc_rejects_non_utc_offset() -> None:
+    with pytest.raises(MODULE.PersonalDeployError, match="must be UTC"):
+        MODULE._utc("2026-09-08T07:34:56-05:00", "local timestamp")
 
 
 def test_receipt_tampering_blocks_approval_and_promotion(tmp_path: Path) -> None:

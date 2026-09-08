@@ -280,8 +280,15 @@ def _copy_uploaded_inputs(upload_root: Path) -> tuple[Path, Path, Path]:
         finally:
             os.close(archive_source)
         return bundle, archive, transaction
-    except OSError as exc:
-        raise StageError("uploaded staging inputs changed during root copy") from exc
+    except Exception as exc:
+        if transaction.exists():
+            resolved = transaction.resolve()
+            if resolved.parent != TRANSACTION_ROOT.resolve() or not resolved.name:
+                raise StageError("refusing unsafe partial transaction cleanup") from exc
+            shutil.rmtree(resolved)
+        if isinstance(exc, OSError):
+            raise StageError("uploaded staging inputs changed during root copy") from exc
+        raise
     finally:
         os.close(upload)
 
@@ -1683,40 +1690,50 @@ def run_stage(args: argparse.Namespace) -> dict[str, Any]:
     upload_root = args.upload_root
     bundle, archive, transaction = _copy_uploaded_inputs(upload_root)
     receipt = transaction / "staging-receipt.json"
-    _safe_file(bundle / "bundle-manifest.json", "bundle manifest")
-    release, source_environment, _ = _validate_bundle(
-        bundle,
-        args.expected_bundle_sha256,
-        args.expected_release_id,
-        args.expected_release_sha256,
-    )
-    production_preflight = _production_preflight(
-        bundle, release, args.deployment_class,
-    )
-    _atomic_json(
-        transaction / "evidence/production-preflight.json", production_preflight,
-    )
-    production_before = _production_snapshot()
-    preflight_ingress = production_preflight["checks"]["network_roles"][
-        "ingress"
-    ]["identities"]
-    if production_before["cloudflared"] != preflight_ingress:
-        raise StageError("production Cloudflared identity changed after preflight")
-    started = _now()
-    _safe_file(archive, "transferred Menhir image archive")
-    if _sha256(archive) != args.expected_menhir_image_archive_sha256:
-        raise StageError("transferred Menhir image archive digest mismatch")
-    _run("docker", "load", "--input", str(archive), timeout=600)
-    runtime_images = _ensure_images(source_environment, release)
+    try:
+        _safe_file(bundle / "bundle-manifest.json", "bundle manifest")
+        release, source_environment, _ = _validate_bundle(
+            bundle,
+            args.expected_bundle_sha256,
+            args.expected_release_id,
+            args.expected_release_sha256,
+        )
+        production_preflight = _production_preflight(
+            bundle, release, args.deployment_class,
+        )
+        _atomic_json(
+            transaction / "evidence/production-preflight.json", production_preflight,
+        )
+        production_before = _production_snapshot()
+        preflight_ingress = production_preflight["checks"]["network_roles"][
+            "ingress"
+        ]["identities"]
+        if production_before["cloudflared"] != preflight_ingress:
+            raise StageError("production Cloudflared identity changed after preflight")
+        started = _now()
+        _safe_file(archive, "transferred Menhir image archive")
+        if _sha256(archive) != args.expected_menhir_image_archive_sha256:
+            raise StageError("transferred Menhir image archive digest mismatch")
+        _run("docker", "load", "--input", str(archive), timeout=600)
+        runtime_images = _ensure_images(source_environment, release)
 
-    run_id = secrets.token_hex(6)
-    root = STAGING_ROOT / run_id
-    project = f"menhir-stage-{run_id}"
-    subnet = _select_subnet()
-    base: Path | None = None
-    override: Path | None = None
-    environment: dict[str, str] | None = None
-    checks = {name: False for name in CHECKS}
+        run_id = secrets.token_hex(6)
+        root = STAGING_ROOT / run_id
+        project = f"menhir-stage-{run_id}"
+        subnet = _select_subnet()
+        base: Path | None = None
+        override: Path | None = None
+        environment: dict[str, str] | None = None
+        checks = {name: False for name in CHECKS}
+    except Exception:
+        inputs = transaction / "inputs"
+        if inputs.exists():
+            resolved_inputs = inputs.resolve()
+            if resolved_inputs.parent != transaction.resolve() \
+                    or resolved_inputs.name != "inputs":
+                raise StageError("refusing unsafe root transaction input cleanup")
+            shutil.rmtree(resolved_inputs)
+        raise
     try:
         STAGING_ROOT.mkdir(parents=True, exist_ok=True, mode=0o700)
         _chown(STAGING_ROOT, 0, 0)

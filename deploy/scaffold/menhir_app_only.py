@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import stat
 import subprocess
 import sys
@@ -784,8 +785,28 @@ def require_runner_sha256(expected: object, path: Path = Path(__file__)) -> str:
     return actual
 
 
-def deploy(bundle_id: str, expected_runner_sha256: str) -> dict[str, Any]:
+def discard_unstarted_transaction(
+    path: Path, lane: str, *, status_root: Path | None = None,
+) -> None:
+    expected_parent = ((status_root or STATUS) / lane).resolve()
+    resolved = path.resolve()
+    if resolved.parent != expected_parent or not resolved.name:
+        raise AppOnlyError("refusing unsafe unstarted transaction cleanup")
+    if resolved.exists():
+        shutil.rmtree(resolved)
+
+
+def deploy(
+    bundle_id: str,
+    expected_runner_sha256: str,
+    expected_release_sha256: str,
+    expected_ingress_container_id: str,
+) -> dict[str, Any]:
     runner_sha256 = require_runner_sha256(expected_runner_sha256)
+    if HEX64.fullmatch(expected_release_sha256) is None:
+        raise AppOnlyError("expected release SHA-256 is malformed")
+    if HEX64.fullmatch(expected_ingress_container_id) is None:
+        raise AppOnlyError("expected Cloudflared container ID is malformed")
     lock = acquire_lock()
     transaction: dict[str, Any] | None = None
     try:
@@ -794,6 +815,9 @@ def deploy(bundle_id: str, expected_runner_sha256: str) -> dict[str, Any]:
         tx_id = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ-") + bundle_id
         tx = STATUS / "app-only" / tx_id
         bundle, classification = classify_bundle(bundle_id, tx)
+        if classification["candidate_release_sha256"] != expected_release_sha256:
+            discard_unstarted_transaction(tx, "app-only")
+            raise AppOnlyError("uploaded release differs from the owner-approved authority")
         require_root_file(LIVE_RELEASE, "live release")
         require_root_file(LIVE_ENV, "live production environment")
         atomic_bytes(tx / "prior-release.json", LIVE_RELEASE.read_bytes(), 0o400)
@@ -805,6 +829,8 @@ def deploy(bundle_id: str, expected_runner_sha256: str) -> dict[str, Any]:
         app = inspect_container("menhir-prod-app")
         database = inspect_container("menhir-prod-neo4j")
         ingress = inspect_cloudflared()
+        if ingress.get("Id") != expected_ingress_container_id:
+            raise AppOnlyError("Cloudflared changed since the approved staging preflight")
         transaction = {
             "schema": 1,
             "kind": "menhir-app-only-transaction",
@@ -884,7 +910,9 @@ def recover() -> dict[str, Any]:
         if transaction.get("kind") != "menhir-app-only-transaction":
             raise AppOnlyError("active app-only transaction schema mismatch")
         require_runner_sha256(transaction.get("runner_sha256"))
-        if transaction.get("stage") in {"accepted", "complete"}:
+        if transaction.get("stage") == "complete":
+            finalize_transaction(transaction)
+        elif transaction.get("stage") == "accepted":
             rollforward(transaction)
         else:
             rollback(transaction)
@@ -954,6 +982,8 @@ def parser() -> argparse.ArgumentParser:
     deploy_command = commands.add_parser("deploy")
     deploy_command.add_argument("bundle_id")
     deploy_command.add_argument("expected_runner_sha256")
+    deploy_command.add_argument("expected_release_sha256")
+    deploy_command.add_argument("expected_ingress_container_id")
     commands.add_parser("recover")
     commands.add_parser("live")
     commands.add_parser("check")
@@ -971,7 +1001,12 @@ def main(argv: list[str]) -> int:
         if args.command == "classify":
             _, value = classify_bundle(args.bundle_id)
         elif args.command == "deploy":
-            value = deploy(args.bundle_id, args.expected_runner_sha256)
+            value = deploy(
+                args.bundle_id,
+                args.expected_runner_sha256,
+                args.expected_release_sha256,
+                args.expected_ingress_container_id,
+            )
         elif args.command == "recover":
             value = recover()
         elif args.command == "live":
