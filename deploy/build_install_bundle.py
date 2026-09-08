@@ -43,6 +43,7 @@ EVIDENCE_DIGESTS = {
 }
 PUBLICATION_EVIDENCE = frozenset({
     "image_publication", "image_metadata", "image_identity", "image_archive",
+    "publication_attestation", "attestation_trusted_root",
 })
 RENDERED_DESTINATIONS = {
     "/srv/menhir/production/release/production.env": "production_env_sha256",
@@ -347,6 +348,14 @@ def _validate_spec_relationship(
         ),
         sbom_path=_regular_file(evidence["sbom"], "release spec evidence.sbom"),
         scan_path=_regular_file(evidence["scan"], "release spec evidence.scan"),
+        publication_attestation_path=_regular_file(
+            evidence["publication_attestation"],
+            "release spec evidence.publication_attestation",
+        ),
+        attestation_trusted_root_path=_regular_file(
+            evidence["attestation_trusted_root"],
+            "release spec evidence.attestation_trusted_root",
+        ),
         menhir_commit=release["repos"]["menhir"],
         menhir_digest=release["images"]["menhir"],
         menhir_ref=image_refs["menhir"],

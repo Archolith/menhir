@@ -29,7 +29,6 @@
     "/srv/menhir/production/bin/release-inspect",
     "/srv/menhir/production/bin/release-lib.sh",
     "/srv/menhir/production/bin/release-validate.sh",
-    "/srv/menhir/production/bin/release-run",
     "/srv/menhir/production/bin/release-run.sh",
     "/srv/menhir/production/bin/restore-production",
     "/srv/menhir/production/bin/restore-rehearsal",

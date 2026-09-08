@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import hashlib
 import importlib.util
 import json
@@ -18,6 +19,15 @@ SPEC = importlib.util.spec_from_file_location("build_install_bundle", MODULE_PAT
 assert SPEC and SPEC.loader
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
+
+
+@pytest.fixture(autouse=True)
+def _verified_attestation(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        release_helpers.MODULE.release_spec,
+        "_verify_github_attestation",
+        lambda **_kwargs: None,
+    )
 
 
 def _sha256(path: Path) -> str:
@@ -282,7 +292,7 @@ def test_fixed_destination_mode_policy() -> None:
     ) == "0400"
     assert MODULE._destination_mode("/etc/sudoers.d/menhir-production") == "0440"
     assert MODULE._destination_mode(
-        "/srv/menhir/production/bin/release-run"
+        "/srv/menhir/production/bin/release-run.sh"
     ) == "0755"
     assert MODULE._destination_mode(
         "/srv/menhir/production/bin/menhir_schema.py"
@@ -333,11 +343,11 @@ def test_bundle_output_is_deterministic(tmp_path: Path) -> None:
 
 def test_installer_keeps_scaffold_and_cutover_out_of_routine_install() -> None:
     source = MODULE_PATH.with_name("release-install.sh").read_text(encoding="ascii")
-    for forbidden in ("groupadd", "usermod", "systemctl enable", "release-run.sh\""):
+    for forbidden in ("groupadd", "usermod", '"${runner_source}"', "production_up"):
         assert forbidden not in source
     assert "bundle manifest destination allowlist mismatch" in source
     assert "bundle file census mismatch" in source
-    assert "replaced files restored" in source
+    assert "durable rollback evidence retained" in source
     assert "/srv/menhir/production/bin/verify-artifacts" in source
     assert "systemctl daemon-reload" in source
     assert "systemctl restart menhir-oauth-operations.service" in source
@@ -346,6 +356,194 @@ def test_installer_keeps_scaffold_and_cutover_out_of_routine_install() -> None:
     assert "retire_caddy_writers" in source
     assert "retired Caddy writer remains loaded or active" in source
     assert "production cutover was not started" in source
+
+
+def test_installer_independently_binds_the_active_maintenance_holder() -> None:
+    source = MODULE_PATH.with_name("release-install.sh").read_text(encoding="ascii")
+    binding_validation = source.index(
+        'path, release_id, release_sha, runner_sha = sys.argv[1:]'
+    )
+    helper_assertion = source.index("\nassert_maintenance\n", binding_validation)
+    mutation_lock = source.index('exec 9>"$mutation_lock"', helper_assertion)
+    second_assertion = source.index("\nassert_maintenance\n", mutation_lock)
+    first_phase = source.index("journal_action phase retiring-caddy")
+
+    assert 'maintenance_state="/var/lib/menhir-production/release-run.json"' in source
+    assert 'require_safe_root_file "$maintenance_state" "maintenance journal"' in source
+    assert '"release_manifest_sha256": release_sha' in source
+    assert '"runner_sha256": runner_sha' in source
+    assert 'value.get("completed_utc") is not None' in source
+    assert helper_assertion < mutation_lock < second_assertion < first_phase
+    assert 'python3 "$admission_helper" assert-maintenance "${admission_args[@]}"' \
+        in source
+
+
+def test_installer_journal_persists_complete_maintenance_binding() -> None:
+    source = MODULE_PATH.with_name("release-install.sh").read_text(encoding="ascii")
+    journal = source[
+        source.index("journal_action() {"):source.index(
+            "validate_destination_parents() {"
+        )
+    ]
+    recovery = source[
+        source.index('journal_output="$(journal_action inspect)"'):source.index(
+            'if [ "$same_binding" -ne 1 ]'
+        )
+    ]
+
+    assert '"approved_utc": approved_utc' in journal
+    assert '"promotion_started_utc": promotion_started_utc' in journal
+    assert '"approval_sha256", "promotion_attempt_id", "approved_utc",' in journal
+    assert '"promotion_started_utc",' in journal
+    assert '[ "$journal_approved_utc" = "$approved_utc" ]' in recovery
+    assert '[ "$journal_promotion_started_utc" = "$promotion_started_utc" ]' \
+        in recovery
+
+
+def test_installer_obeys_admission_then_nonblocking_mutation_lock_order() -> None:
+    source = MODULE_PATH.with_name("release-install.sh").read_text(encoding="ascii")
+    first_assertion = source.index("\nassert_maintenance\n")
+    mutation_lock = source.index('exec 9>"$mutation_lock"')
+    nonblocking = source.index("flock -n 9", mutation_lock)
+    retirement = source.index("retire_caddy_writers\n", nonblocking)
+
+    assert first_assertion < mutation_lock < nonblocking < retirement
+    assert 'exit 75' in source[nonblocking:retirement]
+    assert "menhir-production-admission.lock" not in source
+    assert "flock -n 8" not in source
+
+
+def test_installer_snapshots_every_caddy_retirement_surface_before_arming() -> None:
+    source = MODULE_PATH.with_name("release-install.sh").read_text(encoding="ascii")
+    snapshot = source[source.index("create_snapshot() {"):source.index("unit_property() {")]
+    retirement = source[source.index("retire_caddy_writers() {"):]
+
+    assert 'snapshot_path "caddy-${index}" "/etc/systemd/system/${unit}" file' \
+        in snapshot
+    assert 'snapshot_unit "$unit"' in snapshot
+    assert 'snapshot_path "caddy-${index}" "$path" file' in snapshot
+    assert 'snapshot_path "caddy-${index}" "$path" tree' in snapshot
+    for property_name in ("LoadState", "UnitFileState", "ActiveState", "SubState"):
+        assert f"--property={property_name}" in source
+    assert snapshot.index('fsync_tree "$snapshot_root"') \
+        < snapshot.index("journal_action phase armed")
+    assert source.index("journal_action phase armed") \
+        < source.index("journal_action phase retiring-caddy")
+    for path in (
+        "menhir-caddy-reconcile.path",
+        "menhir-caddy-reconcile.service",
+        "/srv/menhir/production/bin/caddy-release.sh",
+        "/srv/menhir/production/bin/caddy-route-apply",
+        "/srv/menhir/production/bin/caddy-route-rollback",
+        "/srv/yawn/releases/menhir-route-candidate",
+    ):
+        assert path in snapshot + source[source.index("retired_caddy_units=("):source.index("fsync_directory() {")]
+        assert path in retirement or "${retired_caddy_" in retirement
+
+
+def test_installer_journals_and_fsyncs_each_mutation_boundary() -> None:
+    source = MODULE_PATH.with_name("release-install.sh").read_text(encoding="ascii")
+    journal = source[source.index("journal_action() {"):source.index("validate_destination_parents() {")]
+
+    for phase in (
+        "snapshotting", "armed", "retiring-caddy", "installing", "verifying",
+        "rolling-back", "rolled-back", "committed",
+    ):
+        assert f'"{phase}"' in journal
+    for durability_step in (
+        "handle.flush()", "os.fsync(handle.fileno())", "os.replace(temporary, path)",
+        "os.fsync(directory)",
+    ):
+        assert durability_step in journal
+    assert source.index("journal_action phase retiring-caddy") \
+        < source.index("retire_caddy_writers\n")
+    assert source.index("journal_action phase installing") \
+        < source.index('install -o root -g root -m "$mode" "$source" "$temporary"')
+    verifying = source.index("journal_action phase verifying")
+    assert verifying < source.index(
+        "/srv/menhir/production/bin/verify-artifacts", verifying
+    )
+    assert source.index("assert_maintenance\n", source.index("journal_action phase verifying")) \
+        < source.index("journal_action phase committed")
+
+
+@pytest.mark.parametrize(
+    "crash_phase",
+    ["armed", "retiring-caddy", "installing", "verifying", "rolling-back"],
+)
+def test_crash_in_any_mutating_phase_recovers_without_rebaselining(
+    crash_phase: str,
+) -> None:
+    source = MODULE_PATH.with_name("release-install.sh").read_text(encoding="ascii")
+    retirement = source.index("retire_caddy_writers() {")
+    recovery_start = source.rindex('case "$phase" in', 0, retirement)
+    recovery = source[recovery_start:retirement]
+    crash_arm = "armed|retiring-caddy|installing|verifying|rolling-back)"
+
+    assert crash_phase in crash_arm
+    assert crash_arm in recovery
+    branch = recovery[recovery.index(crash_arm):recovery.index("rolled-back)")]
+    assert branch.index("validate_snapshot_census") < branch.index("rollback_install")
+    assert "create_snapshot" not in branch
+    assert "retry the exact bundle" in branch
+
+
+def test_installer_rejects_cross_binding_partial_state_and_only_archives_terminal_state() -> None:
+    source = MODULE_PATH.with_name("release-install.sh").read_text(encoding="ascii")
+    active = source[source.index('if [ -e "$transaction_root" ]'):source.index('if [ -z "$phase" ]')]
+
+    assert 'transaction_root="${install_root}/active"' in source
+    assert "active install transaction has no safe journal; refusing to re-baseline" in active
+    assert 'committed|rolled-back) archive_terminal_transaction' in active
+    assert "unfinished install transaction belongs to another maintenance binding" in active
+    assert "snapshotting" not in active.split("case \"$phase\" in", 1)[1].split("esac", 1)[0]
+
+
+def test_failure_trap_and_rolled_back_retry_are_idempotent() -> None:
+    source = MODULE_PATH.with_name("release-install.sh").read_text(encoding="ascii")
+    rollback = source[source.index("rollback_install() {"):source.index("finish_install() {")]
+    finish = source[source.index("finish_install() {"):source.index("archive_terminal_transaction() {")]
+    retirement = source.index("retire_caddy_writers() {")
+    recovery_start = source.rindex('case "$phase" in', 0, retirement)
+    recovery = source[recovery_start:retirement]
+    retry = recovery[recovery.index("rolled-back)"):recovery.index("committed)")]
+
+    assert "journal_action phase rolling-back" in rollback
+    assert 'rm -f -- "$destination"' in rollback
+    assert 'rm -rf -- "$destination"' in rollback
+    assert "systemctl disable --now" in rollback
+    assert "journal_action phase rolled-back" in rollback
+    assert 'if [ "$status" -ne 0 ] && [ "$transaction_active" -eq 1 ]' in finish
+    assert "rollback_install" in finish
+    assert retry.count("rollback_install") == 1
+    assert retry.index("rollback_install") < retry.index("journal_action phase armed")
+    assert "create_snapshot" not in retry
+
+
+def test_install_journal_transition_graph_rejects_unsafe_recovery_edges() -> None:
+    source = MODULE_PATH.with_name("release-install.sh").read_text(encoding="ascii")
+    helper_start = source.index("import datetime", source.index("journal_action() {"))
+    helper_end = source.index("\nPY\n}", helper_start)
+    tree = ast.parse(source[helper_start:helper_end])
+    transitions = None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and any(
+            isinstance(target, ast.Name) and target.id == "allowed"
+            for target in node.targets
+        ):
+            transitions = ast.literal_eval(node.value)
+            break
+
+    assert transitions is not None
+    for crash_phase in (
+        "armed", "retiring-caddy", "installing", "verifying", "rolling-back",
+    ):
+        assert "rolling-back" in transitions[crash_phase]
+    assert transitions["committed"] == {"committed"}
+    assert "armed" not in transitions["retiring-caddy"]
+    assert "armed" not in transitions["installing"]
+    assert "armed" not in transitions["verifying"]
+    assert transitions["rolled-back"] >= {"rolling-back", "armed"}
 
 
 def test_installer_allowlist_matches_installed_artifact_census() -> None:
@@ -365,6 +563,14 @@ def test_installer_allowlist_matches_installed_artifact_census() -> None:
         )
     )
     assert installer_destinations == set(census["destinations"])
+
+
+def test_installer_excludes_obsolete_release_run_sudo_wrapper() -> None:
+    source = MODULE_PATH.with_name("release-install.sh").read_text(
+        encoding="ascii"
+    )
+    assert "\n/srv/menhir/production/bin/release-run\n" not in source
+    assert "\n/srv/menhir/production/bin/release-run.sh\n" in source
 
 
 def test_installer_mode_policy_matches_bundle_builder() -> None:
