@@ -20,6 +20,7 @@ import menhir_app_only as app
 Error = app.AppOnlyError
 ROOT = app.ROOT
 STATUS = app.STATUS
+ADMISSION_LOCK = app.ADMISSION_LOCK
 UPLOAD_ROOT = Path("/home/thron/.menhir-security-config-upload")
 ACTIVE = STATUS / "security-config-active.json"
 LAST = STATUS / "security-config-last.json"
@@ -55,6 +56,13 @@ ALLOWED_CONFIG_DESTINATIONS = set(DESTINATIONS.values()) - {
     "/srv/menhir/production/release/release.json",
     "/etc/yawn-vps/menhir-oauth-public.pem",
 }
+
+
+def acquire_security_config_admission() -> app.DeploymentLocks:
+    """Acquire the same cross-lane authority used by app-only and maintenance."""
+    if ADMISSION_LOCK != Path("/run/lock/menhir-production-admission.lock"):
+        raise Error("security-config admission authority is inconsistent")
+    return app.acquire_lock()
 
 
 def require_candidate_file(path: Path, label: str) -> None:
@@ -344,7 +352,7 @@ def deploy(
         raise Error("expected release SHA-256 is malformed")
     if app.HEX64.fullmatch(expected_ingress_container_id) is None:
         raise Error("expected Cloudflared container ID is malformed")
-    lock = app.acquire_lock()
+    lock = acquire_security_config_admission()
     transaction: dict[str, Any] | None = None
     try:
         app.require_no_incomplete_transactions()
@@ -417,7 +425,7 @@ def deploy(
 def recover() -> dict[str, Any]:
     if not ACTIVE.exists():
         raise Error("there is no incomplete security-config transaction")
-    lock = app.acquire_lock()
+    lock = acquire_security_config_admission()
     try:
         app.require_root_file(ACTIVE, "active security-config transaction")
         transaction = app.strict_load(ACTIVE)

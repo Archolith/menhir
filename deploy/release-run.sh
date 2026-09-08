@@ -26,16 +26,55 @@ ingress_mode="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).g
     echo "release authority must declare Cloudflared ingress" >&2
     exit 1
 }
+admission_helper="/srv/menhir/scaffold/bin/menhir_scaffold.py"
+require_root_file "$admission_helper" "maintenance admission authority"
+runner_sha="$(sha256sum "$0" | cut -d' ' -f1)"
+approval_sha="${MENHIR_APPROVAL_SHA256:?MENHIR_APPROVAL_SHA256 is required}"
+promotion_attempt_id="${MENHIR_PROMOTION_ATTEMPT_ID:?MENHIR_PROMOTION_ATTEMPT_ID is required}"
+approved_utc="${MENHIR_APPROVED_UTC:?MENHIR_APPROVED_UTC is required}"
+promotion_started_utc="${MENHIR_PROMOTION_STARTED_UTC:?MENHIR_PROMOTION_STARTED_UTC is required}"
+expected_runner_sha="${MENHIR_ROOT_RUNNER_SHA256:?MENHIR_ROOT_RUNNER_SHA256 is required}"
+approved_utc="$(python3 -c 'import datetime,sys; v=datetime.datetime.fromisoformat(sys.argv[1].replace("Z","+00:00")); assert v.utcoffset()==datetime.timedelta(0); print(v.astimezone(datetime.timezone.utc).isoformat())' "$approved_utc")"
+promotion_started_utc="$(python3 -c 'import datetime,sys; v=datetime.datetime.fromisoformat(sys.argv[1].replace("Z","+00:00")); assert v.utcoffset()==datetime.timedelta(0); print(v.astimezone(datetime.timezone.utc).isoformat())' "$promotion_started_utc")"
+[ "$runner_sha" = "$expected_runner_sha" ] \
+    || { echo "maintenance runner differs from approved authority" >&2; exit 1; }
+admission_args=(
+    --release-id "$release_id"
+    --release-manifest-sha256 "$release_sha"
+    --runner-sha256 "$runner_sha"
+    --approval-sha256 "$approval_sha"
+    --promotion-attempt-id "$promotion_attempt_id"
+    --approved-utc "$approved_utc"
+    --promotion-started-utc "$promotion_started_utc"
+)
+python3 "$admission_helper" assert-maintenance "${admission_args[@]}" >/dev/null
 
 write_stage() { # stage generation
     local stage="$1" generation="${2:-}"
     install -d -o root -g root -m 0755 "$STATUS_DIR"
-    python3 - "$state" "$release_id" "$release_sha" "$stage" "$generation" <<'PYEOF'
+    python3 - "$state" "$release_id" "$release_sha" "$stage" "$generation" \
+        "$runner_sha" "$approval_sha" "$promotion_attempt_id" "$approved_utc" \
+        "$promotion_started_utc" <<'PYEOF'
 import datetime,json,os,sys,tempfile
-path,release_id,release_sha,stage,generation=sys.argv[1:6]
-value={"schema":1,"kind":"menhir-release-run","release_id":release_id,
-       "release_manifest_sha256":release_sha,"stage":stage,"generation":generation,
-       "updated_utc":datetime.datetime.now(datetime.timezone.utc).isoformat()}
+path,release_id,release_sha,stage,generation,runner_sha,approval_sha,attempt_id,approved_utc,promotion_started_utc=sys.argv[1:11]
+with open(path, encoding="ascii") as handle:
+    prior=json.load(handle)
+expected={"schema","kind","release_id","release_manifest_sha256","stage","generation",
+          "started_utc","updated_utc","completed_utc","runner_sha256","approval_sha256",
+          "promotion_attempt_id","approved_utc","promotion_started_utc"}
+binding={"release_id":release_id,"release_manifest_sha256":release_sha,
+         "runner_sha256":runner_sha,"approval_sha256":approval_sha,
+         "promotion_attempt_id":attempt_id,"approved_utc":approved_utc,
+         "promotion_started_utc":promotion_started_utc}
+if set(prior)!=expected or prior.get("schema")!=1 or prior.get("kind")!="menhir-release-run" \
+        or any(prior.get(key)!=value for key,value in binding.items()):
+    raise SystemExit("maintenance journal binding changed")
+if prior.get("completed_utc") is not None:
+    raise SystemExit("completed maintenance journal is immutable")
+now=datetime.datetime.now(datetime.timezone.utc).isoformat()
+value={**prior,"stage":stage,"generation":generation,"updated_utc":now}
+if stage=="complete":
+    value["completed_utc"]=now
 parent=os.path.dirname(path); fd,tmp=tempfile.mkstemp(prefix=".release-run-",dir=parent,text=True)
 try:
     with os.fdopen(fd,"w",encoding="ascii") as f:
@@ -67,7 +106,9 @@ if [ -e "$state" ]; then
     python3 - "$state" <<'PYEOF'
 import json,re,sys
 v=json.load(open(sys.argv[1],encoding="utf-8"))
-keys={"schema","kind","release_id","release_manifest_sha256","stage","generation","updated_utc"}
+keys={"schema","kind","release_id","release_manifest_sha256","stage","generation",
+      "started_utc","updated_utc","completed_utc","runner_sha256","approval_sha256",
+      "promotion_attempt_id","approved_utc","promotion_started_utc"}
 if set(v)!=keys or v.get("schema")!=1 or v.get("kind")!="menhir-release-run":
     raise SystemExit("release-run state schema mismatch")
 if v["stage"] not in {"start","backup","staged","rehearsal","candidate","accepted","routed","promoted","complete"}:
@@ -244,6 +285,7 @@ if ! at_least complete; then
     "${SCRIPT_DIR}/verify-artifacts"
     python3 "$acceptance_probe" production "$MENHIR_PUBLIC_BASE_URL" "$RELEASE_JSON" "$client_policy"
     write_stage complete "$generation"; stage=complete
+    python3 "$admission_helper" assert-maintenance "${admission_args[@]}" >/dev/null
 fi
 
 printf 'release_complete=%s generation=%s\n' "$release_id" "$generation"

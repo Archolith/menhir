@@ -350,12 +350,24 @@ if ((Get-FileSha256 -Path $operatorWrapper) -ne $ExpectedOperatorWrapperSha256) 
 
 if (-not $adoptExistingTransaction) {
     $global:LASTEXITCODE = 0
-    & $operatorWrapper -Mode $Mode -BundlePath $bundle `
-        -ExpectedBundleSha256 $ExpectedBundleSha256 -Release $Release `
-        -ExpectedReleaseSha256 $ExpectedReleaseSha256 `
-        -ExpectedIngressContainerId $expectedIngressContainerId `
-        -SourceRepository $SourceRepository -ExpectedRootRunnerSha256 $ExpectedRootRunnerSha256 `
-        -TransactionReceipt $TransactionReceipt
+    if ($Mode -eq "Maintenance") {
+        & $operatorWrapper -Mode $Mode -BundlePath $bundle `
+            -ExpectedBundleSha256 $ExpectedBundleSha256 -Release $Release `
+            -ExpectedReleaseSha256 $ExpectedReleaseSha256 `
+            -ExpectedIngressContainerId $expectedIngressContainerId `
+            -SourceRepository $SourceRepository -ExpectedRootRunnerSha256 $ExpectedRootRunnerSha256 `
+            -ApprovalSha256 $ExpectedApprovalSha256 -ApprovedUtc $approvedAt.UtcDateTime.ToString("o") `
+            -PromotionAttemptId $PromotionAttemptId -PromotionStartedUtc $promotionStartedAt.UtcDateTime.ToString("o") `
+            -TransactionReceipt $TransactionReceipt
+    }
+    else {
+        & $operatorWrapper -Mode $Mode -BundlePath $bundle `
+            -ExpectedBundleSha256 $ExpectedBundleSha256 -Release $Release `
+            -ExpectedReleaseSha256 $ExpectedReleaseSha256 `
+            -ExpectedIngressContainerId $expectedIngressContainerId `
+            -SourceRepository $SourceRepository -ExpectedRootRunnerSha256 $ExpectedRootRunnerSha256 `
+            -TransactionReceipt $TransactionReceipt
+    }
     $powerShellSucceeded = $?
     if (-not $powerShellSucceeded -or $LASTEXITCODE -ne 0) {
         throw "Menhir production transaction failed."
@@ -387,10 +399,16 @@ if ($Mode -ne "Maintenance" -and
     $transaction.database_container_id -ne $transaction.database_container_id_after) {
     throw "Root transaction receipt does not prove unchanged Neo4j."
 }
+if ($Mode -eq "Maintenance" -and (
+    $transaction.approval_sha256 -ne $ExpectedApprovalSha256 -or
+    $transaction.promotion_attempt_id -ne $PromotionAttemptId)) {
+    throw "Root maintenance transaction belongs to another approval or promotion attempt."
+}
 $promotionCompletedAt = [DateTimeOffset]::UtcNow
 $transactionStartedAt = Assert-UtcTimestamp -Value $transaction.started_utc -Label "Transaction start"
 $transactionCompletedAt = Assert-UtcTimestamp -Value $transaction.completed_utc -Label "Transaction completion"
-if ($transactionStartedAt -lt $promotionStartedAt -or
+if ($transactionStartedAt -lt $approvedAt -or
+    $transactionStartedAt -lt $promotionStartedAt -or
     $transactionCompletedAt -lt $transactionStartedAt -or
     $transactionCompletedAt -gt $promotionCompletedAt) {
     throw "Root transaction timestamps escape the promotion window."

@@ -13,6 +13,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -37,9 +38,15 @@ DRILL_RECEIPT = STATUS_ROOT / "scaffold-restore-drill-receipt.json"
 REHEARSAL_RECEIPT = STATUS_ROOT / "rehearsal-receipt.json"
 RELEASE_RUN = STATUS_ROOT / "release-run.json"
 FIRST_MUTATION = STATUS_ROOT / "first-mutation"
+ADMISSION_LOCK = Path("/run/lock/menhir-production-admission.lock")
+ADMISSION_READY = Path("/run/menhir-maintenance-admission.ready")
+ADMISSION_UNIT = "menhir-maintenance-admission.service"
+MAINTENANCE_HISTORY = STATUS_ROOT / "maintenance-history"
 HEX64 = re.compile(r"[0-9a-f]{64}")
 GENERATION = re.compile(r"generation\.[A-Za-z0-9]+")
 SAFE_REASON = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ._:/+-]{0,255}")
+RELEASE_ID = re.compile(r"menhir-prod-[0-9]+\.[0-9]+\.[0-9]+-[0-9]+")
+ATTEMPT_ID = re.compile(r"[0-9a-f]{32}")
 CONTRACT_KEYS = {
     "schema", "kind", "host", "directories", "files", "identities",
     "groups", "network", "units", "backup_policy", "runtime",
@@ -55,6 +62,16 @@ SCAFFOLD_DRILL_KEYS = {
 SCAFFOLD_DRILL_METHODS = {
     "release-rehearsal-clean-load-and-consistency-check",
     "backup-generation-clean-load-and-consistency-check",
+}
+MAINTENANCE_STAGES = {
+    "start", "backup", "staged", "rehearsal", "candidate", "accepted",
+    "routed", "promoted", "complete",
+}
+MAINTENANCE_STATE_KEYS = {
+    "schema", "kind", "release_id", "release_manifest_sha256", "stage",
+    "generation", "started_utc", "updated_utc", "completed_utc",
+    "runner_sha256", "approval_sha256", "promotion_attempt_id", "approved_utc",
+    "promotion_started_utc",
 }
 
 
@@ -332,6 +349,249 @@ def atomic_json(path: Path, value: dict[str, Any], mode: int = 0o400) -> None:
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
+
+
+def maintenance_binding(
+    release_id: str,
+    release_sha256: str,
+    runner_sha256: str,
+    approval_sha256: str,
+    promotion_attempt_id: str,
+    approved_utc: str,
+    promotion_started_utc: str,
+) -> dict[str, str]:
+    if RELEASE_ID.fullmatch(release_id) is None:
+        raise ScaffoldError("maintenance release id is invalid")
+    for value, label in (
+        (release_sha256, "release"),
+        (runner_sha256, "runner"),
+        (approval_sha256, "approval"),
+    ):
+        if HEX64.fullmatch(value) is None:
+            raise ScaffoldError(f"maintenance {label} digest is invalid")
+    if ATTEMPT_ID.fullmatch(promotion_attempt_id) is None:
+        raise ScaffoldError("maintenance promotion attempt id is invalid")
+    approved = parse_time(approved_utc, "maintenance approval")
+    promotion_started = parse_time(promotion_started_utc, "maintenance promotion start")
+    if promotion_started < approved:
+        raise ScaffoldError("maintenance promotion predates approval")
+    if promotion_started > utc_now() + dt.timedelta(minutes=1):
+        raise ScaffoldError("maintenance promotion start is in the future")
+    return {
+        "release_id": release_id,
+        "release_manifest_sha256": release_sha256,
+        "runner_sha256": runner_sha256,
+        "approval_sha256": approval_sha256,
+        "promotion_attempt_id": promotion_attempt_id,
+        "approved_utc": iso(approved),
+        "promotion_started_utc": iso(promotion_started),
+    }
+
+
+def validate_maintenance_state(
+    value: dict[str, Any], binding: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    if set(value) != MAINTENANCE_STATE_KEYS or value.get("schema") != 1 \
+            or value.get("kind") != "menhir-release-run":
+        raise ScaffoldError("maintenance journal schema mismatch")
+    if value.get("stage") not in MAINTENANCE_STAGES:
+        raise ScaffoldError("maintenance journal stage is invalid")
+    generation = value.get("generation")
+    if generation != "" and (
+        not isinstance(generation, str) or GENERATION.fullmatch(generation) is None
+    ):
+        raise ScaffoldError("maintenance journal generation is invalid")
+    started = parse_time(value.get("started_utc"), "maintenance start")
+    updated = parse_time(value.get("updated_utc"), "maintenance update")
+    approved = parse_time(value.get("approved_utc"), "maintenance approval")
+    promotion_started = parse_time(
+        value.get("promotion_started_utc"), "maintenance promotion start",
+    )
+    if started < approved or started < promotion_started or updated < started:
+        raise ScaffoldError("maintenance journal chronology is invalid")
+    completed_value = value.get("completed_utc")
+    if value["stage"] == "complete":
+        completed = parse_time(completed_value, "maintenance completion")
+        if completed < started or updated < completed:
+            raise ScaffoldError("maintenance completion chronology is invalid")
+    elif completed_value is not None:
+        raise ScaffoldError("incomplete maintenance journal has a completion timestamp")
+    for key, pattern in (
+        ("release_manifest_sha256", HEX64),
+        ("runner_sha256", HEX64),
+        ("approval_sha256", HEX64),
+        ("promotion_attempt_id", ATTEMPT_ID),
+    ):
+        if not isinstance(value.get(key), str) or pattern.fullmatch(value[key]) is None:
+            raise ScaffoldError(f"maintenance journal {key} is invalid")
+    if RELEASE_ID.fullmatch(str(value.get("release_id", ""))) is None:
+        raise ScaffoldError("maintenance journal release id is invalid")
+    if binding is not None:
+        for key, expected in binding.items():
+            if value.get(key) != expected:
+                raise ScaffoldError(f"maintenance journal belongs to another {key}")
+    return value
+
+
+def _admission_unit_active() -> bool:
+    result = subprocess.run(
+        ["systemctl", "is-active", "--quiet", ADMISSION_UNIT], check=False,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    return result.returncode == 0
+
+
+def _admission_lock_held() -> bool:
+    result = subprocess.run(
+        ["flock", "-n", str(ADMISSION_LOCK), "true"], check=False,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    if result.returncode not in {0, 1}:
+        raise ScaffoldError("could not inspect the maintenance admission lock")
+    return result.returncode == 1
+
+
+def _ready_attempt() -> str | None:
+    if not ADMISSION_READY.exists():
+        return None
+    require_safe_root_file(ADMISSION_READY, "maintenance admission readiness")
+    value = strict_load(ADMISSION_READY)
+    if set(value) != {"schema", "kind", "promotion_attempt_id"} \
+            or value.get("schema") != 1 \
+            or value.get("kind") != "menhir-maintenance-admission-ready" \
+            or ATTEMPT_ID.fullmatch(str(value.get("promotion_attempt_id", ""))) is None:
+        raise ScaffoldError("maintenance admission readiness schema mismatch")
+    return str(value["promotion_attempt_id"])
+
+
+def assert_maintenance(binding: dict[str, str]) -> dict[str, Any]:
+    require_root()
+    require_safe_root_file(RELEASE_RUN, "maintenance journal")
+    state = validate_maintenance_state(strict_load(RELEASE_RUN), binding)
+    if not _admission_unit_active() or not _admission_lock_held() \
+            or _ready_attempt() != binding["promotion_attempt_id"]:
+        raise ScaffoldError("maintenance admission fence is not held by this transaction")
+    return state
+
+
+def hold_maintenance(binding: dict[str, str]) -> None:
+    require_root()
+    if RELEASE_RUN.exists():
+        require_safe_root_file(RELEASE_RUN, "maintenance journal")
+        state = validate_maintenance_state(strict_load(RELEASE_RUN), binding)
+        if state["stage"] == "complete":
+            raise ScaffoldError("completed maintenance cannot reacquire admission")
+    else:
+        started = utc_now()
+        state = {
+            "schema": 1,
+            "kind": "menhir-release-run",
+            "release_id": binding["release_id"],
+            "release_manifest_sha256": binding["release_manifest_sha256"],
+            "stage": "start",
+            "generation": "",
+            "started_utc": iso(started),
+            "updated_utc": iso(started),
+            "completed_utc": None,
+            "runner_sha256": binding["runner_sha256"],
+            "approval_sha256": binding["approval_sha256"],
+            "promotion_attempt_id": binding["promotion_attempt_id"],
+            "approved_utc": binding["approved_utc"],
+            "promotion_started_utc": binding["promotion_started_utc"],
+        }
+        validate_maintenance_state(state, binding)
+        atomic_json(RELEASE_RUN, state)
+    atomic_json(ADMISSION_READY, {
+        "schema": 1,
+        "kind": "menhir-maintenance-admission-ready",
+        "promotion_attempt_id": binding["promotion_attempt_id"],
+    })
+    while True:
+        time.sleep(30)
+
+
+def _archive_completed_maintenance() -> None:
+    require_safe_root_file(RELEASE_RUN, "completed maintenance journal")
+    payload_sha = sha256_file(RELEASE_RUN)
+    MAINTENANCE_HISTORY.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chown(MAINTENANCE_HISTORY, 0, 0)
+    target = MAINTENANCE_HISTORY / f"{payload_sha}.json"
+    if target.exists():
+        require_safe_root_file(target, "archived maintenance journal")
+        if sha256_file(target) != payload_sha:
+            raise ScaffoldError("maintenance history digest collision")
+        RELEASE_RUN.unlink()
+    else:
+        os.replace(RELEASE_RUN, target)
+
+
+def begin_maintenance(binding: dict[str, str]) -> dict[str, Any]:
+    require_root()
+    if RELEASE_RUN.exists():
+        require_safe_root_file(RELEASE_RUN, "maintenance journal")
+        current = strict_load(RELEASE_RUN)
+        if set(current) == MAINTENANCE_STATE_KEYS:
+            current = validate_maintenance_state(current)
+            if current["stage"] == "complete":
+                if all(current.get(key) == value for key, value in binding.items()):
+                    raise ScaffoldError("completed maintenance must be adopted, not restarted")
+                _archive_completed_maintenance()
+            else:
+                validate_maintenance_state(current, binding)
+        elif current.get("kind") == "menhir-release-run" and current.get("stage") == "complete":
+            _archive_completed_maintenance()
+        else:
+            raise ScaffoldError("an incompatible maintenance journal is active")
+    if _admission_unit_active():
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            if _admission_lock_held() \
+                    and _ready_attempt() == binding["promotion_attempt_id"]:
+                return assert_maintenance(binding)
+            time.sleep(0.1)
+        raise ScaffoldError("active maintenance admission holder is not ready")
+    if ADMISSION_READY.exists():
+        require_safe_root_file(ADMISSION_READY, "stale maintenance admission readiness")
+        ADMISSION_READY.unlink()
+    subprocess.run(
+        ["systemctl", "reset-failed", ADMISSION_UNIT], check=False,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    command = [
+        "systemd-run", f"--unit={ADMISSION_UNIT}", "--collect",
+        "--property=Type=simple", "--property=Restart=no",
+        "/usr/bin/flock", "-n", "-E", "75", str(ADMISSION_LOCK),
+        str(Path(__file__).resolve()), "hold-maintenance",
+        *sum(([f"--{key.replace('_', '-')}", value] for key, value in binding.items()), []),
+    ]
+    started = subprocess.run(command, check=False, capture_output=True, text=True)
+    if started.returncode != 0:
+        raise ScaffoldError("could not start the root maintenance admission holder")
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        if _admission_unit_active() and _admission_lock_held() \
+                and _ready_attempt() == binding["promotion_attempt_id"]:
+            return assert_maintenance(binding)
+        time.sleep(0.1)
+    raise ScaffoldError("root maintenance admission holder did not become ready")
+
+
+def complete_maintenance(binding: dict[str, str]) -> dict[str, Any]:
+    require_root()
+    require_safe_root_file(RELEASE_RUN, "maintenance journal")
+    state = validate_maintenance_state(strict_load(RELEASE_RUN), binding)
+    if state["stage"] != "complete":
+        raise ScaffoldError("maintenance admission cannot close before acceptance")
+    stopped = subprocess.run(
+        ["systemctl", "stop", ADMISSION_UNIT], check=False,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    if stopped.returncode != 0 and _admission_unit_active():
+        raise ScaffoldError("could not release the maintenance admission fence")
+    if ADMISSION_READY.exists():
+        require_safe_root_file(ADMISSION_READY, "maintenance admission readiness")
+        ADMISSION_READY.unlink()
+    return state
 
 
 def build_receipt(
@@ -711,7 +971,36 @@ def abandon_maintenance(contract_path: Path, receipt_path: Path, reason: str) ->
         "production_verified": True,
     }
     atomic_json(archive / "ABORT-RECEIPT.json", value)
+    subprocess.run(
+        ["systemctl", "stop", ADMISSION_UNIT], check=False,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    if ADMISSION_READY.exists():
+        require_safe_root_file(ADMISSION_READY, "maintenance admission readiness")
+        ADMISSION_READY.unlink()
     return value
+
+
+def add_maintenance_binding_arguments(command: argparse.ArgumentParser) -> None:
+    command.add_argument("--release-id", required=True)
+    command.add_argument("--release-manifest-sha256", required=True)
+    command.add_argument("--runner-sha256", required=True)
+    command.add_argument("--approval-sha256", required=True)
+    command.add_argument("--promotion-attempt-id", required=True)
+    command.add_argument("--approved-utc", required=True)
+    command.add_argument("--promotion-started-utc", required=True)
+
+
+def binding_from_arguments(args: argparse.Namespace) -> dict[str, str]:
+    return maintenance_binding(
+        args.release_id,
+        args.release_manifest_sha256,
+        args.runner_sha256,
+        args.approval_sha256,
+        args.promotion_attempt_id,
+        args.approved_utc,
+        args.promotion_started_utc,
+    )
 
 
 def parser() -> argparse.ArgumentParser:
@@ -727,6 +1016,11 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("record-backup-drill")
     abandon = commands.add_parser("abandon-maintenance")
     abandon.add_argument("--reason", required=True)
+    for name in (
+        "begin-maintenance", "hold-maintenance", "assert-maintenance",
+        "complete-maintenance",
+    ):
+        add_maintenance_binding_arguments(commands.add_parser(name))
     return result
 
 
@@ -752,6 +1046,15 @@ def main(argv: list[str]) -> int:
             value = seed_drill()
         elif args.command == "record-backup-drill":
             value = record_backup_drill()
+        elif args.command == "begin-maintenance":
+            value = begin_maintenance(binding_from_arguments(args))
+        elif args.command == "hold-maintenance":
+            hold_maintenance(binding_from_arguments(args))
+            return 0
+        elif args.command == "assert-maintenance":
+            value = assert_maintenance(binding_from_arguments(args))
+        elif args.command == "complete-maintenance":
+            value = complete_maintenance(binding_from_arguments(args))
         else:
             value = abandon_maintenance(args.contract, args.receipt, args.reason)
     except ScaffoldError as exc:

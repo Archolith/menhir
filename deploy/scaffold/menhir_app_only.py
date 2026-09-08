@@ -36,7 +36,8 @@ LIVE_ENV = ROOT / "release/production.env"
 LIVE_POLICY = ROOT / "policy/client-policy.json"
 SCHEMA = ROOT / "bin/menhir_schema.py"
 SCAFFOLD = Path("/srv/menhir/scaffold/bin/menhir_scaffold.py")
-LOCK = Path("/run/lock/menhir-production.lock")
+ADMISSION_LOCK = Path("/run/lock/menhir-production-admission.lock")
+MUTATION_LOCK = Path("/run/lock/menhir-production.lock")
 ACTIVE = STATUS / "app-only-active.json"
 LAST = STATUS / "app-only-last.json"
 SECURITY_CONFIG_ACTIVE = STATUS / "security-config-active.json"
@@ -746,17 +747,36 @@ def rollforward(transaction: dict[str, Any]) -> None:
     finalize_transaction(transaction)
 
 
-def acquire_lock() -> Any:
+class DeploymentLocks:
+    """Hold cross-lane admission before the legacy mutation lock."""
+
+    def __init__(self, handles: list[Any]) -> None:
+        self._handles = handles
+
+    def close(self) -> None:
+        for handle in reversed(self._handles):
+            handle.close()
+
+
+def acquire_lock() -> DeploymentLocks:
     if fcntl is None:
         raise AppOnlyError("POSIX file locking is unavailable")
-    LOCK.parent.mkdir(parents=True, exist_ok=True)
-    handle = LOCK.open("w")
+    handles: list[Any] = []
     try:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        for path in (ADMISSION_LOCK, MUTATION_LOCK):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            handle = path.open("w")
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                handle.close()
+                raise
+            handles.append(handle)
     except OSError as exc:
-        handle.close()
-        raise AppOnlyError("deployment lock is held") from exc
-    return handle
+        for handle in reversed(handles):
+            handle.close()
+        raise AppOnlyError("deployment admission is held") from exc
+    return DeploymentLocks(handles)
 
 
 def require_no_incomplete_transactions() -> None:

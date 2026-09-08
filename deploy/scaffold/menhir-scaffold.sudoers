@@ -20,4 +20,6 @@ Cmnd_Alias MENHIR_SECURITY_CONFIG = \
 Cmnd_Alias MENHIR_PERSONAL_STAGE = \
     /usr/bin/python3 /srv/menhir/scaffold/bin/menhir_stage_vps.py *
 
-%menhir-operators ALL=(root) NOPASSWD: MENHIR_SCAFFOLD_READ, MENHIR_APP_ONLY, MENHIR_SECURITY_CONFIG, MENHIR_PERSONAL_STAGE
+Cmnd_Alias MENHIR_MAINTENANCE_ADMISSION = /srv/menhir/scaffold/bin/menhir_scaffold.py begin-maintenance *, /srv/menhir/scaffold/bin/menhir_scaffold.py complete-maintenance *
+
+%menhir-operators ALL=(root) NOPASSWD: MENHIR_SCAFFOLD_READ, MENHIR_APP_ONLY, MENHIR_SECURITY_CONFIG, MENHIR_PERSONAL_STAGE, MENHIR_MAINTENANCE_ADMISSION
