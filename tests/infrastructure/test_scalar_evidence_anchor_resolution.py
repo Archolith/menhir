@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 
 from menhir.infrastructure.scalar_view_repository import ScalarViewRepositoryMixin
+from menhir.infrastructure.view_write_repository import ViewWriteRepositoryMixin
 
 EPISODIC = "5d98bc2b-ddc2-4099-8441-12ad9b51b1c9"
 TURN = "c26410d0-53e3-4971-88d5-0dcca29d45ee"
@@ -27,11 +28,20 @@ class _StubNeo4j:
         return self._rows
 
 
-def _repo(stub: _StubNeo4j) -> ScalarViewRepositoryMixin:
-    """The mixin takes its driver from the concrete repository, so attach it directly."""
-    repo = ScalarViewRepositoryMixin()
-    repo.neo4j = stub  # type: ignore[attr-defined]
-    return repo
+class _ComposedRepo(ViewWriteRepositoryMixin, ScalarViewRepositoryMixin):
+    """Same mixin composition as the concrete `ViewRepository`.
+
+    `_resolve_evidence_anchors` moved from the scalar mixin to the WRITE mixin when enforcement was
+    centralized in `record()`: record_counter and record_scalar_history were passing raw anchors
+    while record_scalar_state resolved its own, so the rule now runs at the one point every
+    contributor-declaring writer crosses. The behaviour asserted below is unchanged -- only the
+    mixin that owns the method moved.
+    """
+
+
+def _repo(stub: _StubNeo4j) -> _ComposedRepo:
+    """The write mixin takes its driver as a constructor argument, so pass the stub in."""
+    return _ComposedRepo(neo4j=stub)
 
 
 def _resolve(rows: list[dict[str, Any]], eps: list[str]) -> list[str]:
