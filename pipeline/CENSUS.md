@@ -8,8 +8,8 @@ detection rules. Do not hand-edit: re-run the tool.
 - findings: **1194**
 - mutator lines: **656**
 - entry points (must each carry a disposition): **105**
-- classified: **54**
-- unclassified: **51**
+- classified: **105**
+- unclassified: **0**
 - stale dispositions (id no longer present): **0**
 
 ## Scan roots
@@ -49,57 +49,57 @@ retired as a whole. Line-level findings are the evidence and live in
 
 | ID | Repo | Path | Lines | Detectors | Disposition | Owner |
 |---|---|---|---:|---|---|---|
-| `fc61b1803f1ba08c` | `menhir` | `deploy/Dockerfile` | 5 | arbitrary_command_passthrough, root_path_write | **UNCLASSIFIED** | - |
-| `c4b8b4b351e05911` | `menhir` | `deploy/ansible/ansible.cfg` | 1 | sudo_invocation | **UNCLASSIFIED** | - |
-| `7d046043533a742c` | `menhir` | `deploy/ansible/group_vars/all.yml` | 8 | lock_acquisition, systemd_unit | **UNCLASSIFIED** | - |
-| `1e1ac3f90a0b586d` | `menhir` | `deploy/ansible/playbook.yml` | 13 | ansible_mutation, lock_acquisition | **UNCLASSIFIED** | - |
-| `533df3aa5b2388f1` | `menhir` | `deploy/ansible/roles/menhir_host/handlers/main.yml` | 1 | ansible_mutation | **UNCLASSIFIED** | - |
-| `dfe949768a46c66d` | `menhir` | `deploy/ansible/roles/menhir_host/tasks/main.yml` | 15 | ansible_mutation, systemd_unit | **UNCLASSIFIED** | - |
-| `6eefc750c87d793a` | `menhir` | `deploy/ansible/roles/menhir_host/templates/menhir-production.conf.j2` | 2 | lock_acquisition | **UNCLASSIFIED** | - |
-| `63ed58b30e7c3eda` | `menhir` | `deploy/ansible/roles/menhir_host/templates/menhir-scaffold-audit.service.j2` | 5 | systemd_unit | **UNCLASSIFIED** | - |
-| `ac49d1e655ac0bbc` | `menhir` | `deploy/ansible/roles/menhir_host/templates/menhir-scaffold-audit.timer.j2` | 6 | systemd_unit | **UNCLASSIFIED** | - |
-| `393497cde01032a3` | `menhir` | `deploy/ansible/tests/test_host_state.py` | 5 | systemd_unit | **UNCLASSIFIED** | - |
-| `b74427e1ec29f255` | `menhir` | `deploy/backup-generation.sh` | 13 | arbitrary_command_passthrough, compose_production, database_or_backup_op, lock_acquisition, production_host_reference | **UNCLASSIFIED** | - |
-| `586eabfa088cd653` | `menhir` | `deploy/build_install_bundle.py` | 2 | database_or_backup_op, sudoers_definition | **UNCLASSIFIED** | - |
-| `159613ad94da26b0` | `menhir` | `deploy/build_release_image.py` | 1 | compose_production | **UNCLASSIFIED** | - |
-| `f39e477366b9d306` | `menhir` | `deploy/client-policy.production.json` | 18 | production_host_reference | **UNCLASSIFIED** | - |
-| `eabc40b09b1f5e18` | `menhir` | `deploy/cloudflared-config.production.yml.example` | 1 | production_host_reference | **UNCLASSIFIED** | - |
-| `3ee27d359b629acb` | `menhir` | `deploy/cloudflared.production.yml.example` | 3 | production_host_reference | **UNCLASSIFIED** | - |
-| `e31830d0cc6f1e56` | `menhir` | `deploy/docker-compose.production.yml` | 3 | database_or_backup_op, production_host_reference | **UNCLASSIFIED** | - |
-| `963a072be5fa4f7c` | `menhir` | `deploy/durable-state-inventory.json` | 1 | database_or_backup_op | **UNCLASSIFIED** | - |
-| `955e983bd16e20a0` | `menhir` | `deploy/installed-artifacts.json` | 4 | database_or_backup_op, sudoers_definition, systemd_unit | **UNCLASSIFIED** | - |
-| `4b9a547a93721a6c` | `menhir` | `deploy/lib/authority_digest.py` | 1 | database_or_backup_op | **UNCLASSIFIED** | - |
-| `07b0a5412feb7345` | `menhir` | `deploy/lib/make_manifest.py` | 2 | database_or_backup_op | **UNCLASSIFIED** | - |
-| `913b88c042de10d1` | `menhir` | `deploy/lib/mcp_acceptance_probe.py` | 3 | production_host_reference | **UNCLASSIFIED** | - |
-| `f97b070af497164d` | `menhir` | `deploy/lib/menhir_schema.py` | 2 | production_host_reference | **UNCLASSIFIED** | - |
-| `62415da5ebbd31ad` | `menhir` | `deploy/lib/same_host_fence.py` | 10 | production_host_reference, systemd_unit | **UNCLASSIFIED** | - |
-| `2e28822f09068b6d` | `menhir` | `deploy/lib/validate_durable_inventory.py` | 1 | database_or_backup_op | **UNCLASSIFIED** | - |
-| `3da64bb0bbeb62a0` | `menhir` | `deploy/neo4j-base.Dockerfile` | 1 | root_path_write | **UNCLASSIFIED** | - |
-| `c634d1fed54e4f57` | `menhir` | `deploy/personal_security_config.ps1` | 5 | base64_program_transfer, production_host_reference, remote_shell_exec, sudo_invocation | **UNCLASSIFIED** | - |
-| `95a31aa07146b97c` | `menhir` | `deploy/personal_stage.ps1` | 10 | production_host_reference, remote_shell_exec, sudo_invocation | **UNCLASSIFIED** | - |
-| `ef103c0e2df0a2f9` | `menhir` | `deploy/personal_stage_vps.py` | 7 | production_host_reference, systemd_unit | **UNCLASSIFIED** | - |
-| `1cedc13ed73fea05` | `menhir` | `deploy/production.env.example` | 1 | production_host_reference | **UNCLASSIFIED** | - |
-| `c3cd11b4a6686182` | `menhir` | `deploy/python-base.Dockerfile` | 2 | root_path_write | **UNCLASSIFIED** | - |
-| `b9b7505a52e54a9c` | `menhir` | `deploy/release-author.py` | 3 | production_host_reference, sudoers_definition | **UNCLASSIFIED** | - |
-| `85e45f67a7f74b0e` | `menhir` | `deploy/release-install.sh` | 38 | database_or_backup_op, lock_acquisition, root_path_write, sudoers_definition, systemd_unit | **UNCLASSIFIED** | - |
-| `2f7ad19ef5e83840` | `menhir` | `deploy/release-lib.sh` | 11 | arbitrary_command_passthrough, lock_acquisition, production_host_reference | **UNCLASSIFIED** | - |
-| `057cc6505a06baea` | `menhir` | `deploy/release-run.sh` | 6 | lock_acquisition, production_host_reference | **UNCLASSIFIED** | - |
-| `2c374f034e0dcb74` | `menhir` | `deploy/release.json.example` | 3 | production_host_reference | **UNCLASSIFIED** | - |
-| `8f7fb6f4b8d2fe9a` | `menhir` | `deploy/release_spec.py` | 7 | database_or_backup_op, production_host_reference, sudoers_definition, systemd_unit | **UNCLASSIFIED** | - |
-| `338da7fac24a78b4` | `menhir` | `deploy/restore-generation.sh` | 10 | arbitrary_command_passthrough, compose_production, database_or_backup_op, lock_acquisition | **UNCLASSIFIED** | - |
-| `50b2ea70527d600c` | `menhir` | `deploy/same-host-fence.sh` | 3 | compose_production, production_host_reference | **UNCLASSIFIED** | - |
-| `216dc4e96ae29207` | `menhir` | `deploy/scaffold/contract.production.json` | 8 | production_host_reference, sudoers_definition, systemd_unit | **UNCLASSIFIED** | - |
-| `9ee4e670e005e10a` | `menhir` | `deploy/scaffold/install.sh` | 57 | database_or_backup_op, lock_acquisition, root_path_write, sudoers_definition, systemd_unit | **UNCLASSIFIED** | - |
-| `7924e5bb3d5fdab7` | `menhir` | `deploy/scaffold/menhir-scaffold-audit.service` | 5 | systemd_unit | **UNCLASSIFIED** | - |
-| `967460c22d41115f` | `menhir` | `deploy/scaffold/menhir-scaffold-audit.timer` | 6 | systemd_unit | **UNCLASSIFIED** | - |
-| `adb8e35b77d3f018` | `menhir` | `deploy/scaffold/menhir-scaffold.sudoers` | 1 | sudoers_definition | **UNCLASSIFIED** | - |
-| `f7bec0695c486527` | `menhir` | `deploy/scaffold/menhir_app_only.py` | 12 | lock_acquisition, production_host_reference, systemd_unit | **UNCLASSIFIED** | - |
-| `3534a7e669877fa3` | `menhir` | `deploy/scaffold/menhir_scaffold.py` | 7 | database_or_backup_op, lock_acquisition, systemd_unit | **UNCLASSIFIED** | - |
-| `5824452bc78afec0` | `menhir` | `deploy/scaffold/menhir_security_config.py` | 4 | lock_acquisition, production_host_reference, systemd_unit | **UNCLASSIFIED** | - |
-| `e0668ac42adcead0` | `menhir` | `scripts/audit/coverage_baseline.sh` | 3 | compose_production | **UNCLASSIFIED** | - |
-| `89cb0cfdcfd5650c` | `menhir` | `scripts/dev/test_server.py` | 1 | systemd_unit | **UNCLASSIFIED** | - |
-| `e46b741218e2641a` | `menhir` | `scripts/replay_fold_flags.py` | 1 | compose_production | **UNCLASSIFIED** | - |
-| `52709fb1077ed686` | `menhir` | `scripts/setup_remote_test_neo4j.sh` | 5 | arbitrary_command_passthrough, compose_production, remote_shell_exec | **UNCLASSIFIED** | - |
+| `fc61b1803f1ba08c` | `menhir` | `deploy/Dockerfile` | 5 | arbitrary_command_passthrough, root_path_write | preserve | menhir |
+| `c4b8b4b351e05911` | `menhir` | `deploy/ansible/ansible.cfg` | 1 | sudo_invocation | preserve | menhir |
+| `7d046043533a742c` | `menhir` | `deploy/ansible/group_vars/all.yml` | 8 | lock_acquisition, systemd_unit | preserve | menhir |
+| `1e1ac3f90a0b586d` | `menhir` | `deploy/ansible/playbook.yml` | 13 | ansible_mutation, lock_acquisition | preserve | menhir |
+| `533df3aa5b2388f1` | `menhir` | `deploy/ansible/roles/menhir_host/handlers/main.yml` | 1 | ansible_mutation | preserve | menhir |
+| `dfe949768a46c66d` | `menhir` | `deploy/ansible/roles/menhir_host/tasks/main.yml` | 15 | ansible_mutation, systemd_unit | preserve | menhir |
+| `6eefc750c87d793a` | `menhir` | `deploy/ansible/roles/menhir_host/templates/menhir-production.conf.j2` | 2 | lock_acquisition | preserve | menhir |
+| `63ed58b30e7c3eda` | `menhir` | `deploy/ansible/roles/menhir_host/templates/menhir-scaffold-audit.service.j2` | 5 | systemd_unit | preserve | menhir |
+| `ac49d1e655ac0bbc` | `menhir` | `deploy/ansible/roles/menhir_host/templates/menhir-scaffold-audit.timer.j2` | 6 | systemd_unit | preserve | menhir |
+| `393497cde01032a3` | `menhir` | `deploy/ansible/tests/test_host_state.py` | 5 | systemd_unit | preserve | menhir |
+| `b74427e1ec29f255` | `menhir` | `deploy/backup-generation.sh` | 13 | arbitrary_command_passthrough, compose_production, database_or_backup_op, lock_acquisition, production_host_reference | preserve | menhir |
+| `586eabfa088cd653` | `menhir` | `deploy/build_install_bundle.py` | 2 | database_or_backup_op, sudoers_definition | preserve | menhir |
+| `159613ad94da26b0` | `menhir` | `deploy/build_release_image.py` | 1 | compose_production | preserve | menhir |
+| `f39e477366b9d306` | `menhir` | `deploy/client-policy.production.json` | 18 | production_host_reference | preserve | menhir |
+| `eabc40b09b1f5e18` | `menhir` | `deploy/cloudflared-config.production.yml.example` | 1 | production_host_reference | preserve | menhir |
+| `3ee27d359b629acb` | `menhir` | `deploy/cloudflared.production.yml.example` | 3 | production_host_reference | preserve | menhir |
+| `e31830d0cc6f1e56` | `menhir` | `deploy/docker-compose.production.yml` | 3 | database_or_backup_op, production_host_reference | preserve | menhir |
+| `963a072be5fa4f7c` | `menhir` | `deploy/durable-state-inventory.json` | 1 | database_or_backup_op | preserve | menhir |
+| `955e983bd16e20a0` | `menhir` | `deploy/installed-artifacts.json` | 4 | database_or_backup_op, sudoers_definition, systemd_unit | preserve | menhir |
+| `4b9a547a93721a6c` | `menhir` | `deploy/lib/authority_digest.py` | 1 | database_or_backup_op | preserve | menhir |
+| `07b0a5412feb7345` | `menhir` | `deploy/lib/make_manifest.py` | 2 | database_or_backup_op | preserve | menhir |
+| `913b88c042de10d1` | `menhir` | `deploy/lib/mcp_acceptance_probe.py` | 3 | production_host_reference | preserve | menhir |
+| `f97b070af497164d` | `menhir` | `deploy/lib/menhir_schema.py` | 2 | production_host_reference | preserve | menhir |
+| `62415da5ebbd31ad` | `menhir` | `deploy/lib/same_host_fence.py` | 10 | production_host_reference, systemd_unit | preserve | menhir |
+| `2e28822f09068b6d` | `menhir` | `deploy/lib/validate_durable_inventory.py` | 1 | database_or_backup_op | preserve | menhir |
+| `3da64bb0bbeb62a0` | `menhir` | `deploy/neo4j-base.Dockerfile` | 1 | root_path_write | preserve | menhir |
+| `c634d1fed54e4f57` | `menhir` | `deploy/personal_security_config.ps1` | 5 | base64_program_transfer, production_host_reference, remote_shell_exec, sudo_invocation | replace | menhir/pipeline |
+| `95a31aa07146b97c` | `menhir` | `deploy/personal_stage.ps1` | 10 | production_host_reference, remote_shell_exec, sudo_invocation | replace | menhir/pipeline |
+| `ef103c0e2df0a2f9` | `menhir` | `deploy/personal_stage_vps.py` | 7 | production_host_reference, systemd_unit | replace | menhir/pipeline |
+| `1cedc13ed73fea05` | `menhir` | `deploy/production.env.example` | 1 | production_host_reference | preserve | menhir |
+| `c3cd11b4a6686182` | `menhir` | `deploy/python-base.Dockerfile` | 2 | root_path_write | preserve | menhir |
+| `b9b7505a52e54a9c` | `menhir` | `deploy/release-author.py` | 3 | production_host_reference, sudoers_definition | preserve | menhir |
+| `85e45f67a7f74b0e` | `menhir` | `deploy/release-install.sh` | 38 | database_or_backup_op, lock_acquisition, root_path_write, sudoers_definition, systemd_unit | preserve | menhir |
+| `2f7ad19ef5e83840` | `menhir` | `deploy/release-lib.sh` | 11 | arbitrary_command_passthrough, lock_acquisition, production_host_reference | preserve | menhir |
+| `057cc6505a06baea` | `menhir` | `deploy/release-run.sh` | 6 | lock_acquisition, production_host_reference | preserve | menhir |
+| `2c374f034e0dcb74` | `menhir` | `deploy/release.json.example` | 3 | production_host_reference | preserve | menhir |
+| `8f7fb6f4b8d2fe9a` | `menhir` | `deploy/release_spec.py` | 7 | database_or_backup_op, production_host_reference, sudoers_definition, systemd_unit | preserve | menhir |
+| `338da7fac24a78b4` | `menhir` | `deploy/restore-generation.sh` | 10 | arbitrary_command_passthrough, compose_production, database_or_backup_op, lock_acquisition | preserve | menhir |
+| `50b2ea70527d600c` | `menhir` | `deploy/same-host-fence.sh` | 3 | compose_production, production_host_reference | preserve | menhir |
+| `216dc4e96ae29207` | `menhir` | `deploy/scaffold/contract.production.json` | 8 | production_host_reference, sudoers_definition, systemd_unit | preserve | menhir |
+| `9ee4e670e005e10a` | `menhir` | `deploy/scaffold/install.sh` | 57 | database_or_backup_op, lock_acquisition, root_path_write, sudoers_definition, systemd_unit | preserve | menhir |
+| `7924e5bb3d5fdab7` | `menhir` | `deploy/scaffold/menhir-scaffold-audit.service` | 5 | systemd_unit | preserve | menhir |
+| `967460c22d41115f` | `menhir` | `deploy/scaffold/menhir-scaffold-audit.timer` | 6 | systemd_unit | preserve | menhir |
+| `adb8e35b77d3f018` | `menhir` | `deploy/scaffold/menhir-scaffold.sudoers` | 1 | sudoers_definition | preserve | menhir |
+| `f7bec0695c486527` | `menhir` | `deploy/scaffold/menhir_app_only.py` | 12 | lock_acquisition, production_host_reference, systemd_unit | preserve | menhir |
+| `3534a7e669877fa3` | `menhir` | `deploy/scaffold/menhir_scaffold.py` | 7 | database_or_backup_op, lock_acquisition, systemd_unit | preserve | menhir |
+| `5824452bc78afec0` | `menhir` | `deploy/scaffold/menhir_security_config.py` | 4 | lock_acquisition, production_host_reference, systemd_unit | preserve | menhir |
+| `e0668ac42adcead0` | `menhir` | `scripts/audit/coverage_baseline.sh` | 3 | compose_production | preserve | menhir |
+| `89cb0cfdcfd5650c` | `menhir` | `scripts/dev/test_server.py` | 1 | systemd_unit | preserve | menhir |
+| `e46b741218e2641a` | `menhir` | `scripts/replay_fold_flags.py` | 1 | compose_production | preserve | menhir |
+| `52709fb1077ed686` | `menhir` | `scripts/setup_remote_test_neo4j.sh` | 5 | arbitrary_command_passthrough, compose_production, remote_shell_exec | preserve | menhir |
 | `677a91b198075345` | `shared-scripts` | `check-card-colors.py` | 1 | systemd_unit | preserve | shared-scripts |
 | `01f306a439ac5507` | `shared-scripts` | `deploy-menhir-app-only.ps1` | 8 | base64_program_transfer, production_host_reference, remote_shell_exec, sudo_invocation | replace | menhir/pipeline |
 | `fbca7095b88db19b` | `shared-scripts` | `deploy-menhir.ps1` | 45 | base64_program_transfer, database_or_backup_op, inline_interpreter_as_root, production_host_reference, remote_shell_exec, sudo_invocation, systemd_unit | replace | menhir/pipeline |

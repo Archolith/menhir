@@ -283,6 +283,261 @@
       "disposition": "preserve",
       "owner": "shared-scripts",
       "note": "scratch/2026-04-10/tmp_query.sh - a scratch file five months old. Obvious cruft, but it belongs to the shared scripts directory rather than Menhir, so flagging it for the owner rather than retiring it here."
+    },
+    "9ee4e670e005e10a": {
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Part of the scaffold, which is live and working: menhir-scaffold-audit.timer runs daily, scaffold-contract.json is installed at /etc/menhir/, and scaffold-receipt.json was written 2026-09-08. It is the only thing currently monitoring backup freshness against the 24h policy. Preserve."
+    },
+    "f7bec0695c486527": {
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Part of the scaffold, which is live and working: menhir-scaffold-audit.timer runs daily, scaffold-contract.json is installed at /etc/menhir/, and scaffold-receipt.json was written 2026-09-08. It is the only thing currently monitoring backup freshness against the 24h policy. Preserve."
+    },
+    "216dc4e96ae29207": {
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Part of the scaffold, which is live and working: menhir-scaffold-audit.timer runs daily, scaffold-contract.json is installed at /etc/menhir/, and scaffold-receipt.json was written 2026-09-08. It is the only thing currently monitoring backup freshness against the 24h policy. Preserve."
+    },
+    "3534a7e669877fa3": {
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Part of the scaffold, which is live and working: menhir-scaffold-audit.timer runs daily, scaffold-contract.json is installed at /etc/menhir/, and scaffold-receipt.json was written 2026-09-08. It is the only thing currently monitoring backup freshness against the 24h policy. Preserve."
+    },
+    "967460c22d41115f": {
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Part of the scaffold, which is live and working: menhir-scaffold-audit.timer runs daily, scaffold-contract.json is installed at /etc/menhir/, and scaffold-receipt.json was written 2026-09-08. It is the only thing currently monitoring backup freshness against the 24h policy. Preserve."
+    },
+    "7924e5bb3d5fdab7": {
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Part of the scaffold, which is live and working: menhir-scaffold-audit.timer runs daily, scaffold-contract.json is installed at /etc/menhir/, and scaffold-receipt.json was written 2026-09-08. It is the only thing currently monitoring backup freshness against the 24h policy. Preserve."
+    },
+    "5824452bc78afec0": {
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Part of the scaffold, which is live and working: menhir-scaffold-audit.timer runs daily, scaffold-contract.json is installed at /etc/menhir/, and scaffold-receipt.json was written 2026-09-08. It is the only thing currently monitoring backup freshness against the 24h policy. Preserve."
+    },
+    "adb8e35b77d3f018": {
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Part of the scaffold, which is live and working: menhir-scaffold-audit.timer runs daily, scaffold-contract.json is installed at /etc/menhir/, and scaffold-receipt.json was written 2026-09-08. It is the only thing currently monitoring backup freshness against the 24h policy. Preserve."
+    },
+    "dfe949768a46c66d": {
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Ansible host provisioning role. Active and correct - it is what removes the retired caddy-release.sh / caddy-route-* from the host and asserts their absence. Preserve."
+    },
+    "1e1ac3f90a0b586d": {
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Ansible host provisioning role. Active and correct - it is what removes the retired caddy-release.sh / caddy-route-* from the host and asserts their absence. Preserve."
+    },
+    "7d046043533a742c": {
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Ansible host provisioning role. Active and correct - it is what removes the retired caddy-release.sh / caddy-route-* from the host and asserts their absence. Preserve."
+    },
+    "ac49d1e655ac0bbc": {
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Ansible host provisioning role. Active and correct - it is what removes the retired caddy-release.sh / caddy-route-* from the host and asserts their absence. Preserve."
+    },
+    "63ed58b30e7c3eda": {
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Ansible host provisioning role. Active and correct - it is what removes the retired caddy-release.sh / caddy-route-* from the host and asserts their absence. Preserve."
+    },
+    "393497cde01032a3": {
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Ansible host provisioning role. Active and correct - it is what removes the retired caddy-release.sh / caddy-route-* from the host and asserts their absence. Preserve."
+    },
+    "6eefc750c87d793a": {
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Ansible host provisioning role. Active and correct - it is what removes the retired caddy-release.sh / caddy-route-* from the host and asserts their absence. Preserve."
+    },
+    "c4b8b4b351e05911": {
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Ansible host provisioning role. Active and correct - it is what removes the retired caddy-release.sh / caddy-route-* from the host and asserts their absence. Preserve."
+    },
+    "533df3aa5b2388f1": {
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Ansible host provisioning role. Active and correct - it is what removes the retired caddy-release.sh / caddy-route-* from the host and asserts their absence. Preserve."
+    },
+    "f39e477366b9d306": {
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Release input consumed by the publish side. Preserve."
+    },
+    "fc61b1803f1ba08c": {
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Release input consumed by the publish side. Preserve."
+    },
+    "955e983bd16e20a0": {
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Release input consumed by the publish side. Preserve."
+    },
+    "e31830d0cc6f1e56": {
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Release input consumed by the publish side. Preserve."
+    },
+    "c3cd11b4a6686182": {
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Release input consumed by the publish side. Preserve."
+    },
+    "963a072be5fa4f7c": {
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Release input consumed by the publish side. Preserve."
+    },
+    "3da64bb0bbeb62a0": {
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Release input consumed by the publish side. Preserve."
+    },
+    "2c374f034e0dcb74": {
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Release input consumed by the publish side. Preserve."
+    },
+    "1cedc13ed73fea05": {
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Release input consumed by the publish side. Preserve."
+    },
+    "8f7fb6f4b8d2fe9a": {
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Publish-side tooling. Publish is the half of this system that was built correctly - deterministic builds, digest pinning, CI attestation - and is explicitly not being replaced. Preserve."
+    },
+    "b9b7505a52e54a9c": {
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Publish-side tooling. Publish is the half of this system that was built correctly - deterministic builds, digest pinning, CI attestation - and is explicitly not being replaced. Preserve."
+    },
+    "159613ad94da26b0": {
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Publish-side tooling. Publish is the half of this system that was built correctly - deterministic builds, digest pinning, CI attestation - and is explicitly not being replaced. Preserve."
+    },
+    "586eabfa088cd653": {
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Publish-side tooling. Publish is the half of this system that was built correctly - deterministic builds, digest pinning, CI attestation - and is explicitly not being replaced. Preserve."
+    },
+    "85e45f67a7f74b0e": {
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Live deploy-path script, installed to /srv/menhir/production/bin/ and reached through the sanctioned worker. Preserve for now; revisit only when the new pipeline can take over its role end to end."
+    },
+    "b74427e1ec29f255": {
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Live deploy-path script, installed to /srv/menhir/production/bin/ and reached through the sanctioned worker. Preserve for now; revisit only when the new pipeline can take over its role end to end."
+    },
+    "2f7ad19ef5e83840": {
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Live deploy-path script, installed to /srv/menhir/production/bin/ and reached through the sanctioned worker. Preserve for now; revisit only when the new pipeline can take over its role end to end."
+    },
+    "338da7fac24a78b4": {
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Live deploy-path script, installed to /srv/menhir/production/bin/ and reached through the sanctioned worker. Preserve for now; revisit only when the new pipeline can take over its role end to end."
+    },
+    "057cc6505a06baea": {
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Live deploy-path script, installed to /srv/menhir/production/bin/ and reached through the sanctioned worker. Preserve for now; revisit only when the new pipeline can take over its role end to end."
+    },
+    "913b88c042de10d1": {
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Helper installed flat into /srv/menhir/production/bin/. Preserve. Note the host also carries a stale unmanaged copy under /srv/menhir/production/deploy/lib/ - that host artifact is the cleanup item, not this repo source."
+    },
+    "07b0a5412feb7345": {
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Helper installed flat into /srv/menhir/production/bin/. Preserve. Note the host also carries a stale unmanaged copy under /srv/menhir/production/deploy/lib/ - that host artifact is the cleanup item, not this repo source."
+    },
+    "f97b070af497164d": {
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Helper installed flat into /srv/menhir/production/bin/. Preserve. Note the host also carries a stale unmanaged copy under /srv/menhir/production/deploy/lib/ - that host artifact is the cleanup item, not this repo source."
+    },
+    "4b9a547a93721a6c": {
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Helper installed flat into /srv/menhir/production/bin/. Preserve. Note the host also carries a stale unmanaged copy under /srv/menhir/production/deploy/lib/ - that host artifact is the cleanup item, not this repo source."
+    },
+    "2e28822f09068b6d": {
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Helper installed flat into /srv/menhir/production/bin/. Preserve. Note the host also carries a stale unmanaged copy under /srv/menhir/production/deploy/lib/ - that host artifact is the cleanup item, not this repo source."
+    },
+    "52709fb1077ed686": {
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Development or test tooling in the Menhir repo. Not a deployment path. Preserve."
+    },
+    "e0668ac42adcead0": {
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Development or test tooling in the Menhir repo. Not a deployment path. Preserve."
+    },
+    "89cb0cfdcfd5650c": {
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Development or test tooling in the Menhir repo. Not a deployment path. Preserve."
+    },
+    "e46b741218e2641a": {
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Development or test tooling in the Menhir repo. Not a deployment path. Preserve."
+    },
+    "95a31aa07146b97c": {
+      "disposition": "replace",
+      "owner": "menhir/pipeline",
+      "note": "Part of the personal_* desktop deploy path - the code the two seven-commit ratchets were editing. Superseded by the new pipeline. Marked replace, not retire: it is the working deploy path today and must not be removed until a replacement can deploy end to end."
+    },
+    "c634d1fed54e4f57": {
+      "disposition": "replace",
+      "owner": "menhir/pipeline",
+      "note": "Part of the personal_* desktop deploy path - the code the two seven-commit ratchets were editing. Superseded by the new pipeline. Marked replace, not retire: it is the working deploy path today and must not be removed until a replacement can deploy end to end."
+    },
+    "ef103c0e2df0a2f9": {
+      "disposition": "replace",
+      "owner": "menhir/pipeline",
+      "note": "Part of the personal_* desktop deploy path - the code the two seven-commit ratchets were editing. Superseded by the new pipeline. Marked replace, not retire: it is the working deploy path today and must not be removed until a replacement can deploy end to end."
+    },
+    "3ee27d359b629acb": {
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "cloudflared.production.yml.example - the Cloudflared tunnel is the LIVE ingress, verified running 2026-09-08. An earlier draft of ADR 0002 had this backwards and would have retired it. Preserve."
+    },
+    "eabc40b09b1f5e18": {
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "cloudflared-config.production.yml.example - template for the live tunnel ingress config. Preserve, same reasoning as 3ee27d359b629acb."
+    },
+    "50b2ea70527d600c": {
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "same-host-fence.sh guards same-host cutover, which is distinct from the v1-to-v2 handoff fence deleted by the maintenance-window decision. Preserve pending a specific read; do not assume the window decision removed this one."
+    },
+    "62415da5ebbd31ad": {
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "lib/same_host_fence.py - implementation behind same-host-fence.sh. Same reasoning as 50b2ea70527d600c."
     }
   }
 }

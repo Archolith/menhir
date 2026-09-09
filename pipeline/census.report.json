@@ -26,8 +26,8 @@
     "findings": 1194,
     "mutator_lines": 656,
     "entry_points": 105,
-    "classified": 54,
-    "unclassified": 51,
+    "classified": 105,
+    "unclassified": 0,
     "stale_dispositions": 0
   },
   "by_detector": {
@@ -58,9 +58,9 @@
       ],
       "mutator_lines": 5,
       "first_line": 77,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Release input consumed by the publish side. Preserve."
     },
     {
       "id": "c4b8b4b351e05911",
@@ -71,9 +71,9 @@
       ],
       "mutator_lines": 1,
       "first_line": 10,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Ansible host provisioning role. Active and correct - it is what removes the retired caddy-release.sh / caddy-route-* from the host and asserts their absence. Preserve."
     },
     {
       "id": "7d046043533a742c",
@@ -85,9 +85,9 @@
       ],
       "mutator_lines": 8,
       "first_line": 35,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Ansible host provisioning role. Active and correct - it is what removes the retired caddy-release.sh / caddy-route-* from the host and asserts their absence. Preserve."
     },
     {
       "id": "1e1ac3f90a0b586d",
@@ -99,9 +99,9 @@
       ],
       "mutator_lines": 13,
       "first_line": 26,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Ansible host provisioning role. Active and correct - it is what removes the retired caddy-release.sh / caddy-route-* from the host and asserts their absence. Preserve."
     },
     {
       "id": "533df3aa5b2388f1",
@@ -112,9 +112,9 @@
       ],
       "mutator_lines": 1,
       "first_line": 3,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Ansible host provisioning role. Active and correct - it is what removes the retired caddy-release.sh / caddy-route-* from the host and asserts their absence. Preserve."
     },
     {
       "id": "dfe949768a46c66d",
@@ -126,9 +126,9 @@
       ],
       "mutator_lines": 15,
       "first_line": 20,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Ansible host provisioning role. Active and correct - it is what removes the retired caddy-release.sh / caddy-route-* from the host and asserts their absence. Preserve."
     },
     {
       "id": "6eefc750c87d793a",
@@ -139,9 +139,9 @@
       ],
       "mutator_lines": 2,
       "first_line": 8,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Ansible host provisioning role. Active and correct - it is what removes the retired caddy-release.sh / caddy-route-* from the host and asserts their absence. Preserve."
     },
     {
       "id": "63ed58b30e7c3eda",
@@ -152,9 +152,9 @@
       ],
       "mutator_lines": 5,
       "first_line": 1,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Ansible host provisioning role. Active and correct - it is what removes the retired caddy-release.sh / caddy-route-* from the host and asserts their absence. Preserve."
     },
     {
       "id": "ac49d1e655ac0bbc",
@@ -165,9 +165,9 @@
       ],
       "mutator_lines": 6,
       "first_line": 1,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Ansible host provisioning role. Active and correct - it is what removes the retired caddy-release.sh / caddy-route-* from the host and asserts their absence. Preserve."
     },
     {
       "id": "393497cde01032a3",
@@ -178,9 +178,9 @@
       ],
       "mutator_lines": 5,
       "first_line": 24,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Ansible host provisioning role. Active and correct - it is what removes the retired caddy-release.sh / caddy-route-* from the host and asserts their absence. Preserve."
     },
     {
       "id": "b74427e1ec29f255",
@@ -195,9 +195,9 @@
       ],
       "mutator_lines": 13,
       "first_line": 72,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Live deploy-path script, installed to /srv/menhir/production/bin/ and reached through the sanctioned worker. Preserve for now; revisit only when the new pipeline can take over its role end to end."
     },
     {
       "id": "586eabfa088cd653",
@@ -209,9 +209,9 @@
       ],
       "mutator_lines": 2,
       "first_line": 169,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Publish-side tooling. Publish is the half of this system that was built correctly - deterministic builds, digest pinning, CI attestation - and is explicitly not being replaced. Preserve."
     },
     {
       "id": "159613ad94da26b0",
@@ -222,9 +222,9 @@
       ],
       "mutator_lines": 1,
       "first_line": 707,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Publish-side tooling. Publish is the half of this system that was built correctly - deterministic builds, digest pinning, CI attestation - and is explicitly not being replaced. Preserve."
     },
     {
       "id": "f39e477366b9d306",
@@ -235,9 +235,9 @@
       ],
       "mutator_lines": 18,
       "first_line": 5,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Release input consumed by the publish side. Preserve."
     },
     {
       "id": "eabc40b09b1f5e18",
@@ -248,9 +248,9 @@
       ],
       "mutator_lines": 1,
       "first_line": 7,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "cloudflared-config.production.yml.example - template for the live tunnel ingress config. Preserve, same reasoning as 3ee27d359b629acb."
     },
     {
       "id": "3ee27d359b629acb",
@@ -261,9 +261,9 @@
       ],
       "mutator_lines": 3,
       "first_line": 8,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "cloudflared.production.yml.example - the Cloudflared tunnel is the LIVE ingress, verified running 2026-09-08. An earlier draft of ADR 0002 had this backwards and would have retired it. Preserve."
     },
     {
       "id": "e31830d0cc6f1e56",
@@ -275,9 +275,9 @@
       ],
       "mutator_lines": 3,
       "first_line": 121,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Release input consumed by the publish side. Preserve."
     },
     {
       "id": "963a072be5fa4f7c",
@@ -288,9 +288,9 @@
       ],
       "mutator_lines": 1,
       "first_line": 4,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Release input consumed by the publish side. Preserve."
     },
     {
       "id": "955e983bd16e20a0",
@@ -303,9 +303,9 @@
       ],
       "mutator_lines": 4,
       "first_line": 4,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Release input consumed by the publish side. Preserve."
     },
     {
       "id": "4b9a547a93721a6c",
@@ -316,9 +316,9 @@
       ],
       "mutator_lines": 1,
       "first_line": 17,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Helper installed flat into /srv/menhir/production/bin/. Preserve. Note the host also carries a stale unmanaged copy under /srv/menhir/production/deploy/lib/ - that host artifact is the cleanup item, not this repo source."
     },
     {
       "id": "07b0a5412feb7345",
@@ -329,9 +329,9 @@
       ],
       "mutator_lines": 2,
       "first_line": 5,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Helper installed flat into /srv/menhir/production/bin/. Preserve. Note the host also carries a stale unmanaged copy under /srv/menhir/production/deploy/lib/ - that host artifact is the cleanup item, not this repo source."
     },
     {
       "id": "913b88c042de10d1",
@@ -342,9 +342,9 @@
       ],
       "mutator_lines": 3,
       "first_line": 137,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Helper installed flat into /srv/menhir/production/bin/. Preserve. Note the host also carries a stale unmanaged copy under /srv/menhir/production/deploy/lib/ - that host artifact is the cleanup item, not this repo source."
     },
     {
       "id": "f97b070af497164d",
@@ -355,9 +355,9 @@
       ],
       "mutator_lines": 2,
       "first_line": 155,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Helper installed flat into /srv/menhir/production/bin/. Preserve. Note the host also carries a stale unmanaged copy under /srv/menhir/production/deploy/lib/ - that host artifact is the cleanup item, not this repo source."
     },
     {
       "id": "62415da5ebbd31ad",
@@ -369,9 +369,9 @@
       ],
       "mutator_lines": 10,
       "first_line": 25,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "lib/same_host_fence.py - implementation behind same-host-fence.sh. Same reasoning as 50b2ea70527d600c."
     },
     {
       "id": "2e28822f09068b6d",
@@ -382,9 +382,9 @@
       ],
       "mutator_lines": 1,
       "first_line": 15,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Helper installed flat into /srv/menhir/production/bin/. Preserve. Note the host also carries a stale unmanaged copy under /srv/menhir/production/deploy/lib/ - that host artifact is the cleanup item, not this repo source."
     },
     {
       "id": "3da64bb0bbeb62a0",
@@ -395,9 +395,9 @@
       ],
       "mutator_lines": 1,
       "first_line": 17,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Release input consumed by the publish side. Preserve."
     },
     {
       "id": "c634d1fed54e4f57",
@@ -411,9 +411,9 @@
       ],
       "mutator_lines": 5,
       "first_line": 100,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "replace",
+      "owner": "menhir/pipeline",
+      "note": "Part of the personal_* desktop deploy path - the code the two seven-commit ratchets were editing. Superseded by the new pipeline. Marked replace, not retire: it is the working deploy path today and must not be removed until a replacement can deploy end to end."
     },
     {
       "id": "95a31aa07146b97c",
@@ -426,9 +426,9 @@
       ],
       "mutator_lines": 10,
       "first_line": 79,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "replace",
+      "owner": "menhir/pipeline",
+      "note": "Part of the personal_* desktop deploy path - the code the two seven-commit ratchets were editing. Superseded by the new pipeline. Marked replace, not retire: it is the working deploy path today and must not be removed until a replacement can deploy end to end."
     },
     {
       "id": "ef103c0e2df0a2f9",
@@ -440,9 +440,9 @@
       ],
       "mutator_lines": 7,
       "first_line": 43,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "replace",
+      "owner": "menhir/pipeline",
+      "note": "Part of the personal_* desktop deploy path - the code the two seven-commit ratchets were editing. Superseded by the new pipeline. Marked replace, not retire: it is the working deploy path today and must not be removed until a replacement can deploy end to end."
     },
     {
       "id": "1cedc13ed73fea05",
@@ -453,9 +453,9 @@
       ],
       "mutator_lines": 1,
       "first_line": 10,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Release input consumed by the publish side. Preserve."
     },
     {
       "id": "c3cd11b4a6686182",
@@ -466,9 +466,9 @@
       ],
       "mutator_lines": 2,
       "first_line": 28,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Release input consumed by the publish side. Preserve."
     },
     {
       "id": "b9b7505a52e54a9c",
@@ -480,9 +480,9 @@
       ],
       "mutator_lines": 3,
       "first_line": 73,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Publish-side tooling. Publish is the half of this system that was built correctly - deterministic builds, digest pinning, CI attestation - and is explicitly not being replaced. Preserve."
     },
     {
       "id": "85e45f67a7f74b0e",
@@ -497,9 +497,9 @@
       ],
       "mutator_lines": 38,
       "first_line": 27,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Live deploy-path script, installed to /srv/menhir/production/bin/ and reached through the sanctioned worker. Preserve for now; revisit only when the new pipeline can take over its role end to end."
     },
     {
       "id": "2f7ad19ef5e83840",
@@ -512,9 +512,9 @@
       ],
       "mutator_lines": 11,
       "first_line": 11,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Live deploy-path script, installed to /srv/menhir/production/bin/ and reached through the sanctioned worker. Preserve for now; revisit only when the new pipeline can take over its role end to end."
     },
     {
       "id": "057cc6505a06baea",
@@ -526,9 +526,9 @@
       ],
       "mutator_lines": 6,
       "first_line": 17,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Live deploy-path script, installed to /srv/menhir/production/bin/ and reached through the sanctioned worker. Preserve for now; revisit only when the new pipeline can take over its role end to end."
     },
     {
       "id": "2c374f034e0dcb74",
@@ -539,9 +539,9 @@
       ],
       "mutator_lines": 3,
       "first_line": 61,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Release input consumed by the publish side. Preserve."
     },
     {
       "id": "8f7fb6f4b8d2fe9a",
@@ -555,9 +555,9 @@
       ],
       "mutator_lines": 7,
       "first_line": 169,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Publish-side tooling. Publish is the half of this system that was built correctly - deterministic builds, digest pinning, CI attestation - and is explicitly not being replaced. Preserve."
     },
     {
       "id": "338da7fac24a78b4",
@@ -571,9 +571,9 @@
       ],
       "mutator_lines": 10,
       "first_line": 64,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Live deploy-path script, installed to /srv/menhir/production/bin/ and reached through the sanctioned worker. Preserve for now; revisit only when the new pipeline can take over its role end to end."
     },
     {
       "id": "50b2ea70527d600c",
@@ -585,9 +585,9 @@
       ],
       "mutator_lines": 3,
       "first_line": 39,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "same-host-fence.sh guards same-host cutover, which is distinct from the v1-to-v2 handoff fence deleted by the maintenance-window decision. Preserve pending a specific read; do not assume the window decision removed this one."
     },
     {
       "id": "216dc4e96ae29207",
@@ -600,9 +600,9 @@
       ],
       "mutator_lines": 8,
       "first_line": 24,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Part of the scaffold, which is live and working: menhir-scaffold-audit.timer runs daily, scaffold-contract.json is installed at /etc/menhir/, and scaffold-receipt.json was written 2026-09-08. It is the only thing currently monitoring backup freshness against the 24h policy. Preserve."
     },
     {
       "id": "9ee4e670e005e10a",
@@ -617,9 +617,9 @@
       ],
       "mutator_lines": 57,
       "first_line": 43,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Part of the scaffold, which is live and working: menhir-scaffold-audit.timer runs daily, scaffold-contract.json is installed at /etc/menhir/, and scaffold-receipt.json was written 2026-09-08. It is the only thing currently monitoring backup freshness against the 24h policy. Preserve."
     },
     {
       "id": "7924e5bb3d5fdab7",
@@ -630,9 +630,9 @@
       ],
       "mutator_lines": 5,
       "first_line": 1,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Part of the scaffold, which is live and working: menhir-scaffold-audit.timer runs daily, scaffold-contract.json is installed at /etc/menhir/, and scaffold-receipt.json was written 2026-09-08. It is the only thing currently monitoring backup freshness against the 24h policy. Preserve."
     },
     {
       "id": "967460c22d41115f",
@@ -643,9 +643,9 @@
       ],
       "mutator_lines": 6,
       "first_line": 1,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Part of the scaffold, which is live and working: menhir-scaffold-audit.timer runs daily, scaffold-contract.json is installed at /etc/menhir/, and scaffold-receipt.json was written 2026-09-08. It is the only thing currently monitoring backup freshness against the 24h policy. Preserve."
     },
     {
       "id": "adb8e35b77d3f018",
@@ -656,9 +656,9 @@
       ],
       "mutator_lines": 1,
       "first_line": 27,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Part of the scaffold, which is live and working: menhir-scaffold-audit.timer runs daily, scaffold-contract.json is installed at /etc/menhir/, and scaffold-receipt.json was written 2026-09-08. It is the only thing currently monitoring backup freshness against the 24h policy. Preserve."
     },
     {
       "id": "f7bec0695c486527",
@@ -671,9 +671,9 @@
       ],
       "mutator_lines": 12,
       "first_line": 39,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Part of the scaffold, which is live and working: menhir-scaffold-audit.timer runs daily, scaffold-contract.json is installed at /etc/menhir/, and scaffold-receipt.json was written 2026-09-08. It is the only thing currently monitoring backup freshness against the 24h policy. Preserve."
     },
     {
       "id": "3534a7e669877fa3",
@@ -686,9 +686,9 @@
       ],
       "mutator_lines": 7,
       "first_line": 41,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Part of the scaffold, which is live and working: menhir-scaffold-audit.timer runs daily, scaffold-contract.json is installed at /etc/menhir/, and scaffold-receipt.json was written 2026-09-08. It is the only thing currently monitoring backup freshness against the 24h policy. Preserve."
     },
     {
       "id": "5824452bc78afec0",
@@ -701,9 +701,9 @@
       ],
       "mutator_lines": 4,
       "first_line": 27,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Part of the scaffold, which is live and working: menhir-scaffold-audit.timer runs daily, scaffold-contract.json is installed at /etc/menhir/, and scaffold-receipt.json was written 2026-09-08. It is the only thing currently monitoring backup freshness against the 24h policy. Preserve."
     },
     {
       "id": "e0668ac42adcead0",
@@ -714,9 +714,9 @@
       ],
       "mutator_lines": 3,
       "first_line": 98,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Development or test tooling in the Menhir repo. Not a deployment path. Preserve."
     },
     {
       "id": "89cb0cfdcfd5650c",
@@ -727,9 +727,9 @@
       ],
       "mutator_lines": 1,
       "first_line": 99,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Development or test tooling in the Menhir repo. Not a deployment path. Preserve."
     },
     {
       "id": "e46b741218e2641a",
@@ -740,9 +740,9 @@
       ],
       "mutator_lines": 1,
       "first_line": 16,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Development or test tooling in the Menhir repo. Not a deployment path. Preserve."
     },
     {
       "id": "52709fb1077ed686",
@@ -755,9 +755,9 @@
       ],
       "mutator_lines": 5,
       "first_line": 33,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "menhir",
+      "note": "Development or test tooling in the Menhir repo. Not a deployment path. Preserve."
     },
     {
       "id": "677a91b198075345",
@@ -14660,58 +14660,6 @@
       "why": "Executes or transfers to a remote host. Combined with a privileged invocation this is a deployment path."
     }
   ],
-  "unclassified_ids": [
-    "fc61b1803f1ba08c",
-    "c4b8b4b351e05911",
-    "7d046043533a742c",
-    "1e1ac3f90a0b586d",
-    "533df3aa5b2388f1",
-    "dfe949768a46c66d",
-    "6eefc750c87d793a",
-    "63ed58b30e7c3eda",
-    "ac49d1e655ac0bbc",
-    "393497cde01032a3",
-    "b74427e1ec29f255",
-    "586eabfa088cd653",
-    "159613ad94da26b0",
-    "f39e477366b9d306",
-    "eabc40b09b1f5e18",
-    "3ee27d359b629acb",
-    "e31830d0cc6f1e56",
-    "963a072be5fa4f7c",
-    "955e983bd16e20a0",
-    "4b9a547a93721a6c",
-    "07b0a5412feb7345",
-    "913b88c042de10d1",
-    "f97b070af497164d",
-    "62415da5ebbd31ad",
-    "2e28822f09068b6d",
-    "3da64bb0bbeb62a0",
-    "c634d1fed54e4f57",
-    "95a31aa07146b97c",
-    "ef103c0e2df0a2f9",
-    "1cedc13ed73fea05",
-    "c3cd11b4a6686182",
-    "b9b7505a52e54a9c",
-    "85e45f67a7f74b0e",
-    "2f7ad19ef5e83840",
-    "057cc6505a06baea",
-    "2c374f034e0dcb74",
-    "8f7fb6f4b8d2fe9a",
-    "338da7fac24a78b4",
-    "50b2ea70527d600c",
-    "216dc4e96ae29207",
-    "9ee4e670e005e10a",
-    "7924e5bb3d5fdab7",
-    "967460c22d41115f",
-    "adb8e35b77d3f018",
-    "f7bec0695c486527",
-    "3534a7e669877fa3",
-    "5824452bc78afec0",
-    "e0668ac42adcead0",
-    "89cb0cfdcfd5650c",
-    "e46b741218e2641a",
-    "52709fb1077ed686"
-  ],
+  "unclassified_ids": [],
   "stale_disposition_ids": []
 }
