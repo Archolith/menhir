@@ -143,11 +143,15 @@ class ScalarViewRepositoryMixin:
             UNWIND $eps AS eid
             OPTIONAL MATCH (te:TurnEvidence {{turn_id: eid}})
             WHERE {tenant_scope_cypher("te")}
-            OPTIONAL MATCH (ep:Episodic {{uuid: eid}})-[:ADMITTED_ON]->(a:TurnEvidence)
+            OPTIONAL MATCH (ep:Episodic {{uuid: eid}})
+            WHERE {tenant_scope_cypher("ep")}
+            OPTIONAL MATCH (ep)-[:ADMITTED_ON]->(a:TurnEvidence)
             WHERE {tenant_scope_cypher("a")}
             WITH eid, te.turn_id AS direct,
+                 coalesce(ep.evidence_finalized, false) AS ep_finalized,
+                 coalesce(ep.evidence_quarantined, false) AS ep_quarantined,
                  [t IN collect(DISTINCT a.turn_id) WHERE t IS NOT NULL] AS grounded
-            RETURN eid, direct, grounded
+            RETURN eid, direct, ep_finalized, ep_quarantined, grounded
             """,
             {"eps": eps, **tenant_scope_params(namespace_key)},
         )
@@ -161,6 +165,16 @@ class ScalarViewRepositoryMixin:
                 continue
             if row.get("direct"):
                 resolved.append(str(row["direct"]))
+                continue
+            # Already-valid evidence passes through UNCHANGED. The writer's gate accepts a finalized,
+            # unquarantined :Episodic as readily as a :TurnEvidence -- publication intents can set
+            # evidence_finalized on an episode (evidence_publication_intents.py's artifact_node MATCH
+            # carries no label constraint, and the intent manifest includes resolved_episode_uuid).
+            # That path is currently inert only because no GraphitiArtifactManifestService is wired,
+            # which is a wiring gap and not a guarantee. Rewriting such an anchor would make this
+            # resolver STRICTER than the gate it feeds and reject evidence the writer would accept.
+            if row.get("ep_finalized") and not row.get("ep_quarantined"):
+                resolved.append(str(eid))
                 continue
             grounded = [str(t) for t in (row.get("grounded") or [])]
             if len(grounded) == 1:

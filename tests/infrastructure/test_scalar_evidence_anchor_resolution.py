@@ -51,6 +51,24 @@ def test_episodic_anchor_resolves_to_its_grounding_turn() -> None:
     assert _resolve(rows, [EPISODIC]) == [TURN]
 
 
+def test_finalized_episodic_passes_through_unrewritten() -> None:
+    """The gate accepts a finalized, unquarantined :Episodic. Rewriting it would make this resolver
+    stricter than the writer it feeds, rejecting evidence the gate would take."""
+    rows = [{"eid": EPISODIC, "direct": None, "ep_finalized": True,
+             "ep_quarantined": False, "grounded": [TURN]}]
+
+    assert _resolve(rows, [EPISODIC]) == [EPISODIC]
+
+
+def test_quarantined_episodic_is_not_treated_as_valid_evidence() -> None:
+    """Mirrors the gate exactly: finalized AND NOT quarantined. A quarantined anchor falls through
+    to ADMITTED_ON resolution rather than passing through."""
+    rows = [{"eid": EPISODIC, "direct": None, "ep_finalized": True,
+             "ep_quarantined": True, "grounded": [TURN]}]
+
+    assert _resolve(rows, [EPISODIC]) == [TURN]
+
+
 def test_both_anchor_kinds_collapse_onto_one_receipt_entry() -> None:
     """Two anchors naming one turn must not produce a duplicate receipt."""
     rows = [
