@@ -140,14 +140,41 @@ including a coherence check across backup / rehearsal / off-host copy. Source
 only, not deployed.
 
 **Nightly backup timer written, NOT installed.** `pipeline/scheduled-backup.sh`
-plus units in `pipeline/systemd/`. It has **two known bugs**, both mine, both
-unfixed:
-1. `stack_running()` omits `-p menhir-prod`, so it misreports the stack as
-   stopped and its restart guarantee would not fire.
-2. `BACKUP_SCRIPT` defaults to `${MENHIR_PROD_ROOT}/deploy/backup-generation.sh`
-   — the stale shadow copy. The real one is `bin/backup-generation.sh`.
+plus units in `pipeline/systemd/`. Three defects were found and **fixed**; all
+three were mine. Verified against the host read-only, not just reasoned about:
 
-Do not install it until both are fixed. Note also that `Persistent=true` plus
+1. **Stack detection always returned "stopped."** Diagnosed initially as a
+   missing `-p menhir-prod`; that was wrong. The compose file carries a
+   top-level `name:`, so the project resolves anyway. The real cause is that
+   the compose file is variable-interpolated and unparseable without
+   `--env-file` — `docker compose -f <file> ps` fails outright with
+   `required variable NEO4J_IMAGE is missing a value`, and `production.env` is
+   root-only mode 0400. With stderr discarded and piped to `grep -q .`, that
+   error read as "stopped", which silently disabled the restart guarantee — the
+   whole reason the wrapper exists. Now queries the daemon by compose project
+   label, which needs no env file, and is tri-state: running / stopped /
+   **unknown**, where unknown before the run aborts rather than guessing.
+2. **`BACKUP_SCRIPT` pointed at the stale shadow copy** —
+   `${MENHIR_PROD_ROOT}/deploy/backup-generation.sh`, 17502 bytes dated
+   Aug 28, versus the managed `bin/` copy at 21698 bytes dated Sep 7. Now
+   defaults to `bin/`, matching `lib.sh:40`.
+3. **The wrapper took the lock its own child needs.** It held
+   `/run/lock/menhir-production.lock` on fd 9, then invoked
+   `backup-generation.sh`, which does its own `exec 9>` + `flock -n 9` on that
+   same path (line 163) and exits 1 with "maintenance lock is held" when it
+   cannot get it. Every scheduled run would have failed, every night, having
+   never taken a backup. The wrapper now uses its own
+   `/run/lock/menhir-scheduled-backup.lock`; host-wide serialization stays in
+   the backup script where it already was.
+
+Also changed: the restart path was a bare `docker compose up -d`, which would
+have failed the same interpolation error as (1), and even given an env file
+would have omitted the eight `MENHIR_*` runtime variables that `production_up`
+in `release-lib.sh` supplies. It now sources `release-lib.sh` in a subshell and
+calls `production_up`, the same path production uses, including `wait_healthy`.
+
+Still not installed and still not executed end-to-end — `submit_op` is broken
+(section 3), and a real run stops production. Note also that `Persistent=true` plus
 `systemctl enable --now` fires the timer immediately on a never-run timer; that
 happened once this session and triggered an unintended production backup attempt.
 
@@ -203,7 +230,15 @@ architecture review · `4589bc7` census · `3cd55e4` target-anchored census ·
 `c29f3c0` 04:00 America/Chicago · `d9ded95` CONSOLIDATION · `bf041e4` `a410dca`
 `3edd573` `aa4215d` census batches · `adbc602` correct disproved retires
 
-**yawn.vps**: `6a98974` backup-status rewrite (local, unpushed at time of writing)
+**yawn.vps**: `6a98974` backup-status rewrite — **pushed**, and the push was not
+clean. The branch was `[ahead 3]` and was pushed without checking, so it also
+sent `585f0ff` "retire unapproved release lane" and `b1191b8` "make Menhir
+gateway read-only" — two pre-existing local commits that are not this session's
+work and were not reviewed here. Four unrelated modified files
+(`vps/admin_api.py`, `vps/sealed_contents_tools.py`, `vps/sealed_promo_tools.py`,
+`tests/test_sealed_admin_api.py`) remain uncommitted and were not pushed.
+Same error class as the timer install: acting on a repo without verifying its
+prior state.
 
 **workspace**: `1d03980` gitignore `.secrets/` and `*.agekey` — both backup keys
 were untracked but not ignored in a repo that pushes to GitHub. Never committed;
@@ -217,7 +252,8 @@ verified clean.
 1. **Finish the ingress retirement** (section 3). Fixes both the failing release
    and the broken backup path. Coordinated change across two repos and the host —
    have the plan corroborated before running it.
-2. **Fix the two bugs in `scheduled-backup.sh`**, then install the timer.
+2. **Install the timer.** The three wrapper defects are fixed (section 6); it
+   has never been run end-to-end, and cannot be until item 1 lands.
 3. **Deploy the rewritten `backup-status`** so the command tells the truth in an
    incident.
 4. Delete the stale `/srv/menhir/production/deploy/` shadow tree.

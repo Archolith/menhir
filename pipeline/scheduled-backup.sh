@@ -3,9 +3,9 @@
 #
 # WHY THIS EXISTS
 # ---------------
-# deploy/backup-generation.sh stops the whole menhir-prod stack, takes an
-# offline neo4j-admin dump, verifies it by loading both dumps back, encrypts,
-# and only then restarts. Neo4j Community has no online backup, so the outage is
+# bin/backup-generation.sh stops the whole menhir-prod stack, takes an offline
+# neo4j-admin dump, verifies it by loading both dumps back, encrypts, and only
+# then restarts. Neo4j Community has no online backup, so the outage is
 # unavoidable.
 #
 # Critically, that script has NO EXIT TRAP: every failure path exits with the
@@ -15,7 +15,7 @@
 #
 # This wrapper makes unattended runs safe without weakening the attended path:
 #
-#   1. it never runs concurrently with another mutation (same host lock);
+#   1. it never runs concurrently with another SCHEDULED run (its own lock);
 #   2. if the stack was running when we started, it is running when we finish,
 #      whatever happened in between;
 #   3. a failure is recorded durably where backup-status will surface it, rather
@@ -26,13 +26,26 @@
 # "no new backup", never "the database is now suspect", so bringing the stack
 # back does not risk serving corrupt state. Do not copy this wrapper for restore
 # or deploy operations, where fail-stopped is the correct behaviour.
+#
+# LOCKING
+# -------
+# This wrapper does NOT take /run/lock/menhir-production.lock. backup-generation.sh
+# takes that lock itself, non-blocking, and exits 1 if another mutation holds it.
+# An earlier version of this file took it first, which meant the child could
+# never acquire it and every scheduled run would have failed with "maintenance
+# lock is held". The wrapper's own lock exists only to stop two SCHEDULED runs
+# overlapping; host-wide serialization stays where it already was.
 set -uo pipefail
 
 MENHIR_PROD_ROOT="${MENHIR_PROD_ROOT:-/srv/menhir/production}"
-COMPOSE_FILE="${MENHIR_COMPOSE_FILE:-${MENHIR_PROD_ROOT}/deploy/docker-compose.production.yml}"
-BACKUP_SCRIPT="${MENHIR_BACKUP_SCRIPT:-${MENHIR_PROD_ROOT}/deploy/backup-generation.sh}"
+BIN_DIR="${MENHIR_BIN_DIR:-${MENHIR_PROD_ROOT}/bin}"
+# The managed, release-verified implementation. NOT ${MENHIR_PROD_ROOT}/deploy/,
+# which is an unmanaged shadow copy outside verify-artifacts coverage.
+BACKUP_SCRIPT="${MENHIR_BACKUP_SCRIPT:-${BIN_DIR}/backup-generation.sh}"
+RELEASE_LIB="${MENHIR_RELEASE_LIB:-${BIN_DIR}/release-lib.sh}"
+COMPOSE_PROJECT="${MENHIR_COMPOSE_PROJECT:-menhir-prod}"
 STATUS_DIR="${MENHIR_STATUS_DIR:-/var/lib/menhir-production}"
-LOCK="${MENHIR_MAINTENANCE_LOCK:-/run/lock/menhir-production.lock}"
+LOCK="${MENHIR_SCHEDULED_BACKUP_LOCK:-/run/lock/menhir-scheduled-backup.lock}"
 FAILURE_MARKER="${STATUS_DIR}/scheduled-backup-failure.json"
 LAST_RUN="${STATUS_DIR}/scheduled-backup-last-run.json"
 
@@ -47,25 +60,56 @@ write_json() { # path json
     sync -f "$(dirname "$1")" 2>/dev/null || true
 }
 
+# Ask the daemon which containers carry the compose project label, rather than
+# `docker compose -f <file> ps`. The compose file is variable-interpolated and
+# unparseable without --env-file (production.env is root-only, mode 0400), so a
+# bare `-f` invocation fails outright -- with stderr discarded that read as
+# "stopped", which silently disabled the restart guarantee below.
+#
+# Exit: 0 running, 1 not running, 2 could not determine.
 stack_running() {
-    docker compose -f "$COMPOSE_FILE" ps --status running --quiet 2>/dev/null | grep -q .
+    local out
+    out="$(docker ps --quiet --filter "label=com.docker.compose.project=${COMPOSE_PROJECT}" 2>&1)" \
+        || { log "WARN cannot query docker: ${out%%$'\n'*}"; return 2; }
+    [ -n "$out" ]
 }
 
-[ -r "$COMPOSE_FILE" ]   || { log "FATAL compose file unreadable: $COMPOSE_FILE"; exit 1; }
-[ -x "$BACKUP_SCRIPT" ]  || { log "FATAL backup script not executable: $BACKUP_SCRIPT"; exit 1; }
-[ -d "$STATUS_DIR" ]     || { log "FATAL status dir absent: $STATUS_DIR"; exit 1; }
+describe_stack_state() {
+    stack_running
+    case $? in
+        0) printf 'running' ;;
+        1) printf 'stopped' ;;
+        *) printf 'unknown' ;;
+    esac
+}
 
-# One mutation at a time. Non-blocking: if a deploy or another backup holds the
-# lock, this run is skipped rather than queued. A skipped nightly backup is a
-# non-event; a queued one that fires mid-deploy is not.
+# Restart via the same code path production uses, not a hand-rolled
+# `docker compose up -d`: production_up supplies the eight MENHIR_* runtime
+# variables plus --env-file and --project-name, then waits for both containers
+# to report healthy. Sourced in a subshell so its `set -euo pipefail` cannot
+# leak into our own error handling.
+restart_stack() {
+    ( . "$RELEASE_LIB" && production_up ) >/dev/null 2>&1
+}
+
+[ -x "$BACKUP_SCRIPT" ] || { log "FATAL backup script not executable: $BACKUP_SCRIPT"; exit 1; }
+[ -r "$RELEASE_LIB" ]   || { log "FATAL release library unreadable: $RELEASE_LIB"; exit 1; }
+[ -d "$STATUS_DIR" ]    || { log "FATAL status dir absent: $STATUS_DIR"; exit 1; }
+
+# Non-blocking: if a previous scheduled run is somehow still going, this one is
+# skipped rather than queued. A skipped nightly backup is a non-event.
 exec 9>"$LOCK" || { log "FATAL cannot open lock $LOCK"; exit 1; }
 if ! flock -n 9; then
-    log "SKIP another operation holds $LOCK"
+    log "SKIP another scheduled backup holds $LOCK"
     exit 0
 fi
 
-was_running="stopped"
-stack_running && was_running="running"
+was_running="$(describe_stack_state)"
+if [ "$was_running" = "unknown" ]; then
+    log "FATAL cannot determine stack state before starting; refusing to run"
+    exit 1
+fi
+
 started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 start_epoch="$(date +%s)"
 log "starting (stack was ${was_running})"
@@ -77,15 +121,21 @@ elapsed=$(( $(date +%s) - start_epoch ))
 finished="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 # The guarantee: restore the pre-run service state no matter how we got here.
+# If the post-run state cannot be determined, attempt the restart anyway --
+# production_up is idempotent, so a needless call is harmless where a skipped
+# one leaves the endpoint down.
 restart_note="not-needed"
-if [ "$was_running" = "running" ] && ! stack_running; then
-    log "stack is down after backup (rc=${rc}); restarting"
-    if docker compose -f "$COMPOSE_FILE" up -d >/dev/null 2>&1; then
-        restart_note="restarted"
-        log "stack restarted"
-    else
-        restart_note="restart-failed"
-        log "FATAL could not restart the stack; manual recovery required"
+if [ "$was_running" = "running" ]; then
+    post_state="$(describe_stack_state)"
+    if [ "$post_state" != "running" ]; then
+        log "stack is ${post_state} after backup (rc=${rc}); restarting"
+        if restart_stack; then
+            restart_note="restarted"
+            log "stack restarted"
+        else
+            restart_note="restart-failed"
+            log "FATAL could not restart the stack; manual recovery required"
+        fi
     fi
 fi
 
