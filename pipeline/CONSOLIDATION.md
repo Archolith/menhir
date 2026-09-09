@@ -26,36 +26,91 @@ the repository and path on twelve rows of that dict.
 
 ## What moves
 
-Twelve artifacts are currently sourced from `yawn_vps`:
+**Corrected 2026-09-08 against the deployed `release.json`.** An earlier version
+of this document said twelve artifacts come from `yawn_vps`, and repeated the
+`ops/menhir/README.md` claim that the submit wrappers are "source-history only
+and must not be installed". Both are wrong. The release lists **31** artifacts
+from `yawn_vps`, and the submit wrappers are among them — they are installed,
+verified artifacts, not source history. The README describes an intent the
+release does not implement.
+
+The 31 split cleanly into two groups that need opposite treatment.
+
+### Group A — 26 artifacts: Menhir's own tooling, misfiled
+
+Everything under `ops/menhir/`. These are Menhir operator commands that happen to
+live in the yawn.vps repository; nothing about them is yawn's.
 
 | Installed path | Source today |
 |---|---|
-| `/srv/menhir/production/bin/{backup-status, generation-inspect, lib.sh, logs, recover, release-inspect, status, verify-artifacts}` | `yawn_vps: ops/menhir/bin/<name>` |
-| `/srv/menhir/production/bin/verify_python_runtime.py` | `yawn_vps: ops/menhir/bin/verify_python_runtime.py` |
-| `/etc/systemd/system/menhir-oauth-operations.service` | `yawn_vps: ops/menhir/systemd/…` |
+| `bin/{backup, backup-status, candidate-accept, candidate-deploy, generation-inspect, lib.sh, logs, promote, recover, release-inspect, release-run, restore-production, restore-rehearsal, rollback, status, verify-artifacts, worker}` | `yawn_vps: ops/menhir/bin/<name>` |
+| `bin/{caddy-route-apply, caddy-route-rollback}` | `yawn_vps: ops/menhir/bin/<name>` — retired by ADR 0002; drop rather than move |
+| `bin/verify_python_runtime.py` | `yawn_vps: ops/menhir/bin/…` |
+| `/etc/systemd/system/menhir-op@.service` | `yawn_vps: ops/menhir/systemd/…` |
+| `/etc/systemd/system/menhir-caddy-reconcile.{path,service}` | `yawn_vps: ops/menhir/systemd/…` — retired by ADR 0002, but see HANDOFF §3: **do not delete before the retirement is finished** |
+| `/etc/systemd/system/menhir-oauth-operations.service` | `yawn_vps: ops/menhir/systemd/…` — see Group B |
 | `/etc/sudoers.d/menhir-production` | `yawn_vps: ops/menhir/etc/sudoers.d/…` |
 | `/etc/tmpfiles.d/menhir-production.conf` | `yawn_vps: ops/menhir/etc/tmpfiles.d/…` |
 
-Proposed destination: `menhir/pipeline/bin/`, `pipeline/systemd/`, `pipeline/etc/`.
+Destination: `menhir/pipeline/bin/`, `pipeline/systemd/`, `pipeline/etc/`.
 
-`ops/menhir/` also holds files that are **not** in `ARTIFACT_SOURCES` and per its
-own README are "source-history only and must not be installed": the submit
-wrappers `backup`, `promote`, `rollback`, `candidate-deploy`, `candidate-accept`,
-`restore-production`, `restore-rehearsal`, `caddy-route-apply`,
-`caddy-route-rollback`, plus `worker` and the retired
-`menhir-caddy-reconcile.{path,service}` and `menhir-op@.service`.
+### Group B — 5 artifacts: the operations gateway, and it is dead
 
-These need a disposition each before moving — several are for operations ADR 0002
-retired, and moving dead code into the new home defeats the point. The census
-(`pipeline/census.py`) already lists them as entry points awaiting classification.
+| Installed path |
+|---|
+| `/srv/yawn/projects/yawn.vps/menhir_server.py` |
+| `/srv/yawn/projects/yawn.vps/vps/core.py` |
+| `/srv/yawn/projects/yawn.vps/vps/menhir_capabilities.py` |
+| `/srv/yawn/projects/yawn.vps/vps/menhir_tools.py` |
+| `/srv/yawn/projects/yawn.vps/vps/oauth_policy.py` |
+
+These install into yawn's tree, not Menhir's, and back
+`menhir-oauth-operations.service`. Evidence gathered 2026-09-08 that nothing uses
+it:
+
+- **Not routed.** The cloudflared ingress regex admits only `mcp-http`,
+  `oauth/{authorize,token,register,client-metadata/agent-smith.json}`,
+  `.well-known/*`, `livez`, `readyz`. Everything else is `http_status:404`.
+  `/ops/mcp` is not in the list.
+- **Not reachable from outside.** It binds `172.30.0.1:8000`, the gateway address
+  of the private `menhir-proxy` bridge.
+- **No requests.** `journalctl -u menhir-oauth-operations.service --since -7days`
+  contains only the startup banner from the Sep 7 19:50 deploy. Uvicorn logs
+  requests at INFO and its INFO startup lines are present, so requests would
+  appear if there were any.
+- **No client.** Nothing in the workspace `.mcp.json` or `mcp-registry.json`
+  points at it.
+
+The service is `enabled` and `active`. It has served nothing since it started.
+
+Owner decision 2026-09-08: retire it; build a separate MCP surface for deploys
+later if one is wanted, inside `pipeline/`, rather than preserving this coupling.
+
+## Why this now severs yawn.vps completely
+
+Group A moves and Group B retires, so `yawn_vps` contributes **zero** artifacts.
+Combined with the ingress retirement, which removes the five `yawn_deploy`
+artifacts, the release collapses from four source repositories to one:
+
+| Repository | Artifacts today | After |
+|---|---|---|
+| `yawn_vps` | 31 | 0 |
+| `menhir` | 27 | 53 |
+| `yawn_deploy` | 5 | 0 (ingress retirement) |
+| unattributed | 4 | 4 — needs its own look |
+
+A single-repo release removes the cross-repo commit binding that made every
+release record hard to reason about, and it is what makes "I don't want to deal
+with the yawn stuff" actually true rather than aspirational.
 
 ## What must change alongside
 
 1. **`release_spec.py`** — twelve `ARTIFACT_SOURCES` rows change repo and path.
-2. **Repository cardinality.** The release currently binds a `yawn_vps` commit
-   partly for these files. After the move `yawn_vps` is still required for
-   `vps/oauth_policy.py` and the gateway, so it does not drop out — but what it
-   contributes shrinks, and any check asserting *why* it is bound needs review.
+2. **Repository cardinality.** Superseded: with Group B retired, `yawn_vps` drops
+   out of the release entirely rather than shrinking. Any check that asserts the
+   set of bound repositories, or *why* each is bound, has to be updated for a
+   one-repo release — `release.json` carries `repos` and `repo_remotes`, and both
+   change shape.
 3. **`ops/menhir/README.md` install procedure.** Installation is a documented
    manual sequence of `install -o root -g root …` commands, not an automated
    deployer. Those paths change. This is also the only install documentation, so
@@ -92,8 +147,10 @@ Each step is independently revertible and none touches the host until the last.
   two would rewrite line endings and silently change every digest.
 - **Splitting rather than consolidating.** If only some files move, discovery gets
   worse, not better. Either the twelve move together or none do.
-- **`yawn_vps` still supplies gateway code**, so this does not reduce the release
-  from four repositories to three. It reduces what one of them contributes.
+- **Retiring the gateway is a separate, riskier change than the move.** The move
+  is byte-identical and reversible; removing a running `enabled`/`active` service
+  is not. Do them as two releases, move first, so a gateway problem cannot be
+  confused with a consolidation problem.
 
 ## What this does not fix
 
