@@ -83,9 +83,84 @@ sources.
 | Path | Holds | Notes |
 |---|---|---|
 | `/var/lib/menhir-production/` | **All receipts and status markers.** `backup-local-receipt.json`, `rehearsal-receipt.json`, `desktop-archive-receipt.json`, `candidate-accept-receipt.json`, `scaffold-restore-drill-receipt.json`, `current-generation`, `mutation-history/`, `last-incident-recovery.json` | This is the real status directory. It is **not** under `/srv/menhir`. Looking for status under `/srv/menhir/production/status/` finds nothing; that path does not exist. |
-| `/srv/menhir/production/` | Deployed code, `bin/` wrappers, `release/release.json`, `secrets/`, `deploy/` | Secrets subdirs: `cloudflare`, `menhir`, `neo4j`, `oauth`. The age key is **not** here. |
+| `/srv/menhir/production/` | Deployed code and state. Broken out below. | 777 files; 48 of them covered by `release.json`. Secrets subdirs: `cloudflare`, `menhir`, `neo4j`, `oauth`. The age key is **not** here. |
 | `/srv/menhir/backups/` | `encrypted/` (10 `.tar.gz.age`, ~2.9G), `generations/` (plaintext), `decrypted/`, `candidate/`, `in-place/`, `migration-*` | `encrypted/` is the authoritative archive set. |
 | `/etc/menhir/` | `backup-restore.agekey` (the age identity), `scaffold-contract.json` | 189 bytes. Without it every archive is noise. |
+
+## Inside `/srv/menhir/production`
+
+777 files. `release.json` lists 67 artifacts, 48 of them under this tree, so
+**729 files on the host are outside release coverage.** Most of that is
+legitimate — `state/` and `backups/` are runtime data and are supposed to be
+unmanaged. The rest is not.
+
+| Subtree | Files | Unmanaged | What it is |
+|---|---|---|---|
+| `state/` | 346 | 346 | Live runtime data. Correctly unmanaged. |
+| `backups/` | 300 | 300 | 12 bootstrap/experiment generations, Aug 28 – Sep 5. Debris, but harmless. |
+| `bin/` | 42 | 1 | The managed tree. The one exception is a stale `__pycache__/menhir_schema.cpython-312.pyc`. |
+| `deploy/` | 33 | 33 | **Stale shadow tree**, mostly Aug 28. See below. |
+| `ops-source/` | 26 | 26 | **A fourth copy of the yawn.vps ops tree, on the host, drifted.** See below. |
+| `secrets/` | 10 | 10 | Correctly unmanaged. |
+| `caddy/` | 6 | 6 | `releases/adopted-current-20260828T…` — dead Caddy config from the retired ingress path. |
+| `release/` | 6 | 5 | `release.json` (the authority, cannot list itself) plus 4 rollback leftovers: `client-policy.failed-release.json`, `offline-image-ids.env`, `production.env.before-bc2113eb`, `production.env.before-policy-digest-fix`. |
+| `ingress/` | 2 | 2 | **The live Cloudflared ingress. Unmanaged.** See below. |
+
+### Three copies of the operator code, and they disagree
+
+`bin/` is the managed tree. `deploy/` and `ops-source/` are unmanaged copies of
+overlapping material. `ops-source/` is not a stale duplicate of `bin/` — it has
+**drifted on the three most load-bearing files**:
+
+```
+lib.sh             bin=33713036   ops-source/bin=a610ae1b   DIFFERS
+verify-artifacts   bin=4ad73f1f   ops-source/bin=9de2d267   DIFFERS
+worker             bin=87148347   ops-source/bin=60df3d22   DIFFERS
+backup-status      bin=b16c3ac9   ops-source/bin=b16c3ac9   same
+status             bin=41e5957f   ops-source/bin=41e5957f   same
+```
+
+`lib.sh` owns `submit_op`. Anything that resolves its path by guess, or falls
+back to `SCRIPT_DIR` the way `backup-generation.sh` does, can load a different
+`lib.sh` than the one actually running.
+
+### The live ingress is not in any release
+
+Verified against the running container, not from config:
+
+```
+menhir-prod-cloudflared
+  compose project : menhir-ingress          (NOT menhir-prod)
+  config file     : /srv/menhir/production/ingress/docker-compose.cloudflared.yml
+  mount           : /srv/menhir/production/ingress/cloudflared-config.yml
+                      -> /etc/cloudflared/config.yml
+  mount           : /srv/menhir/production/secrets/cloudflare/credentials.json
+```
+
+Both `ingress/` files are outside `release.json`. The sole route to
+`memory.ctharvey.me` is therefore hand-placed, unverified by `verify-artifacts`,
+and not reproducible from a release. The retirement moved ingress **from** a
+managed artifact (the Caddyfile, still listed in `release.json`) **to** an
+unmanaged one — which is a large part of why the retirement reads as
+half-finished.
+
+Note also that ingress is a separate compose project, so a backup that stops
+`menhir-prod` leaves cloudflared up and serving errors. That is expected; the
+outage is the documented cost of an offline Neo4j dump.
+
+### Sudo is not restricted
+
+`sudoers.d/menhir-production` is widely described, including in earlier versions
+of this document, as granting five read-only commands. That is wrong twice:
+
+- The grant itself includes mutating verbs — `backup`, `promote`, `rollback`,
+  `restore-production --confirm`, `candidate-deploy`, `candidate-accept`,
+  `caddy-route-apply`, `caddy-route-rollback`.
+- It does not matter anyway, because `thron` also holds
+  `(ALL : ALL) ALL` and `(ALL) NOPASSWD: ALL`.
+
+The named grant is documentation of intent, not a control. Treat it that way
+when reasoning about blast radius.
 
 ## Desktop state
 

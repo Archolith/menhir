@@ -12,15 +12,26 @@ Companion documents in this directory:
 
 ## 1. Start here: the single most important fact
 
-**Menhir can be restored. Menhir cannot currently be backed up.**
+**Menhir can be restored. New backups need one command run by hand.**
 
 The newest backup is `generation.vJBZKqtqAF`, 2026-09-07 19:52 UTC. It is
 rehearsed, verified, and copied to the desktop with a matching key. Restoring
 from it works.
 
-But `submit_op` — the path every operation runs through — is broken, so no new
-backup can be taken. The backup is ageing against a 24-hour freshness policy.
-See section 3.
+`submit_op` is broken (section 3), so the `backup` wrapper cannot enqueue a job.
+**This was previously recorded here as "Menhir cannot currently be backed up."
+That was wrong.** Verified 2026-09-08: neither `bin/backup-generation.sh` nor
+`bin/release-lib.sh` contains any reference to `caddy-reconcile` — zero matches.
+The backup script takes the host lock itself, loads `production.env` itself, and
+does not go through `systemd-run`. Running it directly as root works today,
+without fixing the ingress first.
+
+What is lost by bypassing `submit_op`: the fence bookkeeping, `reconcile_previous`,
+and the phase markers `submit_op` would have written, so `status` will not show
+the job. Serialization is still correct — the flock is taken by the script, not
+the wrapper. `pipeline/scheduled-backup.sh` deliberately uses this direct path.
+
+So the freshness gap is a decision, not a blocker.
 
 ## 2. Why the last three release attempts failed
 
@@ -92,6 +103,46 @@ definitions available to finish the retirement or restore the release.
 
 Together the first three delete roughly eight of the architecture review's
 eighteen findings rather than fixing them.
+
+## 4b. The rebuild-from-backup option (under consideration)
+
+Owner is considering capturing the data and wiping the host tree rather than
+untangling it. The sprawl that prompts this is real and measured: 777 files under
+`/srv/menhir/production`, 48 covered by a release, three copies of the operator
+code that disagree on `lib.sh`, `verify-artifacts` and `worker`. See
+`MAP.md` → "Inside `/srv/menhir/production`".
+
+**This is more viable than it looks, because the archive is already a rebuild
+bundle, not just a data dump.** `bin/backup-generation.sh:317` does
+`cp -a "${SECRETS_DIR}/." "${target}/secrets/"`, and the required-evidence list
+(lines ~330-356) fails closed unless the generation also contains
+`config/production.env`, `config/docker-compose.production.yml`,
+`config/Dockerfile`, `config/release.json`, `config/durable-state-inventory.json`,
+`config/commit.txt` and `policy/client-policy.json`. A verified generation is
+therefore sufficient to reconstruct the running system.
+
+**Two things are NOT in the archive and must be captured separately:**
+
+1. `/srv/menhir/production/ingress/` — `docker-compose.cloudflared.yml` and
+   `cloudflared-config.yml`. These are unmanaged, outside `release.json`, and
+   outside the backup. They are the **only** route to `memory.ctharvey.me`.
+   Wiping without them means the graph comes back and nothing can reach it.
+   (`secrets/cloudflare/credentials.json` *is* in the archive, via the `cp -a`.)
+2. `/etc/menhir/backup-restore.agekey` — correctly excluded, and already on the
+   desktop, hash-verified. `/etc/menhir/scaffold-contract.json` is also outside
+   the archive; confirm whether a rebuild needs it before relying on this.
+
+**Sequencing that makes it safe.** Do not wipe and then rebuild. The rebuild path
+is the exact thing that has never worked — three failed release attempts. Invert
+it: `restore-rehearsal` already stands up a candidate stack from an archive and
+has passed (`readyz`, `oauth_discovery`, `recall`, `mutation_503` all ok). So
+stand the clean system up *beside* the current one, prove it serves, cut over,
+and only then delete. That converts an irreversible wipe into a reversible
+cutover, and it uses machinery that is known to work rather than machinery that
+is known to fail.
+
+Order: take a fresh backup by hand (see section 1) → capture `ingress/` →
+rehearse → verify → cut over → delete the old tree.
 
 ## 5. The organizing insight
 
