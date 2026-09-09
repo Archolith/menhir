@@ -122,15 +122,26 @@ def _default_log_dir() -> str:
     return os.getenv("MENHIR_LOG_DIR") or os.path.join(os.getcwd(), "logs")
 
 
+def _default_log_level() -> str:
+    """Log level from the environment, falling back to INFO.
+
+    `serve` calls `build_logging_config()` with no level, so before this there was no way to
+    raise verbosity without editing code -- which meant diagnosing a library's DEBUG-level
+    accounting (e.g. graphiti's per-edge dedupe candidate counts) required a source edit.
+    An explicit `level=` argument still wins; this only changes the default.
+    """
+    return (os.getenv("MENHIR_LOG_LEVEL") or DEFAULT_LOG_LEVEL).strip().upper()
+
+
 def build_logging_config(
     *,
-    level: str = DEFAULT_LOG_LEVEL,
+    level: str | None = None,
     log_dir: str | None = None,
     include_console: bool = True,
 ) -> dict[str, Any]:
     """Return a dictConfig-compatible logging configuration."""
 
-    normalized_level = str(level or DEFAULT_LOG_LEVEL).upper()
+    normalized_level = str(level or _default_log_level()).upper()
     resolved_log_dir = log_dir or _default_log_dir()
     os.makedirs(resolved_log_dir, exist_ok=True)
     config = deepcopy(_BASE_LOGGING_CONFIG)
