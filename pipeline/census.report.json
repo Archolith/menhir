@@ -26,8 +26,8 @@
     "findings": 1194,
     "mutator_lines": 656,
     "entry_points": 105,
-    "classified": 16,
-    "unclassified": 89,
+    "classified": 33,
+    "unclassified": 72,
     "stale_dispositions": 0
   },
   "by_detector": {
@@ -1255,9 +1255,9 @@
       ],
       "mutator_lines": 3,
       "first_line": 34,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "yawn.vps",
+      "note": "menhir_server.py is the read-only OAuth-protected MCP server exposing the five Menhir read commands. Legitimate gateway; the scaffold contract requires menhir-oauth-operations.service active and enabled. Note: /ops/mcp is not publicly routed, so this is reachable only on the host - a separate decision, not a cleanup item."
     },
     {
       "id": "9a0a907d04715eeb",
@@ -1268,9 +1268,9 @@
       ],
       "mutator_lines": 2,
       "first_line": 30,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "replace",
+      "owner": "menhir/pipeline",
+      "note": "ops/menhir/bin/backup-status. Already rewritten this session to report the real recoverability chain; relocates with the rest."
     },
     {
       "id": "14056d45d6a70ce8",
@@ -1285,9 +1285,9 @@
       ],
       "mutator_lines": 18,
       "first_line": 23,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "replace",
+      "owner": "menhir/pipeline",
+      "note": "ops/menhir/bin/lib.sh owns submit_op and the transaction verbs - the single most load-bearing file in the operator surface, and the least obvious place to look for it. Relocates to menhir/pipeline per CONSOLIDATION.md, bytes unchanged."
     },
     {
       "id": "ef6101c3a60bd4d8",
@@ -1298,9 +1298,9 @@
       ],
       "mutator_lines": 1,
       "first_line": 12,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "replace",
+      "owner": "menhir/pipeline",
+      "note": "ops/menhir/bin/status. Relocation, bytes unchanged."
     },
     {
       "id": "b032569d5b460b0f",
@@ -1313,9 +1313,9 @@
       ],
       "mutator_lines": 4,
       "first_line": 58,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "replace",
+      "owner": "menhir/pipeline",
+      "note": "ops/menhir/bin/verify-artifacts. Relocation, bytes unchanged. Note it verifies only paths listed in release.json, which is why the stale production/deploy tree is invisible to it."
     },
     {
       "id": "cfec5bc404e3084d",
@@ -1326,9 +1326,9 @@
       ],
       "mutator_lines": 1,
       "first_line": 20,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "replace",
+      "owner": "menhir/pipeline",
+      "note": "ops/menhir/etc/sudoers.d/menhir-production grants only the five read commands - it is the actual privilege boundary and belongs beside the commands it grants."
     },
     {
       "id": "f01bf40620db1afb",
@@ -1339,9 +1339,9 @@
       ],
       "mutator_lines": 2,
       "first_line": 8,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "replace",
+      "owner": "menhir/pipeline",
+      "note": "ops/menhir/etc/tmpfiles.d/menhir-production.conf. Relocation."
     },
     {
       "id": "1293c9a281755afa",
@@ -1378,9 +1378,9 @@
       ],
       "mutator_lines": 8,
       "first_line": 1,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "yawn.vps",
+      "note": "menhir-oauth-operations.service runs the gateway above. Contract requires it active and enabled."
     },
     {
       "id": "8db5421ff7e981a2",
@@ -1404,9 +1404,9 @@
       ],
       "mutator_lines": 1,
       "first_line": 27,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "yawn.vps",
+      "note": "Generic yawn.vps MCP server code, not part of Menhir deployment. Flagged only because it runs privileged operations on the shared host and could in principle reach Menhir's containers. Preserved and recorded so it is never mistaken for absent."
     },
     {
       "id": "d11d822a5cb12067",
@@ -1418,9 +1418,9 @@
       ],
       "mutator_lines": 6,
       "first_line": 81,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "yawn.vps",
+      "note": "Generic yawn.vps MCP server code, not part of Menhir deployment. Flagged only because it runs privileged operations on the shared host and could in principle reach Menhir's containers. Preserved and recorded so it is never mistaken for absent."
     },
     {
       "id": "e0d755d4611251b5",
@@ -1437,9 +1437,9 @@
       ],
       "mutator_lines": 14,
       "first_line": 219,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "yawn.vps",
+      "note": "Generic yawn.vps MCP server code, not part of Menhir deployment. Flagged only because it runs privileged operations on the shared host and could in principle reach Menhir's containers. Preserved and recorded so it is never mistaken for absent."
     },
     {
       "id": "474ca18b851040d2",
@@ -1452,9 +1452,9 @@
       ],
       "mutator_lines": 3,
       "first_line": 806,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "yawn.vps",
+      "note": "Generic yawn.vps MCP server code, not part of Menhir deployment. Flagged only because it runs privileged operations on the shared host and could in principle reach Menhir's containers. Preserved and recorded so it is never mistaken for absent."
     },
     {
       "id": "00d629da6e9631a4",
@@ -1465,9 +1465,9 @@
       ],
       "mutator_lines": 2,
       "first_line": 240,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "yawn.vps",
+      "note": "Generic yawn.vps MCP server code, not part of Menhir deployment. Flagged only because it runs privileged operations on the shared host and could in principle reach Menhir's containers. Preserved and recorded so it is never mistaken for absent."
     },
     {
       "id": "fdc55215aa21b3c5",
@@ -1478,9 +1478,9 @@
       ],
       "mutator_lines": 1,
       "first_line": 108,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "yawn.vps",
+      "note": "Generic yawn.vps MCP server code, not part of Menhir deployment. Flagged only because it runs privileged operations on the shared host and could in principle reach Menhir's containers. Preserved and recorded so it is never mistaken for absent."
     },
     {
       "id": "ac88dae3b090ec11",
@@ -1492,9 +1492,9 @@
       ],
       "mutator_lines": 2,
       "first_line": 170,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "yawn.vps",
+      "note": "Generic yawn.vps MCP server code, not part of Menhir deployment. Flagged only because it runs privileged operations on the shared host and could in principle reach Menhir's containers. Preserved and recorded so it is never mistaken for absent."
     },
     {
       "id": "730740fae495726c",
@@ -1506,9 +1506,9 @@
       ],
       "mutator_lines": 6,
       "first_line": 5,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "yawn.vps",
+      "note": "vps/menhir_tools.py implements those five read tools by shelling to the fixed wrappers. Read-only by construction."
     },
     {
       "id": "264d42c68f61f475",
@@ -1519,9 +1519,9 @@
       ],
       "mutator_lines": 4,
       "first_line": 1,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "yawn.vps",
+      "note": "Generic yawn.vps MCP server code, not part of Menhir deployment. Flagged only because it runs privileged operations on the shared host and could in principle reach Menhir's containers. Preserved and recorded so it is never mistaken for absent."
     }
   ],
   "findings": [
@@ -14732,24 +14732,7 @@
     "d894e988d2e28c97",
     "ddd37cb51e38c1ba",
     "2d7dd86cfae91a37",
-    "9b42b4671c0e15d6",
-    "b6a0d83d3988fc01",
-    "9a0a907d04715eeb",
-    "14056d45d6a70ce8",
-    "ef6101c3a60bd4d8",
-    "b032569d5b460b0f",
-    "cfec5bc404e3084d",
-    "f01bf40620db1afb",
-    "1c556f7e94e6cf71",
-    "0ad5390dc3202079",
-    "d11d822a5cb12067",
-    "e0d755d4611251b5",
-    "474ca18b851040d2",
-    "00d629da6e9631a4",
-    "fdc55215aa21b3c5",
-    "ac88dae3b090ec11",
-    "730740fae495726c",
-    "264d42c68f61f475"
+    "9b42b4671c0e15d6"
   ],
   "stale_disposition_ids": []
 }

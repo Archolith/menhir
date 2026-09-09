@@ -14,72 +14,170 @@
     "2026-09-08. Everything else is deliberately still unclassified."
   ],
   "dispositions": {
-
     "7aedddbcf7882407": {
-      "disposition": "replace", "owner": "yawn.deploy",
+      "disposition": "replace",
+      "owner": "yawn.deploy",
       "note": "Caddyfile serves four vhosts; only the memory.ctharvey.me block is Menhir. That block is dead - verified 2026-09-08 that yawndeploy-caddy-1 is not on menhir-proxy and nslookup menhir-prod-app returns SERVFAIL. Remove the Menhir block and its cert mounts; keep the file."
     },
     "92d28a1a4f8e3064": {
-      "disposition": "replace", "owner": "yawn.deploy",
+      "disposition": "replace",
+      "owner": "yawn.deploy",
       "note": "Declares caddy on the menhir-proxy network, an attachment the running container does not have. Live drift, superseded by the Cloudflared tunnel. Remove the menhir-proxy attachment and external network declaration; keep the file."
     },
     "a7ed817b18792426": {
-      "disposition": "replace", "owner": "yawn.deploy",
+      "disposition": "replace",
+      "owner": "yawn.deploy",
       "note": "releases.json is Yawn's own release registry and stays, but it declares the Menhir proxy surface - menhir_network, menhir_proxy_ip, memory_upstream, the vhost and its Origin CA material. All dead. Remove the menhir_* keys."
     },
     "7aed8f5cc1753f18": {
-      "disposition": "replace", "owner": "yawn.deploy",
+      "disposition": "replace",
+      "owner": "yawn.deploy",
       "note": "caddy-release.sh is a real transactional release tool for the shared Caddy, which still serves three Yawn vhosts, so the script stays. Retire only its Menhir ownership: the /run/lock/menhir-production.lock release lock, the Menhir release authority, and the Menhir branches. This is the second transaction kernel the architecture review flagged."
     },
     "e5ed2b63e4bfcb59": {
-      "disposition": "replace", "owner": "yawn.deploy",
+      "disposition": "replace",
+      "owner": "yawn.deploy",
       "note": "check-drift.sh is READ-ONLY monitoring for Yawn and stays. Its Menhir checks - caddy attachment to menhir-proxy, unexpected Menhir ports, reading Menhir's release.json - now assert a topology that no longer exists and would report false drift. Remove the Menhir assertions."
     },
     "f17e0f0dc087a186": {
-      "disposition": "preserve", "owner": "yawn.deploy",
+      "disposition": "preserve",
+      "owner": "yawn.deploy",
       "note": "remote-deploy.sh references Menhir only to REFUSE: it blocks generic targets from touching privileged proxy artifacts and redirects to the Menhir supervisor. That guard is protective, not duplicated authority. Revisit only after the Menhir Caddy surface is gone, when the refusal has nothing left to protect."
     },
-
     "fbca7095b88db19b": {
-      "disposition": "replace", "owner": "menhir/pipeline",
+      "disposition": "replace",
+      "owner": "menhir/pipeline",
       "note": "deploy-menhir.ps1 is the main desktop deploy wrapper, 45 mutator lines including inline_interpreter_as_root. Superseded by the new pipeline. Retire only once the replacement can deploy end to end."
     },
     "01f306a439ac5507": {
-      "disposition": "replace", "owner": "menhir/pipeline",
+      "disposition": "replace",
+      "owner": "menhir/pipeline",
       "note": "deploy-menhir-app-only.ps1 is the app-only variant; the architecture spec already calls for its removal in favour of one wrapper with the lane carried in the request."
     },
     "933b9a4d04fca3ac": {
-      "disposition": "replace", "owner": "menhir/pipeline",
+      "disposition": "replace",
+      "owner": "menhir/pipeline",
       "note": "menhir-scaffold.ps1 is bootstrap transport. Replaced by the new pipeline's install path."
     },
     "61f4e763602fc83b": {
-      "disposition": "replace", "owner": "menhir/pipeline",
+      "disposition": "replace",
+      "owner": "menhir/pipeline",
       "note": "menhir-backup-archive.ps1 is WORKING and load-bearing: it is what puts nine encrypted archives on the desktop and writes desktop-archive-receipt.json. Do not retire it. Replace only the mechanism - it pipes base64-decoded Python into sudo -n python3 - to read metadata, which is arbitrary root execution for a read that a fixed read command should serve."
     },
     "58272c4cc0311966": {
-      "disposition": "preserve", "owner": "shared-scripts",
+      "disposition": "preserve",
+      "owner": "shared-scripts",
       "note": "vps-ssh.ps1 runs any command on the production host. Unbounded by construction and used by every project on the shared box, including this investigation. Not Menhir's to retire. Recorded so it is never mistaken for absent - it is the reason the census anchors on the target host rather than command verbs."
     },
     "17cb1c07273d1c6c": {
-      "disposition": "preserve", "owner": "shared-scripts",
+      "disposition": "preserve",
+      "owner": "shared-scripts",
       "note": "vps-compose.ps1 runs any docker compose args against the VPS. Same reasoning as vps-ssh.ps1: shared infrastructure, not Menhir's to remove."
     },
     "d881163116b90dda": {
-      "disposition": "preserve", "owner": "shared-scripts",
+      "disposition": "preserve",
+      "owner": "shared-scripts",
       "note": "vps-scp.ps1 is generic file transfer used by menhir-backup-archive.ps1 among others. Shared infrastructure."
     },
-
     "b9ac9038ea3a3189": {
-      "disposition": "retire", "owner": "yawn.vps",
+      "disposition": "retire",
+      "owner": "yawn.vps",
       "note": "menhir-caddy-reconcile.service invokes caddy-release.sh / caddy-route-* under /srv/menhir/production/bin/, which Menhir's own ansible already deletes and asserts absent. The unit points at scripts that are gone."
     },
     "1293c9a281755afa": {
-      "disposition": "retire", "owner": "yawn.vps",
+      "disposition": "retire",
+      "owner": "yawn.vps",
       "note": "menhir-caddy-reconcile.path is the activation trigger for the retired reconcile service. Retire with it."
     },
     "8db5421ff7e981a2": {
-      "disposition": "retire", "owner": "yawn.vps",
+      "disposition": "retire",
+      "owner": "yawn.vps",
       "note": "menhir-op@.service documents itself as a reference definition that is never started directly - the submit wrappers enqueue transient units via systemd-run instead. A unit file that is documentation invites being enabled by mistake; the shape belongs in the README."
+    },
+    "b6a0d83d3988fc01": {
+      "disposition": "preserve",
+      "owner": "yawn.vps",
+      "note": "menhir_server.py is the read-only OAuth-protected MCP server exposing the five Menhir read commands. Legitimate gateway; the scaffold contract requires menhir-oauth-operations.service active and enabled. Note: /ops/mcp is not publicly routed, so this is reachable only on the host - a separate decision, not a cleanup item."
+    },
+    "730740fae495726c": {
+      "disposition": "preserve",
+      "owner": "yawn.vps",
+      "note": "vps/menhir_tools.py implements those five read tools by shelling to the fixed wrappers. Read-only by construction."
+    },
+    "1c556f7e94e6cf71": {
+      "disposition": "preserve",
+      "owner": "yawn.vps",
+      "note": "menhir-oauth-operations.service runs the gateway above. Contract requires it active and enabled."
+    },
+    "14056d45d6a70ce8": {
+      "disposition": "replace",
+      "owner": "menhir/pipeline",
+      "note": "ops/menhir/bin/lib.sh owns submit_op and the transaction verbs - the single most load-bearing file in the operator surface, and the least obvious place to look for it. Relocates to menhir/pipeline per CONSOLIDATION.md, bytes unchanged."
+    },
+    "ef6101c3a60bd4d8": {
+      "disposition": "replace",
+      "owner": "menhir/pipeline",
+      "note": "ops/menhir/bin/status. Relocation, bytes unchanged."
+    },
+    "b032569d5b460b0f": {
+      "disposition": "replace",
+      "owner": "menhir/pipeline",
+      "note": "ops/menhir/bin/verify-artifacts. Relocation, bytes unchanged. Note it verifies only paths listed in release.json, which is why the stale production/deploy tree is invisible to it."
+    },
+    "9a0a907d04715eeb": {
+      "disposition": "replace",
+      "owner": "menhir/pipeline",
+      "note": "ops/menhir/bin/backup-status. Already rewritten this session to report the real recoverability chain; relocates with the rest."
+    },
+    "cfec5bc404e3084d": {
+      "disposition": "replace",
+      "owner": "menhir/pipeline",
+      "note": "ops/menhir/etc/sudoers.d/menhir-production grants only the five read commands - it is the actual privilege boundary and belongs beside the commands it grants."
+    },
+    "f01bf40620db1afb": {
+      "disposition": "replace",
+      "owner": "menhir/pipeline",
+      "note": "ops/menhir/etc/tmpfiles.d/menhir-production.conf. Relocation."
+    },
+    "0ad5390dc3202079": {
+      "disposition": "preserve",
+      "owner": "yawn.vps",
+      "note": "Generic yawn.vps MCP server code, not part of Menhir deployment. Flagged only because it runs privileged operations on the shared host and could in principle reach Menhir's containers. Preserved and recorded so it is never mistaken for absent."
+    },
+    "d11d822a5cb12067": {
+      "disposition": "preserve",
+      "owner": "yawn.vps",
+      "note": "Generic yawn.vps MCP server code, not part of Menhir deployment. Flagged only because it runs privileged operations on the shared host and could in principle reach Menhir's containers. Preserved and recorded so it is never mistaken for absent."
+    },
+    "e0d755d4611251b5": {
+      "disposition": "preserve",
+      "owner": "yawn.vps",
+      "note": "Generic yawn.vps MCP server code, not part of Menhir deployment. Flagged only because it runs privileged operations on the shared host and could in principle reach Menhir's containers. Preserved and recorded so it is never mistaken for absent."
+    },
+    "474ca18b851040d2": {
+      "disposition": "preserve",
+      "owner": "yawn.vps",
+      "note": "Generic yawn.vps MCP server code, not part of Menhir deployment. Flagged only because it runs privileged operations on the shared host and could in principle reach Menhir's containers. Preserved and recorded so it is never mistaken for absent."
+    },
+    "00d629da6e9631a4": {
+      "disposition": "preserve",
+      "owner": "yawn.vps",
+      "note": "Generic yawn.vps MCP server code, not part of Menhir deployment. Flagged only because it runs privileged operations on the shared host and could in principle reach Menhir's containers. Preserved and recorded so it is never mistaken for absent."
+    },
+    "fdc55215aa21b3c5": {
+      "disposition": "preserve",
+      "owner": "yawn.vps",
+      "note": "Generic yawn.vps MCP server code, not part of Menhir deployment. Flagged only because it runs privileged operations on the shared host and could in principle reach Menhir's containers. Preserved and recorded so it is never mistaken for absent."
+    },
+    "ac88dae3b090ec11": {
+      "disposition": "preserve",
+      "owner": "yawn.vps",
+      "note": "Generic yawn.vps MCP server code, not part of Menhir deployment. Flagged only because it runs privileged operations on the shared host and could in principle reach Menhir's containers. Preserved and recorded so it is never mistaken for absent."
+    },
+    "264d42c68f61f475": {
+      "disposition": "preserve",
+      "owner": "yawn.vps",
+      "note": "Generic yawn.vps MCP server code, not part of Menhir deployment. Flagged only because it runs privileged operations on the shared host and could in principle reach Menhir's containers. Preserved and recorded so it is never mistaken for absent."
     }
   }
 }
