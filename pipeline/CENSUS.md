@@ -8,8 +8,8 @@ detection rules. Do not hand-edit: re-run the tool.
 - findings: **1194**
 - mutator lines: **656**
 - entry points (must each carry a disposition): **105**
-- classified: **33**
-- unclassified: **72**
+- classified: **54**
+- unclassified: **51**
 - stale dispositions (id no longer present): **0**
 
 ## Scan roots
@@ -100,40 +100,40 @@ retired as a whole. Line-level findings are the evidence and live in
 | `89cb0cfdcfd5650c` | `menhir` | `scripts/dev/test_server.py` | 1 | systemd_unit | **UNCLASSIFIED** | - |
 | `e46b741218e2641a` | `menhir` | `scripts/replay_fold_flags.py` | 1 | compose_production | **UNCLASSIFIED** | - |
 | `52709fb1077ed686` | `menhir` | `scripts/setup_remote_test_neo4j.sh` | 5 | arbitrary_command_passthrough, compose_production, remote_shell_exec | **UNCLASSIFIED** | - |
-| `677a91b198075345` | `shared-scripts` | `check-card-colors.py` | 1 | systemd_unit | **UNCLASSIFIED** | - |
+| `677a91b198075345` | `shared-scripts` | `check-card-colors.py` | 1 | systemd_unit | preserve | shared-scripts |
 | `01f306a439ac5507` | `shared-scripts` | `deploy-menhir-app-only.ps1` | 8 | base64_program_transfer, production_host_reference, remote_shell_exec, sudo_invocation | replace | menhir/pipeline |
 | `fbca7095b88db19b` | `shared-scripts` | `deploy-menhir.ps1` | 45 | base64_program_transfer, database_or_backup_op, inline_interpreter_as_root, production_host_reference, remote_shell_exec, sudo_invocation, systemd_unit | replace | menhir/pipeline |
-| `423e59d41548b7a5` | `shared-scripts` | `market-sealed/vps-check-null-sealed.ps1` | 4 | compose_production, production_host_reference, remote_shell_exec | **UNCLASSIFIED** | - |
-| `2ff9f2091ef7ec05` | `shared-scripts` | `market-sealed/vps-download-sealed.ps1` | 4 | compose_production, production_host_reference, remote_shell_exec | **UNCLASSIFIED** | - |
-| `6859083f7aae5e25` | `shared-scripts` | `market-sealed/vps-upload-manual-images.ps1` | 4 | compose_production, production_host_reference, remote_shell_exec | **UNCLASSIFIED** | - |
+| `423e59d41548b7a5` | `shared-scripts` | `market-sealed/vps-check-null-sealed.ps1` | 4 | compose_production, production_host_reference, remote_shell_exec | preserve | shared-scripts |
+| `2ff9f2091ef7ec05` | `shared-scripts` | `market-sealed/vps-download-sealed.ps1` | 4 | compose_production, production_host_reference, remote_shell_exec | preserve | shared-scripts |
+| `6859083f7aae5e25` | `shared-scripts` | `market-sealed/vps-upload-manual-images.ps1` | 4 | compose_production, production_host_reference, remote_shell_exec | preserve | shared-scripts |
 | `61f4e763602fc83b` | `shared-scripts` | `menhir-backup-archive.ps1` | 12 | base64_program_transfer, database_or_backup_op, inline_interpreter_as_root, production_host_reference, remote_shell_exec, sudo_invocation | replace | menhir/pipeline |
 | `933b9a4d04fca3ac` | `shared-scripts` | `menhir-scaffold.ps1` | 17 | base64_program_transfer, database_or_backup_op, production_host_reference, remote_shell_exec, sudo_invocation, sudoers_definition, systemd_unit | replace | menhir/pipeline |
-| `8b5af66e191221c4` | `shared-scripts` | `scratch/2026-04-10/tmp_query.sh` | 1 | compose_production | **UNCLASSIFIED** | - |
-| `d242256674690869` | `shared-scripts` | `start_background.ps1` | 1 | compose_production | **UNCLASSIFIED** | - |
-| `579d2683833c5816` | `shared-scripts` | `start_console.ps1` | 1 | compose_production | **UNCLASSIFIED** | - |
-| `9ce30679d465ac13` | `shared-scripts` | `tmp-clear-card-colors.ps1` | 1 | compose_production | **UNCLASSIFIED** | - |
+| `8b5af66e191221c4` | `shared-scripts` | `scratch/2026-04-10/tmp_query.sh` | 1 | compose_production | preserve | shared-scripts |
+| `d242256674690869` | `shared-scripts` | `start_background.ps1` | 1 | compose_production | preserve | shared-scripts |
+| `579d2683833c5816` | `shared-scripts` | `start_console.ps1` | 1 | compose_production | preserve | shared-scripts |
+| `9ce30679d465ac13` | `shared-scripts` | `tmp-clear-card-colors.ps1` | 1 | compose_production | preserve | shared-scripts |
 | `17cb1c07273d1c6c` | `shared-scripts` | `vps-compose.ps1` | 4 | arbitrary_command_passthrough, production_host_reference | preserve | shared-scripts |
 | `d881163116b90dda` | `shared-scripts` | `vps-scp.ps1` | 2 | production_host_reference, remote_shell_exec | preserve | shared-scripts |
 | `58272c4cc0311966` | `shared-scripts` | `vps-ssh.ps1` | 4 | arbitrary_command_passthrough, production_host_reference | preserve | shared-scripts |
 | `7aedddbcf7882407` | `yawn.deploy` | `Caddyfile` | 4 | production_host_reference | replace | yawn.deploy |
-| `bda07c8c781ce55e` | `yawn.deploy` | `bootstrap-postgres.sh` | 2 | arbitrary_command_passthrough, compose_production | **UNCLASSIFIED** | - |
+| `bda07c8c781ce55e` | `yawn.deploy` | `bootstrap-postgres.sh` | 2 | arbitrary_command_passthrough, compose_production | preserve | yawn.deploy |
 | `7aed8f5cc1753f18` | `yawn.deploy` | `caddy-release.sh` | 16 | arbitrary_command_passthrough, lock_acquisition, production_host_reference | replace | yawn.deploy |
 | `e5ed2b63e4bfcb59` | `yawn.deploy` | `check-drift.sh` | 5 | arbitrary_command_passthrough, production_host_reference, sudo_invocation | replace | yawn.deploy |
 | `92d28a1a4f8e3064` | `yawn.deploy` | `docker-compose.yml` | 2 | production_host_reference | replace | yawn.deploy |
-| `e6c256681168af57` | `yawn.deploy` | `lib/registry.sh` | 1 | arbitrary_command_passthrough | **UNCLASSIFIED** | - |
-| `25597cf5a8dc1f5b` | `yawn.deploy` | `ops/backup/daily-backup.sh` | 2 | arbitrary_command_passthrough, compose_production | **UNCLASSIFIED** | - |
-| `2d05f592204ea679` | `yawn.deploy` | `ops/backup/home-pull-backups.sh` | 3 | production_host_reference, remote_shell_exec | **UNCLASSIFIED** | - |
-| `56e9bf1db66c7481` | `yawn.deploy` | `ops/backup/offsite-backup.sh` | 3 | arbitrary_command_passthrough, compose_production | **UNCLASSIFIED** | - |
-| `5aad9b73072e222f` | `yawn.deploy` | `ops/seed-nightly/run-seed-nightly.sh` | 3 | arbitrary_command_passthrough, lock_acquisition | **UNCLASSIFIED** | - |
-| `5ec5e1d4f978a0ab` | `yawn.deploy` | `ops/seed-nightly/yawn-seed-nightly.service` | 3 | systemd_unit | **UNCLASSIFIED** | - |
-| `34842d2f50dfa0a8` | `yawn.deploy` | `ops/seed-nightly/yawn-seed-nightly.timer` | 6 | systemd_unit | **UNCLASSIFIED** | - |
+| `e6c256681168af57` | `yawn.deploy` | `lib/registry.sh` | 1 | arbitrary_command_passthrough | preserve | yawn.deploy |
+| `25597cf5a8dc1f5b` | `yawn.deploy` | `ops/backup/daily-backup.sh` | 2 | arbitrary_command_passthrough, compose_production | preserve | yawn.deploy |
+| `2d05f592204ea679` | `yawn.deploy` | `ops/backup/home-pull-backups.sh` | 3 | production_host_reference, remote_shell_exec | preserve | yawn.deploy |
+| `56e9bf1db66c7481` | `yawn.deploy` | `ops/backup/offsite-backup.sh` | 3 | arbitrary_command_passthrough, compose_production | preserve | yawn.deploy |
+| `5aad9b73072e222f` | `yawn.deploy` | `ops/seed-nightly/run-seed-nightly.sh` | 3 | arbitrary_command_passthrough, lock_acquisition | preserve | yawn.deploy |
+| `5ec5e1d4f978a0ab` | `yawn.deploy` | `ops/seed-nightly/yawn-seed-nightly.service` | 3 | systemd_unit | preserve | yawn.deploy |
+| `34842d2f50dfa0a8` | `yawn.deploy` | `ops/seed-nightly/yawn-seed-nightly.timer` | 6 | systemd_unit | preserve | yawn.deploy |
 | `a7ed817b18792426` | `yawn.deploy` | `releases.json` | 9 | lock_acquisition, production_host_reference | replace | yawn.deploy |
 | `f17e0f0dc087a186` | `yawn.deploy` | `remote-deploy.sh` | 4 | arbitrary_command_passthrough, sudo_invocation, systemd_unit | preserve | yawn.deploy |
-| `2c5286116055f38b` | `yawn.deploy` | `tests/caddy-release.test.sh` | 23 | arbitrary_command_passthrough, production_host_reference | **UNCLASSIFIED** | - |
-| `d894e988d2e28c97` | `yawn.deploy` | `tests/sealed-copy.test.sh` | 8 | arbitrary_command_passthrough, compose_production | **UNCLASSIFIED** | - |
-| `ddd37cb51e38c1ba` | `yawn.deploy` | `tests/seed-nightly.test.sh` | 12 | arbitrary_command_passthrough, lock_acquisition, systemd_unit | **UNCLASSIFIED** | - |
-| `2d7dd86cfae91a37` | `yawn.deploy` | `tools/card-image-canary.py` | 2 | systemd_unit | **UNCLASSIFIED** | - |
-| `9b42b4671c0e15d6` | `yawn.deploy` | `wait-for-readiness.sh` | 2 | arbitrary_command_passthrough | **UNCLASSIFIED** | - |
+| `2c5286116055f38b` | `yawn.deploy` | `tests/caddy-release.test.sh` | 23 | arbitrary_command_passthrough, production_host_reference | replace | yawn.deploy |
+| `d894e988d2e28c97` | `yawn.deploy` | `tests/sealed-copy.test.sh` | 8 | arbitrary_command_passthrough, compose_production | preserve | yawn.deploy |
+| `ddd37cb51e38c1ba` | `yawn.deploy` | `tests/seed-nightly.test.sh` | 12 | arbitrary_command_passthrough, lock_acquisition, systemd_unit | preserve | yawn.deploy |
+| `2d7dd86cfae91a37` | `yawn.deploy` | `tools/card-image-canary.py` | 2 | systemd_unit | preserve | yawn.deploy |
+| `9b42b4671c0e15d6` | `yawn.deploy` | `wait-for-readiness.sh` | 2 | arbitrary_command_passthrough | preserve | yawn.deploy |
 | `b6a0d83d3988fc01` | `yawn.vps` | `menhir_server.py` | 3 | production_host_reference | preserve | yawn.vps |
 | `9a0a907d04715eeb` | `yawn.vps` | `ops/menhir/bin/backup-status` | 2 | arbitrary_command_passthrough | replace | menhir/pipeline |
 | `14056d45d6a70ce8` | `yawn.vps` | `ops/menhir/bin/lib.sh` | 18 | arbitrary_command_passthrough, database_or_backup_op, lock_acquisition, production_host_reference, systemd_unit | replace | menhir/pipeline |

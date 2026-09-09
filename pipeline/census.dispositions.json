@@ -178,6 +178,111 @@
       "disposition": "preserve",
       "owner": "yawn.vps",
       "note": "Generic yawn.vps MCP server code, not part of Menhir deployment. Flagged only because it runs privileged operations on the shared host and could in principle reach Menhir's containers. Preserved and recorded so it is never mistaken for absent."
+    },
+    "2c5286116055f38b": {
+      "disposition": "replace",
+      "owner": "yawn.deploy",
+      "note": "tests/caddy-release.test.sh has 41 Menhir references and asserts the exact dead topology - menhir_network, menhir_network_subnet 172.30.0.0/24, menhir_proxy_ip 172.30.0.3. It must change in the same commit that removes the Menhir surface from caddy-release.sh and releases.json, or it will fail. Pairs with 7aed8f5cc1753f18 and a7ed817b18792426."
+    },
+    "bda07c8c781ce55e": {
+      "disposition": "preserve",
+      "owner": "yawn.deploy",
+      "note": "Yawn's own infrastructure on the shared host. Not part of Menhir deployment. Recorded rather than scoped out because it runs privileged operations on the same box; it is not Menhir's to change."
+    },
+    "e6c256681168af57": {
+      "disposition": "preserve",
+      "owner": "yawn.deploy",
+      "note": "Yawn's own infrastructure on the shared host. Not part of Menhir deployment. Recorded rather than scoped out because it runs privileged operations on the same box; it is not Menhir's to change."
+    },
+    "25597cf5a8dc1f5b": {
+      "disposition": "preserve",
+      "owner": "yawn.deploy",
+      "note": "Yawn's own infrastructure on the shared host. Not part of Menhir deployment. Recorded rather than scoped out because it runs privileged operations on the same box; it is not Menhir's to change."
+    },
+    "2d05f592204ea679": {
+      "disposition": "preserve",
+      "owner": "yawn.deploy",
+      "note": "ops/backup/home-pull-backups.sh pulls Yawn backups from the production host to home. Zero Menhir references - Menhir has its own separate desktop archive path via menhir-backup-archive.ps1. Preserved; noted because the two solve the same problem independently and could eventually share one mechanism."
+    },
+    "56e9bf1db66c7481": {
+      "disposition": "preserve",
+      "owner": "yawn.deploy",
+      "note": "Yawn's own infrastructure on the shared host. Not part of Menhir deployment. Recorded rather than scoped out because it runs privileged operations on the same box; it is not Menhir's to change."
+    },
+    "5aad9b73072e222f": {
+      "disposition": "preserve",
+      "owner": "yawn.deploy",
+      "note": "Yawn's own infrastructure on the shared host. Not part of Menhir deployment. Recorded rather than scoped out because it runs privileged operations on the same box; it is not Menhir's to change."
+    },
+    "5ec5e1d4f978a0ab": {
+      "disposition": "preserve",
+      "owner": "yawn.deploy",
+      "note": "Yawn's own infrastructure on the shared host. Not part of Menhir deployment. Recorded rather than scoped out because it runs privileged operations on the same box; it is not Menhir's to change."
+    },
+    "34842d2f50dfa0a8": {
+      "disposition": "preserve",
+      "owner": "yawn.deploy",
+      "note": "Yawn's own infrastructure on the shared host. Not part of Menhir deployment. Recorded rather than scoped out because it runs privileged operations on the same box; it is not Menhir's to change."
+    },
+    "d894e988d2e28c97": {
+      "disposition": "preserve",
+      "owner": "yawn.deploy",
+      "note": "Yawn's own infrastructure on the shared host. Not part of Menhir deployment. Recorded rather than scoped out because it runs privileged operations on the same box; it is not Menhir's to change."
+    },
+    "ddd37cb51e38c1ba": {
+      "disposition": "preserve",
+      "owner": "yawn.deploy",
+      "note": "Yawn's own infrastructure on the shared host. Not part of Menhir deployment. Recorded rather than scoped out because it runs privileged operations on the same box; it is not Menhir's to change."
+    },
+    "2d7dd86cfae91a37": {
+      "disposition": "preserve",
+      "owner": "yawn.deploy",
+      "note": "Yawn's own infrastructure on the shared host. Not part of Menhir deployment. Recorded rather than scoped out because it runs privileged operations on the same box; it is not Menhir's to change."
+    },
+    "9b42b4671c0e15d6": {
+      "disposition": "preserve",
+      "owner": "yawn.deploy",
+      "note": "Yawn's own infrastructure on the shared host. Not part of Menhir deployment. Recorded rather than scoped out because it runs privileged operations on the same box; it is not Menhir's to change."
+    },
+    "677a91b198075345": {
+      "disposition": "preserve",
+      "owner": "shared-scripts",
+      "note": "Belongs to another project on the shared box (yawn.market / local dev). No Menhir role. Recorded so the census stays a complete picture of what can act on this host; not Menhir's to remove."
+    },
+    "423e59d41548b7a5": {
+      "disposition": "preserve",
+      "owner": "shared-scripts",
+      "note": "yawn.market sealed-image tooling. SCPs to and runs docker on the production host, so it can reach Menhir's containers in principle, but it has no Menhir role and is not Menhir's to remove."
+    },
+    "2ff9f2091ef7ec05": {
+      "disposition": "preserve",
+      "owner": "shared-scripts",
+      "note": "yawn.market sealed-image tooling. Same reasoning as 423e59d41548b7a5."
+    },
+    "6859083f7aae5e25": {
+      "disposition": "preserve",
+      "owner": "shared-scripts",
+      "note": "yawn.market sealed-image tooling. Same reasoning as 423e59d41548b7a5."
+    },
+    "d242256674690869": {
+      "disposition": "preserve",
+      "owner": "shared-scripts",
+      "note": "Belongs to another project on the shared box (yawn.market / local dev). No Menhir role. Recorded so the census stays a complete picture of what can act on this host; not Menhir's to remove."
+    },
+    "579d2683833c5816": {
+      "disposition": "preserve",
+      "owner": "shared-scripts",
+      "note": "Belongs to another project on the shared box (yawn.market / local dev). No Menhir role. Recorded so the census stays a complete picture of what can act on this host; not Menhir's to remove."
+    },
+    "9ce30679d465ac13": {
+      "disposition": "preserve",
+      "owner": "shared-scripts",
+      "note": "Belongs to another project on the shared box (yawn.market / local dev). No Menhir role. Recorded so the census stays a complete picture of what can act on this host; not Menhir's to remove."
+    },
+    "8b5af66e191221c4": {
+      "disposition": "preserve",
+      "owner": "shared-scripts",
+      "note": "scratch/2026-04-10/tmp_query.sh - a scratch file five months old. Obvious cruft, but it belongs to the shared scripts directory rather than Menhir, so flagging it for the owner rather than retiring it here."
     }
   }
 }

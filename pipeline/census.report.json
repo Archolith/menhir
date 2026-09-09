@@ -26,8 +26,8 @@
     "findings": 1194,
     "mutator_lines": 656,
     "entry_points": 105,
-    "classified": 33,
-    "unclassified": 72,
+    "classified": 54,
+    "unclassified": 51,
     "stale_dispositions": 0
   },
   "by_detector": {
@@ -768,9 +768,9 @@
       ],
       "mutator_lines": 1,
       "first_line": 78,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "shared-scripts",
+      "note": "Belongs to another project on the shared box (yawn.market / local dev). No Menhir role. Recorded so the census stays a complete picture of what can act on this host; not Menhir's to remove."
     },
     {
       "id": "01f306a439ac5507",
@@ -818,9 +818,9 @@
       ],
       "mutator_lines": 4,
       "first_line": 10,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "shared-scripts",
+      "note": "yawn.market sealed-image tooling. SCPs to and runs docker on the production host, so it can reach Menhir's containers in principle, but it has no Menhir role and is not Menhir's to remove."
     },
     {
       "id": "2ff9f2091ef7ec05",
@@ -833,9 +833,9 @@
       ],
       "mutator_lines": 4,
       "first_line": 11,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "shared-scripts",
+      "note": "yawn.market sealed-image tooling. Same reasoning as 423e59d41548b7a5."
     },
     {
       "id": "6859083f7aae5e25",
@@ -848,9 +848,9 @@
       ],
       "mutator_lines": 4,
       "first_line": 58,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "shared-scripts",
+      "note": "yawn.market sealed-image tooling. Same reasoning as 423e59d41548b7a5."
     },
     {
       "id": "61f4e763602fc83b",
@@ -898,9 +898,9 @@
       ],
       "mutator_lines": 1,
       "first_line": 2,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "shared-scripts",
+      "note": "scratch/2026-04-10/tmp_query.sh - a scratch file five months old. Obvious cruft, but it belongs to the shared scripts directory rather than Menhir, so flagging it for the owner rather than retiring it here."
     },
     {
       "id": "d242256674690869",
@@ -911,9 +911,9 @@
       ],
       "mutator_lines": 1,
       "first_line": 31,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "shared-scripts",
+      "note": "Belongs to another project on the shared box (yawn.market / local dev). No Menhir role. Recorded so the census stays a complete picture of what can act on this host; not Menhir's to remove."
     },
     {
       "id": "579d2683833c5816",
@@ -924,9 +924,9 @@
       ],
       "mutator_lines": 1,
       "first_line": 39,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "shared-scripts",
+      "note": "Belongs to another project on the shared box (yawn.market / local dev). No Menhir role. Recorded so the census stays a complete picture of what can act on this host; not Menhir's to remove."
     },
     {
       "id": "9ce30679d465ac13",
@@ -937,9 +937,9 @@
       ],
       "mutator_lines": 1,
       "first_line": 2,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "shared-scripts",
+      "note": "Belongs to another project on the shared box (yawn.market / local dev). No Menhir role. Recorded so the census stays a complete picture of what can act on this host; not Menhir's to remove."
     },
     {
       "id": "17cb1c07273d1c6c",
@@ -1006,9 +1006,9 @@
       ],
       "mutator_lines": 2,
       "first_line": 20,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "yawn.deploy",
+      "note": "Yawn's own infrastructure on the shared host. Not part of Menhir deployment. Recorded rather than scoped out because it runs privileged operations on the same box; it is not Menhir's to change."
     },
     {
       "id": "7aed8f5cc1753f18",
@@ -1062,9 +1062,9 @@
       ],
       "mutator_lines": 1,
       "first_line": 38,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "yawn.deploy",
+      "note": "Yawn's own infrastructure on the shared host. Not part of Menhir deployment. Recorded rather than scoped out because it runs privileged operations on the same box; it is not Menhir's to change."
     },
     {
       "id": "25597cf5a8dc1f5b",
@@ -1076,9 +1076,9 @@
       ],
       "mutator_lines": 2,
       "first_line": 37,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "yawn.deploy",
+      "note": "Yawn's own infrastructure on the shared host. Not part of Menhir deployment. Recorded rather than scoped out because it runs privileged operations on the same box; it is not Menhir's to change."
     },
     {
       "id": "2d05f592204ea679",
@@ -1090,9 +1090,9 @@
       ],
       "mutator_lines": 3,
       "first_line": 19,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "yawn.deploy",
+      "note": "ops/backup/home-pull-backups.sh pulls Yawn backups from the production host to home. Zero Menhir references - Menhir has its own separate desktop archive path via menhir-backup-archive.ps1. Preserved; noted because the two solve the same problem independently and could eventually share one mechanism."
     },
     {
       "id": "56e9bf1db66c7481",
@@ -1104,9 +1104,9 @@
       ],
       "mutator_lines": 3,
       "first_line": 78,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "yawn.deploy",
+      "note": "Yawn's own infrastructure on the shared host. Not part of Menhir deployment. Recorded rather than scoped out because it runs privileged operations on the same box; it is not Menhir's to change."
     },
     {
       "id": "5aad9b73072e222f",
@@ -1118,9 +1118,9 @@
       ],
       "mutator_lines": 3,
       "first_line": 6,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "yawn.deploy",
+      "note": "Yawn's own infrastructure on the shared host. Not part of Menhir deployment. Recorded rather than scoped out because it runs privileged operations on the same box; it is not Menhir's to change."
     },
     {
       "id": "5ec5e1d4f978a0ab",
@@ -1131,9 +1131,9 @@
       ],
       "mutator_lines": 3,
       "first_line": 1,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "yawn.deploy",
+      "note": "Yawn's own infrastructure on the shared host. Not part of Menhir deployment. Recorded rather than scoped out because it runs privileged operations on the same box; it is not Menhir's to change."
     },
     {
       "id": "34842d2f50dfa0a8",
@@ -1144,9 +1144,9 @@
       ],
       "mutator_lines": 6,
       "first_line": 1,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "yawn.deploy",
+      "note": "Yawn's own infrastructure on the shared host. Not part of Menhir deployment. Recorded rather than scoped out because it runs privileged operations on the same box; it is not Menhir's to change."
     },
     {
       "id": "a7ed817b18792426",
@@ -1187,9 +1187,9 @@
       ],
       "mutator_lines": 23,
       "first_line": 47,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "replace",
+      "owner": "yawn.deploy",
+      "note": "tests/caddy-release.test.sh has 41 Menhir references and asserts the exact dead topology - menhir_network, menhir_network_subnet 172.30.0.0/24, menhir_proxy_ip 172.30.0.3. It must change in the same commit that removes the Menhir surface from caddy-release.sh and releases.json, or it will fail. Pairs with 7aed8f5cc1753f18 and a7ed817b18792426."
     },
     {
       "id": "d894e988d2e28c97",
@@ -1201,9 +1201,9 @@
       ],
       "mutator_lines": 8,
       "first_line": 17,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "yawn.deploy",
+      "note": "Yawn's own infrastructure on the shared host. Not part of Menhir deployment. Recorded rather than scoped out because it runs privileged operations on the same box; it is not Menhir's to change."
     },
     {
       "id": "ddd37cb51e38c1ba",
@@ -1216,9 +1216,9 @@
       ],
       "mutator_lines": 12,
       "first_line": 10,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "yawn.deploy",
+      "note": "Yawn's own infrastructure on the shared host. Not part of Menhir deployment. Recorded rather than scoped out because it runs privileged operations on the same box; it is not Menhir's to change."
     },
     {
       "id": "2d7dd86cfae91a37",
@@ -1229,9 +1229,9 @@
       ],
       "mutator_lines": 2,
       "first_line": 243,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "yawn.deploy",
+      "note": "Yawn's own infrastructure on the shared host. Not part of Menhir deployment. Recorded rather than scoped out because it runs privileged operations on the same box; it is not Menhir's to change."
     },
     {
       "id": "9b42b4671c0e15d6",
@@ -1242,9 +1242,9 @@
       ],
       "mutator_lines": 2,
       "first_line": 110,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "yawn.deploy",
+      "note": "Yawn's own infrastructure on the shared host. Not part of Menhir deployment. Recorded rather than scoped out because it runs privileged operations on the same box; it is not Menhir's to change."
     },
     {
       "id": "b6a0d83d3988fc01",
@@ -14711,28 +14711,7 @@
     "e0668ac42adcead0",
     "89cb0cfdcfd5650c",
     "e46b741218e2641a",
-    "52709fb1077ed686",
-    "677a91b198075345",
-    "423e59d41548b7a5",
-    "2ff9f2091ef7ec05",
-    "6859083f7aae5e25",
-    "8b5af66e191221c4",
-    "d242256674690869",
-    "579d2683833c5816",
-    "9ce30679d465ac13",
-    "bda07c8c781ce55e",
-    "e6c256681168af57",
-    "25597cf5a8dc1f5b",
-    "2d05f592204ea679",
-    "56e9bf1db66c7481",
-    "5aad9b73072e222f",
-    "5ec5e1d4f978a0ab",
-    "34842d2f50dfa0a8",
-    "2c5286116055f38b",
-    "d894e988d2e28c97",
-    "ddd37cb51e38c1ba",
-    "2d7dd86cfae91a37",
-    "9b42b4671c0e15d6"
+    "52709fb1077ed686"
   ],
   "stale_disposition_ids": []
 }
