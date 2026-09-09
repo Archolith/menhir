@@ -433,14 +433,130 @@ class ViewWriteRepositoryMixin:
                 create_and_supersede, params, timeout_s=SAGA_MUTATION_TIMEOUT_S
             )
         if not write_rows:
-            raise ValueError(
-                "FACT View write refused: every declared contributor UUID must resolve to live "
-                ":Episodic or :TurnEvidence evidence"
-            )
+            raise ValueError(self._diagnose_refusal(
+                label=label, key=key, old_uuid=old_uuid, eps=eps,
+                namespace_key=namespace_key, evidence_scope=evidence_scope,
+            ))
         return {"uuid": new_uuid, "view_key": key, "kind": kind,
                 "created": True, "superseded": current is not None,
                 "episodes_present": len(eps), "episodes_missing": 0,
                 "supporting_event_count": len(eps)}
+
+    def _diagnose_refusal(
+        self, *, label: str, key: str, old_uuid: str | None, eps: list[str],
+        namespace_key: str, evidence_scope: str,
+    ) -> str:
+        """Explain WHICH gate refused the write in `create_and_supersede`.
+
+        That statement drops its row for three independent reasons, and every one of them used to
+        surface as the same "must resolve to live evidence" string:
+
+          1. the compare-and-set on the current version (`actual.uuid = $old`) -- a CONCURRENT
+             writer superseded the version we read. Nothing to do with evidence at all.
+          2. contributor resolution -- an eid that is missing, out-of-tenant, unfinalized,
+             quarantined, or ambiguous (>1 candidate).
+          3. fence-generation equality -- the evidence is live but was stamped by a DIFFERENT
+             namespace fence, or by this one before a purge bumped it.
+
+        Misreporting (1) and (3) as (2) sent a real investigation down a race-condition path for a
+        deterministic cross-tenant bug. This is best-effort and READ-ONLY: the write already failed,
+        so a diagnosis that itself errors must never mask the refusal.
+        """
+        from menhir.domain.namespace import tenant_scope_params
+
+        generic = ("FACT View write refused: every declared contributor UUID must resolve to live "
+                   ":Episodic or :TurnEvidence evidence")
+        try:
+            rows = self.neo4j.execute(
+                f"""
+                OPTIONAL MATCH (actual:{label})
+                WHERE (actual.view_key = $key OR actual.qs_key = $key)
+                  AND coalesce(actual.view_current, actual.qs_current, true)
+                WITH collect(actual.uuid) AS actual_uuids
+                OPTIONAL MATCH (f:EvidenceNamespaceFence {{namespace_key: $namespace_key}})
+                WITH actual_uuids, f.generation AS fence_generation
+                CALL {{
+                    UNWIND $eps AS eid
+                    OPTIONAL MATCH (e)
+                    WHERE (e:Episodic AND e.uuid = eid) OR (e:TurnEvidence AND e.turn_id = eid)
+                    WITH eid, [c IN collect(CASE WHEN e IS NULL THEN null ELSE {{
+                            in_tenant: ({evidence_scope}),
+                            finalized: coalesce(e.evidence_finalized, false),
+                            quarantined: coalesce(e.evidence_quarantined, false),
+                            generation: coalesce(e.evidence_generation, e.publication_generation)
+                        }} END) WHERE c IS NOT NULL] AS found
+                    RETURN collect({{eid: eid, found: found}}) AS probes
+                }}
+                RETURN actual_uuids, fence_generation, probes
+                """,
+                {"key": key, "namespace_key": namespace_key, "eps": eps,
+                 **tenant_scope_params(namespace_key)},
+                timeout_s=SAGA_MUTATION_TIMEOUT_S,
+            )
+        except Exception:  # noqa: BLE001 - diagnosis is best-effort; never mask the refusal
+            logger.debug("View refusal diagnosis failed for key=%s", key, exc_info=True)
+            return generic
+        if not rows:
+            return generic
+
+        row = rows[0]
+        actual_uuids = [u for u in (row.get("actual_uuids") or []) if u is not None]
+        fence_generation = row.get("fence_generation")
+        probes = row.get("probes") or []
+        observed = actual_uuids[0] if actual_uuids else None
+
+        # (1) CAS: the current version is not the one we based this write on.
+        if observed != old_uuid:
+            return (
+                f"View write refused: LOST UPDATE on view_key={key}. Expected the current version to "
+                f"be {old_uuid!r} but found {observed!r} -- a concurrent writer superseded it between "
+                f"our read and our write. This is NOT an evidence problem; retry from a fresh read."
+            )
+
+        # (2) contributor resolution, per declared uuid.
+        problems: list[str] = []
+        live: list[Any] = []
+        for probe in probes:
+            eid = probe.get("eid")
+            found = probe.get("found") or []
+            if not found:
+                problems.append(f"{eid}: no :Episodic/:TurnEvidence node with that id exists")
+                continue
+            in_tenant = [c for c in found if c.get("in_tenant")]
+            if not in_tenant:
+                problems.append(
+                    f"{eid}: exists but belongs to a DIFFERENT tenant than this View "
+                    f"(namespace_key={namespace_key!r}); cross-tenant evidence never resolves"
+                )
+                continue
+            usable = [c for c in in_tenant
+                      if c.get("finalized") and not c.get("quarantined")]
+            if not usable:
+                states = ", ".join(
+                    f"finalized={bool(c.get('finalized'))}/quarantined={bool(c.get('quarantined'))}"
+                    for c in in_tenant
+                )
+                problems.append(f"{eid}: in-tenant but not usable evidence ({states})")
+                continue
+            if len(usable) > 1:
+                problems.append(f"{eid}: AMBIGUOUS -- {len(usable)} live candidates share that id")
+                continue
+            live.append(usable[0])
+        if problems:
+            return ("FACT View write refused: declared contributor UUIDs did not resolve to live "
+                    ":Episodic or :TurnEvidence evidence -- " + "; ".join(problems))
+
+        # (3) fence generation: resolved, live, in-tenant, but stamped by another generation.
+        stale = [c for c in live if c.get("generation") != fence_generation]
+        if stale:
+            gens = sorted({c.get("generation") for c in stale})
+            return (
+                f"View write refused: FENCE GENERATION mismatch on namespace_key={namespace_key!r}. "
+                f"All contributors resolved live, but {len(stale)} carry evidence_generation {gens} "
+                f"while that namespace's fence is at generation {fence_generation}. The evidence was "
+                f"stamped by a different fence (cross-namespace contributor) or predates a purge."
+            )
+        return generic
 
     def _link_episodes(
         self, node_uuid: str, episode_uuids: list[str], now: str,
