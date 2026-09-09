@@ -397,15 +397,20 @@ class AdmissionAuditKind(ViewKind):
             "valid_at": row.get("valid_at"),
         }
 
-    def episode_uuids(self, payload: dict[str, Any]) -> list[str]:
-        """Treat the grounding TurnEvidence UUID as lifecycle provenance.
-
-        Keeping ``turn_evidence_uuid`` as an audit property preserves direct operator inspection;
-        returning it here additionally places it in the durable contributor receipt and causes the
-        shared FACT writer to create the authoritative incoming ``MENTIONS`` relationship.
-        """
-        turn_evidence_uuid = str(payload.get("turn_evidence_uuid") or "").strip()
-        return [turn_evidence_uuid] if turn_evidence_uuid else []
+    # NO episode_uuids override, deliberately. `turn_evidence_uuid` stays an audit PROPERTY
+    # (write_props/parse above) and is not declared as a contributor receipt.
+    #
+    # The admission audit is written into the "agent-status" telemetry silo while its grounding
+    # TurnEvidence lives in the USER namespace, so the contributor is cross-tenant by design.
+    # Declaring it made every audit write unsatisfiable: the shared FACT writer resolves evidence
+    # under `tenant_scope_cypher`, scoped to the VIEW's namespace, so the contributor resolved to
+    # zero candidates and the whole write was refused ("must resolve to live evidence") -- the audit
+    # row was lost entirely, silently, because the call site swallows it at DEBUG.
+    #
+    # The MENTIONS edge it was trying to create only serves `view_live_provenance_cypher`, and that
+    # predicate is applied ONLY to `view_audience = 'RECALL'` views. This kind stamps OPERATOR, so
+    # the edge bought nothing here -- and could never have been satisfied anyway, since that same
+    # predicate requires `evidence_tenant = view_tenant`.
 
 
 def _scalar_norm(value: Any) -> str:
