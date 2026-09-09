@@ -101,6 +101,38 @@ RULES: tuple[Rule, ...] = (
         "and argument inspection at the privilege boundary.",
         "mutator",
     ),
+    # --- target-anchored detection -------------------------------------------
+    # The verb-anchored rules below all failed on scripts/vps-ssh.ps1 and
+    # scripts/vps-compose.ps1, which take an arbitrary command as a parameter
+    # and run it on the production host. They build the command dynamically, so
+    # no literal `ssh host "..."` or `docker compose ...` appears in code; in
+    # vps-compose.ps1 the only occurrence of "docker compose" is a comment.
+    #
+    # This is a general weakness of verb matching: the MOST dangerous scripts
+    # are the ones that pass any command through, and those are the LEAST
+    # likely to contain a matching literal. Anchor on the target instead. A
+    # file that names the production host is a mutation candidate no matter how
+    # it builds what it sends there.
+    Rule(
+        "production_host_reference",
+        "host-target",
+        _rx(r"147\.93\.132\.141|YAWN_VPS_HOST|memory\.ctharvey\.me|"
+            r"YAWN_VPS_SSH_KEY_PATH|menhir-prod-app"),
+        "Names the production host, its host variable, or its SSH credential "
+        "material. Anything that can address the box is a mutation candidate "
+        "regardless of which commands it happens to contain.",
+        "mutator",
+    ),
+    Rule(
+        "arbitrary_command_passthrough",
+        "host-target",
+        _rx(r"ValueFromRemainingArguments|\$args\b|\"\$@\"|\bexec\s+\"?\$|"
+            r"Usage:[^\n]*<remote command>|<docker compose args>"),
+        "Forwards caller-supplied arguments onward as a command. Unbounded by "
+        "construction: it cannot be constrained by sudoers argument matching "
+        "and cannot be reasoned about from its own source.",
+        "mutator",
+    ),
     # --- privileged invocation ------------------------------------------------
     Rule(
         "sudo_invocation",

@@ -4,35 +4,37 @@
     {
       "name": "menhir",
       "root": "C:\\Users\\thron\\Documents\\Codex\\2026-09-06\\inve\\work\\menhir-doc-staged-promotion",
-      "findings": 465
+      "findings": 557
     },
     {
       "name": "shared-scripts",
       "root": "C:\\Users\\thron\\IdeaProjects\\scripts",
-      "findings": 119
+      "findings": 142
     },
     {
       "name": "yawn.deploy",
       "root": "C:\\Users\\thron\\IdeaProjects\\projects\\yawn\\yawn.deploy",
-      "findings": 256
+      "findings": 326
     },
     {
       "name": "yawn.vps",
       "root": "C:\\Users\\thron\\IdeaProjects\\projects\\yawn\\yawn.vps",
-      "findings": 147
+      "findings": 167
     }
   ],
   "totals": {
-    "findings": 987,
-    "mutator_lines": 479,
-    "entry_points": 88,
+    "findings": 1192,
+    "mutator_lines": 654,
+    "entry_points": 104,
     "classified": 0,
-    "unclassified": 88,
+    "unclassified": 104,
     "stale_dispositions": 0
   },
   "by_detector": {
     "inline_interpreter_as_root": 6,
     "base64_program_transfer": 26,
+    "production_host_reference": 169,
+    "arbitrary_command_passthrough": 36,
     "sudo_invocation": 77,
     "sudoers_definition": 40,
     "remote_shell_exec": 36,
@@ -51,9 +53,10 @@
       "repo": "menhir",
       "path": "deploy/Dockerfile",
       "detectors": [
+        "arbitrary_command_passthrough",
         "root_path_write"
       ],
-      "mutator_lines": 4,
+      "mutator_lines": 5,
       "first_line": 77,
       "disposition": null,
       "owner": null,
@@ -184,11 +187,13 @@
       "repo": "menhir",
       "path": "deploy/backup-generation.sh",
       "detectors": [
+        "arbitrary_command_passthrough",
         "compose_production",
         "database_or_backup_op",
-        "lock_acquisition"
+        "lock_acquisition",
+        "production_host_reference"
       ],
-      "mutator_lines": 11,
+      "mutator_lines": 13,
       "first_line": 72,
       "disposition": null,
       "owner": null,
@@ -222,13 +227,53 @@
       "note": null
     },
     {
+      "id": "f39e477366b9d306",
+      "repo": "menhir",
+      "path": "deploy/client-policy.production.json",
+      "detectors": [
+        "production_host_reference"
+      ],
+      "mutator_lines": 18,
+      "first_line": 5,
+      "disposition": null,
+      "owner": null,
+      "note": null
+    },
+    {
+      "id": "eabc40b09b1f5e18",
+      "repo": "menhir",
+      "path": "deploy/cloudflared-config.production.yml.example",
+      "detectors": [
+        "production_host_reference"
+      ],
+      "mutator_lines": 1,
+      "first_line": 7,
+      "disposition": null,
+      "owner": null,
+      "note": null
+    },
+    {
+      "id": "3ee27d359b629acb",
+      "repo": "menhir",
+      "path": "deploy/cloudflared.production.yml.example",
+      "detectors": [
+        "production_host_reference"
+      ],
+      "mutator_lines": 3,
+      "first_line": 8,
+      "disposition": null,
+      "owner": null,
+      "note": null
+    },
+    {
       "id": "e31830d0cc6f1e56",
       "repo": "menhir",
       "path": "deploy/docker-compose.production.yml",
       "detectors": [
-        "database_or_backup_op"
+        "database_or_backup_op",
+        "production_host_reference"
       ],
-      "mutator_lines": 1,
+      "mutator_lines": 3,
       "first_line": 121,
       "disposition": null,
       "owner": null,
@@ -289,14 +334,41 @@
       "note": null
     },
     {
+      "id": "913b88c042de10d1",
+      "repo": "menhir",
+      "path": "deploy/lib/mcp_acceptance_probe.py",
+      "detectors": [
+        "production_host_reference"
+      ],
+      "mutator_lines": 3,
+      "first_line": 137,
+      "disposition": null,
+      "owner": null,
+      "note": null
+    },
+    {
+      "id": "f97b070af497164d",
+      "repo": "menhir",
+      "path": "deploy/lib/menhir_schema.py",
+      "detectors": [
+        "production_host_reference"
+      ],
+      "mutator_lines": 2,
+      "first_line": 155,
+      "disposition": null,
+      "owner": null,
+      "note": null
+    },
+    {
       "id": "62415da5ebbd31ad",
       "repo": "menhir",
       "path": "deploy/lib/same_host_fence.py",
       "detectors": [
+        "production_host_reference",
         "systemd_unit"
       ],
-      "mutator_lines": 8,
-      "first_line": 121,
+      "mutator_lines": 10,
+      "first_line": 25,
       "disposition": null,
       "owner": null,
       "note": null
@@ -333,10 +405,11 @@
       "path": "deploy/personal_security_config.ps1",
       "detectors": [
         "base64_program_transfer",
+        "production_host_reference",
         "remote_shell_exec",
         "sudo_invocation"
       ],
-      "mutator_lines": 4,
+      "mutator_lines": 5,
       "first_line": 100,
       "disposition": null,
       "owner": null,
@@ -347,10 +420,11 @@
       "repo": "menhir",
       "path": "deploy/personal_stage.ps1",
       "detectors": [
+        "production_host_reference",
         "remote_shell_exec",
         "sudo_invocation"
       ],
-      "mutator_lines": 9,
+      "mutator_lines": 10,
       "first_line": 79,
       "disposition": null,
       "owner": null,
@@ -361,10 +435,24 @@
       "repo": "menhir",
       "path": "deploy/personal_stage_vps.py",
       "detectors": [
+        "production_host_reference",
         "systemd_unit"
       ],
-      "mutator_lines": 3,
-      "first_line": 1191,
+      "mutator_lines": 7,
+      "first_line": 43,
+      "disposition": null,
+      "owner": null,
+      "note": null
+    },
+    {
+      "id": "1cedc13ed73fea05",
+      "repo": "menhir",
+      "path": "deploy/production.env.example",
+      "detectors": [
+        "production_host_reference"
+      ],
+      "mutator_lines": 1,
+      "first_line": 10,
       "disposition": null,
       "owner": null,
       "note": null
@@ -387,9 +475,10 @@
       "repo": "menhir",
       "path": "deploy/release-author.py",
       "detectors": [
+        "production_host_reference",
         "sudoers_definition"
       ],
-      "mutator_lines": 1,
+      "mutator_lines": 3,
       "first_line": 73,
       "disposition": null,
       "owner": null,
@@ -417,9 +506,11 @@
       "repo": "menhir",
       "path": "deploy/release-lib.sh",
       "detectors": [
-        "lock_acquisition"
+        "arbitrary_command_passthrough",
+        "lock_acquisition",
+        "production_host_reference"
       ],
-      "mutator_lines": 2,
+      "mutator_lines": 11,
       "first_line": 11,
       "disposition": null,
       "owner": null,
@@ -430,10 +521,24 @@
       "repo": "menhir",
       "path": "deploy/release-run.sh",
       "detectors": [
-        "lock_acquisition"
+        "lock_acquisition",
+        "production_host_reference"
       ],
-      "mutator_lines": 4,
+      "mutator_lines": 6,
       "first_line": 17,
+      "disposition": null,
+      "owner": null,
+      "note": null
+    },
+    {
+      "id": "2c374f034e0dcb74",
+      "repo": "menhir",
+      "path": "deploy/release.json.example",
+      "detectors": [
+        "production_host_reference"
+      ],
+      "mutator_lines": 3,
+      "first_line": 61,
       "disposition": null,
       "owner": null,
       "note": null
@@ -444,10 +549,11 @@
       "path": "deploy/release_spec.py",
       "detectors": [
         "database_or_backup_op",
+        "production_host_reference",
         "sudoers_definition",
         "systemd_unit"
       ],
-      "mutator_lines": 6,
+      "mutator_lines": 7,
       "first_line": 169,
       "disposition": null,
       "owner": null,
@@ -458,11 +564,12 @@
       "repo": "menhir",
       "path": "deploy/restore-generation.sh",
       "detectors": [
+        "arbitrary_command_passthrough",
         "compose_production",
         "database_or_backup_op",
         "lock_acquisition"
       ],
-      "mutator_lines": 8,
+      "mutator_lines": 10,
       "first_line": 64,
       "disposition": null,
       "owner": null,
@@ -473,10 +580,11 @@
       "repo": "menhir",
       "path": "deploy/same-host-fence.sh",
       "detectors": [
-        "compose_production"
+        "compose_production",
+        "production_host_reference"
       ],
-      "mutator_lines": 2,
-      "first_line": 53,
+      "mutator_lines": 3,
+      "first_line": 39,
       "disposition": null,
       "owner": null,
       "note": null
@@ -486,10 +594,11 @@
       "repo": "menhir",
       "path": "deploy/scaffold/contract.production.json",
       "detectors": [
+        "production_host_reference",
         "sudoers_definition",
         "systemd_unit"
       ],
-      "mutator_lines": 6,
+      "mutator_lines": 8,
       "first_line": 24,
       "disposition": null,
       "owner": null,
@@ -557,9 +666,10 @@
       "path": "deploy/scaffold/menhir_app_only.py",
       "detectors": [
         "lock_acquisition",
+        "production_host_reference",
         "systemd_unit"
       ],
-      "mutator_lines": 5,
+      "mutator_lines": 12,
       "first_line": 39,
       "disposition": null,
       "owner": null,
@@ -586,9 +696,10 @@
       "path": "deploy/scaffold/menhir_security_config.py",
       "detectors": [
         "lock_acquisition",
+        "production_host_reference",
         "systemd_unit"
       ],
-      "mutator_lines": 2,
+      "mutator_lines": 4,
       "first_line": 27,
       "disposition": null,
       "owner": null,
@@ -638,10 +749,11 @@
       "repo": "menhir",
       "path": "scripts/setup_remote_test_neo4j.sh",
       "detectors": [
+        "arbitrary_command_passthrough",
         "compose_production",
         "remote_shell_exec"
       ],
-      "mutator_lines": 4,
+      "mutator_lines": 5,
       "first_line": 33,
       "disposition": null,
       "owner": null,
@@ -666,10 +778,11 @@
       "path": "deploy-menhir-app-only.ps1",
       "detectors": [
         "base64_program_transfer",
+        "production_host_reference",
         "remote_shell_exec",
         "sudo_invocation"
       ],
-      "mutator_lines": 7,
+      "mutator_lines": 8,
       "first_line": 26,
       "disposition": null,
       "owner": null,
@@ -683,11 +796,12 @@
         "base64_program_transfer",
         "database_or_backup_op",
         "inline_interpreter_as_root",
+        "production_host_reference",
         "remote_shell_exec",
         "sudo_invocation",
         "systemd_unit"
       ],
-      "mutator_lines": 41,
+      "mutator_lines": 45,
       "first_line": 175,
       "disposition": null,
       "owner": null,
@@ -699,9 +813,10 @@
       "path": "market-sealed/vps-check-null-sealed.ps1",
       "detectors": [
         "compose_production",
+        "production_host_reference",
         "remote_shell_exec"
       ],
-      "mutator_lines": 3,
+      "mutator_lines": 4,
       "first_line": 10,
       "disposition": null,
       "owner": null,
@@ -713,9 +828,10 @@
       "path": "market-sealed/vps-download-sealed.ps1",
       "detectors": [
         "compose_production",
+        "production_host_reference",
         "remote_shell_exec"
       ],
-      "mutator_lines": 3,
+      "mutator_lines": 4,
       "first_line": 11,
       "disposition": null,
       "owner": null,
@@ -727,9 +843,10 @@
       "path": "market-sealed/vps-upload-manual-images.ps1",
       "detectors": [
         "compose_production",
+        "production_host_reference",
         "remote_shell_exec"
       ],
-      "mutator_lines": 3,
+      "mutator_lines": 4,
       "first_line": 58,
       "disposition": null,
       "owner": null,
@@ -743,10 +860,11 @@
         "base64_program_transfer",
         "database_or_backup_op",
         "inline_interpreter_as_root",
+        "production_host_reference",
         "remote_shell_exec",
         "sudo_invocation"
       ],
-      "mutator_lines": 11,
+      "mutator_lines": 12,
       "first_line": 11,
       "disposition": null,
       "owner": null,
@@ -759,12 +877,13 @@
       "detectors": [
         "base64_program_transfer",
         "database_or_backup_op",
+        "production_host_reference",
         "remote_shell_exec",
         "sudo_invocation",
         "sudoers_definition",
         "systemd_unit"
       ],
-      "mutator_lines": 12,
+      "mutator_lines": 17,
       "first_line": 15,
       "disposition": null,
       "owner": null,
@@ -823,14 +942,56 @@
       "note": null
     },
     {
+      "id": "17cb1c07273d1c6c",
+      "repo": "shared-scripts",
+      "path": "vps-compose.ps1",
+      "detectors": [
+        "arbitrary_command_passthrough",
+        "production_host_reference"
+      ],
+      "mutator_lines": 4,
+      "first_line": 5,
+      "disposition": null,
+      "owner": null,
+      "note": null
+    },
+    {
       "id": "d881163116b90dda",
       "repo": "shared-scripts",
       "path": "vps-scp.ps1",
       "detectors": [
+        "production_host_reference",
         "remote_shell_exec"
       ],
-      "mutator_lines": 1,
-      "first_line": 69,
+      "mutator_lines": 2,
+      "first_line": 17,
+      "disposition": null,
+      "owner": null,
+      "note": null
+    },
+    {
+      "id": "58272c4cc0311966",
+      "repo": "shared-scripts",
+      "path": "vps-ssh.ps1",
+      "detectors": [
+        "arbitrary_command_passthrough",
+        "production_host_reference"
+      ],
+      "mutator_lines": 4,
+      "first_line": 5,
+      "disposition": null,
+      "owner": null,
+      "note": null
+    },
+    {
+      "id": "7aedddbcf7882407",
+      "repo": "yawn.deploy",
+      "path": "Caddyfile",
+      "detectors": [
+        "production_host_reference"
+      ],
+      "mutator_lines": 4,
+      "first_line": 186,
       "disposition": null,
       "owner": null,
       "note": null
@@ -840,10 +1001,11 @@
       "repo": "yawn.deploy",
       "path": "bootstrap-postgres.sh",
       "detectors": [
+        "arbitrary_command_passthrough",
         "compose_production"
       ],
-      "mutator_lines": 1,
-      "first_line": 35,
+      "mutator_lines": 2,
+      "first_line": 20,
       "disposition": null,
       "owner": null,
       "note": null
@@ -853,9 +1015,11 @@
       "repo": "yawn.deploy",
       "path": "caddy-release.sh",
       "detectors": [
-        "lock_acquisition"
+        "arbitrary_command_passthrough",
+        "lock_acquisition",
+        "production_host_reference"
       ],
-      "mutator_lines": 3,
+      "mutator_lines": 16,
       "first_line": 81,
       "disposition": null,
       "owner": null,
@@ -866,10 +1030,38 @@
       "repo": "yawn.deploy",
       "path": "check-drift.sh",
       "detectors": [
+        "arbitrary_command_passthrough",
+        "production_host_reference",
         "sudo_invocation"
       ],
-      "mutator_lines": 1,
+      "mutator_lines": 5,
       "first_line": 42,
+      "disposition": null,
+      "owner": null,
+      "note": null
+    },
+    {
+      "id": "92d28a1a4f8e3064",
+      "repo": "yawn.deploy",
+      "path": "docker-compose.yml",
+      "detectors": [
+        "production_host_reference"
+      ],
+      "mutator_lines": 2,
+      "first_line": 76,
+      "disposition": null,
+      "owner": null,
+      "note": null
+    },
+    {
+      "id": "e6c256681168af57",
+      "repo": "yawn.deploy",
+      "path": "lib/registry.sh",
+      "detectors": [
+        "arbitrary_command_passthrough"
+      ],
+      "mutator_lines": 1,
+      "first_line": 38,
       "disposition": null,
       "owner": null,
       "note": null
@@ -879,9 +1071,10 @@
       "repo": "yawn.deploy",
       "path": "ops/backup/daily-backup.sh",
       "detectors": [
+        "arbitrary_command_passthrough",
         "compose_production"
       ],
-      "mutator_lines": 1,
+      "mutator_lines": 2,
       "first_line": 37,
       "disposition": null,
       "owner": null,
@@ -892,10 +1085,11 @@
       "repo": "yawn.deploy",
       "path": "ops/backup/home-pull-backups.sh",
       "detectors": [
+        "production_host_reference",
         "remote_shell_exec"
       ],
-      "mutator_lines": 2,
-      "first_line": 71,
+      "mutator_lines": 3,
+      "first_line": 19,
       "disposition": null,
       "owner": null,
       "note": null
@@ -905,9 +1099,10 @@
       "repo": "yawn.deploy",
       "path": "ops/backup/offsite-backup.sh",
       "detectors": [
+        "arbitrary_command_passthrough",
         "compose_production"
       ],
-      "mutator_lines": 2,
+      "mutator_lines": 3,
       "first_line": 78,
       "disposition": null,
       "owner": null,
@@ -918,9 +1113,10 @@
       "repo": "yawn.deploy",
       "path": "ops/seed-nightly/run-seed-nightly.sh",
       "detectors": [
+        "arbitrary_command_passthrough",
         "lock_acquisition"
       ],
-      "mutator_lines": 2,
+      "mutator_lines": 3,
       "first_line": 6,
       "disposition": null,
       "owner": null,
@@ -957,10 +1153,11 @@
       "repo": "yawn.deploy",
       "path": "releases.json",
       "detectors": [
-        "lock_acquisition"
+        "lock_acquisition",
+        "production_host_reference"
       ],
-      "mutator_lines": 1,
-      "first_line": 194,
+      "mutator_lines": 9,
+      "first_line": 83,
       "disposition": null,
       "owner": null,
       "note": null
@@ -970,11 +1167,26 @@
       "repo": "yawn.deploy",
       "path": "remote-deploy.sh",
       "detectors": [
+        "arbitrary_command_passthrough",
         "sudo_invocation",
         "systemd_unit"
       ],
-      "mutator_lines": 3,
+      "mutator_lines": 4,
       "first_line": 39,
+      "disposition": null,
+      "owner": null,
+      "note": null
+    },
+    {
+      "id": "2c5286116055f38b",
+      "repo": "yawn.deploy",
+      "path": "tests/caddy-release.test.sh",
+      "detectors": [
+        "arbitrary_command_passthrough",
+        "production_host_reference"
+      ],
+      "mutator_lines": 23,
+      "first_line": 47,
       "disposition": null,
       "owner": null,
       "note": null
@@ -984,9 +1196,10 @@
       "repo": "yawn.deploy",
       "path": "tests/sealed-copy.test.sh",
       "detectors": [
+        "arbitrary_command_passthrough",
         "compose_production"
       ],
-      "mutator_lines": 4,
+      "mutator_lines": 8,
       "first_line": 17,
       "disposition": null,
       "owner": null,
@@ -997,10 +1210,11 @@
       "repo": "yawn.deploy",
       "path": "tests/seed-nightly.test.sh",
       "detectors": [
+        "arbitrary_command_passthrough",
         "lock_acquisition",
         "systemd_unit"
       ],
-      "mutator_lines": 11,
+      "mutator_lines": 12,
       "first_line": 10,
       "disposition": null,
       "owner": null,
@@ -1020,15 +1234,43 @@
       "note": null
     },
     {
+      "id": "9b42b4671c0e15d6",
+      "repo": "yawn.deploy",
+      "path": "wait-for-readiness.sh",
+      "detectors": [
+        "arbitrary_command_passthrough"
+      ],
+      "mutator_lines": 2,
+      "first_line": 110,
+      "disposition": null,
+      "owner": null,
+      "note": null
+    },
+    {
+      "id": "b6a0d83d3988fc01",
+      "repo": "yawn.vps",
+      "path": "menhir_server.py",
+      "detectors": [
+        "production_host_reference"
+      ],
+      "mutator_lines": 3,
+      "first_line": 34,
+      "disposition": null,
+      "owner": null,
+      "note": null
+    },
+    {
       "id": "14056d45d6a70ce8",
       "repo": "yawn.vps",
       "path": "ops/menhir/bin/lib.sh",
       "detectors": [
+        "arbitrary_command_passthrough",
         "database_or_backup_op",
         "lock_acquisition",
+        "production_host_reference",
         "systemd_unit"
       ],
-      "mutator_lines": 15,
+      "mutator_lines": 18,
       "first_line": 23,
       "disposition": null,
       "owner": null,
@@ -1172,13 +1414,15 @@
       "repo": "yawn.vps",
       "path": "vps/core.py",
       "detectors": [
+        "arbitrary_command_passthrough",
         "compose_production",
         "lock_acquisition",
+        "production_host_reference",
         "remote_shell_exec",
         "sudo_invocation",
         "systemd_unit"
       ],
-      "mutator_lines": 11,
+      "mutator_lines": 14,
       "first_line": 219,
       "disposition": null,
       "owner": null,
@@ -1189,10 +1433,11 @@
       "repo": "yawn.vps",
       "path": "vps/diagnostics_tools.py",
       "detectors": [
+        "production_host_reference",
         "sudo_invocation",
         "systemd_unit"
       ],
-      "mutator_lines": 2,
+      "mutator_lines": 3,
       "first_line": 806,
       "disposition": null,
       "owner": null,
@@ -1207,6 +1452,19 @@
       ],
       "mutator_lines": 2,
       "first_line": 240,
+      "disposition": null,
+      "owner": null,
+      "note": null
+    },
+    {
+      "id": "fdc55215aa21b3c5",
+      "repo": "yawn.vps",
+      "path": "vps/help_text.py",
+      "detectors": [
+        "production_host_reference"
+      ],
+      "mutator_lines": 1,
+      "first_line": 108,
       "disposition": null,
       "owner": null,
       "note": null
@@ -1299,6 +1557,17 @@
       "why": "Starts, stops, replaces, or loads containers. Affects what is running and reachable."
     },
     {
+      "id": "fa0fa2e3bc1e969a",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "context",
+      "repo": "menhir",
+      "path": "deploy/ACCESS_CONTRACT.md",
+      "line": 13,
+      "evidence": "https://memory.ctharvey.me/mcp-http",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
       "id": "ded556ab1a2daedb",
       "detector": "root_path_write",
       "kind": "fs-mutation",
@@ -1332,6 +1601,17 @@
       "why": "Writes, moves, or deletes under a root-owned production path."
     },
     {
+      "id": "ff197577e802ba07",
+      "detector": "arbitrary_command_passthrough",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/Dockerfile",
+      "line": 164,
+      "evidence": "exec \"$@\"",
+      "why": "Forwards caller-supplied arguments onward as a command. Unbounded by construction: it cannot be constrained by sudoers argument matching and cannot be reasoned about from its own source."
+    },
+    {
       "id": "d85950c12cc91542",
       "detector": "root_path_write",
       "kind": "fs-mutation",
@@ -1341,6 +1621,39 @@
       "line": 166,
       "evidence": "RUN chmod 0555 /usr/local/bin/menhir-entrypoint.sh",
       "why": "Writes, moves, or deletes under a root-owned production path."
+    },
+    {
+      "id": "3f87e2fd716aa6ec",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "context",
+      "repo": "menhir",
+      "path": "deploy/LIVE_VPS_PLAYBOOK.md",
+      "line": 8,
+      "evidence": "This is the operator playbook for `https://memory.ctharvey.me`. Menhir's legacy",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "9b22fa1a721a9118",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "context",
+      "repo": "menhir",
+      "path": "deploy/LIVE_VPS_PLAYBOOK.md",
+      "line": 51,
+      "evidence": "`memory.ctharvey.me`, runs the bounded public canary, and records success or automatic rollback. It",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "68493f108ae87d9b",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "context",
+      "repo": "menhir",
+      "path": "deploy/LIVE_VPS_PLAYBOOK.md",
+      "line": 105,
+      "evidence": "`https://memory.ctharvey.me/mcp-http`. ChatGPT, Codex, and Claude are",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
     },
     {
       "id": "c756c2bf975be024",
@@ -1385,6 +1698,28 @@
       "line": 126,
       "evidence": "sudo -n python3 -c 'import json; v=json.load(open(\"/srv/menhir/production/release/release.json\")); print(v[\"release_id\"], v[\"repos\"][\"menhir\"], v[\"images\"][\"menhir\"])'",
       "why": "Invokes a privileged command. Every one of these is a candidate mutation entry point and must be accounted for."
+    },
+    {
+      "id": "e1a1af8f1af6311a",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "context",
+      "repo": "menhir",
+      "path": "deploy/LIVE_VPS_PLAYBOOK.md",
+      "line": 127,
+      "evidence": "docker inspect -f '{{.Name}} {{.Image}} {{.State.Health.Status}}' menhir-prod-app menhir-prod-neo4j",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "8c36043af5ef5ad4",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "context",
+      "repo": "menhir",
+      "path": "deploy/LIVE_VPS_PLAYBOOK.md",
+      "line": 128,
+      "evidence": "curl -fsS https://memory.ctharvey.me/readyz",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
     },
     {
       "id": "f2c7808aa1ef9f5c",
@@ -1442,6 +1777,17 @@
       "why": "Invokes a privileged command. Every one of these is a candidate mutation entry point and must be accounted for."
     },
     {
+      "id": "8c36043af5ef5ad4",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "context",
+      "repo": "menhir",
+      "path": "deploy/LIVE_VPS_PLAYBOOK.md",
+      "line": 169,
+      "evidence": "curl -fsS https://memory.ctharvey.me/readyz",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
       "id": "45c9ac9405160df9",
       "detector": "sudoers_definition",
       "kind": "privilege-grant",
@@ -1473,6 +1819,17 @@
       "line": 198,
       "evidence": "`menhir-prod-cloudflared` at `172.30.0.2` and `menhir-prod-app` at `172.30.0.3`.",
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
+    },
+    {
+      "id": "8877d363b427a60b",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "context",
+      "repo": "menhir",
+      "path": "deploy/LIVE_VPS_PLAYBOOK.md",
+      "line": 198,
+      "evidence": "`menhir-prod-cloudflared` at `172.30.0.2` and `menhir-prod-app` at `172.30.0.3`.",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
     },
     {
       "id": "82d907de8c2319de",
@@ -1519,6 +1876,17 @@
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
     },
     {
+      "id": "47778302e29de2ea",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "context",
+      "repo": "menhir",
+      "path": "deploy/LIVE_VPS_PLAYBOOK.md",
+      "line": 223,
+      "evidence": "6. replace only `menhir-prod-app` using the existing state and network authority;",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
       "id": "569964588e938246",
       "detector": "ingress_config",
       "kind": "ingress",
@@ -1550,6 +1918,28 @@
       "line": 317,
       "evidence": "-> retain and verify Cloudflared ingress",
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
+    },
+    {
+      "id": "f700616d5cccc8f9",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "context",
+      "repo": "menhir",
+      "path": "deploy/LIVE_VPS_PLAYBOOK.md",
+      "line": 360,
+      "evidence": "\"legacy_container\": \"menhir-prod-app\",",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "5f3cba24474d5cc8",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "context",
+      "repo": "menhir",
+      "path": "deploy/LIVE_VPS_PLAYBOOK.md",
+      "line": 361,
+      "evidence": "\"production_container\": \"menhir-prod-app\",",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
     },
     {
       "id": "af2b061898957d9a",
@@ -1684,6 +2074,50 @@
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
     },
     {
+      "id": "b729c9aa34d2419b",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "context",
+      "repo": "menhir",
+      "path": "deploy/LIVE_VPS_PLAYBOOK.md",
+      "line": 486,
+      "evidence": "The operations resource remains `https://memory.ctharvey.me/ops/mcp`, with",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "eadb640cd5925095",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "context",
+      "repo": "menhir",
+      "path": "deploy/LIVE_VPS_PLAYBOOK.md",
+      "line": 487,
+      "evidence": "issuer `https://memory.ctharvey.me`, audience",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "13f8a89c0b12bb93",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "context",
+      "repo": "menhir",
+      "path": "deploy/LIVE_VPS_PLAYBOOK.md",
+      "line": 488,
+      "evidence": "`https://memory.ctharvey.me/ops/mcp`, and gateway base URL",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "de2b8353c945f9d9",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "context",
+      "repo": "menhir",
+      "path": "deploy/LIVE_VPS_PLAYBOOK.md",
+      "line": 489,
+      "evidence": "`https://memory.ctharvey.me/ops`. The gateway peer allowlist must be derived from",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
       "id": "618588e167757097",
       "detector": "sudo_invocation",
       "kind": "privileged-exec",
@@ -1739,6 +2173,17 @@
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
     },
     {
+      "id": "88b15bc7736c5890",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "context",
+      "repo": "menhir",
+      "path": "deploy/PRODUCTION.md",
+      "line": 47,
+      "evidence": "`https://memory.ctharvey.me/mcp-http`; ChatGPT, Codex, and every Claude variant",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
       "id": "f7a9770b6a9a58f8",
       "detector": "ingress_config",
       "kind": "ingress",
@@ -1781,6 +2226,17 @@
       "line": 66,
       "evidence": "`172.30.0.3` with alias `menhir-prod-app`. Cloudflared proxies the approved public path allowlist",
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
+    },
+    {
+      "id": "052356e447e333cf",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "context",
+      "repo": "menhir",
+      "path": "deploy/PRODUCTION.md",
+      "line": 66,
+      "evidence": "`172.30.0.3` with alias `menhir-prod-app`. Cloudflared proxies the approved public path allowlist",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
     },
     {
       "id": "9f97d15b10c350e1",
@@ -2080,6 +2536,17 @@
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
     },
     {
+      "id": "03ec69e86ffe4d63",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "context",
+      "repo": "menhir",
+      "path": "deploy/RELEASE_AUTOMATION.md",
+      "line": 226,
+      "evidence": "directly to `menhir-prod-app:8099`; Menhir remains `172.30.0.3`. Cloudflared is now the sole",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
       "id": "9e74dc0869a6d0cd",
       "detector": "ingress_config",
       "kind": "ingress",
@@ -2166,6 +2633,17 @@
       "line": 517,
       "evidence": "`menhir_backup_status`, and `menhir_generation_inspect`; its sudoers destination",
       "why": "Defines or edits a privilege grant. The set of these is the actual privilege boundary, regardless of what any document claims."
+    },
+    {
+      "id": "50f42419622c389b",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "context",
+      "repo": "menhir",
+      "path": "deploy/WEB_CLIENT_OAUTH.md",
+      "line": 41,
+      "evidence": "- In Claude.ai, add `https://memory.ctharvey.me/mcp-http` as a custom connector,",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
     },
     {
       "id": "44b8d28be8b386ae",
@@ -3004,6 +3482,17 @@
       "why": "Acquires or defines a mutation lock. Two writers sharing a lock path are the same critical section and must be censused together."
     },
     {
+      "id": "6181f48b10e8d14d",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/backup-generation.sh",
+      "line": 205,
+      "evidence": "docker inspect menhir-prod-app menhir-prod-neo4j > \"$inspect_tmp\" \\",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
       "id": "e884a3ec46925e9f",
       "detector": "compose_production",
       "kind": "container-mutation",
@@ -3024,6 +3513,17 @@
       "line": 271,
       "evidence": "--entrypoint /var/lib/neo4j/bin/neo4j-admin \\",
       "why": "Touches the Neo4j database or its backups. Data loss here is the one unrecoverable failure in this system."
+    },
+    {
+      "id": "1e00162799d2cacf",
+      "detector": "arbitrary_command_passthrough",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/backup-generation.sh",
+      "line": 276,
+      "evidence": "\"$@\"",
+      "why": "Forwards caller-supplied arguments onward as a command. Unbounded by construction: it cannot be constrained by sudoers argument matching and cannot be reasoned about from its own source."
     },
     {
       "id": "4e3744ffbd6f7631",
@@ -3114,6 +3614,204 @@
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
     },
     {
+      "id": "d8d7c42b507dff5b",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/client-policy.production.json",
+      "line": 5,
+      "evidence": "\"primary_endpoint\": \"https://memory.ctharvey.me/mcp-http\",",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "4af702abd874dfd2",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/client-policy.production.json",
+      "line": 24,
+      "evidence": "\"https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client=codex\"",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "ecfcf87c04b2e484",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/client-policy.production.json",
+      "line": 31,
+      "evidence": "\"https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client=claude\",",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "09e509ddb09af216",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/client-policy.production.json",
+      "line": 32,
+      "evidence": "\"https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client=wsl-claude\"",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "71451fefd6e45f8c",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/client-policy.production.json",
+      "line": 38,
+      "evidence": "\"https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client=opencode\",",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "2c279b741ca6664e",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/client-policy.production.json",
+      "line": 39,
+      "evidence": "\"https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client=wsl-opencode\"",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "d829328867c1fc6c",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/client-policy.production.json",
+      "line": 348,
+      "evidence": "\"https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client=claude\": {",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "5ed43f1c28468129",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/client-policy.production.json",
+      "line": 420,
+      "evidence": "\"https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client=codex\": {",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "99a879763ff596c5",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/client-policy.production.json",
+      "line": 492,
+      "evidence": "\"https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client=gemini\": {",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "9d680d353980fa7c",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/client-policy.production.json",
+      "line": 563,
+      "evidence": "\"https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client=antigravity-ide\": {",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "f71115312c950f2e",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/client-policy.production.json",
+      "line": 634,
+      "evidence": "\"https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client=gemini-config\": {",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "c376f9ca632e615b",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/client-policy.production.json",
+      "line": 705,
+      "evidence": "\"https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client=opencode\": {",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "261838e89e293115",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/client-policy.production.json",
+      "line": 776,
+      "evidence": "\"https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client=qwen\": {",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "288fcad60f7a729e",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/client-policy.production.json",
+      "line": 847,
+      "evidence": "\"https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client=goose\": {",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "bc76e5da29921f84",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/client-policy.production.json",
+      "line": 918,
+      "evidence": "\"https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client=zcode\": {",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "c6b6534e732b5273",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/client-policy.production.json",
+      "line": 989,
+      "evidence": "\"https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client=cline\": {",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "549d703bb9d7f659",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/client-policy.production.json",
+      "line": 1060,
+      "evidence": "\"https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client=wsl-claude\": {",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "95979e6ff25bb0ae",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/client-policy.production.json",
+      "line": 1132,
+      "evidence": "\"https://memory.ctharvey.me/oauth/client-metadata/agent-smith.json?client=wsl-opencode\": {",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
       "id": "2af128428856a89d",
       "detector": "ingress_config",
       "kind": "ingress",
@@ -3125,6 +3823,17 @@
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
     },
     {
+      "id": "19044f95e8759a66",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/cloudflared-config.production.yml.example",
+      "line": 7,
+      "evidence": "service: http://menhir-prod-app:8099",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
       "id": "9b188cb46ec25655",
       "detector": "ingress_config",
       "kind": "ingress",
@@ -3134,6 +3843,39 @@
       "line": 3,
       "evidence": "credentials-file: /etc/cloudflared/credentials.json",
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
+    },
+    {
+      "id": "39af2c8eb05ab993",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/cloudflared.production.yml.example",
+      "line": 8,
+      "evidence": "- hostname: memory.ctharvey.me",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "9f036f78503271fc",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/cloudflared.production.yml.example",
+      "line": 10,
+      "evidence": "service: http://menhir-prod-app:8099",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "39af2c8eb05ab993",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/cloudflared.production.yml.example",
+      "line": 14,
+      "evidence": "- hostname: memory.ctharvey.me",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
     },
     {
       "id": "ba0d2b2ac0ce999a",
@@ -3246,6 +3988,17 @@
       "why": "Touches the Neo4j database or its backups. Data loss here is the one unrecoverable failure in this system."
     },
     {
+      "id": "e995d080a7f86b68",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/docker-compose.production.yml",
+      "line": 131,
+      "evidence": "container_name: ${MENHIR_APP_CONTAINER:-menhir-prod-app}",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
       "id": "b30f312f6c3d95e0",
       "detector": "ingress_config",
       "kind": "ingress",
@@ -3255,6 +4008,17 @@
       "line": 142,
       "evidence": "menhir-proxy:",
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
+    },
+    {
+      "id": "d0060ec7d454f909",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/docker-compose.production.yml",
+      "line": 145,
+      "evidence": "- ${MENHIR_PROXY_ALIAS:-menhir-prod-app}",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
     },
     {
       "id": "b30f312f6c3d95e0",
@@ -3367,6 +4131,39 @@
       "why": "Touches the Neo4j database or its backups. Data loss here is the one unrecoverable failure in this system."
     },
     {
+      "id": "8119e1d0624bc56d",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/lib/mcp_acceptance_probe.py",
+      "line": 137,
+      "evidence": "def _mint_probe_token(container_name: str = \"menhir-prod-app\") -> str:",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "570488a677da1a07",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/lib/mcp_acceptance_probe.py",
+      "line": 138,
+      "evidence": "if container_name not in {\"menhir-prod-app\", \"menhir-candidate-app\"}:",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "4c8b3c3feeb5b5e6",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/lib/mcp_acceptance_probe.py",
+      "line": 241,
+      "evidence": "app = _inspect_container(\"menhir-prod-app\")",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
       "id": "32d649ca94fb35db",
       "detector": "ingress_config",
       "kind": "ingress",
@@ -3376,6 +4173,50 @@
       "line": 137,
       "evidence": "_RELEASE_INGRESS_MODES = frozenset({\"cloudflared\"})",
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
+    },
+    {
+      "id": "fafeec5a9c66aeb6",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/lib/menhir_schema.py",
+      "line": 155,
+      "evidence": "\"legacy_container\": \"menhir-prod-app\",",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "27e29e5ae9f0da9e",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/lib/menhir_schema.py",
+      "line": 156,
+      "evidence": "\"production_container\": \"menhir-prod-app\",",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "a298094385d92fff",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/lib/same_host_fence.py",
+      "line": 25,
+      "evidence": "\"legacy_container\": \"menhir-prod-app\",",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "fb74570a93bb6520",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/lib/same_host_fence.py",
+      "line": 26,
+      "evidence": "\"production_container\": \"menhir-prod-app\",",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
     },
     {
       "id": "e75b1ee6d027e52e",
@@ -3554,6 +4395,17 @@
       "why": "Executes or transfers to a remote host. Combined with a privileged invocation this is a deployment path."
     },
     {
+      "id": "827350587d2ef76f",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/personal_security_config.ps1",
+      "line": 125,
+      "evidence": "$remoteHost = if ($env:YAWN_VPS_HOST) { $env:YAWN_VPS_HOST } else { \"thron@147.93.132.141\" }",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
       "id": "bf2bc9368f157c91",
       "detector": "ingress_config",
       "kind": "ingress",
@@ -3653,6 +4505,17 @@
       "why": "Executes or transfers to a remote host. Combined with a privileged invocation this is a deployment path."
     },
     {
+      "id": "c0bf22ebbe0c2e05",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/personal_stage.ps1",
+      "line": 125,
+      "evidence": "$remoteHost = if ($env:YAWN_VPS_HOST) { $env:YAWN_VPS_HOST } else { \"thron@147.93.132.141\" }",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
       "id": "26c877c380cf3442",
       "detector": "remote_shell_exec",
       "kind": "remote-exec",
@@ -3706,6 +4569,17 @@
       "line": 229,
       "evidence": "& $helpers.Scp -Source \"${remoteHost}:$remoteReceipt\" -Destination $localTemp",
       "why": "Executes or transfers to a remote host. Combined with a privileged invocation this is a deployment path."
+    },
+    {
+      "id": "2d948a1a689d0c1a",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/personal_stage_vps.py",
+      "line": 43,
+      "evidence": "STAGING_HOST = \"memory.ctharvey.me\"",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
     },
     {
       "id": "01b0596fdd7f13c3",
@@ -3827,6 +4701,17 @@
       "line": 969,
       "evidence": "ingress = _cloudflared_ingress_preflight(network, expected_peers)",
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
+    },
+    {
+      "id": "fcca3af7dafba2a4",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/personal_stage_vps.py",
+      "line": 971,
+      "evidence": "for name in (\"menhir-prod-app\", \"menhir-prod-neo4j\"):",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
     },
     {
       "id": "f77ce17aa96984c4",
@@ -4005,6 +4890,17 @@
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
     },
     {
+      "id": "c4bbce4c51080fe6",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/personal_stage_vps.py",
+      "line": 1320,
+      "evidence": "app = _healthy_container(\"menhir-prod-app\", \"menhir\")",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
       "id": "260cc16772894f61",
       "detector": "ingress_config",
       "kind": "ingress",
@@ -4036,6 +4932,17 @@
       "line": 1375,
       "evidence": "\"reason\": \"Cloudflared ingress is retained by the maintenance transaction\",",
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
+    },
+    {
+      "id": "fbc554435d8d1546",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/personal_stage_vps.py",
+      "line": 1390,
+      "evidence": "\"container\": \"menhir-prod-app\",",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
     },
     {
       "id": "3c0f03c183e32ab8",
@@ -4093,6 +5000,17 @@
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
     },
     {
+      "id": "23c0c6334f0e0312",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/production.env.example",
+      "line": 10,
+      "evidence": "MENHIR_PUBLIC_BASE_URL=https://memory.ctharvey.me",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
       "id": "97d9982e404e0a6c",
       "detector": "root_path_write",
       "kind": "fs-mutation",
@@ -4135,6 +5053,28 @@
       "line": 73,
       "evidence": "\"/etc/sudoers.d/\", \"/etc/systemd/system/\",",
       "why": "Defines or edits a privilege grant. The set of these is the actual privilege boundary, regardless of what any document claims."
+    },
+    {
+      "id": "c0e25268dda42c22",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/release-author.py",
+      "line": 688,
+      "evidence": "\"legacy_container\": \"menhir-prod-app\",",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "66069af38c1410b6",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/release-author.py",
+      "line": 689,
+      "evidence": "\"production_container\": \"menhir-prod-app\",",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
     },
     {
       "id": "502164b8ac5264e2",
@@ -4621,6 +5561,105 @@
       "why": "Acquires or defines a mutation lock. Two writers sharing a lock path are the same critical section and must be censused together."
     },
     {
+      "id": "13158edf385cf12c",
+      "detector": "arbitrary_command_passthrough",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/release-lib.sh",
+      "line": 63,
+      "evidence": "--file \"$COMPOSE_FILE\" \"$@\"",
+      "why": "Forwards caller-supplied arguments onward as a command. Unbounded by construction: it cannot be constrained by sudoers argument matching and cannot be reasoned about from its own source."
+    },
+    {
+      "id": "cc88d92f1626da95",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/release-lib.sh",
+      "line": 105,
+      "evidence": "MENHIR_PROXY_ALIAS=menhir-prod-app \\",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "096c6ebc05a52e1b",
+      "detector": "arbitrary_command_passthrough",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/release-lib.sh",
+      "line": 106,
+      "evidence": "compose_env menhir-candidate \"$@\"",
+      "why": "Forwards caller-supplied arguments onward as a command. Unbounded by construction: it cannot be constrained by sudoers argument matching and cannot be reasoned about from its own source."
+    },
+    {
+      "id": "0c535edc761204ea",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/release-lib.sh",
+      "line": 188,
+      "evidence": "MENHIR_APP_CONTAINER=menhir-prod-app \\",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "cc88d92f1626da95",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/release-lib.sh",
+      "line": 191,
+      "evidence": "MENHIR_PROXY_ALIAS=menhir-prod-app \\",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "9af365d3376488bf",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/release-lib.sh",
+      "line": 193,
+      "evidence": "wait_healthy menhir-prod-app menhir-prod-neo4j",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "0c535edc761204ea",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/release-lib.sh",
+      "line": 201,
+      "evidence": "MENHIR_APP_CONTAINER=menhir-prod-app \\",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "cc88d92f1626da95",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/release-lib.sh",
+      "line": 204,
+      "evidence": "MENHIR_PROXY_ALIAS=menhir-prod-app \\",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "d93d8aa651acf82f",
+      "detector": "arbitrary_command_passthrough",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/release-lib.sh",
+      "line": 219,
+      "evidence": "python3 \"$schema\" \"$@\"",
+      "why": "Forwards caller-supplied arguments onward as a command. Unbounded by construction: it cannot be constrained by sudoers argument matching and cannot be reasoned about from its own source."
+    },
+    {
       "id": "9d866a83b070c4c8",
       "detector": "lock_acquisition",
       "kind": "lock",
@@ -4663,6 +5702,28 @@
       "line": 26,
       "evidence": "echo \"release authority must declare Cloudflared ingress\" >&2",
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
+    },
+    {
+      "id": "5ce183a9041011ae",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/release-run.sh",
+      "line": 154,
+      "evidence": "&& docker inspect menhir-prod-app menhir-prod-neo4j >/dev/null 2>&1; then",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "c81d651b9bf1fdf0",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/release-run.sh",
+      "line": 214,
+      "evidence": "&& [ \"$(docker inspect -f '{{.State.Health.Status}}' menhir-prod-app 2>/dev/null || true)\" = healthy ] \\",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
     },
     {
       "id": "440ce9eaa277dfd6",
@@ -4718,6 +5779,39 @@
       "line": 60,
       "evidence": "\"external_network\": \"menhir-proxy\",",
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
+    },
+    {
+      "id": "4575ecedb9f9166a",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/release.json.example",
+      "line": 61,
+      "evidence": "\"alias\": \"menhir-prod-app\",",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "db7b00cbaa71deb0",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/release.json.example",
+      "line": 139,
+      "evidence": "\"legacy_container\": \"menhir-prod-app\",",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "3f2baf1d521438f4",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/release.json.example",
+      "line": 140,
+      "evidence": "\"production_container\": \"menhir-prod-app\",",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
     },
     {
       "id": "a49fa73de98d21ab",
@@ -4874,6 +5968,17 @@
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
     },
     {
+      "id": "ba538316d8d126b1",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/release_spec.py",
+      "line": 1145,
+      "evidence": "\"alias\": \"menhir-prod-app\",",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
       "id": "7acb0bbc145e09a2",
       "detector": "lock_acquisition",
       "kind": "lock",
@@ -4883,6 +5988,17 @@
       "line": 64,
       "evidence": "LOCK=\"${MENHIR_MAINTENANCE_LOCK:-/run/lock/menhir-production.lock}\"",
       "why": "Acquires or defines a mutation lock. Two writers sharing a lock path are the same critical section and must be censused together."
+    },
+    {
+      "id": "38f6436879df82e0",
+      "detector": "arbitrary_command_passthrough",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/restore-generation.sh",
+      "line": 74,
+      "evidence": "for arg in \"$@\"; do",
+      "why": "Forwards caller-supplied arguments onward as a command. Unbounded by construction: it cannot be constrained by sudoers argument matching and cannot be reasoned about from its own source."
     },
     {
       "id": "79a3d151033b891f",
@@ -4929,6 +6045,17 @@
       "why": "Touches the Neo4j database or its backups. Data loss here is the one unrecoverable failure in this system."
     },
     {
+      "id": "a3c442543966d0d1",
+      "detector": "arbitrary_command_passthrough",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/restore-generation.sh",
+      "line": 214,
+      "evidence": "\"$@\"",
+      "why": "Forwards caller-supplied arguments onward as a command. Unbounded by construction: it cannot be constrained by sudoers argument matching and cannot be reasoned about from its own source."
+    },
+    {
       "id": "136c7d9e2d20e8b1",
       "detector": "database_or_backup_op",
       "kind": "data-mutation",
@@ -4960,6 +6087,17 @@
       "line": 475,
       "evidence": "if ! docker compose -f \"${COMPOSE_FILE}\" up -d; then",
       "why": "Starts, stops, replaces, or loads containers. Affects what is running and reachable."
+    },
+    {
+      "id": "515dd105222b7d87",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/same-host-fence.sh",
+      "line": 39,
+      "evidence": "docker inspect menhir-prod-app menhir-prod-neo4j > \"$inspect_tmp\" 2>/dev/null \\",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
     },
     {
       "id": "bb150a3d8c81d312",
@@ -5037,6 +6175,28 @@
       "line": 44,
       "evidence": "\"network\": {\"driver\": \"bridge\", \"gateway\": \"172.30.0.1\", \"name\": \"menhir-proxy\", \"subnet\": \"172.30.0.0/24\"},",
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
+    },
+    {
+      "id": "9e71e3304dbd6bb6",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/scaffold/contract.production.json",
+      "line": 46,
+      "evidence": "\"app_container\": \"menhir-prod-app\",",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "5e8180ccdd9be076",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/scaffold/contract.production.json",
+      "line": 51,
+      "evidence": "\"public_ready_url\": \"https://memory.ctharvey.me/readyz\"",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
     },
     {
       "id": "50aa663f88917717",
@@ -5963,6 +7123,17 @@
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
     },
     {
+      "id": "5e77bd9734e3c655",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/scaffold/menhir_app_only.py",
+      "line": 688,
+      "evidence": "app = inspect_container(\"menhir-prod-app\")",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
       "id": "7f8aeca64c720f24",
       "detector": "systemd_unit",
       "kind": "service-definition",
@@ -5972,6 +7143,39 @@
       "line": 698,
       "evidence": "labels.get(\"com.docker.compose.service\") == \"menhir\",",
       "why": "Defines or controls a system service, timer, or socket activation. These run without an operator present and are mutation paths."
+    },
+    {
+      "id": "b28823336a64b06c",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/scaffold/menhir_app_only.py",
+      "line": 819,
+      "evidence": "[\"docker\", \"exec\", \"-i\", \"menhir-prod-app\", \"python\", \"-\"],",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "5e77bd9734e3c655",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/scaffold/menhir_app_only.py",
+      "line": 835,
+      "evidence": "app = inspect_container(\"menhir-prod-app\")",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "a9826f2db1e84fc9",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/scaffold/menhir_app_only.py",
+      "line": 932,
+      "evidence": "accepted_app = inspect_container(\"menhir-prod-app\")",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
     },
     {
       "id": "615905bdc510255f",
@@ -6007,6 +7211,17 @@
       "why": "Acquires or defines a mutation lock. Two writers sharing a lock path are the same critical section and must be censused together."
     },
     {
+      "id": "4db50bc9d7b9110d",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/scaffold/menhir_app_only.py",
+      "line": 1131,
+      "evidence": "running_app = inspect_container(\"menhir-prod-app\")",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
       "id": "2c1b76aa75576b8e",
       "detector": "ingress_config",
       "kind": "ingress",
@@ -6029,6 +7244,17 @@
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
     },
     {
+      "id": "5e77bd9734e3c655",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/scaffold/menhir_app_only.py",
+      "line": 1203,
+      "evidence": "app = inspect_container(\"menhir-prod-app\")",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
       "id": "34d1559ab892defc",
       "detector": "ingress_config",
       "kind": "ingress",
@@ -6049,6 +7275,17 @@
       "line": 1207,
       "evidence": "raise AppOnlyError(\"Cloudflared changed since the approved staging preflight\")",
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
+    },
+    {
+      "id": "a9826f2db1e84fc9",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/scaffold/menhir_app_only.py",
+      "line": 1242,
+      "evidence": "accepted_app = inspect_container(\"menhir-prod-app\")",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
     },
     {
       "id": "615905bdc510255f",
@@ -6205,6 +7442,17 @@
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
     },
     {
+      "id": "92518df3d90e1933",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/scaffold/menhir_security_config.py",
+      "line": 331,
+      "evidence": "running_app = app.inspect_container(\"menhir-prod-app\")",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
       "id": "4dd7f966faafdbb3",
       "detector": "ingress_config",
       "kind": "ingress",
@@ -6236,6 +7484,17 @@
       "line": 382,
       "evidence": "raise Error(\"expected Cloudflared container ID is malformed\")",
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
+    },
+    {
+      "id": "0bc06b5ee777038d",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "deploy/scaffold/menhir_security_config.py",
+      "line": 427,
+      "evidence": "before_app = app.inspect_container(\"menhir-prod-app\")",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
     },
     {
       "id": "4dd7f966faafdbb3",
@@ -6337,6 +7596,17 @@
       "why": "Executes or transfers to a remote host. Combined with a privileged invocation this is a deployment path."
     },
     {
+      "id": "c823d5aed01656fe",
+      "detector": "arbitrary_command_passthrough",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "menhir",
+      "path": "scripts/setup_remote_test_neo4j.sh",
+      "line": 34,
+      "evidence": "-o StrictHostKeyChecking=no -o ConnectTimeout=8 \"root@${OVM_HOST}\" \"$@\"",
+      "why": "Forwards caller-supplied arguments onward as a command. Unbounded by construction: it cannot be constrained by sudoers argument matching and cannot be reasoned about from its own source."
+    },
+    {
       "id": "f7493ad70bef6374",
       "detector": "compose_production",
       "kind": "container-mutation",
@@ -6436,6 +7706,17 @@
       "why": "Executes or transfers to a remote host. Combined with a privileged invocation this is a deployment path."
     },
     {
+      "id": "31b3fe76faa5ff67",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "shared-scripts",
+      "path": "deploy-menhir-app-only.ps1",
+      "line": 27,
+      "evidence": "$remoteHost = if ($env:YAWN_VPS_HOST) { $env:YAWN_VPS_HOST } else { \"thron@147.93.132.141\" }",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
       "id": "d1518c962147f255",
       "detector": "sudo_invocation",
       "kind": "privileged-exec",
@@ -6522,6 +7803,17 @@
       "line": 176,
       "evidence": "$archiveScript = Join-Path $PSScriptRoot \"menhir-backup-archive.ps1\"",
       "why": "Touches the Neo4j database or its backups. Data loss here is the one unrecoverable failure in this system."
+    },
+    {
+      "id": "2b9b5ac9b337ea0e",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "shared-scripts",
+      "path": "deploy-menhir.ps1",
+      "line": 177,
+      "evidence": "$remoteHost = if ($env:YAWN_VPS_HOST) { $env:YAWN_VPS_HOST } else { \"thron@147.93.132.141\" }",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
     },
     {
       "id": "acf225f852436bf7",
@@ -7041,6 +8333,28 @@
       "why": "Invokes a privileged command. Every one of these is a candidate mutation entry point and must be accounted for."
     },
     {
+      "id": "04cc3f94836ff73f",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "shared-scripts",
+      "path": "deploy-menhir.ps1",
+      "line": 628,
+      "evidence": "$ready = Invoke-RestMethod -Uri \"https://memory.ctharvey.me/readyz\" -TimeoutSec 20",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "28faa2f2dcb4ab3d",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "shared-scripts",
+      "path": "deploy-menhir.ps1",
+      "line": 632,
+      "evidence": "Invoke-WebRequest -Uri \"https://memory.ctharvey.me/livez\" -TimeoutSec 20 -UseBasicParsing | Out-Null",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
       "id": "acf225f852436bf7",
       "detector": "ingress_config",
       "kind": "ingress",
@@ -7184,6 +8498,17 @@
       "why": "Invokes a privileged command. Every one of these is a candidate mutation entry point and must be accounted for."
     },
     {
+      "id": "303752c701895e1f",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "shared-scripts",
+      "path": "deploy-menhir.ps1",
+      "line": 716,
+      "evidence": "Write-Output \"Primary endpoint: https://memory.ctharvey.me/mcp-http\"",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
       "id": "5ffa69dbc8d3bce3",
       "detector": "sudo_invocation",
       "kind": "privileged-exec",
@@ -7193,6 +8518,17 @@
       "line": 723,
       "evidence": "& $sshScript \"sudo -n rm -rf -- '$trustedBundle'\" | Out-Null",
       "why": "Invokes a privileged command. Every one of these is a candidate mutation entry point and must be accounted for."
+    },
+    {
+      "id": "cee3758a029fd67d",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "shared-scripts",
+      "path": "market-sealed/vps-check-null-sealed.ps1",
+      "line": 10,
+      "evidence": "& \"$workspaceScriptsDir\\vps-scp.ps1\" -Source $localScript -Destination \"thron@147.93.132.141:$remoteScript\"",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
     },
     {
       "id": "ad42bcb69fefded8",
@@ -7305,6 +8641,17 @@
       "why": "Executes or transfers to a remote host. Combined with a privileged invocation this is a deployment path."
     },
     {
+      "id": "78f0e220e1621ead",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "shared-scripts",
+      "path": "market-sealed/vps-download-sealed.ps1",
+      "line": 11,
+      "evidence": "& \"$workspaceScriptsDir\\vps-scp.ps1\" -Source $localScript -Destination \"thron@147.93.132.141:$remoteScript\"",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
       "id": "90b56a8d228da195",
       "detector": "remote_shell_exec",
       "kind": "remote-exec",
@@ -7336,6 +8683,17 @@
       "line": 19,
       "evidence": "& \"$workspaceScriptsDir\\vps-ssh.ps1\" \"docker exec -u root vps-rip-1 sh $remoteScript\"",
       "why": "Starts, stops, replaces, or loads containers. Affects what is running and reachable."
+    },
+    {
+      "id": "0b1143ecc983cd51",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "shared-scripts",
+      "path": "market-sealed/vps-upload-manual-images.ps1",
+      "line": 58,
+      "evidence": "& \"$workspaceScriptsDir\\vps-scp.ps1\" -Source $localFile -Destination \"thron@147.93.132.141:$remoteHost\"",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
     },
     {
       "id": "469d402ac9705bf3",
@@ -7380,6 +8738,17 @@
       "line": 11,
       "evidence": "$scpScript = Join-Path $PSScriptRoot \"vps-scp.ps1\"",
       "why": "Executes or transfers to a remote host. Combined with a privileged invocation this is a deployment path."
+    },
+    {
+      "id": "9febacc3cf78a9a6",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "shared-scripts",
+      "path": "menhir-backup-archive.ps1",
+      "line": 12,
+      "evidence": "$remoteHost = if ($env:YAWN_VPS_HOST) { $env:YAWN_VPS_HOST } else { \"thron@147.93.132.141\" }",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
     },
     {
       "id": "e4d2f5f717f550e6",
@@ -7512,6 +8881,61 @@
       "line": 16,
       "evidence": "$archiveScript = Join-Path $PSScriptRoot \"menhir-backup-archive.ps1\"",
       "why": "Touches the Neo4j database or its backups. Data loss here is the one unrecoverable failure in this system."
+    },
+    {
+      "id": "5957ad5adea77458",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "shared-scripts",
+      "path": "menhir-scaffold.ps1",
+      "line": 17,
+      "evidence": "$remoteHost = if ($env:YAWN_VPS_HOST) { $env:YAWN_VPS_HOST } else { \"thron@147.93.132.141\" }",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "2b818520481638f0",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "shared-scripts",
+      "path": "menhir-scaffold.ps1",
+      "line": 30,
+      "evidence": "$priorHost = $env:YAWN_VPS_HOST",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "fd4504f41b696dee",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "shared-scripts",
+      "path": "menhir-scaffold.ps1",
+      "line": 33,
+      "evidence": "$env:YAWN_VPS_HOST = $TargetHost",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "855e6c5e9204b155",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "shared-scripts",
+      "path": "menhir-scaffold.ps1",
+      "line": 42,
+      "evidence": "Remove-Item Env:YAWN_VPS_HOST -ErrorAction SilentlyContinue",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "36e1be773a5daa2a",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "shared-scripts",
+      "path": "menhir-scaffold.ps1",
+      "line": 45,
+      "evidence": "$env:YAWN_VPS_HOST = $priorHost",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
     },
     {
       "id": "bcae6a74617f50f7",
@@ -7668,6 +9092,61 @@
       "why": "Starts, stops, replaces, or loads containers. Affects what is running and reachable."
     },
     {
+      "id": "e5142fbf1cc900df",
+      "detector": "arbitrary_command_passthrough",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "shared-scripts",
+      "path": "vps-compose.ps1",
+      "line": 5,
+      "evidence": "[Parameter(Mandatory = $true, ValueFromRemainingArguments = $true)]",
+      "why": "Forwards caller-supplied arguments onward as a command. Unbounded by construction: it cannot be constrained by sudoers argument matching and cannot be reasoned about from its own source."
+    },
+    {
+      "id": "796db9af96d781c4",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "shared-scripts",
+      "path": "vps-compose.ps1",
+      "line": 12,
+      "evidence": "$sshKey = if ($env:YAWN_VPS_SSH_KEY_PATH) { $env:YAWN_VPS_SSH_KEY_PATH } else { $defaultSshKey }",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "81e69cb8638a6474",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "shared-scripts",
+      "path": "vps-compose.ps1",
+      "line": 15,
+      "evidence": "$remoteHost = if ($env:YAWN_VPS_HOST) { $env:YAWN_VPS_HOST } else { \"thron@147.93.132.141\" }",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "fa3741b4dd9ee2a6",
+      "detector": "arbitrary_command_passthrough",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "shared-scripts",
+      "path": "vps-compose.ps1",
+      "line": 20,
+      "evidence": "throw \"Usage: .\\scripts\\vps-compose.ps1 <docker compose args>\"",
+      "why": "Forwards caller-supplied arguments onward as a command. Unbounded by construction: it cannot be constrained by sudoers argument matching and cannot be reasoned about from its own source."
+    },
+    {
+      "id": "61fc7d4b88da0b22",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "shared-scripts",
+      "path": "vps-scp.ps1",
+      "line": 17,
+      "evidence": "$sshKey = if ($env:YAWN_VPS_SSH_KEY_PATH) { $env:YAWN_VPS_SSH_KEY_PATH } else { $defaultSshKey }",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
       "id": "67d9520460c900a5",
       "detector": "remote_shell_exec",
       "kind": "remote-exec",
@@ -7677,6 +9156,50 @@
       "line": 69,
       "evidence": "& scp @scpArgs",
       "why": "Executes or transfers to a remote host. Combined with a privileged invocation this is a deployment path."
+    },
+    {
+      "id": "eea3b3b3e51089f6",
+      "detector": "arbitrary_command_passthrough",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "shared-scripts",
+      "path": "vps-ssh.ps1",
+      "line": 5,
+      "evidence": "[Parameter(Mandatory = $true, ValueFromRemainingArguments = $true)]",
+      "why": "Forwards caller-supplied arguments onward as a command. Unbounded by construction: it cannot be constrained by sudoers argument matching and cannot be reasoned about from its own source."
+    },
+    {
+      "id": "2651057849243ee1",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "shared-scripts",
+      "path": "vps-ssh.ps1",
+      "line": 12,
+      "evidence": "$sshKey = if ($env:YAWN_VPS_SSH_KEY_PATH) { $env:YAWN_VPS_SSH_KEY_PATH } else { $defaultSshKey }",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "03463f32f3543a90",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "shared-scripts",
+      "path": "vps-ssh.ps1",
+      "line": 15,
+      "evidence": "$remoteHost = if ($env:YAWN_VPS_HOST) { $env:YAWN_VPS_HOST } else { \"thron@147.93.132.141\" }",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "77cd8bcd7d277423",
+      "detector": "arbitrary_command_passthrough",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "shared-scripts",
+      "path": "vps-ssh.ps1",
+      "line": 19,
+      "evidence": "throw \"Usage: .\\scripts\\vps-ssh.ps1 <remote command>\"",
+      "why": "Forwards caller-supplied arguments onward as a command. Unbounded by construction: it cannot be constrained by sudoers argument matching and cannot be reasoned about from its own source."
     },
     {
       "id": "c7d7ee35689a5eab",
@@ -7811,6 +9334,39 @@
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
     },
     {
+      "id": "f166702160d05127",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "Caddyfile",
+      "line": 186,
+      "evidence": "http://memory.ctharvey.me {",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "6f876e9f2eadd7e5",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "Caddyfile",
+      "line": 190,
+      "evidence": "memory.ctharvey.me {",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "96e0473c3047a900",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "Caddyfile",
+      "line": 199,
+      "evidence": "tls /etc/caddy/certs/memory.ctharvey.me.crt /etc/caddy/certs/memory.ctharvey.me.key {",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
       "id": "0406ddb92a017a64",
       "detector": "ingress_config",
       "kind": "ingress",
@@ -7831,6 +9387,17 @@
       "line": 235,
       "evidence": "reverse_proxy menhir-prod-app:8099",
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
+    },
+    {
+      "id": "bd690d26e33d0960",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "Caddyfile",
+      "line": 235,
+      "evidence": "reverse_proxy menhir-prod-app:8099",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
     },
     {
       "id": "42e3309afc80fd27",
@@ -8064,6 +9631,17 @@
       "why": "Invokes a privileged command. Every one of these is a candidate mutation entry point and must be accounted for."
     },
     {
+      "id": "18ccf16aaee81c36",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "context",
+      "repo": "yawn.deploy",
+      "path": "README.md",
+      "line": 99,
+      "evidence": "The existing `memory.ctharvey.me` vhost is also the only public operations",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
       "id": "b8d625d1a2aaa5dd",
       "detector": "ingress_config",
       "kind": "ingress",
@@ -8073,6 +9651,17 @@
       "line": 105,
       "evidence": "The external `menhir-proxy` network must therefore be created with subnet",
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
+    },
+    {
+      "id": "b6161b6b439f9a1b",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "context",
+      "repo": "yawn.deploy",
+      "path": "README.md",
+      "line": 115,
+      "evidence": "the rendered and live Caddy configs to contain `menhir-prod-app:8099` and",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
     },
     {
       "id": "064cd61d8ba11acf",
@@ -8273,6 +9862,17 @@
       "why": "Defines or controls a system service, timer, or socket activation. These run without an operator present and are mutation paths."
     },
     {
+      "id": "06353c0ee66efe4b",
+      "detector": "arbitrary_command_passthrough",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "bootstrap-postgres.sh",
+      "line": 20,
+      "evidence": "die() { printf 'ERROR: %s\\n' \"$@\" >&2; exit 1; }",
+      "why": "Forwards caller-supplied arguments onward as a command. Unbounded by construction: it cannot be constrained by sudoers argument matching and cannot be reasoned about from its own source."
+    },
+    {
       "id": "37cc50c88e19f0d5",
       "detector": "compose_production",
       "kind": "container-mutation",
@@ -8315,6 +9915,17 @@
       "line": 85,
       "evidence": "RECORD_FILE=\"${RECORD_FILE:-/var/lib/yawn/caddy-release.records}\"",
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
+    },
+    {
+      "id": "8cb3310d9a6bf7ad",
+      "detector": "arbitrary_command_passthrough",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "caddy-release.sh",
+      "line": 122,
+      "evidence": "print(out)' \"$f\" \"$@\"",
+      "why": "Forwards caller-supplied arguments onward as a command. Unbounded by construction: it cannot be constrained by sudoers argument matching and cannot be reasoned about from its own source."
     },
     {
       "id": "1c5fea6e2117c2f0",
@@ -8405,6 +10016,28 @@
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
     },
     {
+      "id": "0ddecb9433f76a69",
+      "detector": "arbitrary_command_passthrough",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "caddy-release.sh",
+      "line": 292,
+      "evidence": "\"$@\"",
+      "why": "Forwards caller-supplied arguments onward as a command. Unbounded by construction: it cannot be constrained by sudoers argument matching and cannot be reasoned about from its own source."
+    },
+    {
+      "id": "7f694fcb4f3f73bd",
+      "detector": "arbitrary_command_passthrough",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "caddy-release.sh",
+      "line": 300,
+      "evidence": "--project-directory \"$project_dir\" -f \"$compose_file\" --env-file \"$env_file\" \"$@\"",
+      "why": "Forwards caller-supplied arguments onward as a command. Unbounded by construction: it cannot be constrained by sudoers argument matching and cannot be reasoned about from its own source."
+    },
+    {
       "id": "e4bd8742b2738c27",
       "detector": "ingress_config",
       "kind": "ingress",
@@ -8425,6 +10058,50 @@
       "line": 309,
       "evidence": "for f in Caddyfile docker-compose.yml releases.json; do",
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
+    },
+    {
+      "id": "7e2e6c236be4c007",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "caddy-release.sh",
+      "line": 334,
+      "evidence": "[ \"$MEMORY_UPSTREAM\" = \"menhir-prod-app:8099\" ] \\",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "bb9982cf977aa99e",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "caddy-release.sh",
+      "line": 335,
+      "evidence": "|| die \"memory upstream must be exactly menhir-prod-app:8099 (got '$MEMORY_UPSTREAM')\"",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "9bf0cfdedaebc352",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "caddy-release.sh",
+      "line": 336,
+      "evidence": "[ \"$MEMORY_HOST\" = \"memory.ctharvey.me\" ] \\",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "84b9a6ec8530c62c",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "caddy-release.sh",
+      "line": 337,
+      "evidence": "|| die \"memory host must be exactly memory.ctharvey.me (got '$MEMORY_HOST')\"",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
     },
     {
       "id": "999f63acdc6df5e0",
@@ -8548,6 +10225,17 @@
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
     },
     {
+      "id": "9494d85e8edd1e65",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "caddy-release.sh",
+      "line": 501,
+      "evidence": "expected_app=\"menhir-prod-app:8099\"",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
       "id": "5cf49e51b25264ed",
       "detector": "ingress_config",
       "kind": "ingress",
@@ -8559,6 +10247,28 @@
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
     },
     {
+      "id": "15d08118dfcd788f",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "caddy-release.sh",
+      "line": 518,
+      "evidence": "bad_app=[d for d in all_dials if d.startswith(\"menhir-prod-app\") and d != expected_app]",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "d14661535d3b22cd",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "caddy-release.sh",
+      "line": 531,
+      "evidence": "expected=\"menhir-prod-app:8099\"",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
       "id": "5cf49e51b25264ed",
       "detector": "ingress_config",
       "kind": "ingress",
@@ -8568,6 +10278,28 @@
       "line": 536,
       "evidence": "if node.get(\"handler\")==\"reverse_proxy\":",
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
+    },
+    {
+      "id": "f4fd7867962f0029",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "caddy-release.sh",
+      "line": 544,
+      "evidence": "bad=[dial for dial in dials if dial.startswith(\"menhir-prod-app\") and dial!=expected]",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "1441093a766811c2",
+      "detector": "arbitrary_command_passthrough",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "caddy-release.sh",
+      "line": 712,
+      "evidence": "\"$@\" \"$PROBE_SCHEME://$host/ops/mcp\" 2>/dev/null)\" || return 1",
+      "why": "Forwards caller-supplied arguments onward as a command. Unbounded by construction: it cannot be constrained by sudoers argument matching and cannot be reasoned about from its own source."
     },
     {
       "id": "f8c7006af2fb8654",
@@ -8779,6 +10511,17 @@
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
     },
     {
+      "id": "d52697157333c247",
+      "detector": "arbitrary_command_passthrough",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "caddy-release.sh",
+      "line": 1948,
+      "evidence": "main \"$@\"",
+      "why": "Forwards caller-supplied arguments onward as a command. Unbounded by construction: it cannot be constrained by sudoers argument matching and cannot be reasoned about from its own source."
+    },
+    {
       "id": "c6a8f61293914876",
       "detector": "sudo_invocation",
       "kind": "privileged-exec",
@@ -8790,6 +10533,17 @@
       "why": "Invokes a privileged command. Every one of these is a candidate mutation entry point and must be accounted for."
     },
     {
+      "id": "cdcc5743020f8394",
+      "detector": "arbitrary_command_passthrough",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "check-drift.sh",
+      "line": 56,
+      "evidence": "--project-directory \"$project_dir\" -f \"$compose_file\" --env-file \"$env_file\" \"$@\"",
+      "why": "Forwards caller-supplied arguments onward as a command. Unbounded by construction: it cannot be constrained by sudoers argument matching and cannot be reasoned about from its own source."
+    },
+    {
       "id": "cba97a3a76b5cd98",
       "detector": "ingress_config",
       "kind": "ingress",
@@ -8799,6 +10553,39 @@
       "line": 94,
       "evidence": "if node.get(\"handler\")==\"reverse_proxy\":",
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
+    },
+    {
+      "id": "6e338b3ced0d5565",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "check-drift.sh",
+      "line": 105,
+      "evidence": "bad_app=[dial for dial in all_dials if dial.startswith(\"menhir-prod-app\") and dial!=expected_app]",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "e4a82ad94954c695",
+      "detector": "arbitrary_command_passthrough",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "check-drift.sh",
+      "line": 131,
+      "evidence": "\"$@\" \"https://$host/ops/mcp\" 2>/dev/null)\" || return 1",
+      "why": "Forwards caller-supplied arguments onward as a command. Unbounded by construction: it cannot be constrained by sudoers argument matching and cannot be reasoned about from its own source."
+    },
+    {
+      "id": "5740250f06a0aed5",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "check-drift.sh",
+      "line": 343,
+      "evidence": "if [ \"$host\" != \"memory.ctharvey.me\" ] || [ \"$upstream\" != \"menhir-prod-app:8099\" ]; then",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
     },
     {
       "id": "4ba66d6e801ccf65",
@@ -8856,6 +10643,28 @@
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
     },
     {
+      "id": "7848bf835df3fc68",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "docker-compose.yml",
+      "line": 76,
+      "evidence": "- /etc/yawn/certs/memory.ctharvey.me.crt:/etc/caddy/certs/memory.ctharvey.me.crt:ro",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "9df7e9c7a76feb2f",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "docker-compose.yml",
+      "line": 77,
+      "evidence": "- /etc/yawn/certs/memory.ctharvey.me.key:/etc/caddy/certs/memory.ctharvey.me.key:ro",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
       "id": "41fcbe479cc128e3",
       "detector": "ingress_config",
       "kind": "ingress",
@@ -8911,6 +10720,28 @@
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
     },
     {
+      "id": "de42a36e9300fc47",
+      "detector": "arbitrary_command_passthrough",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "lib/registry.sh",
+      "line": 38,
+      "evidence": "\"$REGISTRY_PY\" - \"$REGISTRY_FILE\" \"$@\" <<'PY'",
+      "why": "Forwards caller-supplied arguments onward as a command. Unbounded by construction: it cannot be constrained by sudoers argument matching and cannot be reasoned about from its own source."
+    },
+    {
+      "id": "304e78bb107dda7d",
+      "detector": "arbitrary_command_passthrough",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "ops/backup/daily-backup.sh",
+      "line": 37,
+      "evidence": "if docker exec \"$CONTAINER\" pg_dump -U yawn --format=custom --file=/tmp/yawn_daily.dump yawn 2>\"$BACKUP_DIR/backup_err.tmp\" \\",
+      "why": "Forwards caller-supplied arguments onward as a command. Unbounded by construction: it cannot be constrained by sudoers argument matching and cannot be reasoned about from its own source."
+    },
+    {
       "id": "90bb410173368ffa",
       "detector": "compose_production",
       "kind": "container-mutation",
@@ -8920,6 +10751,17 @@
       "line": 37,
       "evidence": "if docker exec \"$CONTAINER\" pg_dump -U yawn --format=custom --file=/tmp/yawn_daily.dump yawn 2>\"$BACKUP_DIR/backup_err.tmp\" \\",
       "why": "Starts, stops, replaces, or loads containers. Affects what is running and reachable."
+    },
+    {
+      "id": "6cb256614e24e60e",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "ops/backup/home-pull-backups.sh",
+      "line": 19,
+      "evidence": "VPS=\"thron@147.93.132.141\"",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
     },
     {
       "id": "6016170279f6036e",
@@ -8955,6 +10797,17 @@
       "why": "Starts, stops, replaces, or loads containers. Affects what is running and reachable."
     },
     {
+      "id": "6204a2ef870c73b4",
+      "detector": "arbitrary_command_passthrough",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "ops/backup/offsite-backup.sh",
+      "line": 87,
+      "evidence": "docker exec \"$CONTAINER\" pg_dumpall -U yawn --globals-only \\",
+      "why": "Forwards caller-supplied arguments onward as a command. Unbounded by construction: it cannot be constrained by sudoers argument matching and cannot be reasoned about from its own source."
+    },
+    {
       "id": "226b3590526d1c84",
       "detector": "compose_production",
       "kind": "container-mutation",
@@ -8986,6 +10839,17 @@
       "line": 148,
       "evidence": "if ! flock -n 9; then",
       "why": "Acquires or defines a mutation lock. Two writers sharing a lock path are the same critical section and must be censused together."
+    },
+    {
+      "id": "9faffce518276cc3",
+      "detector": "arbitrary_command_passthrough",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "ops/seed-nightly/run-seed-nightly.sh",
+      "line": 209,
+      "evidence": "main \"$@\"",
+      "why": "Forwards caller-supplied arguments onward as a command. Unbounded by construction: it cannot be constrained by sudoers argument matching and cannot be reasoned about from its own source."
     },
     {
       "id": "83388966ab015b27",
@@ -9098,6 +10962,17 @@
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
     },
     {
+      "id": "583dca4f360a3527",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "releases.json",
+      "line": 83,
+      "evidence": "\"caddy\": { \"type\": \"healthy\", \"note\": \"Public ingress (ports 80/443). Also joins the external menhir-proxy network and serves memory.ctharvey.me (approved Menhir public surface) proxied to menhir-prod",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
       "id": "b135a31e4e6dbb79",
       "detector": "ingress_config",
       "kind": "ingress",
@@ -9131,6 +11006,17 @@
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
     },
     {
+      "id": "d1b8ec3144c70108",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "releases.json",
+      "line": 173,
+      "evidence": "\"_comment\": \"Shared Caddy/proxy release surface (Menhir Contabo migration). Single source of truth for the external proxy network, the memory.ctharvey.me vhost, its Cloudflare Origin CA cert/key/trust",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
       "id": "05e4928770715407",
       "detector": "ingress_config",
       "kind": "ingress",
@@ -9142,6 +11028,50 @@
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
     },
     {
+      "id": "abed653832a336ff",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "releases.json",
+      "line": 178,
+      "evidence": "\"memory_host\": \"memory.ctharvey.me\",",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "66cc841807fb9ff7",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "releases.json",
+      "line": 179,
+      "evidence": "\"memory_upstream\": \"menhir-prod-app:8099\",",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "8484594e7b840d8c",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "releases.json",
+      "line": 185,
+      "evidence": "\"memory_tls_cert\": \"/etc/yawn/certs/memory.ctharvey.me.crt\",",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "c848844149f049f3",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "releases.json",
+      "line": 186,
+      "evidence": "\"memory_tls_key\": \"/etc/yawn/certs/memory.ctharvey.me.key\",",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
       "id": "6485e92f03e1fa6b",
       "detector": "lock_acquisition",
       "kind": "lock",
@@ -9151,6 +11081,39 @@
       "line": 194,
       "evidence": "\"release_lock\": \"/run/lock/menhir-production.lock\",",
       "why": "Acquires or defines a mutation lock. Two writers sharing a lock path are the same critical section and must be censused together."
+    },
+    {
+      "id": "ef9d2fc23c6af006",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "releases.json",
+      "line": 196,
+      "evidence": "\"menhir_proxy_alias\": \"menhir-prod-app\",",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "da34e043c10ff4e2",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "releases.json",
+      "line": 197,
+      "evidence": "\"expected_peers\": [\"caddy\", \"menhir-prod-app\"]",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "13064b514beb9101",
+      "detector": "arbitrary_command_passthrough",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "remote-deploy.sh",
+      "line": 39,
+      "evidence": "sudo -u \"$DEPLOY_USER\" env HOME=\"$DEPLOY_HOME\" \"$@\"",
+      "why": "Forwards caller-supplied arguments onward as a command. Unbounded by construction: it cannot be constrained by sudoers argument matching and cannot be reasoned about from its own source."
     },
     {
       "id": "0c48d611854101c2",
@@ -9230,6 +11193,28 @@
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
     },
     {
+      "id": "4b69f3cacb020402",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "tests/caddy-release.test.sh",
+      "line": 47,
+      "evidence": "check \"menhir_proxy_alias\" \"$(_reg \"proxy.menhir_proxy_alias\")\" \"menhir-prod-app\"",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "87a15063d300a04b",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "tests/caddy-release.test.sh",
+      "line": 48,
+      "evidence": "check \"memory_upstream\" \"$(_reg \"proxy.memory_upstream\")\" \"menhir-prod-app:8099\"",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
       "id": "b3ba03e421b01914",
       "detector": "ingress_config",
       "kind": "ingress",
@@ -9261,6 +11246,17 @@
       "line": 60,
       "evidence": "check_grep \"Caddyfile hardcodes 8099\" \"$REPO_ROOT/Caddyfile\" 'menhir-prod-app:8099'",
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
+    },
+    {
+      "id": "f4901dffaa4be7d8",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "tests/caddy-release.test.sh",
+      "line": 60,
+      "evidence": "check_grep \"Caddyfile hardcodes 8099\" \"$REPO_ROOT/Caddyfile\" 'menhir-prod-app:8099'",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
     },
     {
       "id": "aec25dd8363ada85",
@@ -9360,6 +11356,17 @@
       "line": 69,
       "evidence": "check_grep \"memory HTTP is explicitly refused\" \"$REPO_ROOT/Caddyfile\" 'http://memory.ctharvey.me {'",
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
+    },
+    {
+      "id": "40dc3e879c788597",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "tests/caddy-release.test.sh",
+      "line": 69,
+      "evidence": "check_grep \"memory HTTP is explicitly refused\" \"$REPO_ROOT/Caddyfile\" 'http://memory.ctharvey.me {'",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
     },
     {
       "id": "bd064d46225f06f0",
@@ -9758,6 +11765,17 @@
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
     },
     {
+      "id": "bc84f5c40ae520aa",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "tests/caddy-release.test.sh",
+      "line": 137,
+      "evidence": "{\"apps\":{\"http\":{\"servers\":{\"srv0\":{\"routes\":[{\"handle\":[{\"handler\":\"reverse_proxy\",\"upstreams\":[{\"dial\":\"menhir-prod-app:8099\"}]}]},{\"handle\":[{\"handler\":\"reverse_proxy\",\"upstreams\":[{\"dial\":\"172.30.",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
       "id": "610ca500a3cf00a3",
       "detector": "ingress_config",
       "kind": "ingress",
@@ -9767,6 +11785,17 @@
       "line": 140,
       "evidence": "{\"routes\":[{\"handler\":\"reverse_proxy\",\"upstreams\":[{\"dial\":\"menhir-prod-app:8080\"}]},{\"handler\":\"reverse_proxy\",\"upstreams\":[{\"dial\":\"172.30.0.1:8000\"}]}]}",
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
+    },
+    {
+      "id": "f96288cdf3dbedc0",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "tests/caddy-release.test.sh",
+      "line": 140,
+      "evidence": "{\"routes\":[{\"handler\":\"reverse_proxy\",\"upstreams\":[{\"dial\":\"menhir-prod-app:8080\"}]},{\"handler\":\"reverse_proxy\",\"upstreams\":[{\"dial\":\"172.30.0.1:8000\"}]}]}",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
     },
     {
       "id": "648fb24fa03ba36a",
@@ -9780,6 +11809,17 @@
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
     },
     {
+      "id": "1e2b682681a47805",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "tests/caddy-release.test.sh",
+      "line": 143,
+      "evidence": "{\"routes\":[{\"handler\":\"reverse_proxy\",\"upstreams\":[{\"dial\":\"menhir-prod-app:8099\"}]},{\"handler\":\"reverse_proxy\",\"upstreams\":[{\"dial\":\"172.30.0.1:8001\"}]}]}",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
       "id": "0afa04afbe1ece2e",
       "detector": "ingress_config",
       "kind": "ingress",
@@ -9789,6 +11829,17 @@
       "line": 146,
       "evidence": "{\"routes\":[{\"handler\":\"reverse_proxy\",\"upstreams\":[{\"dial\":\"menhir-prod-app:8099\"}]},{\"handler\":\"reverse_proxy\",\"upstreams\":[{\"dial\":\"127.0.0.1:8000\"}]}]}",
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
+    },
+    {
+      "id": "92b9061aa55ceb60",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "tests/caddy-release.test.sh",
+      "line": 146,
+      "evidence": "{\"routes\":[{\"handler\":\"reverse_proxy\",\"upstreams\":[{\"dial\":\"menhir-prod-app:8099\"}]},{\"handler\":\"reverse_proxy\",\"upstreams\":[{\"dial\":\"127.0.0.1:8000\"}]}]}",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
     },
     {
       "id": "8c9bf85ce8437f1b",
@@ -9802,6 +11853,17 @@
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
     },
     {
+      "id": "bbbe1b3196eaad67",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "tests/caddy-release.test.sh",
+      "line": 149,
+      "evidence": "{\"routes\":[{\"handler\":\"reverse_proxy\",\"upstreams\":[{\"dial\":\"menhir-prod-app:8099\"}]},{\"handler\":\"reverse_proxy\",\"upstreams\":[{\"dial\":\"172.30.0.1:8000\"},{\"dial\":\"127.0.0.1:9000\"}]}]}",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
       "id": "50c864425bd6d300",
       "detector": "ingress_config",
       "kind": "ingress",
@@ -9811,6 +11873,61 @@
       "line": 169,
       "evidence": "CADDY_RELEASE_LOCK=\"$META_SANDBOX/lock\" bash \"$REPO_ROOT/caddy-release.sh\" \\",
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
+    },
+    {
+      "id": "f0391cba63aa1524",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "tests/caddy-release.test.sh",
+      "line": 170,
+      "evidence": "memory.ctharvey.me",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "2d1992497e4ab3e9",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "tests/caddy-release.test.sh",
+      "line": 172,
+      "evidence": "if printf '%s' '{\"resource\":\"https://memory.ctharvey.me/ops/mcp\",\"authorization_servers\":[\"https://memory.ctharvey.me/\"]}' \\",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "35a69efa14cde472",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "tests/caddy-release.test.sh",
+      "line": 179,
+      "evidence": "'{\"resource\":\"https://memory.ctharvey.me/mcp\",\"authorization_servers\":[\"https://memory.ctharvey.me/\"]}' \\",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "a7710d2d05955b68",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "tests/caddy-release.test.sh",
+      "line": 180,
+      "evidence": "'{\"resource\":\"https://memory.ctharvey.me/ops/mcp\",\"authorization_servers\":[\"https://evil.invalid/\"]}' \\",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "b3d6bb917ccb8b56",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "tests/caddy-release.test.sh",
+      "line": 181,
+      "evidence": "'{\"resource\":\"https://memory.ctharvey.me/ops/mcp\",\"authorization_servers\":[\"https://memory.ctharvey.me/\",\"https://evil.invalid/\"]}'; do",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
     },
     {
       "id": "09ab0169a6e9f265",
@@ -9844,6 +11961,17 @@
       "line": 223,
       "evidence": "{\"proxy\":{\"menhir_network\":\"menhir-proxy\",\"menhir_network_subnet\":\"172.30.0.0/24\",\"memory_host\":\"memory.example.test\",\"memory_upstream\":\"menhir-prod-app:8099\",\"memory_tls_cert\":\"/cert\",\"memory_tls_key",
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
+    },
+    {
+      "id": "4a3da11604129d58",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "tests/caddy-release.test.sh",
+      "line": 223,
+      "evidence": "{\"proxy\":{\"menhir_network\":\"menhir-proxy\",\"menhir_network_subnet\":\"172.30.0.0/24\",\"memory_host\":\"memory.example.test\",\"memory_upstream\":\"menhir-prod-app:8099\",\"memory_tls_cert\":\"/cert\",\"memory_tls_key",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
     },
     {
       "id": "1ed9b60badd5395c",
@@ -9890,6 +12018,17 @@
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
     },
     {
+      "id": "288a876aa5a1fd01",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "tests/caddy-release.test.sh",
+      "line": 281,
+      "evidence": "\"http\": {\"servers\": {\"srv0\": {\"routes\": [{\"handle\": [{\"handler\": \"reverse_proxy\", \"upstreams\": [{\"dial\": \"menhir-prod-app:8099\"}]}]}]}}},",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
       "id": "0294444573fca75a",
       "detector": "ingress_config",
       "kind": "ingress",
@@ -9899,6 +12038,17 @@
       "line": 289,
       "evidence": "{\"storage\":{\"root\":\"/data/caddy\",\"module\":\"file_system\"},\"logging\":{\"logs\":{\"default\":{\"level\":\"INFO\"}}},\"apps\":{\"tls\":{\"automation\":{\"policies\":[{\"issuers\":[{\"module\":\"internal\"}]}]}},\"http\":{\"server",
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
+    },
+    {
+      "id": "d37e9731187c772b",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "tests/caddy-release.test.sh",
+      "line": 289,
+      "evidence": "{\"storage\":{\"root\":\"/data/caddy\",\"module\":\"file_system\"},\"logging\":{\"logs\":{\"default\":{\"level\":\"INFO\"}}},\"apps\":{\"tls\":{\"automation\":{\"policies\":[{\"issuers\":[{\"module\":\"internal\"}]}]}},\"http\":{\"server",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
     },
     {
       "id": "c3db2634adda819c",
@@ -9912,6 +12062,17 @@
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
     },
     {
+      "id": "f86830a4127db802",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "tests/caddy-release.test.sh",
+      "line": 292,
+      "evidence": "{\"admin\":{\"listen\":\"127.0.0.1:2019\"},\"apps\":{\"http\":{\"servers\":{\"srv0\":{\"routes\":[{\"handle\":[{\"handler\":\"reverse_proxy\",\"upstreams\":[{\"dial\":\"menhir-prod-app:8099\"}]}]}]}}},\"tls\":{\"automation\":{\"polic",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
       "id": "1f527765d2a010c9",
       "detector": "ingress_config",
       "kind": "ingress",
@@ -9921,6 +12082,17 @@
       "line": 295,
       "evidence": "{\"admin\":{\"listen\":\"127.0.0.1:2020\"},\"apps\":{\"http\":{\"servers\":{\"srv0\":{\"routes\":[{\"handle\":[{\"handler\":\"reverse_proxy\",\"upstreams\":[{\"dial\":\"menhir-prod-app:8099\"}]}]}]}}},\"tls\":{\"automation\":{\"polic",
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
+    },
+    {
+      "id": "eff7f415d88c14d1",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "tests/caddy-release.test.sh",
+      "line": 295,
+      "evidence": "{\"admin\":{\"listen\":\"127.0.0.1:2020\"},\"apps\":{\"http\":{\"servers\":{\"srv0\":{\"routes\":[{\"handle\":[{\"handler\":\"reverse_proxy\",\"upstreams\":[{\"dial\":\"menhir-prod-app:8099\"}]}]}]}}},\"tls\":{\"automation\":{\"polic",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
     },
     {
       "id": "74ef830802db6211",
@@ -9954,6 +12126,28 @@
       "line": 343,
       "evidence": "value={\"release_marker\":marker,\"proxy\":{\"menhir_network\":\"menhir-proxy\",\"menhir_network_subnet\":\"172.30.0.0/24\",\"memory_host\":\"memory.example.test\",\"memory_upstream\":\"menhir-prod-app:8099\",\"memory_tls",
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
+    },
+    {
+      "id": "e26daf38b675c62a",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "tests/caddy-release.test.sh",
+      "line": 343,
+      "evidence": "value={\"release_marker\":marker,\"proxy\":{\"menhir_network\":\"menhir-proxy\",\"menhir_network_subnet\":\"172.30.0.0/24\",\"memory_host\":\"memory.example.test\",\"memory_upstream\":\"menhir-prod-app:8099\",\"memory_tls",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "d9c13d6887fc3ea7",
+      "detector": "arbitrary_command_passthrough",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "tests/caddy-release.test.sh",
+      "line": 348,
+      "evidence": "\"$PY\" - \"$@\" <<'PY'",
+      "why": "Forwards caller-supplied arguments onward as a command. Unbounded by construction: it cannot be constrained by sudoers argument matching and cannot be reasoned about from its own source."
     },
     {
       "id": "628ca33ee16477cf",
@@ -10154,6 +12348,17 @@
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
     },
     {
+      "id": "08bdc1e074d244eb",
+      "detector": "arbitrary_command_passthrough",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "tests/caddy-release.test.sh",
+      "line": 496,
+      "evidence": "check_grep \"digest-bound env-file is sole interpolation source\" \"$REPO_ROOT/caddy-release.sh\" '--env-file \"$env_file\" \"$@\"'",
+      "why": "Forwards caller-supplied arguments onward as a command. Unbounded by construction: it cannot be constrained by sudoers argument matching and cannot be reasoned about from its own source."
+    },
+    {
       "id": "4753d916d1a6d8ab",
       "detector": "ingress_config",
       "kind": "ingress",
@@ -10196,6 +12401,17 @@
       "line": 540,
       "evidence": "{\"proxy\":{\"menhir_network\":\"menhir-proxy\",\"menhir_network_subnet\":\"172.30.0.0/24\",\"memory_host\":\"memory.example.test\",\"memory_upstream\":\"menhir-prod-app:8099\",\"memory_tls_cert\":\"/cert\",\"memory_tls_key",
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
+    },
+    {
+      "id": "4a3da11604129d58",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "tests/caddy-release.test.sh",
+      "line": 540,
+      "evidence": "{\"proxy\":{\"menhir_network\":\"menhir-proxy\",\"menhir_network_subnet\":\"172.30.0.0/24\",\"memory_host\":\"memory.example.test\",\"memory_upstream\":\"menhir-prod-app:8099\",\"memory_tls_cert\":\"/cert\",\"memory_tls_key",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
     },
     {
       "id": "1ed9b60badd5395c",
@@ -10297,6 +12513,50 @@
       "why": "Starts, stops, replaces, or loads containers. Affects what is running and reachable."
     },
     {
+      "id": "00014b9a41269616",
+      "detector": "arbitrary_command_passthrough",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "tests/sealed-copy.test.sh",
+      "line": 120,
+      "evidence": "python - \"$runtime_shape\" \"$@\" <<'PY'",
+      "why": "Forwards caller-supplied arguments onward as a command. Unbounded by construction: it cannot be constrained by sudoers argument matching and cannot be reasoned about from its own source."
+    },
+    {
+      "id": "4190d86a612f8cfa",
+      "detector": "arbitrary_command_passthrough",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "tests/sealed-copy.test.sh",
+      "line": 231,
+      "evidence": "run_shaped_tool unprivileged \"$@\"",
+      "why": "Forwards caller-supplied arguments onward as a command. Unbounded by construction: it cannot be constrained by sudoers argument matching and cannot be reasoned about from its own source."
+    },
+    {
+      "id": "5c63cd89a6c8a0b8",
+      "detector": "arbitrary_command_passthrough",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "tests/sealed-copy.test.sh",
+      "line": 324,
+      "evidence": "if \"$@\"; then",
+      "why": "Forwards caller-supplied arguments onward as a command. Unbounded by construction: it cannot be constrained by sudoers argument matching and cannot be reasoned about from its own source."
+    },
+    {
+      "id": "db79967d465f35e1",
+      "detector": "arbitrary_command_passthrough",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "tests/sealed-copy.test.sh",
+      "line": 342,
+      "evidence": "run_tool \"$@\" 2>&1",
+      "why": "Forwards caller-supplied arguments onward as a command. Unbounded by construction: it cannot be constrained by sudoers argument matching and cannot be reasoned about from its own source."
+    },
+    {
       "id": "ff3e516cf3aa589d",
       "detector": "systemd_unit",
       "kind": "service-definition",
@@ -10394,6 +12654,17 @@
       "line": 32,
       "evidence": "\"$ROOT/ops/seed-nightly/yawn-seed-nightly.timer\"",
       "why": "Defines or controls a system service, timer, or socket activation. These run without an operator present and are mutation paths."
+    },
+    {
+      "id": "9f9679fa6a02761f",
+      "detector": "arbitrary_command_passthrough",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "tests/seed-nightly.test.sh",
+      "line": 57,
+      "evidence": "bash \"$SCRIPT\" \"$@\"",
+      "why": "Forwards caller-supplied arguments onward as a command. Unbounded by construction: it cannot be constrained by sudoers argument matching and cannot be reasoned about from its own source."
     },
     {
       "id": "d24b73b9bb40d80a",
@@ -10495,6 +12766,28 @@
       "why": "Defines or controls a system service, timer, or socket activation. These run without an operator present and are mutation paths."
     },
     {
+      "id": "66f1caa985f66087",
+      "detector": "arbitrary_command_passthrough",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "wait-for-readiness.sh",
+      "line": 110,
+      "evidence": "for svc in \"$@\"; do",
+      "why": "Forwards caller-supplied arguments onward as a command. Unbounded by construction: it cannot be constrained by sudoers argument matching and cannot be reasoned about from its own source."
+    },
+    {
+      "id": "3616fd2aac2d278b",
+      "detector": "arbitrary_command_passthrough",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.deploy",
+      "path": "wait-for-readiness.sh",
+      "line": 130,
+      "evidence": "readiness_wait \"$@\"",
+      "why": "Forwards caller-supplied arguments onward as a command. Unbounded by construction: it cannot be constrained by sudoers argument matching and cannot be reasoned about from its own source."
+    },
+    {
       "id": "a54693ceb5c7daa7",
       "detector": "sudo_invocation",
       "kind": "privileged-exec",
@@ -10550,6 +12843,50 @@
       "why": "Starts, stops, replaces, or loads containers. Affects what is running and reachable."
     },
     {
+      "id": "e58f9fc149e53a5d",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "context",
+      "repo": "yawn.vps",
+      "path": "README.md",
+      "line": 11,
+      "evidence": "base URL is `https://memory.ctharvey.me/ops`, its exact MCP resource/audience is",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "01851c9dd7963a57",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "context",
+      "repo": "yawn.vps",
+      "path": "README.md",
+      "line": 12,
+      "evidence": "`https://memory.ctharvey.me/ops/mcp`, and its issuer is Menhir OAuth at",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "9136725c1464866b",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "context",
+      "repo": "yawn.vps",
+      "path": "README.md",
+      "line": 13,
+      "evidence": "`https://memory.ctharvey.me`. RFC 9728 metadata is published at",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "6b9d9dc0e1071b85",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "context",
+      "repo": "yawn.vps",
+      "path": "README.md",
+      "line": 14,
+      "evidence": "`https://memory.ctharvey.me/.well-known/oauth-protected-resource/ops/mcp`.",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
       "id": "d96aff2f159633cf",
       "detector": "remote_shell_exec",
       "kind": "remote-exec",
@@ -10561,6 +12898,17 @@
       "why": "Executes or transfers to a remote host. Combined with a privileged invocation this is a deployment path."
     },
     {
+      "id": "e23195106d713872",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "context",
+      "repo": "yawn.vps",
+      "path": "README.md",
+      "line": 119,
+      "evidence": "- Optional env vars for MCP hosts: `YAWN_VPS_SSH_AUTH_MODE` (`auto`, `agent`, `key`), `YAWN_VPS_SSH_CONFIG_PATH`, `YAWN_VPS_SSH_KEY_PATH`, `YAWN_VPS_SSH_KNOWN_HOSTS_PATH`.",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
       "id": "ecefe1d51b554e7c",
       "detector": "remote_shell_exec",
       "kind": "remote-exec",
@@ -10570,6 +12918,39 @@
       "line": 153,
       "evidence": "a typed `CapabilityDisabledError` before any mkdir/SCP/subprocess. The",
       "why": "Executes or transfers to a remote host. Combined with a privileged invocation this is a deployment path."
+    },
+    {
+      "id": "d24ff1c64a70623c",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.vps",
+      "path": "menhir_server.py",
+      "line": 34,
+      "evidence": "OAUTH_ISSUER = \"https://memory.ctharvey.me\"",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "8cef0eaac6d1f4e7",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.vps",
+      "path": "menhir_server.py",
+      "line": 35,
+      "evidence": "OPERATIONS_BASE_URL = \"https://memory.ctharvey.me/ops\"",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "3be48afbc0679e94",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.vps",
+      "path": "menhir_server.py",
+      "line": 36,
+      "evidence": "OPERATIONS_RESOURCE_URL = \"https://memory.ctharvey.me/ops/mcp\"",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
     },
     {
       "id": "7cfc9393d34006d4",
@@ -10627,6 +13008,39 @@
       "why": "Acquires or defines a mutation lock. Two writers sharing a lock path are the same critical section and must be censused together."
     },
     {
+      "id": "0cd5a03ad3ab1faf",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "context",
+      "repo": "yawn.vps",
+      "path": "ops/menhir/README.md",
+      "line": 35,
+      "evidence": "- OAuth issuer: `https://memory.ctharvey.me`",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "25736cc756668de9",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "context",
+      "repo": "yawn.vps",
+      "path": "ops/menhir/README.md",
+      "line": 36,
+      "evidence": "- OAuth external base URL: `https://memory.ctharvey.me/ops`",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "02a43be97fdb6126",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "context",
+      "repo": "yawn.vps",
+      "path": "ops/menhir/README.md",
+      "line": 37,
+      "evidence": "- OAuth operations resource/audience: `https://memory.ctharvey.me/ops/mcp`",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
       "id": "fc336f56da990c74",
       "detector": "database_or_backup_op",
       "kind": "data-mutation",
@@ -10680,6 +13094,17 @@
       "line": 66,
       "evidence": "`sudo -n /srv/menhir/production/bin/<allowlisted-wrapper> ...` directly with",
       "why": "Invokes a privileged command. Every one of these is a candidate mutation entry point and must be accounted for."
+    },
+    {
+      "id": "b4177daa746afb0d",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "context",
+      "repo": "yawn.vps",
+      "path": "ops/menhir/README.md",
+      "line": 78,
+      "evidence": "`https://memory.ctharvey.me/ops/mcp` and points clients to the Menhir OAuth",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
     },
     {
       "id": "8ca38fa01f88dee0",
@@ -11034,6 +13459,17 @@
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
     },
     {
+      "id": "e9083e7f781f1b37",
+      "detector": "arbitrary_command_passthrough",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.vps",
+      "path": "ops/menhir/bin/lib.sh",
+      "line": 86,
+      "evidence": "--file \"${MENHIR_COMPOSE_FILE}\" \"$@\"",
+      "why": "Forwards caller-supplied arguments onward as a command. Unbounded by construction: it cannot be constrained by sudoers argument matching and cannot be reasoned about from its own source."
+    },
+    {
       "id": "3b56555b50387b9b",
       "detector": "ingress_config",
       "kind": "ingress",
@@ -11186,6 +13622,28 @@
       "line": 561,
       "evidence": "printf 'reconcile-caddy-route: run caddy-release reconcile/status and provide root-owned fresh reconcile/status evidence (%s)' \"${MENHIR_CADDY_RECONCILE_EVIDENCE}\"",
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
+    },
+    {
+      "id": "7d965614046500e2",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.vps",
+      "path": "ops/menhir/bin/lib.sh",
+      "line": 674,
+      "evidence": "fixed_container_healthy menhir-prod-app \\",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "8c26f51a31b6c78b",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.vps",
+      "path": "ops/menhir/bin/lib.sh",
+      "line": 684,
+      "evidence": "! docker inspect menhir-prod-app >/dev/null 2>&1 || return 1",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
     },
     {
       "id": "699729eee3380806",
@@ -11848,6 +14306,28 @@
       "why": "Executes or transfers to a remote host. Combined with a privileged invocation this is a deployment path."
     },
     {
+      "id": "ccb435c51b77a965",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.vps",
+      "path": "vps/core.py",
+      "line": 870,
+      "evidence": "\"YAWN_VPS_SSH_CONFIG_PATH, YAWN_VPS_SSH_AUTH_MODE, and YAWN_VPS_SSH_KEY_PATH.\"",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
+      "id": "4511b222a0ec25df",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.vps",
+      "path": "vps/core.py",
+      "line": 950,
+      "evidence": "return os.getenv(\"YAWN_VPS_HOST\", \"thron@[IP_ADDRESS]\")",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
       "id": "34b0f3ebdd9720aa",
       "detector": "sudo_invocation",
       "kind": "privileged-exec",
@@ -11914,6 +14394,17 @@
       "why": "Starts, stops, replaces, or loads containers. Affects what is running and reachable."
     },
     {
+      "id": "68895f1d43075fe2",
+      "detector": "arbitrary_command_passthrough",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.vps",
+      "path": "vps/core.py",
+      "line": 1158,
+      "evidence": "f'docker exec \"$cid\" test -f {log_path} 2>/dev/null || continue; '",
+      "why": "Forwards caller-supplied arguments onward as a command. Unbounded by construction: it cannot be constrained by sudoers argument matching and cannot be reasoned about from its own source."
+    },
+    {
       "id": "51a82c9a7223ef76",
       "detector": "compose_production",
       "kind": "container-mutation",
@@ -11947,6 +14438,17 @@
       "why": "Defines or controls a system service, timer, or socket activation. These run without an operator present and are mutation paths."
     },
     {
+      "id": "22fb387c41e39c1d",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.vps",
+      "path": "vps/diagnostics_tools.py",
+      "line": 867,
+      "evidence": "\"key_path_set\": bool(os.getenv(\"YAWN_VPS_SSH_KEY_PATH\")),",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
+    },
+    {
       "id": "8653ca83d2dfee20",
       "detector": "base64_program_transfer",
       "kind": "privileged-exec",
@@ -11978,6 +14480,17 @@
       "line": 57,
       "evidence": "- Config: vps_file_read(path_key=\"deploy_caddyfile\"), vps_file_write(path_key=\"deploy_caddyfile\", content=\"...\")",
       "why": "Ingress configuration or its writers. Per ADR 0002 yawn.deploy owns this; any Menhir-side writer is a boundary violation."
+    },
+    {
+      "id": "97241cbdd7fd0e47",
+      "detector": "production_host_reference",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.vps",
+      "path": "vps/help_text.py",
+      "line": 108,
+      "evidence": "- Optional env vars: YAWN_VPS_SSH_AUTH_MODE, YAWN_VPS_SSH_CONFIG_PATH, YAWN_VPS_SSH_KEY_PATH, YAWN_VPS_SSH_KNOWN_HOSTS_PATH",
+      "why": "Names the production host, its host variable, or its SSH credential material. Anything that can address the box is a mutation candidate regardless of which commands it happens to contain."
     },
     {
       "id": "c9581e8b6bc74b73",
@@ -12126,22 +14639,29 @@
     "b74427e1ec29f255",
     "586eabfa088cd653",
     "159613ad94da26b0",
+    "f39e477366b9d306",
+    "eabc40b09b1f5e18",
+    "3ee27d359b629acb",
     "e31830d0cc6f1e56",
     "963a072be5fa4f7c",
     "955e983bd16e20a0",
     "4b9a547a93721a6c",
     "07b0a5412feb7345",
+    "913b88c042de10d1",
+    "f97b070af497164d",
     "62415da5ebbd31ad",
     "2e28822f09068b6d",
     "3da64bb0bbeb62a0",
     "c634d1fed54e4f57",
     "95a31aa07146b97c",
     "ef103c0e2df0a2f9",
+    "1cedc13ed73fea05",
     "c3cd11b4a6686182",
     "b9b7505a52e54a9c",
     "85e45f67a7f74b0e",
     "2f7ad19ef5e83840",
     "057cc6505a06baea",
+    "2c374f034e0dcb74",
     "8f7fb6f4b8d2fe9a",
     "338da7fac24a78b4",
     "50b2ea70527d600c",
@@ -12169,10 +14689,15 @@
     "d242256674690869",
     "579d2683833c5816",
     "9ce30679d465ac13",
+    "17cb1c07273d1c6c",
     "d881163116b90dda",
+    "58272c4cc0311966",
+    "7aedddbcf7882407",
     "bda07c8c781ce55e",
     "7aed8f5cc1753f18",
     "e5ed2b63e4bfcb59",
+    "92d28a1a4f8e3064",
+    "e6c256681168af57",
     "25597cf5a8dc1f5b",
     "2d05f592204ea679",
     "56e9bf1db66c7481",
@@ -12181,9 +14706,12 @@
     "34842d2f50dfa0a8",
     "a7ed817b18792426",
     "f17e0f0dc087a186",
+    "2c5286116055f38b",
     "d894e988d2e28c97",
     "ddd37cb51e38c1ba",
     "2d7dd86cfae91a37",
+    "9b42b4671c0e15d6",
+    "b6a0d83d3988fc01",
     "14056d45d6a70ce8",
     "ef6101c3a60bd4d8",
     "b032569d5b460b0f",
@@ -12198,6 +14726,7 @@
     "e0d755d4611251b5",
     "474ca18b851040d2",
     "00d629da6e9631a4",
+    "fdc55215aa21b3c5",
     "ac88dae3b090ec11",
     "730740fae495726c",
     "264d42c68f61f475"
