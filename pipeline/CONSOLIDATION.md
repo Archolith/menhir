@@ -74,14 +74,43 @@ it:
   `/ops/mcp` is not in the list.
 - **Not reachable from outside.** It binds `172.30.0.1:8000`, the gateway address
   of the private `menhir-proxy` bridge.
-- **No requests.** `journalctl -u menhir-oauth-operations.service --since -7days`
-  contains only the startup banner from the Sep 7 19:50 deploy. Uvicorn logs
-  requests at INFO and its INFO startup lines are present, so requests would
-  appear if there were any.
+- **No requests, ever.** `journalctl -u menhir-oauth-operations.service` across
+  its whole history — 936 lines, earliest entry Aug 30 22:16:49, the first start
+  — contains **zero** `GET`/`POST`/`HTTP/1` lines. Uvicorn logs requests at INFO
+  and its INFO startup lines are present throughout, so requests would appear.
+  (An earlier draft of this bullet claimed the journal held "only the startup
+  banner"; that was read off a `tail -8` and was not true. The conclusion is
+  unchanged and the real evidence is stronger.)
 - **No client.** Nothing in the workspace `.mcp.json` or `mcp-registry.json`
-  points at it.
+  points at it. Every `/ops/mcp` reference in the workspace is either an Aug 30
+  release worktree or an experiment cache.
 
-The service is `enabled` and `active`. It has served nothing since it started.
+The service is `enabled` and `active`. It has served zero requests in nine days.
+
+### How it died: the ingress retirement orphaned it
+
+It was not decommissioned. Its route lived in the shared Caddyfile and was
+dropped when ingress moved to cloudflared, which never carried that path:
+
+```
+Caddyfile.before-cloudflared-only:216   @menhir-operations path /ops/mcp /ops/mcp/* \
+Caddyfile.before-cloudflared-only:217       /.well-known/oauth-protected-resource/ops/mcp
+current Caddyfile                        0 matches
+cloudflared-config.yml                   0 matches
+```
+
+So this is a **third** casualty of the half-finished retirement of 2026-09-08
+00:31-00:50, alongside `verify-artifacts` failing and `submit_op` being unable to
+start any job. Unlike those two it is harmless, because nothing was using the
+gateway even while it was routed.
+
+Worth noting the design was already rejected once. A provenance record from an
+earlier session states the owner corrected a plan to build a dedicated `/ops/mcp`
+connector, "insisting on a shared API endpoint with OAuth-based permissions
+instead", after which that plan was abandoned in favour of `/mcp-http`. That is
+derived transcript data rather than a spec, so treat it as context, not
+authority — but it fits the evidence: the endpoint was built anyway, never used,
+and then silently lost its route.
 
 Owner decision 2026-09-08: retire it; build a separate MCP surface for deploys
 later if one is wanted, inside `pipeline/`, rather than preserving this coupling.
