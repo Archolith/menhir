@@ -58,6 +58,7 @@ Do not add a `_` script to answer a question one of the durable instruments alre
 | `deploy/release_flow.py` | Resumable, digest-bound `prepare` / `finalize` / `status` / `deploy` coordinator; deploy is preview-only without exact confirmation plus `--execute` |
 | `deploy/release_spec.py` | Strictly validates release inputs and generates the maintained four-repository release-author specification |
 | `deploy/release_notes.py` | Validates committed change fragments and deterministically renders release Markdown or JSON |
+| `scripts/maintenance/graphiti_release_monitor.py` | READ-ONLY: compares Menhir's exact Graphiti pin with stable upstream releases and emits a deterministic materiality assessment for the issue-only GitHub workflow |
 | `deploy/build_install_bundle.py` | Builds and revalidates the exact reviewed host installation bundle from committed blobs and rendered artifacts |
 | `deploy/release-install.sh` | Root-only transactional bundle installer with an independent destination allowlist and rollback of replaced files; does not start cutover |
 | `run_mcp_gateway.py` | stdio launcher for the MCP server |

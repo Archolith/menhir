@@ -1,0 +1,184 @@
+{
+  "schema": 1,
+  "upstream_repository": "getzep/graphiti",
+  "dependency": "graphiti-core",
+  "minor_or_major_is_material": true,
+  "categories": [
+    {
+      "id": "security_dependencies",
+      "title": "Security and dependency fixes",
+      "terms": [
+        "security",
+        "CVE",
+        "vulnerability",
+        "dependency",
+        "dependencies",
+        "injection",
+        "authentication"
+      ],
+      "menhir_paths": [
+        "pyproject.toml",
+        "deploy/Dockerfile",
+        "deploy/python-base.Dockerfile"
+      ],
+      "test_focus": [
+        "tests/infrastructure/test_cf87_patch_version_guards.py",
+        "tests/test_build_release_image.py",
+        "tests/test_deployment_contracts.py"
+      ]
+    },
+    {
+      "id": "api_schema",
+      "title": "API, model, and schema compatibility",
+      "terms": [
+        "breaking",
+        "deprecated",
+        "deprecation",
+        "API",
+        "signature",
+        "schema",
+        "pydantic",
+        "model",
+        "enum",
+        "parameter"
+      ],
+      "menhir_paths": [
+        "src/menhir/infrastructure/graphiti_client.py",
+        "src/menhir/infrastructure/graphiti_helpers.py"
+      ],
+      "test_focus": [
+        "tests/test_graphiti_client.py",
+        "tests/test_edge_cases.py"
+      ]
+    },
+    {
+      "id": "entities_edges_episodes",
+      "title": "Entity, edge, and episode handling",
+      "terms": [
+        "entity",
+        "entities",
+        "edge",
+        "episode",
+        "node",
+        "attribute",
+        "property",
+        "group_id"
+      ],
+      "menhir_paths": [
+        "src/menhir/infrastructure/graphiti_client.py",
+        "src/menhir/infrastructure/graphiti_extraction_patches.py",
+        "src/menhir/infrastructure/episode_lifecycle.py"
+      ],
+      "test_focus": [
+        "tests/test_graphiti_*",
+        "tests/test_structural_semantic_domain_partition.py",
+        "tests/test_titled_list_membership.py"
+      ]
+    },
+    {
+      "id": "dedup_resolution",
+      "title": "Deduplication and resolution",
+      "terms": [
+        "dedup",
+        "dedupe",
+        "resolve",
+        "resolution",
+        "merge",
+        "candidate"
+      ],
+      "menhir_paths": [
+        "src/menhir/infrastructure/graphiti_model_patches.py",
+        "src/menhir/infrastructure/graphiti_extraction_patches.py"
+      ],
+      "test_focus": [
+        "tests/test_graphiti_adaptive_dedupe.py",
+        "tests/test_graphiti_dedupe_resolutions_patch.py",
+        "tests/test_self_resolver_bypass.py",
+        "tests/test_structural_semantic_domain_partition.py"
+      ]
+    },
+    {
+      "id": "neo4j_queries",
+      "title": "Neo4j driver and query behavior",
+      "terms": [
+        "Neo4j",
+        "Cypher",
+        "database",
+        "query",
+        "driver",
+        "GraphProvider",
+        "transaction"
+      ],
+      "menhir_paths": [
+        "src/menhir/infrastructure/graphiti_client.py",
+        "src/menhir/infrastructure/neo4j.py",
+        "src/menhir/infrastructure/memory_queries.py"
+      ],
+      "test_focus": [
+        "tests/test_graphiti_entity_record_patch.py",
+        "tests/test_structural_semantic_domain_partition.py",
+        "tests/test_neo4j_repository.py"
+      ]
+    },
+    {
+      "id": "retrieval_performance",
+      "title": "Retrieval quality, performance, and model-call cost",
+      "terms": [
+        "search",
+        "rerank",
+        "RRF",
+        "BM25",
+        "cosine",
+        "BFS",
+        "performance",
+        "latency",
+        "token",
+        "LLM call",
+        "embedding",
+        "parallel",
+        "cache"
+      ],
+      "menhir_paths": [
+        "src/menhir/infrastructure/graphiti_client.py",
+        "src/menhir/infrastructure/graphiti_llm_patches.py",
+        "src/menhir/services/recall_service.py"
+      ],
+      "test_focus": [
+        "tests/test_graphiti_client.py",
+        "tests/test_hybrid_retrieval.py",
+        "tests/test_scoring_service.py",
+        "tests/test_graphiti_truncation_retry.py"
+      ]
+    },
+    {
+      "id": "extraction_prompts",
+      "title": "Extraction, prompts, and provider behavior",
+      "terms": [
+        "extract",
+        "extraction",
+        "prompt",
+        "summarize",
+        "truncation",
+        "rate limit",
+        "OpenAI"
+      ],
+      "menhir_paths": [
+        "src/menhir/infrastructure/graphiti_extraction_patches.py",
+        "src/menhir/infrastructure/graphiti_llm_patches.py",
+        "src/menhir/infrastructure/graphiti_model_patches.py"
+      ],
+      "test_focus": [
+        "tests/test_graphiti_combined_extraction_patch.py",
+        "tests/test_graphiti_entity_extraction_patch.py",
+        "tests/test_graphiti_node_summary_patch.py",
+        "tests/explorer/test_extraction_lab.py"
+      ]
+    }
+  ],
+  "baseline_validation": [
+    "pytest tests/test_graphiti_release_monitor.py -q",
+    "pytest tests/test_graphiti_client.py tests/test_graphiti_adaptive_dedupe.py tests/test_structural_semantic_domain_partition.py -q",
+    "pytest tests/ -m unit -q",
+    "Run the graph-backed online suite against a throwaway Neo4j before approving an upgrade"
+  ]
+}
