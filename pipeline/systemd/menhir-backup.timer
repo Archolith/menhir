@@ -1,0 +1,15 @@
+[Unit]
+Description=Nightly Menhir backup
+Documentation=file:/srv/menhir/production/pipeline/MAP.md
+
+[Timer]
+# 04:00 local. The stack is unavailable for the duration of the run.
+OnCalendar=*-*-* 04:00:00
+# Run after a missed window (host powered off, etc.) rather than skipping a day.
+Persistent=true
+# Avoid colliding with other 04:00 jobs, e.g. menhir-scaffold-audit at 04:45.
+RandomizedDelaySec=300
+Unit=menhir-backup.service
+
+[Install]
+WantedBy=timers.target

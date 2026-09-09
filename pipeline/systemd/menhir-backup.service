@@ -1,0 +1,16 @@
+[Unit]
+Description=Menhir nightly backup (quiesced; takes the stack down)
+Documentation=file:/srv/menhir/production/pipeline/MAP.md
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+# The backup stops the stack, dumps, verifies by loading both dumps back,
+# encrypts, then restarts. Generous ceiling; the wrapper records real elapsed.
+TimeoutStartSec=21600
+ExecStart=/srv/menhir/production/pipeline/scheduled-backup.sh
+Nice=10
+IOSchedulingClass=idle
