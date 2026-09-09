@@ -34,7 +34,7 @@ frozen and must not be represented as compliant merely because it resembles part
 
 | ADR | Date | Decision | Sections affected |
 |---|---|---|---|
-| [`0002`](../adr/0002-menhir-production-ingress-ownership.md) | 2026-09-08 | `yawn.deploy` shared Caddy remains the sole `memory.ctharvey.me` ingress; Cloudflared-sole-ingress withdrawn | Closed architectural decision, system boundary, I-13, live-state composite, lane table, ingress/gateway/contraction, adversarial evidence, acceptance ledger |
+| [`0002`](../adr/0002-menhir-production-ingress-ownership.md) | 2026-09-08 (CORRECTED) | Cloudflared is the sole `memory.ctharvey.me` ingress, verified running. The shared Caddy vhost is dead configuration and is retired. | Closed architectural decision, system boundary, I-13, ingress/gateway/contraction |
 
 A review finding that re-litigates a decision in this table is out of scope and must be raised as a
 proposed ADR supersession, not recorded as a specification defect.
@@ -49,8 +49,7 @@ plane. Replace only the deployment control plane with a strangler cutover:
 - one durable root state machine owns admission, locks, rollback, recovery, receipts, and adoption;
 - versioned adapters own lane-specific commands but never authorization or transaction state;
 - transport wrappers upload exact bytes and copy receipts, without deciding meaning;
-- the shared `yawn.deploy` Caddy is the sole public ingress authority for `memory.ctharvey.me`, and
-  Menhir owns no ingress route writer (ADR 0002);
+- Cloudflared is the sole Menhir public ingress authority, verified running (ADR 0002);
 - Yawn exposes only versioned read responses and no Menhir mutation capability;
 - bootstrap is the only separately authorized control-plane mutation and has a fenced, one-time
   v1-to-v2 handoff;
@@ -68,9 +67,9 @@ an extension point.
 | Shared `C:\Users\thron\IdeaProjects\scripts` | Three transport-only PowerShell interfaces | Validate local argument shape, transfer exact files, invoke one fixed remote command, copy one receipt | Classify lanes, approve, adopt, inspect live state, choose bundles, recover, roll back, or install policy |
 | `yawn.vps` | Read-only operations gateway and five versioned read operations | Supply one commit-addressed gateway input to the infrastructure package and present kernel-produced read models through fixed read-only commands | Submit, promote, recover, converge, install, delete, rotate, or proxy caller-selected paths/commands |
 | `archolith_oauth` | OAuth package source | Supply one commit-addressed wheel/source identity to the release compiler | Operate deployment state or mutate the host |
-| `yawn.deploy` | Yawn services plus the shared Caddy ingress, including the `memory.ctharvey.me` vhost | Own the vhost, its Origin CA certificate, Authenticated Origin Pull configuration, route table, and `menhir-proxy` attachment | Own Menhir locks, Menhir release records, Menhir transaction journal, or Menhir bundle GC |
-| Shared Caddy ingress (`yawn.deploy`) | `yawn.deploy` | Sole public route authority for `memory.ctharvey.me`, including product and operations allowlists | Be written, templated, reconciled, or transacted by any Menhir lane |
-| Host inspection gateway | Menhir infrastructure adapter installs/binds service; `yawn.vps` supplies read-only application code | Listen only on `172.30.0.1:8000`; expose the fixed read API to the verified shared Caddy peer | Bind publicly, trust an address without peer identity, or mutate deployment state |
+| `yawn.deploy` | Yawn services and Yawn-only Caddy/release operation | Continue its own service deployment independently of Menhir | Own Menhir routes, Menhir locks, Menhir release records, Menhir bundle GC, or attach Caddy to `menhir-proxy` |
+| Cloudflared deployment | Menhir infrastructure adapter | Sole public route authority for `memory.ctharvey.me` | Be rewritten by a product lane or coexist with a Menhir Caddy route |
+| Host inspection gateway | Menhir infrastructure adapter installs/binds service; `yawn.vps` supplies read-only application code | Listen only on `172.30.0.1:8000` | Bind publicly, trust an address without peer identity, or mutate deployment state |
 | Root transaction kernel | Signed bootstrap package and root installation | Sole routine mutating authority after cutover | Self-update from a product package or execute caller-provided code/path/text |
 | Owner signing key | Owner workstation and offline backup | Authorize a bounded ticket or bootstrap trust ceremony | Enter the VPS, repository, argv, environment, logs, receipts, uploads, or persistent plaintext storage |
 
@@ -83,26 +82,23 @@ Repository inputs are separated by package type after contraction:
 - a **control-plane package** contains one `menhir` kernel/protocol/bootstrap commit. It may bind an
   already compiled infrastructure package but cannot absorb or install its payload as product data;
 - the shared workspace is transport tooling and is never trusted release/package content;
-- `yawn.deploy` is never a Menhir package input. It remains the owner of the `memory.ctharvey.me`
-  vhost and the `menhir-proxy` attachment, and is retired only as a Menhir lock, release, journal,
-  and GC authority.
+- `yawn.deploy` is never a Menhir package input. Its dead `memory.ctharvey.me` vhost, Menhir
+  certificate mounts, declared `menhir-proxy` attachment, lock, release authority, journal and GC
+  references are all retired.
 
 Each package records its own exact repository cardinality; there is no union “three-repository
 release.” Until these schema migrations and contraction land atomically in the owning implementation
 phase, the current four-repository format remains frozen and cannot be partially reinterpreted.
 
 `yawn.deploy` must participate in the writer/bypass census and contraction acceptance even though it
-is not a Menhir release input. Because it owns ingress (ADR 0002), the census has both positive and
-negative assertions.
+is not a Menhir release input. Per ADR 0002 it holds no Menhir ingress role, so every Menhir-related
+assertion about it is a negative one.
 
-Required to remain present and owned by `yawn.deploy`:
+Required to be absent from `yawn.deploy`:
 
-- the `memory.ctharvey.me` site block, its Origin CA certificate mounts, its Authenticated Origin
-  Pull `client_auth` configuration, and its `/ops/mcp` and product route matchers;
-- the `menhir-proxy` network attachment that lets it reach `menhir-prod-app`.
-
-Required to be absent:
-
+- no `memory.ctharvey.me` site block, Menhir certificate mounts, or `menhir-proxy` attachment. These
+  exist in source today but are dead: the running Caddy container is not on `menhir-proxy` and cannot
+  resolve `menhir-prod-app`;
 - no Menhir release lock, including any use of `/run/lock/menhir-production.lock`;
 - no Menhir release authority record, phase journal, snapshot directory, or reconcile receipt;
 - no `caddy-release.sh`, `caddy-route-apply`, or `caddy-route-rollback` Menhir branch, and no Menhir
@@ -208,7 +204,7 @@ never silently grants roll-forward.
 | I-10 | A product package cannot change kernel, trust store, sudoers, recovery, bootstrap, or read-command policy. | Package schema and kernel member allowlist | Reject package before snapshot |
 | I-11 | Infrastructure uses a distinct signed package but the same admission, locks, journal, rollback, and receipt protocol. | Kernel infrastructure adapter dispatch | Refuse unsigned or mixed package type |
 | I-12 | Exactly one privileged mutating entry point exists; read-only commands are separately enumerated. | Atomic sudoers replacement and installed-artifact census | Installation/cutover fails closed |
-| I-13 | `yawn.deploy` owns the `memory.ctharvey.me` vhost; Menhir installs no ingress route writer and no second ingress. | Source/host census plus read-only ingress verification | Refuse convergence/acceptance |
+| I-13 | Cloudflared is the sole Menhir ingress; no shared Caddy route or peer remains. | Infrastructure adapter plus source/host negative census | Refuse convergence/acceptance |
 | I-14 | App, database, OAuth/MCP, ingress, backup, and restore behavior changes only when a signed lane plan explicitly declares it. | Adapter pre/postcondition verifier | Roll back or block |
 | I-15 | A signed attempt can cause at most one mutation transaction. | Kernel O_EXCL attempt-anchor publication under global lock | Resume/adopt exact match; reject every mismatch |
 | I-16 | v1 cannot start, queue, or resume after bootstrap claims the handoff fence. | Bootstrap fence, caller drain, all-lock acquisition, process census, and tombstones | Bootstrap aborts or restores v1 exactly |
@@ -726,47 +722,36 @@ forbidden.
 
 ## Ingress, operations gateway, and `yawn.deploy` contraction
 
-Per ADR 0002, the shared `yawn.deploy` Caddy owns all public `memory.ctharvey.me` routing. Menhir
-does not write, template, reconcile, or transact this configuration. The table below is the
-**expectation Menhir verifies read-only** during preflight and adoption; `yawn.deploy` is its
-authoritative source, and a change there is a `yawn.deploy` change, not a Menhir lane.
+Per ADR 0002, Cloudflared owns all public `memory.ctharvey.me` routing. This was verified running on
+2026-09-08, not inferred from configuration files.
 
-| Order | External matcher | Upstream | Upstream path | Backend authentication expectation |
-|---|---|---|---|---|
-| 0 | `http://` scheme, any path | None | None | Terminal `403` before TLS-authenticated routing |
-| 1 | Exact `/ops/mcp` and prefix `/ops/mcp/` | `http://172.30.0.1:8000` | `uri strip_prefix /ops`; gateway receives `/mcp` | Gateway requires the operations OAuth bearer policy |
-| 2 | Exact `/.well-known/oauth-protected-resource/ops/mcp` | `http://172.30.0.1:8000` | Unchanged; the path does not begin with `/ops` so `strip_prefix` does not apply | Gateway publishes protected-resource metadata; no bearer required for discovery |
-| 3 | Exact `/mcp-http` and prefix `/mcp-http/` | `http://menhir-prod-app:8099` | Preserve unchanged | Menhir MCP OAuth challenge/token policy; suffixes remain routed for current compatibility but the app may return 404 |
-| 4 | Exact `/oauth/authorize`, `/oauth/token`, `/oauth/register` | `http://menhir-prod-app:8099` | Preserve unchanged | Menhir OAuth endpoint-specific client/user policy |
-| 5 | Exact `/.well-known/jwks.json` | `http://menhir-prod-app:8099` | Preserve unchanged | Public discovery |
-| 6 | Exact `/.well-known/oauth-authorization-server` and prefix `/.well-known/oauth-authorization-server/` | `http://menhir-prod-app:8099` | Preserve unchanged | Public discovery; dynamic suffix is an application-defined RFC metadata route |
-| 7 | Exact `/.well-known/oauth-protected-resource` and prefix `/.well-known/oauth-protected-resource/`, except the order-2 exact operations path | `http://menhir-prod-app:8099` | Preserve unchanged | Public discovery; dynamic suffix is an application-defined RFC metadata route |
-| 8 | Exact `/livez` and `/readyz` | `http://menhir-prod-app:8099` | Preserve unchanged | Current health-endpoint policy |
-| 9 | Same hostname, every other path | Terminal `404` | None | Denied before any origin |
+The table below is the **observed** tunnel configuration. It is materially simpler than the ten-row
+table this specification previously froze:
 
-TLS for the vhost terminates at the shared Caddy using a manually provisioned Cloudflare Origin CA
-certificate and key, with Authenticated Origin Pull enforced as `require_and_verify` against the
-Cloudflare origin-pull CA. Those materials, their mounts, and their rotation belong to
-`yawn.deploy`. Menhir records their observed identity in the live-state composite and refuses on
-mismatch; it never installs or replaces them.
+| Match | Upstream |
+|---|---|
+| `memory.ctharvey.me`, path matching `^/(?:mcp-http(?:/.*)?\|oauth/(?:authorize\|token\|register\|client-metadata/agent-smith\.json)\|\.well-known/(?:jwks\.json\|oauth-authorization-server(?:/.*)?\|oauth-protected-resource(?:/.*)?)\|livez\|readyz)$` | `http://menhir-prod-app:8099` |
+| `memory.ctharvey.me`, any other path | `http_status:404` |
+| Any other hostname | `http_status:404` |
 
-The operations gateway keeps its current `/ops` `strip_prefix` contract. The previously specified
-migration to a native ASGI mount at `/ops/mcp` is withdrawn. Internal `/mcp` is not publicly exposed
-and is not an accepted alias. The gateway listener remains host-bound only to `172.30.0.1`, and
-firewall/peer validation admits only the running shared Caddy service whose container, image,
-labels, alias and network attachment match the recorded expected state. The address alone is not
-identity.
+Two observed facts contradict earlier versions of this specification and are recorded rather than
+silently corrected, because changing either is a separate decision:
 
-The `menhir-proxy` network legitimately contains the shared Caddy, the Menhir app role, and the host
-gateway endpoint. Menhir must not install a second ingress. Any Cloudflared tunnel definition in the
-Menhir repository is non-target and is removed or explicitly marked as such.
+1. **`/ops/mcp` is not publicly routed.** No route reaches the host operations gateway at
+   `172.30.0.1:8000`. The operations-surface design in this document is not deployed. Any claim about
+   `/ops` path translation, `strip_prefix`, or a native ASGI mount is describing something that does
+   not currently exist.
+2. **`oauth/client-metadata/agent-smith.json` is routed** and appears in no version of this
+   document's route table.
+
+The `menhir-proxy` network contains exactly `menhir-prod-cloudflared` and `menhir-prod-app`. The
+shared Yawn Caddy is not attached and cannot resolve the app; its `memory.ctharvey.me` vhost is dead
+configuration retired as part of contraction.
 
 Contraction is complete only when Menhir, shared scripts, Yawn VPS, and `yawn.deploy` source tests
-agree that `yawn.deploy` retains ingress and holds no Menhir lock, release authority, journal, or GC
-role; clean installation and upgrade tests prove the same host absence for the retired writers. The
-Menhir release schema keeps `yawn_deploy` only as a read-only ingress expectation anchor and drops
-Caddy release lock, Caddy release-authority, and Menhir bundle GC references. There is no
-transitional release that accepts a second ingress.
+agree; clean installation and upgrade tests prove the same host absence. The Menhir release schema
+drops `yawn_deploy`, Caddy image/config/registry digests, Caddy peer identity and Caddy release lock.
+There is no transitional release that accepts a second ingress.
 
 ## Retention, garbage collection, and archival
 
@@ -942,7 +927,7 @@ inside control-plane implementation.
 | Replay/adoption closed | READY FOR REVIEW | Fresh reviewer executes the decision table against all terminal/nonterminal cases |
 | Owner key custody closed | READY FOR REVIEW | Fresh reviewer confirms format, ACL, passphrase, key ID, enrollment, rotation overlap, revocation, loss and compromise are one normative contract |
 | v1 handoff bridge and bootstrap closed | READY FOR REVIEW | Fresh reviewer checks bridge-before-fence ordering, pre-fence/activation/post-activation callers, and queued-caller exclusion |
-| Ingress and `yawn.deploy` ownership closed | CLOSED by ADR 0002 (2026-09-08) | `yawn.deploy` retains the vhost; Menhir installs no ingress writer and no second ingress |
+| Ingress and `yawn.deploy` ownership closed | CLOSED by ADR 0002, corrected 2026-09-08 | Cloudflared is the sole ingress, verified running; the shared Caddy vhost is dead config and is retired from `yawn.deploy` source |
 | Privileged/read-only boundaries closed | READY FOR REVIEW | Fresh reviewer verifies one mutator plus five exact read operations |
 | Phase ownership and invalidation closed | READY FOR REVIEW | Fresh reviewer maps each invariant/test to one serial phase |
 | Fresh no-context architecture review | PENDING | Independent report with no open P0-P2 findings |

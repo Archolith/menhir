@@ -1,110 +1,89 @@
 # ADR 0002 — Menhir Production Ingress Ownership
 
-- **Status:** ACCEPTED (2026-09-08). Supersedes the `Cloudflared is the sole Menhir ingress`
-  position recorded as invariant I-13 in
-  `.agent/reference/menhir-deployment-control-plane-architecture-spec-2026-09-08.md`.
+- **Status:** CORRECTED 2026-09-08. The decision recorded in the first version of this ADR rested on
+  a factual error and is withdrawn. The corrected decision is below.
 - **Date:** 2026-09-08
 - **Deciders:** ctharvey
 - **Related:** `.agent/plans/menhir-deployment-control-plane-architecture-reset-2026-09-08.md`,
-  `.agent/reference/menhir-deployment-control-plane-architecture-spec-2026-09-08.md`,
-  `yawn.deploy@4937657` `Caddyfile`, `deploy/docker-compose.cloudflared.yml`
+  `.agent/reference/menhir-deployment-control-plane-architecture-spec-2026-09-08.md`
 
-## Context
+## The error, recorded because it is instructive
 
-Two complete ingress architectures for `memory.ctharvey.me` existed in source at the same time,
-both attached to the same external `menhir-proxy` Docker network, with no executed decision
-retiring either.
+The first version of this ADR decided that Menhir would **remain a tenant of the shared
+`yawn.deploy` Caddy**, and withdrew `Cloudflared is the sole Menhir ingress` (spec invariant I-13).
 
-Verified 2026-09-08:
+That was backwards. It was derived entirely from source files:
 
-- **Shared Caddy is the live ingress.** `yawn.deploy/Caddyfile:190` terminates TLS for
-  `memory.ctharvey.me` using a manually provisioned Cloudflare Origin CA cert plus Authenticated
-  Origin Pull mTLS (`require_and_verify` against the Cloudflare origin-pull CA), then reverse
-  proxies `/mcp-http`, the OAuth endpoints, `/.well-known/*`, `/livez`, `/readyz` to
-  `menhir-prod-app:8099`, and `/ops/mcp` to `172.30.0.1:8000` after `uri strip_prefix /ops`.
-  `yawn.deploy/docker-compose.yml:82` attaches that Caddy to `menhir-proxy`.
-- **`yawn.deploy` is not a product repo.** Its README describes it as centralized VPS deployment
-  config for the yawn infrastructure. It serves four vhosts — `agent.yawn.rip`, `ctharvey.me`,
-  `archolith.dev`, `memory.ctharvey.me`. Menhir is one tenant of a shared reverse proxy.
-- **A parallel Cloudflared path is also built.** `deploy/docker-compose.cloudflared.yml` defines a
-  digest-pinned `menhir-prod-cloudflared` container joining the same `menhir-proxy` network, with
-  config at `/srv/menhir/production/ingress/cloudflared-config.yml`.
-- **Menhir's own production compose still assumes external Caddy.** The header of
-  `deploy/docker-compose.production.yml` states the reverse proxy "lives OUTSIDE this project on an
-  external network named exactly `menhir-proxy`".
-- **The duplicate release kernel is already retired host-side.**
-  `deploy/ansible/roles/menhir_host/tasks/main.yml:77-122` removes
-  `/srv/menhir/production/bin/caddy-release.sh`, `caddy-route-apply`, and `caddy-route-rollback`
-  and asserts their absence. The 1948-line `caddy-release.sh` survives only in `yawn.deploy` source.
+- `yawn.deploy/Caddyfile` contains a `memory.ctharvey.me` vhost with an Origin CA certificate and
+  Authenticated Origin Pull `client_auth`;
+- `yawn.deploy/docker-compose.yml` declares the Caddy service on the `menhir-proxy` network;
+- `deploy/docker-compose.cloudflared.yml` existed in the Menhir repository and appeared unadopted.
 
-The architecture specification nonetheless recorded Cloudflared-sole-ingress as a **closed**
-decision and froze a ten-row Cloudflared route table. Production disagreed with that on every point.
+All three statements are true of the source and none of them is true of the running system. A fresh
+independent review reached the same wrong conclusion by the same route, reporting that it had
+"verified ADR 0002 against the live Caddyfile" — but a Caddyfile in a git checkout is not live state.
 
-This mismatch is assessed as the primary generator of the deployment review cycle. Between
-2026-09-07 and 2026-09-08 the branch took roughly 35 commits after closure was declared twice, with
-`deploy/personal_stage_vps.py` touched 11 times and `deploy/personal_promote.ps1` 10 times. Reviews
-were comparing an implementation against a specification whose foundational ingress decision had
-never been executed, so each pass validly reported ingress-shaped P1 findings that no amount of
-implementation work could close.
+Live verification on 2026-09-08 established the opposite:
 
-## Decision drivers
+| Check | Result |
+|---|---|
+| `docker ps` | `menhir-prod-cloudflared` up 11 days, alongside `menhir-prod-app` and `menhir-prod-neo4j` |
+| `/srv/menhir/production/ingress/cloudflared-config.yml` | Real tunnel `c1e621a0-...` routing `memory.ctharvey.me` to `http://menhir-prod-app:8099`, everything else `http_status:404` |
+| `docker logs menhir-prod-cloudflared` | Live requests from Cloudflare edge IPs to `memory.ctharvey.me/mcp-http` |
+| `docker network inspect menhir-proxy` | Contains only `menhir-prod-cloudflared` and `menhir-prod-app` |
+| `nslookup menhir-prod-app` from inside `yawndeploy-caddy-1` | `SERVFAIL` — shared Caddy cannot resolve or reach the app |
+| `curl https://memory.ctharvey.me/livez` | `200` |
 
-- A shared TLS terminator serving four vhosts must have exactly **one** owner, and that owner cannot
-  be one of its tenants. Menhir routes living in the shared Caddyfile is correct tenancy, not
-  duplicated authority.
-- Cutting `memory.ctharvey.me` over to a private tunnel is a **live TLS and mTLS migration on a
-  production hostname**, which is the highest-risk step available and was scheduled behind nine
-  review gates that could each rediscover the unexecuted decision.
-- Menhir already retired its host-side Caddy release machinery. The remaining duplication is
-  source-only and can be removed by subtraction, with absence assertions as evidence.
-- The decision must be **recorded durably**. Re-derivation of settled decisions by each fresh review
-  is the mechanism this ADR exists to stop.
+The shared Caddy `memory.ctharvey.me` vhost is dead configuration. It reads as live and serves
+nothing.
+
+The lesson is narrow and worth keeping: **source describes intent, only the running system describes
+state.** An ingress claim must be verified against the host, never against a checked-in config file.
 
 ## Decision
 
-**Menhir remains a tenant of the shared `yawn.deploy` Caddy for all `memory.ctharvey.me` ingress.**
+**Cloudflared is the sole Menhir public ingress. Spec invariant I-13 stands as originally written.**
 
-- `yawn.deploy` is the sole owner of the `memory.ctharvey.me` vhost, its Origin CA certificate,
-  its Authenticated Origin Pull configuration, and its route table. Menhir does not write, template,
-  reconcile, or transact that vhost.
-- Menhir owns only its application containers and their `menhir-proxy` attachment under the alias
-  `menhir-prod-app`, plus the host operations gateway bound to `172.30.0.1:8000`.
-- The `/ops` gateway keeps its current Caddy `strip_prefix` contract. The specification's move to a
-  native ASGI mount at `/ops/mcp` is withdrawn.
-- Cloudflared-sole-ingress is withdrawn as a target architecture for this cycle. It may be revisited
-  as a separate, independently reviewed decision; it is not an open item blocking this work.
+- `menhir-prod-cloudflared` owns all public routing for `memory.ctharvey.me`. It is already the live
+  ingress; this decision changes no runtime behaviour.
+- The shared `yawn.deploy` Caddy has no Menhir role. Its `memory.ctharvey.me` vhost, its Menhir
+  certificate mounts, and its declared `menhir-proxy` attachment are dead configuration and are
+  retired from `yawn.deploy` source.
+- `deploy/docker-compose.cloudflared.yml` is the live ingress definition and is **kept**.
+- The `menhir-proxy` network contains only the Cloudflared and Menhir app roles.
+
+## Observed route table
+
+This is the running configuration, not a target. It is materially simpler than the ten-row table the
+specification previously froze, and it does not expose the operations gateway at all.
+
+| Match | Upstream |
+|---|---|
+| `memory.ctharvey.me` where path matches `^/(?:mcp-http(?:/.*)?\|oauth/(?:authorize\|token\|register\|client-metadata/agent-smith\.json)\|\.well-known/(?:jwks\.json\|oauth-authorization-server(?:/.*)?\|oauth-protected-resource(?:/.*)?)\|livez\|readyz)$` | `http://menhir-prod-app:8099` |
+| `memory.ctharvey.me`, any other path | `http_status:404` |
+| Any other hostname | `http_status:404` |
+
+Two facts here contradict the specification and are recorded rather than corrected, because changing
+them is a separate decision:
+
+1. **`/ops/mcp` is not publicly routed.** There is no route to the host operations gateway at
+   `172.30.0.1:8000`. The specification's operations-surface design describes something that is not
+   deployed.
+2. **`oauth/client-metadata/agent-smith.json` is routed** and appears in no version of the
+   specification's route table.
 
 ## Consequences
 
-Specification (`menhir-deployment-control-plane-architecture-spec-2026-09-08.md`):
+- Spec I-13, the system boundary table, and the ingress section revert to Cloudflared ownership, with
+  the route table replaced by the observed configuration above.
+- Plan P1 #5 remains closed, but the retirement work is the reverse of the first version: delete the
+  dead `memory.ctharvey.me` vhost, certificate mounts, and `menhir-proxy` attachment from
+  `yawn.deploy`, and keep the Cloudflared compose file in Menhir.
+- The separate decisions to take a maintenance window at cutover and to authorize deploys by root
+  ceremony rather than a signing key are unaffected. Those concern deploy ceremony, not ingress.
 
-- Invariant **I-13** is replaced. The new invariant is that `yawn.deploy` owns the shared vhost and
-  Menhir owns no ingress route writer, enforced by a source and host negative census.
-- The frozen ten-row Cloudflared route table section is replaced by the shared-Caddy route contract
-  as a **read-only expectation** Menhir verifies but does not author.
-- The `Cloudflared, operations gateway, and yawn.deploy contraction` section is rewritten: gateway
-  keeps `strip_prefix`; `menhir-proxy` legitimately contains shared Caddy.
+## Open, not closed by this ADR
 
-Plan (`menhir-deployment-control-plane-architecture-reset-2026-09-08.md`):
-
-- **P1 #5 is reframed and largely dissolved.** It is no longer split ownership requiring retirement
-  of Caddy routes. It reduces to removing the source-only release-kernel remnants.
-- **Phase 10 shrinks** from a cross-repository ingress migration to deletion of the source-only
-  duplicates plus the PowerShell transport and read-only Yawn contract work.
-
-Repository actions authorized by this ADR:
-
-- Delete `deploy/docker-compose.cloudflared.yml` and the `cloudflared*.example` config files from
-  Menhir, or mark them explicitly non-target.
-- Retire from `yawn.deploy` source: `caddy-release.sh`, the `/run/lock/menhir-production.lock`
-  release lock, the phase journal, `caddy-route-apply`, `caddy-route-rollback`, and their tests.
-- Keep the `yawn.deploy` `memory.ctharvey.me` vhost block and its `menhir-proxy` attachment.
-
-## Open items this ADR does not close
-
-- Whether anything besides the `Caddyfile` block still depends on shared-Caddy behavior for Menhir
-  has not been fully traced.
-- `caddy-release.sh` was reviewed at header and grep level only; its full 1948 lines were not read
-  before this decision.
-- Whether `release.json` release authority under `/srv/menhir/production/release/` is still consumed
-  by a live path after the host-side retirement is unverified.
+- Whether `/ops/mcp` should be exposed at all. It is currently unreachable from the public internet.
+- `menhir-prod-cloudflared` logs recurring `stream canceled by remote` errors against
+  `/mcp-http`. Not investigated.

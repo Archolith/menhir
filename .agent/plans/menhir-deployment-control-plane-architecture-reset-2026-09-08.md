@@ -26,7 +26,7 @@ Current repository anchors at the time this status was written:
 | Shared workspace | `6c9a9086716312e7c17051adfc82e7b52905e0b9` | Only the three Menhir PowerShell wrappers are in scope |
 | Yawn VPS | `b1191b85962f83812ab805fe8d467dd96312741d` | Menhir integration must end read-only; unrelated sealed/admin changes stay excluded |
 | Archolith OAuth | `8b9d8eb3a3016f48359b93c3d15ae95c2c47bef8` | Immutable OAuth source input only |
-| Yawn deploy | `4937657b9ebde7d3ca128f8924da724203c37a81` | Retains `memory.ctharvey.me` ingress by ADR 0002; still holds Menhir lock/release/journal/GC ownership in source that must be retired |
+| Yawn deploy | `4937657b9ebde7d3ca128f8924da724203c37a81` | Holds no live Menhir role; its `memory.ctharvey.me` vhost is dead config. Menhir vhost, certs, `menhir-proxy` attachment, lock, release authority, journal and GC references must all be retired from source |
 
 The long architecture specification at
 [`../reference/menhir-deployment-control-plane-architecture-spec-2026-09-08.md`](../reference/menhir-deployment-control-plane-architecture-spec-2026-09-08.md)
@@ -103,7 +103,7 @@ longer exists, which is why this plan previously reported five P1 and two P2 as 
 | P1 2 | Durable-record and lane inventory incomplete | Closed | Protocol registry declared exhaustive for v2, with producer, consumers, digest binding, compatibility and retention per record; indexes declared rebuildable from anchors and journal heads |
 | P1 3 | At-most-once mutation and crash recovery underspecified | Closed | O_EXCL attempt-anchor publication as sole reservation, `HEAD` as sole commit primitive, full state transition table, per-state ticket expiry and revocation rules |
 | P1 4 | v1-to-v2 bootstrap fence not realizable | Closed as design | Separate v1 handoff bridge gate; bootstrap reordered so the fence is published while all locks are held, after drain and snapshot |
-| P1 5 | Ingress ownership split in source | Closed | ADR 0002 — `yawn.deploy` retains the vhost; Menhir installs no ingress writer |
+| P1 5 | Ingress ownership split in source | Closed | ADR 0002 (corrected) — Cloudflared is the sole ingress, **verified running**; the shared Caddy vhost is dead config. The split existed only in source |
 | P1 6 | Owner-key custody not a closed protocol | Closed | Owner key, signer, and trust-store contract — format, ACL, passphrase, key ID, enrollment, rotation overlap, revocation, loss and compromise |
 | P2 1 | Intake needs a post-copy source check | Closed | Intake step 7 — re-`fstat` every held source descriptor and re-enumerate the directory for the same name-to-inode set |
 | P2 2 | Canonical repository identities unowned | Closed | Canonical repository identity registry — closed five-row registry; the stale `ctharvey/archolith_oauth` metadata URL is explicitly non-authoritative |
@@ -302,21 +302,21 @@ clear.
 
 ### Phase 12 — Cross-repository contraction
 
-Reduced by [ADR 0002](../adr/0002-menhir-production-ingress-ownership.md). This is no longer an
-ingress migration; it is deletion plus interface work.
+Reduced by [ADR 0002](../adr/0002-menhir-production-ingress-ownership.md). Not an ingress migration:
+Cloudflared already serves production, so this is deletion of dead configuration plus interface work.
 
 Convert the shared PowerShell scripts to transport only, convert Yawn to versioned read-only
-responses, and remove Menhir **lock, release-authority, journal, and GC** ownership from
-`yawn.deploy` — `caddy-release.sh`, `caddy-route-apply`, `caddy-route-rollback`,
-`/run/lock/menhir-production.lock`, the phase journal, and their tests. **Keep** the
-`memory.ctharvey.me` vhost, its certificate mounts, and the `menhir-proxy` attachment. Remove the
-non-target `deploy/docker-compose.cloudflared.yml` and `cloudflared*.example` from Menhir. Delete
-every v1 writer, alias, unit, timer, sudoers entry, fallback, and manual mutation procedure
-identified in Phase 0.
+responses, and remove from `yawn.deploy` the dead `memory.ctharvey.me` vhost, Menhir certificate
+mounts, declared `menhir-proxy` attachment, `/run/lock/menhir-production.lock`, the phase journal,
+release authority, `caddy-release.sh`, `caddy-route-apply`, `caddy-route-rollback` and their tests.
+**Keep** `deploy/docker-compose.cloudflared.yml` in Menhir: it is the live ingress. Delete every v1
+writer, alias, unit, timer, sudoers entry, fallback, and manual mutation procedure identified in
+Phase 0.
 
 Gate: all repositories agree on exact arguments, records, return codes, paths, and privilege
-boundaries; the ingress positive assertions still hold and the retired-writer negative censuses pass
-in both source and a clean install; complete phase review is clear.
+boundaries; `memory.ctharvey.me` still serves through the tunnel after the deletions; the
+retired-writer negative censuses pass in both source and a clean install; complete phase review is
+clear.
 
 ### Phase 13 — Integrated acceptance
 
