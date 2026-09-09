@@ -141,10 +141,10 @@ retired as a whole. Line-level findings are the evidence and live in
 | `b032569d5b460b0f` | `yawn.vps` | `ops/menhir/bin/verify-artifacts` | 4 | database_or_backup_op, sudoers_definition, systemd_unit | replace | menhir/pipeline |
 | `cfec5bc404e3084d` | `yawn.vps` | `ops/menhir/etc/sudoers.d/menhir-production` | 1 | sudoers_definition | replace | menhir/pipeline |
 | `f01bf40620db1afb` | `yawn.vps` | `ops/menhir/etc/tmpfiles.d/menhir-production.conf` | 2 | lock_acquisition | replace | menhir/pipeline |
-| `1293c9a281755afa` | `yawn.vps` | `ops/menhir/systemd/menhir-caddy-reconcile.path` | 4 | systemd_unit | retire | yawn.vps |
-| `b9ac9038ea3a3189` | `yawn.vps` | `ops/menhir/systemd/menhir-caddy-reconcile.service` | 7 | systemd_unit | retire | yawn.vps |
+| `1293c9a281755afa` | `yawn.vps` | `ops/menhir/systemd/menhir-caddy-reconcile.path` | 4 | systemd_unit | preserve | BLOCKED-ingress-retirement |
+| `b9ac9038ea3a3189` | `yawn.vps` | `ops/menhir/systemd/menhir-caddy-reconcile.service` | 7 | systemd_unit | preserve | BLOCKED-ingress-retirement |
 | `1c556f7e94e6cf71` | `yawn.vps` | `ops/menhir/systemd/menhir-oauth-operations.service` | 8 | systemd_unit | preserve | yawn.vps |
-| `8db5421ff7e981a2` | `yawn.vps` | `ops/menhir/systemd/menhir-op@.service` | 5 | systemd_unit | retire | yawn.vps |
+| `8db5421ff7e981a2` | `yawn.vps` | `ops/menhir/systemd/menhir-op@.service` | 5 | systemd_unit | preserve | BLOCKED-ingress-retirement |
 | `0ad5390dc3202079` | `yawn.vps` | `vps/card_image_tools.py` | 1 | sudo_invocation | preserve | yawn.vps |
 | `d11d822a5cb12067` | `yawn.vps` | `vps/compose_tools.py` | 6 | compose_production, sudo_invocation | preserve | yawn.vps |
 | `e0d755d4611251b5` | `yawn.vps` | `vps/core.py` | 14 | arbitrary_command_passthrough, compose_production, lock_acquisition, production_host_reference, remote_shell_exec, sudo_invocation, systemd_unit | preserve | yawn.vps |

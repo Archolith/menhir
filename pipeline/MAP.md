@@ -16,11 +16,67 @@ conclude absence. A map is cheaper than repeating that.
 
 **If the VPS died right now, could the graph be recovered?**
 
-As of 2026-09-08: **yes.** `generation.vJBZKqtqAF` is backed up, rehearsed with
-`neo4j_check: ok` and `sqlite_integrity: ok`, verified as a running candidate
-stack (`readyz`, `oauth_discovery`, `recall`, `mutation_503` all ok), and copied
-to the desktop with a matching decryption key. `pipeline/backup-status` reports
-this chain; nothing else does.
+As of 2026-09-08: **yes, from what already exists.** `generation.vJBZKqtqAF` is
+backed up, rehearsed with `neo4j_check: ok` and `sqlite_integrity: ok`, verified
+as a running candidate stack (`readyz`, `oauth_discovery`, `recall`,
+`mutation_503` all ok), and copied to the desktop with a matching decryption key.
+
+**But no NEW backup can currently be taken** - see the ingress retirement issue
+below, which broke `submit_op`. The newest backup is from 2026-09-07 19:52 and
+is ageing against a 24-hour policy. Restoring is fine; backing up is not.
+
+## Live issue: the ingress retirement is half finished
+
+Someone ran a Cloudflared-only ingress retirement directly on the host on
+2026-09-08 between 00:31 and 00:50. Rollback copies were saved to
+`/var/lib/menhir-production/ingress-retirement/`
+(`Caddyfile.before-cloudflared-only`, `scaffold-contract.before-cloudflared-only.json`),
+and `menhir-caddy-reconcile.path` / `.service` were stopped and removed at 00:33:05.
+
+It was not completed, and the host is degraded as a result. Verified 2026-09-08:
+
+```
+verify-artifacts  ->  exit 1
+  FAIL /etc/systemd/system/menhir-caddy-reconcile.path      missing
+  FAIL /etc/systemd/system/menhir-caddy-reconcile.service   missing
+  FAIL /srv/yawn/projects/yawn.deploy/Caddyfile             digest mismatch
+```
+
+What is still inconsistent:
+
+- `release.json` still lists both removed units as required artifacts.
+- `caddy-release.sh`, `caddy-route-apply` and `caddy-route-rollback` are still
+  installed under `/srv/menhir/production/bin/` (2026-09-07 19:50).
+- `/etc/sudoers.d/menhir-production` still grants `caddy-route-apply` and
+  `caddy-route-rollback`.
+- The Caddyfile was edited without cutting a release, hence the digest mismatch.
+
+**The operationally serious one:** deployed `/srv/menhir/production/bin/lib.sh`
+lines 505-506 launch every operation with
+
+```
+systemd-run --property=Requires=menhir-caddy-reconcile.service \
+            --property=After=menhir-caddy-reconcile.service
+```
+
+That unit no longer exists. By systemd semantics every `submit_op` job -
+`backup`, `promote`, `rollback`, `candidate-deploy`, `candidate-accept`,
+`restore-production`, `restore-rehearsal` - cannot start. This has not been
+confirmed by executing a submit, deliberately. The circumstantial fit is exact:
+the last successful backup was 2026-09-07 19:52, before the 00:33 removal, so
+nothing has been attempted since it broke.
+
+**Do not delete the reconcile units' sources.** They are the tail of this
+retirement, not dead code, and are the only maintained definitions available to
+either finish it or restore the release to passing. An independent corroboration
+disproved a proposal to delete them; the census records them as
+`preserve / BLOCKED-ingress-retirement`.
+
+To finish coherently, in one change: remove the scripts and `menhir-op@.service`
+from the host, drop all six paths from `release.json` `artifacts` and
+`installed-artifacts.json`, remove the sudoers grants, strip the `Requires=` /
+`After=` properties from `lib.sh`, cut a release, and only then delete the
+sources.
 
 ## Host state
 

@@ -80,19 +80,19 @@
       "note": "vps-scp.ps1 is generic file transfer used by menhir-backup-archive.ps1 among others. Shared infrastructure."
     },
     "b9ac9038ea3a3189": {
-      "disposition": "retire",
-      "owner": "yawn.vps",
-      "note": "menhir-caddy-reconcile.service invokes caddy-release.sh / caddy-route-* under /srv/menhir/production/bin/, which Menhir's own ansible already deletes and asserts absent. The unit points at scripts that are gone."
+      "disposition": "preserve",
+      "owner": "BLOCKED-ingress-retirement",
+      "note": "BLOCKED by the in-flight Cloudflared-only ingress retirement started on the host 2026-09-08 00:33. An independent corroboration disproved the original retire proposal. The premise - that Menhir's Ansible role had already deleted caddy-release.sh, caddy-route-apply and caddy-route-rollback - is false: that role is on an unmerged branch and all three scripts are installed, dated 2026-09-07 19:50. menhir-caddy-reconcile.service is a required artifact in release.json and in verify-artifacts' required set, it ran successfully 2026-09-07 21:43, and deployed lib.sh:505-506 makes every submit_op job depend on it via systemd-run --property=Requires=. Its removal from the host is why verify-artifacts now exits 1. Deleting the source would destroy the only maintained definition needed to finish the retirement or restore the release."
     },
     "1293c9a281755afa": {
-      "disposition": "retire",
-      "owner": "yawn.vps",
-      "note": "menhir-caddy-reconcile.path is the activation trigger for the retired reconcile service. Retire with it."
+      "disposition": "preserve",
+      "owner": "BLOCKED-ingress-retirement",
+      "note": "BLOCKED by the in-flight Cloudflared-only ingress retirement started on the host 2026-09-08 00:33. An independent corroboration disproved the original retire proposal. The premise - that Menhir's Ansible role had already deleted caddy-release.sh, caddy-route-apply and caddy-route-rollback - is false: that role is on an unmerged branch and all three scripts are installed, dated 2026-09-07 19:50. menhir-caddy-reconcile.path is the activation half of the pair and is also a required release artifact. Its watch target /var/lib/yawn/caddy-release.records is live and was written 2026-09-07 21:44. Retire only together with its service, in the same release."
     },
     "8db5421ff7e981a2": {
-      "disposition": "retire",
-      "owner": "yawn.vps",
-      "note": "menhir-op@.service documents itself as a reference definition that is never started directly - the submit wrappers enqueue transient units via systemd-run instead. A unit file that is documentation invites being enabled by mistake; the shape belongs in the README."
+      "disposition": "preserve",
+      "owner": "BLOCKED-ingress-retirement",
+      "note": "BLOCKED by the in-flight Cloudflared-only ingress retirement started on the host 2026-09-08 00:33. An independent corroboration disproved the original retire proposal. The premise - that Menhir's Ansible role had already deleted caddy-release.sh, caddy-route-apply and caddy-route-rollback - is false: that role is on an unmerged branch and all three scripts are installed, dated 2026-09-07 19:50. menhir-op@.service is installed, loaded, a required release artifact, and passes verify-artifacts. systemd actively instantiates it via the reconcile service's Before= reference. The narrow claim that systemd-run does not use it as a template is correct - submit_op builds hyphenated transient names - but that was the weakest disproof criterion and every other one fires."
     },
     "b6a0d83d3988fc01": {
       "disposition": "preserve",
