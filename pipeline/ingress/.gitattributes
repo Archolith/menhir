@@ -1,0 +1,7 @@
+# These files are captured byte-exact from the running host and are intended to
+# become release artifacts. verify-artifacts compares the SHA-256 of installed
+# bytes, so any line-ending normalisation silently breaks the digest.
+# Recorded 2026-09-08 from /srv/menhir/production/ingress/:
+#   44338a06601339cd114d506a436d266feab20e426b7283c52e514941515c8697  cloudflared-config.yml
+#   8c50533f33f5a143d0e064a4164a4673af657bf035b85743f409b2029de09b39  docker-compose.cloudflared.yml
+* -text

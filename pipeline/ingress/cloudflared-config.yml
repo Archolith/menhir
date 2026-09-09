@@ -1,0 +1,13 @@
+tunnel: c1e621a0-1193-4ba4-ae9b-366fe3901888
+credentials-file: /etc/cloudflared/credentials.json
+
+ingress:
+  - hostname: memory.ctharvey.me
+    path: ^/(?:mcp-http(?:/.*)?|oauth/(?:authorize|token|register|client-metadata/agent-smith\.json)|\.well-known/(?:jwks\.json|oauth-authorization-server(?:/.*)?|oauth-protected-resource(?:/.*)?)|livez|readyz)$
+    service: http://menhir-prod-app:8099
+    originRequest:
+      connectTimeout: 10s
+      noHappyEyeballs: false
+  - hostname: memory.ctharvey.me
+    service: http_status:404
+  - service: http_status:404
