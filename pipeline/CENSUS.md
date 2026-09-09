@@ -5,11 +5,11 @@ detection rules. Do not hand-edit: re-run the tool.
 
 ## Totals
 
-- findings: **1192**
-- mutator lines: **654**
-- entry points (must each carry a disposition): **104**
-- classified: **0**
-- unclassified: **104**
+- findings: **1194**
+- mutator lines: **656**
+- entry points (must each carry a disposition): **105**
+- classified: **16**
+- unclassified: **89**
 - stale dispositions (id no longer present): **0**
 
 ## Scan roots
@@ -19,7 +19,7 @@ detection rules. Do not hand-edit: re-run the tool.
 | `menhir` | 557 | `C:\Users\thron\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion` |
 | `shared-scripts` | 142 | `C:\Users\thron\IdeaProjects\scripts` |
 | `yawn.deploy` | 326 | `C:\Users\thron\IdeaProjects\projects\yawn\yawn.deploy` |
-| `yawn.vps` | 167 | `C:\Users\thron\IdeaProjects\projects\yawn\yawn.vps` |
+| `yawn.vps` | 169 | `C:\Users\thron\IdeaProjects\projects\yawn\yawn.vps` |
 
 ## Findings by detector
 
@@ -33,7 +33,7 @@ detection rules. Do not hand-edit: re-run the tool.
 | `compose_production` | 56 |
 | `database_or_backup_op` | 49 |
 | `sudoers_definition` | 40 |
-| `arbitrary_command_passthrough` | 36 |
+| `arbitrary_command_passthrough` | 38 |
 | `remote_shell_exec` | 36 |
 | `root_path_write` | 35 |
 | `base64_program_transfer` | 26 |
@@ -101,25 +101,25 @@ retired as a whole. Line-level findings are the evidence and live in
 | `e46b741218e2641a` | `menhir` | `scripts/replay_fold_flags.py` | 1 | compose_production | **UNCLASSIFIED** | - |
 | `52709fb1077ed686` | `menhir` | `scripts/setup_remote_test_neo4j.sh` | 5 | arbitrary_command_passthrough, compose_production, remote_shell_exec | **UNCLASSIFIED** | - |
 | `677a91b198075345` | `shared-scripts` | `check-card-colors.py` | 1 | systemd_unit | **UNCLASSIFIED** | - |
-| `01f306a439ac5507` | `shared-scripts` | `deploy-menhir-app-only.ps1` | 8 | base64_program_transfer, production_host_reference, remote_shell_exec, sudo_invocation | **UNCLASSIFIED** | - |
-| `fbca7095b88db19b` | `shared-scripts` | `deploy-menhir.ps1` | 45 | base64_program_transfer, database_or_backup_op, inline_interpreter_as_root, production_host_reference, remote_shell_exec, sudo_invocation, systemd_unit | **UNCLASSIFIED** | - |
+| `01f306a439ac5507` | `shared-scripts` | `deploy-menhir-app-only.ps1` | 8 | base64_program_transfer, production_host_reference, remote_shell_exec, sudo_invocation | replace | menhir/pipeline |
+| `fbca7095b88db19b` | `shared-scripts` | `deploy-menhir.ps1` | 45 | base64_program_transfer, database_or_backup_op, inline_interpreter_as_root, production_host_reference, remote_shell_exec, sudo_invocation, systemd_unit | replace | menhir/pipeline |
 | `423e59d41548b7a5` | `shared-scripts` | `market-sealed/vps-check-null-sealed.ps1` | 4 | compose_production, production_host_reference, remote_shell_exec | **UNCLASSIFIED** | - |
 | `2ff9f2091ef7ec05` | `shared-scripts` | `market-sealed/vps-download-sealed.ps1` | 4 | compose_production, production_host_reference, remote_shell_exec | **UNCLASSIFIED** | - |
 | `6859083f7aae5e25` | `shared-scripts` | `market-sealed/vps-upload-manual-images.ps1` | 4 | compose_production, production_host_reference, remote_shell_exec | **UNCLASSIFIED** | - |
-| `61f4e763602fc83b` | `shared-scripts` | `menhir-backup-archive.ps1` | 12 | base64_program_transfer, database_or_backup_op, inline_interpreter_as_root, production_host_reference, remote_shell_exec, sudo_invocation | **UNCLASSIFIED** | - |
-| `933b9a4d04fca3ac` | `shared-scripts` | `menhir-scaffold.ps1` | 17 | base64_program_transfer, database_or_backup_op, production_host_reference, remote_shell_exec, sudo_invocation, sudoers_definition, systemd_unit | **UNCLASSIFIED** | - |
+| `61f4e763602fc83b` | `shared-scripts` | `menhir-backup-archive.ps1` | 12 | base64_program_transfer, database_or_backup_op, inline_interpreter_as_root, production_host_reference, remote_shell_exec, sudo_invocation | replace | menhir/pipeline |
+| `933b9a4d04fca3ac` | `shared-scripts` | `menhir-scaffold.ps1` | 17 | base64_program_transfer, database_or_backup_op, production_host_reference, remote_shell_exec, sudo_invocation, sudoers_definition, systemd_unit | replace | menhir/pipeline |
 | `8b5af66e191221c4` | `shared-scripts` | `scratch/2026-04-10/tmp_query.sh` | 1 | compose_production | **UNCLASSIFIED** | - |
 | `d242256674690869` | `shared-scripts` | `start_background.ps1` | 1 | compose_production | **UNCLASSIFIED** | - |
 | `579d2683833c5816` | `shared-scripts` | `start_console.ps1` | 1 | compose_production | **UNCLASSIFIED** | - |
 | `9ce30679d465ac13` | `shared-scripts` | `tmp-clear-card-colors.ps1` | 1 | compose_production | **UNCLASSIFIED** | - |
-| `17cb1c07273d1c6c` | `shared-scripts` | `vps-compose.ps1` | 4 | arbitrary_command_passthrough, production_host_reference | **UNCLASSIFIED** | - |
-| `d881163116b90dda` | `shared-scripts` | `vps-scp.ps1` | 2 | production_host_reference, remote_shell_exec | **UNCLASSIFIED** | - |
-| `58272c4cc0311966` | `shared-scripts` | `vps-ssh.ps1` | 4 | arbitrary_command_passthrough, production_host_reference | **UNCLASSIFIED** | - |
-| `7aedddbcf7882407` | `yawn.deploy` | `Caddyfile` | 4 | production_host_reference | **UNCLASSIFIED** | - |
+| `17cb1c07273d1c6c` | `shared-scripts` | `vps-compose.ps1` | 4 | arbitrary_command_passthrough, production_host_reference | preserve | shared-scripts |
+| `d881163116b90dda` | `shared-scripts` | `vps-scp.ps1` | 2 | production_host_reference, remote_shell_exec | preserve | shared-scripts |
+| `58272c4cc0311966` | `shared-scripts` | `vps-ssh.ps1` | 4 | arbitrary_command_passthrough, production_host_reference | preserve | shared-scripts |
+| `7aedddbcf7882407` | `yawn.deploy` | `Caddyfile` | 4 | production_host_reference | replace | yawn.deploy |
 | `bda07c8c781ce55e` | `yawn.deploy` | `bootstrap-postgres.sh` | 2 | arbitrary_command_passthrough, compose_production | **UNCLASSIFIED** | - |
-| `7aed8f5cc1753f18` | `yawn.deploy` | `caddy-release.sh` | 16 | arbitrary_command_passthrough, lock_acquisition, production_host_reference | **UNCLASSIFIED** | - |
-| `e5ed2b63e4bfcb59` | `yawn.deploy` | `check-drift.sh` | 5 | arbitrary_command_passthrough, production_host_reference, sudo_invocation | **UNCLASSIFIED** | - |
-| `92d28a1a4f8e3064` | `yawn.deploy` | `docker-compose.yml` | 2 | production_host_reference | **UNCLASSIFIED** | - |
+| `7aed8f5cc1753f18` | `yawn.deploy` | `caddy-release.sh` | 16 | arbitrary_command_passthrough, lock_acquisition, production_host_reference | replace | yawn.deploy |
+| `e5ed2b63e4bfcb59` | `yawn.deploy` | `check-drift.sh` | 5 | arbitrary_command_passthrough, production_host_reference, sudo_invocation | replace | yawn.deploy |
+| `92d28a1a4f8e3064` | `yawn.deploy` | `docker-compose.yml` | 2 | production_host_reference | replace | yawn.deploy |
 | `e6c256681168af57` | `yawn.deploy` | `lib/registry.sh` | 1 | arbitrary_command_passthrough | **UNCLASSIFIED** | - |
 | `25597cf5a8dc1f5b` | `yawn.deploy` | `ops/backup/daily-backup.sh` | 2 | arbitrary_command_passthrough, compose_production | **UNCLASSIFIED** | - |
 | `2d05f592204ea679` | `yawn.deploy` | `ops/backup/home-pull-backups.sh` | 3 | production_host_reference, remote_shell_exec | **UNCLASSIFIED** | - |
@@ -127,23 +127,24 @@ retired as a whole. Line-level findings are the evidence and live in
 | `5aad9b73072e222f` | `yawn.deploy` | `ops/seed-nightly/run-seed-nightly.sh` | 3 | arbitrary_command_passthrough, lock_acquisition | **UNCLASSIFIED** | - |
 | `5ec5e1d4f978a0ab` | `yawn.deploy` | `ops/seed-nightly/yawn-seed-nightly.service` | 3 | systemd_unit | **UNCLASSIFIED** | - |
 | `34842d2f50dfa0a8` | `yawn.deploy` | `ops/seed-nightly/yawn-seed-nightly.timer` | 6 | systemd_unit | **UNCLASSIFIED** | - |
-| `a7ed817b18792426` | `yawn.deploy` | `releases.json` | 9 | lock_acquisition, production_host_reference | **UNCLASSIFIED** | - |
-| `f17e0f0dc087a186` | `yawn.deploy` | `remote-deploy.sh` | 4 | arbitrary_command_passthrough, sudo_invocation, systemd_unit | **UNCLASSIFIED** | - |
+| `a7ed817b18792426` | `yawn.deploy` | `releases.json` | 9 | lock_acquisition, production_host_reference | replace | yawn.deploy |
+| `f17e0f0dc087a186` | `yawn.deploy` | `remote-deploy.sh` | 4 | arbitrary_command_passthrough, sudo_invocation, systemd_unit | preserve | yawn.deploy |
 | `2c5286116055f38b` | `yawn.deploy` | `tests/caddy-release.test.sh` | 23 | arbitrary_command_passthrough, production_host_reference | **UNCLASSIFIED** | - |
 | `d894e988d2e28c97` | `yawn.deploy` | `tests/sealed-copy.test.sh` | 8 | arbitrary_command_passthrough, compose_production | **UNCLASSIFIED** | - |
 | `ddd37cb51e38c1ba` | `yawn.deploy` | `tests/seed-nightly.test.sh` | 12 | arbitrary_command_passthrough, lock_acquisition, systemd_unit | **UNCLASSIFIED** | - |
 | `2d7dd86cfae91a37` | `yawn.deploy` | `tools/card-image-canary.py` | 2 | systemd_unit | **UNCLASSIFIED** | - |
 | `9b42b4671c0e15d6` | `yawn.deploy` | `wait-for-readiness.sh` | 2 | arbitrary_command_passthrough | **UNCLASSIFIED** | - |
 | `b6a0d83d3988fc01` | `yawn.vps` | `menhir_server.py` | 3 | production_host_reference | **UNCLASSIFIED** | - |
+| `9a0a907d04715eeb` | `yawn.vps` | `ops/menhir/bin/backup-status` | 2 | arbitrary_command_passthrough | **UNCLASSIFIED** | - |
 | `14056d45d6a70ce8` | `yawn.vps` | `ops/menhir/bin/lib.sh` | 18 | arbitrary_command_passthrough, database_or_backup_op, lock_acquisition, production_host_reference, systemd_unit | **UNCLASSIFIED** | - |
 | `ef6101c3a60bd4d8` | `yawn.vps` | `ops/menhir/bin/status` | 1 | lock_acquisition | **UNCLASSIFIED** | - |
 | `b032569d5b460b0f` | `yawn.vps` | `ops/menhir/bin/verify-artifacts` | 4 | database_or_backup_op, sudoers_definition, systemd_unit | **UNCLASSIFIED** | - |
 | `cfec5bc404e3084d` | `yawn.vps` | `ops/menhir/etc/sudoers.d/menhir-production` | 1 | sudoers_definition | **UNCLASSIFIED** | - |
 | `f01bf40620db1afb` | `yawn.vps` | `ops/menhir/etc/tmpfiles.d/menhir-production.conf` | 2 | lock_acquisition | **UNCLASSIFIED** | - |
-| `1293c9a281755afa` | `yawn.vps` | `ops/menhir/systemd/menhir-caddy-reconcile.path` | 4 | systemd_unit | **UNCLASSIFIED** | - |
-| `b9ac9038ea3a3189` | `yawn.vps` | `ops/menhir/systemd/menhir-caddy-reconcile.service` | 7 | systemd_unit | **UNCLASSIFIED** | - |
+| `1293c9a281755afa` | `yawn.vps` | `ops/menhir/systemd/menhir-caddy-reconcile.path` | 4 | systemd_unit | retire | yawn.vps |
+| `b9ac9038ea3a3189` | `yawn.vps` | `ops/menhir/systemd/menhir-caddy-reconcile.service` | 7 | systemd_unit | retire | yawn.vps |
 | `1c556f7e94e6cf71` | `yawn.vps` | `ops/menhir/systemd/menhir-oauth-operations.service` | 8 | systemd_unit | **UNCLASSIFIED** | - |
-| `8db5421ff7e981a2` | `yawn.vps` | `ops/menhir/systemd/menhir-op@.service` | 5 | systemd_unit | **UNCLASSIFIED** | - |
+| `8db5421ff7e981a2` | `yawn.vps` | `ops/menhir/systemd/menhir-op@.service` | 5 | systemd_unit | retire | yawn.vps |
 | `0ad5390dc3202079` | `yawn.vps` | `vps/card_image_tools.py` | 1 | sudo_invocation | **UNCLASSIFIED** | - |
 | `d11d822a5cb12067` | `yawn.vps` | `vps/compose_tools.py` | 6 | compose_production, sudo_invocation | **UNCLASSIFIED** | - |
 | `e0d755d4611251b5` | `yawn.vps` | `vps/core.py` | 14 | arbitrary_command_passthrough, compose_production, lock_acquisition, production_host_reference, remote_shell_exec, sudo_invocation, systemd_unit | **UNCLASSIFIED** | - |

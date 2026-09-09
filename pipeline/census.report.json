@@ -19,22 +19,22 @@
     {
       "name": "yawn.vps",
       "root": "C:\\Users\\thron\\IdeaProjects\\projects\\yawn\\yawn.vps",
-      "findings": 167
+      "findings": 169
     }
   ],
   "totals": {
-    "findings": 1192,
-    "mutator_lines": 654,
-    "entry_points": 104,
-    "classified": 0,
-    "unclassified": 104,
+    "findings": 1194,
+    "mutator_lines": 656,
+    "entry_points": 105,
+    "classified": 16,
+    "unclassified": 89,
     "stale_dispositions": 0
   },
   "by_detector": {
     "inline_interpreter_as_root": 6,
     "base64_program_transfer": 26,
     "production_host_reference": 169,
-    "arbitrary_command_passthrough": 36,
+    "arbitrary_command_passthrough": 38,
     "sudo_invocation": 77,
     "sudoers_definition": 40,
     "remote_shell_exec": 36,
@@ -784,9 +784,9 @@
       ],
       "mutator_lines": 8,
       "first_line": 26,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "replace",
+      "owner": "menhir/pipeline",
+      "note": "deploy-menhir-app-only.ps1 is the app-only variant; the architecture spec already calls for its removal in favour of one wrapper with the lane carried in the request."
     },
     {
       "id": "fbca7095b88db19b",
@@ -803,9 +803,9 @@
       ],
       "mutator_lines": 45,
       "first_line": 175,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "replace",
+      "owner": "menhir/pipeline",
+      "note": "deploy-menhir.ps1 is the main desktop deploy wrapper, 45 mutator lines including inline_interpreter_as_root. Superseded by the new pipeline. Retire only once the replacement can deploy end to end."
     },
     {
       "id": "423e59d41548b7a5",
@@ -866,9 +866,9 @@
       ],
       "mutator_lines": 12,
       "first_line": 11,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "replace",
+      "owner": "menhir/pipeline",
+      "note": "menhir-backup-archive.ps1 is WORKING and load-bearing: it is what puts nine encrypted archives on the desktop and writes desktop-archive-receipt.json. Do not retire it. Replace only the mechanism - it pipes base64-decoded Python into sudo -n python3 - to read metadata, which is arbitrary root execution for a read that a fixed read command should serve."
     },
     {
       "id": "933b9a4d04fca3ac",
@@ -885,9 +885,9 @@
       ],
       "mutator_lines": 17,
       "first_line": 15,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "replace",
+      "owner": "menhir/pipeline",
+      "note": "menhir-scaffold.ps1 is bootstrap transport. Replaced by the new pipeline's install path."
     },
     {
       "id": "8b5af66e191221c4",
@@ -951,9 +951,9 @@
       ],
       "mutator_lines": 4,
       "first_line": 5,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "shared-scripts",
+      "note": "vps-compose.ps1 runs any docker compose args against the VPS. Same reasoning as vps-ssh.ps1: shared infrastructure, not Menhir's to remove."
     },
     {
       "id": "d881163116b90dda",
@@ -965,9 +965,9 @@
       ],
       "mutator_lines": 2,
       "first_line": 17,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "shared-scripts",
+      "note": "vps-scp.ps1 is generic file transfer used by menhir-backup-archive.ps1 among others. Shared infrastructure."
     },
     {
       "id": "58272c4cc0311966",
@@ -979,9 +979,9 @@
       ],
       "mutator_lines": 4,
       "first_line": 5,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "shared-scripts",
+      "note": "vps-ssh.ps1 runs any command on the production host. Unbounded by construction and used by every project on the shared box, including this investigation. Not Menhir's to retire. Recorded so it is never mistaken for absent - it is the reason the census anchors on the target host rather than command verbs."
     },
     {
       "id": "7aedddbcf7882407",
@@ -992,9 +992,9 @@
       ],
       "mutator_lines": 4,
       "first_line": 186,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "replace",
+      "owner": "yawn.deploy",
+      "note": "Caddyfile serves four vhosts; only the memory.ctharvey.me block is Menhir. That block is dead - verified 2026-09-08 that yawndeploy-caddy-1 is not on menhir-proxy and nslookup menhir-prod-app returns SERVFAIL. Remove the Menhir block and its cert mounts; keep the file."
     },
     {
       "id": "bda07c8c781ce55e",
@@ -1021,9 +1021,9 @@
       ],
       "mutator_lines": 16,
       "first_line": 81,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "replace",
+      "owner": "yawn.deploy",
+      "note": "caddy-release.sh is a real transactional release tool for the shared Caddy, which still serves three Yawn vhosts, so the script stays. Retire only its Menhir ownership: the /run/lock/menhir-production.lock release lock, the Menhir release authority, and the Menhir branches. This is the second transaction kernel the architecture review flagged."
     },
     {
       "id": "e5ed2b63e4bfcb59",
@@ -1036,9 +1036,9 @@
       ],
       "mutator_lines": 5,
       "first_line": 42,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "replace",
+      "owner": "yawn.deploy",
+      "note": "check-drift.sh is READ-ONLY monitoring for Yawn and stays. Its Menhir checks - caddy attachment to menhir-proxy, unexpected Menhir ports, reading Menhir's release.json - now assert a topology that no longer exists and would report false drift. Remove the Menhir assertions."
     },
     {
       "id": "92d28a1a4f8e3064",
@@ -1049,9 +1049,9 @@
       ],
       "mutator_lines": 2,
       "first_line": 76,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "replace",
+      "owner": "yawn.deploy",
+      "note": "Declares caddy on the menhir-proxy network, an attachment the running container does not have. Live drift, superseded by the Cloudflared tunnel. Remove the menhir-proxy attachment and external network declaration; keep the file."
     },
     {
       "id": "e6c256681168af57",
@@ -1158,9 +1158,9 @@
       ],
       "mutator_lines": 9,
       "first_line": 83,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "replace",
+      "owner": "yawn.deploy",
+      "note": "releases.json is Yawn's own release registry and stays, but it declares the Menhir proxy surface - menhir_network, menhir_proxy_ip, memory_upstream, the vhost and its Origin CA material. All dead. Remove the menhir_* keys."
     },
     {
       "id": "f17e0f0dc087a186",
@@ -1173,9 +1173,9 @@
       ],
       "mutator_lines": 4,
       "first_line": 39,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "preserve",
+      "owner": "yawn.deploy",
+      "note": "remote-deploy.sh references Menhir only to REFUSE: it blocks generic targets from touching privileged proxy artifacts and redirects to the Menhir supervisor. That guard is protective, not duplicated authority. Revisit only after the Menhir Caddy surface is gone, when the refusal has nothing left to protect."
     },
     {
       "id": "2c5286116055f38b",
@@ -1260,6 +1260,19 @@
       "note": null
     },
     {
+      "id": "9a0a907d04715eeb",
+      "repo": "yawn.vps",
+      "path": "ops/menhir/bin/backup-status",
+      "detectors": [
+        "arbitrary_command_passthrough"
+      ],
+      "mutator_lines": 2,
+      "first_line": 30,
+      "disposition": null,
+      "owner": null,
+      "note": null
+    },
+    {
       "id": "14056d45d6a70ce8",
       "repo": "yawn.vps",
       "path": "ops/menhir/bin/lib.sh",
@@ -1339,9 +1352,9 @@
       ],
       "mutator_lines": 4,
       "first_line": 1,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "retire",
+      "owner": "yawn.vps",
+      "note": "menhir-caddy-reconcile.path is the activation trigger for the retired reconcile service. Retire with it."
     },
     {
       "id": "b9ac9038ea3a3189",
@@ -1352,9 +1365,9 @@
       ],
       "mutator_lines": 7,
       "first_line": 1,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "retire",
+      "owner": "yawn.vps",
+      "note": "menhir-caddy-reconcile.service invokes caddy-release.sh / caddy-route-* under /srv/menhir/production/bin/, which Menhir's own ansible already deletes and asserts absent. The unit points at scripts that are gone."
     },
     {
       "id": "1c556f7e94e6cf71",
@@ -1378,9 +1391,9 @@
       ],
       "mutator_lines": 5,
       "first_line": 11,
-      "disposition": null,
-      "owner": null,
-      "note": null
+      "disposition": "retire",
+      "owner": "yawn.vps",
+      "note": "menhir-op@.service documents itself as a reference definition that is never started directly - the submit wrappers enqueue transient units via systemd-run instead. A unit file that is documentation invites being enabled by mistake; the shape belongs in the README."
     },
     {
       "id": "0ad5390dc3202079",
@@ -13382,6 +13395,28 @@
       "why": "Defines or edits a privilege grant. The set of these is the actual privilege boundary, regardless of what any document claims."
     },
     {
+      "id": "5d126f381a3bda99",
+      "detector": "arbitrary_command_passthrough",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.vps",
+      "path": "ops/menhir/bin/backup-status",
+      "line": 30,
+      "evidence": "python3 - \"$@\" <<'PYEOF'",
+      "why": "Forwards caller-supplied arguments onward as a command. Unbounded by construction: it cannot be constrained by sudoers argument matching and cannot be reasoned about from its own source."
+    },
+    {
+      "id": "5d126f381a3bda99",
+      "detector": "arbitrary_command_passthrough",
+      "kind": "host-target",
+      "severity": "mutator",
+      "repo": "yawn.vps",
+      "path": "ops/menhir/bin/backup-status",
+      "line": 51,
+      "evidence": "python3 - \"$@\" <<'PYEOF'",
+      "why": "Forwards caller-supplied arguments onward as a command. Unbounded by construction: it cannot be constrained by sudoers argument matching and cannot be reasoned about from its own source."
+    },
+    {
       "id": "701f7a530ecd45f2",
       "detector": "ingress_config",
       "kind": "ingress",
@@ -14678,25 +14713,14 @@
     "e46b741218e2641a",
     "52709fb1077ed686",
     "677a91b198075345",
-    "01f306a439ac5507",
-    "fbca7095b88db19b",
     "423e59d41548b7a5",
     "2ff9f2091ef7ec05",
     "6859083f7aae5e25",
-    "61f4e763602fc83b",
-    "933b9a4d04fca3ac",
     "8b5af66e191221c4",
     "d242256674690869",
     "579d2683833c5816",
     "9ce30679d465ac13",
-    "17cb1c07273d1c6c",
-    "d881163116b90dda",
-    "58272c4cc0311966",
-    "7aedddbcf7882407",
     "bda07c8c781ce55e",
-    "7aed8f5cc1753f18",
-    "e5ed2b63e4bfcb59",
-    "92d28a1a4f8e3064",
     "e6c256681168af57",
     "25597cf5a8dc1f5b",
     "2d05f592204ea679",
@@ -14704,23 +14728,19 @@
     "5aad9b73072e222f",
     "5ec5e1d4f978a0ab",
     "34842d2f50dfa0a8",
-    "a7ed817b18792426",
-    "f17e0f0dc087a186",
     "2c5286116055f38b",
     "d894e988d2e28c97",
     "ddd37cb51e38c1ba",
     "2d7dd86cfae91a37",
     "9b42b4671c0e15d6",
     "b6a0d83d3988fc01",
+    "9a0a907d04715eeb",
     "14056d45d6a70ce8",
     "ef6101c3a60bd4d8",
     "b032569d5b460b0f",
     "cfec5bc404e3084d",
     "f01bf40620db1afb",
-    "1293c9a281755afa",
-    "b9ac9038ea3a3189",
     "1c556f7e94e6cf71",
-    "8db5421ff7e981a2",
     "0ad5390dc3202079",
     "d11d822a5cb12067",
     "e0d755d4611251b5",
