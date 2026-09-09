@@ -3,11 +3,15 @@ Description=Nightly Menhir backup
 Documentation=file:/srv/menhir/production/pipeline/MAP.md
 
 [Timer]
-# 04:00 local. The stack is unavailable for the duration of the run.
-OnCalendar=*-*-* 04:00:00
+# 04:00 America/Chicago -- the operator's local time, not the host's.
+# The host runs Europe/Berlin, so a bare "04:00:00" would fire at 21:00 CT.
+# The explicit zone also tracks CST/CDT automatically: 09:00 UTC in summer,
+# 10:00 UTC in winter. Requires systemd 252+; host runs 255.
+# Verify after any change with:
+#   systemd-analyze calendar '*-*-* 04:00:00 America/Chicago'
+OnCalendar=*-*-* 04:00:00 America/Chicago
 # Run after a missed window (host powered off, etc.) rather than skipping a day.
 Persistent=true
-# Avoid colliding with other 04:00 jobs, e.g. menhir-scaffold-audit at 04:45.
 RandomizedDelaySec=300
 Unit=menhir-backup.service
 
