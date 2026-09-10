@@ -114,8 +114,20 @@ started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 start_epoch="$(date +%s)"
 log "starting (stack was ${was_running})"
 
+# backup-generation.sh hands the finished generation to
+# /usr/local/sbin/menhir-backup-local, which refuses to encrypt without a job id
+# matching ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$. Normally submit_op mints that id
+# and the worker exports it (lib.sh worker line 79). Bypassing submit_op means
+# nothing supplies it, and the run dies AFTER the stack has been stopped, dumped
+# and verified -- the most expensive possible place to fail. Mint one here in
+# the same shape submit_op uses.
+job_id="${MENHIR_OPERATION_JOB_ID:-$(date -u +%Y%m%dT%H%M%SZ)-$((RANDOM % 10000))}"
+[[ "$job_id" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]] \
+    || { log "FATAL generated job id is invalid: ${job_id}"; exit 1; }
+log "operation job id ${job_id}"
+
 rc=0
-"$BACKUP_SCRIPT" || rc=$?
+MENHIR_OPERATION_JOB_ID="$job_id" "$BACKUP_SCRIPT" || rc=$?
 
 elapsed=$(( $(date +%s) - start_epoch ))
 finished="$(date -u +%Y-%m-%dT%H:%M:%SZ)"

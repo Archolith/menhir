@@ -12,11 +12,22 @@ Companion documents in this directory:
 
 ## 1. Start here: the single most important fact
 
-**Menhir can be restored. New backups need one command run by hand.**
+**Menhir can be restored, from a backup taken 2026-09-10.**
 
-The newest backup is `generation.vJBZKqtqAF`, 2026-09-07 19:52 UTC. It is
-rehearsed, verified, and copied to the desktop with a matching key. Restoring
-from it works.
+Phase 0 is complete. The newest backup is `generation.YBf6rSxgwW`,
+2026-09-10 02:05 UTC: `roundtrip_verified: true`, recipient
+`age1v5azxda7…qdppg0k` (the same identity held on the desktop), 338 MB, plaintext
+cleanup completed. Copied off-host to
+`%USERPROFILE%\Backups\Menhir\generation.YBf6rSxgwW-20260910T020506Z-2578944e9011ab13.tar.gz.age`,
+SHA-256 `6dbac32b75cd57d3c2467708b2b5a3e0dd9714448fdeed9f07ea32da6841a76b`,
+with a `desktop-archive-receipt.json` on the host.
+
+The live Cloudflared ingress is also captured now, byte-exact, in
+`pipeline/ingress/` — previously it existed only on the host, in no release and
+no backup, which meant a restore could bring the graph back with no route to it.
+
+The previous newest, `generation.vJBZKqtqAF` of 2026-09-07 19:52, remains
+rehearsed and verified.
 
 `submit_op` is broken (section 3), so the `backup` wrapper cannot enqueue a job.
 **This was previously recorded here as "Menhir cannot currently be backed up."
@@ -224,8 +235,36 @@ would have omitted the eight `MENHIR_*` runtime variables that `production_up`
 in `release-lib.sh` supplies. It now sources `release-lib.sh` in a subshell and
 calls `production_up`, the same path production uses, including `wait_healthy`.
 
-Still not installed and still not executed end-to-end — `submit_op` is broken
-(section 3), and a real run stops production. Note also that `Persistent=true` plus
+**Run for real on 2026-09-10, and it found a fourth defect.** Executed as a
+transient systemd unit against production. Sequence:
+
+- Stack stopped, both dumps taken, consistency check passed, OAuth and telemetry
+  authorities snapshotted, `Local generation complete and verified:
+  generation.YBf6rSxgwW`.
+- Then: `MENHIR_OPERATION_JOB_ID is required and invalid`, and
+  `FATAL: encrypted local backup failed; stack is left stopped`.
+- Wrapper logged `stack is stopped after backup (rc=1); restarting` and brought
+  production back. App healthy, `readyz=200`. Outage ~3.5 minutes.
+
+Defect 4: `/usr/local/sbin/menhir-backup-local` refuses to encrypt without a job
+id matching `^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`. `submit_op` mints it and the
+worker exports it (`lib.sh` worker line 79); bypassing `submit_op` means nothing
+does, so the run died *after* the stack was stopped, dumped and verified — the
+most expensive place to fail. The wrapper now mints one in the same shape.
+
+This corrects section 1's claim that the direct path "works today". It works up
+to encryption; the job id is the missing piece, and it is now supplied.
+
+**It also proved the wrapper's reason for existing.** The raw script left the
+stack stopped exactly as documented. The restart guarantee — the thing defect 1
+had silently disabled — fired and recovered production unattended. Had the timer
+been installed before that fix, this would have been a 04:00 outage lasting until
+someone noticed.
+
+Recovery did not need a second outage: the generation was already verified, so
+`menhir-backup-local` was run directly against it with a valid job id.
+
+Note also that `Persistent=true` plus
 `systemctl enable --now` fires the timer immediately on a never-run timer; that
 happened once this session and triggered an unintended production backup attempt.
 
