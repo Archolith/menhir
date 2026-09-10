@@ -1,6 +1,6 @@
 [Unit]
 Description=Menhir nightly backup (quiesced; takes the stack down)
-Documentation=file:/srv/menhir/production/pipeline/MAP.md
+Documentation=file:/usr/local/sbin/menhir-scheduled-backup
 After=docker.service
 Requires=docker.service
 
@@ -11,6 +11,12 @@ Group=root
 # The backup stops the stack, dumps, verifies by loading both dumps back,
 # encrypts, then restarts. Generous ceiling; the wrapper records real elapsed.
 TimeoutStartSec=21600
-ExecStart=/srv/menhir/production/pipeline/scheduled-backup.sh
+# Install with:
+#   install -o root -g root -m 0755 pipeline/scheduled-backup.sh \
+#       /usr/local/sbin/menhir-scheduled-backup
+# This previously pointed at /srv/menhir/production/pipeline/, a directory no
+# release creates and which does not exist on the host -- every run would have
+# been status=203/EXEC.
+ExecStart=/usr/local/sbin/menhir-scheduled-backup
 Nice=10
 IOSchedulingClass=idle

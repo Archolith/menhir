@@ -1,6 +1,6 @@
 [Unit]
 Description=Nightly Menhir backup
-Documentation=file:/srv/menhir/production/pipeline/MAP.md
+Documentation=file:/usr/local/sbin/menhir-scheduled-backup
 
 [Timer]
 # 04:00 America/Chicago -- the operator's local time, not the host's.

@@ -264,6 +264,52 @@ someone noticed.
 Recovery did not need a second outage: the generation was already verified, so
 `menhir-backup-local` was run directly against it with a valid job id.
 
+**Independently reviewed 2026-09-10 (opus, read-only).** Confirmed: the backup
+and its receipt, the off-host copy (the reviewer went further and decrypted the
+archive *header* with the desktop identity — a payload-chunk error rather than
+"no identity matched" proves the key genuinely unlocks it), the ingress digests
+four ways, production health, and the journal ordering. Measured outage from
+container timestamps: 3 min 09 s, app down 2 min 28 s.
+
+It also refuted two things and found eight further defects. Refuted: "host
+changes: none" (see §8), and the implication that the *fixed* wrapper had been
+proven — the copy that ran was the pre-fix one, so the job-id fix is verified as
+code and by its consumer, never by execution.
+
+Fixed in response:
+1. **Exit code lied.** Backup succeeds, restart fails → the wrapper still
+   `exit`ed `rc`=0. systemd would record success while the site was down, and
+   the unit has no `OnFailure=`. Now any `restart-failed` forces rc=1.
+2. **No signal trap.** The restart was straight-line code, so `systemctl stop`,
+   a reboot, or an OOM kill during the ~2 minute window killed both wrapper and
+   child and production stayed down — `docker compose stop` is an explicit stop,
+   which `unless-stopped` deliberately does not undo. Now `trap … EXIT TERM INT`.
+3. **Any-of stack detection.** Non-empty label query counted as "running" even
+   if only neo4j came back. Becomes a permanent false positive once the ingress
+   retirement folds cloudflared into `menhir-prod`. Now asserts both containers.
+4. **Early aborts wrote no record**, making a wrapper that fails nightly
+   indistinguishable from one never scheduled. Now every path records.
+5. **`ExecStart` pointed at `/srv/menhir/production/pipeline/`**, which no
+   release creates and which does not exist — every run would have been
+   `203/EXEC`. Now `/usr/local/sbin/menhir-scheduled-backup`, with the install
+   command in the unit and the script header.
+6. **`restart_stack` discarded stderr** on the one path that ends in "manual
+   recovery required". Now only stdout is dropped.
+7. **`elapsed_seconds` excluded the restart**, understating this real incident
+   by 40% (115 s recorded, 190 s actual). Now measured at finalize.
+8. **Header overclaimed** that failures surface in `backup-status`. They do not:
+   the deployed `backup-status` reads one job file and nothing anywhere
+   references `scheduled-backup`. Claim removed pending deployment of
+   `yawn.vps@6a98974`.
+
+Still open from that review: retention says target 2 while holding 11 archives
+(~3.2 G); `validate-receipt-binding` never ran for this generation because
+`backup-generation.sh` exited before it, and cannot be re-run now that the
+plaintext generation is deleted; and `menhir-scaffold-audit.service` has been
+**failed since 2026-09-09** with "VPS backup is stale" — it is the only automated
+staleness detector and it is itself down. Whether the new backup satisfies it
+should be checked after its next run.
+
 Note also that `Persistent=true` plus
 `systemctl enable --now` fires the timer immediately on a never-run timer; that
 happened once this session and triggered an unintended production backup attempt.
@@ -334,8 +380,24 @@ prior state.
 were untracked but not ignored in a repo that pushes to GitHub. Never committed;
 history clean.
 
-**Host changes: none.** Everything installed during the session was reverted;
-verified clean.
+**Host changes.** This line previously read "none — everything installed during
+the session was reverted; verified clean." An independent review refuted that.
+Current state after Phase 0:
+
+- `/var/lib/menhir-production/backup-local-receipt.json` — updated (new backup).
+- `/var/lib/menhir-production/desktop-archive-receipt.json` — updated.
+- `/var/lib/menhir-production/scheduled-backup-{failure,last-run}.json` — new.
+  The failure marker is only cleared by a *successful* wrapper run, and no timer
+  is installed, so it persists until then.
+- `/srv/menhir/backups/encrypted/generation.YBf6rSxgwW-…age` — the new backup.
+- `/home/thron/.menhir-backup-export/` — created (empty), staging used by
+  `menhir-backup-archive.ps1`.
+- `/tmp/menhir-scheduled-backup.sh` — a staged pre-fix copy of the wrapper was
+  left executable on the host. **Removed 2026-09-10.** It was the only copy on
+  the host, looked like "the backup wrapper", and re-running it would have
+  reproduced the job-id failure and another real outage.
+
+No release-managed artifact was modified.
 
 ## 9. Next actions, in order
 
