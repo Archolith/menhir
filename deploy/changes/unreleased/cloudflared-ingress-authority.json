@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "id": "cloudflared-ingress-authority",
+  "category": "operations",
+  "deployment_class": "maintenance",
+  "summary": "Select Cloudflared as the sole Menhir ingress authority and bring its configuration under release control.",
+  "details": "Commit e18a58389288b64d33afc300c09435f726e37bc7 and yawn.vps commit 8e99ca7ec510c70eed1381cd77e05590c112d5d2 resolve the ambiguous ingress authority recorded as BLOCKS MAINTENANCE in the release 0.2.0-13 postmortem. The live Cloudflared tunnel configuration and its compose file were previously hand-placed on the host, listed in no release and captured by no backup, so a restore could return the graph with no route reaching it; both are now managed artifacts sourced from deploy/. Menhir's own Caddy tooling retires: menhir-caddy-reconcile.path, menhir-caddy-reconcile.service, caddy-release.sh, caddy-route-apply and caddy-route-rollback leave the required set and enter the verifier's obsolete set, matching the installer's retirement arrays. The four shared yawn.deploy paths stop being Menhir release artifacts without being modified or removed, because Yawn continues to use Caddy; this also clears the standing Caddyfile digest mismatch, which existed only because Menhir pinned the digest of a file Yawn edits. lib.sh no longer launches operations with Requires= and After=menhir-caddy-reconcile.service, a unit removed from the host on 2026-09-08, which had prevented every submit_op job from starting. bin/release-run is added to the retirement arrays; it submitted an operation the worker no longer implements and appeared in no authority, surviving installs as an orphan. A new cross-repository coherence test compares the verifier's required and obsolete sets against installed-artifacts.json and the installer's allowed and retirement lists, a comparison that did not previously exist in either repository, so divergence between them could only surface as a failed installation on the host.",
+  "operator_impact": "Menhir ingress is served solely by Cloudflared. Caddy route commands are removed and their sudoers grants no longer apply; Yawn's own Caddy stack is unaffected. Changing the ingress configuration now requires a release, and because the running container bind-mounts these files by inode, a changed configuration also requires recreating menhir-prod-cloudflared before it takes effect.",
+  "repositories": {
+    "menhir": [
+      "e18a58389288b64d33afc300c09435f726e37bc7"
+    ],
+    "yawn_vps": [
+      "8e99ca7ec510c70eed1381cd77e05590c112d5d2"
+    ]
+  },
+  "security_scopes": [
+    "host-privilege-and-command-wrappers",
+    "network-and-ingress-boundaries",
+    "backup-restore-and-rollback"
+  ],
+  "breaking": false
+}
