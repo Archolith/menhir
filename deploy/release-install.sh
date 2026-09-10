@@ -64,6 +64,8 @@ allowed = frozenset(line for line in """
 /srv/menhir/production/deploy/docker-compose.production.yml
 /srv/menhir/production/deploy/durable-state-inventory.json
 /srv/menhir/production/deploy/installed-artifacts.json
+/srv/menhir/production/ingress/cloudflared-config.yml
+/srv/menhir/production/ingress/docker-compose.cloudflared.yml
 /srv/menhir/production/policy/client-policy.json
 /srv/menhir/production/release/production.env
 /srv/yawn/projects/yawn.vps/menhir_server.py
@@ -355,6 +357,7 @@ retired_gateway_scripts=(
     /srv/menhir/production/bin/restore-production
     /srv/menhir/production/bin/promote
     /srv/menhir/production/bin/rollback
+    /srv/menhir/production/bin/release-run
 )
 retired_units=("${retired_caddy_units[@]}" "${retired_gateway_units[@]}")
 retired_scripts=("${retired_caddy_scripts[@]}" "${retired_gateway_scripts[@]}")

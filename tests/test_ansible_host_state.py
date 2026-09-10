@@ -463,7 +463,11 @@ def test_release_installer_converges_retired_caddy_writers_only():
     assert installer.index("create_snapshot\n") \
         < installer.index("journal_action phase retiring-caddy")
     assert installer.index("journal_action phase retiring-caddy") \
-        < installer.index("retire_caddy_writers\n")
+        < installer.index("retire_obsolete_writers\n")
+    # bin/release-run submits an op the worker no longer implements, so it must
+    # be retired rather than left on the host as an orphan.
+    assert "/srv/menhir/production/bin/release-run\n" in installer
+    assert "/srv/menhir/production/bin/release-run" not in census["destinations"]
     assert installer.index("--property=ActiveState") \
         < installer.index('rm -f -- "/etc/systemd/system/${unit}"')
 

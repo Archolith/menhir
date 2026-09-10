@@ -153,6 +153,15 @@ ARTIFACT_SOURCES: dict[str, dict[str, str]] = {
     "/srv/menhir/production/deploy/installed-artifacts.json": _git(
         "menhir", "deploy/installed-artifacts.json"
     ),
+    # The live Cloudflared ingress. Sole route to memory.ctharvey.me; previously
+    # hand-placed on the host, in no release and no backup. Sourced from deploy/
+    # rather than pipeline/ so there is exactly one blob per file.
+    "/srv/menhir/production/ingress/cloudflared-config.yml": _git(
+        "menhir", "deploy/cloudflared-config.yml"
+    ),
+    "/srv/menhir/production/ingress/docker-compose.cloudflared.yml": _git(
+        "menhir", "deploy/docker-compose.cloudflared.yml"
+    ),
     "/srv/yawn/projects/yawn.vps/menhir_server.py": _git(
         "yawn_vps", "menhir_server.py"
     ),

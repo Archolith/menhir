@@ -24,3 +24,8 @@ uv.lock text eol=lf
 *.pdf   binary
 *.woff  binary
 *.woff2 binary
+
+# Byte-exact ingress artifact captured from the running host; verify-artifacts
+# compares installed-byte SHA-256, so line-ending normalisation breaks it.
+deploy/cloudflared-config.yml -text
+deploy/docker-compose.cloudflared.yml -text

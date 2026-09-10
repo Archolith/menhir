@@ -41,6 +41,8 @@
     "/srv/menhir/production/deploy/docker-compose.production.yml",
     "/srv/menhir/production/deploy/durable-state-inventory.json",
     "/srv/menhir/production/deploy/installed-artifacts.json",
+    "/srv/menhir/production/ingress/cloudflared-config.yml",
+    "/srv/menhir/production/ingress/docker-compose.cloudflared.yml",
     "/srv/menhir/production/policy/client-policy.json",
     "/srv/menhir/production/release/production.env",
     "/srv/yawn/projects/yawn.vps/menhir_server.py",
