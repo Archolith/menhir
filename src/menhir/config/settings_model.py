@@ -264,6 +264,17 @@ class MemorySettings:
     # 2048 figure used. Do not tune this against content demand alone while any configured model
     # emits reasoning tokens.
     personal_memory_consolidation_max_tokens: int = 8192
+    # Ask the provider to skip reasoning for the consolidation extractor. OPT-IN, and it must stay
+    # opt-in: this travels as `extra_body={"reasoning": {"enabled": false}}`, which OpenRouter
+    # understands and api.openai.com rejects outright, so defaulting it on would 400 every native
+    # OpenAI deployment. Typed-scalar perception is mechanical schema-filling -- gpt-4o-mini does it
+    # in ~370 completion tokens with no reasoning at all, while gpt-5.6-luna spent 516-1552 reasoning
+    # tokens per sample on the same input. Reasoning is also charged and counted inside
+    # `personal_memory_consolidation_max_tokens`, so it is what pushed a k-sample into truncation.
+    # Turning it off is therefore both a cost and a headroom lever -- but it is UNMEASURED against
+    # perception recall, which is the thing k-sample agreement actually depends on. Measure before
+    # adopting.
+    personal_memory_consolidation_disable_reasoning: bool = False
     # Dedicated chat model for the consolidation extractor ONLY (empty = use the global chat provider
     # model). gpt-4o-mini @ k=3 recovers known-good measures where gpt-4.1-nano abstains (see
     # .agent/plans/phase3-extractor-matrix-results.md); set this rather than the global model so
@@ -831,6 +842,7 @@ class MemorySettings:
             personal_memory_consolidation_k=int(_getenv("MENHIR_PERSONAL_MEMORY_CONSOLIDATION_K", default=str(cls.personal_memory_consolidation_k))),
             personal_memory_consolidation_call_budget=int(_getenv("MENHIR_PERSONAL_MEMORY_CONSOLIDATION_CALL_BUDGET", default=str(cls.personal_memory_consolidation_call_budget))),
             personal_memory_consolidation_max_tokens=int(_getenv("MENHIR_PERSONAL_MEMORY_CONSOLIDATION_MAX_TOKENS", default=str(cls.personal_memory_consolidation_max_tokens))),
+            personal_memory_consolidation_disable_reasoning=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_CONSOLIDATION_DISABLE_REASONING", default=str(cls.personal_memory_consolidation_disable_reasoning))),
             personal_memory_consolidation_chat_model=_getenv("MENHIR_PERSONAL_MEMORY_CHAT_MODEL", default=cls.personal_memory_consolidation_chat_model),
             personal_memory_consolidation_verify_retries=int(_getenv("MENHIR_PERSONAL_MEMORY_VERIFY_RETRIES", default=str(cls.personal_memory_consolidation_verify_retries))),
             personal_memory_consolidation_sum_grounding=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_SUM_GROUNDING", default=str(cls.personal_memory_consolidation_sum_grounding))),
