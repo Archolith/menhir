@@ -3,6 +3,74 @@
 Change list. **Nothing here has been executed.** Owner decision 2026-09-10:
 *"retire caddy only for menhir, yawn still uses it."*
 
+> ## CORRECTED 2026-09-10 after independent corroboration
+>
+> **Group C below was wrong and has been withdrawn.** It rested on the claim
+> that the mutation-lane retirement was accidental overreach and that "no
+> replacement exists". Both are false:
+>
+> - The `obsolete` set was **not** added by `585f0ff`. `git log -S'obsolete = {'`
+>   returns exactly one commit: `b1191b8` "fix(ops): make Menhir gateway
+>   read-only" — a deliberate 13-file change that also removed the
+>   `Cmnd_Alias MENHIR_WRITE` from sudoers, stripped 97 lines of mutation tools
+>   from `vps/menhir_tools.py`, and updated three test files. `585f0ff` touched
+>   `verify-artifacts` with a one-line diff removing `release-run` only.
+> - `ops/menhir/README.md`, rewritten by that same commit, states the intent
+>   outright: *"Retired gateway lane: menhir-op@.service, bin/worker, and the
+>   public submit wrappers are source-history only and must not be installed."*
+> - **The successor lane exists and is installed**: `deploy/release-run.sh`
+>   calls the canonical scripts directly at `:237` (stage), `:250`
+>   (candidate-deploy), `:260` (candidate-accept), `:272` (promote), all of
+>   which are in `required`. Backups go via `release-install.sh:1028-1034` and
+>   the `pipeline/` timer.
+> - `submit_op` has **no live caller**. Its nine wrappers are in no authority.
+>
+> Restoring `release-run` to `required` would also arm a fence lockout:
+> `submit_op` → `fence_close` (lib.sh:494) → worker rejects the unknown op
+> (`return 2`) → no completion reconciler (lib.sh:692) → `recover` refuses. The
+> fence stays closed with no recovery path.
+>
+> **The owner's decision stands for Groups A and B, which are verified safe.**
+> Group C was this document's own proposal, not the owner's, and it is dropped.
+>
+> **Corrected target: `required` = 48 + 2 ingress = 50. `obsolete` = 14**
+> (`retired_caddy_*` 5 ∪ `retired_gateway_*` 9), **or 15 including
+> `bin/release-run`**, so the verifier matches the installer exactly.
+>
+> Two further corrections, both fatal on their own:
+>
+> - **A missed authority.** `menhir/deploy/release-install.sh` holds an `allowed`
+>   frozenset (`:26-75`, 48 paths) enforced with `SystemExit` at `:136-137` and
+>   `:186-187`, plus `retired_caddy_*` / `retired_gateway_*` arrays
+>   (`:334-358`). Editing only the four files listed below produces an
+>   un-installable release. It fails before the lock, so it fails safe — but if
+>   `allowed` is fixed and the retirement arrays are not, the install fails at
+>   `verify_obsolete_writers_retired` (`:1057`) **after** stopping the gateway
+>   and taking the backup outage, then rolls back. A wasted window with a real
+>   outage in it.
+> - **Step 5 is deleted.** Running `backup` through the submit lane is not an
+>   enqueue check: it runs immediately, stops production, has `op_timeout` 21600s,
+>   and that lane has none of the restart protection `pipeline/scheduled-backup.sh`
+>   provides. On failure `memory.ctharvey.me` stays down until a human notices.
+>   Assert the `lib.sh` fix statically instead:
+>   `grep -c menhir-caddy-reconcile ops/menhir/bin/lib.sh` → 0.
+>
+> **Live hazard found in passing:** `recover` gates fence reopening on
+> `verify-artifacts` exiting 0 (`lib.sh:1012`), and it currently exits 1. If the
+> maintenance fence closes today, root cannot reopen it. Fixing the three FAILs
+> is what clears this.
+>
+> Six more files need editing (`release-install.sh` plus five test files), and
+> `menhir/tests/test_ansible_host_state.py:466` is **already broken** on this
+> branch — it does `installer.index("retire_caddy_writers\n")` for a function
+> since renamed `retire_obsolete_writers`, an unconditional `ValueError`. So
+> "the tests pass" is not currently a usable pre-flight signal, which matters
+> because those tests are the only off-host detection for the missed authority.
+>
+> **There is no cross-repo check at all.** Nothing compares yawn.vps's `required`
+> against menhir's `installed-artifacts.json`. Step 2 below is aspirational until
+> such a check is written into a test in one of the two repos.
+
 ## Why the last three release attempts failed
 
 `verify-artifacts` enforces a three-way equality and exits 1 on any divergence:
@@ -65,7 +133,10 @@ must keep existing, they are simply not Menhir's to verify. This also clears the
 standing `FAIL … Caddyfile: digest mismatch`, which exists only because Menhir
 was pinning the digest of a file yawn edits.
 
-### Group C — the mutation lane (10). KEEP. This is the overreach.
+### Group C — the mutation lane (10). ~~KEEP~~ **WITHDRAWN — retire as source intends.**
+
+**Everything in this subsection is superseded by the correction at the top.**
+Kept for the record of what was proposed and why it was wrong.
 
 ```
 /srv/menhir/production/bin/worker
