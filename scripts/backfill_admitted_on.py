@@ -24,8 +24,8 @@ separately -- a rising count means duplicate episodes are accumulating, which is
 Read-only unless --apply is passed.
 
 Usage:
-  python scripts/backfill_admitted_on.py bolt://localhost:7704 --password lmedata123
-  python scripts/backfill_admitted_on.py bolt://localhost:7704 --password lmedata123 --apply
+  python scripts/backfill_admitted_on.py bolt://localhost:7704 --password "$MENHIR_BENCH_NEO4J_PASSWORD"
+  python scripts/backfill_admitted_on.py bolt://localhost:7704 --password "$MENHIR_BENCH_NEO4J_PASSWORD" --apply
   python scripts/backfill_admitted_on.py ... --namespace-prefix lme-
 
 Writes to any non-loopback target require --allow-remote. A target matching

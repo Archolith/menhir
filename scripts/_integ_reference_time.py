@@ -1,13 +1,15 @@
 """Integration smoke-test: create_pending_episode persists reference_time to Neo4j.
 
 Run with:
-  PYTHONPATH=src python scripts/_integ_reference_time.py
+  PYTHONPATH=src MENHIR_DUMMY_NEO4J_PASSWORD=... python scripts/_integ_reference_time.py
 
-Requires menhir-neo4j-dummy on bolt://localhost:7687  (neo4j / menhirdummy123).
+Requires menhir-neo4j-dummy on bolt://localhost:7687 (neo4j / password via
+MENHIR_DUMMY_NEO4J_PASSWORD).
 """
 
 from __future__ import annotations
 
+import os
 import sys
 import uuid
 from datetime import datetime, timezone
@@ -19,7 +21,7 @@ if FRONTIER_SRC not in sys.path:
 
 NEO4J_URI = "bolt://localhost:7687"
 NEO4J_USER = "neo4j"
-NEO4J_PASSWORD = "menhirdummy123"
+NEO4J_PASSWORD = os.environ.get("MENHIR_DUMMY_NEO4J_PASSWORD", "")
 TEST_NS = "integ-reference-time-test"
 BACKDATED = datetime(2023, 7, 14, 8, 30, tzinfo=timezone.utc)
 

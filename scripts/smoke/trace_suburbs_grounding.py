@@ -34,7 +34,7 @@ sys.path.insert(0, str(MENHIR_ROOT / "src"))
 load_dotenv(MENHIR_ROOT / ".env")
 
 os.environ["NEO4J_URI"] = os.getenv("MENHIR_LME_NEO4J_URI", "bolt://localhost:7694")
-os.environ["NEO4J_PASSWORD"] = "lmedata123"
+os.environ["NEO4J_PASSWORD"] = os.environ.get("MENHIR_BENCH_NEO4J_PASSWORD", "")
 os.environ["GRAPHITI_LLM_PROVIDER"] = "openai"
 os.environ["MEMORY_GRAPHITI_PROVIDER"] = "openai"
 os.environ["LLM_CHAT_PROVIDER"] = "openai"

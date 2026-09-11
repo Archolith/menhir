@@ -50,7 +50,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--jsonl", required=True)
     ap.add_argument("--uri", default="bolt://127.0.0.1:7701")
-    ap.add_argument("--password", default="lmedata123")
+    ap.add_argument("--password", default=os.environ.get("MENHIR_BENCH_NEO4J_PASSWORD", ""))
     args = ap.parse_args()
 
     completions: dict[tuple[str, int], list[str]] = collections.defaultdict(list)

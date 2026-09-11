@@ -14,7 +14,7 @@ from neo4j import GraphDatabase
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 SRC = (os.environ["NEO4J_URI"], os.environ.get("NEO4J_USER", "neo4j"), os.environ.get("NEO4J_PASSWORD", ""))
-TGT = ("bolt://localhost:7687", "neo4j", "menhirdummy123")
+TGT = ("bolt://localhost:7687", "neo4j", os.environ.get("MENHIR_DUMMY_NEO4J_PASSWORD", ""))
 
 NODE_BATCH = 500
 REL_BATCH = 1000

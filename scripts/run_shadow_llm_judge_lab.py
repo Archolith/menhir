@@ -42,7 +42,7 @@ def _configure_environment() -> None:
     os.environ["OPENAI_CHAT_MODEL"] = "gpt-4o-mini"
     os.environ.setdefault("OPENAI_EMBED_MODEL", "text-embedding-3-small")
     os.environ.setdefault("NEO4J_URI", "bolt://localhost:7689")
-    os.environ.setdefault("NEO4J_PASSWORD", "lmedata123")
+    os.environ.setdefault("NEO4J_PASSWORD", os.environ.get("MENHIR_BENCH_NEO4J_PASSWORD", ""))
 
 
 _configure_environment()

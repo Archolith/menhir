@@ -39,6 +39,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -504,7 +505,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--uri", default="bolt://127.0.0.1:7694")
     parser.add_argument("--database", default="neo4j")
     parser.add_argument("--user", default="neo4j")
-    parser.add_argument("--password", default="lmedata123")
+    parser.add_argument("--password", default=os.environ.get("MENHIR_BENCH_NEO4J_PASSWORD", ""))
     parser.add_argument("--fixture", type=Path, required=True)
     parser.add_argument("--prefix", required=True)
     parser.add_argument("--apply", action="store_true")
