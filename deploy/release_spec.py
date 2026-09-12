@@ -42,11 +42,29 @@ INPUT_KEYS = frozenset({
     "prior_release", "prior_route", "secret_version_ids", "yawn_env_sha256",
     "ingress_mode",
 })
+# Optional. Absent means "rebuilt", so every input written before this existed
+# keeps its exact previous meaning and the rebuilt contract is untouched.
+INPUT_KEYS_WITH_PROVENANCE = INPUT_KEYS | frozenset({"image_provenance"})
+# A release that rebuilds the image must supply the full publication and
+# attestation chain for the bytes it produced.
 EVIDENCE_KEYS = frozenset({
     "wheelhouse", "sbom", "scan", "image_publication",
     "image_metadata", "image_identity", "image_archive",
     "publication_attestation", "attestation_trusted_root",
 })
+# A release that ships the prior release's image unchanged cannot supply that
+# chain: nothing was built, so there is nothing new to attest. It inherits the
+# binding instead, and must prove the image digests are identical to the prior
+# release authority. The resulting record carries no image_publication or
+# image_refs, which is the _PRE_IMAGE_PUBLICATION release shape the schema
+# already accepts.
+#
+# This is deliberately not a way to skip attestation. An inherited release is
+# attested exactly as strongly as the release it inherits from, and claims
+# nothing more: it asserts only that these are the same bytes that release
+# bound. Rebuilding is still required whenever the image changes.
+INHERITED_EVIDENCE_KEYS = frozenset({"wheelhouse", "sbom", "scan"})
+IMAGE_PROVENANCE_VALUES = frozenset({"rebuilt", "inherited"})
 IMAGE_KEYS = frozenset({"digest", "ref"})
 PUBLICATION_KEYS = frozenset({
     "schema", "source_repository", "validation_identity_sha256",
@@ -873,8 +891,13 @@ def prepare_release_spec(
     overwrite: bool = False,
 ) -> dict[str, Any]:
     """Validate release inputs and atomically write a release-author spec."""
+    raw_inputs = _load_json(inputs_path, "release inputs")
     inputs = _exact(
-        _load_json(inputs_path, "release inputs"), INPUT_KEYS, "release inputs"
+        raw_inputs,
+        INPUT_KEYS_WITH_PROVENANCE
+        if isinstance(raw_inputs, dict) and "image_provenance" in raw_inputs
+        else INPUT_KEYS,
+        "release inputs",
     )
     if inputs.get("schema") != 1:
         raise ReleaseSpecError("release inputs schema must be 1")
@@ -922,34 +945,50 @@ def prepare_release_spec(
         images[name] = digest
         image_refs[name] = reference
 
+    image_provenance = inputs.get("image_provenance", "rebuilt")
+    if image_provenance not in IMAGE_PROVENANCE_VALUES:
+        raise ReleaseSpecError(
+            "image_provenance must be 'rebuilt' or 'inherited'"
+        )
+    inherited_image = image_provenance == "inherited"
     evidence_values = _exact(
-        inputs.get("evidence"), EVIDENCE_KEYS, "evidence"
+        inputs.get("evidence"),
+        INHERITED_EVIDENCE_KEYS if inherited_image else EVIDENCE_KEYS,
+        "evidence",
     )
     wheelhouse, oauth_wheel, docker_manifest, wheel_records = _wheelhouse(
         evidence_values["wheelhouse"]
     )
     sbom = _regular(evidence_values["sbom"], "evidence.sbom")
     scan = _regular(evidence_values["scan"], "evidence.scan")
-    image_publication = _regular(
-        evidence_values["image_publication"], "evidence.image_publication"
-    )
-    image_metadata = _regular(
-        evidence_values["image_metadata"], "evidence.image_metadata"
-    )
-    image_identity = _regular(
-        evidence_values["image_identity"], "evidence.image_identity"
-    )
-    image_archive = _regular(
-        evidence_values["image_archive"], "evidence.image_archive"
-    )
-    publication_attestation = _regular(
-        evidence_values["publication_attestation"],
-        "evidence.publication_attestation",
-    )
-    attestation_trusted_root = _regular(
-        evidence_values["attestation_trusted_root"],
-        "evidence.attestation_trusted_root",
-    )
+    if inherited_image:
+        image_publication = None
+        image_metadata = None
+        image_identity = None
+        image_archive = None
+        publication_attestation = None
+        attestation_trusted_root = None
+    else:
+        image_publication = _regular(
+            evidence_values["image_publication"], "evidence.image_publication"
+        )
+        image_metadata = _regular(
+            evidence_values["image_metadata"], "evidence.image_metadata"
+        )
+        image_identity = _regular(
+            evidence_values["image_identity"], "evidence.image_identity"
+        )
+        image_archive = _regular(
+            evidence_values["image_archive"], "evidence.image_archive"
+        )
+        publication_attestation = _regular(
+            evidence_values["publication_attestation"],
+            "evidence.publication_attestation",
+        )
+        attestation_trusted_root = _regular(
+            evidence_values["attestation_trusted_root"],
+            "evidence.attestation_trusted_root",
+        )
     baseline = _regular(
         inputs["baseline_production_env"], "baseline_production_env"
     )
@@ -963,6 +1002,23 @@ def prepare_release_spec(
     prior = menhir_schema.validate_release(str(prior_release))
     if prior.get("release_id") == release_id:
         raise ReleaseSpecError("release_id must differ from prior release")
+    if inherited_image:
+        # The whole basis of an inherited release: these must be the same bytes
+        # the prior authority already bound. Any difference means something was
+        # built, and a built image must carry its own attestation.
+        prior_images = prior.get("images")
+        if not isinstance(prior_images, dict):
+            raise ReleaseSpecError(
+                "prior release does not record images; cannot inherit"
+            )
+        for name in sorted(IMAGES):
+            declared = images.get(name)
+            inherited = prior_images.get(name)
+            if declared != inherited:
+                raise ReleaseSpecError(
+                    "inherited image %s does not match the prior release: "
+                    "%s != %s" % (name, declared, inherited)
+                )
     yawn_env_sha256 = inputs.get("yawn_env_sha256")
     if not isinstance(yawn_env_sha256, str) or not DIGEST_RE.fullmatch(
         yawn_env_sha256
@@ -1131,7 +1187,6 @@ def prepare_release_spec(
                 name: str(identities[name][0]) for name in sorted(REPOSITORIES)
             },
             "images": images,
-            "image_refs": image_refs,
             "evidence": {
                 "oauth_wheel": str(oauth_wheel),
                 "wheelhouse": str(wheelhouse),
@@ -1139,12 +1194,6 @@ def prepare_release_spec(
                 "dockerfile_wheel_manifest": str(docker_manifest),
                 "sbom": str(sbom),
                 "scan": str(scan),
-                "image_publication": str(image_publication),
-                "image_metadata": str(image_metadata),
-                "image_identity": str(image_identity),
-                "image_archive": str(image_archive),
-                "publication_attestation": str(publication_attestation),
-                "attestation_trusted_root": str(attestation_trusted_root),
                 "provenance": final("provenance.json"),
             },
             "rendered": rendered,
@@ -1161,7 +1210,29 @@ def prepare_release_spec(
             "secret_version_ids": secret_versions,
             "artifact_sources": ARTIFACT_SOURCES,
             "initial_host_state": None,
+            "image_provenance": image_provenance,
         }
+        if not inherited_image:
+            # A rebuilt release carries the full publication and attestation
+            # chain for the bytes it produced. Unchanged from before this
+            # branch existed.
+            spec["image_refs"] = image_refs
+            spec["evidence"].update({
+                "image_publication": str(image_publication),
+                "image_metadata": str(image_metadata),
+                "image_identity": str(image_identity),
+                "image_archive": str(image_archive),
+                "publication_attestation": str(publication_attestation),
+                "attestation_trusted_root": str(attestation_trusted_root),
+            })
+        else:
+            # Name the authority the image binding is inherited from, so the
+            # chain stays followable: these bytes are attested exactly as
+            # strongly as that release attested them, and no more.
+            spec["inherited_image_release"] = {
+                "release_id": prior.get("release_id"),
+                "release_sha256": _sha256(prior_release),
+            }
         staged_spec = stage / "release-spec.json"
         _write_json(staged_spec, spec)
         if PLACEHOLDER_RE.search(staged_spec.read_text(encoding="ascii")):
