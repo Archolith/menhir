@@ -1126,9 +1126,16 @@ def _relation_completeness_instructions(
     author, so the prompt that produces `user` and the post-processing that trusts it cannot
     disagree about what counts as first-person.
     """
-    core = _RELATION_COMPLETENESS_CORE
     if not _is_first_person(episode_text):
-        return core
+        # NOTHING for third-person text -- not even the subject-neutral core. Live evidence
+        # (2026-09-12, fix commit 7e0d4124): with core alone, "Alice wakes up at 7:30 AM."
+        # extracted zero entities, because "omit the entity if no relationship is stated"
+        # with no relationship shape to follow made the model drop everything. The
+        # 2026-07-20 run with no block at all persisted `Alice` + `7:30 AM` and materialized
+        # the View. 811dd41b introduced this block to repair relationless FIRST-PERSON
+        # memories; third-person text never needed it and is worse off with any of it.
+        return ""
+    core = _RELATION_COMPLETENESS_CORE
     marker = endpoint.marker if endpoint is not None else None
     # The self-binding bullets go in front of the closing "do not invent" rule so that rule
     # stays the block's final word, as it was before the split.

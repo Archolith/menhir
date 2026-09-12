@@ -62,14 +62,23 @@ def test_empty_and_none_are_not_first_person() -> None:
 # --------------------------------------------------------------------------------------
 
 @pytest.mark.parametrize("text", THIRD_PERSON)
-def test_third_person_gets_core_only(text: str) -> None:
-    block = gep._relation_completeness_instructions(None, text)
-    assert block.startswith("MENHIR RELATION COMPLETENESS:")
-    assert "Do not return an entity without a relationship" in block
-    assert "Do not invent a relationship" in block
-    for marker in _SELF_BINDING_MARKERS:
-        assert marker not in block, f"self-binding text {marker!r} leaked into a third-person prompt"
-    assert "speaker" not in block, "third-person core must steer toward the subject, not the speaker"
+def test_third_person_gets_no_block_at_all(text: str) -> None:
+    """Not even the subject-neutral core.
+
+    Live evidence on the first fix attempt: core alone made gpt-4o-mini extract NOTHING from
+    "Alice wakes up at 7:30 AM." -- "omit the entity if no relationship is stated", with no
+    relationship shape to follow, dropped every entity. The July run with no block persisted
+    `Alice` + `7:30 AM`. Third-person text is best served by Graphiti's own prompt, untouched.
+    """
+    assert gep._relation_completeness_instructions(None, text) == ""
+
+
+def test_empty_block_is_dropped_by_the_combiner() -> None:
+    """The combiner must not leave a blank section behind for third-person episodes."""
+    combined = gep._combine_extraction_instructions(
+        "CALLER CONTRACT", gep._relation_completeness_instructions(None, "Alice owns coins."), None,
+    )
+    assert combined == "CALLER CONTRACT"
 
 
 @pytest.mark.parametrize("text", FIRST_PERSON)
@@ -86,10 +95,8 @@ def test_first_person_keeps_do_not_invent_as_the_closing_rule() -> None:
     assert block.index("`user`") < block.index("Do not invent a relationship")
 
 
-def test_endpoint_variant_third_person_has_no_marker() -> None:
-    block = gep._relation_completeness_instructions(_ENDPOINT, "Alice owns 37 coins.")
-    assert _ENDPOINT.marker not in block
-    assert "`user`" not in block
+def test_endpoint_variant_third_person_has_no_block() -> None:
+    assert gep._relation_completeness_instructions(_ENDPOINT, "Alice owns 37 coins.") == ""
 
 
 def test_endpoint_variant_first_person_binds_to_marker_not_user() -> None:
