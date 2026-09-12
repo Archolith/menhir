@@ -32,6 +32,13 @@ SPEC_KEYS = frozenset({
     "artifact_sources", "initial_host_state", "deployment_class",
     "notes_json_sha256", "notes_markdown_sha256", "ingress_mode",
 })
+# See release_spec.INHERITED_EVIDENCE_KEYS. An inherited-image spec carries no
+# image_refs and no publication evidence, and names the authority it inherits from.
+SPEC_KEYS_WITH_PROVENANCE = SPEC_KEYS | frozenset({"image_provenance"})
+SPEC_KEYS_INHERITED = (
+    (SPEC_KEYS - frozenset({"image_refs"}))
+    | frozenset({"image_provenance", "inherited_image_release"})
+)
 REPOSITORIES = frozenset({"menhir", "archolith_oauth", "yawn_deploy", "yawn_vps"})
 EVIDENCE_DIGESTS = {
     "oauth_wheel": "oauth_wheel_sha256",
@@ -269,7 +276,29 @@ def _git_blob(
 def _validate_spec_relationship(
     release: dict[str, Any], spec: dict[str, Any]
 ) -> tuple[dict[str, Path], dict[str, Path]]:
-    _exact_keys(spec, SPEC_KEYS, "release spec")
+    image_provenance = spec.get("image_provenance", "rebuilt")         if isinstance(spec, dict) else "rebuilt"
+    if image_provenance not in release_spec.IMAGE_PROVENANCE_VALUES:
+        raise ValueError("release spec image_provenance is invalid")
+    inherited_image = image_provenance == "inherited"
+    _exact_keys(
+        spec,
+        SPEC_KEYS_INHERITED if inherited_image
+        else SPEC_KEYS_WITH_PROVENANCE if "image_provenance" in spec
+        else SPEC_KEYS,
+        "release spec",
+    )
+    if inherited_image:
+        # The authority this release inherits its image binding from must be
+        # the release the spec was proven against, and the record itself must
+        # be in the pre-publication shape (no image_refs / image_publication).
+        inherited = spec.get("inherited_image_release")
+        if not isinstance(inherited, dict)                 or set(inherited) != {"release_id", "release_sha256"}:
+            raise ValueError("release spec inherited_image_release is malformed")
+        if "image_refs" in release or "image_publication" in release:
+            raise ValueError(
+                "inherited-image release authority must not carry image_refs "
+                "or image_publication"
+            )
     if spec.get("schema") != 1:
         raise ValueError("release spec schema must be 1")
     for key in (
@@ -279,10 +308,15 @@ def _validate_spec_relationship(
     ):
         if spec.get(key) != release.get(key):
             raise ValueError(f"release spec {key} differs from release authority")
-    image_refs = _exact_keys(
-        spec.get("image_refs"), set(release["images"]), "release spec image_refs"
-    )
+    image_refs = {}
+    if not inherited_image:
+        image_refs = _exact_keys(
+            spec.get("image_refs"), set(release["images"]),
+            "release spec image_refs",
+        )
     for name, digest in release["images"].items():
+        if inherited_image:
+            break
         reference = image_refs[name]
         if not isinstance(reference, str) \
                 or release_spec.IMAGE_REF_RE.fullmatch(reference) is None \
@@ -322,7 +356,7 @@ def _validate_spec_relationship(
     evidence_keys = (
         frozenset(EVIDENCE_DIGESTS)
         | frozenset({"wheelhouse"})
-        | PUBLICATION_EVIDENCE
+        | (frozenset() if inherited_image else PUBLICATION_EVIDENCE)
     )
     evidence = _exact_keys(
         spec.get("evidence"), evidence_keys, "release spec evidence"
@@ -332,7 +366,7 @@ def _validate_spec_relationship(
         path = _regular_file(evidence.get(key), f"release spec evidence.{key}")
         if _sha256_file(path) != release[release_key]:
             raise ValueError(f"release spec evidence.{key} digest drift")
-    publication = release_spec.validate_image_publication(
+    publication = None if inherited_image else release_spec.validate_image_publication(
         publication_path=_regular_file(
             evidence["image_publication"],
             "release spec evidence.image_publication",
@@ -364,7 +398,7 @@ def _validate_spec_relationship(
         wheel_manifest_sha256=release["dockerfile_wheel_manifest_sha256"],
         oauth_wheel_sha256=release["oauth_wheel_sha256"],
     )
-    if publication != release.get("image_publication"):
+    if not inherited_image and publication != release.get("image_publication"):
         raise ValueError(
             "release spec image publication differs from release authority"
         )
