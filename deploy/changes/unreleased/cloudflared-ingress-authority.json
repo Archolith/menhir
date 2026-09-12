@@ -15,9 +15,9 @@
     ]
   },
   "security_scopes": [
+    "backup-restore-and-rollback",
     "host-privilege-and-command-wrappers",
-    "network-and-ingress-boundaries",
-    "backup-restore-and-rollback"
+    "network-and-ingress-boundaries"
   ],
   "breaking": false
 }
