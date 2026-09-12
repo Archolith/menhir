@@ -1066,23 +1066,27 @@ def prepare_release_spec(
             "secret_version_ids.client-policy must bind the client policy digest"
         )
 
-    validate_image_publication(
-        publication_path=image_publication,
-        metadata_path=image_metadata,
-        identity_path=image_identity,
-        archive_path=image_archive,
-        sbom_path=sbom,
-        scan_path=scan,
-        publication_attestation_path=publication_attestation,
-        attestation_trusted_root_path=attestation_trusted_root,
-        menhir_commit=menhir_commit,
-        menhir_digest=images["menhir"],
-        menhir_ref=image_refs["menhir"],
-        base_ref=image_refs["base"],
-        release_id=release_id,
-        wheel_manifest_sha256=_sha256(docker_manifest),
-        oauth_wheel_sha256=_sha256(oauth_wheel),
-    )
+    if not inherited_image:
+        # A rebuilt image must revalidate its full publication chain here.
+        # An inherited image has no new chain; its digests were proven equal
+        # to the prior release authority above.
+        validate_image_publication(
+            publication_path=image_publication,
+            metadata_path=image_metadata,
+            identity_path=image_identity,
+            archive_path=image_archive,
+            sbom_path=sbom,
+            scan_path=scan,
+            publication_attestation_path=publication_attestation,
+            attestation_trusted_root_path=attestation_trusted_root,
+            menhir_commit=menhir_commit,
+            menhir_digest=images["menhir"],
+            menhir_ref=image_refs["menhir"],
+            base_ref=image_refs["base"],
+            release_id=release_id,
+            wheel_manifest_sha256=_sha256(docker_manifest),
+            oauth_wheel_sha256=_sha256(oauth_wheel),
+        )
 
     operations = _load_json_bytes(operations_bytes, "operations policy")
     _validate_operations_policy(operations)
