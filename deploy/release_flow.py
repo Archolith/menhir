@@ -1059,8 +1059,12 @@ def deploy_flow(
         if confirmation != state["release_id"]:
             raise ReleaseFlowError("deployment confirmation must exactly match the release_id")
         return state
-    if state["phase"] != "bundled":
-        raise ReleaseFlowError("only a bundled release can be deployed")
+    # A published release is a bundled release whose notes have also been
+    # archived; the bundle is unchanged by publication. Before this, publish
+    # advanced the phase past the only value deploy accepted, so a release
+    # could be prepared, finalized and published but never deployed.
+    if state["phase"] not in {"bundled", "published"}:
+        raise ReleaseFlowError("only a bundled or published release can be deployed")
     _verify_staged_files(workspace, state)
     if confirmation != state["release_id"]:
         raise ReleaseFlowError("deployment confirmation must exactly match the release_id")
