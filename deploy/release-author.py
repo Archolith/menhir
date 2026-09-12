@@ -39,6 +39,19 @@ SPEC_KEYS = frozenset({
     "initial_host_state", "deployment_class", "notes_json_sha256",
     "notes_markdown_sha256", "ingress_mode",
 })
+# A spec may declare image_provenance. "inherited" ships the prior release's
+# image unchanged: it carries no image_refs and no image attestation evidence,
+# and instead names the authority it inherits the binding from. See
+# release_spec.INHERITED_EVIDENCE_KEYS for the rationale and its limits.
+SPEC_KEYS_WITH_PROVENANCE = SPEC_KEYS | frozenset({"image_provenance"})
+SPEC_KEYS_INHERITED = (
+    (SPEC_KEYS - frozenset({"image_refs"}))
+    | frozenset({"image_provenance", "inherited_image_release"})
+)
+INHERITED_EVIDENCE = EVIDENCE - frozenset({
+    "image_publication", "image_metadata", "image_identity", "image_archive",
+    "publication_attestation", "attestation_trusted_root",
+})
 SECURITY_REVIEW_KEYS = frozenset({
     "schema", "kind", "review_id", "release_author", "reviewer",
     "reviewed_utc", "authority_sha256", "verdict", "unresolved_findings",
@@ -447,7 +460,20 @@ def author_release(
     spec_path = _regular(str(spec_path), "spec")
     if output_path.resolve() == spec_path.resolve():
         raise ValueError("output must not overwrite the release spec")
-    spec = _exact(_load_json(spec_path, "release spec"), SPEC_KEYS, "release spec")
+    raw_spec = _load_json(spec_path, "release spec")
+    image_provenance = "rebuilt"
+    if isinstance(raw_spec, dict) and "image_provenance" in raw_spec:
+        image_provenance = raw_spec.get("image_provenance")
+        if image_provenance not in release_spec.IMAGE_PROVENANCE_VALUES:
+            raise ValueError("image_provenance must be 'rebuilt' or 'inherited'")
+    inherited_image = image_provenance == "inherited"
+    spec = _exact(
+        raw_spec,
+        SPEC_KEYS_INHERITED if inherited_image
+        else SPEC_KEYS_WITH_PROVENANCE if "image_provenance" in raw_spec
+        else SPEC_KEYS,
+        "release spec",
+    )
     if spec.get("schema") != 1:
         raise ValueError("release spec schema must be 1")
     release_id = spec.get("release_id")
@@ -486,7 +512,11 @@ def author_release(
     for name, digest in images.items():
         if not isinstance(digest, str) or not DIGEST_RE.fullmatch(digest):
             raise ValueError(f"images.{name} must be a sha256 digest")
-    image_refs = _exact(spec.get("image_refs"), IMAGES, "image_refs")
+    image_refs = None
+    if inherited_image:
+        image_refs = {}
+    else:
+        image_refs = _exact(spec.get("image_refs"), IMAGES, "image_refs")
     for name, reference in image_refs.items():
         if not isinstance(reference, str) \
                 or release_spec.IMAGE_REF_RE.fullmatch(reference) is None \
@@ -495,7 +525,11 @@ def author_release(
                 f"image_refs.{name} must be an immutable matching reference"
             )
 
-    evidence_values = _exact(spec.get("evidence"), EVIDENCE, "evidence")
+    evidence_values = _exact(
+        spec.get("evidence"),
+        INHERITED_EVIDENCE if inherited_image else EVIDENCE,
+        "evidence",
+    )
     evidence = {
         name: (
             _directory(evidence_values[name], f"evidence.{name}")
@@ -521,23 +555,32 @@ def author_release(
         evidence["provenance"], repos, repo_remotes, images, oauth_sha,
         wheel_manifest_sha, docker_manifest_sha,
     )
-    image_publication = release_spec.validate_image_publication(
-        publication_path=evidence["image_publication"],
-        metadata_path=evidence["image_metadata"],
-        identity_path=evidence["image_identity"],
-        archive_path=evidence["image_archive"],
-        sbom_path=evidence["sbom"],
-        scan_path=evidence["scan"],
-        publication_attestation_path=evidence["publication_attestation"],
-        attestation_trusted_root_path=evidence["attestation_trusted_root"],
-        menhir_commit=repos["menhir"],
-        menhir_digest=images["menhir"],
-        menhir_ref=image_refs["menhir"],
-        base_ref=image_refs["base"],
-        release_id=release_id,
-        wheel_manifest_sha256=docker_manifest_sha,
-        oauth_wheel_sha256=oauth_sha,
-    )
+    if inherited_image:
+        # No image was built, so there is no new publication to attest. The
+        # digests were already proven equal to the prior release authority by
+        # release_spec; bind the sbom/scan evidence directly.
+        image_publication = {
+            "sbom_sha256": _sha256(evidence["sbom"]),
+            "scan_evidence_sha256": _sha256(evidence["scan"]),
+        }
+    else:
+        image_publication = release_spec.validate_image_publication(
+            publication_path=evidence["image_publication"],
+            metadata_path=evidence["image_metadata"],
+            identity_path=evidence["image_identity"],
+            archive_path=evidence["image_archive"],
+            sbom_path=evidence["sbom"],
+            scan_path=evidence["scan"],
+            publication_attestation_path=evidence["publication_attestation"],
+            attestation_trusted_root_path=evidence["attestation_trusted_root"],
+            menhir_commit=repos["menhir"],
+            menhir_digest=images["menhir"],
+            menhir_ref=image_refs["menhir"],
+            base_ref=image_refs["base"],
+            release_id=release_id,
+            wheel_manifest_sha256=docker_manifest_sha,
+            oauth_wheel_sha256=oauth_sha,
+        )
 
     rendered_values = _exact(spec.get("rendered"), RENDERED, "rendered")
     rendered_paths = {}
@@ -671,8 +714,6 @@ def author_release(
             "wheel_sha256": oauth_sha,
         },
         "images": images,
-        "image_refs": image_refs,
-        "image_publication": image_publication,
         "wheel_manifest_sha256": wheel_manifest_sha,
         "dockerfile_wheel_manifest_sha256": docker_manifest_sha,
         "sbom_sha256": image_publication["sbom_sha256"],
@@ -694,6 +735,11 @@ def author_release(
             "compose_service": "menhir",
         },
     }
+    if not inherited_image:
+        # A rebuilt release records its immutable refs and its publication;
+        # unchanged from before inherited releases existed.
+        release["image_refs"] = image_refs
+        release["image_publication"] = image_publication
 
     authority_sha = menhir_schema.release_authority_sha256(release)
     if review_request:
