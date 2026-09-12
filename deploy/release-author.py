@@ -39,19 +39,6 @@ SPEC_KEYS = frozenset({
     "initial_host_state", "deployment_class", "notes_json_sha256",
     "notes_markdown_sha256", "ingress_mode",
 })
-# A spec may declare image_provenance. "inherited" ships the prior release's
-# image unchanged: it carries no image_refs and no image attestation evidence,
-# and instead names the authority it inherits the binding from. See
-# release_spec.INHERITED_EVIDENCE_KEYS for the rationale and its limits.
-SPEC_KEYS_WITH_PROVENANCE = SPEC_KEYS | frozenset({"image_provenance"})
-SPEC_KEYS_INHERITED = (
-    (SPEC_KEYS - frozenset({"image_refs"}))
-    | frozenset({"image_provenance", "inherited_image_release"})
-)
-INHERITED_EVIDENCE = EVIDENCE - frozenset({
-    "image_publication", "image_metadata", "image_identity", "image_archive",
-    "publication_attestation", "attestation_trusted_root",
-})
 SECURITY_REVIEW_KEYS = frozenset({
     "schema", "kind", "review_id", "release_author", "reviewer",
     "reviewed_utc", "authority_sha256", "verdict", "unresolved_findings",
@@ -63,6 +50,19 @@ EVIDENCE = frozenset({
     "oauth_wheel", "wheelhouse", "wheel_manifest",
     "dockerfile_wheel_manifest", "sbom", "scan", "image_publication",
     "image_metadata", "image_identity", "image_archive", "provenance",
+    "publication_attestation", "attestation_trusted_root",
+})
+# A spec may declare image_provenance. "inherited" ships the prior release's
+# image unchanged: it carries no image_refs and no image attestation evidence,
+# and instead names the authority it inherits the binding from. See
+# release_spec.INHERITED_EVIDENCE_KEYS for the rationale and its limits.
+SPEC_KEYS_WITH_PROVENANCE = SPEC_KEYS | frozenset({"image_provenance"})
+SPEC_KEYS_INHERITED = (
+    (SPEC_KEYS - frozenset({"image_refs"}))
+    | frozenset({"image_provenance", "inherited_image_release"})
+)
+INHERITED_EVIDENCE = EVIDENCE - frozenset({
+    "image_publication", "image_metadata", "image_identity", "image_archive",
     "publication_attestation", "attestation_trusted_root",
 })
 RENDERED = frozenset({
