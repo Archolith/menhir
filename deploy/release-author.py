@@ -536,7 +536,7 @@ def author_release(
             if name == "wheelhouse"
             else _regular(evidence_values[name], f"evidence.{name}")
         )
-        for name in EVIDENCE
+        for name in (INHERITED_EVIDENCE if inherited_image else EVIDENCE)
     }
     oauth_sha = _sha256(evidence["oauth_wheel"])
     oauth_repo, oauth_commit, _ = repo_identities["archolith_oauth"]
