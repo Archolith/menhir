@@ -8,10 +8,6 @@
   "operator_impact": "Use release_flow.py to prepare, finalize, and publish the product release. For this owner's instance, use personal_deploy.py rehearse, approve, and promote; review the release notes and staging receipt before the one bound approval. App-only has a five-minute target, security-config has a dedicated ten-minute config/application lane, and database, key-rotation, host, or topology changes mechanically escalate to maintenance.",
   "repositories": {
     "menhir": [
-      "9b37082a23d544dc9458b5ef47c03da6da5c684a",
-      "ae6055e61cff6ae4d036cf6900286c8d390d14bc",
-      "3e412a9510211147e8b5ae480cf5ad8d81039197",
-      "5ae772d294bd9280160e4611bd81d3a6ab71d73a",
       "fb62b5e35b72a3ef9f1f1be83eecff0a7cbf12e8",
       "409b6096d700ee1e1647c62b689485aedfbeb36d",
       "f7f8475d6b58e4f7717a9fba5009b2890fde329f"
