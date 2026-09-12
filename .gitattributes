@@ -29,3 +29,7 @@ uv.lock text eol=lf
 # compares installed-byte SHA-256, so line-ending normalisation breaks it.
 deploy/cloudflared-config.yml -text
 deploy/docker-compose.cloudflared.yml -text
+
+# Published release-note archives are digest-bound by publication-receipt.json.
+# Line-ending normalisation would change the bytes and fail _verify_publication.
+deploy/changes/releases/** -text
