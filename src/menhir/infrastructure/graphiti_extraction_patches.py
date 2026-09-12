@@ -728,7 +728,7 @@ def _current_message_anchor_tokens(episode_text: str) -> set[str]:
 #: Edge fields that may serve as EVIDENCE that an edge is grounded in the current turn.
 #:
 #: CF-192(b): `relation_type` is deliberately absent. It is model-supplied boilerplate -- the repair
-#: prompt (`_RELATIONLESS_REPAIR_INSTRUCTIONS`) instructs the model to emit relation labels -- so
+#: prompt (`_RELATIONLESS_REPAIR_CORE`) instructs the model to emit relation labels -- so
 #: counting its tokens as evidence lets the model ground its own edge. Measured: against
 #: "Thanks, that helps me understand more." an edge whose endpoints and fact were copied entirely
 #: from prior context was admitted, matching on `more` supplied by its own
@@ -905,7 +905,7 @@ def _sanitize_combined_payload(
                 # This is the assistant restating a fact the human already gave first-hand. The
                 # decision is made on ROLE + LABEL alone and is tested BEFORE `known` membership,
                 # because enforcement used to rely on leaving the endpoint unbound so graphiti
-                # would drop the edge -- and Menhir's own `_RELATION_COMPLETENESS_INSTRUCTIONS`
+                # would drop the edge -- and Menhir's own `_RELATION_COMPLETENESS_CORE`
                 # tells the model to include `user` in extracted_entities, which puts the endpoint
                 # in `known` and silently disabled the whole policy. Break: a doomed edge must not
                 # go on to mint a synthesized endpoint entity for its other side.
@@ -1066,11 +1066,23 @@ def _sanitize_combined_payload(
 # ---------------------------------------------------------------------------
 
 
-_RELATION_COMPLETENESS_INSTRUCTIONS = """\
+#: Subject-neutral half of the relation-completeness contract. "The subject", not "the
+#: speaker": for third-person text the speaker is precisely the wrong thing to steer toward.
+_RELATION_COMPLETENESS_CORE = """\
 MENHIR RELATION COMPLETENESS:
-- Do not return an entity without a relationship when CURRENT MESSAGES state what the speaker
+- Do not return an entity without a relationship when CURRENT MESSAGES state what the subject
   does, owns, uses, prefers, plans, experiences, believes, or explicitly wants to learn about
   that entity.
+- Do not invent a relationship merely to connect an entity. If the current text truly states no
+  relationship, omit the entity as well.
+"""
+
+#: First-person half. Appended ONLY when the episode text actually contains a first-person
+#: reference (`_is_first_person`). Issue #90: appended unconditionally, gpt-4o-mini applied
+#: "represent I/me/my with `user`" to a third-person subject and rewrote "Alice owns 37 coins"
+#: as "User owns 37 coins" -- no `Alice` node was ever created, and the bogus `user` cascaded
+#: into a self-fork, a self-subject perceiver proposal, and a missing View.
+_FIRST_PERSON_SELF_BINDING = """\
 - In a human-authored first-person statement, represent I/me/my with the canonical entity `user`
   and emit the direct speaker-to-target relationship. Include `user` in extracted_entities.
 - Example: "I'm actually using a new app I recently downloaded." must include entities `user`
@@ -1081,62 +1093,84 @@ MENHIR RELATION COMPLETENESS:
 - Apply that rule only when CURRENT MESSAGES explicitly state the speaker's informational intent.
   A bare request or question such as "Can you tell me about X?" does not by itself assert durable
   interest in X.
-- Do not invent a relationship merely to connect an entity. If the current text truly states no
-  relationship, omit the entity as well.
 """
+
+
+def _first_person_self_binding(marker: str | None) -> str:
+    """The first-person rules, bound to `user` or to an opaque endpoint marker."""
+    if marker is None:
+        return _FIRST_PERSON_SELF_BINDING
+    return f"""\
+- In a human-authored first-person statement, represent I/me/my with the exact opaque entity
+  `{marker}` and emit the direct speaker-to-target relationship. Include
+  `{marker}` in extracted_entities.
+- Explicit first-person informational intent is relationship-bearing. Emit
+  `{marker}` -> `WANTS_TO_KNOW_MORE_ABOUT` or `INTERESTED_IN` -> the target.
+- Apply that rule only when CURRENT MESSAGES explicitly state the speaker's informational intent.
+  A bare request or question such as "Can you tell me about X?" does not by itself assert durable
+  interest in X.
+"""
+
+
+_DO_NOT_INVENT = "- Do not invent a relationship"
 
 
 def _relation_completeness_instructions(
     endpoint: SelfSubjectEndpointEnvelope | None,
+    episode_text: str,
 ) -> str:
-    """Render one non-contradictory author endpoint into the first extraction prompt."""
-    if endpoint is None:
-        return _RELATION_COMPLETENESS_INSTRUCTIONS
-    return f"""\
-MENHIR RELATION COMPLETENESS:
-- Do not return an entity without a relationship when CURRENT MESSAGES state what the speaker
-  does, owns, uses, prefers, plans, experiences, believes, or explicitly wants to learn about
-  that entity.
-- In a human-authored first-person statement, represent I/me/my with the exact opaque entity
-  `{endpoint.marker}` and emit the direct speaker-to-target relationship. Include
-  `{endpoint.marker}` in extracted_entities.
-- Explicit first-person informational intent is relationship-bearing. Emit
-  `{endpoint.marker}` -> `WANTS_TO_KNOW_MORE_ABOUT` or `INTERESTED_IN` -> the target.
-- Apply that rule only when CURRENT MESSAGES explicitly state the speaker's informational intent.
-  A bare request or question such as "Can you tell me about X?" does not by itself assert durable
-  interest in X.
-- Do not invent a relationship merely to connect an entity. If the current text truly states no
-  relationship, omit the entity as well.
-"""
+    """Render the relation-completeness contract for one episode.
 
-_RELATIONLESS_REPAIR_INSTRUCTIONS = """\
+    The self-binding rules are appended only when `episode_text` is first-person. The gate is
+    the SAME predicate `_unresolved_author_aliases` uses to decide whether a `user` node is the
+    author, so the prompt that produces `user` and the post-processing that trusts it cannot
+    disagree about what counts as first-person.
+    """
+    core = _RELATION_COMPLETENESS_CORE
+    if not _is_first_person(episode_text):
+        return core
+    marker = endpoint.marker if endpoint is not None else None
+    # The self-binding bullets go in front of the closing "do not invent" rule so that rule
+    # stays the block's final word, as it was before the split.
+    head, sep, tail = core.partition(_DO_NOT_INVENT)
+    return head + _first_person_self_binding(marker) + sep + tail
+
+
+_RELATIONLESS_REPAIR_CORE = """\
 CORRECTIVE RE-EXTRACTION:
 Your previous extraction returned one or more entities but no usable relationship, so every entity
 would be orphan-pruned and the memory would be lost. Re-read CURRENT MESSAGES and return a complete
-entity-and-edge extraction. Pay special attention to first-person predicates such as "I use...",
-"I own...", "I prefer...", "I plan...", "I'd like to know more about X", and "I'm interested in
-understanding X"; bind a human first-person speaker to `user`. Explicit informational intent must
-emit `WANTS_TO_KNOW_MORE_ABOUT` or `INTERESTED_IN`. A bare request or question such as "Can you tell
-me about X?" does not by itself assert durable interest. Do not invent facts. If the text truly
-contains no relationship, return both lists empty.
+entity-and-edge extraction. Do not invent facts. If the text truly contains no relationship, return
+both lists empty.
 """
+
+_REPAIR_FIRST_PERSON_USER = (
+    'Pay special attention to first-person predicates such as "I use...", "I own...", '
+    '"I prefer...", "I plan...", "I\'d like to know more about X", and "I\'m interested in '
+    'understanding X"; bind a human first-person speaker to `user`. Explicit informational '
+    "intent must emit `WANTS_TO_KNOW_MORE_ABOUT` or `INTERESTED_IN`. A bare request or "
+    'question such as "Can you tell me about X?" does not by itself assert durable interest. '
+)
 
 
 def _relationless_repair_instructions(
     endpoint: SelfSubjectEndpointEnvelope | None,
+    episode_text: str,
 ) -> str:
+    """Repair-pass instructions, with the first-person rules gated the same way."""
+    if not _is_first_person(episode_text):
+        return _RELATIONLESS_REPAIR_CORE
     if endpoint is None:
-        return _RELATIONLESS_REPAIR_INSTRUCTIONS
-    return f"""\
-CORRECTIVE RE-EXTRACTION:
-Your previous extraction returned one or more entities but no usable relationship, so every entity
-would be orphan-pruned and the memory would be lost. Re-read CURRENT MESSAGES and return a complete
-entity-and-edge extraction. For first-person predicates such as "I use...", "I own...", "I
-prefer...", or "I plan...", bind the current human speaker to the exact opaque entity
-`{endpoint.marker}`. Explicit informational intent must emit `WANTS_TO_KNOW_MORE_ABOUT` or
-`INTERESTED_IN`. A bare request or question does not by itself assert durable interest. Do not
-invent facts. If the text truly contains no relationship, return both lists empty.
-"""
+        first_person = _REPAIR_FIRST_PERSON_USER
+    else:
+        first_person = (
+            'For first-person predicates such as "I use...", "I own...", "I prefer...", or '
+            f'"I plan...", bind the current human speaker to the exact opaque entity `{endpoint.marker}`. '
+            "Explicit informational intent must emit `WANTS_TO_KNOW_MORE_ABOUT` or `INTERESTED_IN`. "
+            "A bare request or question does not by itself assert durable interest. "
+        )
+    head, sep, tail = _RELATIONLESS_REPAIR_CORE.partition("Do not invent facts.")
+    return head + first_person + sep + tail
 
 
 def _subject_endpoint_correction_instructions(
@@ -1158,6 +1192,18 @@ MENHIR INVALID AUTHOR-ENDPOINT CORRECTION:
 _AUTHOR_REFERENCE_RE = re.compile(r"\b(?:i|me|my|mine|myself)\b", re.IGNORECASE)
 
 
+def _is_first_person(text: str) -> bool:
+    """True when `text` contains a first-person singular reference.
+
+    The single source of truth for "is the author speaking?" -- consulted by the prompt that
+    asks the model to emit `user` (`_relation_completeness_instructions`) AND by the
+    post-processing that decides whether an emitted `user` is the author
+    (`_unresolved_author_aliases`). Plural first person (we/our/us) is deliberately not here;
+    that is pre-existing behaviour and a separate question.
+    """
+    return bool(_AUTHOR_REFERENCE_RE.search(text or ""))
+
+
 def _unresolved_author_aliases(
     nodes: list[Any], receipt: CombinedExtractionReceipt,
 ) -> set[str]:
@@ -1165,7 +1211,7 @@ def _unresolved_author_aliases(
         return set()
     names = [str(getattr(node, "name", "") or "") for node in nodes]
     if (receipt.self_subject_endpoint.marker not in names
-            and not _AUTHOR_REFERENCE_RE.search(receipt.episode_text)):
+            and not _is_first_person(receipt.episode_text)):
         return set()  # Ordinary third-person/RBAC-only `user` is not the author.
     return {
         str(getattr(node, "uuid", "") or "") for node in nodes
@@ -1550,7 +1596,7 @@ async def _run_graphiti_combined_extraction(
 
     effective_instructions = _combine_extraction_instructions(
         custom_extraction_instructions,
-        _relation_completeness_instructions(endpoint),
+        _relation_completeness_instructions(endpoint, receipt.episode_text),
         endpoint_instructions,
     )
     nodes, edges, index_map = await extract_nodes_and_edges(
@@ -1588,7 +1634,7 @@ async def _run_graphiti_combined_extraction(
         )
         repair_instructions = _combine_extraction_instructions(
             effective_instructions,
-            _relationless_repair_instructions(endpoint),
+            _relationless_repair_instructions(endpoint, receipt.episode_text),
             (
                 _RELATIONLESS_REPAIR_CONTEXT_INSTRUCTIONS
                 if receipt.relationless_repair_context_texts
