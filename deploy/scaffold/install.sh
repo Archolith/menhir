@@ -499,9 +499,11 @@ systemctl daemon-reload
 transaction_step="enabling scaffold audit timer"
 systemctl enable --now menhir-scaffold-audit.timer
 transaction_step="enabling nightly backup timer"
-if [ ! -e "$backup_timer_stamp" ]; then
-    # First installation: record now as the last trigger so the timer waits
-    # for its next 04:00 window instead of taking a backup mid-install.
+if [ "$(unit_property menhir-backup.timer LoadState)" = not-found ]; then
+    # The timer was not installed before this transaction. A stamp left by an
+    # earlier life of the unit is not a last trigger the catch-up policy may
+    # honour; record now so the timer waits for its next 04:00 window instead
+    # of taking a backup mid-install.
     install -d -o root -g root -m 0755 "$(dirname -- "$backup_timer_stamp")"
     touch -- "$backup_timer_stamp"
 fi

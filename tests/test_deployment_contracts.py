@@ -1352,12 +1352,16 @@ def test_scaffold_owns_the_nightly_backup_timer_and_does_not_fire_it_on_install(
         assert {"digest": True, "gid": 0, "mode": mode, "path": path, "uid": 0} in contract["files"]
     assert {"active": "active", "enabled": "enabled", "name": "menhir-backup.timer"} in contract["units"]
 
-    # Persistent=true fires a never-run timer the moment it starts; the stamp
-    # must be seeded before the timer is enabled so install does not take an
-    # unscheduled backup.
+    # Persistent=true fires the timer on start whenever a window was missed
+    # since the stamp's timestamp -- and a never-run timer, or one whose stamp
+    # was left by an earlier life of the unit, has missed every window. The
+    # stamp must be reset whenever the timer was not installed before this
+    # transaction, before the timer is enabled.
     units = (scaffold.parent.parent / "pipeline" / "systemd" / "menhir-backup.timer").read_text(encoding="ascii")
     assert "Persistent=true" in units
     stamp = 'touch -- "$backup_timer_stamp"'
+    assert 'if [ "$(unit_property menhir-backup.timer LoadState)" = not-found ]; then' in install
+    assert '[ ! -e "$backup_timer_stamp" ]' not in install
     enable = "systemctl enable --now menhir-backup.timer"
     reload = install.index("transaction_step=\"reloading systemd\"")
     assert reload < install.index(stamp) < install.index(enable)
