@@ -12,7 +12,7 @@ Companion documents in this directory:
 
 ## 1. Start here: the single most important fact
 
-**Menhir can be restored, from a backup taken 2026-09-10.**
+**Menhir can be restored, from a backup taken 2026-09-13 (`generation.u0wWCFHba4`, rehearsed, off-host). Release 0.2.0-14 is installed and verified.**
 
 Phase 0 is complete. The newest backup is `generation.YBf6rSxgwW`,
 2026-09-10 02:05 UTC: `roundtrip_verified: true`, recipient
@@ -56,7 +56,27 @@ of which looks like a release problem from the outside:
 
 Time spent debugging the release itself was spent in the wrong place.
 
-## 3. The live problem: a half-finished ingress retirement
+## 3. RESOLVED 2026-09-13 — release menhir-prod-0.2.0-14 is installed
+
+`verify-artifacts` exit 0 (51 OK, Python runtime included). 50 artifacts,
+`ingress_mode: cloudflared`. Every Caddy path, `worker`, `menhir-op@.service`
+and the orphan `release-run` retired; both cloudflared ingress files managed.
+`lib.sh` has zero `menhir-caddy-reconcile` references. The gateway runs under
+its real `verify-artifacts` gate, `active`, zero restarts. Scaffold `static: ok`,
+`maintenance_stage: complete`, audit `success`. Production healthy, `readyz=200`,
+no restart during any install attempt — the installer takes no outage.
+
+Three install attempts were needed; each failure was real and each fix is
+committed: template units broke `systemctl show` (`872c5bb`); rollback tried to
+stop a unit that never existed (`17df72d`); the Python runtime evidence reused
+from r11 never matched this host (rebound to the live digest, third cut);
+an evidence file picked up CRLF on Windows (64 bytes exactly). The maintenance
+lifecycle itself had no exit for a rolled-back or artifact-only release
+(`dd6f939`, `0ec8283`; see `MARKERS.md`).
+
+What follows is the diagnosis as it stood before, kept for the record.
+
+### The live problem as it was: a half-finished ingress retirement
 
 On 2026-09-08 between 00:31 and 00:50 someone ran a Cloudflared-only ingress
 retirement directly on the host. Rollback copies were saved first, to
@@ -401,9 +421,7 @@ No release-managed artifact was modified.
 
 ## 9. Next actions, in order
 
-1. **Finish the ingress retirement** (section 3). Fixes both the failing release
-   and the broken backup path. Coordinated change across two repos and the host —
-   have the plan corroborated before running it.
+1. ~~Finish the ingress retirement~~ **Done 2026-09-13.** See section 3.
 2. **Install the timer.** The three wrapper defects are fixed (section 6); it
    has never been run end-to-end, and cannot be until item 1 lands.
 3. **Deploy the rewritten `backup-status`** so the command tells the truth in an
