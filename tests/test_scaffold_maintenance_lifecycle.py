@@ -16,6 +16,7 @@ import os
 from pathlib import Path
 
 import pytest
+from types import SimpleNamespace
 
 SCRIPT = Path(__file__).resolve().parents[1] / "deploy" / "scaffold" / "menhir_scaffold.py"
 SPEC = importlib.util.spec_from_file_location("menhir_scaffold_lifecycle", SCRIPT)
@@ -235,3 +236,31 @@ def test_plain_complete_still_requires_acceptance(host: dict) -> None:
     _write(scaffold.RELEASE_RUN, _journal(started, release_id="menhir-prod-0.2.0-14"))
     with pytest.raises(scaffold.ScaffoldError, match="before acceptance"):
         scaffold.complete_maintenance(_bound(started, HEX))
+
+
+def test_app_only_audit_runs_the_installed_artifact_verifier(monkeypatch, tmp_path):
+    # The OAuth gateway's ExecStartPre used to run verify-artifacts at boot; the
+    # daily audit is the only unattended verifier run since release 0.2.0-16.
+    calls = []
+    verifier = tmp_path / "verify-artifacts"
+    verifier.write_text("#!/bin/sh\nexit 0\n", encoding="ascii")
+    monkeypatch.setattr(scaffold, "VERIFY_ARTIFACTS", verifier)
+    monkeypatch.setattr(scaffold, "verify_static", lambda c, r: {"contract": {"backup_policy": {}}})
+    monkeypatch.setattr(scaffold, "operational_evidence", lambda contract, now: {})
+    monkeypatch.setattr(scaffold, "evaluate_evidence", lambda policy, evidence, now: [])
+
+    def fake_run(argv, check=False, **kwargs):
+        calls.append(argv)
+        return SimpleNamespace(returncode=fake_run.rc)
+    fake_run.rc = 0
+    monkeypatch.setattr(scaffold.subprocess, "run", fake_run)
+    result = scaffold.verify_app_only(tmp_path / "contract.json", tmp_path / "receipt.json")
+    assert result["artifacts"] == "ok" and calls == [[str(verifier)]]
+
+    fake_run.rc = 1
+    with pytest.raises(scaffold.ScaffoldError, match="do not verify"):
+        scaffold.verify_app_only(tmp_path / "contract.json", tmp_path / "receipt.json")
+
+    verifier.unlink()
+    with pytest.raises(scaffold.ScaffoldError, match="verifier is missing"):
+        scaffold.verify_app_only(tmp_path / "contract.json", tmp_path / "receipt.json")

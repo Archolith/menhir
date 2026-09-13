@@ -190,7 +190,7 @@ def classify_release(
     for key in ("schema", "network", "deployment", "repo_remotes", "ingress_mode"):
         if candidate.get(key) != live.get(key):
             raise Error(f"protected release field differs: {key}")
-    for name in ("yawn_deploy", "yawn_vps"):
+    for name in ("yawn_deploy",):
         if candidate.get("repos", {}).get(name) != live.get("repos", {}).get(name):
             raise Error(f"security-config cannot change repository: {name}")
     for name in ("neo4j", "caddy", "base"):

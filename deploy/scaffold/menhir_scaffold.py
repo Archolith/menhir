@@ -972,14 +972,30 @@ def operational_evidence(
     }
 
 
+def verify_installed_artifacts() -> str:
+    # Until release 0.2.0-16 the OAuth gateway ran verify-artifacts as its
+    # ExecStartPre, so a drifted install failed at boot. The gateway is gone;
+    # the daily audit is now the only unattended run of the verifier.
+    if not VERIFY_ARTIFACTS.is_file():
+        raise ScaffoldError(f"installed artifact verifier is missing: {VERIFY_ARTIFACTS}")
+    verified = subprocess.run(
+        [str(VERIFY_ARTIFACTS)], check=False,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    if verified.returncode != 0:
+        raise ScaffoldError("installed artifacts do not verify against the release authority")
+    return "ok"
+
+
 def verify_app_only(contract_path: Path, receipt_path: Path) -> dict[str, Any]:
     verified = verify_static(contract_path, receipt_path)
+    artifacts = verify_installed_artifacts()
     now = utc_now()
     evidence = operational_evidence(verified["contract"], now)
     failures = evaluate_evidence(verified["contract"]["backup_policy"], evidence, now)
     if failures:
         raise ScaffoldError("app-only admission refused: " + "; ".join(failures))
-    return {"static": "ok", "app_only": "admitted", "evidence": evidence}
+    return {"static": "ok", "artifacts": artifacts, "app_only": "admitted", "evidence": evidence}
 
 
 def write_drill_receipt(backup: dict[str, Any], checked_utc: str, method: str) -> dict[str, Any]:
