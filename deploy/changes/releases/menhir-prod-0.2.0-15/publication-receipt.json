@@ -1,0 +1,24 @@
+{
+  "artifacts": {
+    "bundle_manifest_sha256": "2e39da1eebcbc0f85b8193ce21b779caadf160e525adb53614453caa35162338",
+    "bundle_sha256": "f0ecd6a2cca60a15c8fae97bc59dee288a0480d9746fe295a17b72f46287250f",
+    "notes_json_sha256": "e7c42728ab7eb997ab0f9846a8b29d68f939839ec659379ad56f70069c0b7276",
+    "notes_markdown_sha256": "331fe076a2a4935589e0c87062c70a26635a37c5b704533c59c56eb15231556d",
+    "release_sha256": "b9f1c6558b2704e7fe98ea1a210d4820d3dfef09453bf88fefafc6477384656b",
+    "review_request_sha256": "585e5c1cc2cedd5e48d058b98dd6703566c85018a03965e03276d7d83d4a167c",
+    "security_review_sha256": "0f6e5592f608aeae7f887f9821d304aa98219f7db8f4f8f01b0c308e5a82e66b",
+    "spec_sha256": "dcaac22d1323c6d7db1431f2bb13086ea105a6410f3de65ce184edb2c47f3c91"
+  },
+  "fragments": [
+    {
+      "name": "nightly-backup-observability.json",
+      "sha256": "5b547bf6fa55f95e09f3a26197f50f068505229e9b407f6d1797674de7337586"
+    }
+  ],
+  "fragments_dir": "C:\\Users\\thron\\Documents\\Codex\\2026-09-06\\inve\\work\\menhir-doc-staged-promotion\\deploy\\changes\\unreleased",
+  "kind": "menhir-release-publication",
+  "publication_nonce": "3e767c1ff91d1a55b382a2108a2d6642",
+  "release_id": "menhir-prod-0.2.0-15",
+  "schema": 1,
+  "workspace": "C:\\Users\\thron\\Documents\\Codex\\2026-09-06\\inve\\work\\releases\\menhir-prod-0.2.0-15\\workspace"
+}

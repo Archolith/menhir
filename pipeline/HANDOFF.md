@@ -445,8 +445,16 @@ No release-managed artifact was modified.
    run:** `scheduled-backup-last-run.json` status `ok`, no
    `scheduled-backup-failure.json`, `menhir-backup.service` not `failed`,
    and the audit still green (it will now judge the nightly receipt).
-3. **Deploy the rewritten `backup-status`** so the command tells the truth in an
-   incident.
+3. ~~Deploy the rewritten `backup-status`~~ **Done 2026-09-13 05:45 UTC as
+   release menhir-prod-0.2.0-15** (release_sha256 `b9f1c655…`, yawn.vps
+   `bc4f29e`). The `6a98974` rewrite had in fact shipped with 14, but it read
+   `created_utc` (a field the receipt never carries) and the retired job-runner
+   file; 15 reads `checked_utc` and the two `scheduled-backup-*` markers, so the
+   nightly wrapper now has a reader. Second artifact-only release through the
+   flow: `prepare` clean first try, Opus focused-delta review APPROVED, installer
+   committed in 14 s with no outage, `verify-artifacts` 0, maintenance closed by
+   `complete-maintenance --artifact-only`. The flow works when nothing is
+   hand-installed underneath it.
 4. Delete the stale `/srv/menhir/production/deploy/` shadow tree.
 5. Execute the 19 `replace` dispositions; consolidate per `CONSOLIDATION.md`.
 
