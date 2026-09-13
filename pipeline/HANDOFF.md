@@ -129,7 +129,7 @@ definitions available to finish the retirement or restore the release.
 | Cloudflared is the sole ingress (ADR 0002, **corrected**) | Verified running. The shared Caddy vhost is dead config. |
 | Cutover takes a maintenance window | Deletes the v1 bridge, handoff fence, cgroup census, caller drain, all-lock ordering |
 | Deploys authorized by root ceremony, no signing key | Deletes the entire PKI: key custody, ACLs, passphrases, trust store, rotation, revocation |
-| Nightly backup at 04:00 America/Chicago | Timer written, **not installed** — see section 6 |
+| Nightly backup at 04:00 America/Chicago | Timer delivered by the scaffold — see section 6 |
 | Publish stays rigorous; deploy does not | The organizing principle. See section 5. |
 
 Together the first three delete roughly eight of the architecture review's
@@ -221,8 +221,20 @@ python pipeline/census.py --config pipeline/census.config.json \
 including a coherence check across backup / rehearsal / off-host copy. Source
 only, not deployed.
 
-**Nightly backup timer written, NOT installed.** `pipeline/scheduled-backup.sh`
-plus units in `pipeline/systemd/`. Three defects were found and **fixed**; all
+**Nightly backup timer: owned by the scaffold (Phase 2).** `pipeline/scheduled-backup.sh`
+plus units in `pipeline/systemd/`. The scaffold had retired
+`/usr/local/sbin/menhir-scheduled-backup` and `menhir-backup.{service,timer}` as
+"legacy" since its first commit (`5ca51ac`) while its own audit demanded a backup
+fresher than 24 h — so nothing scheduled one, and the audit unit sat `failed`
+with "VPS backup is stale". Now the three files ride in the scaffold bundle
+(`scripts/menhir-scaffold.ps1` source map), `install.sh` installs them and
+enables the timer, and the contract pins their digests and requires
+`menhir-backup.timer` active. The installer seeds
+`/var/lib/systemd/timers/stamp-menhir-backup.timer` on first install because
+`Persistent=true` fires a never-run timer the moment it starts (that took an
+unscheduled production backup once this session). Rollback of the scaffold
+transaction restores the prior (absent) state through the existing unit
+snapshots. Three wrapper defects were found and **fixed**; all
 three were mine. Verified against the host read-only, not just reasoned about:
 
 1. **Stack detection always returned "stopped."** Diagnosed initially as a
@@ -422,8 +434,8 @@ No release-managed artifact was modified.
 ## 9. Next actions, in order
 
 1. ~~Finish the ingress retirement~~ **Done 2026-09-13.** See section 3.
-2. **Install the timer.** The three wrapper defects are fixed (section 6); it
-   has never been run end-to-end, and cannot be until item 1 lands.
+2. **Install the timer** through the scaffold (section 6). The wrapper ran
+   clean end-to-end on 2026-09-13 (172 s).
 3. **Deploy the rewritten `backup-status`** so the command tells the truth in an
    incident.
 4. Delete the stale `/srv/menhir/production/deploy/` shadow tree.

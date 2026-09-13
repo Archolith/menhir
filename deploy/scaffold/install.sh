@@ -53,9 +53,13 @@ requested_transaction_id="$transaction_id"
 bundle_files=(
     contract.production.json menhir_scaffold.py menhir_app_only.py
     menhir_security_config.py personal_stage_vps.py
+    scheduled-backup.sh menhir-backup.service menhir-backup.timer
     menhir-scaffold-audit.service menhir-scaffold-audit.timer
     menhir-scaffold.sudoers install.sh
 )
+# systemd's Persistent= catch-up uses this stamp's mtime as the last trigger.
+# A never-run timer has no stamp, so starting it fires the backup immediately.
+backup_timer_stamp="/var/lib/systemd/timers/stamp-menhir-backup.timer"
 file_keys=(
     contract scaffold app_only security_config stage_vps scheduled_backup
     backup_service backup_timer audit_service audit_timer sudoers
@@ -110,7 +114,7 @@ if not stat.S_ISDIR(root_info.st_mode) or root_info.st_uid != 0 or root_info.st_
         or root_info.st_mode & 0o022:
     raise SystemExit(label+" root must be a root-owned directory not writable by group or other")
 value=json.load(open(manifest,encoding="utf-8"),object_pairs_hook=unique)
-expected={"contract.production.json","menhir_scaffold.py","menhir_app_only.py","menhir_security_config.py","personal_stage_vps.py","menhir-scaffold-audit.service","menhir-scaffold-audit.timer","menhir-scaffold.sudoers","install.sh"}
+expected={"contract.production.json","menhir_scaffold.py","menhir_app_only.py","menhir_security_config.py","personal_stage_vps.py","scheduled-backup.sh","menhir-backup.service","menhir-backup.timer","menhir-scaffold-audit.service","menhir-scaffold-audit.timer","menhir-scaffold.sudoers","install.sh"}
 if set(value)!={"schema","kind","files"} or value["schema"]!=1 or value["kind"]!="menhir-scaffold-bundle" or set(value["files"])!=expected:
     raise SystemExit(label+" manifest mismatch")
 for name,want in value["files"].items():
@@ -478,14 +482,10 @@ install -o root -g root -m 0755 "${staged_bundle}/menhir_app_only.py" /srv/menhi
 install -o root -g root -m 0755 "${staged_bundle}/menhir_security_config.py" /srv/menhir/scaffold/bin/menhir_security_config.py
 install -o root -g root -m 0755 "${staged_bundle}/personal_stage_vps.py" /srv/menhir/scaffold/bin/menhir_stage_vps.py
 
-transaction_step="retiring legacy scaffold backup files"
-backup_load_state="$(unit_property menhir-backup.timer LoadState)"
-if [ "$backup_load_state" != not-found ]; then
-    systemctl disable --now menhir-backup.timer
-fi
-rm -f /usr/local/sbin/menhir-scheduled-backup \
-    /etc/systemd/system/menhir-backup.service \
-    /etc/systemd/system/menhir-backup.timer
+transaction_step="installing nightly backup wrapper and units"
+install -o root -g root -m 0755 "${staged_bundle}/scheduled-backup.sh" /usr/local/sbin/menhir-scheduled-backup
+install -o root -g root -m 0644 "${staged_bundle}/menhir-backup.service" /etc/systemd/system/menhir-backup.service
+install -o root -g root -m 0644 "${staged_bundle}/menhir-backup.timer" /etc/systemd/system/menhir-backup.timer
 
 transaction_step="installing scaffold audit units and sudoers"
 install -o root -g root -m 0644 "${staged_bundle}/menhir-scaffold-audit.service" /etc/systemd/system/menhir-scaffold-audit.service
@@ -498,6 +498,14 @@ transaction_step="reloading systemd"
 systemctl daemon-reload
 transaction_step="enabling scaffold audit timer"
 systemctl enable --now menhir-scaffold-audit.timer
+transaction_step="enabling nightly backup timer"
+if [ ! -e "$backup_timer_stamp" ]; then
+    # First installation: record now as the last trigger so the timer waits
+    # for its next 04:00 window instead of taking a backup mid-install.
+    install -d -o root -g root -m 0755 "$(dirname -- "$backup_timer_stamp")"
+    touch -- "$backup_timer_stamp"
+fi
+systemctl enable --now menhir-backup.timer
 transaction_step="capturing scaffold receipt"
 /srv/menhir/scaffold/bin/menhir_scaffold.py capture
 transaction_step="seeding scaffold restore drill"

@@ -1324,6 +1324,46 @@ def test_scaffold_installs_and_audits_fixed_root_staging_runner():
     } in contract["directories"]
 
 
+def test_scaffold_owns_the_nightly_backup_timer_and_does_not_fire_it_on_install():
+    scaffold = REPO_ROOT / "deploy" / "scaffold"
+    install = (scaffold / "install.sh").read_text(encoding="ascii")
+    contract = json.loads(
+        (scaffold / "contract.production.json").read_text(encoding="ascii")
+    )
+    wrapper = "/usr/local/sbin/menhir-scheduled-backup"
+    service = "/etc/systemd/system/menhir-backup.service"
+    timer = "/etc/systemd/system/menhir-backup.timer"
+
+    # The scaffold used to retire these three paths as legacy while its own
+    # audit demanded a backup fresher than 24 hours; nothing scheduled one.
+    assert "retiring legacy scaffold backup files" not in install
+    assert f"rm -f {wrapper}" not in install
+    for name in ("scheduled-backup.sh", "menhir-backup.service", "menhir-backup.timer"):
+        assert f'"{name}"' in install
+    assert (
+        'install -o root -g root -m 0755 "${staged_bundle}/scheduled-backup.sh" '
+        + wrapper
+    ) in install
+    assert (
+        'install -o root -g root -m 0644 "${staged_bundle}/menhir-backup.timer" '
+        + timer
+    ) in install
+    for path, mode in ((wrapper, "0755"), (service, "0644"), (timer, "0644")):
+        assert {"digest": True, "gid": 0, "mode": mode, "path": path, "uid": 0} in contract["files"]
+    assert {"active": "active", "enabled": "enabled", "name": "menhir-backup.timer"} in contract["units"]
+
+    # Persistent=true fires a never-run timer the moment it starts; the stamp
+    # must be seeded before the timer is enabled so install does not take an
+    # unscheduled backup.
+    units = (scaffold.parent.parent / "pipeline" / "systemd" / "menhir-backup.timer").read_text(encoding="ascii")
+    assert "Persistent=true" in units
+    stamp = 'touch -- "$backup_timer_stamp"'
+    enable = "systemctl enable --now menhir-backup.timer"
+    reload = install.index("transaction_step=\"reloading systemd\"")
+    assert reload < install.index(stamp) < install.index(enable)
+    assert "menhir-backup.timer" in install.split("units=(")[1].split(")")[0]
+
+
 def test_scaffold_install_requires_shared_admission_before_any_host_mutation():
     install = (
         REPO_ROOT / "deploy" / "scaffold" / "install.sh"
@@ -1402,9 +1442,20 @@ def test_shared_scaffold_wrapper_maps_reviewed_repo_and_bootstraps_outside_old_s
         '"install.sh" = Join-Path $RepositoryRoot '
         '"deploy\\scaffold\\install.sh"'
     ) in wrapper
+    for name, source in (
+        ("scheduled-backup.sh", "pipeline\scheduled-backup.sh"),
+        ("menhir-backup.service", "pipeline\systemd\menhir-backup.service"),
+        ("menhir-backup.timer", "pipeline\systemd\menhir-backup.timer"),
+    ):
+        assert f'"{name}" = Join-Path $RepositoryRoot "{source}"' in wrapper
+    # Privileged steps run either through a separately authorized root endpoint
+    # or, by owner decision, the operator's own unrestricted sudo -- never
+    # through the scaffold-installed sudoers, which cannot authorize their own
+    # replacement.
     assert "-BootstrapHost" in wrapper
-    assert "installed sudoers cannot authorize their own replacement" in wrapper
+    assert "-PrivilegedSudo" in wrapper
     install_branch = wrapper[wrapper.index('{ $_ -in @("Install", "Recover") }'):]
+    assert "Invoke-Privileged" in install_branch
     assert 'Invoke-Vps "sudo -n bash' not in install_branch
     assert 'Invoke-Vps "sudo -n install' not in install_branch
 
