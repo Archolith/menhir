@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "id": "nightly-backup-observability",
+  "category": "operations",
+  "deployment_class": "maintenance",
+  "summary": "Give the nightly backup a reader: backup-status reports the scheduled wrapper's run markers, and the scaffold owns the backup timer instead of retiring it.",
+  "details": "yawn.vps commit bc4f29e fixes two defects in bin/backup-status: the last-backup section asked the receipt for created_utc, a field menhir-backup-local never writes (the field is checked_utc), so it always printed (missing); and the final section read the retired job-runner status file and printed (no backup job recorded) forever. It now reports scheduled-backup-last-run.json and, when present, scheduled-backup-failure.json, the markers written by /usr/local/sbin/menhir-scheduled-backup on every run. Menhir commits 23f8c11, c224548 and 8c5015c make the host scaffold the owner of that wrapper and of menhir-backup.service and menhir-backup.timer, which the scaffold had retired as legacy since its first commit while its own audit demanded a backup fresher than 24 hours; the scaffold is not a release artifact and was installed separately on 2026-09-13, but the release's backup-status now depends on the markers it produces. No other release artifact changes; images are inherited from release 0.2.0-13 unchanged.",
+  "operator_impact": "backup-status gains a final section describing the last scheduled nightly run and any standing failure. No runtime, ingress, secret or privilege change.",
+  "repositories": {
+    "menhir": [
+      "23f8c115a05ee583bab11c2f8d2d68b30562ae69",
+      "c2245480511d5a5378d75c55c9842b70001b8a9a",
+      "8c5015c635e9e5c41333d8c4319557bc3c75aa5a"
+    ],
+    "yawn_vps": [
+      "bc4f29e3bb271c249f21799430fc7b084a123690"
+    ]
+  },
+  "security_scopes": [
+    "backup-restore-and-rollback",
+    "runtime-hardening-and-observability"
+  ],
+  "breaking": false
+}
