@@ -712,6 +712,13 @@ restore_unit_enablement() {
 
 restore_unit_activity() {
     local unit="$1" state
+    # A unit that was not-found before the install has no activity to restore;
+    # `systemctl stop` on it fails with "Unit not loaded" and left the rollback
+    # reported incomplete on every retry. The snapshot's LoadState is the
+    # authority for whether the unit existed at all.
+    if [ "$(unit_property "$unit" LoadState)" = not-found ]; then
+        return 0
+    fi
     state="$(unit_property "$unit" ActiveState)"
     if [[ "$unit" == *@.service ]]; then
         [ "$state" = inactive ] \
