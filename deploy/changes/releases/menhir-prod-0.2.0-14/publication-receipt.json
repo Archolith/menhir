@@ -1,0 +1,32 @@
+{
+  "artifacts": {
+    "bundle_manifest_sha256": "3cb48ddde347266725b948d2a03d4a9b7fcb33b5cbe48abefe923d93be9fb575",
+    "bundle_sha256": "489c4f29e41463341e6347777381159d8c2a4c2e54cc5609998128f7032cfb14",
+    "notes_json_sha256": "e00b496aa58c7469e002c3c1422cd5e30930e27f3054fde0b083f357393845fe",
+    "notes_markdown_sha256": "8c6b71f2b98f3758dd8c7073f62b3351da2be1bff1edd49e76b81fed7d8e95b1",
+    "release_sha256": "82088862f58abf3f1631298dbe8c68c66f2d57c5f2afa86ef6b97108de48071e",
+    "review_request_sha256": "3bb30ec880336678b470d84a9f94b6d564f71fc090d11bdf0087df243c0ed0b1",
+    "security_review_sha256": "ea48f7a992db0580fd23a4830aad0d9a33565f798d5f54612ea444d753b51446",
+    "spec_sha256": "1c236cf942461fe2c3fddb800c4850792ad4d97573638ee34652cba6cde9087e"
+  },
+  "fragments": [
+    {
+      "name": "cloudflared-ingress-authority.json",
+      "sha256": "3eec4bb86b8d1c6bd31f040d72807f821469df7ec66bfb9289b30c80486aecc2"
+    },
+    {
+      "name": "release-image-label-automation.json",
+      "sha256": "ca55f84ad13c5a8c06b44fe875c4f5f1fd4b2173a02f8a33c494fc1217e63741"
+    },
+    {
+      "name": "staged-promotion-deployment.json",
+      "sha256": "a62f11e6cfba9faa05fbda14a8d4b34ef28c77862e6b9160dfb8d23898cbf3bb"
+    }
+  ],
+  "fragments_dir": "C:\\Users\\thron\\Documents\\Codex\\2026-09-06\\inve\\work\\menhir-doc-staged-promotion\\deploy\\changes\\unreleased",
+  "kind": "menhir-release-publication",
+  "publication_nonce": "9cec6f7b72e47ed4d74acf68e074156c",
+  "release_id": "menhir-prod-0.2.0-14",
+  "schema": 1,
+  "workspace": "C:\\Users\\thron\\Documents\\Codex\\2026-09-06\\inve\\work\\releases\\menhir-prod-0.2.0-14\\workspace"
+}
