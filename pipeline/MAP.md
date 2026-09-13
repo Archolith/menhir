@@ -175,8 +175,9 @@ when reasoning about blast radius.
 |---|---|---|
 | `menhir` | `deploy/` | Release compilers, staging, ansible, `backup-generation.sh`, `restore-generation.sh`, `scaffold/`, `personal_*` deploy scripts |
 | `menhir` | `pipeline/` | The rebuilt pipeline. `census.py` and this map. New work goes here. |
-| `yawn.vps` | `ops/menhir/bin/` | The operator read commands and `lib.sh`, which owns `submit_op` and the transaction verbs |
-| `yawn.vps` | `ops/menhir/systemd/`, `etc/` | Unit definitions, `sudoers.d/menhir-production` (read commands only), tmpfiles |
+| `menhir` | `pipeline/bin/` | The operator read commands, `verify-artifacts` and `lib.sh` (moved from yawn.vps in 0.2.0-16) |
+| `menhir` | `pipeline/etc/`, `pipeline/systemd/` | `sudoers.d/menhir-production` (read commands only), tmpfiles; the scaffold-owned nightly backup units |
+| `yawn.vps` | `ops/menhir/` | **Retired source.** Nothing is sourced from here since 0.2.0-16; deleted after 16 is verified on the host. |
 | `IdeaProjects/scripts` | root | `deploy-menhir.ps1`, `deploy-menhir-app-only.ps1`, `menhir-scaffold.ps1`, `menhir-backup-archive.ps1`, and the generic `vps-ssh.ps1` / `vps-scp.ps1` / `vps-compose.ps1` |
 | `yawn.deploy` | root | **Dead Menhir config only.** The `memory.ctharvey.me` vhost, `caddy-release.sh` and the Menhir lock are retired-in-place; see ADR 0002. |
 

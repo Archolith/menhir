@@ -1,5 +1,10 @@
 # Consolidating Menhir deploy code into `menhir/pipeline/`
 
+> **Executed in release 0.2.0-16 (2026-09-13):** Group A's live members moved to
+> `pipeline/bin` and `pipeline/etc`; Group B retired; `yawn_vps` contributes zero
+> artifacts. The repository pin itself leaves the contract in release 17. See
+> `.agent/plans/menhir-phase3-sever-yawn-vps-plan.md` and `pipeline/README.md`.
+
 A map of what the move actually requires. Nothing here has been executed.
 
 ## The finding that makes this cheap
