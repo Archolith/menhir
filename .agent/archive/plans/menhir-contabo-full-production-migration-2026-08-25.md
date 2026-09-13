@@ -2,10 +2,23 @@
 artifact_schema: 1
 artifact_uuid: a6b498e0-f409-424a-b516-84b96cc5703e
 artifact_type: plan
-artifact_status: PROPOSED
+artifact_status: SUPERSEDED
 ---
 
 # Menhir full production migration to Contabo
+
+> **Disposition (2026-09-08, archived 2026-09-13):** Superseded — retained as the
+> historical migration/topology rationale. The migration itself was delivered to
+> production (Menhir runs on Contabo; releases through `menhir-prod-0.2.0-14`), but the
+> execution authority moved to the deployment control-plane architecture reset
+> (`menhir-deployment-control-plane-architecture-reset-2026-09-08.md`, branch
+> `fix/deployment-reliability-20260907`); its Caddy-ownership and Yawn-mutation language
+> is not current execution authority.
+> Divergences between this plan and production: ingress is a digest-pinned cloudflared
+> tunnel (not Caddy + AOP, which the plan forbade), and operations run through
+> root-owned fixed wrappers plus the desktop release coordinator rather than the
+> `yawn.vps` `menhir_*` tool surface this plan specified. Re-plan any genuine residual
+> from the control-plane reset rather than resuming these procedures.
 
 > **Backup contract correction (2026-08-31):** this plan never had owner authority to
 > require a cloud/object-store backup service. The release backup is an encrypted,
