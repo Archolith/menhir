@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "id": "sever-yawn-vps-sources",
+  "category": "operations",
+  "deployment_class": "maintenance",
+  "summary": "Source every Menhir host artifact from the menhir repository and retire the OAuth operations gateway.",
+  "details": "Menhir commits 9ce2056, 4947d68 and dda8712 end the release's dependency on the yawn.vps repository. The ten live host artifacts previously sourced from yawn.vps (backup-status, generation-inspect, lib.sh, logs, recover, release-inspect, status and verify-artifacts under /srv/menhir/production/bin; /etc/sudoers.d/menhir-production; /etc/tmpfiles.d/menhir-production.conf) now come from pipeline/bin and pipeline/etc in the menhir repository, byte-identical to yawn.vps bc4f29e except verify-artifacts, whose required and obsolete sets change as described next. The OAuth operations gateway retires: menhir-oauth-operations.service is stopped, disabled and removed through the installer's retired-unit mechanism and restored by its rollback path; /srv/menhir/production/bin/verify_python_runtime.py and the rendered /etc/yawn-vps/menhir-oauth-policy.json, menhir-oauth-public.pem and menhir-python-runtime.sha256 are removed and enter the verifier's obsolete set. The five gateway sources under /srv/yawn/projects/yawn.vps leave the artifact set without being deleted because Yawn's own server imports vps/core.py. The release inputs operations_policy, oauth_public_key and python_runtime_digest no longer exist; the schema keeps their rendered keys optional so releases 14 and 15 continue to validate as prior authorities. Installed artifacts 50 to 40; verifier obsolete set 15 to 20. The scaffold contract no longer pins the gateway unit or the /etc/yawn-vps directory and the security-config lane no longer ships or restarts it. The yawn_vps repository stays pinned in this record for provenance and leaves the contract in release 17; the yawn.vps sources are deleted only after this release is verified on the host.",
+  "operator_impact": "The read wrappers, sudoers and tmpfiles are unchanged in content. The OAuth operations gateway on 172.30.0.1:8000 is gone; it served no request. Cutting a Menhir release no longer requires a yawn.vps checkout for artifact sources.",
+  "repositories": {
+    "menhir": [
+      "9ce2056ddd6697a57acc61a26a3944c0be022212",
+      "4947d68907b75bd8a31414468500788794044d05",
+      "dda8712b040fb85c06c0d9a6c6238656edc908d2"
+    ]
+  },
+  "security_scopes": [
+    "authentication-and-oauth-authority",
+    "authorization-and-client-tool-policy",
+    "host-privilege-and-command-wrappers",
+    "runtime-hardening-and-observability",
+    "supply-chain-and-build-evidence"
+  ],
+  "breaking": false
+}
