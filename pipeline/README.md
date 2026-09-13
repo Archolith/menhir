@@ -29,9 +29,7 @@ Menhir's canonical release/admission workflow is the sole mutation authority.
 | `bin/verify-artifacts` | Root-only: verifies every installed artifact (owner 0, non-symlink, non-group/other-writable, sha256) against `release.json`. |
 | `bin/recover` | Root-only: verifies the lock is free, no transient unit is active, and artifacts verify; then reopens the maintenance fence. |
 | `bin/{status,release-inspect,logs,backup-status,generation-inspect}` | Read-only wrappers. |
-| `systemd/menhir-oauth-operations.service` | Runs the dedicated HTTP-only OAuth gateway from the reviewed `yawn.vps` checkout. |
 | `etc/tmpfiles.d/menhir-production.conf` | Runtime/status directories. |
-| `etc/logrotate.d/menhir-production` | Log rotation. |
 | `etc/sudoers.d/menhir-production` | Narrow sudoers (exact wrappers only). |
 
 ## Fixed authority (single source of truth)
@@ -45,12 +43,9 @@ Menhir's canonical release/admission workflow is the sole mutation authority.
 - Operation lock: `/run/lock/menhir-production.lock` (`flock`, kernel-held; precreated `root:menhir-operators 0660`)
 - Persisted status: `/var/lib/menhir-production` (`jobs/`, `backups/`, `receipts/`, generation files, `restore-armed`, `restore-selection`, `fence`)
 - Immutable release record: `/srv/menhir/production/release/release.json` (root-owned, mode <= 0444)
-- OAuth operations policy: `/etc/yawn-vps/menhir-oauth-policy.json` (root-owned, release-rendered, mode 0644)
-- OAuth verification key: `/etc/yawn-vps/menhir-oauth-public.pem` (root-owned public key, release-rendered, mode 0644)
-- OAuth issuer: `https://memory.ctharvey.me`
-- OAuth external base URL: `https://memory.ctharvey.me/ops`
-- OAuth operations resource/audience: `https://memory.ctharvey.me/ops/mcp`
-- OAuth gateway: `/srv/yawn/projects/yawn.vps/menhir_server.py`, HTTP on the fixed Docker bridge gateway `172.30.0.1:8000`; the only permitted network peer is Caddy at `172.30.0.2/32`; policy/key paths, bind address, port, and transport are not environment-configurable
+- OAuth operations gateway (`menhir-oauth-operations.service`, `/etc/yawn-vps/*`,
+  `/srv/yawn/projects/yawn.vps/menhir_server.py` on `172.30.0.1:8000`): **retired
+  in release 0.2.0-16**; the paths are in the verifier's obsolete set.
 - Logs: `/var/log/menhir-production`
 - Retired gateway lane: `menhir-op@.service`, `bin/worker`, and the public
   submit wrappers are source-history only and must not be installed.

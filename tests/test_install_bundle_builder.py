@@ -462,7 +462,7 @@ def test_installer_bootstrap_backup_is_armed_atomic_and_precedes_full_install() 
     execution_start = source.index('validate_destination_parents\ncase "$phase" in')
     execution = source[execution_start:]
     armed = execution.index("transaction_active=1")
-    stop_gateway = execution.index('transaction_step="quiescing obsolete Menhir mutation gateway"', armed)
+    stop_gateway = execution.index('transaction_step="guarding lane retirement against active legacy workers"', armed)
     worker_guard = execution.index("assert_no_active_legacy_workers\n", stop_gateway)
     bootstrap_phase = execution.index("journal_action phase bootstrap-backup", worker_guard)
     cleanup_exists = execution.index('if [ -e "$cleanup_journal" ]', bootstrap_phase)
@@ -504,7 +504,7 @@ def test_installer_refuses_active_transient_worker_before_lane_retirement() -> N
         source.index("assert_no_active_legacy_workers() {"):
         source.index("retire_obsolete_writers() {")
     ]
-    stop_gateway = source.index('transaction_step="quiescing obsolete Menhir mutation gateway"')
+    stop_gateway = source.index('transaction_step="guarding lane retirement against active legacy workers"')
     first_guard = source.index("assert_no_active_legacy_workers\n", stop_gateway)
     retirement_phase = source.index("journal_action phase retiring-caddy", first_guard)
     second_guard = source.index("assert_no_active_legacy_workers\n", retirement_phase)

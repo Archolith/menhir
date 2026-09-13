@@ -1044,7 +1044,7 @@ retire_obsolete_writers() {
     verify_obsolete_writers_retired
 }
 
-transaction_step="quiescing obsolete Menhir mutation gateway"
+transaction_step="guarding lane retirement against active legacy workers"
 assert_no_active_legacy_workers
 
 transaction_step="recovering or creating the first encrypted backup"

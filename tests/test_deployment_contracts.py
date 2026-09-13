@@ -287,6 +287,39 @@ def test_release_valid(tmp_path):
     _schema.validate_release(str(path))
 
 
+def test_release_without_oauth_gateway_binding_is_valid_and_exact(tmp_path):
+    # Release 0.2.0-16 retired the OAuth operations gateway: all three rendered
+    # keys and their /etc/yawn-vps artifacts are absent together. Either half
+    # alone is a mismatch.
+    gateway = {
+        "/etc/yawn-vps/menhir-oauth-policy.json": "operations_policy_sha256",
+        "/etc/yawn-vps/menhir-oauth-public.pem": "oauth_public_key_sha256",
+        "/etc/yawn-vps/menhir-python-runtime.sha256": "python_runtime_digest_sha256",
+    }
+    release = _valid_release()
+    for path, key in gateway.items():
+        del release["rendered"][key]
+        del release["artifacts"][path]
+    release["security_review"]["authority_sha256"] =         _schema.release_authority_sha256(release)
+    _schema.validate_release(str(_write_json(tmp_path, "r16.json", release)))
+
+    for path, key in gateway.items():
+        orphan_artifact = _valid_release()
+        del orphan_artifact["rendered"][key]
+        orphan_artifact["security_review"]["authority_sha256"] =             _schema.release_authority_sha256(orphan_artifact)
+        with pytest.raises(ValueError, match="rendered authority"):
+            _schema.validate_release(
+                str(_write_json(tmp_path, f"orphan-{key}.json", orphan_artifact))
+            )
+        orphan_key = _valid_release()
+        del orphan_key["artifacts"][path]
+        orphan_key["security_review"]["authority_sha256"] =             _schema.release_authority_sha256(orphan_key)
+        with pytest.raises(ValueError, match="required rendered artifact"):
+            _schema.validate_release(
+                str(_write_json(tmp_path, f"orphan-{path.rsplit('/', 1)[1]}.json", orphan_key))
+            )
+
+
 def test_prior_release_without_new_runtime_binding_remains_valid(tmp_path):
     release = _valid_release()
     del release["rendered"]["python_runtime_digest_sha256"]
