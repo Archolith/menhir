@@ -231,9 +231,6 @@ def release_fixture(tmp_path: Path, monkeypatch):
     files_by_repo["yawn_deploy"]["Caddyfile"] = b"example.invalid {}\n"
     files_by_repo["yawn_deploy"]["releases.json"] = b"{}\n"
     files_by_repo["archolith_oauth"]["src/archolith_oauth/__init__.py"] = b""
-    # No artifact is sourced from yawn_vps since 0.2.0-16; the repository is
-    # still pinned for provenance until release 17 removes it.
-    files_by_repo["yawn_vps"]["README.md"] = b"yawn.vps\n"
 
     repos = {}
     commits = {}
@@ -527,10 +524,10 @@ def test_refuses_dirty_and_non_tip_repositories(release_fixture) -> None:
 
 def test_refuses_remote_mismatch(release_fixture) -> None:
     fixture = release_fixture
-    repo = fixture["repos"]["yawn_vps"]
+    repo = fixture["repos"]["yawn_deploy"]
     _run(
         "git", "-C", repo, "remote", "set-url", "origin",
-        "https://github.com/attacker/yawn.vps.git",
+        "https://github.com/attacker/yawn.deploy.git",
     )
     with pytest.raises(MODULE.ReleaseSpecError, match="origin mismatch"):
         MODULE.prepare_release_spec(fixture["inputs_path"], fixture["output"])

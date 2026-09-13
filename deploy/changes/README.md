@@ -23,7 +23,8 @@ file containing exactly these keys:
 Allowed categories are `added`, `changed`, `fixed`, `security`, and
 `operations`. Allowed deployment classes are `app-only`, `security-config`,
 and `maintenance`. Repository names are limited to `menhir`,
-`archolith_oauth`, `yawn_deploy`, and `yawn_vps`; every listed commit must be a
+`archolith_oauth`, and `yawn_deploy` (`yawn_vps` left the contract in release
+0.2.0-17); every listed commit must be a
 full 40-character lowercase hexadecimal commit ID. A commit may appear only
 once in a fragment.
 

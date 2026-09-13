@@ -164,7 +164,7 @@ def test_fragment_coverage_rejects_claim_for_unchanged_repository(tmp_path: Path
     fragment = {
         "repositories": {
             "menhir": [commits["menhir"][1]],
-            "yawn_vps": [commits["yawn_vps"][1]],
+            "yawn_deploy": [commits["yawn_deploy"][1]],
         }
     }
 

@@ -120,8 +120,8 @@ fi
 
 echo
 echo "scheduled nightly backup (${SCHEDULED_LAST_RUN##*/}):"
-receipt_fields "${SCHEDULED_LAST_RUN}" finished_utc exit_code restart stack_was elapsed_seconds job_id
+receipt_fields "${SCHEDULED_LAST_RUN}" finished_utc exit_code rehearsal generation restart stack_was downtime_seconds elapsed_seconds job_id
 if [ -e "${SCHEDULED_FAILURE}" ]; then
     echo "  LAST SCHEDULED RUN FAILED (${SCHEDULED_FAILURE##*/}):"
-    receipt_fields "${SCHEDULED_FAILURE}" finished_utc exit_code restart
+    receipt_fields "${SCHEDULED_FAILURE}" finished_utc exit_code rehearsal generation restart
 fi

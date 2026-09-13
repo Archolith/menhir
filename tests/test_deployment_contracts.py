@@ -134,9 +134,11 @@ def _valid_release() -> dict:
             "menhir": "a" * 40,
             "archolith_oauth": "b" * 40,
             "yawn_deploy": "c" * 40,
-            "yawn_vps": "d" * 40,
         },
-        "repo_remotes": dict(_schema.EXPECTED_REPO_REMOTES),
+        "repo_remotes": {
+            name: _schema.EXPECTED_REPO_REMOTES[name]
+            for name in ("menhir", "archolith_oauth", "yawn_deploy")
+        },
         "oauth_wheel_sha256": "e" * 64,
         "oauth_wheel_source": {
             "repository": "archolith_oauth",
@@ -428,12 +430,28 @@ def test_release_cryptographically_binds_oauth_wheel_to_source_commit(tmp_path):
         _schema.validate_release(str(path))
 
 
-def test_release_requires_four_commits(tmp_path):
-    release = _valid_release()
-    del release["repos"]["yawn_vps"]
-    path = _write_json(tmp_path, "release.json", release)
-    with pytest.raises(ValueError):
-        _schema.validate_release(str(path))
+def test_release_repositories_are_exactly_three_or_the_legacy_four(tmp_path):
+    # Records up to 0.2.0-16 pin yawn_vps; records from 17 do not. Either exact
+    # set validates; the remotes must name the same set; a missing core
+    # repository is refused.
+    legacy = _valid_release()
+    legacy["repos"]["yawn_vps"] = "d" * 40
+    legacy["repo_remotes"]["yawn_vps"] = _schema.EXPECTED_REPO_REMOTES["yawn_vps"]
+    legacy["security_review"]["authority_sha256"] =         _schema.release_authority_sha256(legacy)
+    _schema.validate_release(str(_write_json(tmp_path, "legacy.json", legacy)))
+
+    mismatched = _valid_release()
+    mismatched["repos"]["yawn_vps"] = "d" * 40
+    mismatched["security_review"]["authority_sha256"] =         _schema.release_authority_sha256(mismatched)
+    with pytest.raises(ValueError, match="repo_remotes"):
+        _schema.validate_release(str(_write_json(tmp_path, "mismatched.json", mismatched)))
+
+    for missing in ("menhir", "archolith_oauth", "yawn_deploy"):
+        release = _valid_release()
+        del release["repos"][missing]
+        del release["repo_remotes"][missing]
+        with pytest.raises(ValueError, match="repos"):
+            _schema.validate_release(str(_write_json(tmp_path, f"no-{missing}.json", release)))
 
 
 @pytest.mark.parametrize(

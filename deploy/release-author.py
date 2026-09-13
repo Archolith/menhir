@@ -44,7 +44,7 @@ SECURITY_REVIEW_KEYS = frozenset({
     "reviewed_utc", "authority_sha256", "verdict", "unresolved_findings",
     "scope", "report_sha256",
 })
-REPOSITORIES = frozenset({"menhir", "archolith_oauth", "yawn_deploy", "yawn_vps"})
+REPOSITORIES = frozenset({"menhir", "archolith_oauth", "yawn_deploy"})
 IMAGES = frozenset({"menhir", "neo4j", "caddy", "base"})
 EVIDENCE = frozenset({
     "oauth_wheel", "wheelhouse", "wheel_manifest",
@@ -81,9 +81,8 @@ DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 DEPLOYMENT_CLASSES = frozenset({"app-only", "security-config", "maintenance"})
 INGRESS_MODES = frozenset({"cloudflared"})
-ALLOWED_ARTIFACT_PREFIXES = ("/srv/menhir/production/", "/srv/yawn/projects/",
-                             "/etc/sudoers.d/", "/etc/systemd/system/",
-                             "/etc/tmpfiles.d/", "/etc/yawn-vps/",
+ALLOWED_ARTIFACT_PREFIXES = ("/srv/menhir/production/", "/etc/sudoers.d/",
+                             "/etc/systemd/system/", "/etc/tmpfiles.d/",
                              "/usr/local/sbin/")
 
 # Safe release_id contract (blocker 8): only this shape is accepted, so a

@@ -28,7 +28,7 @@ class ReleaseSpecError(ValueError):
     """A release preparation input or derived value is invalid."""
 
 
-REPOSITORIES = frozenset({"menhir", "archolith_oauth", "yawn_deploy", "yawn_vps"})
+REPOSITORIES = frozenset({"menhir", "archolith_oauth", "yawn_deploy"})
 IMAGES = frozenset({"menhir", "neo4j", "caddy", "base"})
 SECRET_VERSIONS = frozenset({
     "neo4j-auth", "neo4j-password", "oauth-signing-key",

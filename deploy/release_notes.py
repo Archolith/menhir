@@ -19,7 +19,7 @@ from typing import Any, Mapping, NoReturn, Sequence
 SCHEMA = 1
 CATEGORIES = ("added", "changed", "fixed", "security", "operations")
 DEPLOYMENT_CLASSES = ("app-only", "security-config", "maintenance")
-REPOSITORIES = ("menhir", "archolith_oauth", "yawn_deploy", "yawn_vps")
+REPOSITORIES = ("menhir", "archolith_oauth", "yawn_deploy")
 SECURITY_SCOPES = (
     "authentication-and-oauth-authority",
     "authorization-and-client-tool-policy",

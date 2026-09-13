@@ -39,7 +39,7 @@ SPEC_KEYS_INHERITED = (
     (SPEC_KEYS - frozenset({"image_refs"}))
     | frozenset({"image_provenance", "inherited_image_release"})
 )
-REPOSITORIES = frozenset({"menhir", "archolith_oauth", "yawn_deploy", "yawn_vps"})
+REPOSITORIES = frozenset({"menhir", "archolith_oauth", "yawn_deploy"})
 EVIDENCE_DIGESTS = {
     "oauth_wheel": "oauth_wheel_sha256",
     "wheel_manifest": "wheel_manifest_sha256",

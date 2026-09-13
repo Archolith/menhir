@@ -128,7 +128,10 @@ REQUIRED_SECURITY_REVIEW_SCOPE = frozenset({
     "backup-restore-and-rollback",
     "runtime-hardening-and-observability",
 })
-_RELEASE_REPOS = frozenset({"menhir", "archolith_oauth", "yawn_deploy", "yawn_vps"})
+_RELEASE_REPOS = frozenset({"menhir", "archolith_oauth", "yawn_deploy"})
+# yawn_vps contributed host artifacts until release 0.2.0-16 and stayed pinned
+# there for provenance; records up to 16 carry it, records from 17 do not.
+_LEGACY_RELEASE_REPOS = _RELEASE_REPOS | frozenset({"yawn_vps"})
 _RELEASE_IMAGES = frozenset({"menhir", "neo4j", "caddy", "base"})
 _RELEASE_IMAGE_REFS = _RELEASE_IMAGES
 _RELEASE_DEPLOYMENT_CLASSES = frozenset({
@@ -505,14 +508,17 @@ def validate_release(path: str) -> dict:
         raise ValueError("ingress_mode is invalid")
 
     repos = release.get("repos")
-    _require_exact_keys(repos, _RELEASE_REPOS, "repos")
-    for repo in sorted(_RELEASE_REPOS):
+    if not isinstance(repos, dict) or frozenset(repos) not in (
+            _RELEASE_REPOS, _LEGACY_RELEASE_REPOS):
+        raise ValueError("repos must name exactly the release repositories")
+    release_repos = frozenset(repos)
+    for repo in sorted(release_repos):
         if not _COMMIT_RE.match(_require_str(repos.get(repo), "repos.%s" % repo)):
             raise ValueError("repos.%s must be a 40-char lowercase hex commit" % repo)
     repo_remotes = release.get("repo_remotes")
-    _require_exact_keys(repo_remotes, _RELEASE_REPOS, "repo_remotes")
-    for repo, expected in EXPECTED_REPO_REMOTES.items():
-        if repo_remotes.get(repo) != expected:
+    _require_exact_keys(repo_remotes, release_repos, "repo_remotes")
+    for repo in sorted(release_repos):
+        if repo_remotes.get(repo) != EXPECTED_REPO_REMOTES[repo]:
             raise ValueError("repo_remotes.%s is not the canonical repository identity" % repo)
     deployment = release.get("deployment")
     _require_exact_keys(deployment, _RELEASE_DEPLOYMENT, "deployment")
@@ -702,7 +708,7 @@ def validate_release(path: str) -> dict:
                                 "artifacts[%s]" % path)
             _require_sha256(entry.get("sha256"), "artifacts[%s].sha256" % path)
             repository = entry.get("repository")
-            if repository not in _RELEASE_REPOS:
+            if repository not in release_repos:
                 raise ValueError("artifacts[%s].repository is unknown" % path)
             if entry.get("commit") != repos[repository]:
                 raise ValueError("artifacts[%s].commit differs from repository authority" % path)

@@ -22,7 +22,6 @@ COMMITS = {
     "menhir": "0" * 40,
     "archolith_oauth": "1" * 40,
     "yawn_deploy": "2" * 40,
-    "yawn_vps": "3" * 40,
 }
 
 
@@ -55,7 +54,7 @@ def test_collect_and_render_are_deterministic(tmp_path: Path) -> None:
         fragment(
             id="z-fix",
             category="fixed",
-            repositories={"yawn_vps": [COMMITS["yawn_vps"]]},
+            repositories={"yawn_deploy": [COMMITS["yawn_deploy"]]},
             security_scopes=["secret-handling"],
         ),
     )

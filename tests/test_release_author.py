@@ -239,7 +239,7 @@ def _image_publication_bundle(
 
 
 def _fixture(tmp_path: Path) -> tuple[Path, Path, dict]:
-    repo_names = ("menhir", "archolith_oauth", "yawn_deploy", "yawn_vps")
+    repo_names = ("menhir", "archolith_oauth", "yawn_deploy")
     repos: dict[str, str] = {}
     commits: dict[str, str] = {}
     artifact_sources: dict[str, dict[str, str]] = {}
@@ -284,7 +284,7 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, dict]:
     provenance.write_text(json.dumps({
         "schema": 1,
         "repos": commits,
-        "repo_remotes": MODULE.EXPECTED_REPO_REMOTES,
+        "repo_remotes": {name: MODULE.EXPECTED_REPO_REMOTES[name] for name in repo_names},
         "images": images,
         "oauth_wheel_sha256": _sha(oauth_wheel),
         "wheel_manifest_sha256": _sha(wheel_manifest),
@@ -749,8 +749,8 @@ def test_refuses_dirty_repository(tmp_path: Path) -> None:
 def test_refuses_noncanonical_repository_remote(tmp_path: Path) -> None:
     spec_path, output, spec = _fixture(tmp_path)
     subprocess.run(
-        ["git", "-C", spec["repositories"]["yawn_vps"], "remote", "set-url",
-         "origin", "https://github.com/attacker/yawn.vps.git"],
+        ["git", "-C", spec["repositories"]["yawn_deploy"], "remote", "set-url",
+         "origin", "https://github.com/attacker/yawn.deploy.git"],
         check=True,
     )
     with pytest.raises(ValueError, match="origin identity mismatch"):

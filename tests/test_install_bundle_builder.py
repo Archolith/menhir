@@ -251,7 +251,7 @@ def test_rejects_git_blob_oid_mismatch(tmp_path: Path) -> None:
 
 def test_rejects_inconsistent_repository_checkout(tmp_path: Path) -> None:
     release_path, spec_path, spec = _release_fixture(tmp_path)
-    spec["repositories"]["menhir"] = spec["repositories"]["yawn_vps"]
+    spec["repositories"]["menhir"] = spec["repositories"]["yawn_deploy"]
     spec_path.write_text(json.dumps(spec), encoding="ascii")
     with pytest.raises(ValueError, match="inconsistent|missing"):
         MODULE.build_install_bundle(release_path, spec_path, tmp_path / "bundle")
