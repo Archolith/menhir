@@ -1,0 +1,24 @@
+{
+  "artifacts": {
+    "bundle_manifest_sha256": "2e9ac719b39f5d3779e515dc4d2b33ccda809609de82fcfd9398caa2122e26d1",
+    "bundle_sha256": "368a9864b70621e12b09f08d9339fad6b82050760e028368a26ad388c3156e1d",
+    "notes_json_sha256": "ce2e3c68dbb7bd2ed0ea69f107f12b77bc93068beebc099bf99852c759681170",
+    "notes_markdown_sha256": "a761a46868cd678fd7bb9b4da6a5bba9059318c3ef033456f22698d6ca0838c3",
+    "release_sha256": "f10c3564839b5e27e3db8d168611a7aa6f1e77c34354f8313d61bd156f612781",
+    "review_request_sha256": "cb145a1f6db56136ee278a3c7ca0a53bd54d7708a3aa1512d1d7818532b5c22d",
+    "security_review_sha256": "ac1960977f58c62eb3793e09b7f97c42172c5452c4c619de0cfa8349f4e78337",
+    "spec_sha256": "f509f74651093e7eb30ad2842ad1e208f65cfccc3f313474fa76ebbf966c18ed"
+  },
+  "fragments": [
+    {
+      "name": "sever-yawn-vps-sources.json",
+      "sha256": "13ff4b3c3705775dd861c865f5dbe617395b8591ddb83f71f748922861c47ab9"
+    }
+  ],
+  "fragments_dir": "C:\\Users\\thron\\Documents\\Codex\\2026-09-06\\inve\\work\\menhir-doc-staged-promotion\\deploy\\changes\\unreleased",
+  "kind": "menhir-release-publication",
+  "publication_nonce": "c29a159734a6a8469d97685b9df2b119",
+  "release_id": "menhir-prod-0.2.0-16",
+  "schema": 1,
+  "workspace": "C:\\Users\\thron\\Documents\\Codex\\2026-09-06\\inve\\work\\releases\\menhir-prod-0.2.0-16\\workspace"
+}

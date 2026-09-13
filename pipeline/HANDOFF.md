@@ -455,7 +455,25 @@ No release-managed artifact was modified.
    committed in 14 s with no outage, `verify-artifacts` 0, maintenance closed by
    `complete-maintenance --artifact-only`. The flow works when nothing is
    hand-installed underneath it.
-4. Delete the stale `/srv/menhir/production/deploy/` shadow tree.
-5. Execute the 19 `replace` dispositions; consolidate per `CONSOLIDATION.md`.
+4. ~~Sever yawn.vps (Phase 3)~~ **Done 2026-09-13 15:45 UTC as release
+   menhir-prod-0.2.0-16** (release_sha256 `f10c3564…`; menhir `9ce2056`..`5fdf26c`;
+   yawn.vps cleanup `3f7c5dc`). The ten live host artifacts are sourced from
+   `pipeline/bin` and `pipeline/etc`; the OAuth operations gateway, its five
+   `/srv/yawn/projects/yawn.vps` sources, `verify_python_runtime.py` and the
+   three `/etc/yawn-vps` rendered files are retired; verify-artifacts 40 OK;
+   scaffold contract without the gateway pin installed first. Plan:
+   `.agent/plans/menhir-phase3-sever-yawn-vps-plan.md` (shape B). The
+   `yawn_vps` repository pin leaves the release contract in release 17.
+   **Found on the way, must be fixed before the next scaffold install:** the
+   nightly wrapper backs up but does not stage or rehearse, and
+   `validate_backup_promotion` only accepts a backup receipt younger than one
+   hour, so no nightly generation can ever be rehearsed and scaffold
+   `install.sh` (which runs `seed-drill` unconditionally) refuses from the next
+   morning on. Today it was unblocked by a manual backup + rehearsal
+   (`generation.cQTQX0b8vx`). Fix: the wrapper runs `stage-generation.sh` and
+   the rehearsal right after the backup.
+5. Delete the stale `/srv/menhir/production/deploy/` shadow tree.
+6. Execute the remaining `replace` dispositions; release 17 drops `yawn_vps`
+   from the release contract (plan section 3.D).
 
 Items 1 and 2 are the only ones affecting whether data can be protected today.

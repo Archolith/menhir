@@ -48,7 +48,7 @@ Heuristic line classification, then hand-verified for every row marked defect.
 |---|---|---|---|
 | `backup-local-receipt.json` | `menhir-backup-local` | `lib.sh:295,636`, `stage-generation.sh`, `worker:153`, scaffold status (24 h freshness policy) | latest-wins |
 | `backup-receipts/` (12) | `menhir-backup-local`, one per generation | `menhir-backup-local --resume-cleanup` | history |
-| `rehearsal-receipt.json` | `restore-generation.sh:295,339` | `candidate-deploy.sh:17`, `lib.sh:296,644`, `release-run.sh:128`, scaffold status (must bind current backup generation) | latest-wins |
+| `rehearsal-receipt.json` (**goes stale after every nightly backup** — the wrapper does not rehearse, and `stage-generation.sh` refuses receipts older than 1 h, so a nightly generation can only be rehearsed by the wrapper itself; scaffold `install.sh` refuses at `seed-drill` until it is) | `restore-generation.sh:295,339` | `candidate-deploy.sh:17`, `lib.sh:296,644`, `release-run.sh:128`, scaffold status (must bind current backup generation) | latest-wins |
 | `desktop-archive-receipt.json` | `menhir-backup-archive.ps1` on the desktop | `promote.sh:56`, `worker:149`, `release-run.sh:88`, scaffold | latest-wins |
 | `scaffold-receipt.json` | scaffold `capture` | scaffold `verify`/`status` | latest-wins |
 | `scaffold-restore-drill-receipt.json` | scaffold `seed-drill` / `record-backup-drill` | scaffold `status` | latest-wins |
