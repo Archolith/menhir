@@ -129,7 +129,7 @@ definitions available to finish the retirement or restore the release.
 | Cloudflared is the sole ingress (ADR 0002, **corrected**) | Verified running. The shared Caddy vhost is dead config. |
 | Cutover takes a maintenance window | Deletes the v1 bridge, handoff fence, cgroup census, caller drain, all-lock ordering |
 | Deploys authorized by root ceremony, no signing key | Deletes the entire PKI: key custody, ACLs, passphrases, trust store, rotation, revocation |
-| Nightly backup at 04:00 America/Chicago | Timer delivered by the scaffold — see section 6 |
+| Nightly backup at 04:00 America/Chicago | Installed 2026-09-13 through the scaffold — see sections 6 and 9 |
 | Publish stays rigorous; deploy does not | The organizing principle. See section 5. |
 
 Together the first three delete roughly eight of the architecture review's
@@ -437,8 +437,14 @@ No release-managed artifact was modified.
 ## 9. Next actions, in order
 
 1. ~~Finish the ingress retirement~~ **Done 2026-09-13.** See section 3.
-2. **Install the timer** through the scaffold (section 6). The wrapper ran
-   clean end-to-end on 2026-09-13 (172 s).
+2. ~~Install the timer~~ **Done 2026-09-13 03:44 CEST** via scaffold
+   transaction (menhir `8c5015c`, IdeaProjects `c7dcc762`). `menhir-backup.timer`
+   active/waiting, first fire Sun 2026-09-13 09:00 UTC (04:00 CDT); nothing
+   fired on install; audit unit green against the new contract. Installed
+   digests equal the committed `pipeline/` sources. **Check after the first
+   run:** `scheduled-backup-last-run.json` status `ok`, no
+   `scheduled-backup-failure.json`, `menhir-backup.service` not `failed`,
+   and the audit still green (it will now judge the nightly receipt).
 3. **Deploy the rewritten `backup-status`** so the command tells the truth in an
    incident.
 4. Delete the stale `/srv/menhir/production/deploy/` shadow tree.
