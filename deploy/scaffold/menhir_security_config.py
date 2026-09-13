@@ -24,37 +24,27 @@ ADMISSION_LOCK = app.ADMISSION_LOCK
 UPLOAD_ROOT = Path("/home/thron/.menhir-security-config-upload")
 ACTIVE = STATUS / "security-config-active.json"
 LAST = STATUS / "security-config-last.json"
-OPERATIONS_SERVICE = "menhir-oauth-operations.service"
 BUNDLE_ID = re.compile(r"[a-f0-9]{32}")
 
 TARGETS = {
     "release.json": app.LIVE_RELEASE,
     "production.env": app.LIVE_ENV,
     "client-policy.json": app.LIVE_POLICY,
-    "operations-policy.json": Path("/etc/yawn-vps/menhir-oauth-policy.json"),
-    "oauth-public.pem": Path("/etc/yawn-vps/menhir-oauth-public.pem"),
 }
 DESTINATIONS = {
     "release.json": "/srv/menhir/production/release/release.json",
     "production.env": "/srv/menhir/production/release/production.env",
     "client-policy.json": "/srv/menhir/production/policy/client-policy.json",
-    "operations-policy.json": "/etc/yawn-vps/menhir-oauth-policy.json",
-    "oauth-public.pem": "/etc/yawn-vps/menhir-oauth-public.pem",
 }
 MODES = {
     "release.json": 0o400,
     "production.env": 0o400,
     "client-policy.json": 0o644,
-    "operations-policy.json": 0o644,
-    "oauth-public.pem": 0o644,
 }
 ALLOWED_ENV_CHANGES = app.ALLOWED_ENV_CHANGES | {"MENHIR_CLIENT_POLICY_DIGEST"}
-ALLOWED_RENDERED_CHANGES = {
-    "production_env_sha256", "policy_sha256", "operations_policy_sha256",
-}
+ALLOWED_RENDERED_CHANGES = {"production_env_sha256", "policy_sha256"}
 ALLOWED_CONFIG_DESTINATIONS = set(DESTINATIONS.values()) - {
     "/srv/menhir/production/release/release.json",
-    "/etc/yawn-vps/menhir-oauth-public.pem",
 }
 
 
@@ -98,16 +88,8 @@ def validate_policy_files(bundle: Path, release: dict[str, Any]) -> None:
     ).encode("ascii")).hexdigest()
     if declared != calculated:
         raise Error("client-policy.json canonical digest mismatch")
-    operations = app.strict_load(bundle / "operations-policy.json")
-    if operations.get("schema") != 1:
-        raise Error("operations-policy.json schema mismatch")
-    public = (bundle / "oauth-public.pem").read_text(encoding="ascii")
-    if "-----BEGIN PUBLIC KEY-----" not in public or "PRIVATE KEY" in public:
-        raise Error("OAuth public key is not a public PEM key")
     expected = {
         "client-policy.json": release.get("rendered", {}).get("policy_sha256"),
-        "operations-policy.json": release.get("rendered", {}).get("operations_policy_sha256"),
-        "oauth-public.pem": release.get("rendered", {}).get("oauth_public_key_sha256"),
         "production.env": release.get("rendered", {}).get("production_env_sha256"),
     }
     for name, digest in expected.items():
@@ -317,14 +299,11 @@ def finalize(transaction: dict[str, Any]) -> None:
 
 
 def install_files(root: Path, prefix: str) -> None:
-    # Commit policy and gateway authority before replacing the app that consumes them.
-    for name in ("client-policy.json", "operations-policy.json", "oauth-public.pem",
-                 "production.env", "release.json"):
+    # Commit policy before replacing the app that consumes it.
+    for name in ("client-policy.json", "production.env", "release.json"):
         source = root / f"{prefix}-{name}"
         app.require_root_file(source, f"{prefix} {name}")
         app.atomic_bytes(TARGETS[name], source.read_bytes(), MODES[name])
-    app.run(["systemctl", "restart", OPERATIONS_SERVICE], 30)
-    app.run(["systemctl", "is-active", "--quiet", OPERATIONS_SERVICE], 15)
 
 
 def assert_unchanged(transaction: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:

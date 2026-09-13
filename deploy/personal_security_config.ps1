@@ -115,8 +115,6 @@ $selected = [ordered]@{
     "release.json" = "/srv/menhir/production/release/release.json"
     "production.env" = "/srv/menhir/production/release/production.env"
     "client-policy.json" = "/srv/menhir/production/policy/client-policy.json"
-    "operations-policy.json" = "/etc/yawn-vps/menhir-oauth-policy.json"
-    "oauth-public.pem" = "/etc/yawn-vps/menhir-oauth-public.pem"
 }
 $uploadId = [Guid]::NewGuid().ToString("N")
 $temporary = Join-Path ([IO.Path]::GetTempPath()) "menhir-security-config-$uploadId"
