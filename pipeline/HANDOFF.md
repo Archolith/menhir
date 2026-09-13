@@ -234,7 +234,10 @@ enables the timer, and the contract pins their digests and requires
 `Persistent=true` fires a never-run timer the moment it starts (that took an
 unscheduled production backup once this session). Rollback of the scaffold
 transaction restores the prior (absent) state through the existing unit
-snapshots. Three wrapper defects were found and **fixed**; all
+snapshots; the stamp file is the one write outside the snapshot set and is
+harmless to leave. A backup that fails leaves `menhir-backup.service`
+`failed`, which refuses the next scaffold install at `snapshot_unit` until
+`systemctl reset-failed menhir-backup.service`. Three wrapper defects were found and **fixed**; all
 three were mine. Verified against the host read-only, not just reasoned about:
 
 1. **Stack detection always returned "stopped."** Diagnosed initially as a

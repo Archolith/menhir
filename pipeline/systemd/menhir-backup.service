@@ -11,6 +11,10 @@ Group=root
 # The backup stops the stack, dumps, verifies by loading both dumps back,
 # encrypts, then restarts. Generous ceiling; the wrapper records real elapsed.
 TimeoutStartSec=21600
+# On stop, finalize restarts the stack and waits for health (up to 240 s in
+# release-lib wait_healthy); the 90 s default would SIGKILL it before the
+# run markers are written.
+TimeoutStopSec=300
 # Install with:
 #   install -o root -g root -m 0755 pipeline/scheduled-backup.sh \
 #       /usr/local/sbin/menhir-scheduled-backup

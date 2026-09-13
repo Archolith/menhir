@@ -57,8 +57,10 @@ bundle_files=(
     menhir-scaffold-audit.service menhir-scaffold-audit.timer
     menhir-scaffold.sudoers install.sh
 )
-# systemd's Persistent= catch-up uses this stamp's mtime as the last trigger.
-# A never-run timer has no stamp, so starting it fires the backup immediately.
+# systemd's Persistent= catch-up reads this stamp's mtime as the last trigger
+# when the timer starts; a stamp left by an earlier life of the unit is
+# honoured and fires the backup at once. Reset it whenever this install will
+# start the timer.
 backup_timer_stamp="/var/lib/systemd/timers/stamp-menhir-backup.timer"
 file_keys=(
     contract scaffold app_only security_config stage_vps scheduled_backup
@@ -499,11 +501,10 @@ systemctl daemon-reload
 transaction_step="enabling scaffold audit timer"
 systemctl enable --now menhir-scaffold-audit.timer
 transaction_step="enabling nightly backup timer"
-if [ "$(unit_property menhir-backup.timer LoadState)" = not-found ]; then
-    # The timer was not installed before this transaction. A stamp left by an
-    # earlier life of the unit is not a last trigger the catch-up policy may
-    # honour; record now so the timer waits for its next 04:00 window instead
-    # of taking a backup mid-install.
+if [ "$(unit_property menhir-backup.timer ActiveState)" != active ]; then
+    # enable --now will start the timer (absent, or loaded but stopped), and
+    # timer_start reads the stamp. Record now so it waits for its next 04:00
+    # window instead of taking a backup mid-install.
     install -d -o root -g root -m 0755 "$(dirname -- "$backup_timer_stamp")"
     touch -- "$backup_timer_stamp"
 fi

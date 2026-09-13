@@ -1353,14 +1353,13 @@ def test_scaffold_owns_the_nightly_backup_timer_and_does_not_fire_it_on_install(
     assert {"active": "active", "enabled": "enabled", "name": "menhir-backup.timer"} in contract["units"]
 
     # Persistent=true fires the timer on start whenever a window was missed
-    # since the stamp's timestamp -- and a never-run timer, or one whose stamp
-    # was left by an earlier life of the unit, has missed every window. The
-    # stamp must be reset whenever the timer was not installed before this
-    # transaction, before the timer is enabled.
+    # since the stamp's timestamp, and a stamp left by an earlier life of the
+    # unit has missed every window. The stamp must be reset whenever this
+    # install will start the timer, before the timer is enabled.
     units = (scaffold.parent.parent / "pipeline" / "systemd" / "menhir-backup.timer").read_text(encoding="ascii")
     assert "Persistent=true" in units
     stamp = 'touch -- "$backup_timer_stamp"'
-    assert 'if [ "$(unit_property menhir-backup.timer LoadState)" = not-found ]; then' in install
+    assert 'if [ "$(unit_property menhir-backup.timer ActiveState)" != active ]; then' in install
     assert '[ ! -e "$backup_timer_stamp" ]' not in install
     enable = "systemctl enable --now menhir-backup.timer"
     reload = install.index("transaction_step=\"reloading systemd\"")
@@ -1447,9 +1446,9 @@ def test_shared_scaffold_wrapper_maps_reviewed_repo_and_bootstraps_outside_old_s
         '"deploy\\scaffold\\install.sh"'
     ) in wrapper
     for name, source in (
-        ("scheduled-backup.sh", "pipeline\scheduled-backup.sh"),
-        ("menhir-backup.service", "pipeline\systemd\menhir-backup.service"),
-        ("menhir-backup.timer", "pipeline\systemd\menhir-backup.timer"),
+        ("scheduled-backup.sh", r"pipeline\scheduled-backup.sh"),
+        ("menhir-backup.service", r"pipeline\systemd\menhir-backup.service"),
+        ("menhir-backup.timer", r"pipeline\systemd\menhir-backup.timer"),
     ):
         assert f'"{name}" = Join-Path $RepositoryRoot "{source}"' in wrapper
     # Privileged steps run either through a separately authorized root endpoint
