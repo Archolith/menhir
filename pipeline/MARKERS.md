@@ -53,7 +53,7 @@ Heuristic line classification, then hand-verified for every row marked defect.
 | `scaffold-receipt.json` | scaffold `capture` | scaffold `verify`/`status` | latest-wins |
 | `scaffold-restore-drill-receipt.json` | scaffold `seed-drill` / `record-backup-drill` | scaffold `status` | latest-wins |
 | `durable-live-census.json` | `backup-generation.sh:128` via `validate_durable_inventory.py --live` | (binding checked at backup time) | latest-wins |
-| `backup-status` (release 0.2.0-15, `yawn.vps@bc4f29e`) | latest-wins; failure marker is `rm`'d on success |
+| `scheduled-backup-last-run.json`, `scheduled-backup-failure.json` | `/usr/local/sbin/menhir-scheduled-backup` (scaffold-installed 2026-09-13, nightly via `menhir-backup.timer`) | `backup-status` (release 0.2.0-15, `yawn.vps@bc4f29e`) | latest-wins; failure marker is `rm`'d on success |
 | `maintenance-history/` (1) | scaffold `_archive_completed_maintenance` | — | history |
 | `mutation-history/` (1) | `backup-generation.sh:204-215` — archives the *content* of `first-mutation` per generation, but never removes the marker | — | history |
 | `abandoned/` (16) | scaffold `abandon-maintenance` | — | history |
