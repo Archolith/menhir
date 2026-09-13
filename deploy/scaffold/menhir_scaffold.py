@@ -622,10 +622,65 @@ def begin_maintenance(binding: dict[str, str]) -> dict[str, Any]:
     raise ScaffoldError("root maintenance admission holder did not become ready")
 
 
-def complete_maintenance(binding: dict[str, str]) -> dict[str, Any]:
+VERIFY_ARTIFACTS = Path("/srv/menhir/production/bin/verify-artifacts")
+
+
+def _prove_artifact_only_complete(
+    state: dict[str, Any], binding: dict[str, str],
+    contract_path: Path, receipt_path: Path,
+) -> None:
+    """Prove that this maintenance is finished without a cutover.
+
+    A release that ships the prior release's image unchanged has nothing to
+    cut over: the installer places the artifacts and stops, and the only lane
+    to `complete` -- candidate, accept, promote -- would deploy the identical
+    image beside itself for no reason. Before this, such a maintenance could
+    never close, which blocked the app-only lane and failed the audit.
+
+    Completion is proven, not declared: the live release authority must be the
+    one this maintenance was bound to, every installed artifact must verify,
+    the running containers must carry that authority's image digests, no
+    candidate may exist, and the public endpoint must be ready.
+    """
+    if state["stage"] != "start":
+        raise ScaffoldError("artifact-only completion applies to a maintenance at start")
+    require_safe_root_file(RELEASE_PATH, "live release authority")
+    if sha256_file(RELEASE_PATH) != binding["release_manifest_sha256"]:
+        raise ScaffoldError("live release authority is not this maintenance's release")
+    verified = subprocess.run(
+        [str(VERIFY_ARTIFACTS)], check=False,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    if verified.returncode != 0:
+        raise ScaffoldError("installed artifacts do not verify against the release authority")
+    contract = verify_static(contract_path, receipt_path)["contract"]
+    healthy, candidates = inspect_runtime(contract)
+    if not healthy:
+        raise ScaffoldError("production is not running this release's images healthily")
+    if candidates:
+        raise ScaffoldError("candidate containers exist; this is not artifact-only")
+    if not public_ready(contract["runtime"]["public_ready_url"]):
+        raise ScaffoldError("public endpoint is not ready")
+
+
+def complete_maintenance(
+    binding: dict[str, str],
+    *,
+    artifact_only: bool = False,
+    contract_path: Path | None = None,
+    receipt_path: Path | None = None,
+) -> dict[str, Any]:
     require_root()
     require_safe_root_file(RELEASE_RUN, "maintenance journal")
     state = validate_maintenance_state(strict_load(RELEASE_RUN), binding)
+    if artifact_only and state["stage"] != "complete":
+        _prove_artifact_only_complete(
+            state, binding, contract_path or CONTRACT_PATH, receipt_path or RECEIPT_PATH,
+        )
+        now = iso(utc_now())
+        state = {**state, "stage": "complete", "updated_utc": now, "completed_utc": now}
+        validate_maintenance_state(state, binding)
+        atomic_json(RELEASE_RUN, state)
     if state["stage"] != "complete":
         raise ScaffoldError("maintenance admission cannot close before acceptance")
     stopped = subprocess.run(
@@ -1065,6 +1120,11 @@ def parser() -> argparse.ArgumentParser:
         "complete-maintenance",
     ):
         add_maintenance_binding_arguments(commands.add_parser(name))
+    commands.choices["complete-maintenance"].add_argument(
+        "--artifact-only", action="store_true",
+        help="close a maintenance that installed artifacts without an image cutover; "
+             "proven against the live authority, verifier, runtime and endpoint",
+    )
     return result
 
 
@@ -1098,7 +1158,12 @@ def main(argv: list[str]) -> int:
         elif args.command == "assert-maintenance":
             value = assert_maintenance(binding_from_arguments(args))
         elif args.command == "complete-maintenance":
-            value = complete_maintenance(binding_from_arguments(args))
+            value = complete_maintenance(
+                binding_from_arguments(args),
+                artifact_only=args.artifact_only,
+                contract_path=args.contract,
+                receipt_path=args.receipt,
+            )
         else:
             value = abandon_maintenance(args.contract, args.receipt, args.reason)
     except ScaffoldError as exc:

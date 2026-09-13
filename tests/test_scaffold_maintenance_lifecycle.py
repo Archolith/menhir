@@ -163,3 +163,75 @@ def test_completed_maintenance_archives_its_markers_with_the_journal(host: dict)
     marker_dirs = [p for p in history if p.name.endswith(".markers")]
     assert len(journals) == 1 and len(marker_dirs) == 1
     assert {p.name for p in marker_dirs[0].iterdir()} == set(scaffold.MAINTENANCE_MARKERS)
+
+
+def _bound(started: dt.datetime, release_sha: str) -> dict:
+    return {
+        "release_id": "menhir-prod-0.2.0-14", "release_manifest_sha256": release_sha,
+        "runner_sha256": HEX, "approval_sha256": HEX, "promotion_attempt_id": ATTEMPT,
+        "approved_utc": scaffold.iso(started), "promotion_started_utc": scaffold.iso(started),
+    }
+
+
+def test_artifact_only_completion_is_proven_not_declared(host: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A release that ships the prior image unchanged installs its artifacts
+    and stops. It closes by proof: the live authority is this maintenance's,
+    the verifier passes, the runtime carries that authority's images, no
+    candidate exists, the endpoint is ready."""
+    started = scaffold.utc_now() - dt.timedelta(minutes=5)
+    _write(host["release"], {"release_id": "menhir-prod-0.2.0-14"})
+    release_sha = scaffold.sha256_file(host["release"])
+    journal = _journal(started, release_id="menhir-prod-0.2.0-14")
+    journal["release_manifest_sha256"] = release_sha
+    _write(scaffold.RELEASE_RUN, journal)
+    calls: list[list[str]] = []
+    monkeypatch.setattr(scaffold.subprocess, "run",
+                        lambda cmd, **k: calls.append(cmd) or type("R", (), {"returncode": 0})())
+
+    state = scaffold.complete_maintenance(_bound(started, release_sha), artifact_only=True)
+
+    assert state["stage"] == "complete" and state["completed_utc"] is not None
+    assert json.loads(scaffold.RELEASE_RUN.read_text())["stage"] == "complete"
+    assert [str(scaffold.VERIFY_ARTIFACTS)] in calls
+
+
+def test_artifact_only_refuses_when_live_authority_is_not_this_release(host: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    started = scaffold.utc_now() - dt.timedelta(minutes=5)
+    _write(host["release"], {"release_id": "menhir-prod-0.2.0-13"})
+    _write(scaffold.RELEASE_RUN, _journal(started, release_id="menhir-prod-0.2.0-14"))
+    with pytest.raises(scaffold.ScaffoldError, match="not this maintenance's release"):
+        scaffold.complete_maintenance(_bound(started, HEX), artifact_only=True)
+    assert json.loads(scaffold.RELEASE_RUN.read_text())["stage"] == "start"
+
+
+def test_artifact_only_refuses_when_verifier_fails(host: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    started = scaffold.utc_now() - dt.timedelta(minutes=5)
+    _write(host["release"], {"release_id": "menhir-prod-0.2.0-14"})
+    release_sha = scaffold.sha256_file(host["release"])
+    journal = _journal(started, release_id="menhir-prod-0.2.0-14")
+    journal["release_manifest_sha256"] = release_sha
+    _write(scaffold.RELEASE_RUN, journal)
+    monkeypatch.setattr(scaffold.subprocess, "run",
+                        lambda cmd, **k: type("R", (), {"returncode": 1})())
+    with pytest.raises(scaffold.ScaffoldError, match="do not verify"):
+        scaffold.complete_maintenance(_bound(started, release_sha), artifact_only=True)
+
+
+def test_artifact_only_refuses_when_a_candidate_exists(host: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    started = scaffold.utc_now() - dt.timedelta(minutes=5)
+    _write(host["release"], {"release_id": "menhir-prod-0.2.0-14"})
+    release_sha = scaffold.sha256_file(host["release"])
+    journal = _journal(started, release_id="menhir-prod-0.2.0-14")
+    journal["release_manifest_sha256"] = release_sha
+    _write(scaffold.RELEASE_RUN, journal)
+    monkeypatch.setattr(scaffold.subprocess, "run", lambda cmd, **k: type("R", (), {"returncode": 0})())
+    monkeypatch.setattr(scaffold, "inspect_runtime", lambda contract: (True, ["menhir-candidate-app"]))
+    with pytest.raises(scaffold.ScaffoldError, match="candidate containers exist"):
+        scaffold.complete_maintenance(_bound(started, release_sha), artifact_only=True)
+
+
+def test_plain_complete_still_requires_acceptance(host: dict) -> None:
+    started = scaffold.utc_now() - dt.timedelta(minutes=5)
+    _write(scaffold.RELEASE_RUN, _journal(started, release_id="menhir-prod-0.2.0-14"))
+    with pytest.raises(scaffold.ScaffoldError, match="before acceptance"):
+        scaffold.complete_maintenance(_bound(started, HEX))
