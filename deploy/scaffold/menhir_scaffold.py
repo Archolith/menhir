@@ -510,6 +510,46 @@ def hold_maintenance(binding: dict[str, str]) -> None:
         time.sleep(30)
 
 
+# Every marker that belongs to one maintenance transaction. Written during the
+# cycle, and archived with its journal when the cycle ends -- by completion or
+# by abandonment. Before this list existed, `abandon` archived some of these and
+# `complete` archived none, so every finished cycle left markers behind for the
+# next one to trip over. `first-mutation` in particular had no clearer at all,
+# which made abandon impossible on any host that had ever completed a promote.
+MAINTENANCE_MARKERS = (
+    "candidate-generation", "candidate-prestart-authority.json",
+    "candidate-accept-receipt.json", "candidate-accepted", "restore-selection",
+    "same-host-writer-fence-intent.json", "same-host-writer-fence.json",
+    "first-mutation",
+)
+
+
+def _archive_maintenance_markers(archive: Path) -> dict[str, str]:
+    moved: dict[str, str] = {}
+    for name in MAINTENANCE_MARKERS:
+        source = STATUS_ROOT / name
+        if source.exists():
+            require_safe_root_file(source, name)
+            digest = sha256_file(source)
+            os.replace(source, archive / name)
+            moved[name] = digest
+    return moved
+
+
+def _mutation_belongs_to(state: dict[str, Any]) -> bool:
+    """True when first-mutation was written during this maintenance.
+
+    The marker is the point of no return for one transaction. A marker older
+    than the journal belongs to a previous cycle whose completion did not
+    archive it, and must not veto abandoning the current one.
+    """
+    if not FIRST_MUTATION.exists():
+        return False
+    started = parse_time(state.get("started_utc"), "maintenance start")
+    mutated = dt.datetime.fromtimestamp(FIRST_MUTATION.stat().st_mtime, dt.timezone.utc)
+    return mutated >= started
+
+
 def _archive_completed_maintenance() -> None:
     require_safe_root_file(RELEASE_RUN, "completed maintenance journal")
     payload_sha = sha256_file(RELEASE_RUN)
@@ -523,6 +563,12 @@ def _archive_completed_maintenance() -> None:
         RELEASE_RUN.unlink()
     else:
         os.replace(RELEASE_RUN, target)
+    # The cycle's markers go with its journal. A completed maintenance must
+    # leave nothing behind that the next begin-maintenance or abandon reads as
+    # its own.
+    markers_dir = MAINTENANCE_HISTORY / f"{payload_sha}.markers"
+    markers_dir.mkdir(exist_ok=True, mode=0o700)
+    _archive_maintenance_markers(markers_dir)
 
 
 def begin_maintenance(binding: dict[str, str]) -> dict[str, Any]:
@@ -929,35 +975,33 @@ def abandon_maintenance(contract_path: Path, receipt_path: Path, reason: str) ->
     if not SAFE_REASON.fullmatch(reason):
         raise ScaffoldError("maintenance-abort reason is invalid")
     verified = verify_static(contract_path, receipt_path)
-    if FIRST_MUTATION.exists():
-        raise ScaffoldError("cannot abandon maintenance after first mutation")
     if not RELEASE_RUN.exists():
         raise ScaffoldError("there is no active maintenance transaction")
-    state = strict_load(RELEASE_RUN)
+    state = validate_maintenance_state(strict_load(RELEASE_RUN))
+    # Only a mutation made by THIS maintenance forbids abandoning it. A marker
+    # left by an earlier, completed cycle is archived below with everything else.
+    if _mutation_belongs_to(state):
+        raise ScaffoldError("cannot abandon maintenance after first mutation")
     if state.get("stage") not in {"start", "backup", "staged", "rehearsal", "candidate", "accepted", "routed"}:
         raise ScaffoldError("maintenance transaction is not safely pre-mutation")
     healthy, candidates = inspect_runtime(verified["contract"])
     if not healthy or candidates or not public_ready(verified["contract"]["runtime"]["public_ready_url"]):
         raise ScaffoldError("healthy exact production without candidates is required before archival")
     release = strict_load(RELEASE_PATH)
-    if state.get("release_id") != release.get("release_id"):
+    if state.get("stage") != "start" and state.get("release_id") != release.get("release_id"):
+        # Past `start`, the maintenance's own release is installed and the live
+        # authority must agree. At `start` nothing has been installed under
+        # this journal -- including after an install that rolled back, which
+        # restores the prior release and is exactly the case abandon exists for.
         raise ScaffoldError("maintenance state is not bound to the live release")
     timestamp = utc_now().strftime("%Y%m%dT%H%M%SZ")
     archive = STATUS_ROOT / "abandoned" / f"{timestamp}-{state['release_id']}"
     archive.mkdir(parents=True, mode=0o700)
-    markers = [
-        "release-run.json", "candidate-generation", "candidate-prestart-authority.json",
-        "candidate-accept-receipt.json", "candidate-accepted", "restore-selection",
-        "same-host-writer-fence-intent.json", "same-host-writer-fence.json",
-    ]
     moved: dict[str, str] = {}
-    for name in markers:
-        source = STATUS_ROOT / name
-        if source.exists():
-            require_safe_root_file(source, name)
-            digest = sha256_file(source)
-            os.replace(source, archive / name)
-            moved[name] = digest
+    journal_digest = sha256_file(RELEASE_RUN)
+    os.replace(RELEASE_RUN, archive / "release-run.json")
+    moved["release-run.json"] = journal_digest
+    moved.update(_archive_maintenance_markers(archive))
     value = {
         "schema": 1,
         "kind": "menhir-maintenance-abort",
