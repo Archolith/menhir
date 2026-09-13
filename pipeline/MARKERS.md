@@ -37,7 +37,7 @@ Heuristic line classification, then hand-verified for every row marked defect.
 | `candidate-accepted` | `candidate-accept.sh:250` | `abandon-maintenance` only | `promote.sh:42`, `lib.sh:665`, `release-run.sh:144` | Sep 7 | stale-after-success |
 | `candidate-prestart-authority.json` | `candidate-deploy.sh:51` | `abandon-maintenance` only | `candidate-accept.sh:83` | Sep 7 | stale-after-success |
 | `candidate-accept-receipt.json` | `candidate-accept.sh:204` | `abandon-maintenance` only | `lib.sh:666`, `release-run.sh:143` | Sep 7 | stale-after-success |
-| `restore-selection` | `stage-generation.sh:64` | `abandon-maintenance` only | `candidate-deploy.sh:10`, `lib.sh:33`, `release-run.sh:117`, worker | Sep 13, `u0wWCFHba4` | stale-after-success |
+| `restore-selection` | `stage-generation.sh:64` (nightly: via `menhir-scheduled-backup`) | `abandon-maintenance`; the nightly wrapper removes the one it wrote | `candidate-deploy.sh:10`, `lib.sh:33`, `release-run.sh:117`, worker | Sep 13, `u0wWCFHba4` | stale-after-success |
 | `same-host-writer-fence-intent.json`, `same-host-writer-fence.json` | `same_host_fence.py` from `candidate-deploy.sh` / `promote.sh` | `abandon-maintenance` only | `candidate-deploy.sh:25`, `promote.sh:19`, `release-run.sh` | Sep 7 | stale-after-success |
 | `fence` | `lib.sh` `fence_close` | `lib.sh` `fence_open` from `backup-generation.sh`, `promote.sh` | `backup-generation.sh`, `candidate-deploy.sh`, `promote.sh`, `release-run.sh`, `same-host-fence.sh` | Sep 5, 5 bytes | pointer — maintained |
 | `current-generation` | `promote.sh`, `restore-generation.sh:482` | `restore-generation.sh:487-490` restores prior or removes on failure | `lib.sh`, `release-run.sh`, `restore-generation.sh:360`, `backup-generation.sh` | `vJBZKqtqAF` | pointer — maintained |
@@ -48,7 +48,7 @@ Heuristic line classification, then hand-verified for every row marked defect.
 |---|---|---|---|
 | `backup-local-receipt.json` | `menhir-backup-local` | `lib.sh:295,636`, `stage-generation.sh`, `worker:153`, scaffold status (24 h freshness policy) | latest-wins |
 | `backup-receipts/` (12) | `menhir-backup-local`, one per generation | `menhir-backup-local --resume-cleanup` | history |
-| `rehearsal-receipt.json` (**goes stale after every nightly backup** — the wrapper does not rehearse, and `stage-generation.sh` refuses receipts older than 1 h, so a nightly generation can only be rehearsed by the wrapper itself; scaffold `install.sh` refuses at `seed-drill` until it is) | `restore-generation.sh:295,339` | `candidate-deploy.sh:17`, `lib.sh:296,644`, `release-run.sh:128`, scaffold status (must bind current backup generation) | latest-wins |
+| `rehearsal-receipt.json` (rewritten by the nightly wrapper for each generation since `5649ae9`; `stage-generation.sh` refuses receipts older than 1 h, so only the wrapper can rehearse a nightly generation) | `restore-generation.sh:295,339` | `candidate-deploy.sh:17`, `lib.sh:296,644`, `release-run.sh:128`, scaffold status (must bind current backup generation) | latest-wins |
 | `desktop-archive-receipt.json` | `menhir-backup-archive.ps1` on the desktop | `promote.sh:56`, `worker:149`, `release-run.sh:88`, scaffold | latest-wins |
 | `scaffold-receipt.json` | scaffold `capture` | scaffold `verify`/`status` | latest-wins |
 | `scaffold-restore-drill-receipt.json` | scaffold `seed-drill` / `record-backup-drill` | scaffold `status` | latest-wins |

@@ -469,9 +469,16 @@ No release-managed artifact was modified.
    `validate_backup_promotion` only accepts a backup receipt younger than one
    hour, so no nightly generation can ever be rehearsed and scaffold
    `install.sh` (which runs `seed-drill` unconditionally) refuses from the next
-   morning on. Today it was unblocked by a manual backup + rehearsal
-   (`generation.cQTQX0b8vx`). Fix: the wrapper runs `stage-generation.sh` and
-   the rehearsal right after the backup.
+   morning on. **Fixed the same day (`5649ae9`, scaffold-installed):** the
+   wrapper brings production back, then stages and rehearses its generation,
+   verifies the receipt, and cleans its plaintext scratch and
+   `restore-selection`; any rehearsal failure is a failed nightly. Proven
+   19:18 UTC: `generation.jpSjHqieHz`, 178 s down, rehearsal ok, total 271 s,
+   `seed-drill` accepts again, desktop copy taken, recoverability YES. The
+   one-hour promotion window is unchanged on purpose: it guards staging, and
+   the wrapper now works inside it. Left behind for Phase 4: nine plaintext
+   generations under `/srv/menhir/backups/{decrypted,candidate}/` from earlier
+   manual rehearsals (the wrapper deletes only its own).
 5. Delete the stale `/srv/menhir/production/deploy/` shadow tree.
 6. Execute the remaining `replace` dispositions; release 17 drops `yawn_vps`
    from the release contract (plan section 3.D).
