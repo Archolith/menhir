@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "id": "release-contract-three-repositories",
+  "category": "operations",
+  "deployment_class": "maintenance",
+  "summary": "Remove yawn_vps from the release contract and report the nightly rehearsal in backup-status.",
+  "details": "Menhir commits 66aa7a6 and c995337 (with the digest refresh that follows them) complete the yawn.vps sever begun in release 0.2.0-16. New release records name three repositories (menhir, archolith_oauth, yawn_deploy); records up to 16, which pinned yawn_vps for provenance, remain valid as the legacy four-repository shape and are accepted as prior authorities. The only installed artifact whose bytes change is /srv/menhir/production/bin/backup-status, which now prints the nightly wrapper's rehearsal result, generation and downtime alongside the run record. Outside the release, the scaffold's daily audit now runs verify-artifacts (the retired gateway's ExecStartPre was the only unattended run of it) and the yawn user leaves the menhir-operators group, whose MENHIR_READ sudoers grant it only needed for that gateway. Images are inherited from release 0.2.0-13 unchanged.",
+  "operator_impact": "Cutting a release no longer references yawn.vps at all. backup-status shows whether last night's backup was rehearsed. No runtime, ingress or secret change.",
+  "repositories": {
+    "menhir": [
+      "66aa7a6f315aad586c6e39617eeac8949848b511",
+      "c9953371b13be6a1ad2b2d884c8fdc524710e522",
+      "68819f9417561d74a9b8050441cae5b4f4af6293"
+    ]
+  },
+  "security_scopes": [
+    "backup-restore-and-rollback",
+    "host-privilege-and-command-wrappers",
+    "runtime-hardening-and-observability",
+    "supply-chain-and-build-evidence"
+  ],
+  "breaking": false
+}
