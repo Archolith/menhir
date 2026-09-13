@@ -1,0 +1,24 @@
+{
+  "artifacts": {
+    "bundle_manifest_sha256": "c29834a922b2cbfe49659e52ebb071ebb2ca01206439b5dafc318f9085c98589",
+    "bundle_sha256": "069baed1e5120862afe08b476b385ece5d3b6064bb7f4582b6ab139e2232689e",
+    "notes_json_sha256": "1ec59a12188f3e8c3fcfee16d924fef85101dd0c942b7b277e1d2180f64edd1c",
+    "notes_markdown_sha256": "9511e4fd873118f98060de2d92ecc122700d78eefc504f4bb23eb6e7a11382f5",
+    "release_sha256": "b0e95f873b31b81e777764bcc24e197336296eae2c36ee3696312511e6715671",
+    "review_request_sha256": "1a8068d175b4d5b95b1e1f2d8580e29309104ad03950f884765888962555157b",
+    "security_review_sha256": "69931e62b7fd700bba96fa8794ebd9c7b6ddd3f2f07845b3e9014b2d98d38e58",
+    "spec_sha256": "0401ffb7eb9d4cd22d501330b278aa03a5cc2bc7344fc8b6745e829401b58809"
+  },
+  "fragments": [
+    {
+      "name": "release-contract-three-repositories.json",
+      "sha256": "2519f0337529533e36e7038a280fa5ecd30b760d591eaa02fdae25636024f7e1"
+    }
+  ],
+  "fragments_dir": "C:\\Users\\thron\\Documents\\Codex\\2026-09-06\\inve\\work\\menhir-doc-staged-promotion\\deploy\\changes\\unreleased",
+  "kind": "menhir-release-publication",
+  "publication_nonce": "df89e4b0ef30281afc5e8124e5ed3d4b",
+  "release_id": "menhir-prod-0.2.0-17",
+  "schema": 1,
+  "workspace": "C:\\Users\\thron\\Documents\\Codex\\2026-09-06\\inve\\work\\releases\\menhir-prod-0.2.0-17\\workspace"
+}

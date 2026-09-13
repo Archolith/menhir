@@ -120,14 +120,11 @@ install -o root -g root -m 0755 bin/verify-artifacts /srv/menhir/production/bin/
 install -o root -g root -m 0755 bin/recover          /srv/menhir/production/bin/recover
 install -o root -g root -m 0755 bin/status bin/release-inspect bin/logs bin/backup-status bin/generation-inspect /srv/menhir/production/bin/
 install -o root -g root -m 0644 etc/tmpfiles.d/menhir-production.conf /etc/tmpfiles.d/menhir-production.conf
-install -o root -g root -m 0644 etc/logrotate.d/menhir-production    /etc/logrotate.d/menhir-production
 install -o root -g root -m 0440 etc/sudoers.d/menhir-production      /etc/sudoers.d/menhir-production
 groupadd --force menhir-operators
-id -u yawn >/dev/null
-usermod -a -G menhir-operators yawn
-chown root:root /srv/yawn/projects/yawn.vps/menhir_server.py /srv/yawn/projects/yawn.vps/vps/oauth_policy.py /srv/yawn/projects/yawn.vps/vps/menhir_capabilities.py /srv/yawn/projects/yawn.vps/vps/menhir_tools.py
-chmod 0644 /srv/yawn/projects/yawn.vps/menhir_server.py /srv/yawn/projects/yawn.vps/vps/oauth_policy.py /srv/yawn/projects/yawn.vps/vps/menhir_capabilities.py /srv/yawn/projects/yawn.vps/vps/menhir_tools.py
-install -d -o root -g root -m 0755 /etc/yawn-vps /srv/menhir/production/release
+# Members: the operator login only (release 0.2.0-17 removed yawn, whose only
+# consumer was the retired OAuth gateway).
+install -d -o root -g root -m 0755 /srv/menhir/production/release
 install -o root -g root -m 0644 release/menhir-oauth-policy.json /etc/yawn-vps/menhir-oauth-policy.json
 install -o root -g root -m 0644 release/menhir-oauth-public.pem /etc/yawn-vps/menhir-oauth-public.pem
 install -o root -g root -m 0644 systemd/menhir-oauth-operations.service /etc/systemd/system/menhir-oauth-operations.service

@@ -480,7 +480,15 @@ No release-managed artifact was modified.
    generations under `/srv/menhir/backups/{decrypted,candidate}/` from earlier
    manual rehearsals (the wrapper deletes only its own).
 5. Delete the stale `/srv/menhir/production/deploy/` shadow tree.
-6. Execute the remaining `replace` dispositions; release 17 drops `yawn_vps`
-   from the release contract (plan section 3.D).
+6. ~~Release 17~~ **Done 2026-09-13 20:20 UTC as menhir-prod-0.2.0-17**
+   (release_sha256 `b0e95f87…`; menhir `66aa7a6`..`59dc467`). New records
+   name three repositories; records 14–16 validate as the legacy four-repo
+   shape; `backup-status` prints the nightly rehearsal fields; the scaffold
+   audit runs `verify-artifacts` daily; `yawn` is out of `menhir-operators`
+   on the host and in the contract. Installed in 7 s, 40 OK, maintenance
+   completed by proof, audit green. Every phase of the recovery plan is now
+   closed except Phase 4 (host debris) and the review lows that belong to
+   Yawn (its Caddyfile `/ops/mcp` route).
+7. Execute the remaining `replace` dispositions.
 
 Items 1 and 2 are the only ones affecting whether data can be protected today.
