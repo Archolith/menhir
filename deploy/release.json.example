@@ -51,9 +51,7 @@
     "registry_sha256": "<64-lowercase-hex>",
     "policy_sha256": "<64-lowercase-hex>",
     "yawn_env_sha256": "<64-lowercase-hex>",
-    "production_env_sha256": "<64-lowercase-hex>",
-    "operations_policy_sha256": "<64-lowercase-hex>",
-    "oauth_public_key_sha256": "<64-lowercase-hex>"
+    "production_env_sha256": "<64-lowercase-hex>"
   },
   "network": {
     "project": "menhir-prod",
@@ -96,16 +94,6 @@
       "kind": "rendered",
       "sha256": "<same-digest-as-rendered.production_env_sha256>",
       "rendered_key": "production_env_sha256"
-    },
-    "/etc/yawn-vps/menhir-oauth-policy.json": {
-      "kind": "rendered",
-      "sha256": "<same-digest-as-rendered.operations_policy_sha256>",
-      "rendered_key": "operations_policy_sha256"
-    },
-    "/etc/yawn-vps/menhir-oauth-public.pem": {
-      "kind": "rendered",
-      "sha256": "<same-digest-as-rendered.oauth_public_key_sha256>",
-      "rendered_key": "oauth_public_key_sha256"
     }
   },
   "security_review": {

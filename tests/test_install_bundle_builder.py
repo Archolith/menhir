@@ -350,7 +350,12 @@ def test_installer_keeps_scaffold_and_cutover_out_of_routine_install() -> None:
     assert "durable rollback evidence retained" in source
     assert "/srv/menhir/production/bin/verify-artifacts" in source
     assert "systemctl daemon-reload" in source
-    assert "systemctl restart menhir-oauth-operations.service" in source
+    # The OAuth gateway retired in 0.2.0-16: the installer must neither
+    # restart it nor stop it by hand; the retired-unit mechanism owns it.
+    assert "systemctl restart menhir-oauth-operations.service" not in source
+    assert "systemctl stop menhir-oauth-operations.service" not in source
+    retired_units = source[source.index("retired_gateway_units=("):source.index("retired_gateway_scripts=(")]
+    assert "menhir-oauth-operations.service" in retired_units
     assert "menhir-caddy-reconcile.path" in source
     assert "menhir-caddy-reconcile.service" in source
     assert "retire_obsolete_writers" in source
@@ -457,7 +462,7 @@ def test_installer_bootstrap_backup_is_armed_atomic_and_precedes_full_install() 
     execution_start = source.index('validate_destination_parents\ncase "$phase" in')
     execution = source[execution_start:]
     armed = execution.index("transaction_active=1")
-    stop_gateway = execution.index("systemctl stop menhir-oauth-operations.service", armed)
+    stop_gateway = execution.index('transaction_step="quiescing obsolete Menhir mutation gateway"', armed)
     worker_guard = execution.index("assert_no_active_legacy_workers\n", stop_gateway)
     bootstrap_phase = execution.index("journal_action phase bootstrap-backup", worker_guard)
     cleanup_exists = execution.index('if [ -e "$cleanup_journal" ]', bootstrap_phase)
@@ -499,7 +504,7 @@ def test_installer_refuses_active_transient_worker_before_lane_retirement() -> N
         source.index("assert_no_active_legacy_workers() {"):
         source.index("retire_obsolete_writers() {")
     ]
-    stop_gateway = source.index("systemctl stop menhir-oauth-operations.service")
+    stop_gateway = source.index('transaction_step="quiescing obsolete Menhir mutation gateway"')
     first_guard = source.index("assert_no_active_legacy_workers\n", stop_gateway)
     retirement_phase = source.index("journal_action phase retiring-caddy", first_guard)
     second_guard = source.index("assert_no_active_legacy_workers\n", retirement_phase)

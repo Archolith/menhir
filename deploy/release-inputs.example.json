@@ -38,9 +38,6 @@
     "image_archive": "C:\\absolute\\release-image.tar"
   },
   "baseline_production_env": "C:\\absolute\\evidence\\production.env",
-  "operations_policy": "C:\\absolute\\evidence\\menhir-oauth-policy.json",
-  "oauth_public_key": "C:\\absolute\\evidence\\menhir-oauth-public.pem",
-  "python_runtime_digest": "C:\\absolute\\evidence\\menhir-python-runtime.sha256",
   "prior_release": "C:\\absolute\\evidence\\prior-release.json",
   "prior_route": "C:\\absolute\\evidence\\prior-route.json",
   "yawn_env_sha256": "sha256:5555555555555555555555555555555555555555555555555555555555555555",

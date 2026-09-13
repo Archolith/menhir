@@ -38,7 +38,6 @@ SECRET_VERSIONS = frozenset({
 INPUT_KEYS = frozenset({
     "schema", "release_id", "release_author", "release_workspace_root",
     "repositories", "images", "evidence", "baseline_production_env",
-    "operations_policy", "oauth_public_key", "python_runtime_digest",
     "prior_release", "prior_route", "secret_version_ids", "yawn_env_sha256",
     "ingress_mode",
 })
@@ -91,17 +90,6 @@ IMAGE_EVIDENCE_ENTRY_KEYS = frozenset({
 IMAGE_EVIDENCE_DIGEST_KEYS = frozenset({"sbom", "vulnerability_scan"})
 IMAGE_ARTIFACT_BINDING_KEYS = frozenset({"artifact_path", "sha256"})
 IMAGE_SUBJECT_KEYS = frozenset({"image_id", "image_archive_sha256"})
-OPERATIONS_POLICY_KEYS = frozenset({
-    "schema", "issuer", "audience", "base_url", "clients",
-})
-OPERATIONS_CLIENT_KEYS = frozenset({"tier", "scopes", "tools"})
-OPERATIONS_POLICY_TOOLS = frozenset({
-    "menhir_release_inspect",
-    "menhir_status",
-    "menhir_logs",
-    "menhir_backup_status",
-    "menhir_generation_inspect",
-})
 RELEASE_ID_RE = re.compile(r"^menhir-prod-[0-9]+\.[0-9]+\.[0-9]+-[0-9]+$")
 AUTHOR_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._@+-]{0,127}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -144,15 +132,6 @@ def _rendered(key: str) -> dict[str, str]:
 
 # The sole destination-to-source authority for the installed artifact census.
 ARTIFACT_SOURCES: dict[str, dict[str, str]] = {
-    "/etc/yawn-vps/menhir-oauth-policy.json": _rendered(
-        "operations_policy_sha256"
-    ),
-    "/etc/yawn-vps/menhir-oauth-public.pem": _rendered(
-        "oauth_public_key_sha256"
-    ),
-    "/etc/yawn-vps/menhir-python-runtime.sha256": _rendered(
-        "python_runtime_digest_sha256"
-    ),
     "/srv/menhir/production/release/production.env": _rendered(
         "production_env_sha256"
     ),
@@ -180,19 +159,6 @@ ARTIFACT_SOURCES: dict[str, dict[str, str]] = {
     "/srv/menhir/production/ingress/docker-compose.cloudflared.yml": _git(
         "menhir", "deploy/docker-compose.cloudflared.yml"
     ),
-    "/srv/yawn/projects/yawn.vps/menhir_server.py": _git(
-        "yawn_vps", "menhir_server.py"
-    ),
-    "/srv/yawn/projects/yawn.vps/vps/core.py": _git("yawn_vps", "vps/core.py"),
-    "/srv/yawn/projects/yawn.vps/vps/menhir_capabilities.py": _git(
-        "yawn_vps", "vps/menhir_capabilities.py"
-    ),
-    "/srv/yawn/projects/yawn.vps/vps/menhir_tools.py": _git(
-        "yawn_vps", "vps/menhir_tools.py"
-    ),
-    "/srv/yawn/projects/yawn.vps/vps/oauth_policy.py": _git(
-        "yawn_vps", "vps/oauth_policy.py"
-    ),
     "/usr/local/sbin/menhir-backup-local": _git(
         "menhir", "deploy/menhir-backup-local.sh"
     ),
@@ -202,7 +168,7 @@ for _name in (
     "release-inspect", "status", "verify-artifacts",
 ):
     ARTIFACT_SOURCES[f"/srv/menhir/production/bin/{_name}"] = _git(
-        "yawn_vps", f"ops/menhir/bin/{_name}"
+        "menhir", f"pipeline/bin/{_name}"
     )
 for _name in (
     "backup-generation.sh", "candidate-accept.sh", "candidate-deploy.sh",
@@ -222,18 +188,11 @@ for _name in (
     ARTIFACT_SOURCES[f"/srv/menhir/production/bin/{_name}"] = _git(
         "menhir", f"deploy/lib/{_name}"
     )
-ARTIFACT_SOURCES["/srv/menhir/production/bin/verify_python_runtime.py"] = _git(
-    "yawn_vps", "ops/menhir/bin/verify_python_runtime.py"
-)
-for _name in ("menhir-oauth-operations.service",):
-    ARTIFACT_SOURCES[f"/etc/systemd/system/{_name}"] = _git(
-        "yawn_vps", f"ops/menhir/systemd/{_name}"
-    )
 ARTIFACT_SOURCES["/etc/sudoers.d/menhir-production"] = _git(
-    "yawn_vps", "ops/menhir/etc/sudoers.d/menhir-production"
+    "menhir", "pipeline/etc/sudoers.d/menhir-production"
 )
 ARTIFACT_SOURCES["/etc/tmpfiles.d/menhir-production.conf"] = _git(
-    "yawn_vps", "ops/menhir/etc/tmpfiles.d/menhir-production.conf"
+    "menhir", "pipeline/etc/tmpfiles.d/menhir-production.conf"
 )
 
 
@@ -753,44 +712,6 @@ def _reject_secret_material(value: Any, label: str) -> None:
         raise ReleaseSpecError(f"secret-looking value in {label}")
 
 
-def _validate_operations_policy(value: dict[str, Any]) -> None:
-    policy = _exact(value, OPERATIONS_POLICY_KEYS, "operations policy")
-    if policy.get("schema") != 1:
-        raise ReleaseSpecError("operations policy schema must be 1")
-    for key in ("issuer", "audience", "base_url"):
-        item = policy.get(key)
-        if not isinstance(item, str) or not item.startswith("https://"):
-            raise ReleaseSpecError(f"operations policy {key} must be an https URL")
-    clients = policy.get("clients")
-    if not isinstance(clients, dict) or not clients:
-        raise ReleaseSpecError("operations policy clients must be non-empty")
-    for client_id, raw in clients.items():
-        if not isinstance(client_id, str) or not client_id or len(client_id) > 255:
-            raise ReleaseSpecError("operations policy client id is malformed")
-        client = _exact(
-            raw, OPERATIONS_CLIENT_KEYS,
-            f"operations policy clients.{client_id}",
-        )
-        if client.get("tier") not in {"agent", "operator"}:
-            raise ReleaseSpecError("operations policy client tier is invalid")
-        for field in ("scopes", "tools"):
-            rows = client.get(field)
-            if not isinstance(rows, list) or not rows or any(
-                not isinstance(row, str) or not row or len(row) > 255
-                for row in rows
-            ) or len(rows) != len(set(rows)):
-                raise ReleaseSpecError(
-                    f"operations policy client {field} must be unique strings"
-                )
-        unknown_tools = set(client["tools"]) - OPERATIONS_POLICY_TOOLS
-        if unknown_tools:
-            raise ReleaseSpecError(
-                "operations policy names removed or unknown Menhir tools: "
-                + ", ".join(sorted(unknown_tools))
-            )
-    _reject_secret_material(policy, "operations policy")
-
-
 def _render_env(path: Path, replacements: dict[str, str]) -> str:
     try:
         lines = path.read_text(encoding="ascii").splitlines()
@@ -992,11 +913,6 @@ def prepare_release_spec(
     baseline = _regular(
         inputs["baseline_production_env"], "baseline_production_env"
     )
-    operations_path = _regular(inputs["operations_policy"], "operations_policy")
-    public_key = _regular(inputs["oauth_public_key"], "oauth_public_key")
-    runtime_digest = _regular(
-        inputs["python_runtime_digest"], "python_runtime_digest"
-    )
     prior_release = _regular(inputs["prior_release"], "prior_release")
     prior_route = _regular(inputs["prior_route"], "prior_route")
     prior = menhir_schema.validate_release(str(prior_release))
@@ -1024,25 +940,6 @@ def prepare_release_spec(
         yawn_env_sha256
     ):
         raise ReleaseSpecError("yawn_env_sha256 must be a sha256 digest")
-
-    runtime_bytes = runtime_digest.read_bytes()
-    public_key_bytes = public_key.read_bytes()
-    operations_bytes = operations_path.read_bytes()
-    try:
-        runtime_text = runtime_bytes.decode("ascii").strip()
-        public_key_text = public_key_bytes.decode("ascii")
-    except UnicodeError as exc:
-        raise ReleaseSpecError("runtime digest and public key must be ASCII") from exc
-    if not SHA256_HEX_RE.fullmatch(runtime_text):
-        raise ReleaseSpecError(
-            "python runtime digest file must contain one sha256 digest"
-        )
-    if "-----BEGIN PUBLIC KEY-----" not in public_key_text or (
-        "PRIVATE KEY" in public_key_text
-    ) or PLACEHOLDER_RE.search(public_key_text):
-        raise ReleaseSpecError(
-            "OAuth public key must contain a concrete public PEM key"
-        )
 
     menhir_repo, menhir_commit, _ = identities["menhir"]
     policy_bytes = _git_blob(
@@ -1088,9 +985,6 @@ def prepare_release_spec(
             oauth_wheel_sha256=_sha256(oauth_wheel),
         )
 
-    operations = _load_json_bytes(operations_bytes, "operations policy")
-    _validate_operations_policy(operations)
-
     production_env = _render_env(baseline, {
         "MENHIR_IMAGE": image_refs["menhir"],
         "NEO4J_IMAGE": image_refs["neo4j"],
@@ -1112,12 +1006,6 @@ def prepare_release_spec(
             "registry_sha256": staged_assets / "releases.json",
             "policy_sha256": staged_assets / "client-policy.json",
             "production_env_sha256": staged_assets / "production.env",
-            "operations_policy_sha256":
-                staged_assets / "menhir-oauth-policy.json",
-            "oauth_public_key_sha256":
-                staged_assets / "menhir-oauth-public.pem",
-            "python_runtime_digest_sha256":
-                staged_assets / "menhir-python-runtime.sha256",
         }
         blobs = {
             "menhir_compose_sha256":
@@ -1133,18 +1021,7 @@ def prepare_release_spec(
         generated["production_env_sha256"].write_text(
             production_env, encoding="ascii", newline="\n"
         )
-        generated["operations_policy_sha256"].write_bytes(
-            operations_bytes
-        )
-        generated["oauth_public_key_sha256"].write_bytes(
-            public_key_bytes
-        )
-        generated["python_runtime_digest_sha256"].write_bytes(
-            runtime_bytes
-        )
         for key, path in generated.items():
-            if key == "oauth_public_key_sha256":
-                continue
             try:
                 content = path.read_text(encoding="utf-8")
             except UnicodeError as exc:

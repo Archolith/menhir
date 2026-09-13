@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Menhir log retrieval — read-only, bounded. Only a positive integer line count
+# is accepted (re-validated here as defense in depth); no arbitrary arguments.
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib.sh
+. "${SCRIPT_DIR}/lib.sh"
+
+if [ "$#" -ne 2 ] || [ "$1" != "--lines" ]; then
+    echo "error: expected exactly --lines <positive-integer>" >&2
+    exit 2
+fi
+
+lines="$2"
+case "$lines" in
+    ''|*[!0-9]*) echo "error: --lines must be a positive integer" >&2; exit 2 ;;
+esac
+if [ "$lines" -gt 5000 ]; then lines=5000; fi
+if [ "$lines" -lt 1 ]; then lines=1; fi
+
+# Bound bytes before they enter the Python gateway. head closes the pipe after
+# 64 KiB, preventing unusually long journal entries from creating an unbounded
+# communicate() buffer; SIGPIPE from an upstream logger is expected.
+{
+    journalctl --no-pager -n "${lines}" -u "${MENHIR_UNIT_PREFIX}-*" 2>/dev/null || true
+    compose logs --no-color --tail "${lines}" "${MENHIR_SERVICE}" "${MENHIR_NEO4J_SERVICE}" 2>/dev/null || true
+} | head -c 65536 || true

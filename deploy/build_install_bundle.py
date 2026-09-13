@@ -54,9 +54,6 @@ PUBLICATION_EVIDENCE = frozenset({
 })
 RENDERED_DESTINATIONS = {
     "/srv/menhir/production/release/production.env": "production_env_sha256",
-    "/etc/yawn-vps/menhir-oauth-policy.json": "operations_policy_sha256",
-    "/etc/yawn-vps/menhir-oauth-public.pem": "oauth_public_key_sha256",
-    "/etc/yawn-vps/menhir-python-runtime.sha256": "python_runtime_digest_sha256",
 }
 RELEASE_DESTINATION = "/srv/menhir/production/release/release.json"
 STAGING_RUNNER_DESTINATION = "/srv/menhir/scaffold/bin/menhir_stage_vps.py"

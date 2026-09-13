@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Menhir production status — read-only. Reports the remote flock holder,
+# systemd unit/phase, persisted generation IDs, current/previous candidate
+# release, and stale/recovery state from host-persisted files.
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib.sh
+. "${SCRIPT_DIR}/lib.sh"
+
+echo "fence: $(fence_state)"
+echo "lock:"
+if (flock -n 9) 9>"${MENHIR_LOCK}"; then
+    echo "  free (${MENHIR_LOCK})"
+else
+    echo "  held (${MENHIR_LOCK})"
+fi
+
+echo "release-record:"
+if require_release_record 2>/dev/null; then
+    echo "  present and immutable (${MENHIR_RELEASE_JSON})"
+else
+    echo "  MISSING or invalid (${MENHIR_RELEASE_JSON})"
+fi
+
+echo "generations:"
+echo "  current:  $(gen_current)"
+echo "  previous: $(gen_previous)"
+echo "  candidate: $(gen_candidate)"
+echo "  recovery-state: $(cat "${MENHIR_STATUS_DIR}/recovery-state" 2>/dev/null || echo '(none)')"
+
+echo "jobs:"
+for f in "${MENHIR_JOB_DIR}"/*.status; do
+    [ -e "${f}" ] || continue
+    echo "--- $(basename "${f}" .status) ---"
+    cat "${f}"
+done
+
+echo "systemd units:"
+systemctl list-units --all --no-pager --no-legend "${MENHIR_UNIT_PREFIX}-*" 2>/dev/null || true
+
+echo "compose:"
+compose ps --all || true

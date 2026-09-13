@@ -711,26 +711,21 @@ def test_refuses_missing_or_invalid_canonical_self_mode(
     ("destination", "rendered_key"),
     (
         (
-            "/etc/yawn-vps/menhir-oauth-policy.json",
-            "operations_policy_sha256",
-        ),
-        (
-            "/etc/yawn-vps/menhir-oauth-public.pem",
-            "oauth_public_key_sha256",
-        ),
-        (
-            "/etc/yawn-vps/menhir-python-runtime.sha256",
-            "python_runtime_digest_sha256",
+            "/srv/menhir/production/release/production.env",
+            "production_env_sha256",
         ),
     ),
 )
-def test_oauth_authority_files_are_required_rendered_artifacts(
+def test_rendered_authority_files_are_required_rendered_artifacts(
     tmp_path: Path, destination: str, rendered_key: str
 ) -> None:
     spec_path, output, spec = _fixture(tmp_path)
     release = _author(spec_path, output)
 
     assert MODULE.RENDERED_ARTIFACT_DESTINATIONS[destination] == rendered_key
+    # The OAuth gateway's three /etc/yawn-vps rendered artifacts retired in
+    # release 0.2.0-16 and must not be authored any more.
+    assert not any(path.startswith("/etc/yawn-vps/") for path in release["artifacts"])
     assert release["artifacts"][destination] == {
         "kind": "rendered",
         "sha256": release["rendered"][rendered_key],

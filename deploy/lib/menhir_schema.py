@@ -138,10 +138,15 @@ _RELEASE_INGRESS_MODES = frozenset({"cloudflared"})
 _RELEASE_RENDERED = frozenset({
     "menhir_compose_sha256", "yawn_compose_sha256", "caddy_sha256",
     "registry_sha256", "policy_sha256", "yawn_env_sha256",
-    "production_env_sha256", "operations_policy_sha256",
-    "oauth_public_key_sha256",
+    "production_env_sha256",
 })
-_RELEASE_RENDERED_OPTIONAL = frozenset({"python_runtime_digest_sha256"})
+# The OAuth operations gateway retired in release 0.2.0-16. Records before it
+# carry these three keys and their /etc/yawn-vps artifacts; records after it
+# carry neither. Absent key => artifact must be absent (enforced below).
+_RELEASE_RENDERED_OPTIONAL = frozenset({
+    "operations_policy_sha256", "oauth_public_key_sha256",
+    "python_runtime_digest_sha256",
+})
 _RELEASE_NETWORK = frozenset({
     "project", "external_network", "alias", "peers",
 })

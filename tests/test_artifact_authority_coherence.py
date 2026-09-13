@@ -1,12 +1,12 @@
-"""Cross-repo coherence of the installed-artifact authorities.
+"""Coherence of the installed-artifact authorities.
 
-The installed artifact list is hardcoded in four places across two repositories,
-and each enforces it independently with a hard failure:
+The installed artifact list is hardcoded in four places, and each enforces it
+independently with a hard failure:
 
-  1. menhir  deploy/installed-artifacts.json    "destinations"
-  2. menhir  deploy/release_spec.py             ARTIFACT_SOURCES
-  3. menhir  deploy/release-install.sh          allowed frozenset (SystemExit)
-  4. yawn.vps ops/menhir/bin/verify-artifacts   required (sys.exit(1))
+  1. deploy/installed-artifacts.json    "destinations"
+  2. deploy/release_spec.py             ARTIFACT_SOURCES
+  3. deploy/release-install.sh          allowed frozenset (SystemExit)
+  4. pipeline/bin/verify-artifacts      required (sys.exit(1))
 
 Nothing compared (4) against (1)-(3). A divergence was therefore undetectable
 off-host: the first honest signal was a failed install on production, after the
@@ -16,16 +16,14 @@ The same applies to the retirement lists: verify-artifacts' `obsolete` must
 match release-install.sh's retired_caddy_* + retired_gateway_*, or the verifier
 stops being an independent check on paths the installer just deleted.
 
-yawn.vps lives in a separate repository, so its location is supplied by
-MENHIR_YAWN_VPS_ROOT. When it is absent this test SKIPS rather than passes --
-a silent pass here would recreate exactly the blind spot it exists to close.
+Until release 0.2.0-16 the verifier lived in the yawn.vps repository and this
+test skipped whenever that checkout was absent -- a blind spot in itself.
 """
 from __future__ import annotations
 
 import ast
 import importlib.util
 import json
-import os
 import re
 from pathlib import Path
 
@@ -35,14 +33,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DEPLOY = ROOT / "deploy"
 
 
-def _yawn_vps_root() -> Path:
-    raw = os.environ.get("MENHIR_YAWN_VPS_ROOT")
-    if not raw:
-        pytest.skip("MENHIR_YAWN_VPS_ROOT is not set; cannot check the verifier")
-    root = Path(raw)
-    if not (root / "ops/menhir/bin/verify-artifacts").is_file():
-        pytest.skip(f"verify-artifacts not found under {root}")
-    return root
+VERIFIER = ROOT / "pipeline" / "bin" / "verify-artifacts"
 
 
 def _brace_set(source: str, name: str) -> set[str]:
@@ -108,7 +99,7 @@ def test_menhir_side_authorities_agree() -> None:
 
 
 def test_verifier_required_matches_census() -> None:
-    verifier = (_yawn_vps_root() / "ops/menhir/bin/verify-artifacts").read_text(
+    verifier = (VERIFIER).read_text(
         encoding="utf-8"
     )
     required = _brace_set(verifier, "required")
@@ -121,7 +112,7 @@ def test_verifier_required_matches_census() -> None:
 
 
 def test_verifier_obsolete_matches_installer_retirement() -> None:
-    verifier = (_yawn_vps_root() / "ops/menhir/bin/verify-artifacts").read_text(
+    verifier = (VERIFIER).read_text(
         encoding="utf-8"
     )
     obsolete = _brace_set(verifier, "obsolete")
@@ -133,7 +124,7 @@ def test_verifier_obsolete_matches_installer_retirement() -> None:
 
 
 def test_required_and_obsolete_are_disjoint() -> None:
-    verifier = (_yawn_vps_root() / "ops/menhir/bin/verify-artifacts").read_text(
+    verifier = (VERIFIER).read_text(
         encoding="utf-8"
     )
     overlap = _brace_set(verifier, "required") & _brace_set(verifier, "obsolete")

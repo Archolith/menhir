@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+#
+# Menhir recovery — root-only. Fails closed and operation-specific.
+#
+# Reopens the maintenance fence ONLY when every layer of evidence is
+# independently verified (see recover_main in lib.sh):
+#   - both locks are free,
+#   - no menhir-op transient unit is active,
+#   - no recorded worker pid / process-group descendant is alive,
+#   - the installed artifacts verify against the immutable release record,
+#   - every persisted job is reconciled (done) OR an explicitly proven
+#     pre-mutation failure (terminal failed, recovery_required=0, detail
+#     "pre-mutation failure", and no durable mutation-started evidence),
+#   - caddy-route recovery transitions additionally require fresh caddy release
+#     reconcile/status evidence.
+#
+# A SIGKILL/unknown interruption is NEVER treated as safe merely because the
+# operation lock or the systemd unit is gone: the durable mutation-started
+# evidence and the persisted phase record are authoritative. Unknown/running/
+# stale/post-mutation state keeps the fence closed and names the required
+# operation-specific reconciler; there is no automatic fence_open on ambiguous
+# state.
+#
+# Install to /srv/menhir/production/bin/recover (mode 0755, root:root).
+# Not present in sudoers: run only as root.
+
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib.sh
+. "${SCRIPT_DIR}/lib.sh"
+
+if [ "$(id -u)" != "0" ]; then
+    echo "error: recover must be run as root" >&2
+    exit 1
+fi
+
+recover_main

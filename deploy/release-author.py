@@ -68,8 +68,7 @@ INHERITED_EVIDENCE = EVIDENCE - frozenset({
 RENDERED = frozenset({
     "menhir_compose_sha256", "yawn_compose_sha256", "caddy_sha256",
     "registry_sha256", "policy_sha256", "yawn_env_sha256",
-    "production_env_sha256", "operations_policy_sha256",
-    "oauth_public_key_sha256", "python_runtime_digest_sha256",
+    "production_env_sha256",
 })
 LITERAL_RENDERED_DIGESTS = frozenset({"yawn_env_sha256"})
 SECRET_VERSIONS = frozenset({
@@ -98,9 +97,6 @@ RELEASE_ID_RE = re.compile(r"^menhir-prod-[0-9]+\.[0-9]+\.[0-9]+-[0-9]+$")
 EXPECTED_REPO_REMOTES = menhir_schema.EXPECTED_REPO_REMOTES
 RENDERED_ARTIFACT_DESTINATIONS = {
     "/srv/menhir/production/release/production.env": "production_env_sha256",
-    "/etc/yawn-vps/menhir-oauth-policy.json": "operations_policy_sha256",
-    "/etc/yawn-vps/menhir-oauth-public.pem": "oauth_public_key_sha256",
-    "/etc/yawn-vps/menhir-python-runtime.sha256": "python_runtime_digest_sha256",
 }
 
 

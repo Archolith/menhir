@@ -25,11 +25,7 @@ bundle, manifest_path, plan_path = sys.argv[1:]
 release_destination = "/srv/menhir/production/release/release.json"
 allowed = frozenset(line for line in """
 /etc/sudoers.d/menhir-production
-/etc/systemd/system/menhir-oauth-operations.service
 /etc/tmpfiles.d/menhir-production.conf
-/etc/yawn-vps/menhir-oauth-policy.json
-/etc/yawn-vps/menhir-oauth-public.pem
-/etc/yawn-vps/menhir-python-runtime.sha256
 /srv/menhir/production/bin/authority_digest.py
 /srv/menhir/production/bin/backup-status
 /srv/menhir/production/bin/backup-generation.sh
@@ -59,7 +55,6 @@ allowed = frozenset(line for line in """
 /srv/menhir/production/bin/status
 /srv/menhir/production/bin/validate_durable_inventory.py
 /srv/menhir/production/bin/verify-artifacts
-/srv/menhir/production/bin/verify_python_runtime.py
 /srv/menhir/production/deploy/Dockerfile
 /srv/menhir/production/deploy/docker-compose.production.yml
 /srv/menhir/production/deploy/durable-state-inventory.json
@@ -68,11 +63,6 @@ allowed = frozenset(line for line in """
 /srv/menhir/production/ingress/docker-compose.cloudflared.yml
 /srv/menhir/production/policy/client-policy.json
 /srv/menhir/production/release/production.env
-/srv/yawn/projects/yawn.vps/menhir_server.py
-/srv/yawn/projects/yawn.vps/vps/core.py
-/srv/yawn/projects/yawn.vps/vps/menhir_capabilities.py
-/srv/yawn/projects/yawn.vps/vps/menhir_tools.py
-/srv/yawn/projects/yawn.vps/vps/oauth_policy.py
 /usr/local/sbin/menhir-backup-local
 """.splitlines() if line)
 
@@ -329,10 +319,10 @@ exec 9>"$mutation_lock"
 flock -n 9 || { echo "maintenance mutation lock is held: $mutation_lock" >&2; exit 75; }
 assert_maintenance
 
+# The OAuth operations gateway retired in 0.2.0-16; it is stopped, disabled
+# and removed through the retired-unit mechanism below and restored by the
+# same rollback path. The journal field is kept for schema stability.
 operations_was_active=0
-if systemctl is-active --quiet menhir-oauth-operations.service; then
-    operations_was_active=1
-fi
 retired_caddy_units=(
     menhir-caddy-reconcile.path
     menhir-caddy-reconcile.service
@@ -347,8 +337,13 @@ retired_caddy_routes=(
 )
 retired_gateway_units=(
     menhir-op@.service
+    menhir-oauth-operations.service
 )
 retired_gateway_scripts=(
+    /srv/menhir/production/bin/verify_python_runtime.py
+    /etc/yawn-vps/menhir-oauth-policy.json
+    /etc/yawn-vps/menhir-oauth-public.pem
+    /etc/yawn-vps/menhir-python-runtime.sha256
     /srv/menhir/production/bin/worker
     /srv/menhir/production/bin/candidate-deploy
     /srv/menhir/production/bin/candidate-accept
@@ -797,10 +792,6 @@ rollback_install() {
         restore_unit_activity "$unit" || failed=1
     done
     verify_restored_units || failed=1
-    if [ "$operations_was_active" -eq 1 ]; then
-        systemctl restart menhir-oauth-operations.service || failed=1
-        systemctl is-active --quiet menhir-oauth-operations.service || failed=1
-    fi
     set -e
     if [ "$failed" -ne 0 ]; then
         echo "FATAL: install rollback incomplete; evidence retained at $transaction_root" >&2
@@ -1054,9 +1045,6 @@ retire_obsolete_writers() {
 }
 
 transaction_step="quiescing obsolete Menhir mutation gateway"
-if [ "$operations_was_active" -eq 1 ]; then
-    systemctl stop menhir-oauth-operations.service
-fi
 assert_no_active_legacy_workers
 
 transaction_step="recovering or creating the first encrypted backup"
@@ -1100,10 +1088,6 @@ python3 /srv/menhir/production/bin/menhir_schema.py \
     validate-release /srv/menhir/production/release/release.json
 /srv/menhir/production/bin/verify-artifacts
 verify_obsolete_writers_retired
-if [ "$operations_was_active" -eq 1 ]; then
-    systemctl restart menhir-oauth-operations.service
-    systemctl is-active --quiet menhir-oauth-operations.service
-fi
 assert_maintenance
 journal_action phase committed
 transaction_active=0

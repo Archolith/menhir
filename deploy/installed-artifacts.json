@@ -2,11 +2,7 @@
   "schema": 1,
   "destinations": [
     "/etc/sudoers.d/menhir-production",
-    "/etc/systemd/system/menhir-oauth-operations.service",
     "/etc/tmpfiles.d/menhir-production.conf",
-    "/etc/yawn-vps/menhir-oauth-policy.json",
-    "/etc/yawn-vps/menhir-oauth-public.pem",
-    "/etc/yawn-vps/menhir-python-runtime.sha256",
     "/srv/menhir/production/bin/authority_digest.py",
     "/srv/menhir/production/bin/backup-status",
     "/srv/menhir/production/bin/backup-generation.sh",
@@ -36,7 +32,6 @@
     "/srv/menhir/production/bin/status",
     "/srv/menhir/production/bin/validate_durable_inventory.py",
     "/srv/menhir/production/bin/verify-artifacts",
-    "/srv/menhir/production/bin/verify_python_runtime.py",
     "/srv/menhir/production/deploy/Dockerfile",
     "/srv/menhir/production/deploy/docker-compose.production.yml",
     "/srv/menhir/production/deploy/durable-state-inventory.json",
@@ -45,11 +40,6 @@
     "/srv/menhir/production/ingress/docker-compose.cloudflared.yml",
     "/srv/menhir/production/policy/client-policy.json",
     "/srv/menhir/production/release/production.env",
-    "/srv/yawn/projects/yawn.vps/menhir_server.py",
-    "/srv/yawn/projects/yawn.vps/vps/core.py",
-    "/srv/yawn/projects/yawn.vps/vps/menhir_capabilities.py",
-    "/srv/yawn/projects/yawn.vps/vps/menhir_tools.py",
-    "/srv/yawn/projects/yawn.vps/vps/oauth_policy.py",
     "/usr/local/sbin/menhir-backup-local"
   ]
 }

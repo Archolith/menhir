@@ -231,6 +231,9 @@ def release_fixture(tmp_path: Path, monkeypatch):
     files_by_repo["yawn_deploy"]["Caddyfile"] = b"example.invalid {}\n"
     files_by_repo["yawn_deploy"]["releases.json"] = b"{}\n"
     files_by_repo["archolith_oauth"]["src/archolith_oauth/__init__.py"] = b""
+    # No artifact is sourced from yawn_vps since 0.2.0-16; the repository is
+    # still pinned for provenance until release 17 removes it.
+    files_by_repo["yawn_vps"]["README.md"] = b"yawn.vps\n"
 
     repos = {}
     commits = {}
@@ -270,34 +273,12 @@ def release_fixture(tmp_path: Path, monkeypatch):
         "MENHIR_RUNTIME_MODE=production\n",
         encoding="ascii",
     )
-    public_key = tmp_path / "oauth-public.pem"
-    public_key.write_text(
-        "-----BEGIN PUBLIC KEY-----\nQUJD\n-----END PUBLIC KEY-----\n",
-        encoding="ascii",
-    )
-    runtime = tmp_path / "runtime.sha256"
-    runtime.write_text("9" * 64 + "\n", encoding="ascii")
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     secret_versions = {
         name: "version-" + name for name in MODULE.SECRET_VERSIONS
     }
     secret_versions["client-policy"] = "sha256-" + policy["canonical_digest"]
-    operations = {
-        "schema": 1,
-        "issuer": "https://memory.example",
-        "audience": "https://memory.example/ops/mcp",
-        "base_url": "https://memory.example/ops",
-        "clients": {
-            "client-id": {
-                "tier": "operator",
-                "scopes": ["menhir:read"],
-                "tools": ["menhir_status"],
-            }
-        },
-    }
-    operations_path = tmp_path / "operations.json"
-    _write_json(operations_path, operations)
     images = {
         name: {
             "digest": "sha256:" + str(index) * 64,
@@ -328,9 +309,6 @@ def release_fixture(tmp_path: Path, monkeypatch):
             **publication_evidence,
         },
         "baseline_production_env": str(baseline.resolve()),
-        "operations_policy": str(operations_path.resolve()),
-        "oauth_public_key": str(public_key.resolve()),
-        "python_runtime_digest": str(runtime.resolve()),
         "prior_release": str(prior.resolve()),
         "prior_route": str(route.resolve()),
         "yawn_env_sha256": "sha256:" + "8" * 64,
@@ -353,8 +331,6 @@ def release_fixture(tmp_path: Path, monkeypatch):
         "output": workspace / "release-spec.json",
         "repos": repos,
         "commits": commits,
-        "operations": operations,
-        "operations_path": operations_path,
         "baseline": baseline,
         "policy_digest": policy["canonical_digest"],
         "publication_evidence": publication_evidence,
@@ -611,38 +587,6 @@ def test_refuses_client_policy_secret_version_mismatch(release_fixture) -> None:
         MODULE.prepare_release_spec(fixture["inputs_path"], fixture["output"])
 
 
-def test_refuses_operations_policy_schema_drift(release_fixture) -> None:
-    fixture = release_fixture
-    fixture["operations"]["unexpected"] = True
-    _write_json(fixture["operations_path"], fixture["operations"])
-    with pytest.raises(MODULE.ReleaseSpecError, match="keys mismatch"):
-        MODULE.prepare_release_spec(fixture["inputs_path"], fixture["output"])
-
-
-@pytest.mark.parametrize(
-    "tool",
-    [
-        "menhir_candidate_deploy",
-        "menhir_candidate_accept",
-        "menhir_backup_submit",
-        "menhir_restore_rehearsal_submit",
-        "menhir_restore_production_submit",
-        "menhir_caddy_route_apply",
-        "menhir_caddy_route_rollback",
-        "menhir_promote",
-        "menhir_rollback",
-    ],
-)
-def test_refuses_operations_policy_removed_mutation_tools(
-    release_fixture, tool: str
-) -> None:
-    fixture = release_fixture
-    fixture["operations"]["clients"]["client-id"]["tools"].append(tool)
-    _write_json(fixture["operations_path"], fixture["operations"])
-    with pytest.raises(MODULE.ReleaseSpecError, match="removed or unknown"):
-        MODULE.prepare_release_spec(fixture["inputs_path"], fixture["output"])
-
-
 def test_refuses_installed_artifact_mapping_drift(
     release_fixture, monkeypatch
 ) -> None:
@@ -654,20 +598,27 @@ def test_refuses_installed_artifact_mapping_drift(
         MODULE.prepare_release_spec(fixture["inputs_path"], fixture["output"])
 
 
-def test_artifact_source_exceptions_match_proven_release_layout() -> None:
-    assert MODULE.ARTIFACT_SOURCES[
-        "/srv/menhir/production/bin/verify_python_runtime.py"
-    ] == {
-        "kind": "git",
-        "repository": "yawn_vps",
-        "path": "ops/menhir/bin/verify_python_runtime.py",
+def test_artifact_sources_no_longer_depend_on_yawn_vps() -> None:
+    assert not any(
+        source.get("repository") == "yawn_vps"
+        for source in MODULE.ARTIFACT_SOURCES.values()
+    )
+    assert MODULE.ARTIFACT_SOURCES["/srv/menhir/production/bin/verify-artifacts"] == {
+        "kind": "git", "repository": "menhir", "path": "pipeline/bin/verify-artifacts",
     }
-    for name in ("menhir-oauth-operations.service",):
-        assert MODULE.ARTIFACT_SOURCES[f"/etc/systemd/system/{name}"] == {
-            "kind": "git",
-            "repository": "yawn_vps",
-            "path": f"ops/menhir/systemd/{name}",
-        }
+    assert MODULE.ARTIFACT_SOURCES["/etc/sudoers.d/menhir-production"] == {
+        "kind": "git", "repository": "menhir",
+        "path": "pipeline/etc/sudoers.d/menhir-production",
+    }
+    for retired in (
+        "/etc/systemd/system/menhir-oauth-operations.service",
+        "/srv/menhir/production/bin/verify_python_runtime.py",
+        "/etc/yawn-vps/menhir-oauth-policy.json",
+        "/etc/yawn-vps/menhir-oauth-public.pem",
+        "/etc/yawn-vps/menhir-python-runtime.sha256",
+        "/srv/yawn/projects/yawn.vps/menhir_server.py",
+    ):
+        assert retired not in MODULE.ARTIFACT_SOURCES
 
 
 def test_obsolete_gateway_lane_has_no_release_source_mapping() -> None:
@@ -700,18 +651,6 @@ def test_refuses_secret_looking_env_and_config_values(release_fixture) -> None:
     fixture = release_fixture
     with fixture["baseline"].open("a", encoding="ascii") as handle:
         handle.write("OPENAI_API_KEY=sk_test_secret_material_123456\n")
-    with pytest.raises(MODULE.ReleaseSpecError, match="secret-looking"):
-        MODULE.prepare_release_spec(fixture["inputs_path"], fixture["output"])
-    fixture["baseline"].write_text(
-        fixture["baseline"].read_text(encoding="ascii").split(
-            "OPENAI_API_KEY", 1
-        )[0],
-        encoding="ascii",
-    )
-    fixture["operations"]["clients"]["client-id"]["scopes"] = (
-        ["sk_secret_material_123456"]
-    )
-    _write_json(fixture["operations_path"], fixture["operations"])
     with pytest.raises(MODULE.ReleaseSpecError, match="secret-looking"):
         MODULE.prepare_release_spec(fixture["inputs_path"], fixture["output"])
 

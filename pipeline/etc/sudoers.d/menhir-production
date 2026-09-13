@@ -1,0 +1,20 @@
+# Menhir production — narrow sudoers.
+#
+# Allows the operator group to run ONLY the exact fixed root-owned wrappers,
+# non-interactively. No arbitrary commands, paths, or arguments are permitted.
+#
+# The deploy/SSH user must be a member of the `menhir-operators` group (or this
+# file adjusted to the actual user). `logs` accepts only `--lines <int>` (the
+# gateway bounds it to 1..5000 and the wrapper re-validates it).
+#
+# Install to /etc/sudoers.d/menhir-production (mode 0440, root:root).
+# Validate with: visudo -c -f /etc/sudoers.d/menhir-production
+
+Cmnd_Alias MENHIR_READ = \
+    /srv/menhir/production/bin/status, \
+    /srv/menhir/production/bin/release-inspect, \
+    /srv/menhir/production/bin/logs --lines [0-9]*, \
+    /srv/menhir/production/bin/backup-status, \
+    /srv/menhir/production/bin/generation-inspect
+
+%menhir-operators ALL=(root) NOPASSWD: MENHIR_READ

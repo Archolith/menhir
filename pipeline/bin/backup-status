@@ -1,0 +1,127 @@
+#!/usr/bin/env bash
+# Menhir backup status — read-only.
+#
+# Answers one question: if this host were lost right now, could the graph be
+# recovered, and from what?
+#
+# The previous version reported only ${MENHIR_JOB_DIR}/backup.status, which
+# records whether a backup was submitted through the job runner. That file is
+# absent whenever backups were taken by any other path, so this command
+# reported "(no backup job recorded)" while a complete, rehearsed, off-host
+# backup chain existed one directory away. In an incident that is the worst
+# possible failure mode: the command you reach for reports nothing and you
+# conclude you have nothing.
+#
+# The receipts below are the real evidence. They are fixed root-owned paths.
+# This script reads them and takes no caller input.
+#
+# The nightly wrapper (menhir-scheduled-backup, via menhir-backup.timer) records
+# every run in scheduled-backup-last-run.json and leaves
+# scheduled-backup-failure.json behind until a later run succeeds; the last
+# section reports both, replacing the retired job-runner status file.
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib.sh
+. "${SCRIPT_DIR}/lib.sh"
+
+BACKUP_RECEIPT="${MENHIR_STATUS_DIR}/backup-local-receipt.json"
+REHEARSAL_RECEIPT="${MENHIR_STATUS_DIR}/rehearsal-receipt.json"
+DESKTOP_RECEIPT="${MENHIR_STATUS_DIR}/desktop-archive-receipt.json"
+SCHEDULED_LAST_RUN="${MENHIR_STATUS_DIR}/scheduled-backup-last-run.json"
+SCHEDULED_FAILURE="${MENHIR_STATUS_DIR}/scheduled-backup-failure.json"
+ENCRYPTED_ROOT="${MENHIR_BACKUP_ROOT:-/srv/menhir/backups}/encrypted"
+
+# Print selected scalar fields from a fixed receipt path. Fields are named by
+# this script, never by a caller.
+receipt_fields() { # fixed_receipt_path field...
+    python3 - "$@" <<'PYEOF'
+import json, sys
+path = sys.argv[1]
+try:
+    with open(path, encoding="utf-8") as handle:
+        value = json.load(handle)
+except FileNotFoundError:
+    print("  (absent)")
+    raise SystemExit(0)
+except Exception as exc:  # unreadable or malformed is itself the answer
+    print(f"  (unreadable: {type(exc).__name__})")
+    raise SystemExit(0)
+for field in sys.argv[2:]:
+    cur = value
+    for part in field.split("."):
+        cur = cur.get(part) if isinstance(cur, dict) else None
+    print(f"  {field}: {cur if cur is not None else '(missing)'}")
+PYEOF
+}
+
+receipt_value() { # fixed_receipt_path dotted_field  -> bare value or empty
+    python3 - "$@" <<'PYEOF'
+import json, sys
+try:
+    with open(sys.argv[1], encoding="utf-8") as handle:
+        value = json.load(handle)
+except Exception:
+    raise SystemExit(0)
+cur = value
+for part in sys.argv[2].split("."):
+    cur = cur.get(part) if isinstance(cur, dict) else None
+print(cur if isinstance(cur, str) else "")
+PYEOF
+}
+
+echo "live generation:"
+echo "  current: $(gen_current || echo '(none)')"
+
+echo
+echo "last backup (${BACKUP_RECEIPT##*/}):"
+receipt_fields "${BACKUP_RECEIPT}" generation checked_utc plaintext_removed
+
+echo
+echo "last restore rehearsal (${REHEARSAL_RECEIPT##*/}):"
+receipt_fields "${REHEARSAL_RECEIPT}" generation checked_utc neo4j_check sqlite_integrity
+
+echo
+echo "last off-host copy (${DESKTOP_RECEIPT##*/}):"
+receipt_fields "${DESKTOP_RECEIPT}" generation archived_utc desktop_destination archive.sha256
+
+echo
+echo "encrypted archives on this host:"
+if [ -d "${ENCRYPTED_ROOT}" ]; then
+    count="$(find "${ENCRYPTED_ROOT}" -maxdepth 1 -type f -name '*.tar.gz.age' 2>/dev/null | wc -l)"
+    newest="$(find "${ENCRYPTED_ROOT}" -maxdepth 1 -type f -name '*.tar.gz.age' -printf '%T@ %f\n' 2>/dev/null \
+              | sort -rn | head -1 | cut -d' ' -f2-)"
+    echo "  count:  ${count}"
+    echo "  newest: ${newest:-(none)}"
+else
+    echo "  (archive root absent: ${ENCRYPTED_ROOT})"
+fi
+
+# The coherence check. Having a backup, a rehearsal and an off-host copy is not
+# the same as having them for the SAME generation: backing up A, rehearsing B
+# and copying C off-host yields three partial answers and no recoverable state.
+echo
+echo "recoverability:"
+backup_gen="$(receipt_value "${BACKUP_RECEIPT}" generation)"
+rehearsal_gen="$(receipt_value "${REHEARSAL_RECEIPT}" generation)"
+desktop_gen="$(receipt_value "${DESKTOP_RECEIPT}" generation)"
+neo4j_check="$(receipt_value "${REHEARSAL_RECEIPT}" neo4j_check)"
+
+if [ -z "${backup_gen}" ]; then
+    echo "  NO — no backup receipt"
+elif [ "${backup_gen}" != "${rehearsal_gen}" ]; then
+    echo "  PARTIAL — backup ${backup_gen} has no rehearsal (last rehearsed: ${rehearsal_gen:-none})"
+elif [ "${neo4j_check}" != "ok" ]; then
+    echo "  PARTIAL — rehearsal for ${rehearsal_gen} reported neo4j_check=${neo4j_check:-missing}"
+elif [ "${backup_gen}" != "${desktop_gen}" ]; then
+    echo "  ON-HOST ONLY — ${backup_gen} rehearsed ok but off-host copy is ${desktop_gen:-none}"
+else
+    echo "  YES — ${backup_gen} is backed up, rehearsed (neo4j_check=ok), and copied off-host"
+fi
+
+echo
+echo "scheduled nightly backup (${SCHEDULED_LAST_RUN##*/}):"
+receipt_fields "${SCHEDULED_LAST_RUN}" finished_utc exit_code restart stack_was elapsed_seconds job_id
+if [ -e "${SCHEDULED_FAILURE}" ]; then
+    echo "  LAST SCHEDULED RUN FAILED (${SCHEDULED_FAILURE##*/}):"
+    receipt_fields "${SCHEDULED_FAILURE}" finished_utc exit_code restart
+fi

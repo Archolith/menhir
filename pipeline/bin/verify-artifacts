@@ -1,0 +1,176 @@
+#!/usr/bin/env bash
+#
+# Menhir artifact verification - root-only. Verifies every root-executed
+# installed artifact against the immutable release record:
+#   owner == 0, regular non-symlink, not group/other writable, sha256 match.
+#
+# The release record /srv/menhir/production/release/release.json maps each
+# artifact path to a provenance object containing its authoritative sha256.
+#
+# Install to /srv/menhir/production/bin/verify-artifacts (mode 0755, root:root).
+# Not present in sudoers: run only as root.
+
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib.sh
+. "${SCRIPT_DIR}/lib.sh"
+
+RELEASE="${MENHIR_RELEASE_JSON}"
+require_release_record || exit 1
+SCHEMA_TOOL="/srv/menhir/production/bin/menhir_schema.py"
+[ -f "${SCHEMA_TOOL}" ] && [ ! -L "${SCHEMA_TOOL}" ] \
+    || { echo "FAIL: strict release schema tool is missing" >&2; exit 1; }
+python3 "${SCHEMA_TOOL}" validate-release "${RELEASE}" \
+    || { echo "FAIL: release record failed strict schema" >&2; exit 1; }
+
+python3 - "${RELEASE}" <<'PY'
+import hashlib
+import json
+import os
+import stat
+import sys
+
+def reject_duplicates(pairs):
+    out = {}
+    for key, value in pairs:
+        if key in out:
+            raise ValueError("duplicate key: %s" % key)
+        out[key] = value
+    return out
+
+with open(sys.argv[1], "r", encoding="utf-8") as fh:
+    data = json.load(fh, object_pairs_hook=reject_duplicates)
+
+artifacts = data.get("artifacts", {})
+if not isinstance(artifacts, dict) or not artifacts:
+    print("FAIL: release record has no artifacts map")
+    sys.exit(1)
+
+required = {
+    "/srv/menhir/production/bin/verify-artifacts",
+    "/srv/menhir/production/bin/recover",
+    "/srv/menhir/production/bin/lib.sh",
+    "/srv/menhir/production/bin/status",
+    "/srv/menhir/production/bin/release-inspect",
+    "/srv/menhir/production/bin/logs",
+    "/srv/menhir/production/bin/backup-status",
+    "/srv/menhir/production/bin/generation-inspect",
+    "/srv/menhir/production/bin/backup-generation.sh",
+    "/srv/menhir/production/bin/restore-generation.sh",
+    "/srv/menhir/production/bin/restore_authority_txn.py",
+    "/srv/menhir/production/bin/candidate-deploy.sh",
+    "/srv/menhir/production/bin/candidate-accept.sh",
+    "/srv/menhir/production/bin/promote.sh",
+    "/srv/menhir/production/bin/rollback.sh",
+    "/srv/menhir/production/bin/release-lib.sh",
+    "/srv/menhir/production/bin/release-validate.sh",
+    "/srv/menhir/production/bin/release-run.sh",
+    "/srv/menhir/production/bin/secrets-map.sh",
+    "/srv/menhir/production/bin/same-host-fence.sh",
+    "/srv/menhir/production/bin/same_host_fence.py",
+    "/srv/menhir/production/bin/stage-generation.sh",
+    "/srv/menhir/production/bin/stage_generation.py",
+    "/srv/menhir/production/bin/menhir_schema.py",
+    "/srv/menhir/production/bin/make_manifest.py",
+    "/srv/menhir/production/bin/mcp_acceptance_probe.py",
+    "/srv/menhir/production/bin/authority_digest.py",
+    "/srv/menhir/production/bin/backup_cleanup_txn.py",
+    "/srv/menhir/production/bin/validate_durable_inventory.py",
+    "/srv/menhir/production/deploy/docker-compose.production.yml",
+    "/srv/menhir/production/deploy/Dockerfile",
+    "/srv/menhir/production/deploy/durable-state-inventory.json",
+    "/srv/menhir/production/deploy/installed-artifacts.json",
+    "/srv/menhir/production/ingress/cloudflared-config.yml",
+    "/srv/menhir/production/ingress/docker-compose.cloudflared.yml",
+    "/srv/menhir/production/release/production.env",
+    "/srv/menhir/production/policy/client-policy.json",
+    "/usr/local/sbin/menhir-backup-local",
+    "/etc/sudoers.d/menhir-production",
+    "/etc/tmpfiles.d/menhir-production.conf",
+}
+obsolete = {
+    "/etc/systemd/system/menhir-oauth-operations.service",
+    "/srv/menhir/production/bin/verify_python_runtime.py",
+    "/etc/yawn-vps/menhir-oauth-policy.json",
+    "/etc/yawn-vps/menhir-oauth-public.pem",
+    "/etc/yawn-vps/menhir-python-runtime.sha256",
+    "/etc/systemd/system/menhir-caddy-reconcile.path",
+    "/etc/systemd/system/menhir-caddy-reconcile.service",
+    "/etc/systemd/system/menhir-op@.service",
+    "/srv/menhir/production/bin/caddy-release.sh",
+    "/srv/menhir/production/bin/caddy-route-apply",
+    "/srv/menhir/production/bin/caddy-route-rollback",
+    "/srv/menhir/production/bin/release-run",
+    "/srv/menhir/production/bin/worker",
+    "/srv/menhir/production/bin/candidate-deploy",
+    "/srv/menhir/production/bin/candidate-accept",
+    "/srv/menhir/production/bin/backup",
+    "/srv/menhir/production/bin/restore-rehearsal",
+    "/srv/menhir/production/bin/restore-production",
+    "/srv/menhir/production/bin/promote",
+    "/srv/menhir/production/bin/rollback",
+}
+inventory_path = "/srv/menhir/production/deploy/installed-artifacts.json"
+try:
+    with open(inventory_path, "r", encoding="utf-8") as fh:
+        inventory = json.load(fh, object_pairs_hook=reject_duplicates)
+except (OSError, ValueError, json.JSONDecodeError) as exc:
+    print(f"FAIL installed artifact inventory: {exc}")
+    sys.exit(1)
+if set(inventory) != {"schema", "destinations"} or inventory.get("schema") != 1 \
+        or not isinstance(inventory.get("destinations"), list) \
+        or len(inventory["destinations"]) != len(set(inventory["destinations"])) \
+        or set(inventory["destinations"]) != required:
+    print("FAIL installed artifact inventory differs from verifier authority")
+    sys.exit(1)
+for path in sorted(obsolete):
+    if os.path.lexists(path):
+        print(f"FAIL obsolete Menhir mutation-lane artifact remains: {path}")
+        sys.exit(1)
+actual_paths = set(artifacts)
+if actual_paths != required:
+    for path in sorted(required - actual_paths):
+        print(f"FAIL release artifacts: missing required path {path}")
+    for path in sorted(actual_paths - required):
+        print(f"FAIL release artifacts: unexpected path {path}")
+    sys.exit(1)
+
+ok = True
+for path, expected in artifacts.items():
+    if not isinstance(expected, dict) or not isinstance(expected.get("sha256"), str):
+        print(f"FAIL {path}: invalid provenance entry")
+        ok = False
+        continue
+    expected_digest = expected["sha256"]
+    try:
+        st = os.lstat(path)
+    except OSError:
+        print(f"FAIL {path}: missing")
+        ok = False
+        continue
+    if stat.S_ISLNK(st.st_mode):
+        print(f"FAIL {path}: symlink")
+        ok = False
+        continue
+    if not stat.S_ISREG(st.st_mode):
+        print(f"FAIL {path}: not a regular file")
+        ok = False
+        continue
+    if st.st_uid != 0:
+        print(f"FAIL {path}: owner != 0")
+        ok = False
+        continue
+    if st.st_mode & 0o022:
+        print(f"FAIL {path}: group/other writable")
+        ok = False
+        continue
+    with open(path, "rb") as fh:
+        actual = hashlib.sha256(fh.read()).hexdigest()
+    if actual != expected_digest:
+        print(f"FAIL {path}: digest mismatch")
+        ok = False
+        continue
+    print(f"OK {path}")
+
+sys.exit(0 if ok else 1)
+PY

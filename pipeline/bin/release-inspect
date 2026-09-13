@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Menhir release inspection — read-only. Reports current/previous candidate
+# release, persisted generation IDs, and stale/recovery state.
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib.sh
+. "${SCRIPT_DIR}/lib.sh"
+
+echo "release:"
+echo "  current:  $(gen_current)"
+echo "  previous: $(gen_previous)"
+echo "  candidate: $(gen_candidate)"
+echo "  recovery-state: $(cat "${MENHIR_STATUS_DIR}/recovery-state" 2>/dev/null || echo '(none)')"
