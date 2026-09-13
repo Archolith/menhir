@@ -617,8 +617,7 @@ snapshot_path() { # key path removal-policy
 
 snapshot_unit() {
     local unit="$1" target="${snapshot_root}/units/${unit}.state"
-    systemctl show "$unit" --property=LoadState --property=UnitFileState \
-        --property=ActiveState --property=SubState > "$target"
+    unit_live_state "$unit" > "$target"
     grep -Eq '^LoadState=(loaded|not-found|masked)$' "$target" \
         || { echo "cannot capture retired unit load state: $unit" >&2; return 1; }
     grep -Eq '^UnitFileState=(|disabled|enabled|enabled-runtime|masked|masked-runtime|static)$' "$target" \
@@ -627,6 +626,42 @@ snapshot_unit() {
         || { echo "refusing unstable retired unit state: $unit" >&2; return 1; }
     grep -Eq '^SubState=[A-Za-z0-9_-]+$' "$target" \
         || { echo "cannot capture retired unit substate: $unit" >&2; return 1; }
+}
+
+# `systemctl show` refuses a bare template name ("neither a valid invocation ID
+# nor unit name"), so a template such as menhir-op@.service cannot be captured
+# the way an instance can. Record the equivalent facts instead: whether the
+# unit file is loaded, its enablement, and the only active state a template
+# itself can have.
+template_unit_state() {
+    local unit="$1" file_state load_state
+    file_state="$(systemctl is-enabled "$unit" 2>/dev/null || true)"
+    case "$file_state" in
+        static|disabled|enabled|enabled-runtime|masked|masked-runtime) ;;
+        *) file_state="" ;;
+    esac
+    if [ -e "/etc/systemd/system/${unit}" ] || [ -n "$file_state" ]; then
+        load_state=loaded
+    else
+        load_state=not-found
+    fi
+    printf 'LoadState=%s\nUnitFileState=%s\nActiveState=inactive\nSubState=dead\n' \
+        "$load_state" "$file_state"
+}
+
+unit_live_state() {
+    local unit="$1"
+    if [[ "$unit" == *@.service ]]; then
+        template_unit_state "$unit"
+    else
+        systemctl show "$unit" --property=LoadState --property=UnitFileState \
+            --property=ActiveState --property=SubState
+    fi
+}
+
+unit_live_property() {
+    local unit="$1" property="$2"
+    unit_live_state "$unit" | sed -n "s/^${property}=//p"
 }
 
 create_snapshot() {
@@ -695,7 +730,7 @@ verify_restored_units() {
     for unit in "${retired_units[@]}"; do
         for property in LoadState UnitFileState ActiveState SubState; do
             expected="$(unit_property "$unit" "$property")"
-            actual="$(systemctl show "$unit" --property="$property" --value)"
+            actual="$(unit_live_state "$unit" | sed -n "s/^${property}=//p")"
             [ "$actual" = "$expected" ] || {
                 echo "restored retired unit $unit $property differs: expected $expected, got $actual" >&2
                 return 1
@@ -856,9 +891,9 @@ verify_obsolete_writers_retired() {
         path="/etc/systemd/system/${unit}"
         [ ! -e "$path" ] && [ ! -L "$path" ] \
             || { echo "retired writer definition remains present: $path" >&2; return 1; }
-        load_state="$(systemctl show "$unit" --property=LoadState --value)"
-        active_state="$(systemctl show "$unit" --property=ActiveState --value)"
-        sub_state="$(systemctl show "$unit" --property=SubState --value)"
+        load_state="$(unit_live_property "$unit" LoadState)"
+        active_state="$(unit_live_property "$unit" ActiveState)"
+        sub_state="$(unit_live_property "$unit" SubState)"
         [ "$load_state" = not-found ] && [ "$active_state" = inactive ] && [ "$sub_state" = dead ] \
             || { echo "retired writer remains loaded or active: $unit" >&2; return 1; }
     done
@@ -970,9 +1005,9 @@ assert_no_active_legacy_workers() {
 retire_obsolete_writers() {
     local unit path parent load_state unit_file_state active_state sub_state
     for unit in "${retired_units[@]}"; do
-        load_state="$(systemctl show "$unit" --property=LoadState --value)"
-        active_state="$(systemctl show "$unit" --property=ActiveState --value)"
-        sub_state="$(systemctl show "$unit" --property=SubState --value)"
+        load_state="$(unit_live_property "$unit" LoadState)"
+        active_state="$(unit_live_property "$unit" ActiveState)"
+        sub_state="$(unit_live_property "$unit" SubState)"
         if [ "$load_state" = "not-found" ]; then
             if [ "$active_state" != "inactive" ] || [ "$sub_state" != "dead" ]; then
                 echo "definition-free retired writer remains active: $unit" >&2
@@ -981,7 +1016,7 @@ retire_obsolete_writers() {
             continue
         fi
         if [[ "$unit" == *@.service ]]; then
-            unit_file_state="$(systemctl show "$unit" --property=UnitFileState --value)"
+            unit_file_state="$(unit_live_property "$unit" UnitFileState)"
             case "$unit_file_state" in
                 enabled) systemctl disable "$unit" ;;
                 enabled-runtime) systemctl disable --runtime "$unit" ;;
@@ -992,8 +1027,8 @@ retire_obsolete_writers() {
         else
             systemctl disable --now "$unit"
         fi
-        active_state="$(systemctl show "$unit" --property=ActiveState --value)"
-        sub_state="$(systemctl show "$unit" --property=SubState --value)"
+        active_state="$(unit_live_property "$unit" ActiveState)"
+        sub_state="$(unit_live_property "$unit" SubState)"
         if [ "$active_state" != "inactive" ] || [ "$sub_state" != "dead" ]; then
             echo "retired writer did not stop cleanly: $unit" >&2
             return 1
