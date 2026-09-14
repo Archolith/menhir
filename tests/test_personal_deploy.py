@@ -265,6 +265,7 @@ def test_stage_refuses_direct_vps_runner(tmp_path: Path) -> None:
     _, deployment, _ = _selected(tmp_path)
     runner = tmp_path / "personal_stage_vps.py"
     runner.write_text("# companion only\n", encoding="ascii")
+    runner.chmod(0o755)
 
     with pytest.raises(MODULE.PersonalDeployError, match="cannot run directly"):
         MODULE.stage_flow(deployment, runner.resolve(), execute=False)

@@ -178,7 +178,7 @@ def test_missing_episode_refuses_current_fact_until_evidence_exists(test_neo4j_r
     present, reaped = f"{ns}-here", f"{ns}-gone"
     _make_episodes(test_neo4j_repo, ns, [present])        # `reaped` never exists
 
-    with pytest.raises(ValueError, match="every declared contributor UUID"):
+    with pytest.raises(ValueError, match="declared contributors could not be resolved"):
         adapter.record_counter(
             subject="user", counter="bike_spend", value=500.0, namespace=ns,
             episode_uuids=[present, reaped],

@@ -1,3 +1,10 @@
+---
+artifact_schema: 1
+artifact_uuid: 67e2074d-0f07-4ce7-83f7-7f7d6d6940a1
+artifact_type: plan
+artifact_status: PROPOSED
+---
+
 # menhir -- FeatureFlag registry: one declarative inventory, machine-enforced
 
 Status: **PROPOSED. No code written.**

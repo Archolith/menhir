@@ -225,15 +225,22 @@ def test_phase3_run_forwards_flag_from_settings(monkeypatch):
     import menhir.services.scheduler_tasks as scheduler_tasks
 
     captured: dict[str, object] = {}
+    sync_chat_args: dict[str, object] = {}
 
     async def _fake_consolidate(*_args, **kwargs):
         captured.update(kwargs)
         return {}
 
+    def _fake_make_sync_chat(
+        settings, model=None, max_tokens=None, disable_reasoning=False,
+    ):
+        sync_chat_args["disable_reasoning"] = disable_reasoning
+        return lambda system, user: "[]"
+
     monkeypatch.setattr(scheduler_tasks, "consolidate_personal_memory", _fake_consolidate)
     monkeypatch.setattr(
         "menhir.infrastructure.sync_llm.make_sync_chat",
-        lambda settings, model=None, max_tokens=None: lambda system, user: "[]",
+        _fake_make_sync_chat,
     )
     monkeypatch.setattr(
         "menhir.infrastructure.view_embedder.make_view_embedder", lambda settings: None)
@@ -242,6 +249,7 @@ def test_phase3_run_forwards_flag_from_settings(monkeypatch):
 
     settings = MemorySettings(
         personal_memory_scalar_deterministic_shadow=True,
+        personal_memory_consolidation_disable_reasoning=True,
         personal_memory_consolidation_chat_model="",
         personal_memory_consolidation_max_tokens=2048,
         personal_memory_consolidation_verify_retries=0,
@@ -272,3 +280,4 @@ def test_phase3_run_forwards_flag_from_settings(monkeypatch):
 
     asyncio.run(_run())
     assert captured["scalar_deterministic_shadow_enabled"] is True
+    assert sync_chat_args["disable_reasoning"] is True
