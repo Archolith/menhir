@@ -476,9 +476,8 @@ async def _run_extraction_arm(
         # silently no-ops and the harness tried to reach a Neo4j that was never
         # configured, exactly the kind of harness/production divergence the fidelity
         # contract exists to catch.
-        # CF-107: `from_settings` resolves the LLM and embedding endpoints over HTTP through
-        # `acquire_llama_url_sync` -- two blocking network calls per arm, up to 16 arms per
-        # request, all on the shared event loop.
+        # CF-107: `from_settings` reads settings and builds clients synchronously; keep it off
+        # the shared event loop (up to 16 arms per request).
         settings = await asyncio.to_thread(MemorySettings.from_env)
         graphiti_client = await asyncio.to_thread(GraphitiClient.from_settings, settings)
         clients = graphiti_client.client.clients

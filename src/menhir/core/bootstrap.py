@@ -22,9 +22,6 @@ class UnavailableGraphitiClient:
 
     def __init__(self, reason: str) -> None:
         self.reason = reason
-        self.scheduler_fallback_base_url = ""
-        self.scheduler_fallback_embed_base_url = ""
-        self.scheduler_fallback_reranker_base_url = ""
         self.llm_client_ref = None
         self.embedder_ref = None
         self.reranker_ref = None

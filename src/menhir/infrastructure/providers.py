@@ -15,7 +15,6 @@ from urllib import parse as urllib_parse
 from urllib import request as urllib_request
 
 from menhir.config import MemorySettings
-from menhir.infrastructure.llama_endpoint import acquire_llama_url_async, should_use_scheduler
 from menhir.infrastructure.observability import (
     build_async_openai_client,
     complete_llm_usage_call,
@@ -23,7 +22,6 @@ from menhir.infrastructure.observability import (
     start_llm_usage_call,
 )
 
-SchedulerUrlAcquire = Callable[..., Awaitable[str]]
 OpenAIClientFactory = Callable[..., Any]
 RetrySleep = Callable[[float], Awaitable[None]]
 
@@ -245,7 +243,6 @@ def _chat_client_cache_key(
 class ProviderRuntimeDependencies:
     """Runtime hooks for OpenAI-compatible provider I/O."""
 
-    scheduler_url_acquire: SchedulerUrlAcquire = acquire_llama_url_async
     openai_client_factory: OpenAIClientFactory = build_async_openai_client
     request_timeout_s: float = DEFAULT_REQUEST_TIMEOUT_S
     retry_sleep: RetrySleep = asyncio.sleep
@@ -260,26 +257,13 @@ class OpenAIStyleChatBackend:
     dependencies: ProviderRuntimeDependencies = field(default_factory=ProviderRuntimeDependencies)
 
     async def _resolve_base_url(self, operation: str) -> str:
-        """Resolve the base URL for ``operation``, via the scheduler when one is configured.
+        """Return the configured base URL for ``operation``.
 
-        Takes NO prompt. It previously accepted a ``user_prompt`` it never read, and the obvious
-        way to "use" that parameter is interpolating it into the scheduler ``task`` label below --
-        which the scheduler logs and renders on a dashboard. That would be a prompt-content leak.
-        The parameter is gone so it cannot be wired up; the label is built from ``operation`` alone.
+        Takes NO prompt: a previous version accepted a ``user_prompt`` it never read, and the
+        obvious way to "use" it was to interpolate it into a request label that an external
+        service logged -- a prompt-content leak. The parameter stays gone.
         """
-        fallback_base_url = self.provider.base_url
-        if not should_use_scheduler(fallback_base_url):
-            return fallback_base_url
-        try:
-            return await self.dependencies.scheduler_url_acquire(
-                fallback=fallback_base_url,
-                task=f"memory: llm {operation}",
-                timeout_s=self.dependencies.request_timeout_s,
-            )
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            return fallback_base_url
+        return self.provider.base_url
 
     async def create_chat_completion(
         self,

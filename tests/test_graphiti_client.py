@@ -19,7 +19,6 @@ from menhir.infrastructure.graphiti_helpers import (
     _raw_preview,
 )
 from menhir.infrastructure.graphiti_llm_patches import _openai_strict_json_schema
-from menhir.infrastructure.scheduler_trace import build_episode_scheduler_task
 import menhir.infrastructure.graphiti_client as graphiti_client_module
 
 
@@ -714,17 +713,6 @@ def test_normalize_graphiti_json_payload_prefers_alternate_edge_text_before_synt
 
 
 @pytest.mark.unit
-def test_build_episode_scheduler_task_uses_full_episode_uuid() -> None:
-    task = build_episode_scheduler_task(
-        episode_uuid="123e4567-e89b-12d3-a456-426614174000",
-        provider="graphiti",
-        action="add-episode",
-    )
-
-    assert task == "memory-123e4567e89b12d3a456426614174000--graphiti-add-episode"
-
-
-@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_build_indices_and_constraints_runs_once_unless_forced() -> None:
     client = _DummyGraphiti(
@@ -768,7 +756,6 @@ async def test_add_episode_uses_episode_uuid_for_telemetry_only_not_graphiti_pay
         embedder=object(),
     )
     wrapper = GraphitiClient(client=client)
-    monkeypatch.setattr(wrapper, "_ensure_graphiti_endpoints_alive", lambda task=None: asyncio.sleep(0))
     monkeypatch.setattr(wrapper, "_await_add_episode_request", lambda **kwargs: kwargs["awaitable"])
 
     await wrapper.add_episode(
@@ -832,365 +819,6 @@ async def test_graphiti_client_delegates_episode_search_and_close() -> None:
     ]
     assert client.search_calls == [{"query": "first event", "kwargs": {"limit": 5}}]
     assert client.close_calls == 1
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_add_episode_watchdog_fails_when_scheduler_goes_idle(monkeypatch: pytest.MonkeyPatch) -> None:
-    class _HungClient(_DummyGraphiti):
-        async def add_episode(self, **kwargs: object) -> dict[str, object]:
-            await asyncio.sleep(60)
-            return {"ok": True, "kind": "episode"}
-
-    client = _HungClient(
-        uri="bolt://localhost:7687",
-        user="neo4j",
-        password="password",
-        graph_driver=_DummyNeo4jDriver(
-            uri="bolt://localhost:7687",
-            user="neo4j",
-            password="password",
-            database="neo4j",
-        ),
-        llm_client=object(),
-        embedder=object(),
-    )
-    wrapper = GraphitiClient(
-        client=client,
-        scheduler_fallback_base_url="http://127.0.0.1:8081/v1",
-        scheduler_request_stall_timeout_s=0.1,
-    )
-    monkeypatch.setattr(wrapper, "_ensure_graphiti_endpoints_alive", lambda task=None: asyncio.sleep(0))
-
-    async def _idle_status() -> dict[str, object]:
-        return {
-            "busy": False,
-            "slot_active": False,
-            "active_proxy_connections": 0,
-            "current_task": None,
-        }
-
-    monkeypatch.setattr(wrapper, "_fetch_scheduler_status", _idle_status)
-
-    with pytest.raises(TimeoutError, match="stalled after scheduler request went idle"):
-        await wrapper.add_episode(
-            name="episode-1",
-            episode_body="first event",
-            source_description="unit-test",
-            reference_time=datetime(2026, 3, 6, 12, 0, tzinfo=timezone.utc),
-            episode_uuid="episode-uuid",
-            attempt=1,
-        )
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_add_episode_watchdog_fails_when_scheduler_status_stays_unavailable(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    class _HungClient(_DummyGraphiti):
-        async def add_episode(self, **kwargs: object) -> dict[str, object]:
-            await asyncio.sleep(60)
-            return {"ok": True, "kind": "episode"}
-
-    client = _HungClient(
-        uri="bolt://localhost:7687",
-        user="neo4j",
-        password="password",
-        graph_driver=_DummyNeo4jDriver(
-            uri="bolt://localhost:7687",
-            user="neo4j",
-            password="password",
-            database="neo4j",
-        ),
-        llm_client=object(),
-        embedder=object(),
-    )
-    wrapper = GraphitiClient(
-        client=client,
-        scheduler_fallback_base_url="http://127.0.0.1:8081/v1",
-        scheduler_request_stall_timeout_s=0.1,
-    )
-    monkeypatch.setattr(wrapper, "_ensure_graphiti_endpoints_alive", lambda task=None: asyncio.sleep(0))
-    monkeypatch.setattr(wrapper, "_fetch_scheduler_status", lambda: asyncio.sleep(0, result=None))
-
-    with pytest.raises(TimeoutError, match="scheduler status was unavailable"):
-        await wrapper.add_episode(
-            name="episode-1",
-            episode_body="first event",
-            source_description="unit-test",
-            reference_time=datetime(2026, 3, 6, 12, 0, tzinfo=timezone.utc),
-            episode_uuid="episode-uuid",
-            attempt=1,
-        )
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_fetch_scheduler_status_uses_watchdog_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
-    seen: dict[str, object] = {}
-
-    class _Response:
-        def raise_for_status(self) -> None:
-            return None
-
-        def json(self) -> dict[str, object]:
-            return {"state": "running", "current_task": "memory-task"}
-
-    class _Client:
-        def __init__(self, *, timeout: float) -> None:
-            seen["timeout"] = timeout
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-        async def get(self, url: str):
-            seen["url"] = url
-            return _Response()
-
-    wrapper = GraphitiClient(client=object())
-    monkeypatch.setattr(graphiti_client_module.httpx, "AsyncClient", lambda timeout=0: _Client(timeout=timeout))
-    monkeypatch.setattr(graphiti_client_module, "scheduler_url_from_env", lambda: "http://127.0.0.1:8082")
-
-    payload = await wrapper._fetch_scheduler_status()
-
-    assert payload == {"state": "running", "current_task": "memory-task"}
-    assert seen == {"timeout": 3.0, "url": "http://127.0.0.1:8082/watchdog-status"}
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_add_episode_bypasses_scheduler_watchdog_for_non_scheduler_endpoint(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    client = _DummyGraphiti(
-        uri="bolt://localhost:7687",
-        user="neo4j",
-        password="password",
-        graph_driver=_DummyNeo4jDriver(
-            uri="bolt://localhost:7687",
-            user="neo4j",
-            password="password",
-            database="neo4j",
-        ),
-        llm_client=object(),
-        embedder=object(),
-    )
-    wrapper = GraphitiClient(
-        client=client,
-        scheduler_fallback_base_url="https://api.openai.com/v1",
-    )
-    monkeypatch.setattr(wrapper, "_ensure_graphiti_endpoints_alive", lambda task=None: asyncio.sleep(0))
-
-    async def _unexpected_status() -> dict[str, object] | None:
-        raise AssertionError("scheduler status should not be polled for non-scheduler endpoints")
-
-    monkeypatch.setattr(wrapper, "_fetch_scheduler_status", _unexpected_status)
-
-    result = await wrapper.add_episode(
-        name="episode-1",
-        episode_body="first event",
-        source_description="unit-test",
-        reference_time=datetime(2026, 3, 6, 12, 0, tzinfo=timezone.utc),
-        episode_uuid="episode-uuid",
-        attempt=1,
-    )
-
-    assert result == {"ok": True, "kind": "episode"}
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_add_episode_skips_scheduler_trace_for_non_scheduler_endpoint(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    client = _DummyGraphiti(
-        uri="bolt://localhost:7687",
-        user="neo4j",
-        password="password",
-        graph_driver=_DummyNeo4jDriver(
-            uri="bolt://localhost:7687",
-            user="neo4j",
-            password="password",
-            database="neo4j",
-        ),
-        llm_client=object(),
-        embedder=object(),
-    )
-    wrapper = GraphitiClient(
-        client=client,
-        scheduler_fallback_base_url="https://api.openai.com/v1",
-    )
-    emitted_events: list[dict[str, object]] = []
-
-    monkeypatch.setattr(wrapper, "_ensure_graphiti_endpoints_alive", lambda task=None: asyncio.sleep(0))
-
-    async def _fake_emit(**kwargs: object) -> None:
-        emitted_events.append(kwargs)
-
-    monkeypatch.setattr(graphiti_client_module, "emit_scheduler_task_event", _fake_emit)
-
-    result = await wrapper.add_episode(
-        name="episode-1",
-        episode_body="first event",
-        source_description="unit-test",
-        reference_time=datetime(2026, 3, 6, 12, 0, tzinfo=timezone.utc),
-        episode_uuid="episode-uuid",
-        attempt=1,
-    )
-
-    assert result == {"ok": True, "kind": "episode"}
-    assert emitted_events == []
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_graphiti_client_refreshes_llm_base_url_from_scheduler_acquire(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(graphiti_client_module, "should_use_scheduler", lambda _base_url: True)
-
-    # Keyed on `task`, not a call-order queue. The real scheduler derives the URL it returns
-    # from the task it was asked for (`handle_acquire` returns `{base}/v1/t/{task_id}`), so a
-    # queue only reproduced its answers while the acquires happened to run in a fixed order.
-    # CF-174 made the three endpoint acquires concurrent, which is not a change to which URL a
-    # branch receives -- each still passes its own task -- but it did make the queue's
-    # order-as-identity assumption observable. Every assertion below is unchanged; only the stub
-    # now models the contract it is standing in for.
-    _ACQUIRED_URLS = {
-        "memory: graphiti bootstrap": "http://127.0.0.1:8082/v1/t/memory--graphiti-bootstrap",
-        "memory: graphiti embed bootstrap": "http://127.0.0.1:8082/v1/t/memory--graphiti-embed-bootstrap",
-        "memory: graphiti reranker bootstrap": "http://127.0.0.1:8082/v1/t/memory--graphiti-reranker-bootstrap",
-        "memory: graphiti add_episode": "http://127.0.0.1:8082/v1/t/memory--graphiti-add-episode",
-        "memory: graphiti add_episode embed": "http://127.0.0.1:8082/v1/t/memory--graphiti-add-episode-embed",
-        "memory: graphiti add_episode reranker": "http://127.0.0.1:8082/v1/t/memory--graphiti-add-episode-reranker",
-    }
-
-    def _url_for(task: str | None) -> str:
-        assert task in _ACQUIRED_URLS, f"unexpected acquire task {task!r}"
-        return _ACQUIRED_URLS[task]
-
-    def _fake_acquire_sync(*, fallback: str, task: str | None = None, timeout_s: float = 30.0) -> str:
-        return _url_for(task)
-
-    async def _fake_acquire_async(*, fallback: str, task: str | None = None, timeout_s: float = 30.0) -> str:
-        return _url_for(task)
-
-    observed_clients: list[tuple[str, object]] = []
-
-    def _fake_build_async_openai_client(*, base_url: str, api_key: str, settings: object, embedding_cache=None) -> object:
-        client = object()
-        observed_clients.append((base_url, client))
-        return client
-
-    monkeypatch.setattr(graphiti_client_module, "_GRAPHITI_IMPORT_ERROR", None)
-    monkeypatch.setattr(graphiti_client_module, "LLMConfig", _DummyLLMConfig)
-    monkeypatch.setattr(graphiti_client_module, "OpenAIGenericClient", _DummyOpenAIGenericClient)
-    monkeypatch.setattr(graphiti_client_module, "OpenAIEmbedderConfig", _DummyOpenAIEmbedderConfig)
-    monkeypatch.setattr(graphiti_client_module, "OpenAIEmbedder", _DummyOpenAIEmbedder)
-    monkeypatch.setattr(graphiti_client_module, "OpenAIRerankerClient", _DummyOpenAIRerankerClient)
-    monkeypatch.setattr(graphiti_client_module, "Neo4jDriver", _DummyNeo4jDriver)
-    monkeypatch.setattr(graphiti_client_module, "Graphiti", _DummyGraphiti)
-    monkeypatch.setattr(graphiti_client_module, "acquire_llama_url_sync", _fake_acquire_sync)
-    monkeypatch.setattr(graphiti_client_module, "acquire_llama_url_async", _fake_acquire_async)
-    monkeypatch.setattr(graphiti_client_module, "build_async_openai_client", _fake_build_async_openai_client)
-
-    settings = MemorySettings(
-        neo4j_uri="bolt://db:7687",
-        neo4j_database="gemini-test",
-        neo4j_user="neo-user",
-        neo4j_password="secret",
-        local_llm_base_url="http://127.0.0.1:8081/v1",
-        local_llm_api_key="local-key",
-        local_llm_chat_model="chat-model",
-        local_llm_embed_model="embed-model",
-        local_llm_embed_base_url="http://127.0.0.1:8081-embed/v1",
-    )
-
-    wrapper = GraphitiClient.from_settings(settings)
-    reference_time = datetime(2026, 3, 6, 12, 0, tzinfo=timezone.utc)
-
-    await wrapper.add_episode(
-        name="episode-1",
-        episode_body="first event",
-        source_description="unit-test",
-        reference_time=reference_time,
-    )
-
-    assert observed_clients[0][0] == "http://127.0.0.1:8082/v1/t/memory--graphiti-bootstrap"
-    assert observed_clients[1][0] == "http://127.0.0.1:8082/v1/t/memory--graphiti-embed-bootstrap"
-    assert observed_clients[2][0] == "http://127.0.0.1:8082/v1/t/memory--graphiti-reranker-bootstrap"
-    assert observed_clients[3][0] == "http://127.0.0.1:8082/v1/t/memory--graphiti-add-episode"
-    assert observed_clients[4][0] == "http://127.0.0.1:8082/v1/t/memory--graphiti-add-episode-embed"
-    assert observed_clients[5][0] == "http://127.0.0.1:8082/v1/t/memory--graphiti-add-episode-reranker"
-    assert wrapper.llm_client_ref.config.base_url == "http://127.0.0.1:8082/v1/t/memory--graphiti-add-episode"
-    assert wrapper.llm_client_ref.client is observed_clients[3][1]
-    assert wrapper.embedder_ref.config.base_url == "http://127.0.0.1:8082/v1/t/memory--graphiti-add-episode-embed"
-    assert wrapper.embedder_ref.client is observed_clients[4][1]
-    assert wrapper.reranker_ref.config.base_url == "http://127.0.0.1:8082/v1/t/memory--graphiti-add-episode-reranker"
-    assert wrapper.reranker_ref.client is observed_clients[5][1]
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_search_scored_wakes_scheduler_when_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
-    class _SearchClient:
-        def __init__(self) -> None:
-            self.calls: list[tuple[str, object, object]] = []
-
-        async def search_(self, query: str, config: object, *, group_ids: list[str] | None = None) -> _DummySearchResults:
-            self.calls.append((query, config, group_ids))
-            return _DummySearchResults(
-                nodes=[_DummyNode(uuid="n1", name="node-1")],
-                scores=[0.42],
-            )
-
-    observed_calls: list[tuple[str, str | None]] = []
-
-    async def _fake_acquire(*, fallback: str, task: str | None = None, timeout_s: float = 30.0) -> str:
-        observed_calls.append((fallback, task))
-        return "http://127.0.0.1:8081/v1"
-
-    _stub_search_config(monkeypatch)
-    monkeypatch.setattr(graphiti_client_module, "should_use_scheduler", lambda _base_url: True)
-    monkeypatch.setattr(graphiti_client_module, "acquire_llama_url_async", _fake_acquire)
-
-    wrapper = GraphitiClient(
-        client=_SearchClient(),
-        scheduler_fallback_base_url="http://127.0.0.1:8081/v1",
-    )
-    scored = await wrapper.search_scored("hello", num_results=5)
-
-    assert observed_calls == [("http://127.0.0.1:8081/v1", "memory: graphiti search_scored")]
-    assert scored == [("n1", "node-1", 0.42)]
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_search_scored_scheduler_failure_degrades_gracefully(monkeypatch: pytest.MonkeyPatch) -> None:
-    class _SearchClient:
-        async def search_(self, query: str, config: object, *, group_ids: list[str] | None = None) -> _DummySearchResults:
-            return _DummySearchResults(
-                nodes=[_DummyNode(uuid="n2", name="node-2")],
-                scores=[0.99],
-            )
-
-    async def _failing_acquire(*, fallback: str, task: str | None = None, timeout_s: float = 30.0) -> str:
-        raise RuntimeError("scheduler down")
-
-    _stub_search_config(monkeypatch)
-    monkeypatch.setattr(graphiti_client_module, "should_use_scheduler", lambda _base_url: True)
-    monkeypatch.setattr(graphiti_client_module, "acquire_llama_url_async", _failing_acquire)
-
-    wrapper = GraphitiClient(
-        client=_SearchClient(),
-        scheduler_fallback_base_url="http://127.0.0.1:8081/v1",
-    )
-
-    # Acquire failure should not prevent search execution.
-    scored = await wrapper.search_scored("hello", num_results=5)
-    assert scored == [("n2", "node-2", 0.99)]
 
 
 @pytest.mark.unit
@@ -1317,36 +945,8 @@ async def test_search_ranked_by_method_keeps_healthy_lane_when_other_fails(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_search_wakes_scheduler_with_task_label(monkeypatch: pytest.MonkeyPatch) -> None:
-    class _SearchClient:
-        async def search(self, query: str, **kwargs: object) -> dict[str, object]:
-            return {"query": query, "kwargs": kwargs}
-
-    observed_calls: list[tuple[str, str | None]] = []
-
-    async def _fake_acquire(*, fallback: str, task: str | None = None, timeout_s: float = 30.0) -> str:
-        observed_calls.append((fallback, task))
-        return "http://127.0.0.1:8081/v1"
-
-    monkeypatch.setattr(graphiti_client_module, "should_use_scheduler", lambda _base_url: True)
-    monkeypatch.setattr(graphiti_client_module, "acquire_llama_url_async", _fake_acquire)
-
-    wrapper = GraphitiClient(
-        client=_SearchClient(),
-        scheduler_fallback_base_url="http://127.0.0.1:8081/v1",
-    )
-    result = await wrapper.search("hello", limit=3)
-
-    assert observed_calls == [("http://127.0.0.1:8081/v1", "memory: graphiti search")]
-    assert result == {"query": "hello", "kwargs": {"limit": 3}}
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_await_add_episode_request_cancels_inner_task_on_cancellation(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """When asyncio.wait_for times out (non-watchdog/OpenAI path), the inner
+async def test_await_add_episode_request_cancels_inner_task_on_cancellation() -> None:
+    """When asyncio.wait_for times out, the inner
     create_task() must be cancelled — not left as an orphan running in the
     background holding connections and emitting unhandled-exception warnings."""
     inner_cancelled = False
@@ -1362,20 +962,11 @@ async def test_await_add_episode_request_cancels_inner_task_on_cancellation(
             raise
         return {"ok": True}
 
-    wrapper = GraphitiClient(
-        client=object(),  # type: ignore[arg-type]
-        scheduler_fallback_base_url="https://api.openai.com/v1",  # non-scheduler
-    )
-    monkeypatch.setattr(wrapper, "_ensure_graphiti_endpoints_alive", lambda task=None: asyncio.sleep(0))
+    wrapper = GraphitiClient(client=object())  # type: ignore[arg-type]
 
     with pytest.raises((asyncio.CancelledError, TimeoutError, asyncio.TimeoutError)):
         await asyncio.wait_for(
-            wrapper._await_add_episode_request(
-                awaitable=_slow_openai_call(),
-                task="test-task",
-                episode_uuid="test-uuid",
-                child_task_id="test-child",
-            ),
+            wrapper._await_add_episode_request(awaitable=_slow_openai_call()),
             timeout=0.1,
         )
 
@@ -1387,24 +978,13 @@ async def test_await_add_episode_request_cancels_inner_task_on_cancellation(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_await_add_episode_request_propagates_task_exception_non_watchdog(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Normal exceptions from the OpenAI call propagate unchanged on the non-watchdog path."""
+async def test_await_add_episode_request_propagates_task_exception_non_watchdog() -> None:
+    """Normal exceptions from the OpenAI call propagate unchanged."""
 
     async def _failing_call() -> None:
         raise ValueError("openai error")
 
-    wrapper = GraphitiClient(
-        client=object(),  # type: ignore[arg-type]
-        scheduler_fallback_base_url="https://api.openai.com/v1",
-    )
-    monkeypatch.setattr(wrapper, "_ensure_graphiti_endpoints_alive", lambda task=None: asyncio.sleep(0))
+    wrapper = GraphitiClient(client=object())  # type: ignore[arg-type]
 
     with pytest.raises(ValueError, match="openai error"):
-        await wrapper._await_add_episode_request(
-            awaitable=_failing_call(),
-            task="test-task",
-            episode_uuid="test-uuid",
-            child_task_id="test-child",
-        )
+        await wrapper._await_add_episode_request(awaitable=_failing_call())

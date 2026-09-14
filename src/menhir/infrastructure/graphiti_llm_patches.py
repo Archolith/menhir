@@ -134,14 +134,18 @@ def _n_ctx_from_props(payload: object) -> int | None:
 
 
 async def _probe_endpoint_context_window(endpoint: str) -> int | None:
-    """Ask the scheduler what context window the loaded model actually has."""
+    """Ask a llama.cpp server (``GET /props`` at the endpoint root) for its loaded context window.
+
+    Any other OpenAI-compatible server answers 404 or with a body that has no ``n_ctx``; both
+    resolve to ``None`` ("cannot derive"), never to a ceiling.
+    """
     parts = urlsplit(endpoint)
     root = f"{parts.scheme}://{parts.netloc}"
     try:
-        from menhir.infrastructure.llama_endpoint import _shared_scheduler_http_client
+        import httpx
 
-        client = _shared_scheduler_http_client()
-        response = await client.get(f"{root}/llama/props", timeout=2.0)
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            response = await client.get(f"{root}/props")
         response.raise_for_status()
         return _n_ctx_from_props(response.json())
     except Exception as exc:  # noqa: BLE001 - any failure means "cannot derive", never "no ceiling"

@@ -12,9 +12,8 @@ provider is configured — in which case counters degrade to BM25-only surfacing
 The returned callable itself NEVER raises: on any provider error it logs and returns ``None`` so a
 failed embed can never drop the counter write (the bridge writes ``name_embedding=None``).
 
-The OpenAI client is built lazily on first embed (so importing / constructing the scheduler does
-no network I/O), and any scheduler-managed embed URL is resolved once via ``acquire_llama_url_sync``
-— the same resolution ``repair_embedding_dimensions`` uses.
+The OpenAI client is built lazily on first embed, so importing / constructing the maintenance
+scheduler does no network I/O.
 """
 
 from __future__ import annotations
@@ -23,7 +22,6 @@ import logging
 from typing import Any, Callable
 
 from menhir.config import MemorySettings, redact_uri_credentials
-from menhir.infrastructure.llama_endpoint import acquire_llama_url_sync, should_use_scheduler
 from menhir.infrastructure.observability import (
     complete_llm_usage_call,
     fail_llm_usage_call,
@@ -64,10 +62,6 @@ def make_view_embedder(settings: MemorySettings) -> ViewEmbedder | None:
         from openai import OpenAI
 
         base_url = configured_base_url
-        if should_use_scheduler(base_url):
-            base_url = acquire_llama_url_sync(
-                fallback=base_url, task="memory: view counter embed", timeout_s=120.0,
-            )
         # CF-190: see the note in sync_llm.py. This seam is installed as the maintenance
         # scheduler's `experience_embed` hook with `experience_counter_enabled` defaulting True,
         # so an SDK-default client lets a hung endpoint hold a scheduler worker thread for ~30

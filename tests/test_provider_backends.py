@@ -191,31 +191,6 @@ async def test_openai_style_backend_uses_openai_client() -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_openai_style_backend_uses_structured_scheduler_task_label() -> None:
-    settings = MemorySettings()
-    provider = ProviderConfig(
-        kind=ProviderKind.LOCAL,
-        base_url="http://localhost:1234/v1",
-        api_key="test-key",
-        chat_model="test-model",
-    )
-    acquire_mock = AsyncMock(return_value="http://localhost:8082/v1/t/memory--llm-compression")
-    backend = OpenAIStyleChatBackend(
-        provider=provider,
-        settings=settings,
-        dependencies=ProviderRuntimeDependencies(scheduler_url_acquire=acquire_mock, request_timeout_s=0.5),
-    )
-
-    with patch("menhir.infrastructure.providers.should_use_scheduler", return_value=True):
-        resolved = await backend._resolve_base_url("compression")
-
-    assert resolved == "http://localhost:8082/v1/t/memory--llm-compression"
-    assert acquire_mock.await_args.kwargs["task"] == "memory: llm compression"
-    assert acquire_mock.await_args.kwargs["timeout_s"] == 0.5
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
 async def test_gemini_backend_uses_generate_content_contract() -> None:
     provider = ProviderConfig(
         kind=ProviderKind.GEMINI,
