@@ -328,6 +328,8 @@ The dependency-group command requires pip 25.1 or newer.
 
 `menhir setup` is the idempotent post-install step for a source checkout. It creates `.env` only
 when missing and enables the repository-managed Git hooks without replacing a custom hooks path.
+Add `--compose-neo4j` to target the root `docker-compose.yml` Neo4j and `--provider local|openai`
+to write a consistent LLM provider block; re-running never overwrites a filled-in key.
 Run `menhir setup --check` to audit without changing anything. Runtime, MCP client, optional agent
 hook, and Windows watchdog steps are listed in [`docs/post-install.md`](docs/post-install.md).
 

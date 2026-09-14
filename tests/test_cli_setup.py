@@ -171,3 +171,86 @@ def test_setup_check_is_non_mutating_and_reports_missing_items(tmp_path: Path) -
     assert "[MISSING] environment" in result.output
     assert "[MISSING] git-hooks" in result.output
     assert not (repo / ".env").exists()
+
+
+# --- --provider / --compose-neo4j ---------------------------------------------------------
+
+from menhir.cli.setup import COMPOSE_NEO4J_KEYS, upsert_env_keys  # noqa: E402
+
+
+def _env_map(path: Path) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line and not line.startswith("#") and "=" in line:
+            k, _, v = line.partition("=")
+            out[k.strip()] = v.strip()
+    return out
+
+
+@pytest.mark.unit
+def test_upsert_env_keys_rewrites_uncomments_and_appends(tmp_path: Path) -> None:
+    env = tmp_path / ".env"
+    env.write_text("# header\nA=1\n# B=old\nC=keep\n", encoding="utf-8")
+
+    changes = upsert_env_keys(env, {"A": "2", "B": "new", "D": "4", "C": None})
+
+    assert changes == ["set A", "enabled B", "added D"]
+    assert env.read_text(encoding="utf-8") == "# header\nA=2\nB=new\nC=keep\nD=4\n"
+    assert upsert_env_keys(env, {"A": "2", "B": "new", "D": "4"}) == []
+
+
+@pytest.mark.unit
+def test_upsert_env_keys_never_overwrites_a_filled_secret(tmp_path: Path) -> None:
+    env = tmp_path / ".env"
+    env.write_text("OPENAI_API_KEY=sk-real\n", encoding="utf-8")
+
+    assert upsert_env_keys(env, {"OPENAI_API_KEY": None}) == []
+    assert _env_map(env)["OPENAI_API_KEY"] == "sk-real"
+
+    env.write_text("# OPENAI_API_KEY=\n", encoding="utf-8")
+    assert upsert_env_keys(env, {"OPENAI_API_KEY": None}) == ["enabled OPENAI_API_KEY"]
+    assert _env_map(env)["OPENAI_API_KEY"] == ""
+
+
+@pytest.mark.unit
+def test_apply_setup_provider_openai_with_compose_neo4j(tmp_path: Path) -> None:
+    repo = _make_checkout(tmp_path / "menhir")
+    (repo / ".env.example").write_text(
+        "NEO4J_URI=bolt://localhost:7687\nNEO4J_PASSWORD=\nLLM_CHAT_PROVIDER=local\nGRAPHITI_LLM_PROVIDER=local\n"
+        "# OPENAI_API_KEY=\nOPENAI_CHAT_MODEL=gpt-4.1-nano\n",
+        encoding="utf-8",
+    )
+
+    first = apply_setup(repo, provider="openai", compose_neo4j=True)
+    second = apply_setup(repo, provider="openai", compose_neo4j=True)
+
+    env = _env_map(repo / ".env")
+    assert env["NEO4J_PASSWORD"] == COMPOSE_NEO4J_KEYS["NEO4J_PASSWORD"] == "password"
+    assert env["LLM_CHAT_PROVIDER"] == "openai"
+    assert env["GRAPHITI_LLM_PROVIDER"] == "openai"
+    assert env["GRAPHITI_EMBED_PROVIDER"] == "openai"
+    assert env["OPENAI_API_KEY"] == ""  # uncommented for the operator to fill in
+    assert env["OPENAI_CHAT_MODEL"] == "gpt-4.1-nano"  # existing value untouched
+    assert any(c.startswith("set NEO4J_PASSWORD") for c in first)
+    assert second == []
+
+
+@pytest.mark.unit
+def test_apply_setup_rejects_unsupported_provider(tmp_path: Path) -> None:
+    repo = _make_checkout(tmp_path / "menhir")
+    with pytest.raises(SetupError, match="gemini is chat-only"):
+        apply_setup(repo, provider="gemini")
+    with pytest.raises(SetupError, match="drop --no-env"):
+        apply_setup(repo, create_env=False, provider="local")
+
+
+@pytest.mark.unit
+def test_setup_cli_accepts_provider_flags(tmp_path: Path) -> None:
+    repo = _make_checkout(tmp_path / "menhir")
+    result = CliRunner().invoke(
+        app, ["setup", "--repo", str(repo), "--provider", "local", "--compose-neo4j"]
+    )
+    assert result.exit_code == 0, result.output
+    env = _env_map(repo / ".env")
+    assert env["LLM_CHAT_PROVIDER"] == "local"
+    assert env["NEO4J_PASSWORD"] == "password"

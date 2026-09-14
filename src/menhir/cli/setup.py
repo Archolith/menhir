@@ -30,6 +30,110 @@ class SetupItem:
     required: bool = True
 
 
+#: Providers `menhir setup --provider` can make fully consistent. Gemini is chat-only
+#: (Graphiti extraction requires an OpenAI-compatible provider), so it is not a
+#: one-flag path and stays a manual .env edit.
+SETUP_PROVIDERS = ("local", "openai")
+
+#: Keys written for each provider. A value of ``None`` means "ensure the key exists,
+#: never overwrite a non-empty value" -- used for secrets the operator fills in.
+_PROVIDER_KEYS: dict[str, dict[str, str | None]] = {
+    "local": {
+        "LLM_CHAT_PROVIDER": "local",
+        "GRAPHITI_LLM_PROVIDER": "local",
+        "GRAPHITI_EMBED_PROVIDER": "local",
+        "LOCAL_LLM_BASE_URL": None,
+        "LOCAL_LLM_CHAT_MODEL": None,
+        "LOCAL_LLM_EMBED_MODEL": None,
+    },
+    "openai": {
+        "LLM_CHAT_PROVIDER": "openai",
+        "GRAPHITI_LLM_PROVIDER": "openai",
+        "GRAPHITI_EMBED_PROVIDER": "openai",
+        "OPENAI_API_KEY": None,
+        "OPENAI_CHAT_MODEL": None,
+        "OPENAI_EMBED_MODEL": None,
+    },
+}
+
+#: Credentials matching the root docker-compose.yml Neo4j service.
+COMPOSE_NEO4J_KEYS: dict[str, str | None] = {
+    "NEO4J_URI": "bolt://localhost:7687",
+    "NEO4J_USER": "neo4j",
+    "NEO4J_PASSWORD": "password",
+    "NEO4J_DATABASE": "neo4j",
+}
+
+
+def _split_env_line(line: str) -> tuple[str, str, str] | None:
+    """Return (prefix, key, value) for ``KEY=value`` or ``# KEY=value`` lines, else None."""
+
+    stripped = line.lstrip()
+    prefix = ""
+    if stripped.startswith("#"):
+        prefix = "#"
+        stripped = stripped[1:].lstrip()
+    if "=" not in stripped:
+        return None
+    key, _, value = stripped.partition("=")
+    key = key.strip()
+    if not key or not all(ch.isalnum() or ch == "_" for ch in key):
+        return None
+    return prefix, key, value
+
+
+def upsert_env_keys(env_path: Path, updates: dict[str, str | None]) -> list[str]:
+    """Set keys in a dotenv file, preserving every other line. Returns the changes made.
+
+    - An active ``KEY=`` line is rewritten in place (only when the value differs).
+    - A commented ``# KEY=`` line is uncommented in place.
+    - A missing key is appended.
+    - ``None`` values mean *ensure present*: an existing active line with a non-empty
+      value is left untouched, otherwise ``KEY=`` is written so the operator sees what
+      to fill in. Secrets therefore never get overwritten by re-running setup.
+    """
+
+    lines = env_path.read_text(encoding="utf-8").split("\n") if env_path.exists() else [""]
+    changes: list[str] = []
+    active_idx: dict[str, int] = {}
+    commented_idx: dict[str, int] = {}
+    for i, line in enumerate(lines):
+        parsed = _split_env_line(line)
+        if parsed is None:
+            continue
+        prefix, key, _ = parsed
+        if prefix == "" and key not in active_idx:
+            active_idx[key] = i
+        elif prefix == "#" and key not in commented_idx:
+            commented_idx[key] = i
+
+    for key, desired in updates.items():
+        if key in active_idx:
+            i = active_idx[key]
+            _, _, current = _split_env_line(lines[i])  # type: ignore[misc]
+            current = current.strip()
+            if desired is None:
+                continue  # ensure-present only; an active line already satisfies it
+            if current != desired:
+                lines[i] = f"{key}={desired}"
+                changes.append(f"set {key}")
+            continue
+        value = "" if desired is None else desired
+        if key in commented_idx:
+            lines[commented_idx[key]] = f"{key}={value}"
+            changes.append(f"enabled {key}")
+            continue
+        if lines and lines[-1] == "":
+            lines.insert(len(lines) - 1, f"{key}={value}")
+        else:
+            lines.append(f"{key}={value}")
+        changes.append(f"added {key}")
+
+    if changes:
+        env_path.write_text("\n".join(lines), encoding="utf-8", newline="\n")
+    return changes
+
+
 def find_checkout(start: Path) -> Path:
     """Find the nearest checkout whose package metadata identifies Menhir."""
     candidate = start.expanduser().resolve()
@@ -151,9 +255,20 @@ def apply_setup(
     install_claude: bool = False,
     hook_location: str = "project",
     workspace: str = "",
+    provider: str | None = None,
+    compose_neo4j: bool = False,
 ) -> list[str]:
     """Apply safe checkout setup and return a list of changes made."""
     changes: list[str] = []
+
+    provider = provider.strip().lower() if provider else None
+    if provider is not None and provider not in SETUP_PROVIDERS:
+        raise SetupError(
+            f"--provider must be one of {', '.join(SETUP_PROVIDERS)} "
+            "(gemini is chat-only and cannot back Graphiti extraction; edit .env by hand)."
+        )
+    if (provider is not None or compose_neo4j) and not create_env:
+        raise SetupError("--provider and --compose-neo4j need the .env step; drop --no-env.")
 
     hook_location = hook_location.strip().lower()
     if hook_location not in ("project", "user"):
@@ -176,6 +291,13 @@ def apply_setup(
             env_path.chmod(0o600)
             changes.append(f"created {env_path}")
             changes.extend(_restrict_secret_file(env_path))
+        env_updates: dict[str, str | None] = {}
+        if compose_neo4j:
+            env_updates.update(COMPOSE_NEO4J_KEYS)
+        if provider is not None:
+            env_updates.update(_PROVIDER_KEYS[provider])
+        if env_updates:
+            changes.extend(upsert_env_keys(env_path, env_updates))
 
     if configure_git_hooks:
         pre_push = repo / ".githooks" / "pre-push"
@@ -267,6 +389,14 @@ def setup(
         bool,
         typer.Option(help="Install the opt-in Windows login watchdog task."),
     ] = False,
+    provider: Annotated[
+        str | None,
+        typer.Option(help="Write a consistent LLM provider block into .env: local or openai."),
+    ] = None,
+    compose_neo4j: Annotated[
+        bool,
+        typer.Option("--compose-neo4j", help="Point .env at the root docker-compose.yml Neo4j (neo4j/password)."),
+    ] = False,
 ) -> None:
     """Finish safe post-install setup and report conditional next steps."""
     try:
@@ -296,6 +426,8 @@ def setup(
                 install_claude=install_claude,
                 hook_location=hook_location,
                 workspace=workspace,
+                provider=provider,
+                compose_neo4j=compose_neo4j,
             )
             if install_watchdog:
                 _install_windows_watchdog(checkout)
@@ -317,9 +449,12 @@ def setup(
 
 
 __all__ = [
+    "COMPOSE_NEO4J_KEYS",
+    "SETUP_PROVIDERS",
     "SetupError",
     "SetupItem",
     "apply_setup",
+    "upsert_env_keys",
     "find_checkout",
     "inspect_setup",
     "setup",

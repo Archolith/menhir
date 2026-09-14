@@ -1,3 +1,13 @@
+## 2026-09-14 - tiered .env.example and `menhir setup --provider`
+
+- `.env.example` is now ordered by what a feature needs: Tier 0 (works with the root compose and
+  `menhir serve`), Tier 1 (needs a credential, URL, or tuning value), Tier 2 (needs a public
+  origin, secret files, a proxy, or an operator ceremony). Block text is unchanged.
+- `menhir setup --provider local|openai` writes a consistent chat / Graphiti LLM / Graphiti embed
+  provider block and ensures the provider's URL, model, and key lines exist; `--compose-neo4j`
+  writes the root compose credentials. Both upsert in place and never overwrite a filled-in
+  secret, so re-running is safe.
+
 ## 2026-09-14 - remove operator-specific literals from runtime code
 
 - `access_contract` no longer hardcodes one deployment's public origin. The policy's
