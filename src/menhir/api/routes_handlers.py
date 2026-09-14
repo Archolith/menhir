@@ -47,7 +47,9 @@ async def phase3_run_impl(
     pm_model = getattr(settings, "personal_memory_consolidation_chat_model", "") or None
     chat = make_sync_chat(
         settings, model=pm_model,
-        max_tokens=getattr(settings, "personal_memory_consolidation_max_tokens", 2048))
+        max_tokens=getattr(settings, "personal_memory_consolidation_max_tokens", 8192),
+        disable_reasoning=bool(getattr(
+            settings, "personal_memory_consolidation_disable_reasoning", False)))
     if chat is None:
         raise HTTPException(
             status_code=503,

@@ -53,7 +53,7 @@ COMPOSE_FILE="docker-compose.test.yml"
 CONTAINER="menhir-neo4j-test"
 TEST_URI="bolt://localhost:7688"
 TEST_USER="neo4j"
-TEST_PASSWORD="testpassword"
+TEST_PASSWORD="${MENHIR_TEST_NEO4J_PASSWORD:-testpassword}"
 
 if [ -x ".venv/Scripts/python.exe" ]; then
     PY=".venv/Scripts/python.exe"          # Windows

@@ -26,17 +26,6 @@ This index routes the current execution owners listed below exactly once.
 | [`menhir-unbounded-graph-writes-2026-08-09.md`](menhir-unbounded-graph-writes-2026-08-09.md) | Bound raw graph-write payload retention rather than only enrichment input. |
 | [`menhir-view-evidence-lifecycle-2026-08-28.md`](menhir-view-evidence-lifecycle-2026-08-28.md) | Keep current View contributors alive under automatic lifecycle work, invalidate dependent Views on explicit erasure, and exclude stale/internal/orphaned Views from recall. |
 
-## Deferred, non-executable deployment dependencies
-
-These records remain at their stable paths because tests and historical records consume them. Their
-`DEFERRED` lifecycle and disposition banners remove execution authority while the control-plane reset
-is active.
-
-| Document | Deferred disposition |
-|---|---|
-| [`menhir-production-release-2026-09-04.md`](menhir-production-release-2026-09-04.md) | Preserve product-release requirements; re-plan execution against the accepted replacement control plane. |
-| [`menhir-contabo-full-production-migration-2026-08-25.md`](menhir-contabo-full-production-migration-2026-08-25.md) | Historical migration/topology rationale only; Caddy/Yawn mutation language is non-authoritative. |
-
 ## Partially implemented
 
 | Document | Implemented | Remaining owner work |

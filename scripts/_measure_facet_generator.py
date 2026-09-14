@@ -17,6 +17,7 @@ Run: ``.venv/Scripts/python.exe scripts/_measure_facet_generator.py``.
 from __future__ import annotations
 
 import re
+import os
 import sys
 from pathlib import Path
 
@@ -45,7 +46,7 @@ def _jaccard(a: set[str], b: set[str]) -> float:
 def main() -> None:
     repo = Neo4jRepository(
         uri="bolt://localhost:7687", database="neo4j",
-        user="neo4j", password="menhirdummy123",
+        user="neo4j", password=os.environ.get("MENHIR_DUMMY_NEO4J_PASSWORD", ""),
     )
     try:
         # BROAD cross-scope pool: all anchored memories. The scope facet must do the

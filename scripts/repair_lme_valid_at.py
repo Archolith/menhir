@@ -51,7 +51,7 @@ NAMESPACE_PREFIX = "lme-scalar-ku-"
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--uri", default="bolt://127.0.0.1:7701")
-    ap.add_argument("--password", default="lmedata123")
+    ap.add_argument("--password", default=os.environ.get("MENHIR_BENCH_NEO4J_PASSWORD", ""))
     ap.add_argument("--prefix", default=NAMESPACE_PREFIX)
     ap.add_argument("--apply", action="store_true", help="write (default is a dry run)")
     ap.add_argument("--revert", action="store_true",

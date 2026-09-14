@@ -32,12 +32,18 @@ SyncChat = Callable[[str, str], str]
 
 def make_sync_chat(
     settings: MemorySettings, *, temperature: float = 0.7, max_tokens: int = 512,
-    model: str | None = None,
+    model: str | None = None, disable_reasoning: bool = False,
 ) -> SyncChat | None:
     """Return a sync `(system, user) -> str` chat callable, or None when no usable chat provider is
     configured (missing api key / model). None lets callers disable the job rather than crash.
     `model` overrides only the model name (same provider api_key/base_url) — used to run a job on a
-    stronger model than the global chat model without touching the rest of the stack."""
+    stronger model than the global chat model without touching the rest of the stack.
+
+    `disable_reasoning` asks the provider not to spend completion budget on reasoning. It rides in
+    `extra_body`, which is passed through verbatim, so it is only meaningful on providers that accept
+    it (OpenRouter) and is an error on those that do not (api.openai.com rejects an unknown
+    `reasoning` field). Callers must therefore treat it as opt-in, never a default. Reasoning tokens
+    are counted inside `max_tokens`, so disabling them buys content headroom as well as cost."""
     cfg = ProviderConfig.for_chat(settings)
     if not cfg.api_key or not cfg.chat_model:
         logger.info("sync chat seam unavailable: no api_key/chat_model for the configured provider")
@@ -88,6 +94,12 @@ def make_sync_chat(
         client_holder["client"] = client
         return client
 
+    # Built once, outside the per-call path: an empty dict means the request is byte-identical
+    # to before, so the default configuration cannot be perturbed by this option existing.
+    extra: dict[str, Any] = (
+        {"extra_body": {"reasoning": {"enabled": False}}} if disable_reasoning else {}
+    )
+
     def _complete(system: str, user: str) -> str:
         handle = start_llm_usage_call(
             kind="chat",
@@ -105,6 +117,7 @@ def make_sync_chat(
                 ],
                 temperature=temperature,
                 max_tokens=max_tokens,
+                **extra,
             )
         except Exception as exc:
             fail_llm_usage_call(handle, exc)

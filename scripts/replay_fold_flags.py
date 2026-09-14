@@ -106,11 +106,12 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--jsonl", required=True)
     ap.add_argument("--source-uri", default="bolt://127.0.0.1:7701")
-    ap.add_argument("--source-password", default="lmedata123")
+    ap.add_argument("--source-password",
+                    default=os.environ.get("MENHIR_BENCH_NEO4J_PASSWORD", ""))
     ap.add_argument("--target-uri",
                     default=os.environ.get("MENHIR_TEST_NEO4J_URI", "bolt://127.0.0.1:7688"))
     ap.add_argument("--target-password",
-                    default=os.environ.get("MENHIR_TEST_NEO4J_PASSWORD", "testpassword"))
+                    default=os.environ.get("MENHIR_TEST_NEO4J_PASSWORD", ""))
     ap.add_argument("--run-id", default="foldflags")
     ap.add_argument("--bind-scope", choices=("episode", "namespace"), default="episode",
                     help="binding candidates: the claim's own episode (production behaviour) "

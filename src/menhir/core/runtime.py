@@ -409,7 +409,9 @@ async def _start_scheduler(built: object) -> MaintenanceScheduler:
         pm_model = getattr(settings, "personal_memory_consolidation_chat_model", "") or None
         personal_memory_llm = make_sync_chat(
             settings, model=pm_model,
-            max_tokens=getattr(settings, "personal_memory_consolidation_max_tokens", 2048))
+            max_tokens=getattr(settings, "personal_memory_consolidation_max_tokens", 8192),
+            disable_reasoning=bool(getattr(
+                settings, "personal_memory_consolidation_disable_reasoning", False)))
         if personal_memory_llm is None:
             logger.warning(
                 "personal-memory consolidation or event history enabled but no sync chat provider; job disabled")

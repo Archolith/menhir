@@ -165,7 +165,7 @@ def main() -> int:
                     help="max completion tokens (production default 2048)")
     ap.add_argument("--uri", default="bolt://127.0.0.1:7701")
     ap.add_argument("--user", default="neo4j")
-    ap.add_argument("--password", default="lmedata123")
+    ap.add_argument("--password", default=os.environ.get("MENHIR_BENCH_NEO4J_PASSWORD", ""))
     ap.add_argument("--model", default="", help="override OPENAI_CHAT_MODEL")
     ap.add_argument(
         "--show-raw",

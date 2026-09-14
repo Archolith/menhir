@@ -71,11 +71,17 @@ def test_metric_kind_is_always_operator_audience() -> None:
 
 
 @pytest.mark.unit
-def test_admission_turn_evidence_is_lifecycle_provenance() -> None:
+def test_admission_turn_evidence_is_not_a_contributor_receipt() -> None:
+    """The audit is written to the "agent-status" silo while its TurnEvidence is in the user
+    namespace, so declaring it as a contributor made every audit write unsatisfiable against the
+    tenant-scoped evidence resolver. It stays an audit property, inspectable via write_props/parse.
+    """
     kind = AdmissionAuditKind()
 
-    assert kind.episode_uuids({"turn_evidence_uuid": " turn-1 "}) == ["turn-1"]
+    assert kind.episode_uuids({"turn_evidence_uuid": " turn-1 "}) == []
     assert kind.episode_uuids({"turn_evidence_uuid": None}) == []
+    # ...but it remains durably recorded for operator inspection.
+    assert kind.write_props("s", "k", {"turn_evidence_uuid": "turn-1"})["turn_evidence_uuid"] == "turn-1"
 
 
 @pytest.mark.unit

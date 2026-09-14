@@ -88,7 +88,7 @@ def build_session_times() -> dict[str, datetime]:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--uri", default="bolt://127.0.0.1:7701")
-    ap.add_argument("--password", default="lmedata123")
+    ap.add_argument("--password", default=os.environ.get("MENHIR_BENCH_NEO4J_PASSWORD", ""))
     args = ap.parse_args()
 
     session_times = build_session_times()

@@ -123,7 +123,8 @@ class ScalarViewRepositoryMixin:
             source=source, source_confidence=source_confidence, name_embedding=name_embedding,
             audit_props=audit, refresh_props=audit, authoritative=True,
             attribute=attribute, scope=scope, value_kind=value_kind, unit=unit,
-            value=value, display=display, valid_at=valid_at, episode_uuids=list(episode_uuids or []),
+            value=value, display=display, valid_at=valid_at,
+            episode_uuids=list(episode_uuids or []),
         )
         return res
 

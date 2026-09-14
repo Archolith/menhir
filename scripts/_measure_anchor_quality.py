@@ -20,6 +20,7 @@ anchor-noise regime. Read-only.
 from __future__ import annotations
 
 import re
+import os
 import sys
 from collections import Counter
 from pathlib import Path
@@ -53,7 +54,8 @@ def _mentions(content_tokens: set[str], name: str) -> bool:
 
 def main() -> None:
     repo = Neo4jRepository(
-        uri="bolt://localhost:7687", database="neo4j", user="neo4j", password="menhirdummy123",
+        uri="bolt://localhost:7687", database="neo4j", user="neo4j",
+        password=os.environ.get("MENHIR_DUMMY_NEO4J_PASSWORD", ""),
     )
     try:
         rows = repo.execute(

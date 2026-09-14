@@ -340,6 +340,12 @@ class _UnchangedSigNeo4j:
         if "RETURN uuids AS stored, present" in query:
             eps = list((params or {}).get("eps", []))
             return [{"stored": eps, "present": eps}]
+        # Anchor normalization (_resolve_evidence_anchors): report each declared contributor as a
+        # :TurnEvidence anchor already, so the receipt reaching the writer is unchanged and this
+        # test keeps exercising provenance REPLACEMENT rather than anchor resolution.
+        if "ADMITTED_ON" in query:
+            return [{"eid": e, "direct": e, "grounded": []}
+                    for e in (params or {}).get("eps", [])]
         return []
 
     def refresh_dict(self):

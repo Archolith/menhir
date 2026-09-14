@@ -7,11 +7,15 @@ artifact_status: DEFERRED
 
 # Menhir production release — canonical self and accumulated candidate
 
-> **Disposition (2026-09-08):** Deferred until the
-> [deployment control-plane architecture reset](menhir-deployment-control-plane-architecture-reset-2026-09-08.md)
-> is implemented and accepted. This plan preserves product-release requirements but does not
-> authorize the existing deployment machinery or any production action. Re-plan its execution
-> against the completed control-plane protocol before reactivation.
+> **Disposition (2026-09-08, archived 2026-09-13):** Deferred until the deployment
+> control-plane architecture reset (`menhir-deployment-control-plane-architecture-reset-2026-09-08.md`,
+> branch `fix/deployment-reliability-20260907`) is implemented and accepted. This plan preserves
+> product-release requirements but does not authorize the existing deployment machinery or any
+> production action. Re-plan its execution against the completed control-plane protocol before
+> reactivation. Historical note: releases `menhir-prod-0.2.0-9` through `0.2.0-14` shipped through
+> the release-automation path (`release_flow.py`) rather than this plan's single accumulated-candidate
+> maintenance release; its Phase 2.3 (fixed production canary verifier) and Phase 2.5 (executable
+> changed-policy acceptance) were never built and remain genuine residuals for any future release.
 
 ## Decision
 

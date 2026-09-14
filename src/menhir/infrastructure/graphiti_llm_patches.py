@@ -8,6 +8,7 @@ import importlib
 import importlib.metadata
 import json
 import logging
+import os
 from time import monotonic, perf_counter
 from typing import Any
 from urllib.parse import urlsplit
@@ -422,6 +423,22 @@ def _patch_graphiti_openai_generic_client(
             _extra: dict[str, Any] = {}
             if _is_deepseek:
                 _extra["extra_body"] = {"thinking": {"type": "disabled"}}
+            # Same problem as the DeepSeek case above, different provider vocabulary. Measured
+            # 2026-09-08 on archolith-bench's 1-item date smoke: openai/gpt-5.6-luna via
+            # OpenRouter spent 12,997 of 19,859 output tokens (65%) on reasoning, ran 2.1x the
+            # wall clock of gpt-4o-mini, and cost 2.2x. Graphiti extraction asks for a JSON
+            # object; it needs no chain-of-thought. OpenRouter's unified form is
+            # {"reasoning": {"enabled": false}} -- verified to drive reasoning_tokens to 0,
+            # where "effort": "minimal" only reduces them.
+            #
+            # OPT-IN, default off: this is read from the environment rather than applied to every
+            # OpenRouter endpoint, because suppressing reasoning is a quality decision that
+            # belongs to whoever configured the provider, not to a default. Promote it to
+            # MemorySettings if it ever becomes policy rather than an experiment.
+            elif "openrouter" in (endpoint or "").lower() and os.getenv(
+                "MENHIR_GRAPHITI_DISABLE_REASONING", ""
+            ).strip().lower() in {"1", "true", "yes"}:
+                _extra["extra_body"] = {"reasoning": {"enabled": False}}
             # Measure what is actually about to be sent. The pre-extraction guardrail
             # (graphiti_episode_max_estimated_tokens) only sees the episode text, which
             # is ~1% of this payload, so it cannot catch a context overrun.

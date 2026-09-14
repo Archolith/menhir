@@ -19,7 +19,7 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 os.environ["NEO4J_URI"] = "bolt://localhost:7687"
 os.environ["NEO4J_USER"] = "neo4j"
-os.environ["NEO4J_PASSWORD"] = "menhirdummy123"
+os.environ["NEO4J_PASSWORD"] = os.environ.get("MENHIR_DUMMY_NEO4J_PASSWORD", "")
 os.environ["MENHIR_BENCHMARK_MODE"] = "1"
 for _k in list(os.environ):
     if _k.startswith("MENHIR_FRONTIER_"):
