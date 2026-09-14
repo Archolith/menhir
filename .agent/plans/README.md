@@ -14,7 +14,6 @@ This index routes the current execution owners listed below exactly once.
 
 | Document | Current ownership |
 |---|---|
-| [`menhir-production-release-2026-09-04.md`](menhir-production-release-2026-09-04.md) | Prepare and deploy the complete accumulated Menhir candidate with production-model/image parity, mechanically classified maintenance controls, canonical-self enforcement, one public synthetic canary, and pre-authored rollback. |
 | [`menhir-research-execution-ladder.md`](menhir-research-execution-ladder.md) | Dependency-ordered research → code → bench sequence. Read-side rungs are closed; Track W6 is the remaining write-side rung. |
 | [`menhir-work-artifact-reconciliation-2026-08-11.md`](menhir-work-artifact-reconciliation-2026-08-11.md) | Add read-only corpus parity auditing, hash/Git-backed source reconciliation, bounded move detectors, and a separately approved live-graph repair. |
 | [`menhir-conflict-detection-signal-2026-08-09.md`](menhir-conflict-detection-signal-2026-08-09.md) | Separate fused-retrieval score semantics from cosine conflict thresholds. |

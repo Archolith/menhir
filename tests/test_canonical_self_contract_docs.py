@@ -12,7 +12,7 @@ pytestmark = pytest.mark.unit
 _ROOT = Path(__file__).resolve().parents[1]
 _CONTRACT_ID = "automatic-memory-v1"
 _ACTIVE_CONTRACT_DOCS = (
-    _ROOT / ".agent" / "plans" / "menhir-production-release-2026-09-04.md",
+    _ROOT / ".agent" / "archive" / "plans" / "menhir-production-release-2026-09-04.md",
     _ROOT / ".agent" / "workflows" / "canonical-self-migration-runbook.md",
     _ROOT / ".agent" / "architecture.md",
 )
