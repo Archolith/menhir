@@ -26,7 +26,7 @@ for destination, info in manifest["files"].items():
     if os.path.islink(target) or not os.path.isfile(target):
         raise SystemExit(f"destination is not a regular file: {destination}")
     mode = int(str(info["mode"]), 8)
-    if mode not in (0o400, 0o444, 0o600, 0o644, 0o755):
+    if mode & 0o7022 or mode > 0o777:
         raise SystemExit(f"unexpected mode {oct(mode)} for {destination}")
     os.chmod(target, mode)
 for current, _dirs, _files in os.walk(os.path.join(bundle, "rootfs")):
