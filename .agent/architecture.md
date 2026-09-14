@@ -77,7 +77,6 @@ Concept id: `runtime.stack`
 - `graphiti-core` >=0.28.1 (graph memory framework)
 - llama.cpp (`llama-server`) via OpenAI-compatible API
 - provider scaffold for pluggable chat backends (`openai_compat`, `openai`, `gemini`, `anthropic`)
-- yawn.scheduler for llama-server lifecycle management and endpoint acquisition
 - Langfuse (optional local tracing for OpenAI-compatible llama.cpp calls)
 - `pytest` / `pytest-asyncio` for tests
 - `fastapi` for the developer explorer UI
@@ -93,7 +92,7 @@ Direction:
 
 - plain reads stay side-effect free
 - `core/runtime.py` is now the canonical runtime owner for init, shutdown, and runtime state; `mcp/lifecycle.py` is a thin stdio-client lifespan wrapper plus a small compatibility surface for flagged-memory bootstrap helpers
-- runtime preflight now produces an explicit capability snapshot (`neo4j_ready`, `embedder_ready`, `llm_ready`, `scheduler_ready`) that the HTTP surface exposes directly for readiness and debugging
+- runtime preflight now produces an explicit capability snapshot (`neo4j_ready`, `embedder_ready`, `llm_ready`) that the HTTP surface exposes directly for readiness and debugging
 - `menhir serve` constructs one immutable `MemorySettings` snapshot and shares it with HTTP auth, the embedded OAuth AS, client-token storage, and the backend runtime; request handlers do not reread OAuth/HTTP environment variables
   - `config/oauth.py` owns `OAuthConfig` and its snapshot/legacy-environment builder
   - `config/auth_mode.py` owns the OAuth > client-token > static > none precedence decision
@@ -166,8 +165,7 @@ Direction:
 - failure history is also persisted append-only in SQLite so retry and terminal decisions can be audited after the graph row changes
 - malformed Graphiti JSON/schema output is now classified as `manual_review` instead of being blindly retried until the normal attempt cap is exhausted
 - future capacity control will reserve llama.cpp throughput for delegate versus memory workloads
-- live episode telemetry now carries a coarse `processing_stage` plus finer `processing_substage` and current LLM task metadata so stalled Graphiti calls can be correlated with scheduler activity
-- `menhir` now also registers generic parent-job / child-task updates with `yawn.scheduler` so episode UUIDs can be shown as parent jobs while Graphiti add-episode requests are shown as child tasks on the scheduler dashboard
+- live episode telemetry now carries a coarse `processing_stage` plus finer `processing_substage` and current LLM task metadata so stalled Graphiti calls can be correlated with the LLM task in flight
 - `ingest_project` now writes a deterministic structural graph directly into Neo4j and then queues a best-effort semantic narrative episode for the same project
   - `services/project_ingest.py` owns path validation, scan/write orchestration, bounded narrative
     construction, best-effort episode queueing, and transport-neutral outcomes
@@ -191,7 +189,7 @@ Concept id: `runtime.packages`
 src/menhir/
 |- __init__.py        Package metadata
 |- __main__.py        CLI entry point
-|- main.py            Startup dependency checks (Neo4j + scheduler/llama.cpp connectivity)
+|- main.py            Startup dependency checks (Neo4j + LLM endpoint connectivity)
 |- core/              build_memory_services(), prepare_memory_runtime(), BuildArtifacts
 |- config/            MemorySettings, AuthMode, OAuthConfig (env-backed), MilestoneZeroScope
 |- domain/            MemoryNode, Edge, MemorySession, IngestResult, recall types (QueryPreset, ScoredMemory, etc.)
@@ -258,7 +256,7 @@ The runtime is now split into one persistent owner plus multiple optional client
 
 Startup modes:
 
-- `full`: Neo4j + embedder + LLM + scheduler available
+- `full`: Neo4j + embedder + LLM available
 - `degraded_reads_only`: Neo4j + embedder available, LLM unavailable
 - `degraded_queue_only`: Neo4j available, embedder/LLM unavailable
 
@@ -308,7 +306,6 @@ Database isolation for provider testing:
 The system has a working ingestion pipeline:
 
 0. **Backend startup bootstrap** (`menhir serve`)
-   - Start scheduler process bootstrap when Graphiti is using scheduler-managed local llama endpoints
    - Initialize the canonical runtime once on backend startup
    - Recover pending work and then run orphan recovery in the background so `/api/ready` can return promptly
 
@@ -344,7 +341,6 @@ The system has a working ingestion pipeline:
      `results/suburbs_extraction_live_smoke.json`.
    - Bounds Graphiti `add_episode()` with a configurable timeout (`MEMORY_GRAPHITI_ADD_EPISODE_TIMEOUT_SECONDS`, default `300s`) so hung extraction requests fail back into retry flow instead of leaving episodes stuck in `ENRICHING`
    - Rejects obviously oversized episode text before Graphiti extraction using a configurable rough token estimate (`MEMORY_GRAPHITI_EPISODE_MAX_ESTIMATED_TOKENS` / `GRAPHITI_EPISODE_MAX_ESTIMATED_TOKENS`, default `12000`, `0` disables the guard)
-   - When Graphiti is using scheduler-managed llama endpoints, the client watchdog also fails `add_episode()` if scheduler status stays unavailable or goes idle past the configured stall timeout, rather than waiting indefinitely for a stuck request
    - Extracts UUIDs from Graphiti result (episode, entity nodes, edges, episodic edges)
    - Stamps policy metadata via `MemoryGraphAdapter.stamp_ingest_metadata()`:
      - Episodic nodes: strong stamp (scope=SESSION, session_id, user_id, source)
@@ -726,19 +722,7 @@ Concept id: `runtime.dependencies`
 - Graphiti-specific backend selection:
   - `GRAPHITI_LLM_PROVIDER` (aliases: `MEMORY_GRAPHITI_PROVIDER`, `GRAPHITI_PROVIDER`) -- selects the provider only; there is no separate `GRAPHITI_LLM_BASE_URL`/`GRAPHITI_LLM_API_KEY`/`GRAPHITI_LLM_CHAT_MODEL` (endpoint/key/model come from the selected provider's own settings above, e.g. `OPENAI_*` or `LOCAL_LLM_*`/`LLAMA_*`)
   - `GRAPHITI_EMBED_PROVIDER`, `GRAPHITI_RERANKER_PROVIDER` (each inherits `GRAPHITI_LLM_PROVIDER` when unset) -- likewise no separate `GRAPHITI_EMBED_BASE_URL`/`GRAPHITI_EMBED_API_KEY`/`GRAPHITI_EMBED_MODEL`
-- yawn.scheduler (primary process manager for llama-server):
-  - `SCHEDULER_URL` (default `http://localhost:8082`)
-  - local scheduler URLs are normalized to loopback IP form (`127.0.0.1`) before memory-side probes and acquire calls, which avoids transient localhost-resolution differences between processes
-- runtime preflight checks are side-effect free by default; only backend runtime initialization opts into scheduler-backed endpoint acquisition during startup validation
-- Graphiti add-episode watchdog probes now use the scheduler's lightweight `/watchdog-status` endpoint instead of the heavier `/status` payload so long-running requests do not get false `scheduler_status_unavailable` stalls while the scheduler is busy
-  - on Windows, scheduler autostart now launches `manager.py` as a hidden direct child process (`CREATE_NO_WINDOW`) so MCP startup does not spray visible PowerShell/terminal windows
-  - when `menhir` runs under WSL/bash, scheduler autostart now normalizes Windows drive-letter model/bin paths from `yawn.scheduler/.env` to `/mnt/<drive>/...` before launch, so remote SSH into WSL can reuse the same scheduler config
-  - `LLMAdapter` and `GraphitiClient` attempt `POST /acquire` and fall back to `LLAMA_BASE_URL` on failure
-  - Graphiti recall/search/ingest paths re-issue acquire calls per operation as a wake ping so idle timeout recovery is automatic
-  - background enrichment heartbeat now sends periodic `/ping` keepalives only when the Graphiti client is actually using a scheduler-managed local llama endpoint
-  - If scheduler is not running at MCP startup/runtime acquire, `llama_endpoint` will auto-start `yawn.scheduler` (`manager.py`) before continuing
-  - during runtime init, `menhir` registers itself as a generic scheduler task source
-  - enrichment now emits parent-job updates keyed by episode UUID plus child-task updates for Graphiti `add_episode` work, using episode-scoped scheduler task ids like `memory-<episode>--graphiti-add-episode`
+- Local model endpoints are plain OpenAI-compatible URLs (`LOCAL_LLM_BASE_URL`, `LOCAL_LLM_EMBED_BASE_URL`). Menhir does not start, wake, queue, or keep alive a model process; the operator's serving layer (llama.cpp, Ollama, LM Studio, vLLM, or a proxy in front of them) owns that. The former `cth.mcp.scheduler` client was removed on the `launch-readiness` branch (2026-09-14).
 - Langfuse (optional observability):
   - `LANGFUSE_HOST`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`
   - when configured, both direct `LLMAdapter` calls and Graphiti's OpenAI-compatible clients are traced
@@ -808,7 +792,7 @@ Operational sidecar storage:
 - this SQLite file is the first place to inspect when estimating real usage, queue pressure, failure rates, and likely LLM cost
 - `mcp_events` records operation timings plus serialized input/result sizes
 - `failure_events` records structured enrichment/scheduler failures
-- `episode_task_events` records per-episode LLM task events (phase, kind, model, endpoint, scheduler task) and is now populated directly from ingest-side Graphiti LLM usage instrumentation
+- `episode_task_events` records per-episode LLM task events (phase, kind, model, endpoint, episode task id) and is now populated directly from ingest-side Graphiti LLM usage instrumentation
 - `llm_usage_events` records one terminal row per instrumented provider-client call, correlated by
   `call_id`. It preserves provider-reported input, output, total, cached-input, and reasoning-output
   tokens plus the raw usage payload, duration, operation, endpoint, model, run, and episode. Counts

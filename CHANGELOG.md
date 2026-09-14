@@ -1,3 +1,16 @@
+## 2026-09-14 - remove the external LLM scheduler client
+
+- Removed the `cth.mcp.scheduler` integration: Menhir no longer acquires model endpoints from,
+  auto-starts, pings, traces to, or reads stall status from an external scheduler. Local model
+  endpoints are plain OpenAI-compatible URLs that the operator's own serving layer keeps up.
+- Dropped every `SCHEDULER_*` environment variable and `GRAPHITI_REQUEST_STALL_TIMEOUT_SECONDS`
+  (its only consumer was the scheduler-status stall watchdog); `GRAPHITI_ADD_EPISODE_TIMEOUT_SECONDS`
+  remains the request bound. `/api/ready` and `/api/health` no longer report `scheduler_ready` /
+  `services.scheduler`, and `/api/stats` no longer carries `scheduler_url`.
+- The context-window probe now reads llama.cpp's native `GET /props` instead of a scheduler proxy;
+  other servers simply yield "cannot derive". The per-episode telemetry task id moved to
+  `infrastructure/telemetry/task_ids.build_episode_task_id`.
+
 ## 2026-09-14 - auto-scope the project .venv interpreter guard
 
 - Enforced the `.venv` interpreter guard only when a source checkout actually carries a project

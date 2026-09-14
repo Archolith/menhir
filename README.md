@@ -352,7 +352,6 @@ the same machine.
 | `LOCAL_LLM_BASE_URL` | Local OpenAI-compatible chat endpoint | `http://127.0.0.1:8081/v1` |
 | `OPENAI_API_KEY` | Credential used when the provider is `openai` | empty |
 | `GEMINI_API_KEY` | Credential used when the provider is `gemini` | empty |
-| `SCHEDULER_URL` | Optional external model scheduler | `http://localhost:8082` |
 
 See [`.env.example`](.env.example) for model names, separate embedding endpoints, OAuth,
 telemetry, and experimental flags.

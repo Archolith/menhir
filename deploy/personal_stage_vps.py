@@ -764,7 +764,6 @@ def _stage_environment(
         "LOCAL_LLM_BASE_URL": "http://fake-llm:8080/v1",
         "LOCAL_LLM_CHAT_MODEL": "staging-chat",
         "MENHIR_CANONICAL_SELF_BINDING_MODE": "enforce",
-        "SCHEDULER_TRACE_DISABLED": "1",
     })
     return env
 

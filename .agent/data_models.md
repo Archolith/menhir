@@ -820,7 +820,6 @@ LOCAL_LLM_EMBED_MODEL (legacy alias: LLAMA_EMBED_MODEL)
 OPENAI_API_KEY
 OPENAI_CHAT_MODEL
 OPENAI_EMBED_MODEL
-SCHEDULER_URL (optional, defaults to http://localhost:8082 for scheduler-backed llama acquisition)
 GRAPHITI_EPISODE_MAX_ESTIMATED_TOKENS (optional rough preflight limit for episode text; set 0 to disable)
 ```
 
