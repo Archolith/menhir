@@ -309,6 +309,23 @@ running HTTP backend before launching it.
 - Neo4j 5 with APOC
 - a local OpenAI-compatible server (llama.cpp, Ollama, LM Studio, vLLM) or OpenAI
 
+### One command
+
+```bash
+git clone https://github.com/Archolith/menhir.git
+cd menhir
+python -m pip install .
+menhir up --compose-neo4j --provider openai   # or --provider local
+```
+
+`menhir up` creates `.env` (writing the provider block and the root-compose Neo4j credentials),
+starts Neo4j from `docker-compose.yml`, waits for Bolt, prints a tier report that names the `.env`
+key behind anything still missing, and then runs `menhir serve`. On the first run paste your
+`OPENAI_API_KEY` (or point `LOCAL_LLM_*` at your model server) when the report asks, and run it
+again. `menhir up --check` does everything except start Neo4j or the server.
+
+The rest of this section is the same path taken one step at a time.
+
 ### Install
 
 ```bash

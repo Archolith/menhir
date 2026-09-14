@@ -1,25 +1,40 @@
-"""Service abstractions for memory ingestion and policy phases."""
+"""Service abstractions for memory ingestion and policy phases.
 
-from .candidate_service import CandidateService
-from .context_builder import ContextBuilderService
-from .ingest_service import IngestService
-from .lifecycle_service import LifecycleService
-from .maintenance_scheduler import MaintenanceScheduler
-from .projection_coverage_service import ProjectionCoverageService
-from .realization_coverage_service import RealizationCoverageService
-from .recall_service import RecallService
-from .scheduler_lease import SchedulerLeaseStore
-from .scoring_service import ScoringService
+Package attributes resolve lazily (PEP 562) for the same reason as ``menhir.infrastructure``:
+an eager import here reached ``graphiti_core``, whose import-time ``load_dotenv()`` reads the
+current directory's ``.env`` before the CLI loads the checkout's own.
+"""
 
-__all__ = [
-    "CandidateService",
-    "ContextBuilderService",
-    "IngestService",
-    "RecallService",
-    "ScoringService",
-    "LifecycleService",
-    "MaintenanceScheduler",
-    "ProjectionCoverageService",
-    "RealizationCoverageService",
-    "SchedulerLeaseStore",
-]
+from __future__ import annotations
+
+import importlib
+from typing import Any
+
+_LAZY: dict[str, str] = {
+    "CandidateService": ".candidate_service",
+    "ContextBuilderService": ".context_builder",
+    "IngestService": ".ingest_service",
+    "LifecycleService": ".lifecycle_service",
+    "MaintenanceScheduler": ".maintenance_scheduler",
+    "ProjectionCoverageService": ".projection_coverage_service",
+    "RealizationCoverageService": ".realization_coverage_service",
+    "RecallService": ".recall_service",
+    "SchedulerLeaseStore": ".scheduler_lease",
+    "ScoringService": ".scoring_service",
+}
+
+__all__ = sorted(_LAZY)
+
+
+def __getattr__(name: str) -> Any:
+    target = _LAZY.get(name)
+    if target is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module = importlib.import_module(target, __name__)
+    value = getattr(module, name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(_LAZY))

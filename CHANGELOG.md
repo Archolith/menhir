@@ -1,3 +1,15 @@
+## 2026-09-14 - `menhir up`: one command from checkout to running server
+
+- Added `menhir up`: ensures `.env` (with `--provider` / `--compose-neo4j` passthrough), starts
+  the root compose Neo4j when asked, waits for Bolt with a bounded timeout, prints a tier report
+  that names the `.env` key behind each missing capability and the startup mode you would get,
+  then runs `serve`. `--check` reports and exits without launching anything.
+- `menhir.infrastructure` and `menhir.services` now resolve their package attributes lazily.
+  Their eager imports reached `graphiti_core`, whose import-time `load_dotenv()` read the current
+  directory's `.env` before the CLI loaded the checkout's own -- so running any command from a
+  different directory silently took that directory's Neo4j and provider settings. `menhir up`
+  loads the checkout `.env` first; shell environment still wins over `.env`.
+
 ## 2026-09-14 - remove the Gemini chat provider
 
 - Removed `GeminiChatBackend`, `ProviderKind.GEMINI`, and the `GEMINI_*` settings. Gemini could

@@ -28,6 +28,13 @@ The command is idempotent. It:
 Use `--repo PATH` when running outside the checkout. The command needs a source checkout because the
 Git hooks, service launcher, and optional producer scripts are repository-managed assets.
 
+## 1b. Or do it in one step
+
+`menhir up [--compose-neo4j] [--provider local|openai]` runs the env step above, starts the root
+compose Neo4j when asked, waits for Bolt, prints a tier report (each missing capability with the
+`.env` key that fixes it), and hands off to `menhir serve`. `menhir up --check` stops after the
+report and starts nothing. The steps below are the same path taken manually.
+
 ## 2. Configure and verify the runtime
 
 Edit `.env` for one Neo4j 5 + APOC instance and one supported LLM/embedding configuration. Never put
