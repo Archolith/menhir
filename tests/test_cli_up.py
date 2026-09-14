@@ -117,17 +117,17 @@ def test_tier_report_names_the_env_keys_behind_each_miss() -> None:
     lines = tier_report(
         _caps(neo4j_ready=False, graphiti_llm_ready=False, embedder_ready=False), settings
     )
-    by_name = {line.capability: line for line in lines}
+    def _line(rows, prefix):
+        return next(r for r in rows if r.capability.startswith(prefix))
 
-    assert by_name["neo4j: reachable"].ready is False
-    assert "NEO4J_PASSWORD" in by_name["neo4j: reachable"].hint
-    assert "OPENAI_API_KEY" in by_name["llm: graphiti extraction"].hint
-    assert "OPENAI_EMBED_MODEL" in by_name["llm: embeddings"].hint
-    assert by_name["python: graphiti_core importable"].ready is True
+    assert _line(lines, "neo4j: reachable").ready is False
+    assert "NEO4J_PASSWORD" in _line(lines, "neo4j: reachable").hint
+    assert "OPENAI_API_KEY" in _line(lines, "llm: graphiti extraction").hint
+    assert "OPENAI_EMBED_MODEL" in _line(lines, "llm: embeddings").hint
+    assert _line(lines, "python: graphiti_core importable").ready is True
 
     local = tier_report(_caps(embedder_ready=False), MemorySettings(graphiti_provider="local"))
-    local_by_name = {line.capability: line for line in local}
-    assert "LOCAL_LLM_EMBED_MODEL" in local_by_name["llm: embeddings"].hint
+    assert "LOCAL_LLM_EMBED_MODEL" in _line(local, "llm: embeddings").hint
 
 
 def test_render_report_marks_misses_and_states_the_mode() -> None:

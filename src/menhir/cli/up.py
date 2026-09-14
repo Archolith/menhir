@@ -95,6 +95,7 @@ def tier_report(capabilities: object, settings: object) -> list[TierLine]:
     llm = ProviderConfig.for_graphiti_llm(settings)  # type: ignore[arg-type]
     embed = ProviderConfig.for_graphiti_embedder(settings)  # type: ignore[arg-type]
 
+    cloud_note = " (openai: key present; verified on first call, not at startup)"
     if llm.kind is ProviderKind.OPENAI:
         llm_hint = "OPENAI_API_KEY, OPENAI_CHAT_MODEL"
     elif llm.kind is ProviderKind.LOCAL:
@@ -115,8 +116,16 @@ def tier_report(capabilities: object, settings: object) -> list[TierLine]:
                  "run from the checkout .venv, or set MENHIR_ALLOW_SYSTEM_PYTHON=1"),
         TierLine("neo4j: reachable", bool(getattr(capabilities, "neo4j_ready", False)),
                  "NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD (or `menhir up --compose-neo4j`)"),
-        TierLine("llm: graphiti extraction", bool(getattr(capabilities, "graphiti_llm_ready", False)), llm_hint),
-        TierLine("llm: embeddings", bool(getattr(capabilities, "embedder_ready", False)), embed_hint),
+        TierLine(
+            "llm: graphiti extraction" + (cloud_note if llm.kind is ProviderKind.OPENAI else ""),
+            bool(getattr(capabilities, "graphiti_llm_ready", False)),
+            llm_hint,
+        ),
+        TierLine(
+            "llm: embeddings" + (cloud_note if embed.kind is ProviderKind.OPENAI else ""),
+            bool(getattr(capabilities, "embedder_ready", False)),
+            embed_hint,
+        ),
     ]
     return lines
 
@@ -124,7 +133,8 @@ def tier_report(capabilities: object, settings: object) -> list[TierLine]:
 def render_report(lines: list[TierLine], startup_mode: str) -> str:
     body = "\n".join(line.render() for line in lines)
     tail = {
-        "full": "startup mode: full -- reads, writes, and enrichment.",
+        "full": "startup mode: full -- reads, writes, and enrichment. A cloud key is only proven by the first "
+        "enrichment: watch /api/health services.llm_auth or the WARNING on your next add_memory.",
         "degraded_reads_only": "startup mode: degraded_reads_only -- recall works; new memories queue until the LLM is reachable.",
         "degraded_queue_only": "startup mode: degraded_queue_only -- writes queue; recall needs the embedder.",
         "unavailable": "startup mode: unavailable -- Neo4j is required to start.",

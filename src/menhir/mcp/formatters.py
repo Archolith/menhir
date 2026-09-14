@@ -573,6 +573,15 @@ async def _queue_summary(backend: object) -> str:
         f"scheduler={scheduler_state}"
     )
 
+    from menhir.infrastructure.observability import last_provider_auth_failure
+
+    auth_failure = last_provider_auth_failure()
+    if auth_failure is not None:
+        summary += (
+            f"\nWARNING: {auth_failure.summary()}. New memories are stored but cannot be "
+            "enriched or recalled until the provider credential (e.g. OPENAI_API_KEY) is fixed; "
+            "failed episodes are retried automatically once a call succeeds."
+        )
     unrecallable = await _standing_unrecallable_count(backend)
     if unrecallable > 0:
         summary += (

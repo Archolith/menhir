@@ -90,6 +90,13 @@ def _capability_payload(runtime_ctx: RuntimeContext | None) -> dict[str, bool]:
     }
 
 
+def _provider_auth_failure_text() -> str | None:
+    from menhir.infrastructure.observability import last_provider_auth_failure
+
+    failure = last_provider_auth_failure()
+    return failure.summary() if failure is not None else None
+
+
 def _service_payload(runtime_ctx: RuntimeContext | None) -> dict[str, str]:
     if runtime_ctx is None:
         return {"runtime": "starting"}
@@ -100,6 +107,7 @@ def _service_payload(runtime_ctx: RuntimeContext | None) -> dict[str, str]:
         "graphiti": "ok" if capabilities is None or capabilities.graphiti_ready else "degraded",
         "ingest": "ok" if built.ingest_service and built.ingest_service.enrichment_enabled() else "queue_only",
         "recall": "ok" if capabilities is None or capabilities.reads_ready else "degraded",
+        "llm_auth": "rejected" if _provider_auth_failure_text() else "ok",
     }
 
 
@@ -479,6 +487,9 @@ class UnflagResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     services: dict[str, str]
+    # Set when the LLM provider has rejected our credentials since the last successful
+    # call: a server can be "ok" and "full" and still unable to enrich anything.
+    provider_auth_failure: str | None = None
     startup_mode: str | None = None
     # Echoes MENHIR_INSTANCE_ID when set, so a client (e.g. a smoke launcher) can
     # confirm it is talking to the exact server it started and not a different
@@ -491,6 +502,7 @@ class ReadyResponse(BaseModel):
     startup_mode: str
     capabilities: dict[str, bool]
     failures: list[str]
+    provider_auth_failure: str | None = None
 
 
 class StatsResponse(BaseModel):

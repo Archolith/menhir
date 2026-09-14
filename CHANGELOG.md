@@ -1,3 +1,13 @@
+## 2026-09-14 - a rejected LLM credential is reported, not just logged
+
+- Every OpenAI-compatible chat/embedding failure already passes through one seam; it now
+  classifies 401/403/`invalid_api_key` and keeps the most recent rejection process-wide until a
+  call succeeds. `add_memory` appends a WARNING naming it (and `OPENAI_API_KEY`), `/api/health`
+  gains `services.llm_auth` and `provider_auth_failure`, and `/api/ready` reports `degraded` with
+  the same text while capabilities stay truthful about configuration.
+- `menhir up` labels cloud provider lines "key present; verified on first call, not at startup"
+  rather than a bare ok, because preflight deliberately never probes api.openai.com.
+
 ## 2026-09-14 - open loopback mode binds the operator tier
 
 - With no credential configured on a loopback bind, the auth middleware bound a session but no
