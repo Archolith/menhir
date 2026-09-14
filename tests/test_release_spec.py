@@ -223,6 +223,9 @@ def release_fixture(tmp_path: Path, monkeypatch):
     files_by_repo["menhir"]["deploy/installed-artifacts.json"] = (
         MODULE_PATH.parent / "installed-artifacts.json"
     ).read_bytes()
+    files_by_repo["menhir"]["deploy/artifact-authority.json"] = (
+        MODULE_PATH.parent / "artifact-authority.json"
+    ).read_bytes()
     files_by_repo["menhir"]["deploy/client-policy.production.json"] = policy_bytes
     files_by_repo["menhir"]["deploy/docker-compose.production.yml"] = (
         b"name: menhir-prod\n"
@@ -581,6 +584,20 @@ def test_refuses_client_policy_secret_version_mismatch(release_fixture) -> None:
     with pytest.raises(
         MODULE.ReleaseSpecError, match="must bind the client policy digest"
     ):
+        MODULE.prepare_release_spec(fixture["inputs_path"], fixture["output"])
+
+
+def test_refuses_authority_that_differs_from_the_commit(
+    release_fixture, monkeypatch
+) -> None:
+    # Same destination set as the committed census, but one destination bound
+    # to a different source path than the committed authority says: the
+    # release would install the wrong committed blob under that name.
+    fixture = release_fixture
+    mapping = {k: dict(v) for k, v in MODULE.ARTIFACT_SOURCES.items()}
+    mapping["/srv/menhir/production/bin/promote.sh"]["path"] = "deploy/rollback.sh"
+    monkeypatch.setattr(MODULE, "ARTIFACT_SOURCES", mapping)
+    with pytest.raises(MODULE.ReleaseSpecError, match="authority differs"):
         MODULE.prepare_release_spec(fixture["inputs_path"], fixture["output"])
 
 

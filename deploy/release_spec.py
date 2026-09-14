@@ -609,6 +609,22 @@ def _validate_census(menhir_repo: Path, commit: str) -> None:
         )
     if set(rows) != set(ARTIFACT_SOURCES):
         raise ReleaseSpecError("installed artifact mapping drift")
+    # ARTIFACT_SOURCES was loaded from this checkout's authority file. The
+    # census above proves the destination set matches the commit; this proves
+    # the destination-to-source map does too, so a dirty authority cannot bind
+    # a destination to the wrong committed blob.
+    try:
+        committed_authority = artifact_authority.sources(json.loads(
+            _git_blob(
+                menhir_repo, commit, "deploy/artifact-authority.json",
+                "artifact authority",
+            ).decode("utf-8"),
+            object_pairs_hook=_unique_pairs,
+        ))
+    except (UnicodeError, json.JSONDecodeError, KeyError, TypeError) as exc:
+        raise ReleaseSpecError("committed artifact authority is invalid") from exc
+    if committed_authority != ARTIFACT_SOURCES:
+        raise ReleaseSpecError("artifact authority differs from the menhir commit")
 
 
 def _validate_policy(data: bytes) -> str:

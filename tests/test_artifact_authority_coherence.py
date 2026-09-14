@@ -202,3 +202,29 @@ def test_authority_refuses_overlap_and_unsafe_paths(tmp_path: Path) -> None:
     broken.write_text(json.dumps(value), encoding="utf-8")
     with pytest.raises(authority.AuthorityError, match="unsafe destination"):
         authority.load(broken)
+    for bad in ("/srv/menhir/../root/x", "/srv/x\n", "/srv//x"):
+        value = authority.load()
+        value["retired"]["gateway_scripts"].append(bad)
+        broken.write_text(json.dumps(value), encoding="utf-8")
+        with pytest.raises(authority.AuthorityError, match="unsafe"):
+            authority.load(broken)
+    value = authority.load()
+    value["retired"]["gateway_units"].append("-x.service")
+    broken.write_text(json.dumps(value), encoding="utf-8")
+    with pytest.raises(authority.AuthorityError, match="unsafe"):
+        authority.load(broken)
+
+
+def test_replace_block_refuses_nested_or_miscounted_blocks() -> None:
+    authority = _authority_module()
+    begin, end = authority.BEGIN, authority.END
+    nested = f"a\n{begin}\nold\n{begin}\nold2\n{end}\nc\n"
+    with pytest.raises(authority.AuthorityError, match="expected 1"):
+        authority._replace_block(nested, "R\n", "t")
+    with pytest.raises(authority.AuthorityError, match="another block start"):
+        authority._replace_block(nested, "R\n", "t", 0, 2)
+    unterminated = f"a\n{begin}\nold\nfoo {end}\nc\n"
+    with pytest.raises(authority.AuthorityError, match="unterminated"):
+        authority._replace_block(unterminated, "R\n", "t")
+    clean = f"a\n{begin}\nold\n{end}\nc\n"
+    assert authority._replace_block(clean, "R\n", "t") == "a\nR\nc\n"

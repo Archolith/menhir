@@ -33,8 +33,13 @@ RETIRED_GROUPS = (
 UNIT_GROUPS = ("caddy_units", "gateway_units")
 BEGIN = "# BEGIN GENERATED from deploy/artifact-authority.json -- do not edit by hand"
 END = "# END GENERATED"
-_DESTINATION_RE = re.compile(r"^/[A-Za-z0-9._@+-]+(?:/[A-Za-z0-9._@+-]+)*$")
-_UNIT_RE = re.compile(r"^[A-Za-z0-9._@-]+\.(?:service|timer|path)$")
+_DESTINATION_RE = re.compile(r"/[A-Za-z0-9._@+-]+(?:/[A-Za-z0-9._@+-]+)*")
+_UNIT_RE = re.compile(r"[A-Za-z0-9._@][A-Za-z0-9._@-]*\.(?:service|timer|path)")
+
+
+def _safe_destination(value: str) -> bool:
+    return _DESTINATION_RE.fullmatch(value) is not None \
+        and not any(part in {".", ".."} for part in value.split("/")[1:])
 
 
 class AuthorityError(ValueError):
@@ -62,7 +67,7 @@ def load(path: Path = AUTHORITY) -> dict[str, Any]:
     if not isinstance(artifacts, dict) or not artifacts:
         raise AuthorityError("artifact authority has no artifacts")
     for destination, source in artifacts.items():
-        if not _DESTINATION_RE.match(destination):
+        if not _safe_destination(destination):
             raise AuthorityError(f"unsafe destination: {destination}")
         if not isinstance(source, dict):
             raise AuthorityError(f"artifacts[{destination}] must be an object")
@@ -87,9 +92,10 @@ def load(path: Path = AUTHORITY) -> dict[str, Any]:
         rows = retired[group]
         if not isinstance(rows, list) or any(not isinstance(row, str) for row in rows):
             raise AuthorityError(f"retired.{group} must be a list of strings")
-        pattern = _UNIT_RE if group in UNIT_GROUPS else _DESTINATION_RE
         for row in rows:
-            if not pattern.match(row):
+            safe = _UNIT_RE.fullmatch(row) is not None if group in UNIT_GROUPS \
+                else _safe_destination(row)
+            if not safe:
                 raise AuthorityError(f"retired.{group} entry is unsafe: {row}")
             if row in seen:
                 raise AuthorityError(f"retired path listed twice: {row}")
@@ -156,22 +162,36 @@ def render_installer_retired_block(value: dict[str, Any]) -> str:
     return "\n".join(out) + "\n"
 
 
-def _replace_block(text: str, rendered: str, label: str, occurrence: int = 0) -> str:
-    starts = [match.start() for match in re.finditer(re.escape(BEGIN) + r"\n", text)]
-    if len(starts) <= occurrence:
-        raise AuthorityError(f"{label}: generated block {occurrence} not found")
+_BEGIN_RE = re.compile("^" + re.escape(BEGIN) + "$", re.M)
+_END_RE = re.compile("^" + re.escape(END) + "$", re.M)
+
+
+def _replace_block(
+    text: str, rendered: str, label: str, occurrence: int = 0, expected_blocks: int = 1,
+) -> str:
+    starts = [match.start() for match in _BEGIN_RE.finditer(text)]
+    if len(starts) != expected_blocks:
+        raise AuthorityError(
+            f"{label}: expected {expected_blocks} generated block(s), found {len(starts)}"
+        )
     start = starts[occurrence]
-    end = text.find(END + "\n", start)
-    if end < 0:
+    end_match = _END_RE.search(text, start)
+    if end_match is None:
         raise AuthorityError(f"{label}: generated block is unterminated")
-    return text[:start] + rendered + text[end + len(END) + 1:]
+    if _BEGIN_RE.search(text, start + len(BEGIN), end_match.start()):
+        raise AuthorityError(f"{label}: generated block contains another block start")
+    return text[:start] + rendered + text[end_match.end() + 1:]
 
 
 def render_all(value: dict[str, Any]) -> dict[Path, str]:
-    verifier = VERIFIER.read_text(encoding="utf-8")
-    installer = INSTALLER.read_text(encoding="utf-8")
-    installer = _replace_block(installer, render_installer_allowed_block(value), "installer allowed", 0)
-    installer = _replace_block(installer, render_installer_retired_block(value), "installer retired", 1)
+    verifier = _current_text(VERIFIER) or ""
+    installer = _current_text(INSTALLER) or ""
+    installer = _replace_block(
+        installer, render_installer_allowed_block(value), "installer allowed", 0, 2,
+    )
+    installer = _replace_block(
+        installer, render_installer_retired_block(value), "installer retired", 1, 2,
+    )
     return {
         CENSUS: render_census(value),
         VERIFIER: _replace_block(verifier, render_verifier_block(value), "verifier", 0),
@@ -179,11 +199,17 @@ def render_all(value: dict[str, Any]) -> dict[Path, str]:
     }
 
 
+def _current_text(path: Path) -> str | None:
+    # Byte-exact: a CRLF checkout must show as stale, not pass through
+    # universal-newline decoding.
+    return path.read_bytes().decode("utf-8") if path.exists() else None
+
+
 def drift(value: dict[str, Any] | None = None) -> list[Path]:
     value = load() if value is None else value
     stale = []
     for path, rendered in render_all(value).items():
-        current = path.read_text(encoding="utf-8") if path.exists() else None
+        current = _current_text(path)
         if current != rendered:
             stale.append(path)
     return stale
@@ -193,8 +219,8 @@ def write(value: dict[str, Any] | None = None) -> list[Path]:
     value = load() if value is None else value
     written = []
     for path, rendered in render_all(value).items():
-        if not path.exists() or path.read_text(encoding="utf-8") != rendered:
-            path.write_text(rendered, encoding="utf-8", newline="\n")
+        if _current_text(path) != rendered:
+            path.write_bytes(rendered.encode("utf-8"))
             written.append(path)
     return written
 
