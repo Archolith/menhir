@@ -1392,7 +1392,11 @@ def _is_view_graphiti_candidate(node: Any) -> bool:
     attributes = getattr(node, "attributes", None)
     if not isinstance(attributes, dict):
         return False
-    return bool(attributes.get("is_view")) or attributes.get("view_kind") is not None         or attributes.get("view_class") is not None
+    return (
+        bool(attributes.get("is_view"))
+        or attributes.get("view_kind") is not None
+        or attributes.get("view_class") is not None
+    )
 
 
 def _patch_graphiti_structural_candidate_isolation() -> None:

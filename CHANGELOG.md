@@ -1,4 +1,11 @@
-## 2026-09-14 - repair checks after the release merge
+## 2026-09-14 - complete relation extraction and repair checks after the release merge
+
+- Limited canonical-self relation guidance to first-person text, leaving third-person extraction on
+  Graphiti's native prompt and preserving named people as their own typed-scalar subjects.
+- Excluded derived Menhir Views from Graphiti's semantic identity candidates so later turns cannot
+  attach ordinary relationships to projection nodes and corrupt their evidence provenance.
+- Made unchanged-FACT provenance refusals report the exact failed gate, including stale MENTIONS
+  parity and contributor scope, lifecycle, and fence-generation details.
 
 - Kept host-only Testinfra assertions out of the ordinary product suite when their external
   operator toolchain is absent, while preserving their documented explicit invocation.
