@@ -34,6 +34,10 @@ def connect_telemetry_db(db_path: Path) -> sqlite3.Connection:
     pragma on every connect means the file is created in WAL mode no matter which writer
     gets there first. ``PRAGMA journal_mode=WAL`` is a cheap no-op when already WAL.
     """
+    # The default state directory (~/.menhir) does not exist on a fresh install; sqlite3
+    # will not create parents, and several stores reach this seam before TelemetryStore
+    # has run its own mkdir.
+    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path, timeout=_SQLITE_BUSY_TIMEOUT_S)
     try:
         conn.execute(f"PRAGMA busy_timeout = {int(_SQLITE_BUSY_TIMEOUT_S * 1000)}")

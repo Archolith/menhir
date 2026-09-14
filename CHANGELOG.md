@@ -1,3 +1,14 @@
+## 2026-09-14 - root local state in MENHIR_STATE_DIR instead of the install layout
+
+- Telemetry sidecar and embedded OAuth AS files now default to `~/.menhir` (override with
+  `MENHIR_STATE_DIR`, or per file with `MENHIR_MCP_TELEMETRY_DB` / `MENHIR_OAUTH_AS_DIR`).
+  The old discovery walked up from the installed package looking for a `CLAUDE.md` + `projects/`
+  workspace and fell back to a fixed ancestor, which pointed into site-packages on a pip install.
+- `WORKSPACE_ROOT` remains an explicit legacy alias (`$WORKSPACE_ROOT/.agent`) so existing
+  operator workspaces keep their state without editing `.env`; without it,
+  `repo_root_for_project` returns `None` and git staleness evidence is simply unavailable.
+- The shared telemetry connect seam creates the state directory on first use.
+
 ## 2026-09-14 - remove the external LLM scheduler client
 
 - Removed the `cth.mcp.scheduler` integration: Menhir no longer acquires model endpoints from,
