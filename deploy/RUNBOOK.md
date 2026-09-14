@@ -6,10 +6,11 @@ on the host and is mechanical: it checks digests and refuses, never judges. Ever
 command here ran for releases 0.2.0-14 through 0.2.0-18 (2026-09-13/14); nothing
 below is theoretical. For rebuilt images, see the caveat at the end.
 
-Where things live: the menhir checkout of record is the branch
-`fix/deployment-reliability-20260907` (currently the worktree
-`C:\Users\thron\Documents\Codex\2026-09-06\inve\work\menhir-doc-staged-promotion`);
-release workspaces are siblings under `..\releases\menhir-prod-0.2.0-N\`; the
+Where things live: the menhir checkout of record is
+`C:\Users\thron\IdeaProjects\projects\archolith\menhir` on `main` (the deployment
+branch was merged 2026-09-14); release workspaces stay at
+`C:\Users\thron\Documents\Codex\2026-09-06\inve\work\releases\menhir-prod-0.2.0-N\`
+(not in git; each release's `prior_release` points at the previous one); the
 desktop helpers are `C:\Users\thron\IdeaProjects\scripts\`; the host is
 `147.93.132.141`, operator login `thron` with `sudo -n`, no root login.
 
@@ -47,7 +48,7 @@ Copy the previous release's `release-inputs.json` into a new
 empty `workspace\` directory.
 
 ```powershell
-cd <menhir checkout>
+cd C:\Users\thron\IdeaProjects\projects\archolith\menhir
 $R = 'C:\Users\thron\Documents\Codex\2026-09-06\inve\work\releases'
 python deploy/release_flow.py next-id --prior-release "$R\menhir-prod-0.2.0-<N-1>\workspace\release.json"
 python deploy/release_flow.py prepare --inputs "$R\menhir-prod-0.2.0-N\release-inputs.json" --workspace "$R\menhir-prod-0.2.0-N\workspace"
