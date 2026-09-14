@@ -408,9 +408,9 @@ def console(
     import os
     from pathlib import Path
 
-    from dotenv import load_dotenv
+    from menhir.env_file import load_menhir_env
 
-    load_dotenv(os.getenv("ENV_FILE") or None)
+    load_menhir_env()
 
     from menhir.cli.console import run_console
     from menhir.config import MemorySettings
@@ -460,13 +460,12 @@ def serve(
     ),
 ) -> None:
     """Start the menhir HTTP + MCP server."""
-    import os
     import sys
 
     import uvicorn
-    from dotenv import load_dotenv
+    from menhir.env_file import load_menhir_env
 
-    load_dotenv(os.getenv("ENV_FILE") or None)
+    load_menhir_env()
 
     from menhir.api.server import create_app
     from menhir.config import MemorySettings
@@ -631,9 +630,9 @@ def serve_watch(
     import time
     from pathlib import Path
 
-    from dotenv import load_dotenv
+    from menhir.env_file import load_menhir_env
 
-    load_dotenv(os.getenv("ENV_FILE") or None)
+    load_menhir_env()
 
     from menhir.config import MemorySettings
 

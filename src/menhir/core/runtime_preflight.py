@@ -50,6 +50,9 @@ class RuntimeCapabilities:
     #: "verified" (200), "rejected" (401/403), "unverified" (network/other -- startup
     #: proceeds), or "n/a" when no cloud provider is configured.
     cloud_credential: str = "n/a"
+    #: Neo4j probe outcome: "ok", "unauthorized" (server reached, credentials refused),
+    #: "unreachable" (no server answered), or "unknown".
+    neo4j_status: str = "unknown"
 
     @property
     def llm_ready(self) -> bool:
@@ -146,29 +149,59 @@ def check_graphiti_dependency() -> bool:
     return True
 
 
-def check_neo4j_connectivity(uri: str, user: str, password: str) -> bool:
-    """Validate Neo4j reachable and queryable."""
+NEO4J_OK = "ok"
+NEO4J_UNAUTHORIZED = "unauthorized"
+NEO4J_UNREACHABLE = "unreachable"
+NEO4J_UNKNOWN = "unknown"
 
+#: Outcome of the most recent :func:`probe_neo4j` in this process. `collect_runtime_capabilities`
+#: reads it instead of opening a second connection to learn *why* a check failed.
+_last_neo4j_status: str = NEO4J_UNKNOWN
+
+
+def probe_neo4j(uri: str, user: str, password: str) -> str:
+    """Return ``ok`` / ``unauthorized`` / ``unreachable`` for one connection attempt.
+
+    The distinction matters for a first run: an unreachable server is worth waiting for (it
+    may still be booting), a refused password never becomes right by waiting.
+    """
+
+    global _last_neo4j_status
     logger.info("Checking Neo4j at %s ...", uri)
-    driver = None
     if _NEO4J_IMPORT_ERROR is not None:
         logger.error("Neo4j connectivity failed: %s", _NEO4J_IMPORT_ERROR)
-        return False
+        _last_neo4j_status = NEO4J_UNREACHABLE
+        return NEO4J_UNREACHABLE
+    driver = None
     try:
         driver = GraphDatabase.driver(uri, auth=(user, password))
         with driver.session() as session:
             result = session.run("RETURN 1 AS ok").single()
-            if not result or result.get("ok") != 1:
-                logger.error("Neo4j response invalid: %s", result)
-                return False
+        if not result or result.get("ok") != 1:
+            logger.error("Neo4j response invalid: %s", result)
+            _last_neo4j_status = NEO4J_UNREACHABLE
+            return NEO4J_UNREACHABLE
         logger.info("Neo4j connectivity verified.")
-        return True
+        _last_neo4j_status = NEO4J_OK
+        return NEO4J_OK
     except Exception as exc:  # pragma: no cover - external dependency behavior
+        code = str(getattr(exc, "code", "") or "")
+        if "Security.Unauthorized" in code or "AuthError" in type(exc).__name__:
+            logger.error("Neo4j rejected the configured credentials: %s", exc)
+            _last_neo4j_status = NEO4J_UNAUTHORIZED
+            return NEO4J_UNAUTHORIZED
         logger.error("Neo4j connectivity failed: %s", exc)
-        return False
+        _last_neo4j_status = NEO4J_UNREACHABLE
+        return NEO4J_UNREACHABLE
     finally:
         if driver is not None:
             driver.close()
+
+
+def check_neo4j_connectivity(uri: str, user: str, password: str) -> bool:
+    """Validate Neo4j reachable and queryable (one connection; see :func:`probe_neo4j`)."""
+
+    return probe_neo4j(uri, user, password) == NEO4J_OK
 
 
 def check_llama_connectivity(
@@ -339,12 +372,19 @@ def collect_runtime_capabilities(
     if not graphiti_dependency_ready:
         failures.append("graphiti_core is not installed in the active interpreter.")
 
+    global _last_neo4j_status
+    _last_neo4j_status = NEO4J_UNKNOWN
     neo4j_ready = check_neo4j_connectivity(
         settings.neo4j_uri,
         settings.neo4j_user,
         settings.neo4j_password,
     )
-    if not neo4j_ready:
+    # One connection only: the probe behind check_neo4j_connectivity recorded why it failed.
+    # A substituted check (tests) leaves this "unknown", which renders as the generic message.
+    neo4j_status = NEO4J_OK if neo4j_ready else _last_neo4j_status
+    if not neo4j_ready and neo4j_status == NEO4J_UNAUTHORIZED:
+        failures.append("Neo4j rejected NEO4J_USER/NEO4J_PASSWORD (authentication failure).")
+    elif not neo4j_ready:
         failures.append("Neo4j connectivity check failed.")
     else:
         expected_dim = expected_graphiti_embedding_dimension(settings)
@@ -401,6 +441,7 @@ def collect_runtime_capabilities(
             embedder_ready=False,
             reranker_ready=False,
             failures=tuple(failures),
+            neo4j_status=neo4j_status,
         )
 
     llama_base_url = (graphiti_llm.base_url or "").strip()
@@ -510,4 +551,5 @@ def collect_runtime_capabilities(
         reranker_ready=reranker_ready,
         failures=tuple(failures),
         cloud_credential=cloud_credential,
+        neo4j_status=neo4j_status,
     )

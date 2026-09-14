@@ -1,3 +1,17 @@
+## 2026-09-14 - Menhir reads one .env, and a refused Neo4j password is named as such
+
+- `python-dotenv`'s path-less `load_dotenv()` walks up from the *calling file* whenever the
+  entry point has a `__file__` (`python -m menhir.cli`, the installed `menhir` script), so
+  `graphiti_core.helpers`' import-time call loaded whatever `.env` sat above `site-packages`
+  and Menhir's own `load_dotenv(ENV_FILE or None)` loaded the one above `menhir/cli`. Keys the
+  operator's `.env` left unset were silently filled from a bystander file (seen as
+  `GRAPHITI_EMBED_PROVIDER=openai` in a deployment configured `local`). Menhir now resolves
+  exactly one file -- `ENV_FILE`, else `./.env` -- via `menhir.env_file`, and installs a guard
+  at package import that turns a dependency's bare `load_dotenv()` into a no-op.
+- Preflight distinguishes a Neo4j that refused `NEO4J_USER`/`NEO4J_PASSWORD` from one that
+  did not answer, with one connection instead of two; `menhir up` stops its wait immediately
+  on a refused password and the tier report says which credential to fix.
+
 ## 2026-09-14 - a rejected LLM credential is reported, not just logged
 
 - Every OpenAI-compatible chat/embedding failure already passes through one seam; it now

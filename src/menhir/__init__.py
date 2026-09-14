@@ -4,6 +4,12 @@ menhir - Provenance, governed context, and code-impact analysis for coding agent
 
 from importlib.metadata import PackageNotFoundError, version
 
+from menhir.env_file import install_dotenv_guard
+
+# Before anything can import graphiti_core: its helpers module calls a bare load_dotenv()
+# at import, which reads a .env found by walking up from site-packages, not from cwd.
+install_dotenv_guard()
+
 try:
     # Single source of truth: the installed package's own metadata (which
     # setuptools populates from pyproject.toml's [project].version). Avoids

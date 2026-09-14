@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import logging
-import os
 
-from dotenv import load_dotenv
+from menhir.env_file import load_menhir_env
 from fastapi import FastAPI
 
 import menhir
@@ -87,7 +86,7 @@ def main() -> None:
     """CLI entry point for ``menhir serve``."""
     import uvicorn
 
-    load_dotenv(os.getenv("ENV_FILE") or None)
+    load_menhir_env()
     settings = MemorySettings.from_env()
     configure_logging()
     logger.info("Launching uvicorn on %s:%d", settings.api_host, settings.api_port)

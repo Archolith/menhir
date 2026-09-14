@@ -61,18 +61,24 @@ def wait_for_neo4j(
     user: str,
     password: str,
     timeout_s: float,
-    check: Callable[[str, str, str], bool],
+    probe: Callable[[str, str, str], str],
     sleep: Callable[[float], None] = time.sleep,
     clock: Callable[[], float] = time.monotonic,
-) -> bool:
-    """Poll Neo4j until it answers or ``timeout_s`` elapses. The first probe is immediate."""
+) -> str:
+    """Poll Neo4j until it answers, refuses the credentials, or ``timeout_s`` elapses.
+
+    Returns the last probe outcome (``ok`` / ``unauthorized`` / ``unreachable``). A refused
+    password ends the wait at once: no amount of waiting makes it right. The first probe is
+    immediate.
+    """
 
     deadline = clock() + max(0.0, timeout_s)
     while True:
-        if check(uri, user, password):
-            return True
+        status = probe(uri, user, password)
+        if status != "unreachable":
+            return status
         if clock() >= deadline:
-            return False
+            return status
         sleep(_POLL_INTERVAL_S)
 
 
@@ -114,7 +120,7 @@ def tier_report(capabilities: object, settings: object) -> list[TierLine]:
     elif embed.kind is ProviderKind.OPENAI:
         embed_hint = "OPENAI_API_KEY, OPENAI_EMBED_MODEL"
     elif embed.kind is ProviderKind.LOCAL:
-        embed_hint = "LOCAL_LLM_EMBED_MODEL (and LOCAL_LLM_EMBED_BASE_URL if on another server)"
+        embed_hint = "the embedding server must be running and list LOCAL_LLM_EMBED_MODEL at GET /v1/models (LOCAL_LLM_EMBED_BASE_URL if separate)"
     else:
         embed_hint = "GRAPHITI_EMBED_PROVIDER must be local or openai"
 
@@ -123,8 +129,13 @@ def tier_report(capabilities: object, settings: object) -> list[TierLine]:
                  "pip install . (or -e .) into the interpreter running menhir"),
         TierLine("python: interpreter guard", bool(getattr(capabilities, "venv_ready", True)),
                  "run from the checkout .venv, or set MENHIR_ALLOW_SYSTEM_PYTHON=1"),
-        TierLine("neo4j: reachable", bool(getattr(capabilities, "neo4j_ready", False)),
-                 "NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD (or `menhir up --compose-neo4j`)"),
+        TierLine(
+            "neo4j: reachable",
+            bool(getattr(capabilities, "neo4j_ready", False)),
+            "NEO4J_USER / NEO4J_PASSWORD were rejected by the server -- fix the credentials"
+            if getattr(capabilities, "neo4j_status", "") == "unauthorized"
+            else "NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD (or `menhir up --compose-neo4j`)",
+        ),
         TierLine(
             "llm: graphiti extraction" + (cloud_note if llm.kind is ProviderKind.OPENAI else ""),
             bool(getattr(capabilities, "graphiti_llm_ready", False)),
@@ -187,7 +198,7 @@ def up(
 
         from menhir.config import MemorySettings
         from menhir.core import collect_runtime_capabilities
-        from menhir.core.runtime_preflight import check_neo4j_connectivity
+        from menhir.core.runtime_preflight import probe_neo4j
 
         settings = MemorySettings.from_env()
 
@@ -208,13 +219,16 @@ def up(
                 typer.echo(f"[neo4j] probing {settings.neo4j_uri} ...")
             else:
                 typer.echo(f"[neo4j] waiting up to {wait_timeout:.0f}s for {settings.neo4j_uri} ...")
-            if not wait_for_neo4j(
+            status = wait_for_neo4j(
                 uri=settings.neo4j_uri,
                 user=settings.neo4j_user,
                 password=settings.neo4j_password,
                 timeout_s=wait_timeout if not check else 0.0,
-                check=check_neo4j_connectivity,
-            ):
+                probe=probe_neo4j,
+            )
+            if status == "unauthorized":
+                typer.echo("[neo4j] reached, but it rejected NEO4J_USER/NEO4J_PASSWORD", err=True)
+            elif status != "ok":
                 typer.echo("[neo4j] not answering yet", err=True)
 
         # 4. preflight + tier report

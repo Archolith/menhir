@@ -46,40 +46,50 @@ def test_neo4j_is_loopback() -> None:
 
 
 def test_wait_for_neo4j_probes_immediately_then_polls_until_answer() -> None:
-    answers = iter([False, False, True])
+    answers = iter(["unreachable", "unreachable", "ok"])
     slept: list[float] = []
     ticks = iter([0.0, 0.0, 2.0, 2.0, 4.0, 4.0])
-    ok = wait_for_neo4j(
+    status = wait_for_neo4j(
         uri="bolt://x", user="u", password="p", timeout_s=10.0,
-        check=lambda *a: next(answers), sleep=slept.append, clock=lambda: next(ticks),
+        probe=lambda *a: next(answers), sleep=slept.append, clock=lambda: next(ticks),
     )
-    assert ok is True
+    assert status == "ok"
     assert slept == [2.0, 2.0]
+
+
+def test_wait_for_neo4j_stops_at_once_when_credentials_are_refused() -> None:
+    slept: list[float] = []
+    status = wait_for_neo4j(
+        uri="bolt://x", user="u", password="p", timeout_s=60.0,
+        probe=lambda *a: "unauthorized", sleep=slept.append, clock=lambda: 0.0,
+    )
+    assert status == "unauthorized"
+    assert slept == [], "a wrong password never becomes right by waiting"
 
 
 def test_wait_for_neo4j_gives_up_at_deadline() -> None:
     slept: list[float] = []
     ticks = iter([0.0, 0.0, 3.0, 6.0, 9.0, 12.0])
-    ok = wait_for_neo4j(
+    status = wait_for_neo4j(
         uri="bolt://x", user="u", password="p", timeout_s=5.0,
-        check=lambda *a: False, sleep=slept.append, clock=lambda: next(ticks),
+        probe=lambda *a: "unreachable", sleep=slept.append, clock=lambda: next(ticks),
     )
-    assert ok is False
+    assert status == "unreachable"
     assert len(slept) >= 1
 
 
 def test_wait_for_neo4j_zero_timeout_is_a_single_probe() -> None:
     calls: list[int] = []
 
-    def _check(*a) -> bool:
+    def _probe(*a) -> str:
         calls.append(1)
-        return False
+        return "unreachable"
 
-    ok = wait_for_neo4j(
+    status = wait_for_neo4j(
         uri="bolt://x", user="u", password="p", timeout_s=0.0,
-        check=_check, sleep=lambda s: None, clock=lambda: 0.0,
+        probe=_probe, sleep=lambda s: None, clock=lambda: 0.0,
     )
-    assert ok is False
+    assert status == "unreachable"
     assert calls == [1]
 
 
@@ -161,7 +171,7 @@ def test_up_check_reports_and_exits_without_serving(
 ) -> None:
     repo = _checkout(tmp_path)
     served: list[object] = []
-    monkeypatch.setattr("menhir.core.runtime_preflight.check_neo4j_connectivity", lambda *a: False)
+    monkeypatch.setattr("menhir.core.runtime_preflight.probe_neo4j", lambda *a: "unreachable")
     monkeypatch.setattr("menhir.core.collect_runtime_capabilities", lambda settings: _caps(neo4j_ready=False))
 
     import menhir.cli as cli_module
@@ -186,7 +196,7 @@ def test_up_starts_compose_waits_and_hands_off_to_serve(
     served: list[object] = []
     composed: list[Path] = []
     monkeypatch.setattr(up_module, "compose_neo4j_up", lambda checkout: composed.append(checkout) or "started")
-    monkeypatch.setattr("menhir.core.runtime_preflight.check_neo4j_connectivity", lambda *a: True)
+    monkeypatch.setattr("menhir.core.runtime_preflight.probe_neo4j", lambda *a: "ok")
     monkeypatch.setattr("menhir.core.collect_runtime_capabilities", lambda settings: _caps())
 
     import menhir.cli as cli_module
@@ -233,11 +243,11 @@ def test_up_loads_the_checkout_env_not_the_cwd_env(
     monkeypatch.chdir(cwd)
     seen: list[str] = []
 
-    def _probe(uri: str, user: str, password: str) -> bool:
+    def _probe(uri: str, user: str, password: str) -> str:
         seen.append(uri)
-        return False
+        return "unreachable"
 
-    monkeypatch.setattr("menhir.core.runtime_preflight.check_neo4j_connectivity", _probe)
+    monkeypatch.setattr("menhir.core.runtime_preflight.probe_neo4j", _probe)
     monkeypatch.setattr("menhir.core.collect_runtime_capabilities", lambda settings: _caps(neo4j_ready=False))
 
     CliRunner().invoke(app, ["up", "--check", "--repo", str(repo)])

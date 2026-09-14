@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import os
 
-from dotenv import load_dotenv
+from menhir.env_file import load_menhir_env
 
 import anyio
 
@@ -26,7 +26,7 @@ __all__ = [
     "register_memory_resources",
 ]
 
-load_dotenv(os.getenv("ENV_FILE") or None)
+load_menhir_env()
 logger = logging.getLogger(__name__)
 
 # Core tools pinned visible for LLM discovery; others found via search_tools/call_tool

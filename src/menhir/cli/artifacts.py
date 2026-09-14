@@ -38,7 +38,7 @@ def _service() -> Any:
     ``menhir artifacts validate`` must work in a repository with no database
     reachable, so nothing at module import time may require Neo4j.
     """
-    from dotenv import load_dotenv
+    from menhir.env_file import load_menhir_env
 
     from menhir.config.settings_model import MemorySettings
     from menhir.infrastructure.neo4j import Neo4jRepository
@@ -47,7 +47,7 @@ def _service() -> Any:
         ArtifactReconciliationService,
     )
 
-    load_dotenv()
+    load_menhir_env()
     settings = MemorySettings.from_env()
     neo4j = Neo4jRepository(
         uri=settings.neo4j_uri,
