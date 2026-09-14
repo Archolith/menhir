@@ -115,3 +115,49 @@ def test_diagnosis_failure_falls_back_to_the_generic_refusal() -> None:
 @pytest.mark.unit
 def test_empty_result_falls_back_to_the_generic_refusal() -> None:
     assert "must resolve to live" in _diagnose(None)
+
+
+@pytest.mark.unit
+def test_fact_refresh_refusal_reports_every_gate_and_contributor_probe() -> None:
+    """The unchanged-FACT path must expose parity and contributor resolution, not a generic lie."""
+    row = {
+        "fence_exists": True,
+        "fence_generation": 7,
+        "node_exists": True,
+        "node_current": True,
+        "node_retired": False,
+        "stored_eps": ["e1", "e2"],
+        "old_mentions": ["e1"],
+        "contributors": [{
+            "eid": "e2",
+            "any_match": 1,
+            "in_scope": 1,
+            "labels": [["Episodic"]],
+            "finalized": [True],
+            "quarantined": [False],
+            "generation": [7],
+        }],
+    }
+    repo = ViewWriteRepositoryMixin(neo4j=_StubNeo4j(row))
+
+    msg = repo._diagnose_fact_provenance_refusal("view-1", ["e2"], "agent-status")
+
+    assert "node_uuid=view-1" in msg
+    assert "node_exists=True current=True retired=False" in msg
+    assert "fence_exists=True fence_generation=7" in msg
+    assert "old_mentions_parity=False" in msg
+    assert "contributor eid=e2 any_match=1 in_scope=1" in msg
+    assert "finalized=[True] quarantined=[False] generation=[7]" in msg
+
+
+@pytest.mark.unit
+def test_fact_refresh_diagnosis_failure_preserves_the_original_refusal() -> None:
+    class _Exploding:
+        def execute(self, *_a: Any, **_k: Any) -> list:
+            raise RuntimeError("neo4j down")
+
+    repo = ViewWriteRepositoryMixin(neo4j=_Exploding())
+
+    msg = repo._diagnose_fact_provenance_refusal("view-1", ["e1"], "agent-status")
+
+    assert msg == "diagnosis unavailable (RuntimeError: neo4j down)"

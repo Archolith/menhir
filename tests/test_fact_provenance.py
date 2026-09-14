@@ -171,6 +171,38 @@ def test_unchanged_value_rewrite_unions_provenance_and_keeps_the_version(test_ne
 
 
 @pytest.mark.online
+def test_refresh_refusal_names_broken_old_mentions_parity_without_mutating(test_neo4j_repo):
+    """A damaged FACT explains the actual parity gate and leaves its durable receipt untouched."""
+    adapter = MemoryGraphAdapter(neo4j=test_neo4j_repo)
+    ns = f"prov-{uuidlib.uuid4().hex[:8]}"
+    first, second = f"{ns}-first", f"{ns}-second"
+    _make_episodes(test_neo4j_repo, ns, [first, second])
+
+    adapter.record_counter(
+        subject="user", counter="movies", value=20.0, namespace=ns,
+        episode_uuids=[first],
+    )
+    key = f"{ns}::user::movies"
+    before = _fact(test_neo4j_repo, key)
+    test_neo4j_repo.execute(
+        "MATCH (:Episodic {uuid:$eid})-[r:MENTIONS]->(:Entity {view_key:$key}) DELETE r",
+        {"eid": first, "key": key},
+    )
+
+    with pytest.raises(ValueError, match="old_mentions_parity=False"):
+        adapter.record_counter(
+            subject="user", counter="movies", value=20.0, namespace=ns,
+            episode_uuids=[second],
+        )
+
+    after = _fact(test_neo4j_repo, key)
+    assert after["uuid"] == before["uuid"]
+    assert after["eps"] == [first]
+    assert after["count"] == 1
+    assert after["mentions"] == 0
+
+
+@pytest.mark.online
 def test_missing_episode_refuses_current_fact_until_evidence_exists(test_neo4j_repo):
     """A durable UUID receipt is not evidence and cannot create a current FACT View."""
     adapter = MemoryGraphAdapter(neo4j=test_neo4j_repo)

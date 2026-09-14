@@ -1375,6 +1375,30 @@ def _is_structural_graphiti_candidate(node: Any) -> bool:
     return isinstance(attributes, dict) and attributes.get("structure_role") is not None
 
 
+def _is_view_graphiti_candidate(node: Any) -> bool:
+    """Return whether a Graphiti candidate is a Menhir View (scalar_state, counter, timeline...).
+
+    Views are ``:Entity`` nodes with a name embedding, so Graphiti's semantic candidate search
+    returns them like any memory node, and its dedupe then resolves an extracted entity ONTO
+    the View. Issue #94: "Alice owns 37 coins." produced a counter View named
+    "alice's coins: 37 ...", the next extraction resolved its "coins" entity onto that View,
+    Graphiti wrote `(:Episodic)-[:MENTIONS]->(view)` and `(Alice)-[:OWNS]->(view)`, and the
+    View's provenance gate -- correctly -- refused every refresh from then on.
+
+    A View is derived state and must never be an identity-resolution target. Checked on the
+    same materialized attributes the structural predicate uses; `is_view` is what the View
+    writer stamps (`view_write_repository.py`), `view_kind`/`view_class` are its siblings.
+    """
+    attributes = getattr(node, "attributes", None)
+    if not isinstance(attributes, dict):
+        return False
+    return (
+        bool(attributes.get("is_view"))
+        or attributes.get("view_kind") is not None
+        or attributes.get("view_class") is not None
+    )
+
+
 def _patch_graphiti_structural_candidate_isolation() -> None:
     """Prevent semantic enrichment from resolving onto structural ``:Entity`` nodes.
 
@@ -1407,12 +1431,13 @@ def _patch_graphiti_structural_candidate_isolation() -> None:
                     candidate
                     for candidate in candidates
                     if not _is_structural_graphiti_candidate(candidate)
+                    and not _is_view_graphiti_candidate(candidate)
                 ]
                 dropped += len(candidates) - len(eligible)
                 filtered.append(eligible)
             if dropped:
                 logger.info(
-                    "Excluded %d structural node candidate(s) from Graphiti semantic dedup",
+                    "Excluded %d structural/View node candidate(s) from Graphiti semantic dedup",
                     dropped,
                 )
             return filtered

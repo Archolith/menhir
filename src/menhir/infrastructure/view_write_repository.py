@@ -801,9 +801,13 @@ class ViewWriteRepositoryMixin:
              **tenant_scope_params(namespace_key)},
         )
         if not rows:
+            # Zero rows means ONE of four gates above refused, and the write statement cannot
+            # say which. Ask read-only, then name it (issue #94; same shape as 68fa2ec8 for the
+            # admission path). A refusal that names no gate is a swallow with extra steps.
+            detail = self._diagnose_fact_provenance_refusal(node_uuid, episode_uuids, namespace_key)
             raise ValueError(
                 "FACT View provenance refresh refused: every stored contributor UUID must resolve "
-                "to live :Episodic or :TurnEvidence evidence"
+                f"to live :Episodic or :TurnEvidence evidence; {detail}"
             )
         row = dict(rows[0])
         stored = [str(u) for u in (row.get("stored") or [])]
@@ -812,6 +816,78 @@ class ViewWriteRepositoryMixin:
         _log_missing_episodes(node_uuid, stored, missing)
         return {"episodes_present": len(present), "episodes_missing": len(missing),
                 "supporting_event_count": len(stored)}
+
+    def _diagnose_fact_provenance_refusal(
+        self, node_uuid: str, episode_uuids: list[str], namespace_key: str,
+    ) -> str:
+        """Read-only: report which of the refresh statement's gates refused, and why.
+
+        Mirrors the gates in `_refresh_fact_provenance` one by one -- node/current/retired, the
+        old-MENTIONS parity check, and per-contributor resolution (exists, in tenant scope,
+        finalized, not quarantined, exactly one candidate, generation matches the fence). Any
+        error while diagnosing is reported inside the string rather than raised, so the original
+        refusal is never replaced by a diagnostics failure.
+        """
+        from menhir.domain.namespace import tenant_scope_cypher, tenant_scope_params
+
+        try:
+            rows = self.neo4j.execute(
+                """
+                OPTIONAL MATCH (f:EvidenceNamespaceFence {namespace_key: $namespace_key})
+                OPTIONAL MATCH (n:Entity {uuid: $u})
+                OPTIONAL MATCH (old_evidence)-[:MENTIONS]->(n)
+                WHERE old_evidence:Episodic OR old_evidence:TurnEvidence
+                WITH f, n, collect(DISTINCT coalesce(old_evidence.uuid, old_evidence.turn_id)) AS old_mentions
+                UNWIND CASE WHEN size($eps) = 0 THEN [null] ELSE $eps END AS eid
+                OPTIONAL MATCH (e)
+                WHERE ((e:Episodic AND e.uuid = eid) OR (e:TurnEvidence AND e.turn_id = eid))
+                WITH f, n, old_mentions, eid, collect(e) AS any_match,
+                     [c IN collect(e) WHERE """ + tenant_scope_cypher("c") + """] AS in_scope
+                RETURN
+                  f IS NOT NULL AS fence_exists,
+                  f.generation AS fence_generation,
+                  n IS NOT NULL AS node_exists,
+                  coalesce(n.view_current, n.qs_current, true) AS node_current,
+                  coalesce(n.retired, false) AS node_retired,
+                  n.episode_uuids AS stored_eps,
+                  old_mentions,
+                  collect({
+                    eid: eid,
+                    any_match: size(any_match),
+                    in_scope: size(in_scope),
+                    finalized: [c IN in_scope | coalesce(c.evidence_finalized, false)],
+                    quarantined: [c IN in_scope | coalesce(c.evidence_quarantined, false)],
+                    generation: [c IN in_scope | coalesce(c.evidence_generation, c.publication_generation)],
+                    labels: [c IN any_match | labels(c)]
+                  }) AS contributors
+                """,
+                {"u": node_uuid, "eps": list(episode_uuids), "namespace_key": namespace_key,
+                 **tenant_scope_params(namespace_key)},
+            )
+        except Exception as exc:  # noqa: BLE001 - diagnostics must not replace the refusal
+            return f"diagnosis unavailable ({type(exc).__name__}: {exc})"
+        if not rows:
+            return "diagnosis returned no rows"
+        r = dict(rows[0])
+        stored = list(r.get("stored_eps") or [])
+        old = list(r.get("old_mentions") or [])
+        parity = len(old) == len(stored) and all(x in stored for x in old)
+        parts = [
+            f"node_uuid={node_uuid}",
+            f"namespace_key={namespace_key}",
+            f"fence_exists={r.get('fence_exists')} fence_generation={r.get('fence_generation')}",
+            f"node_exists={r.get('node_exists')} current={r.get('node_current')} retired={r.get('node_retired')}",
+            f"old_mentions_parity={parity} stored_eps={stored} old_mentions={old}",
+            f"requested_eps={list(episode_uuids)}",
+        ]
+        for c in r.get("contributors") or []:
+            parts.append(
+                f"contributor eid={c.get('eid')} any_match={c.get('any_match')} "
+                f"in_scope={c.get('in_scope')} labels={c.get('labels')} "
+                f"finalized={c.get('finalized')} quarantined={c.get('quarantined')} "
+                f"generation={c.get('generation')}"
+            )
+        return " | ".join(parts)
 
     def _replace_fact_provenance(
         self, node_uuid: str, episode_uuids: list[str], now: str, *,
