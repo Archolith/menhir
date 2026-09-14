@@ -165,7 +165,10 @@ def test_interior_dotdot_collapses_without_escaping() -> None:
 
 @pytest.mark.unit
 def test_absolute_windows_path_is_trimmed_to_workspace_relative() -> None:
-    loc = parse_code_ref(r"C:\Users\dev\IdeaProjects\projects\archolith\menhir\src\menhir\api\routes.py")[0]
+    loc = parse_code_ref(
+        r"C:\Users\dev\IdeaProjects\projects\archolith\menhir\src\menhir\api\routes.py",
+        workspace_marker="/IdeaProjects/",
+    )[0]
     assert loc.project == "menhir"
     assert loc.path == "src/menhir/api/routes.py"
 
