@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "id": "single-artifact-authority",
+  "category": "operations",
+  "deployment_class": "maintenance",
+  "summary": "One authority file renders the installed-artifact census, the verifier's compiled-in sets and the installer's allowed and retired blocks.",
+  "details": "Menhir commits 0097a50 and 5e06c62 replace four hand-maintained copies of the installed-artifact list with deploy/artifact-authority.json. deploy/lib/artifact_authority.py renders deploy/installed-artifacts.json, the required and obsolete sets compiled into /srv/menhir/production/bin/verify-artifacts and the allowed and retired blocks in release-install.sh between generated-block markers, and release_spec loads the same file for its destination-to-source map; a test runs the generator in check mode, so the repository cannot be committed with green tests while any copy diverges. The installed artifact set is unchanged at 40 destinations and 20 retired paths. Two installed artifacts change bytes: verify-artifacts gains the markers and re-emits its sets in authority order, and installed-artifacts.json is rendered in sorted order. prepare now also requires the authority used to build the spec to equal the one at the menhir commit, closing the gap where a dirty checkout could bind a destination to the wrong committed source. The loader refuses path traversal, trailing newlines and unit names that systemctl would parse as options. Images inherited from release 0.2.0-13 unchanged.",
+  "operator_impact": "Adding or retiring an installed artifact is one edit to deploy/artifact-authority.json followed by artifact_authority.py --write. No runtime, ingress, secret or privilege change.",
+  "repositories": {
+    "menhir": [
+      "0097a50a97f4d54a6d8606fcf6327587e4ae1cb4",
+      "5e06c62002fdfaceeca457603bfd7b200ff09935"
+    ]
+  },
+  "security_scopes": [
+    "host-privilege-and-command-wrappers",
+    "supply-chain-and-build-evidence"
+  ],
+  "breaking": false
+}
