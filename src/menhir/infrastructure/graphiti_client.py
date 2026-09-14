@@ -8,7 +8,7 @@ import logging
 from dataclasses import dataclass, field
 from functools import partial
 from datetime import datetime
-from time import monotonic, perf_counter
+from time import perf_counter
 from typing import Any
 
 

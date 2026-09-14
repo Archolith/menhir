@@ -6,13 +6,9 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
-import json
 import logging
 import threading
 from typing import Any, Protocol, runtime_checkable
-from urllib import error as urllib_error
-from urllib import parse as urllib_parse
-from urllib import request as urllib_request
 
 from menhir.config import MemorySettings
 from menhir.infrastructure.observability import (

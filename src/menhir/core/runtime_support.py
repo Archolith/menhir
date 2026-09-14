@@ -11,7 +11,6 @@ from menhir.config import MemorySettings, redact_uri_credentials
 from menhir.core.reader_identity import normalize_reader_id
 from menhir.core.runtime_preflight import RuntimeCapabilities
 from menhir.domain.bootstrap_scope import bootstrap_selection
-from menhir.infrastructure.providers import ProviderConfig
 from menhir.services import MaintenanceScheduler
 
 if TYPE_CHECKING:

@@ -17,6 +17,7 @@ from .recorders import (
     record_memory_revision,
     record_merge,
 )
+from .task_ids import build_episode_task_id
 from .store import (
     McpTelemetryStore,
     connect_telemetry_db,
@@ -33,6 +34,7 @@ def enable_llm_usage_telemetry() -> None:
     set_default_llm_usage_callback(lambda event: record_llm_usage_event(event=event))
 
 __all__ = [
+    "build_episode_task_id",
     "McpTelemetryStore",
     "connect_telemetry_db",
     "default_telemetry_db_path",
@@ -49,7 +51,3 @@ __all__ = [
     "record_merge",
     "enable_llm_usage_telemetry",
 ]
-
-from .task_ids import build_episode_task_id  # noqa: E402
-
-__all__ = [*__all__, "build_episode_task_id"]

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 
 from menhir.core.backend_impl import RuntimeProvider
 from menhir.mcp.tools.base import BaseJsonTool
@@ -57,27 +56,17 @@ class RecoverOrphansTool(BaseJsonTool):
                 }
             )
 
-        total = len(candidates)
-        job_id = f"orphan-recovery-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
-
-        async def _on_progress(processed: int, total: int, current_node: str) -> None:
-            return None
-
-        try:
-            if isinstance(backend, RuntimeProvider):
-                result = await backend.built.lifecycle_service.recover_orphans(
-                    max_age_hours=max_age_hours,
-                    on_progress=_on_progress,
-                )
-                summary = {
-                    "promoted": result.promoted,
-                    "deleted": result.deleted,
-                    "conflicts_detected": result.conflicts_detected,
-                    "skipped_pending": result.skipped_pending,
-                    "orphan_episodes_cleaned": result.orphan_episodes_cleaned,
-                }
-            else:
-                summary = await backend.recover_orphans(max_age_hours=max_age_hours)
-            return self.render_json(summary)
-        except Exception as exc:
-            raise
+        if isinstance(backend, RuntimeProvider):
+            result = await backend.built.lifecycle_service.recover_orphans(
+                max_age_hours=max_age_hours,
+            )
+            summary = {
+                "promoted": result.promoted,
+                "deleted": result.deleted,
+                "conflicts_detected": result.conflicts_detected,
+                "skipped_pending": result.skipped_pending,
+                "orphan_episodes_cleaned": result.orphan_episodes_cleaned,
+            }
+        else:
+            summary = await backend.recover_orphans(max_age_hours=max_age_hours)
+        return self.render_json(summary)

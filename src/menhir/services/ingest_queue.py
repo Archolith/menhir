@@ -31,7 +31,6 @@ from menhir.infrastructure.observability import (
     reset_llm_usage_callback,
     set_llm_usage_callback,
 )
-from menhir.infrastructure.telemetry import build_episode_task_id
 from menhir.infrastructure.telemetry import (
     record_episode_task_event,
     record_lifecycle_event,
