@@ -46,6 +46,10 @@ class RuntimeCapabilities:
     embedder_ready: bool
     reranker_ready: bool
     failures: tuple[str, ...] = field(default_factory=tuple)
+    #: Outcome of the free GET /v1/models credential probe for a cloud provider:
+    #: "verified" (200), "rejected" (401/403), "unverified" (network/other -- startup
+    #: proceeds), or "n/a" when no cloud provider is configured.
+    cloud_credential: str = "n/a"
 
     @property
     def llm_ready(self) -> bool:
@@ -220,17 +224,58 @@ def check_llama_connectivity(
             return False
 
 
+CREDENTIAL_VERIFIED = "verified"
+CREDENTIAL_REJECTED = "rejected"
+CREDENTIAL_UNVERIFIED = "unverified"
+
+
+def probe_openai_credential(
+    *,
+    api_key: str,
+    base_url: str = "https://api.openai.com/v1",
+    timeout_s: float = DEFAULT_TIMEOUT_SECONDS,
+) -> str:
+    """Ask the provider whether ``api_key`` is accepted, using the free ``GET /models`` call.
+
+    Bills no tokens. Three outcomes, so a network problem never masquerades as a bad key:
+    ``verified`` (2xx), ``rejected`` (401/403 -- the key itself is wrong), ``unverified``
+    (timeout, DNS, TLS, 5xx, 429 -- nothing is known; startup proceeds as before).
+    """
+
+    if not api_key.strip():
+        return CREDENTIAL_REJECTED
+    request = Request(
+        base_url.rstrip("/") + "/models",
+        headers={"Authorization": f"Bearer {api_key}"},
+        method="GET",
+    )
+    try:
+        with urlopen(request, timeout=timeout_s) as response:
+            status = getattr(response, "status", 200)
+        return CREDENTIAL_VERIFIED if 200 <= int(status) < 300 else CREDENTIAL_UNVERIFIED
+    except HTTPError as exc:
+        if exc.code in (401, 403):
+            return CREDENTIAL_REJECTED
+        logger.warning("Cloud credential probe inconclusive (HTTP %s); continuing.", exc.code)
+        return CREDENTIAL_UNVERIFIED
+    except (URLError, OSError, ValueError) as exc:
+        logger.warning("Cloud credential probe inconclusive (%s); continuing.", exc)
+        return CREDENTIAL_UNVERIFIED
+
+
 def check_openai_provider_configuration(
     *,
     api_key: str,
     chat_model: str,
     embed_model: str,
+    credential_status: str | None = None,
 ) -> bool:
-    """Validate cloud OpenAI provider configuration without requiring a startup probe.
+    """Validate cloud OpenAI provider configuration.
 
-    Startup should not hard-fail or degrade just because a cloud provider blocks
-    a `/models` probe, is momentarily slow, or the current runtime environment
-    restricts outbound sockets. Actual request failures are handled at call time.
+    ``credential_status`` is the shared result of :func:`probe_openai_credential`. Only a
+    definite rejection fails the check: a probe that could not reach the provider (blocked
+    outbound sockets, a slow network) leaves startup exactly as permissive as before, and
+    real request failures are still handled at call time.
     """
 
     if not api_key.strip():
@@ -239,8 +284,12 @@ def check_openai_provider_configuration(
     if not chat_model.strip() and not embed_model.strip():
         logger.error("OpenAI provider is configured but no chat or embedding model is set.")
         return False
+    if credential_status == CREDENTIAL_REJECTED:
+        logger.error("OpenAI rejected OPENAI_API_KEY (401/403) on GET /models.")
+        return False
     logger.info(
-        "OpenAI provider configuration verified for startup (chat=%s, embed=%s).",
+        "OpenAI provider configuration %s for startup (chat=%s, embed=%s).",
+        "verified" if credential_status == CREDENTIAL_VERIFIED else "accepted (credential not verified)",
         chat_model or "(none)",
         embed_model or "(none)",
     )
@@ -356,11 +405,21 @@ def collect_runtime_capabilities(
 
     llama_base_url = (graphiti_llm.base_url or "").strip()
     embed_base_url = (graphiti_embed.base_url or "").strip()
+    cloud_credential = "n/a"
+    cloud_provider = next(
+        (p for p in (graphiti_llm, graphiti_embed, graphiti_reranker) if p.kind is ProviderKind.OPENAI),
+        None,
+    )
+    if cloud_provider is not None:
+        cloud_credential = probe_openai_credential(
+            api_key=cloud_provider.api_key, base_url=cloud_provider.base_url
+        )
     if graphiti_llm.kind is ProviderKind.OPENAI:
         graphiti_llm_ready = check_openai_provider_configuration(
             api_key=graphiti_llm.api_key,
             chat_model=graphiti_llm.chat_model,
             embed_model="" if embed_base_url != llama_base_url else graphiti_embed.embed_model,
+            credential_status=cloud_credential,
         )
     else:
         graphiti_llm_ready = check_llama_connectivity(
@@ -369,7 +428,9 @@ def collect_runtime_capabilities(
             chat_model=graphiti_llm.chat_model,
             embed_model="" if embed_base_url != llama_base_url else graphiti_embed.embed_model,
         )
-    if not graphiti_llm_ready:
+    if not graphiti_llm_ready and cloud_credential == CREDENTIAL_REJECTED:
+        failures.append("OpenAI rejected OPENAI_API_KEY (401/403) on GET /v1/models; set a valid key.")
+    elif not graphiti_llm_ready:
         failures.append(
             "Graphiti extraction connectivity/model check failed "
             f"(provider={graphiti_llm.kind.value}, "
@@ -385,6 +446,7 @@ def collect_runtime_capabilities(
                 api_key=graphiti_embed.api_key,
                 chat_model="",
                 embed_model=graphiti_embed.embed_model,
+                credential_status=cloud_credential,
             )
         else:
             embedder_ready = check_llama_connectivity(
@@ -421,6 +483,7 @@ def collect_runtime_capabilities(
                 api_key=graphiti_reranker.api_key,
                 chat_model=graphiti_reranker.chat_model,
                 embed_model="",
+                credential_status=cloud_credential,
             )
         else:
             reranker_ready = check_llama_connectivity(
@@ -446,4 +509,5 @@ def collect_runtime_capabilities(
         embedder_ready=embedder_ready,
         reranker_ready=reranker_ready,
         failures=tuple(failures),
+        cloud_credential=cloud_credential,
     )

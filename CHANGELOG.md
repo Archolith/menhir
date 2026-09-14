@@ -5,8 +5,10 @@
   call succeeds. `add_memory` appends a WARNING naming it (and `OPENAI_API_KEY`), `/api/health`
   gains `services.llm_auth` and `provider_auth_failure`, and `/api/ready` reports `degraded` with
   the same text while capabilities stay truthful about configuration.
-- `menhir up` labels cloud provider lines "key present; verified on first call, not at startup"
-  rather than a bare ok, because preflight deliberately never probes api.openai.com.
+- Preflight now asks the provider whether the key is accepted using the free `GET /v1/models`
+  call (no tokens billed), once per startup. Only a definite 401/403 fails the check and names
+  `OPENAI_API_KEY`; a probe that cannot reach the provider leaves startup as permissive as
+  before. `menhir up` reports the key as verified, REJECTED, or unverifiable, never a bare ok.
 
 ## 2026-09-14 - open loopback mode binds the operator tier
 

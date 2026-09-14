@@ -125,15 +125,14 @@ def test_health_and_ready_expose_the_rejection() -> None:
     assert "Incorrect API key" in ready["provider_auth_failure"]
 
 
-def test_tier_report_labels_cloud_lines_as_unverified() -> None:
-    caps = RuntimeCapabilities(
-        venv_ready=True, graphiti_dependency_ready=True, neo4j_ready=True,
-        graphiti_llm_ready=True, embedder_ready=True, reranker_ready=True, failures=(),
-    )
-    text = render_report(tier_report(caps, MemorySettings(graphiti_provider="openai")), "full")
-    assert "llm: graphiti extraction (openai: key present; verified on first call, not at startup)" in text
-    assert "llm: embeddings (openai: key present" in text
-    assert "A cloud key is only proven by the first" in text
-
-    local = render_report(tier_report(caps, MemorySettings(graphiti_provider="local")), "full")
-    assert "verified on first call" not in local.split("\n")[3]  # local lines carry no cloud note
+def test_tier_report_never_shows_a_bare_ok_for_a_cloud_provider() -> None:
+    """Cloud lines always say how the key was judged: verified, rejected, or unverifiable."""
+    for credential in ("verified", "rejected", "unverified"):
+        caps = RuntimeCapabilities(
+            venv_ready=True, graphiti_dependency_ready=True, neo4j_ready=True,
+            graphiti_llm_ready=credential != "rejected", embedder_ready=credential != "rejected",
+            reranker_ready=True, failures=(), cloud_credential=credential,
+        )
+        text = render_report(tier_report(caps, MemorySettings(graphiti_provider="openai")), "full")
+        llm_line = next(l for l in text.splitlines() if "llm: graphiti extraction" in l)
+        assert "(openai:" in llm_line, llm_line

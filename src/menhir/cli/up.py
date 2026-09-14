@@ -95,14 +95,23 @@ def tier_report(capabilities: object, settings: object) -> list[TierLine]:
     llm = ProviderConfig.for_graphiti_llm(settings)  # type: ignore[arg-type]
     embed = ProviderConfig.for_graphiti_embedder(settings)  # type: ignore[arg-type]
 
-    cloud_note = " (openai: key present; verified on first call, not at startup)"
-    if llm.kind is ProviderKind.OPENAI:
+    credential = str(getattr(capabilities, "cloud_credential", "n/a"))
+    cloud_note = {
+        "verified": " (openai: key verified via GET /v1/models)",
+        "rejected": " (openai: key REJECTED)",
+        "unverified": " (openai: key present; could not reach api.openai.com to verify)",
+    }.get(credential, "")
+    if llm.kind is ProviderKind.OPENAI and credential == "rejected":
+        llm_hint = "OPENAI_API_KEY was rejected with 401/403 -- set a valid key"
+    elif llm.kind is ProviderKind.OPENAI:
         llm_hint = "OPENAI_API_KEY, OPENAI_CHAT_MODEL"
     elif llm.kind is ProviderKind.LOCAL:
         llm_hint = "LOCAL_LLM_BASE_URL must answer GET /v1/models and list LOCAL_LLM_CHAT_MODEL"
     else:
         llm_hint = "GRAPHITI_LLM_PROVIDER must be local or openai"
-    if embed.kind is ProviderKind.OPENAI:
+    if embed.kind is ProviderKind.OPENAI and credential == "rejected":
+        embed_hint = "OPENAI_API_KEY was rejected with 401/403 -- set a valid key"
+    elif embed.kind is ProviderKind.OPENAI:
         embed_hint = "OPENAI_API_KEY, OPENAI_EMBED_MODEL"
     elif embed.kind is ProviderKind.LOCAL:
         embed_hint = "LOCAL_LLM_EMBED_MODEL (and LOCAL_LLM_EMBED_BASE_URL if on another server)"
@@ -133,8 +142,7 @@ def tier_report(capabilities: object, settings: object) -> list[TierLine]:
 def render_report(lines: list[TierLine], startup_mode: str) -> str:
     body = "\n".join(line.render() for line in lines)
     tail = {
-        "full": "startup mode: full -- reads, writes, and enrichment. A cloud key is only proven by the first "
-        "enrichment: watch /api/health services.llm_auth or the WARNING on your next add_memory.",
+        "full": "startup mode: full -- reads, writes, and enrichment.",
         "degraded_reads_only": "startup mode: degraded_reads_only -- recall works; new memories queue until the LLM is reachable.",
         "degraded_queue_only": "startup mode: degraded_queue_only -- writes queue; recall needs the embedder.",
         "unavailable": "startup mode: unavailable -- Neo4j is required to start.",
