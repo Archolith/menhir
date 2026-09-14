@@ -106,6 +106,25 @@ def expected_venv_python() -> Path:
     return repo_root / ".venv" / "bin" / "python"
 
 
+_TRUTHY = {"1", "true", "yes", "on"}
+
+
+def venv_guard_applies() -> bool:
+    """Return whether the project-venv interpreter guard should be enforced.
+
+    The guard exists for the source-checkout case: a stray global interpreter picked up
+    instead of the project ``.venv``. It is only meaningful when that ``.venv`` exists.
+    A pip, pipx, or container install has no project ``.venv`` next to the package, so the
+    guard is skipped there and ``check_graphiti_dependency`` carries the real concern.
+    ``MENHIR_ALLOW_SYSTEM_PYTHON=1`` remains an explicit opt-out for a checkout that does
+    carry a ``.venv`` but is deliberately run from another interpreter.
+    """
+
+    if os.getenv("MENHIR_ALLOW_SYSTEM_PYTHON", "").strip().lower() in _TRUTHY:
+        return False
+    return expected_venv_python().exists()
+
+
 def check_expected_python_runtime(executable: str | None = None) -> bool:
     """Require the MCP server to run from the project virtualenv interpreter."""
 
@@ -259,10 +278,13 @@ def _resolve_connectivity_base_url(
 def collect_runtime_failures(
     settings: MemorySettings,
     *,
-    require_venv: bool = False,
+    require_venv: bool | None = None,
     acquire_scheduler_endpoints: bool = False,
 ) -> list[str]:
-    """Run runtime preflight checks and return human-readable failure messages."""
+    """Run runtime preflight checks and return human-readable failure messages.
+
+    ``require_venv=None`` resolves via :func:`venv_guard_applies`.
+    """
 
     return list(
         collect_runtime_capabilities(
@@ -276,13 +298,19 @@ def collect_runtime_failures(
 def collect_runtime_capabilities(
     settings: MemorySettings,
     *,
-    require_venv: bool = False,
+    require_venv: bool | None = None,
     acquire_scheduler_endpoints: bool = False,
 ) -> RuntimeCapabilities:
-    """Run runtime preflight checks and return a capability snapshot."""
+    """Run runtime preflight checks and return a capability snapshot.
+
+    ``require_venv=None`` resolves via :func:`venv_guard_applies`, so ``serve`` and
+    ``check`` make the same decision without each re-deriving it.
+    """
 
     failures: list[str] = []
 
+    if require_venv is None:
+        require_venv = venv_guard_applies()
     venv_ready = True
     if require_venv:
         venv_ready = check_expected_python_runtime()

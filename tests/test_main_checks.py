@@ -396,3 +396,64 @@ def test_collect_runtime_failures_reports_embedding_dimension_mismatch(
 def test_main_launches_typer_app() -> None:
     """Verify the main() entry point imports and calls the Typer app."""
     assert callable(main.main)
+
+
+@pytest.mark.unit
+def test_venv_guard_applies_only_when_project_venv_exists(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.delenv("MENHIR_ALLOW_SYSTEM_PYTHON", raising=False)
+    missing = tmp_path / ".venv" / "bin" / "python"
+    monkeypatch.setattr(runtime_preflight, "expected_venv_python", lambda: missing)
+    assert runtime_preflight.venv_guard_applies() is False
+
+    missing.parent.mkdir(parents=True)
+    missing.write_text("", encoding="utf-8")
+    assert runtime_preflight.venv_guard_applies() is True
+
+
+@pytest.mark.unit
+def test_venv_guard_opt_out_env_disables_guard_even_with_venv(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    present = tmp_path / ".venv" / "bin" / "python"
+    present.parent.mkdir(parents=True)
+    present.write_text("", encoding="utf-8")
+    monkeypatch.setattr(runtime_preflight, "expected_venv_python", lambda: present)
+    monkeypatch.setenv("MENHIR_ALLOW_SYSTEM_PYTHON", "1")
+    assert runtime_preflight.venv_guard_applies() is False
+
+
+@pytest.mark.unit
+def test_collect_runtime_failures_default_skips_venv_guard_for_pip_install(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A pip/pipx install has no project .venv: require_venv=None must not fail on interpreter path."""
+    settings = MemorySettings()
+    monkeypatch.setattr(runtime_preflight, "venv_guard_applies", lambda: False)
+    monkeypatch.setattr(runtime_preflight, "check_expected_python_runtime", lambda executable=None: False)
+    monkeypatch.setattr(runtime_preflight, "check_graphiti_dependency", lambda: True)
+    monkeypatch.setattr(runtime_preflight, "check_neo4j_connectivity", lambda *args, **kwargs: False)
+    monkeypatch.setattr(runtime_preflight, "check_llama_connectivity", lambda *args, **kwargs: False)
+    monkeypatch.setattr(runtime_preflight, "expected_graphiti_embedding_dimension", lambda settings: None)
+
+    failures = runtime_preflight.collect_runtime_failures(settings)
+
+    assert "menhir must run from the project .venv interpreter." not in failures
+
+
+@pytest.mark.unit
+def test_collect_runtime_failures_default_enforces_venv_guard_for_source_checkout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = MemorySettings()
+    monkeypatch.setattr(runtime_preflight, "venv_guard_applies", lambda: True)
+    monkeypatch.setattr(runtime_preflight, "check_expected_python_runtime", lambda executable=None: False)
+    monkeypatch.setattr(runtime_preflight, "check_graphiti_dependency", lambda: True)
+    monkeypatch.setattr(runtime_preflight, "check_neo4j_connectivity", lambda *args, **kwargs: False)
+    monkeypatch.setattr(runtime_preflight, "check_llama_connectivity", lambda *args, **kwargs: False)
+    monkeypatch.setattr(runtime_preflight, "expected_graphiti_embedding_dimension", lambda settings: None)
+
+    failures = runtime_preflight.collect_runtime_failures(settings)
+
+    assert "menhir must run from the project .venv interpreter." in failures

@@ -309,7 +309,7 @@ def check() -> None:
     from menhir.core import collect_runtime_failures
 
     settings = MemorySettings.from_env()
-    failures = collect_runtime_failures(settings, require_venv=True)
+    failures = collect_runtime_failures(settings, require_venv=None)
     if failures:
         for failure in failures:
             typer.echo(f"[FAIL] {failure}", err=True)

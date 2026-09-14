@@ -10,6 +10,7 @@ from .runtime_preflight import (
     collect_runtime_capabilities,
     collect_runtime_failures,
     expected_venv_python,
+    venv_guard_applies,
 )
 
 __all__ = [
@@ -24,4 +25,5 @@ __all__ = [
     "collect_runtime_capabilities",
     "collect_runtime_failures",
     "expected_venv_python",
+    "venv_guard_applies",
 ]

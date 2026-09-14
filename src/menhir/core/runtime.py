@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from time import perf_counter
@@ -706,19 +705,14 @@ async def _initialize_services(
     # Don't acquire scheduler task slots at startup — they block when the LLM
     # is busy with enrichment.  Slots are acquired lazily on first use.
     #
-    # The venv-path check guards the dev-workspace case (a stray global
-    # interpreter instead of the project .venv). In a container/pip install the
-    # package is properly installed into the system interpreter — graphiti's own
-    # importability check (graphiti_dependency_ready) covers the real concern —
-    # so allow opting out via MENHIR_ALLOW_SYSTEM_PYTHON=1. Default preserves the
-    # existing dev behavior.
-    require_venv = os.getenv("MENHIR_ALLOW_SYSTEM_PYTHON", "").strip().lower() not in (
-        "1", "true", "yes", "on",
-    )
+    # The venv-path guard is auto-scoped by preflight (venv_guard_applies): enforced
+    # only for a source checkout that carries its own .venv, skipped for pip/pipx/
+    # container installs, opt-out via MENHIR_ALLOW_SYSTEM_PYTHON=1. `menhir check`
+    # relies on the same default so both commands agree.
     capabilities = await asyncio.to_thread(
         collect_runtime_capabilities,
         settings,
-        require_venv=require_venv,
+        require_venv=None,
         acquire_scheduler_endpoints=False,
     )
     _state.capabilities = capabilities

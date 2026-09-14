@@ -1,3 +1,11 @@
+## 2026-09-14 - auto-scope the project .venv interpreter guard
+
+- Enforced the `.venv` interpreter guard only when a source checkout actually carries a project
+  `.venv`; pip, pipx, and container installs no longer fail preflight on interpreter path, and
+  `check_graphiti_dependency` remains the importability check for those installs.
+- Made `menhir check` and `menhir serve` share that decision instead of `check` hardcoding the
+  guard on; `MENHIR_ALLOW_SYSTEM_PYTHON=1` stays as the explicit opt-out.
+
 ## 2026-09-14 - complete relation extraction and repair checks after the release merge
 
 - Limited canonical-self relation guidance to first-person text, leaving third-person extraction on
