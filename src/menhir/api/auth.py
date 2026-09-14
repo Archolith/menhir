@@ -482,9 +482,16 @@ class BearerAuthMiddleware:
             session_token = bind_request_session(
                 user_id, session_id, client_id=client_id, client_name=client_name
             )
+            # Tool contracts refuse to run without a bound tier, so this mode must bind one
+            # or "open access on loopback" lists tools and then rejects every call. The
+            # unauthenticated loopback caller is the operator of a single-operator
+            # deployment -- the same authority the loopback bootstrap mint grants -- still
+            # clamped to readonly while the candidate fence is active.
+            tier_token = bind_request_tier(self._effective_tier("operator"))
             try:
                 await self.app(scope, receive, send)
             finally:
+                reset_request_tier(tier_token)
                 reset_request_session(session_token)
             return
 

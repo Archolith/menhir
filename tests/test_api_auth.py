@@ -63,6 +63,24 @@ def test_dev_mode_skips_auth_when_key_empty():
     assert resp.json()["secure"] is True
 
 
+def test_no_auth_loopback_binds_the_operator_tier():
+    """Tool contracts refuse to run with no tier bound; the open loopback mode must bind one.
+
+    Found by a fresh-install walkthrough: tools/list worked, every tools/call failed with
+    "No request tier is bound".
+    """
+    app = FastAPI()
+
+    @app.get("/api/tier")
+    async def tier():
+        return JSONResponse({"tier": get_request_tier()})
+
+    client = TestClient(BearerAuthMiddleware(app, api_key=""))
+    resp = client.get("/api/tier")
+    assert resp.status_code == 200
+    assert resp.json()["tier"] == "operator"
+
+
 def test_health_is_exempt():
     client = _build_app("secret")
     resp = client.get("/api/health")

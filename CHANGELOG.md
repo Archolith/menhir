@@ -1,3 +1,11 @@
+## 2026-09-14 - open loopback mode binds the operator tier
+
+- With no credential configured on a loopback bind, the auth middleware bound a session but no
+  request tier, and every tool contract refuses to run without one: `tools/list` worked, every
+  `tools/call` failed with "No request tier is bound". The mode now binds `operator` (clamped
+  to `readonly` under the candidate fence), matching the loopback bootstrap mint. Found during a
+  fresh-install walkthrough on Debian.
+
 ## 2026-09-14 - README says which distros actually ship Python 3.12
 
 - Prerequisites now list where 3.12+ is the default, where it is an extra package (RHEL 9, Leap),
