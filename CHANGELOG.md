@@ -1,3 +1,9 @@
+## 2026-09-14 - README says which distros actually ship Python 3.12
+
+- Prerequisites now list where 3.12+ is the default, where it is an extra package (RHEL 9, Leap),
+  where it is absent from the repositories entirely (Debian 12, Ubuntu 22.04), and the `uv`
+  route that works everywhere. Surveyed in fresh containers on 2026-09-14.
+
 ## 2026-09-14 - `menhir up`: one command from checkout to running server
 
 - Added `menhir up`: ensures `.env` (with `--provider` / `--compose-neo4j` passthrough), starts

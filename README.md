@@ -304,9 +304,14 @@ running HTTP backend before launching it.
 
 ### Prerequisites
 
-- Python 3.12 or newer
+- Python 3.12 or newer. Check with `python3 --version` first: it is the default on Debian 13,
+  Ubuntu 24.04, Fedora, RHEL/Alma 10, Arch, and Alpine 3.19+. **Debian 12 and Ubuntu 22.04 ship
+  3.11 / 3.10 and have no 3.12 in their repositories**; RHEL/Rocky 9 (`dnf install python3.12`)
+  and openSUSE Leap (`zypper install python312`) have it as an extra package. On any of these
+  the simplest route is [uv](https://docs.astral.sh/uv/): `uv python install 3.12` then
+  `uv venv --python 3.12 && source .venv/bin/activate`.
 - Git, because two first-party dependencies install from public GitHub repositories
-- Neo4j 5 with APOC
+- Neo4j 5 with APOC (the root `docker-compose.yml` provides one)
 - a local OpenAI-compatible server (llama.cpp, Ollama, LM Studio, vLLM) or OpenAI
 
 ### One command
