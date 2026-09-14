@@ -44,11 +44,11 @@ def test_default_recall_visibility_requires_current_live_view_provenance() -> No
 
 
 @pytest.mark.unit
-def test_fact_create_is_gated_before_supersession_when_evidence_is_missing() -> None:
+def test_fact_create_is_refused_before_persistence_when_evidence_is_missing() -> None:
     neo4j = _CaptureNeo4j()
     repo = ViewRepository(neo4j)
 
-    with pytest.raises(ValueError, match="every declared contributor UUID"):
+    with pytest.raises(ValueError, match="declared contributors could not be resolved"):
         repo.record(
             "counter",
             subject="user",
@@ -58,17 +58,13 @@ def test_fact_create_is_gated_before_supersession_when_evidence_is_missing() -> 
             episode_uuids=["missing-evidence"],
         )
 
-    create_query = next(query for query, _ in neo4j.calls if "CREATE (n:" in query)
-    assert "OPTIONAL MATCH (e)" in create_query
-    assert "(e:Episodic AND e.uuid = eid)" in create_query
-    assert "(e:TurnEvidence AND e.turn_id = eid)" in create_query
-    assert "$tenant_namespaces IS NULL OR" in create_query
-    assert "collect(DISTINCT e)" in create_query
-    assert "size(row.candidates) = 1" in create_query
-    assert create_query.index("WHERE resolved_count = size($eps)") < create_query.index(
-        "CREATE (n:"
-    )
-    assert "FOREACH (e IN evidence | MERGE (e)-[:MENTIONS]->(n))" in create_query
+    assert len(neo4j.calls) == 1
+    resolver_query = neo4j.calls[0][0]
+    assert "UNWIND $eps AS eid" in resolver_query
+    assert "OPTIONAL MATCH (te:TurnEvidence {turn_id: eid})" in resolver_query
+    assert "OPTIONAL MATCH (ep:Episodic {uuid: eid})" in resolver_query
+    assert "OPTIONAL MATCH (ep)-[:ADMITTED_ON]->(a:TurnEvidence)" in resolver_query
+    assert all("CREATE (n:" not in query for query, _ in neo4j.calls)
 
 
 @pytest.mark.unit

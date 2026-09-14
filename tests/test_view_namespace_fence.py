@@ -21,7 +21,12 @@ class _Neo4j:
 
 @pytest.mark.unit
 def test_new_fact_acquires_namespace_fence_before_current_and_evidence_reads() -> None:
-    neo4j = _Neo4j([[], [{"uuid": "view-1"}]])
+    neo4j = _Neo4j([
+        [{"eid": "turn-1", "direct": "turn-1", "ep_finalized": False,
+          "ep_quarantined": False, "grounded": []}],
+        [],
+        [{"uuid": "view-1"}],
+    ])
     repo = ViewRepository(neo4j)
 
     result = repo.record(
@@ -33,7 +38,7 @@ def test_new_fact_acquires_namespace_fence_before_current_and_evidence_reads() -
         episode_uuids=["turn-1"],
     )
 
-    query, params = neo4j.calls[1]
+    query, params = neo4j.calls[2]
     assert query.index("MERGE (f:EvidenceNamespaceFence") < query.index("OPTIONAL MATCH (actual:")
     assert query.index("SET f.lock_nonce") < query.index("OPTIONAL MATCH (e)")
     assert "size(row.candidates) = 1" in query
@@ -87,7 +92,12 @@ def test_default_namespace_spellings_share_one_fence_without_rekeying_storage(
 
 @pytest.mark.unit
 def test_fact_create_is_one_statement_without_post_commit_mentions_write() -> None:
-    neo4j = _Neo4j([[], [{"uuid": "view-1"}]])
+    neo4j = _Neo4j([
+        [{"eid": "turn-1", "direct": "turn-1", "ep_finalized": False,
+          "ep_quarantined": False, "grounded": []}],
+        [],
+        [{"uuid": "view-1"}],
+    ])
     repo = ViewRepository(neo4j)
 
     repo.record(
@@ -99,7 +109,7 @@ def test_fact_create_is_one_statement_without_post_commit_mentions_write() -> No
         episode_uuids=["turn-1"],
     )
 
-    assert len(neo4j.calls) == 2  # lookup + one atomic fenced mutation
+    assert len(neo4j.calls) == 3  # anchor resolution + lookup + one atomic fenced mutation
     assert sum("MERGE (e)-[:MENTIONS]->(n)" in query for query, _ in neo4j.calls) == 1
 
 
@@ -107,6 +117,8 @@ def test_fact_create_is_one_statement_without_post_commit_mentions_write() -> No
 def test_unchanged_fact_refresh_validates_old_edge_set_under_fence() -> None:
     neo4j = _Neo4j(
         [
+            [{"eid": "turn-2", "direct": "turn-2", "ep_finalized": False,
+              "ep_quarantined": False, "grounded": []}],
             [{"uuid": "view-1", "sig": "2", "valid_at": "2026-08-28T00:00:00+00:00"}],
             [{"stored": ["turn-1", "turn-2"], "present": ["turn-1", "turn-2"]}],
         ]
@@ -122,7 +134,7 @@ def test_unchanged_fact_refresh_validates_old_edge_set_under_fence() -> None:
         episode_uuids=["turn-2"],
     )
 
-    query, _ = neo4j.calls[1]
+    query, _ = neo4j.calls[2]
     assert query.index("SET f.lock_nonce") < query.index("MATCH (n:Entity")
     assert "OPTIONAL MATCH (old_evidence)-[:MENTIONS]->(n)" in query
     assert "size(old_mentions) = size(coalesce(n.episode_uuids, []))" in query

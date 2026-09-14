@@ -3,6 +3,12 @@
 import pytest
 
 
+pytest.importorskip(
+    "testinfra",
+    reason="host-state assertions require the external operator pytest-testinfra toolchain",
+)
+
+
 DIRECTORIES = {
     "/srv/menhir": 0o755,
     "/srv/menhir/production": 0o755,

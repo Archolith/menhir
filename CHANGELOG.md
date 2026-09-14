@@ -1,3 +1,11 @@
+## 2026-09-14 - repair checks after the release merge
+
+- Kept host-only Testinfra assertions out of the ordinary product suite when their external
+  operator toolchain is absent, while preserving their documented explicit invocation.
+- Updated stale View-provenance, namespace-fence, reasoning-control, and Linux runner contracts to
+  exercise the newly published behavior and arguments.
+- Registered the feature-flag plan with stable artifact metadata and the active plan index.
+
 ## 2026-09-08 - transact first-backup bootstrap before release installation
 
 - Moved first encrypted-backup bootstrap out of the desktop wrapper and into the root release
@@ -91,35 +99,6 @@
 - Made production startup fail closed when runtime scope/tier configuration cannot satisfy the
   canonical access contract, and added compose plus startup regression coverage.
 
-## 2026-09-03 - add Utopia prior-art comparison
-
-- Added a revision-pinned comparison of Utopia's governed bitemporal knowledge application against
-  Menhir's code-linked evidence, repository structure, agent authority, and change-impact model.
-- Recorded the novelty and category boundary, the ideas worth borrowing, the ideas to keep outside
-  Menhir core, and a dependency-aware follow-up order.
-- Updated the prior-art index to classify Utopia as the strongest adjacent comparison for enterprise
-  world models rather than a direct replacement for Menhir's software-understanding center.
-
-## 2026-09-03 - fix three faults found in the live production logs
-
-- **`get_artifact_relationships` had never worked.** The adapter delegated to
-  `_work_artifacts.get_artifact_relationships`; the repository defines the method as
-  `artifact_relationships`. Every other delegation in the adapter matches its
-  repository name, so this was a lone typo raising AttributeError on every call.
-  Checked the remaining eleven delegations mechanically -- this was the only one.
-- **Malformed dedupe output no longer fails the whole episode.** The identity gate
-  reads the raw LLM response before Graphiti validates it, and gpt-4.1-nano returned
-  an `entity_resolutions` entry that was a bare string. The resulting AttributeError
-  propagated out of `add_episode`, leaving the content in the graph with no entities:
-  `add_memory` reported success, retry classification marked it `manual_review`, and
-  recall could never see it. The new guards mirror the fail-safe
-  `PatchedNodeResolutions._drop_degenerate` already applies on the validation path, so
-  both consumers of that output now agree on what malformed means.
-- **`SCHEDULER_TRACE_DISABLED=1` turns off scheduler task tracing.** The scheduler is
-  a developer-workstation service; production has none, so every lifecycle transition
-  paid a 2s timeout to localhost:8082 and logged a WARNING. Tracing is observability
-  only, and both network paths are now gated.
-
 ## 2026-09-04 - close six review findings on the canonical-self prevention path
 
 - **Binding now requires a DECLARED node-level subject, and nothing else qualifies.** Trusted
@@ -161,40 +140,3 @@
   producing no telemetry.
 - **`detect_self_forks` no longer writes.** It obtained its uuid by calling `ensure_self_entity`,
   which MERGEs, so a census mutated the graph it was inspecting.
-
-## 2026-09-03 - bind the canonical self deterministically, before graphiti dedup
-
-- Menhir now has one authoritative human-self entity per logical namespace, and no longer asks
-  cosine search or an LLM to decide which node that is. New `domain/self_identity.py` owns the
-  single UUID formula and the evidence contract; `infrastructure/self_binding.py` applies it.
-- The name is never authority. Binding requires trusted metadata the ingestion boundary owns --
-  a `user`/`manual` source that the admission gate GRANTED, meaning it verified Menhir-owned
-  turn evidence with `role == "user"` and text grounded in that turn. An entity called `user`
-  from an agent turn, a project scan or an imported document stays an ordinary semantic entity.
-- Evidence needed no new field: it already survives the async queue in the episode's persisted
-  `source`, because the gate rewrites ungrounded claims to `agent_inference` before persistence.
-- A proven self is withheld from `_collect_candidate_nodes` entirely rather than skipped
-  afterwards. Candidate search IS the mechanism that fragmented the identity: with 66 exact-name
-  `user` nodes against a 15-candidate window, graphiti's deterministic single-match branch was
-  arithmetically unreachable, so every extraction escalated to the LLM and a
-  `duplicate_candidate_id = -1` verdict could mint another fork. Tests assert the calls do not
-  happen, not merely that the resulting uuid is right.
-- Three self-UUID derivations (one writer, two recall readers) now route through one helper, and
-  a static guard fails if a second copy appears. Output is byte-identical to the formula already
-  written into production data.
-- `ensure_self_entity` is non-destructive. `_absorb_self_entity_forks` -- which bulk-rewired and
-  `DETACH DELETE`d every same-named node as a side effect of an ordinary write, dropping
-  fork-to-canonical edges as "split artifacts" -- is removed, not merely unreferenced. Forks are
-  now reported as `SELF_FORKS_REQUIRE_MIGRATION`; consolidating them is an operator-only,
-  journaled migration driven by an approved UUID manifest.
-- Fixes the activation hazard that made the above unsafe: the canonical write stamped
-  `group_id = <logical namespace>`, so a `default` namespace would have created the node in group
-  `"default"` -- a partition holding none of the production data. Detection reads both spellings,
-  since existing forks live under the wrong one.
-- Adds privacy-safe observability: per-decision binding records and per-branch dedup counters
-  (`unique_exact_bind`, `multiple_exact_llm`, `entropy_guard_skip`, ...), carrying enums, counts
-  and UUIDs but never memory text or arbitrary entity names. The RCA could only infer which
-  branch production took; it is now recorded.
-- Ships dormant. `MENHIR_CANONICAL_SELF_BINDING_MODE` is `off | observe | enforce`, default
-  `off`, and an unrecognized value falls back to `off`. Consolidating the existing forks remains
-  blocked on an approved census and a restored-copy rehearsal.
