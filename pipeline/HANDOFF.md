@@ -493,6 +493,21 @@ No release-managed artifact was modified.
    completed by proof, audit green. Every phase of the recovery plan is now
    closed except Phase 4 (host debris) and the review lows that belong to
    Yawn (its Caddyfile `/ops/mcp` route).
-7. Execute the remaining `replace` dispositions.
+7. ~~Phase 5~~ **Done 2026-09-14 01:45 UTC as menhir-prod-0.2.0-18**
+   (release_sha256 `c4cadbb2…`; menhir `0097a50`, `5e06c62`, `fee4fa1`).
+   `deploy/artifact-authority.json` is the one list; `deploy/lib/
+   artifact_authority.py --write` renders the census, the verifier's sets and
+   the installer's blocks, `release_spec` loads it, `prepare` binds it to the
+   commit, and the coherence suite runs `--check`. Installed set unchanged
+   (40 / 20); three artifact digests changed (verifier markers, sorted census,
+   release stamp). 8.7 s install, 40 OK, completed by proof.
+   **Known behaviour:** the rehearsal receipt binds the release manifest, so
+   every artifact-only release turns the scaffold audit red until the next
+   nightly rehearses under the new release (self-heals by 09:00 UTC; or run
+   `systemctl start menhir-backup.service`, ~3 min quiesce, as done here).
+8. Execute the remaining `replace` dispositions. Uncorroborated debris from
+   Phase 4 (`PHASE4.md` banner) and the security-review lows carried since 15
+   (Yawn Caddyfile `/ops/mcp` route; `backup-status` freshness-blind verdict;
+   installer retired-route parent guard hardcoded to `/srv/yawn/releases`).
 
 Items 1 and 2 are the only ones affecting whether data can be protected today.

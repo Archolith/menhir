@@ -1,0 +1,24 @@
+{
+  "artifacts": {
+    "bundle_manifest_sha256": "2a2f7631f67f6be3a18401c2baeba8c6546f145689ce4fbf066f914fe2193e43",
+    "bundle_sha256": "8950ccccb5aa526b2115c13620f44128436b4b02ef9005bf67a739ab3169e396",
+    "notes_json_sha256": "67674d4e7c29a5211bbf702022a647656d6becda84afaa292ae474695baac9d2",
+    "notes_markdown_sha256": "5b0a4c45a131dbbc376c2f2d54d084eeccd7d05e24b55093a87f1bad651bc6fd",
+    "release_sha256": "c4cadbb2999e2daff17e45f0c8420307fedd2c9d75661c3dbd9ed329992eb907",
+    "review_request_sha256": "e1c174898669d148015f49a660b564f111bbede173c649a484b8a0cfb80f1144",
+    "security_review_sha256": "660e0d739fdcd59369afb9b317b3a1c065c3e0b1c0f321e3b3664c019d37415c",
+    "spec_sha256": "cd33f7f752d666cc83a14941053964a49c6321834c7420d016b37fdc298502ba"
+  },
+  "fragments": [
+    {
+      "name": "single-artifact-authority.json",
+      "sha256": "90ca7a05bc78c07a68a290b89d500a6337194abb1d21206710512fd191c64b0e"
+    }
+  ],
+  "fragments_dir": "C:\\Users\\thron\\Documents\\Codex\\2026-09-06\\inve\\work\\menhir-doc-staged-promotion\\deploy\\changes\\unreleased",
+  "kind": "menhir-release-publication",
+  "publication_nonce": "89959acdad704486c51cf133720f44a1",
+  "release_id": "menhir-prod-0.2.0-18",
+  "schema": 1,
+  "workspace": "C:\\Users\\thron\\Documents\\Codex\\2026-09-06\\inve\\work\\releases\\menhir-prod-0.2.0-18\\workspace"
+}
