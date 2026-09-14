@@ -65,6 +65,36 @@ from menhir.infrastructure.graphiti_patches import (  # noqa: E402
 __all__ = ["GraphitiClient", "_safe_to_prompt_json"]
 
 
+class _EquivalentIndexFilter(logging.Filter):
+    """Downgrade graphiti's ``EquivalentSchemaRuleAlreadyExists`` errors to DEBUG.
+
+    Menhir's phase-one schema and Graphiti's ``build_indices_and_constraints`` both create
+    indexes on the same (label, property) pairs under different names. Whichever runs second
+    gets ``Neo.ClientError.Schema.EquivalentSchemaRuleAlreadyExists`` from ``CREATE INDEX ...
+    IF NOT EXISTS`` -- the guard is by name, the conflict is by shape -- and Graphiti's driver
+    logs each one at ERROR before continuing. The index exists, so nothing is wrong; on a first
+    boot this was a wall of red for a new operator to paste into an issue.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if "EquivalentSchemaRuleAlreadyExists" in record.getMessage():
+            record.levelno = logging.DEBUG
+            record.levelname = "DEBUG"
+            return logging.getLogger(record.name).isEnabledFor(logging.DEBUG)
+        return True
+
+
+@contextlib.contextmanager
+def _quiet_equivalent_index_errors():
+    target = logging.getLogger("graphiti_core.driver.neo4j_driver")
+    flt = _EquivalentIndexFilter()
+    target.addFilter(flt)
+    try:
+        yield
+    finally:
+        target.removeFilter(flt)
+
+
 def _is_vector_dimension_mismatch_error(exc: Exception) -> bool:
     """Return True when Neo4j/Graphiti failed due to mixed embedding dimensions."""
 
@@ -379,7 +409,8 @@ class GraphitiClient:
         logger.info("build_indices_and_constraints starting (existing indices: %s)", pre_count)
 
         try:
-            await asyncio.wait_for(self.client.build_indices_and_constraints(), timeout=timeout)
+            with _quiet_equivalent_index_errors():
+                await asyncio.wait_for(self.client.build_indices_and_constraints(), timeout=timeout)
             post_count = await self._count_existing_indices()
             logger.info("build_indices_and_constraints completed (indices now: %s)", post_count)
         except asyncio.TimeoutError:

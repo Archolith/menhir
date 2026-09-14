@@ -36,6 +36,21 @@ def production_tool_catalog() -> frozenset[str]:
     return frozenset(_required_tier_by_name())
 
 
+def _stamp_server_version(server: FastMCP) -> None:
+    """Report Menhir's version in MCP ``serverInfo`` instead of the SDK's own.
+
+    The SDK's ``FastMCP`` takes no ``version``; the low-level server it wraps does and falls
+    back to ``pkg_version("mcp")``, which is what clients were shown (``1.30.0`` for a
+    ``0.2.0`` Menhir).
+    """
+
+    from menhir import __version__
+
+    low_level = getattr(server, "_mcp_server", None)
+    if low_level is not None:
+        low_level.version = __version__
+
+
 class TierFilteredFastMCP(FastMCP):
     """FastMCP whose advertised tool list is scoped to the caller's auth tier.
 
@@ -83,6 +98,7 @@ def create_remote_tool_only_mcp() -> FastMCP:
         "menhir",
         instructions=_INSTRUCTIONS,
     )
+    _stamp_server_version(remote_mcp)
     register_all_tools(remote_mcp)
     register_memory_resources(remote_mcp)
     return remote_mcp
@@ -114,6 +130,7 @@ def create_mcp_streamable_http_app() -> tuple[ASGIApp, "FastMCP"]:
         host="0.0.0.0",  # disables DNS rebinding protection — auth via BearerAuthMiddleware
         stateless_http=True,
     )
+    _stamp_server_version(remote_mcp)
     register_all_tools(remote_mcp)
     register_memory_resources(remote_mcp)
     return remote_mcp.streamable_http_app(), remote_mcp

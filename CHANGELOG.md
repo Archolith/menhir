@@ -1,3 +1,14 @@
+## 2026-09-14 - quieter first boot, honest MCP serverInfo
+
+- Menhir's Neo4j drivers disable the UNRECOGNIZED notification classification (Neo4j's
+  ``01N52`` "property key does not exist"), which fired dozens of WARNING lines on an empty
+  graph and never meant anything; every other classification stays visible.
+- Graphiti's ``EquivalentSchemaRuleAlreadyExists`` errors during ``build_indices_and_constraints``
+  -- its index shapes collide by (label, property) with Menhir's under different names, so
+  ``IF NOT EXISTS`` cannot help -- are downgraded to DEBUG for the duration of that call only.
+- MCP ``serverInfo.version`` now reports Menhir's package version; the SDK's ``FastMCP`` has no
+  version parameter and was advertising the ``mcp`` package's own (``1.30.0`` for a ``0.2.0`` build).
+
 ## 2026-09-14 - Menhir reads one .env, and a refused Neo4j password is named as such
 
 - `python-dotenv`'s path-less `load_dotenv()` walks up from the *calling file* whenever the

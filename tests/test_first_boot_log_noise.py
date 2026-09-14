@@ -1,0 +1,64 @@
+"""First boot must not print a wall of benign ERROR/WARNING lines.
+
+Two sources, both seen in a fresh-install walkthrough: Neo4j ``01N52`` notifications for
+properties that do not exist yet on an empty graph, and Graphiti's
+``EquivalentSchemaRuleAlreadyExists`` errors when its index shapes collide with Menhir's.
+"""
+
+from __future__ import annotations
+
+import logging
+
+import pytest
+
+from menhir.infrastructure import graphiti_client as gc
+from menhir.infrastructure.neo4j import DRIVER_NOTIFICATION_CONFIG, Neo4jRepository
+
+pytestmark = [pytest.mark.unit]
+
+
+def test_menhir_drivers_disable_unrecognized_notifications_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert DRIVER_NOTIFICATION_CONFIG == {"notifications_disabled_classifications": ["UNRECOGNIZED"]}
+
+    seen: dict[str, object] = {}
+
+    class _FakeGraphDatabase:
+        @staticmethod
+        def driver(uri, **kwargs):
+            seen.update(kwargs)
+            return object()
+
+    import menhir.infrastructure.neo4j as neo4j_module
+
+    monkeypatch.setattr(neo4j_module, "GraphDatabase", _FakeGraphDatabase)
+    repo = Neo4jRepository(uri="bolt://x", database="neo4j", user="u", password="p")
+    repo._get_driver()
+    assert seen["notifications_disabled_classifications"] == ["UNRECOGNIZED"]
+    assert "notifications_min_severity" not in seen, "other classifications must remain visible"
+
+
+def test_equivalent_index_errors_are_downgraded_during_index_build(caplog: pytest.LogCaptureFixture) -> None:
+    target = logging.getLogger("graphiti_core.driver.neo4j_driver")
+    with caplog.at_level(logging.INFO, logger="graphiti_core.driver.neo4j_driver"):
+        with gc._quiet_equivalent_index_errors():
+            target.error(
+                "Error executing Neo4j query: {neo4j_code: Neo.ClientError.Schema."
+                "EquivalentSchemaRuleAlreadyExists} An equivalent index already exists"
+            )
+            target.error("Error executing Neo4j query: something genuinely broken")
+        # outside the context the filter is gone again
+        target.error("Neo.ClientError.Schema.EquivalentSchemaRuleAlreadyExists after build")
+
+    messages = [(r.levelname, r.getMessage()) for r in caplog.records]
+    assert ("ERROR", "Error executing Neo4j query: something genuinely broken") in messages
+    assert not any(lvl == "ERROR" and "EquivalentSchemaRuleAlreadyExists} An equivalent" in msg for lvl, msg in messages)
+    assert any(lvl == "ERROR" and "after build" in msg for lvl, msg in messages)
+
+
+def test_mcp_server_info_reports_menhir_version_not_the_sdk() -> None:
+    import menhir
+    from menhir.api.mcp_remote import create_mcp_streamable_http_app
+
+    _app, server = create_mcp_streamable_http_app()
+    options = server._mcp_server.create_initialization_options()
+    assert options.server_version == menhir.__version__

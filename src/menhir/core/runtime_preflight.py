@@ -174,7 +174,9 @@ def probe_neo4j(uri: str, user: str, password: str) -> str:
         return NEO4J_UNREACHABLE
     driver = None
     try:
-        driver = GraphDatabase.driver(uri, auth=(user, password))
+        from menhir.infrastructure.neo4j import DRIVER_NOTIFICATION_CONFIG
+
+        driver = GraphDatabase.driver(uri, auth=(user, password), **DRIVER_NOTIFICATION_CONFIG)
         with driver.session() as session:
             result = session.run("RETURN 1 AS ok").single()
         if not result or result.get("ok") != 1:

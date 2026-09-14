@@ -181,6 +181,16 @@ class Neo4jTransaction:
         return [record.data() for record in result]
 
 
+#: Menhir queries properties and labels that do not exist yet on a fresh graph (e.g.
+#: ``processing_error`` before any episode has failed). Neo4j 5 reports each as an
+#: ``01N52`` "property key does not exist" notification classified UNRECOGNIZED, which the
+#: driver logs at WARNING -- dozens of lines on first boot, none actionable. Every other
+#: classification (DEPRECATION, PERFORMANCE, SECURITY, ...) stays on.
+DRIVER_NOTIFICATION_CONFIG: dict[str, object] = {
+    "notifications_disabled_classifications": ["UNRECOGNIZED"],
+}
+
+
 @dataclass
 class Neo4jRepository:
     """Thin adapter boundary around a Neo4j driver.
@@ -223,6 +233,7 @@ class Neo4jRepository:
                         self.uri,
                         auth=(self.user, self.password),
                         disable_auto_commit_retries=True,
+                        **DRIVER_NOTIFICATION_CONFIG,
                     )
         return self._driver
 
