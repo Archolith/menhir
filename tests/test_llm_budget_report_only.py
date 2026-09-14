@@ -2,9 +2,8 @@
 
 **What was wrong.** `OpenAIStyleChatBackend` announced nothing, so every `LLMAdapter` call it
 served was invisible to both LLM budgets -- including the judge fan-out (3 calls per merge
-proposal per extracted node) that CF-79 was filed to bound. `GeminiChatBackend`, behind the same
-interface, announced correctly. `chat_provider` defaults to `"local"`, which routes to the silent
-one, so this was the default configuration.
+proposal per extracted node) that CF-79 was filed to bound. `chat_provider` defaults to `"local"`,
+which routes to it, so this was the default configuration.
 
 **Why the fix does not enforce.** A refusal has no landing zone: `LlmBudgetExceeded` is caught by
 nothing, falls into `_process_episode`'s generic `except Exception`, and marks the episode FAILED.
@@ -123,23 +122,6 @@ async def test_a_provider_failure_is_still_announced(events) -> None:
 
     assert [e.phase for e in events] == ["started", "failed"]
     assert all(e.report_only for e in events)
-
-
-def test_both_backends_behind_the_interface_agree() -> None:
-    """One interface, one behaviour. The split between the two backends IS the finding, so a fix
-    that left them disagreeing in the other direction would not have closed it."""
-    import inspect
-
-    src = inspect.getsource(prov.GeminiChatBackend.create_chat_completion)
-    assert "report_only=True" in src, (
-        "the Gemini backend announces in a different mode from the OpenAI-style one -- that is "
-        "the same one-interface-two-behaviours split CF-234 was filed about"
-    )
-
-
-# ---------------------------------------------------------------------------
-# The reservation side
-# ---------------------------------------------------------------------------
 
 
 class _Worker:

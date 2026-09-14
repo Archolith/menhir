@@ -321,7 +321,6 @@ class SystemMetadataResource(BaseJsonResource):
                 or provider_config.get("graphiti_provider", "local"),
                 "chat_model": provider_config.get("chat_model", ""),
                 "graphiti_llm_chat_model": provider_config.get("graphiti_llm_chat_model", ""),
-                "gemini_chat_model": provider_config.get("gemini_chat_model", ""),
                 "embed_model": provider_config.get("embed_model", ""),
                 "graphiti_embed_model": provider_config.get("graphiti_embed_model", ""),
                 "enrichment_queue_depth": await backend.get_queue_depth(),

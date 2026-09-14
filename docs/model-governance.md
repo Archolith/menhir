@@ -33,7 +33,6 @@ listed environment variables.
 | Local embedding model | `local_llm_embed_model` | `LOCAL_LLM_EMBED_MODEL` | empty |
 | OpenAI chat model | `openai_chat_model` | `OPENAI_CHAT_MODEL` | `gpt-4o-mini` |
 | OpenAI embedding model | `openai_embed_model` | `OPENAI_EMBED_MODEL` | `text-embedding-3-small` |
-| Gemini chat model | `gemini_chat_model` | `GEMINI_CHAT_MODEL` | `gemini-2.5-flash` |
 | Graphiti extraction provider | `graphiti_provider` | `GRAPHITI_LLM_PROVIDER` / `MEMORY_GRAPHITI_PROVIDER` / `GRAPHITI_PROVIDER` | `local` |
 | Graphiti embedding provider | `graphiti_embed_provider` | `GRAPHITI_EMBED_PROVIDER` / `MEMORY_GRAPHITI_EMBED_PROVIDER` | inherits extraction provider |
 | Graphiti reranker provider | `graphiti_reranker_provider` | `GRAPHITI_RERANKER_PROVIDER` | inherits extraction provider |

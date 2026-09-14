@@ -153,7 +153,7 @@ class LLMAdapter:
     def _wants_no_think(self) -> bool:
         """True when the chat model is a Qwen3-family model whose extended reasoning must be
         suppressed with the `/no_think` prompt token. Gated on the MODEL NAME, not the provider
-        kind — ProviderKind has no 'qwen' member (local/openai/gemini/anthropic), and Qwen runs
+        kind — ProviderKind has no 'qwen' member (local/openai/anthropic), and Qwen runs
         under kind 'local' here, so a kind-based gate would silently never fire."""
         return "qwen" in (self.chat_model or "").lower()
 

@@ -74,13 +74,8 @@ class MemorySettings:
     openai_chat_model: str = "gpt-4o-mini"
     openai_embed_model: str = "text-embedding-3-small"
 
-    # Gemini
-    gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
-    gemini_api_key: str = field(default="", repr=False)
-    gemini_chat_model: str = "gemini-2.5-flash"
-
     # Provider selection — applies to chat backend and all Graphiti components
-    # Valid values: local | openai | gemini
+    # Valid values: local | openai
     chat_provider: str = "local"
     graphiti_provider: str = "local"
     graphiti_embed_provider: str = ""   # inherits graphiti_provider when blank
@@ -745,10 +740,6 @@ class MemorySettings:
             openai_api_key=_getenv("OPENAI_API_KEY", default=cls.openai_api_key),
             openai_chat_model=_getenv("OPENAI_CHAT_MODEL", default=cls.openai_chat_model),
             openai_embed_model=_getenv("OPENAI_EMBED_MODEL", default=cls.openai_embed_model),
-            # Gemini
-            gemini_base_url=_getenv("GEMINI_BASE_URL", default=cls.gemini_base_url),
-            gemini_api_key=_getenv("GEMINI_API_KEY", default=cls.gemini_api_key),
-            gemini_chat_model=_getenv("GEMINI_CHAT_MODEL", default=cls.gemini_chat_model),
             # Provider selection
             chat_provider=_getenv("LLM_CHAT_PROVIDER", "MEMORY_CHAT_PROVIDER", default=cls.chat_provider),
             # GRAPHITI_PROVIDER is accepted as a final alias: it is the intuitive name

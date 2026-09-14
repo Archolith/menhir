@@ -12,13 +12,12 @@ import pytest
 
 from menhir.config import MemorySettings
 
-#: The twelve secret-bearing fields that must never appear in a repr.
+#: The eleven secret-bearing fields that must never appear in a repr.
 SECRET_FIELDS: frozenset[str] = frozenset(
     {
         "neo4j_password",
         "local_llm_api_key",
         "openai_api_key",
-        "gemini_api_key",
         "api_key",
         "operator_key",
         "agent_key",
@@ -35,7 +34,6 @@ CANARIES: dict[str, str] = {
     "neo4j_password": "CANARY_NEO4J_PASSWORD",
     "local_llm_api_key": "CANARY_LOCAL_LLM_API_KEY",
     "openai_api_key": "CANARY_OPENAI_API_KEY",
-    "gemini_api_key": "CANARY_GEMINI_API_KEY",
     "api_key": "CANARY_API_KEY",
     "operator_key": "CANARY_OPERATOR_KEY",
     "agent_key": "CANARY_AGENT_KEY",

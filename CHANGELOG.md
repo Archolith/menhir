@@ -1,3 +1,12 @@
+## 2026-09-14 - remove the Gemini chat provider
+
+- Removed `GeminiChatBackend`, `ProviderKind.GEMINI`, and the `GEMINI_*` settings. Gemini could
+  only back the auxiliary `LLMAdapter` calls -- never Graphiti extraction, embeddings, or the
+  reranker -- so `LLM_CHAT_PROVIDER=gemini` produced a server that could not ingest memories
+  while the docs presented it as a peer of `local` and `openai`. Supported providers are now
+  exactly the two that work end to end. `gemini` as an MCP client name and as a memory source
+  label is unaffected.
+
 ## 2026-09-14 - tiered .env.example and `menhir setup --provider`
 
 - `.env.example` is now ordered by what a feature needs: Tier 0 (works with the root compose and

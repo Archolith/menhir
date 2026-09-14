@@ -128,7 +128,7 @@ def test_no_embed_model_returns_none(monkeypatch) -> None:
 @pytest.mark.unit
 def test_non_openai_provider_returns_none(monkeypatch) -> None:
     """A provider that does not support the OpenAI contract -> None, not a stamp."""
-    _patch(monkeypatch, _Provider(kind="gemini", embed_model="m1"))
+    _patch(monkeypatch, _Provider(kind="anthropic", embed_model="m1"))
     assert view_embedder.view_embedder_version(object()) is None
 
 

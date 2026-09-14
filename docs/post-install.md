@@ -19,7 +19,7 @@ The command is idempotent. It:
 - with `--provider local|openai`, writes a consistent provider block (chat, Graphiti LLM, Graphiti
   embed) and makes sure the provider's URL/model/key lines are present without ever overwriting a
   filled-in secret; with `--compose-neo4j`, points `NEO4J_*` at the root `docker-compose.yml`
-  instance (`neo4j/password`). Gemini is chat-only and stays a manual edit;
+  instance (`neo4j/password`).
 - configures `core.hooksPath=.githooks` so the repository's pre-push protection is active;
 - preserves an existing `.env` and refuses to replace a different Git hooks path without
   `--force-git-hooks`;

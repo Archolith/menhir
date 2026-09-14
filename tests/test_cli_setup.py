@@ -238,7 +238,7 @@ def test_apply_setup_provider_openai_with_compose_neo4j(tmp_path: Path) -> None:
 @pytest.mark.unit
 def test_apply_setup_rejects_unsupported_provider(tmp_path: Path) -> None:
     repo = _make_checkout(tmp_path / "menhir")
-    with pytest.raises(SetupError, match="gemini is chat-only"):
+    with pytest.raises(SetupError, match="--provider must be one of"):
         apply_setup(repo, provider="gemini")
     with pytest.raises(SetupError, match="drop --no-env"):
         apply_setup(repo, create_env=False, provider="local")

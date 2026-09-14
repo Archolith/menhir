@@ -315,7 +315,7 @@ def test_graphiti_client_pins_llm_temperature_to_zero(monkeypatch: pytest.Monkey
 def test_graphiti_client_rejects_non_openai_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(graphiti_client_module, "_GRAPHITI_IMPORT_ERROR", None)
 
-    settings = MemorySettings(graphiti_provider="gemini")
+    settings = MemorySettings(graphiti_provider="anthropic")
 
     with pytest.raises(NotImplementedError):
         GraphitiClient.from_settings(settings)

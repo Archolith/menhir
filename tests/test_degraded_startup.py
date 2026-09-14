@@ -290,7 +290,7 @@ class TestInitializeServicesDegradedMode:
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        # Bug AR-01 regression: a direct OpenAI/Gemini Graphiti config does not use the external
+        # Bug AR-01 regression: a direct OpenAI Graphiti config does not use the external
         # yawn.scheduler process (uses_scheduler=False), but it IS enrichment-ready and therefore
         # still needs the in-process maintenance scheduler (stale-lease recovery, retry, conflict
         # work, structure refresh). It must start regardless of model-endpoint ownership.

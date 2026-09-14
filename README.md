@@ -307,7 +307,7 @@ running HTTP backend before launching it.
 - Python 3.12 or newer
 - Git, because two first-party dependencies install from public GitHub repositories
 - Neo4j 5 with APOC
-- a local OpenAI-compatible server, OpenAI, or Gemini
+- a local OpenAI-compatible server (llama.cpp, Ollama, LM Studio, vLLM) or OpenAI
 
 ### Install
 
@@ -348,12 +348,11 @@ the same machine.
 | `NEO4J_URI` | Neo4j connection | `bolt://localhost:7687` |
 | `NEO4J_USER` | Neo4j user | `neo4j` |
 | `NEO4J_PASSWORD` | Neo4j password | empty |
-| `LLM_CHAT_PROVIDER` | Chat provider: `local`, `openai`, or `gemini` | `local` |
+| `LLM_CHAT_PROVIDER` | Chat provider: `local` or `openai` | `local` |
 | `GRAPHITI_LLM_PROVIDER` | Graphiti extraction provider | `local` |
 | `GRAPHITI_EMBED_PROVIDER` | Optional separate embedding provider | inherits Graphiti provider |
 | `LOCAL_LLM_BASE_URL` | Local OpenAI-compatible chat endpoint | `http://127.0.0.1:8081/v1` |
 | `OPENAI_API_KEY` | Credential used when the provider is `openai` | empty |
-| `GEMINI_API_KEY` | Credential used when the provider is `gemini` | empty |
 
 See [`.env.example`](.env.example) for model names, separate embedding endpoints, OAuth,
 telemetry, and experimental flags.

@@ -31,7 +31,6 @@ logger = logging.getLogger(__name__)
 class ProviderKind(StrEnum):
     LOCAL = "local"           # local OpenAI-compatible (llama.cpp, etc.)
     OPENAI = "openai"         # OpenAI API
-    GEMINI = "gemini"
     ANTHROPIC = "anthropic"
 
 
@@ -50,7 +49,7 @@ def parse_provider_kind(value: str | ProviderKind | None, *, default: ProviderKi
         return ProviderKind(normalized)
     except ValueError as exc:
         raise ValueError(
-            "Unsupported LLM provider. Use one of: local, openai, gemini, anthropic."
+            "Unsupported LLM provider. Use one of: local, openai, anthropic."
         ) from exc
 
 
@@ -83,23 +82,11 @@ class ProviderConfig:
         )
 
     @classmethod
-    def _for_gemini(cls, settings: MemorySettings) -> "ProviderConfig":
-        return cls(
-            kind=ProviderKind.GEMINI,
-            base_url=settings.gemini_base_url,
-            api_key=settings.gemini_api_key,
-            chat_model=settings.gemini_chat_model,
-            embed_model="",
-        )
-
-    @classmethod
     def _base_for_kind(cls, kind: ProviderKind, settings: MemorySettings) -> "ProviderConfig":
         if kind is ProviderKind.LOCAL:
             return cls._for_local(settings)
         if kind is ProviderKind.OPENAI:
             return cls._for_openai(settings)
-        if kind is ProviderKind.GEMINI:
-            return cls._for_gemini(settings)
         return cls(
             kind=ProviderKind.ANTHROPIC,
             base_url="",
@@ -333,72 +320,6 @@ class OpenAIStyleChatBackend:
 
 
 @dataclass
-class GeminiChatBackend:
-    """Google Gemini REST backend for memory-processing chat tasks."""
-
-    provider: ProviderConfig
-
-    async def create_chat_completion(
-        self,
-        *,
-        system_prompt: str,
-        user_prompt: str,
-        operation: str,
-        max_tokens: int,
-        temperature: float,
-    ) -> str:
-        if not self.provider.api_key:
-            raise ValueError("GEMINI_API_KEY is required when chat_provider=gemini.")
-
-        payload = {
-            "system_instruction": {
-                "parts": [{"text": system_prompt}],
-            },
-            "contents": [
-                {
-                    "role": "user",
-                    "parts": [{"text": user_prompt}],
-                }
-            ],
-            "generationConfig": {
-                "temperature": temperature,
-                "maxOutputTokens": max_tokens,
-            },
-        }
-        handle = start_llm_usage_call(
-            kind="chat",
-            model=self.provider.chat_model,
-            endpoint="models.generateContent",
-            operation=operation,
-            # Same surface as the OpenAI-style backend above, so the same mode. Leaving this one
-            # enforcing would keep exactly the split CF-234 is about -- and its enforcement is
-            # phantom anyway: CF-235 has `_chat_text` catch the refusal, retry it, and return
-            # None, so no refusal on this path has ever reached an actor.
-            report_only=True,
-        )
-        try:
-            response = await _gemini_generate_content(
-                base_url=self.provider.base_url,
-                api_key=self.provider.api_key,
-                model=self.provider.chat_model,
-                payload=payload,
-            )
-        except Exception as exc:
-            fail_llm_usage_call(handle, exc)
-            raise
-        complete_llm_usage_call(handle, usage=response.get("usageMetadata"))
-        candidates = response.get("candidates") or []
-        for candidate in candidates:
-            content = candidate.get("content") or {}
-            for part in content.get("parts") or []:
-                text = part.get("text")
-                if text:
-                    return str(text)
-        logger.warning("Gemini returned no text content.")
-        return ""
-
-
-@dataclass
 class UnimplementedProviderChatBackend:
     """Placeholder backend for non-openai providers until SDK bridges are added."""
 
@@ -418,52 +339,6 @@ class UnimplementedProviderChatBackend:
         )
 
 
-def _gemini_generate_content_sync(
-    *,
-    base_url: str,
-    api_key: str,
-    model: str,
-    payload: dict[str, object],
-) -> dict[str, object]:
-    base = base_url.rstrip("/")
-    encoded_model = urllib_parse.quote(model, safe="")
-    url = f"{base}/models/{encoded_model}:generateContent"
-    data = json.dumps(payload).encode("utf-8")
-    req = urllib_request.Request(
-        url,
-        data=data,
-        headers={
-            "Content-Type": "application/json",
-            "x-goog-api-key": api_key,
-        },
-        method="POST",
-    )
-    try:
-        with urllib_request.urlopen(req, timeout=120) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except urllib_error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"Gemini request failed: {exc.code} {body}") from exc
-    except urllib_error.URLError as exc:
-        raise RuntimeError(f"Gemini request failed: {exc.reason}") from exc
-
-
-async def _gemini_generate_content(
-    *,
-    base_url: str,
-    api_key: str,
-    model: str,
-    payload: dict[str, object],
-) -> dict[str, object]:
-    return await asyncio.to_thread(
-        _gemini_generate_content_sync,
-        base_url=base_url,
-        api_key=api_key,
-        model=model,
-        payload=payload,
-    )
-
-
 def build_chat_backend(
     settings: MemorySettings,
     provider: ProviderConfig | None = None,
@@ -476,8 +351,6 @@ def build_chat_backend(
             settings=settings,
             dependencies=dependencies or ProviderRuntimeDependencies(),
         )
-    if provider.kind is ProviderKind.GEMINI:
-        return GeminiChatBackend(provider=provider)
     if provider.kind is ProviderKind.ANTHROPIC:
         return UnimplementedProviderChatBackend(provider=provider)
     raise ValueError(f"Unsupported provider kind: {provider.kind}")

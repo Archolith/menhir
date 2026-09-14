@@ -130,7 +130,7 @@ def live_settings():
         f"instance {test_uri}. This suite performs destructive writes."
     )
 
-    if not (settings.openai_api_key or settings.gemini_api_key or settings.local_llm_base_url):
+    if not (settings.openai_api_key or settings.local_llm_base_url):
         pytest.skip("no chat provider configured; an acceptance gate must not run without an LLM")
     return settings
 

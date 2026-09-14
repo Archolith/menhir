@@ -241,7 +241,7 @@ def test_collect_runtime_failures_accumulates_preflight_errors(monkeypatch: pyte
 @pytest.mark.unit
 def test_collect_runtime_failures_rejects_non_openai_graphiti_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     settings = MemorySettings(
-        graphiti_provider="gemini",
+        graphiti_provider="anthropic",
         graphiti_embed_provider="openai_compat",
     )
     monkeypatch.setattr(runtime_preflight, "check_expected_python_runtime", lambda executable=None: True)
@@ -259,7 +259,7 @@ def test_collect_runtime_failures_rejects_non_openai_graphiti_provider(monkeypat
 def test_collect_runtime_failures_rejects_non_openai_graphiti_reranker(monkeypatch: pytest.MonkeyPatch) -> None:
     settings = MemorySettings(
         graphiti_provider="openai_compat",
-        graphiti_reranker_provider="gemini",
+        graphiti_reranker_provider="anthropic",
     )
     monkeypatch.setattr(runtime_preflight, "check_expected_python_runtime", lambda executable=None: True)
     monkeypatch.setattr(runtime_preflight, "check_graphiti_dependency", lambda: True)

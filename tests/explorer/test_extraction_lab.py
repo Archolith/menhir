@@ -477,7 +477,7 @@ class TestApplyPromptVariant:
 
         MARKED `online`/`needs_llm` (CF-152). It was unmarked and therefore ran in the
         default offline lane, where it does two things an offline unit test must not:
-        `MemorySettings.from_env()` loads the operator's REAL OpenAI/Gemini keys (conftest's
+        `MemorySettings.from_env()` loads the operator's REAL OpenAI keys (conftest's
         pytest_configure overrides only the NEO4J_* variables, so the graph is safely pinned to
         the disposable instance but the LLM credentials are genuine), and
         `GraphitiClient.from_settings` applies sixteen irreversible `_patch_graphiti_*` mutations

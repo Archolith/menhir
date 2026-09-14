@@ -345,7 +345,6 @@ class RuntimeProviderAdminOpsMixin:
             ),
             "chat_model": chat_provider.chat_model,
             "graphiti_llm_chat_model": graphiti_llm_provider.chat_model,
-            "gemini_chat_model": getattr(settings, "gemini_chat_model", ""),
             "embed_model": chat_provider.embed_model,
             "graphiti_embed_model": graphiti_embed_provider.embed_model,
             "backend_url": redact_uri_credentials(getattr(settings, "backend_url", "")),

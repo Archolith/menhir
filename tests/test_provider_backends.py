@@ -7,7 +7,6 @@ import pytest
 
 from menhir.config import MemorySettings
 from menhir.infrastructure.providers import (
-    GeminiChatBackend,
     OpenAIStyleChatBackend,
     ProviderConfig,
     ProviderKind,
@@ -21,7 +20,6 @@ from menhir.infrastructure.providers import (
 @pytest.mark.unit
 def test_parse_provider_kind_normalizes_values() -> None:
     assert parse_provider_kind("openai-compat") is ProviderKind.LOCAL
-    assert parse_provider_kind("gemini") is ProviderKind.GEMINI
 
 
 @pytest.mark.unit
@@ -31,32 +29,6 @@ def test_build_chat_backend_returns_openai_style_backend() -> None:
     backend = build_chat_backend(settings)
 
     assert isinstance(backend, OpenAIStyleChatBackend)
-
-
-@pytest.mark.unit
-def test_build_chat_backend_returns_placeholder_for_gemini() -> None:
-    settings = MemorySettings(chat_provider="gemini")
-
-    backend = build_chat_backend(settings)
-
-    assert isinstance(backend, GeminiChatBackend)
-
-
-@pytest.mark.unit
-def test_provider_config_for_chat_uses_gemini_settings() -> None:
-    settings = MemorySettings(
-        chat_provider="gemini",
-        gemini_base_url="https://generativelanguage.googleapis.com/v1beta",
-        gemini_api_key="gem-key",
-        gemini_chat_model="gemini-2.5-flash",
-    )
-
-    config = ProviderConfig.for_chat(settings)
-
-    assert config.kind is ProviderKind.GEMINI
-    assert config.base_url == "https://generativelanguage.googleapis.com/v1beta"
-    assert config.api_key == "gem-key"
-    assert config.chat_model == "gemini-2.5-flash"
 
 
 @pytest.mark.unit
@@ -189,31 +161,3 @@ async def test_openai_style_backend_uses_openai_client() -> None:
     assert mock_create.call_args.kwargs["max_tokens"] == 64
 
 
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_gemini_backend_uses_generate_content_contract() -> None:
-    provider = ProviderConfig(
-        kind=ProviderKind.GEMINI,
-        base_url="https://generativelanguage.googleapis.com/v1beta",
-        api_key="gem-key",
-        chat_model="gemini-2.5-flash",
-    )
-    backend = GeminiChatBackend(provider=provider)
-
-    with patch(
-        "menhir.infrastructure.providers._gemini_generate_content",
-        new=AsyncMock(return_value={"candidates": [{"content": {"parts": [{"text": "gemini ok"}]}}]}),
-    ) as generate_mock:
-        result = await backend.create_chat_completion(
-            system_prompt="sys",
-            user_prompt="user",
-            operation="compression",
-            max_tokens=64,
-            temperature=0.3,
-        )
-
-    assert result == "gemini ok"
-    call_kwargs = generate_mock.await_args.kwargs
-    assert call_kwargs["model"] == "gemini-2.5-flash"
-    assert call_kwargs["payload"]["system_instruction"]["parts"][0]["text"] == "sys"
-    assert call_kwargs["payload"]["contents"][0]["parts"][0]["text"] == "user"

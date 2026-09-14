@@ -211,7 +211,7 @@ def _usage_dict(usage: Any) -> dict[str, Any] | None:
 
 
 def _normalized_usage(usage: Any) -> dict[str, Any]:
-    """Normalize common OpenAI, Gemini, and compatible usage shapes without estimating."""
+    """Normalize common OpenAI-style (snake_case and camelCase) usage shapes without estimating."""
 
     raw = _usage_dict(usage)
     if raw is None:

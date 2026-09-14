@@ -229,7 +229,7 @@ class GraphitiClient:
         if not llm_provider.supports_graphiti_openai_contract():
             raise NotImplementedError(
                 "Graphiti provider must currently be openai_compat or openai. "
-                "Gemini and Anthropic require a dedicated Graphiti bridge."
+                "Other providers require a dedicated Graphiti bridge."
             )
         if not embed_provider.supports_graphiti_openai_contract():
             raise NotImplementedError(

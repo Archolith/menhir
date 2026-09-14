@@ -76,7 +76,7 @@ Concept id: `runtime.stack`
 - Neo4j 5 (remote systemd service via bolt)
 - `graphiti-core` >=0.28.1 (graph memory framework)
 - llama.cpp (`llama-server`) via OpenAI-compatible API
-- provider scaffold for pluggable chat backends (`openai_compat`, `openai`, `gemini`, `anthropic`)
+- provider scaffold for pluggable chat backends (`openai_compat`, `openai`; `anthropic` scaffolded only)
 - Langfuse (optional local tracing for OpenAI-compatible llama.cpp calls)
 - `pytest` / `pytest-asyncio` for tests
 - `fastapi` for the developer explorer UI
@@ -268,27 +268,25 @@ Concept id: `runtime.providers`
 
 - `openai_compat`
 - `openai`
-- `gemini`
-- `anthropic`
+- `anthropic` (scaffold only)
 
 Current scope:
 
 - `LLMAdapter` is now built through a provider-backed chat backend factory
 - `openai_compat` and `openai` use the current OpenAI SDK path
-- `gemini` now uses a direct Google `generateContent` REST backend for `LLMAdapter`
 - `anthropic` is still scaffolded but not implemented yet
 
 Important limitation:
 
 - `GraphitiClient` still requires an OpenAI-compatible contract today
 - non-OpenAI Graphiti providers are rejected explicitly at startup
-- swapping Graphiti extraction to Gemini or Anthropic will require a dedicated bridge layer, not just an env flip
+- swapping Graphiti extraction to a non-OpenAI-compatible provider will require a dedicated bridge layer, not just an env flip
 
 Practical backend implication:
 
 - the currently supported "hybrid" setup is `OpenAI` or `openai_compat` for Graphiti extraction, plus optional local embeddings / reranking behind the OpenAI-compatible endpoints Graphiti already knows how to call
-- `gemini` can be used for direct `LLMAdapter` work outside the Graphiti path, but it is not a drop-in replacement for Graphiti episode extraction today
-- when discussing backend cost, treat Graphiti extraction as the billable path unless and until a dedicated Gemini bridge exists
+- the Gemini chat-only backend was removed on the `launch-readiness` branch (2026-09-14): a provider that cannot back Graphiti extraction produced a server that could not ingest, so listing it as a peer of `local`/`openai` was misleading
+- when discussing backend cost, treat Graphiti extraction as the billable path
 
 Supported hybrid config shape:
 
@@ -300,7 +298,7 @@ Supported hybrid config shape:
 Database isolation for provider testing:
 
 - `NEO4J_DATABASE` now selects the target graph database for both the local repository adapter and Graphiti
-- use a separate database name (for example `menhir_gemini_test`) when testing Gemini-backed memory processing
+- use a separate database name (for example `menhir_provider_test`) when testing an alternative provider
 - `memory://system/metadata` now reports both the active `neo4j_database` and the selected chat/graphiti providers
 
 The system has a working ingestion pipeline:
@@ -798,7 +796,7 @@ Operational sidecar storage:
   tokens plus the raw usage payload, duration, operation, endpoint, model, run, and episode. Counts
   are never estimated; completed calls without provider usage remain explicitly measurable as
   `missing_usage_calls` in aggregates.
-- async OpenAI-compatible chat/response/embedding calls, Gemini REST chat calls, synchronous scalar
+- async OpenAI-compatible chat/response/embedding calls, synchronous scalar
   chat, and synchronous View embedding all use the same instrumentation boundary. An
   episode-scoped callback attaches ingest provenance; a process-wide fallback captures scheduler
   and maintenance calls without double-writing episode calls.

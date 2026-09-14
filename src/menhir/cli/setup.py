@@ -30,9 +30,8 @@ class SetupItem:
     required: bool = True
 
 
-#: Providers `menhir setup --provider` can make fully consistent. Gemini is chat-only
-#: (Graphiti extraction requires an OpenAI-compatible provider), so it is not a
-#: one-flag path and stays a manual .env edit.
+#: Providers `menhir setup --provider` can make fully consistent: the two that back
+#: chat, Graphiti extraction, and embeddings end to end.
 SETUP_PROVIDERS = ("local", "openai")
 
 #: Keys written for each provider. A value of ``None`` means "ensure the key exists,
@@ -263,10 +262,7 @@ def apply_setup(
 
     provider = provider.strip().lower() if provider else None
     if provider is not None and provider not in SETUP_PROVIDERS:
-        raise SetupError(
-            f"--provider must be one of {', '.join(SETUP_PROVIDERS)} "
-            "(gemini is chat-only and cannot back Graphiti extraction; edit .env by hand)."
-        )
+        raise SetupError(f"--provider must be one of {', '.join(SETUP_PROVIDERS)}.")
     if (provider is not None or compose_neo4j) and not create_env:
         raise SetupError("--provider and --compose-neo4j need the .env step; drop --no-env.")
 
