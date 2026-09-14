@@ -1,8 +1,9 @@
 # Menhir Docker deployment
 
-For an immutable production release to the live VPS, start with the
-[live VPS deployment playbook](LIVE_VPS_PLAYBOOK.md) and use
-[PRODUCTION.md](PRODUCTION.md) as the detailed contract. The one-endpoint,
+For an immutable production release to the live VPS, start with
+[RUNBOOK.md](RUNBOOK.md) (the release-and-deploy procedure as run for 0.2.0-14
+through 18) and use [PRODUCTION.md](PRODUCTION.md) as the detailed contract. The
+older [playbook](LIVE_VPS_PLAYBOOK.md) covers the rebuilt-image path only. The one-endpoint,
 per-client OAuth identity, and ChatGPT/Codex/Claude/OpenCode role invariant is
 in [ACCESS_CONTRACT.md](ACCESS_CONTRACT.md).
 

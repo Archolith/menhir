@@ -27,7 +27,7 @@ production database, or start the full maintenance candidate transaction. They v
 backup/restore freshness and automatically restore the prior application on failed acceptance.
 The same bounded model is implemented for non-migrating `security-config` releases by a dedicated
 config/application transaction. It atomically replaces only the reviewed authority files, restarts
-the gateway and app, proves Neo4j and Cloudflared identities unchanged, and restores the prior set
+the app, proves Neo4j and Cloudflared identities unchanged, and restores the prior set
 on failure. Full state protection remains mandatory for
 mechanically classified maintenance and recovery work.
 
@@ -64,15 +64,15 @@ docker network create \
 
 The current live inventory assigns Cloudflared `172.30.0.2` and Menhir
 `172.30.0.3` with alias `menhir-prod-app`. Cloudflared proxies the approved public path allowlist
-directly to Menhir. Menhir does not publish a host port. The dedicated operator gateway binds only
-`172.30.0.1:8000`.
+directly to Menhir. Menhir does not publish a host port. (The OAuth operations gateway that
+bound `172.30.0.1:8000` was retired in release 0.2.0-16.)
 
 The shared Yawn Caddy container is on `yawndeploy_default`, not `menhir-proxy`. Its inactive Menhir
 virtual host and the Menhir Caddy reconciliation units were retired on 2026-09-07. Cloudflared is
 the sole supported Menhir ingress authority: release authority declares `cloudflared`, staging
 proves that the peer at `.2` is the running Cloudflared Compose service, and every deployment class
-retains ingress unchanged. The pre-change Caddyfile is retained root-only under
-`/var/lib/menhir-production/ingress-retirement/` for incident rollback.
+retains ingress unchanged. The Cloudflared tunnel configuration and its compose file are
+release artifacts under `/srv/menhir/production/ingress/` since 0.2.0-14.
 
 The release authority fixes the same-host topology and all container/project
 names. Caller-provided names, paths, Compose projects, networks, and commands
@@ -132,15 +132,15 @@ does not rebuild or re-review it.
 ## One-time scaffold and routine verification
 
 Host users/groups, fixed directories, networks, backup identity, secret ownership,
-systemd units, read-only sudoers, Cloudflared topology, inspection gateway, a read-only admission
+systemd units, read-only sudoers, Cloudflared topology, the nightly backup timer, a read-only admission
 audit, desktop archival, and restore evidence are scaffolded once. Successful
 bootstrap writes a root-owned receipt binding that host contract.
 
-The dedicated OAuth gateway is inspection-only: release inspect, status, logs,
-backup status, and generation inspect. It has no mutation tools or write sudo
-authorization. Production mutation remains solely under the canonical Menhir
-release/admission authority; the authoritative root-only implementation scripts
-remain installed and are not callable through the gateway.
+The read-only operator commands (release inspect, status, logs, backup status,
+generation inspect) are the `MENHIR_READ` sudoers alias for `%menhir-operators`
+(member: the operator login). Production mutation remains solely under the
+canonical Menhir release/admission authority. The OAuth operations gateway that
+once exposed these over MCP was retired in 0.2.0-16 after serving no request.
 
 Scaffold convergence starts from the exact reviewed repository root. The operator passes that root
 as `SourceRoot`; it must not pass `deploy/scaffold`, because the fixed source map also includes
@@ -151,7 +151,7 @@ archive scheduling is a separate backup phase, not a side effect of convergence.
 Old hosts are upgraded only through the release installer's durable transaction.
 After the existing admission holder is validated and the production mutation lock is held, the
 installer creates and fsyncs its exact prior-state snapshot and durably arms the install journal.
-Only then does it stop the gateway and refuse any active `menhir-op-*` transient worker. If the host
+Only then does it refuse any active `menhir-op-*` transient worker. If the host
 has no encrypted generation, its journaled `bootstrap-backup` phase atomically overlays the fixed
 verified schema, cleanup, and local-encryption helpers, resumes any interrupted cleanup, recounts
 retained archives, and creates the first backup while inheriting the same lock on FD 9. The

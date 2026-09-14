@@ -10,6 +10,11 @@ Companion documents in this directory:
 
 ---
 
+> **Current procedure lives in [`deploy/RUNBOOK.md`](../deploy/RUNBOOK.md)**
+> (2026-09-14). This file is the session record for the recovery (releases
+> 14-18, Phases 0-5); read it for history and for why things are the way they
+> are, not for how to cut the next release.
+
 ## 1. Start here: the single most important fact
 
 **Menhir can be restored, from a backup taken 2026-09-13 (`generation.u0wWCFHba4`, rehearsed, off-host). Release 0.2.0-14 is installed and verified.**

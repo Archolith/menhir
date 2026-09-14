@@ -1,9 +1,12 @@
 # Live VPS deployment playbook
 
-> **FROZEN — DO NOT RUN (2026-09-08).** These v1 procedures are inputs to the
-> [deployment control-plane architecture reset](../.agent/plans/menhir-deployment-control-plane-architecture-reset-2026-09-08.md),
-> not current deployment authority. Production remains blocked until the replacement's serial code,
-> clean-host, CI, and owner gates are complete.
+> **Superseded for artifact-only releases (2026-09-14).** Releases 0.2.0-14
+> through 18 were cut and installed with [`RUNBOOK.md`](RUNBOOK.md); use that.
+> This document describes the rebuilt-image path and the `personal_deploy`
+> staging/promotion ceremony, which have not been run end to end since release
+> 13 and are unverified against the current host. Its Caddy, OAuth-gateway and
+> yawn.vps references are historical: Caddy was retired for Menhir in 14, the
+> gateway in 16, the yawn.vps repository in 17.
 
 This is the operator playbook for `https://memory.ctharvey.me`. Menhir's legacy
 writer and its replacement run on the same VPS. The release machinery therefore

@@ -1,10 +1,12 @@
 # Release automation
 
-> **FROZEN — NOT EXECUTION AUTHORITY (2026-09-08).** The current v1 commands below are retained for
-> architecture inventory and historical recovery analysis only. Do not author, approve, promote, or
-> adopt a release through them while the
-> [deployment control-plane architecture reset](../.agent/plans/menhir-deployment-control-plane-architecture-reset-2026-09-08.md)
-> is active. The replacement protocol becomes authoritative only after its serial gates pass.
+> **Superseded for artifact-only releases (2026-09-14).** Releases 0.2.0-14
+> through 18 were cut and installed with [`RUNBOOK.md`](RUNBOOK.md); use that.
+> This document describes the rebuilt-image path and the `personal_deploy`
+> staging/promotion ceremony, which have not been run end to end since release
+> 13 and are unverified against the current host. Its Caddy, OAuth-gateway and
+> yawn.vps references are historical: Caddy was retired for Menhir in 14, the
+> gateway in 16, the yawn.vps repository in 17.
 
 Menhir has two independent automation boundaries:
 
