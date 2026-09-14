@@ -38,10 +38,6 @@ from menhir.infrastructure.evidence_publication_intents import (
     EvidencePublicationIntentRepository,
     PublicationDispatchSuppressed,
 )
-from menhir.infrastructure.scheduler_trace import (
-    build_episode_parent_metadata,
-    emit_scheduler_task_event,
-)
 from menhir.infrastructure.telemetry import (
     record_failure_event,
     record_lifecycle_event,
@@ -349,18 +345,6 @@ async def try_reconcile_existing(ctx: EnrichmentContext) -> bool:
                 "reconciled_existing_completion": True,
             },
         )
-        await emit_scheduler_task_event(
-            parent_job_id=ctx.episode_uuid,
-            parent_label=str(ctx.claimed.get("name") or ctx.episode_uuid),
-            parent_state="ready",
-            parent_heartbeat_at=datetime.now(timezone.utc).isoformat(),
-            parent_metadata=build_episode_parent_metadata(
-                attempts=ctx.processing_attempts,
-                source=str(ctx.claimed.get("source") or ""),
-                content=str(ctx.claimed.get("content") or ""),
-                name=str(ctx.claimed.get("name") or ctx.episode_uuid),
-            ),
-        )
         duration_ms = int((perf_counter() - ctx.started) * 1000)
         record_mcp_event(
             kind="background",
@@ -475,19 +459,6 @@ async def run_preflight_rejection(ctx: EnrichmentContext) -> bool:
                 "char_count": preflight_rejection["char_count"],
             },
         )
-        await emit_scheduler_task_event(
-            parent_job_id=ctx.episode_uuid,
-            parent_label=str(ctx.claimed.get("name") or ctx.episode_uuid),
-            parent_state="failed",
-            parent_heartbeat_at=datetime.now(timezone.utc).isoformat(),
-            parent_error=str(preflight_rejection["error"]),
-            parent_metadata=build_episode_parent_metadata(
-                attempts=ctx.processing_attempts,
-                source=str(ctx.claimed.get("source") or ""),
-                content=str(ctx.claimed.get("content") or ""),
-                name=str(ctx.claimed.get("name") or ctx.episode_uuid),
-            ),
-        )
         logger.warning(
             "Rejected oversized episode before Graphiti extraction episode_id=%s estimated_tokens=%s limit=%s",
             ctx.episode_uuid,
@@ -575,46 +546,6 @@ async def run_graphiti_extraction(
             state="acquired",
             episode_uuid=ctx.episode_uuid,
         )
-        record_lifecycle_event(
-            component="ingest_worker",
-            event="emit_parent_job_trace",
-            state="started",
-            episode_uuid=ctx.episode_uuid,
-            details={"name": str(ctx.claimed.get("name") or ctx.episode_uuid)},
-        )
-        try:
-            await emit_scheduler_task_event(
-                parent_job_id=ctx.episode_uuid,
-                parent_label=str(ctx.claimed.get("name") or ctx.episode_uuid),
-                parent_state="graphiti_extracting",
-                parent_heartbeat_at=datetime.now(timezone.utc).isoformat(),
-                parent_metadata=build_episode_parent_metadata(
-                    attempts=ctx.processing_attempts,
-                    source=str(ctx.claimed.get("source") or ""),
-                    content=str(ctx.claimed.get("content") or ""),
-                    name=str(ctx.claimed.get("name") or ctx.episode_uuid),
-                ),
-            )
-        except Exception as exc:
-            record_lifecycle_event(
-                component="ingest_worker",
-                event="emit_parent_job_trace",
-                state="failed",
-                episode_uuid=ctx.episode_uuid,
-                details={
-                    "name": str(ctx.claimed.get("name") or ctx.episode_uuid),
-                    "error": f"{type(exc).__name__}: {exc}",
-                },
-            )
-            raise
-        else:
-            record_lifecycle_event(
-                component="ingest_worker",
-                event="emit_parent_job_trace",
-                state="completed",
-                episode_uuid=ctx.episode_uuid,
-                details={"name": str(ctx.claimed.get("name") or ctx.episode_uuid)},
-            )
         record_lifecycle_event(
             component="ingest_worker",
             event="before_add_episode_timeout_wrapper",
@@ -1223,18 +1154,6 @@ async def stamp_and_finalize(
             episode_uuid=ctx.episode_uuid,
             details={"reason": "empty_extraction"},
         )
-        await emit_scheduler_task_event(
-            parent_job_id=ctx.episode_uuid,
-            parent_label=str(ctx.claimed.get("name") or ctx.episode_uuid),
-            parent_state="ready",
-            parent_heartbeat_at=datetime.now(timezone.utc).isoformat(),
-            parent_metadata=build_episode_parent_metadata(
-                attempts=ctx.processing_attempts,
-                source=str(ctx.claimed.get("source") or ""),
-                content=str(ctx.claimed.get("content") or ""),
-                name=str(ctx.claimed.get("name") or ctx.episode_uuid),
-            ),
-        )
         return
 
     node_uuids = [resolved_episode_uuid] + [node.uuid for node in extracted_nodes]
@@ -1442,18 +1361,6 @@ async def stamp_and_finalize(
             "edges_touched": stamped.edges_touched,
         },
     )
-    await emit_scheduler_task_event(
-        parent_job_id=ctx.episode_uuid,
-        parent_label=str(ctx.claimed.get("name") or ctx.episode_uuid),
-        parent_state="ready",
-        parent_heartbeat_at=datetime.now(timezone.utc).isoformat(),
-        parent_metadata=build_episode_parent_metadata(
-            attempts=ctx.processing_attempts,
-            source=str(ctx.claimed.get("source") or ""),
-            content=str(ctx.claimed.get("content") or ""),
-            name=str(ctx.claimed.get("name") or ctx.episode_uuid),
-        ),
-    )
     duration_ms = int((perf_counter() - ctx.started) * 1000)
     record_mcp_event(
         kind="background",
@@ -1522,19 +1429,6 @@ async def handle_enrichment_failure(
         "duration_ms": duration_ms,
     }
     failure_details.update(failure_details_from_exception(exc))
-    await emit_scheduler_task_event(
-        parent_job_id=ctx.episode_uuid,
-        parent_label=str(ctx.claimed.get("name") or ctx.episode_uuid),
-        parent_state="failed",
-        parent_heartbeat_at=datetime.now(timezone.utc).isoformat(),
-        parent_error=str(exc),
-        parent_metadata=build_episode_parent_metadata(
-            attempts=ctx.processing_attempts,
-            source=str(ctx.claimed.get("source") or ""),
-            content=str(ctx.claimed.get("content") or ""),
-            name=str(ctx.claimed.get("name") or ctx.episode_uuid),
-        ),
-    )
     record_lifecycle_event(
         component="ingest_worker",
         event="episode_failed",

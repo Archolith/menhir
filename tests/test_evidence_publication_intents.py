@@ -326,7 +326,6 @@ async def test_pipeline_begins_before_dispatch_and_finalizes_after_return(
 
     monkeypatch.setattr(steps, "add_episode_with_timeout", fake_add_episode)
     monkeypatch.setattr(steps, "record_lifecycle_event", lambda **_kwargs: None)
-    monkeypatch.setattr(steps, "emit_scheduler_task_event", _noop_async)
 
     result = await steps.run_graphiti_extraction(
         _pipeline_context(events),
@@ -352,7 +351,6 @@ async def test_pipeline_timeout_leaves_created_intent_pending(
 
     monkeypatch.setattr(steps, "add_episode_with_timeout", timeout_after_dispatch)
     monkeypatch.setattr(steps, "record_lifecycle_event", lambda **_kwargs: None)
-    monkeypatch.setattr(steps, "emit_scheduler_task_event", _noop_async)
 
     with pytest.raises(TimeoutError, match="remote completion status unknown"):
         await steps.run_graphiti_extraction(

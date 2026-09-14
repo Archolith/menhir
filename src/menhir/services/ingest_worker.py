@@ -12,7 +12,6 @@ from time import monotonic, perf_counter
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
-import httpx
 
 from menhir.domain import IngestResult, IngestStatus, MemorySession
 from menhir.domain.models import ProcessingState
@@ -32,9 +31,7 @@ from menhir.infrastructure.observability import (
     reset_llm_usage_callback,
     set_llm_usage_callback,
 )
-from menhir.infrastructure.scheduler_trace import (
-    build_episode_scheduler_task,
-)
+from menhir.infrastructure.telemetry import build_episode_task_id
 from menhir.infrastructure.telemetry import (
     record_episode_task_event,
     record_lifecycle_event,
@@ -346,7 +343,7 @@ class IngestWorkerMixin:
                         f"{self._budget_settings_window_s}s)"
                     )
 
-        scheduler_task = build_episode_scheduler_task(
+        scheduler_task = build_episode_task_id(
             episode_uuid=episode_uuid,
             provider="graphiti",
             action="add-episode",
@@ -413,21 +410,6 @@ class IngestWorkerMixin:
     async def _processing_heartbeat_loop(
         self, episode_uuid: str, stop_event: asyncio.Event
     ) -> None:
-        from menhir.infrastructure.llama_endpoint import (
-            scheduler_url_from_env,
-            should_use_scheduler,
-        )
-
-        scheduler_url = scheduler_url_from_env()
-        ping_url = f"{scheduler_url}/ping"
-        fallback_base_url = str(
-            getattr(self.graphiti_client, "scheduler_fallback_base_url", "") or ""
-        )
-        use_scheduler = should_use_scheduler(fallback_base_url)
-        _ping_every_n = max(
-            1, int(60.0 / self._processing_heartbeat_interval_s)
-        )  # ~60s
-        _tick = 0
         while not stop_event.is_set():
             await asyncio.sleep(self._processing_heartbeat_interval_s)
             if stop_event.is_set():
@@ -456,18 +438,3 @@ class IngestWorkerMixin:
                     episode_uuid,
                     exc_info=True,
                 )
-            _tick += 1
-            if use_scheduler and _tick % _ping_every_n == 0:
-                try:
-                    if (
-                        self._scheduler_http_client is None
-                        or self._scheduler_http_client.is_closed
-                    ):
-                        self._scheduler_http_client = httpx.AsyncClient(timeout=2.0)
-                    await self._scheduler_http_client.post(ping_url)
-                except (httpx.HTTPError, OSError):
-                    logger.debug(
-                        "Scheduler keepalive ping failed for episode=%s",
-                        episode_uuid,
-                        exc_info=True,
-                    )

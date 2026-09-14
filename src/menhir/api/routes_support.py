@@ -76,7 +76,6 @@ def _capability_payload(runtime_ctx: RuntimeContext | None) -> dict[str, bool]:
             "neo4j_ready": False,
             "embedder_ready": False,
             "llm_ready": False,
-            "scheduler_ready": False,
             "reads_ready": False,
             "queue_writes_ready": False,
             "enrichment_ready": False,
@@ -85,7 +84,6 @@ def _capability_payload(runtime_ctx: RuntimeContext | None) -> dict[str, bool]:
         "neo4j_ready": capabilities.neo4j_ready,
         "embedder_ready": capabilities.embedder_ready,
         "llm_ready": capabilities.llm_ready,
-        "scheduler_ready": capabilities.scheduler_ready,
         "reads_ready": capabilities.reads_ready,
         "queue_writes_ready": capabilities.queue_writes_ready,
         "enrichment_ready": capabilities.enrichment_ready,
@@ -102,7 +100,6 @@ def _service_payload(runtime_ctx: RuntimeContext | None) -> dict[str, str]:
         "graphiti": "ok" if capabilities is None or capabilities.graphiti_ready else "degraded",
         "ingest": "ok" if built.ingest_service and built.ingest_service.enrichment_enabled() else "queue_only",
         "recall": "ok" if capabilities is None or capabilities.reads_ready else "degraded",
-        "scheduler": "ok" if capabilities is None or capabilities.scheduler_ready else "unavailable",
     }
 
 

@@ -6,7 +6,6 @@ from typing import Any
 
 from menhir.config import redact_uri_credentials
 from menhir.core.tenancy import require_own_object
-from menhir.infrastructure.llama_endpoint import scheduler_url_from_env
 from menhir.infrastructure.providers import ProviderConfig
 
 from .backend_shared import _to_jsonable
@@ -344,7 +343,6 @@ class RuntimeProviderAdminOpsMixin:
             "local_llm_embed_base_url": redact_uri_credentials(
                 getattr(settings, "local_llm_embed_base_url", "")
             ),
-            "scheduler_url": redact_uri_credentials(scheduler_url_from_env()),
             "chat_model": chat_provider.chat_model,
             "graphiti_llm_chat_model": graphiti_llm_provider.chat_model,
             "gemini_chat_model": getattr(settings, "gemini_chat_model", ""),

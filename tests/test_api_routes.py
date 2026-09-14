@@ -148,7 +148,6 @@ class TestHealth:
         data = resp.json()
         assert data["status"] == "ok"
         assert data["services"]["neo4j"] == "ok"
-        assert data["services"]["scheduler"] == "ok"
 
     def test_health_starting(self):
         app = FastAPI()

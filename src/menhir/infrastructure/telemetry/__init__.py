@@ -49,3 +49,7 @@ __all__ = [
     "record_merge",
     "enable_llm_usage_telemetry",
 ]
+
+from .task_ids import build_episode_task_id  # noqa: E402
+
+__all__ = [*__all__, "build_episode_task_id"]

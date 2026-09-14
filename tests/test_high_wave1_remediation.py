@@ -365,8 +365,6 @@ def _sync_calls_in_async_bodies(path: pathlib.Path, names: set[str]) -> list[int
 def test_cf170_no_bare_lifecycle_writes_remain_inside_async_bodies() -> None:
     for rel in (
         "infrastructure/graphiti_client.py",
-        "infrastructure/llama_endpoint.py",
-        "infrastructure/scheduler_trace.py",
     ):
         assert _sync_calls_in_async_bodies(_SRC / rel, {"record_lifecycle_event"}) == [], rel
 
@@ -571,10 +569,6 @@ def test_cf188_empty_base_url_refuses_rather_than_defaulting_to_openai(monkeypat
             )
         ),
     )
-    monkeypatch.setattr(sync_llm, "should_use_scheduler", lambda base_url: True)
-    monkeypatch.setattr(
-        sync_llm, "acquire_llama_url_sync", lambda **kwargs: kwargs.get("fallback") or ""
-    )
 
     chat = sync_llm.make_sync_chat(MemorySettings.from_env())
     assert chat is not None
@@ -582,48 +576,3 @@ def test_cf188_empty_base_url_refuses_rather_than_defaulting_to_openai(monkeypat
         chat("system", "personal memory content")
 
 
-def test_cf188_resolved_scheduler_url_is_used(monkeypatch) -> None:
-    from menhir.config import MemorySettings
-    from menhir.infrastructure import sync_llm
-    from menhir.infrastructure.providers import ProviderConfig, ProviderKind
-
-    built: dict[str, object] = {}
-
-    class _Client:
-        # **_bounds absorbs timeout/max_retries, which the seam now passes explicitly (CF-190).
-        # This test is about WHICH base_url is used, so the bounds are irrelevant to it -- but a
-        # stub narrower than the real constructor turns an added argument into a TypeError here.
-        def __init__(self, api_key=None, base_url=None, **_bounds):
-            built["base_url"] = base_url
-            self.chat = SimpleNamespace(
-                completions=SimpleNamespace(
-                    create=lambda **kwargs: SimpleNamespace(
-                        choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))]
-                    )
-                )
-            )
-
-    monkeypatch.setattr(
-        ProviderConfig,
-        "for_chat",
-        classmethod(
-            lambda cls, settings: ProviderConfig(
-                kind=ProviderKind.LOCAL,
-                base_url="http://127.0.0.1:8081/v1",
-                api_key="not-needed",
-                chat_model="local-model",
-                embed_model="",
-            )
-        ),
-    )
-    monkeypatch.setattr(sync_llm, "should_use_scheduler", lambda base_url: True)
-    monkeypatch.setattr(
-        sync_llm, "acquire_llama_url_sync", lambda **kwargs: "http://127.0.0.1:9099/v1"
-    )
-    import openai
-
-    monkeypatch.setattr(openai, "OpenAI", _Client)
-
-    chat = sync_llm.make_sync_chat(MemorySettings.from_env())
-    chat("system", "user")
-    assert built["base_url"] == "http://127.0.0.1:9099/v1"

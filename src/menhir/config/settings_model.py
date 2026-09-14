@@ -105,7 +105,6 @@ class MemorySettings:
 
     # Graphiti tuning
     graphiti_add_episode_timeout_seconds: float = 300.0
-    graphiti_request_stall_timeout_seconds: float = 45.0
     graphiti_episode_max_estimated_tokens: int = 12000
     #: Guardrail on the ASSEMBLED extraction request, not the episode text.  The
     #: episode is a tiny fraction of what actually gets sent (context, candidate
@@ -764,10 +763,6 @@ class MemorySettings:
             graphiti_add_episode_timeout_seconds=_parse_float(
                 _getenv("MEMORY_GRAPHITI_ADD_EPISODE_TIMEOUT_SECONDS", "GRAPHITI_ADD_EPISODE_TIMEOUT_SECONDS", default=str(cls.graphiti_add_episode_timeout_seconds)),
                 env_var="MEMORY_GRAPHITI_ADD_EPISODE_TIMEOUT_SECONDS",
-            ),
-            graphiti_request_stall_timeout_seconds=_parse_float(
-                _getenv("MEMORY_GRAPHITI_REQUEST_STALL_TIMEOUT_SECONDS", "GRAPHITI_REQUEST_STALL_TIMEOUT_SECONDS", default=str(cls.graphiti_request_stall_timeout_seconds)),
-                env_var="MEMORY_GRAPHITI_REQUEST_STALL_TIMEOUT_SECONDS",
             ),
             graphiti_episode_max_estimated_tokens=_parse_int(
                 _getenv("MEMORY_GRAPHITI_EPISODE_MAX_ESTIMATED_TOKENS", "GRAPHITI_EPISODE_MAX_ESTIMATED_TOKENS", default=str(cls.graphiti_episode_max_estimated_tokens)),

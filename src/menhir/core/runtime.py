@@ -13,11 +13,6 @@ from menhir.config import MemorySettings
 from menhir.core import build_memory_services, prepare_memory_runtime
 from menhir.core.runtime_preflight import collect_runtime_capabilities
 from menhir.domain import new_session
-from menhir.infrastructure.llama_endpoint import (
-    aclose_scheduler_http_client,
-    ensure_scheduler_running,
-)
-from menhir.infrastructure.scheduler_trace import register_scheduler_task_source
 from menhir.infrastructure.telemetry import enable_llm_usage_telemetry, record_lifecycle_event
 from menhir.infrastructure.view_embedder import make_view_embedder, view_embedder_version
 from menhir.services import MaintenanceScheduler
@@ -30,7 +25,6 @@ from .runtime_support import (
     _init_lock,
     _remember_flagged_bootstrap_read,  # noqa: F401 - lifecycle compatibility re-export
     _state,
-    _uses_scheduler_managed_graphiti,
 )
 
 logger = logging.getLogger(__name__)
@@ -625,20 +619,6 @@ async def _shutdown_runtime() -> None:
                     state="failed",
                 )
                 logger.exception("Neo4j driver close failed")
-        try:
-            await aclose_scheduler_http_client()
-            record_lifecycle_event(
-                component="runtime_shutdown",
-                event="scheduler_http_client_close",
-                state="completed",
-            )
-        except Exception:
-            record_lifecycle_event(
-                component="runtime_shutdown",
-                event="scheduler_http_client_close",
-                state="failed",
-            )
-            logger.exception("Scheduler HTTP client close failed")
         await _stop_scheduler()
     finally:
         _clear_runtime_state()
@@ -692,19 +672,6 @@ async def _initialize_services(
     if not candidate_readonly:
         enable_llm_usage_telemetry()
 
-    # Start the scheduler BEFORE preflight so it can bring up the LLM/embedder
-    # endpoints that preflight will check. Without this, preflight sees the LLM
-    # as down → enrichment_ready=False → scheduler never starts → deadlock.
-    uses_scheduler = False if candidate_readonly else _uses_scheduler_managed_graphiti(settings)
-    if uses_scheduler:
-        record_lifecycle_event(component="runtime_init", event="ensure_scheduler_running", state="started")
-        logger.info("[init 0/6] Ensuring scheduler process is running...")
-        await asyncio.to_thread(ensure_scheduler_running)
-        record_lifecycle_event(component="runtime_init", event="ensure_scheduler_running", state="completed")
-
-    # Don't acquire scheduler task slots at startup — they block when the LLM
-    # is busy with enrichment.  Slots are acquired lazily on first use.
-    #
     # The venv-path guard is auto-scoped by preflight (venv_guard_applies): enforced
     # only for a source checkout that carries its own .venv, skipped for pip/pipx/
     # container installs, opt-out via MENHIR_ALLOW_SYSTEM_PYTHON=1. `menhir check`
@@ -713,7 +680,6 @@ async def _initialize_services(
         collect_runtime_capabilities,
         settings,
         require_venv=None,
-        acquire_scheduler_endpoints=False,
     )
     _state.capabilities = capabilities
     blocking_failures = (
@@ -745,11 +711,6 @@ async def _initialize_services(
         read_only=candidate_readonly,
     )
     record_lifecycle_event(component="runtime_init", event="build_memory_services", state="completed")
-
-    if uses_scheduler and capabilities.enrichment_ready and not candidate_readonly:
-        record_lifecycle_event(component="runtime_init", event="register_scheduler_task_source", state="started")
-        await register_scheduler_task_source()
-        record_lifecycle_event(component="runtime_init", event="register_scheduler_task_source", state="completed")
 
     if candidate_readonly:
         from menhir.infrastructure.memory_graph_adapter import MemoryGraphAdapter
@@ -829,12 +790,9 @@ async def _initialize_services(
             session.session_id,
         )
         return built, session
-    # Start the in-process maintenance scheduler whenever enrichment is ready, regardless of
-    # whether the *model endpoints* are managed by the external scheduler process
-    # (uses_scheduler). Periodic maintenance — stale-lease recovery, failed-enrichment retry,
-    # conflict resolution, structure refresh, counter sync — is required by every enrichment-ready
-    # deployment, including direct OpenAI/Gemini Graphiti configs. Coupling it to model-process
-    # ownership left direct-provider deployments with no maintenance owner (bug AR-01).
+    # Start the in-process maintenance scheduler whenever enrichment is ready. Periodic
+    # maintenance — stale-lease recovery, failed-enrichment retry, conflict resolution,
+    # structure refresh, counter sync — is required by every enrichment-ready deployment.
     if capabilities.enrichment_ready:
         await _start_scheduler(built)
     _state.orphan_recovery_task = asyncio.create_task(

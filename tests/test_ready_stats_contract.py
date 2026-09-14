@@ -390,7 +390,7 @@ class TestStats:
 
         data = resp.json()
         services = data["services"]
-        for svc in ("neo4j", "graphiti", "ingest", "recall", "scheduler"):
+        for svc in ("neo4j", "graphiti", "ingest", "recall"):
             assert svc in services, f"missing service key: {svc}"
             assert services[svc] in ("ok", "unavailable", "degraded", "queue_only"), (
                 f"unexpected service status: {services[svc]}"

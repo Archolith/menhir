@@ -37,7 +37,6 @@ def _caps(**overrides: Any) -> RuntimeCapabilities:
         graphiti_llm_ready=True,
         embedder_ready=True,
         reranker_ready=True,
-        scheduler_required=False,
         failures=(),
     )
     defaults.update(overrides)
@@ -52,7 +51,6 @@ class TestRuntimeCapabilities:
         assert caps.reads_ready is True
         assert caps.queue_writes_ready is True
         assert caps.enrichment_ready is True
-        assert caps.scheduler_ready is True
 
     @pytest.mark.unit
     def test_degraded_reads_only_when_llm_down(self):
@@ -81,21 +79,6 @@ class TestRuntimeCapabilities:
         assert _caps().graphiti_ready is True
         assert _caps(embedder_ready=False).graphiti_ready is False
         assert _caps(neo4j_ready=False).graphiti_ready is False
-
-    @pytest.mark.unit
-    def test_scheduler_ready_when_not_required(self):
-        caps = _caps(scheduler_required=False, graphiti_llm_ready=False, embedder_ready=False)
-        assert caps.scheduler_ready is True
-
-    @pytest.mark.unit
-    def test_scheduler_not_ready_when_required_but_enrichment_down(self):
-        caps = _caps(scheduler_required=True, graphiti_llm_ready=False)
-        assert caps.scheduler_ready is False
-
-    @pytest.mark.unit
-    def test_scheduler_ready_when_required_and_enrichment_up(self):
-        caps = _caps(scheduler_required=True)
-        assert caps.scheduler_ready is True
 
     @pytest.mark.unit
     def test_llm_ready_aliases_graphiti_llm_ready(self):
@@ -172,9 +155,6 @@ class TestUnavailableGraphitiClient:
     @pytest.mark.unit
     def test_sentinel_attributes_are_safe_defaults(self):
         client = UnavailableGraphitiClient("reason")
-        assert client.scheduler_fallback_base_url == ""
-        assert client.scheduler_fallback_embed_base_url == ""
-        assert client.scheduler_fallback_reranker_base_url == ""
         assert client.llm_client_ref is None
         assert client.embedder_ref is None
         assert client.reranker_ref is None
@@ -258,7 +238,7 @@ class TestInitializeServicesDegradedMode:
     @pytest.mark.unit
     @pytest.mark.asyncio
     async def test_initialize_services_allows_partial_capabilities(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        caps = _caps(graphiti_llm_ready=False, embedder_ready=True, scheduler_required=True)
+        caps = _caps(graphiti_llm_ready=False, embedder_ready=True)
         settings = MemorySettings()
         session = SimpleNamespace(session_id="session-test")
         calls: list[str] = []
@@ -280,7 +260,6 @@ class TestInitializeServicesDegradedMode:
         try:
             runtime_mod._state.clear_all()
             monkeypatch.setattr(runtime_mod.MemorySettings, "from_env", classmethod(lambda cls: settings))
-            monkeypatch.setattr(runtime_mod, "_uses_scheduler_managed_graphiti", lambda _s: False)
             monkeypatch.setattr(runtime_mod, "collect_runtime_capabilities", lambda *args, **kwargs: caps)
             monkeypatch.setattr(runtime_mod, "build_memory_services", lambda *args, **kwargs: built)
             monkeypatch.setattr(runtime_mod, "prepare_memory_runtime", _fake_prepare)
@@ -337,7 +316,6 @@ class TestInitializeServicesDegradedMode:
         try:
             runtime_mod._state.clear_all()
             monkeypatch.setattr(runtime_mod.MemorySettings, "from_env", classmethod(lambda cls: settings))
-            monkeypatch.setattr(runtime_mod, "_uses_scheduler_managed_graphiti", lambda _s: False)
             monkeypatch.setattr(runtime_mod, "collect_runtime_capabilities", lambda *args, **kwargs: caps)
             monkeypatch.setattr(runtime_mod, "build_memory_services", lambda *args, **kwargs: built)
             monkeypatch.setattr(runtime_mod, "prepare_memory_runtime", _fake_prepare)

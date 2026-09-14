@@ -622,8 +622,7 @@ class TestPartialStampFailure:
             get_queue_depth=lambda: 0,
         )
 
-        with patch("menhir.services.enrichment_steps.emit_scheduler_task_event", new_callable=AsyncMock), \
-             patch("menhir.services.enrichment_steps.record_mcp_event"):
+        with patch("menhir.services.enrichment_steps.record_mcp_event"):
             handled = await try_reconcile_existing(ctx)
         assert handled is True
 

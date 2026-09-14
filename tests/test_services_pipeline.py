@@ -20,7 +20,7 @@ from menhir.core import BuildArtifacts, build_memory_services, prepare_memory_ru
 from menhir.domain.models import ProcessingState
 from menhir.infrastructure import MemoryGraphAdapter
 from menhir.infrastructure.observability import LLMUsageEvent
-from menhir.infrastructure.scheduler_trace import build_episode_scheduler_task
+from menhir.infrastructure.telemetry import build_episode_task_id
 from menhir.services import IngestService, LifecycleService, MaintenanceScheduler, RecallService, ScoringService
 from menhir.services.enrichment_failures import classify_enrichment_failure
 from menhir.services.scheduler_lease import SchedulerLeaseStore
@@ -855,7 +855,7 @@ def test_record_episode_llm_usage_records_episode_task_event(
             "kind": "chat",
             "model": "test-model",
             "endpoint": "chat.completions.create",
-            "scheduler_task": build_episode_scheduler_task(
+            "scheduler_task": build_episode_task_id(
                 episode_uuid=episode_uuid,
                 provider="graphiti",
                 action="add-episode",
@@ -1028,52 +1028,6 @@ async def test_process_pending_episode_rejects_oversized_with_raw_capture(
     assert client.add_episode_calls == []            # rejected before Graphiti
     assert len(adapter.raw_capture_calls) == 1       # prose preserved (Part 2)
     assert adapter.raw_capture_calls[0]["episode_uuid"] == episode_uuid
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_processing_heartbeat_loop_pings_scheduler_for_scheduler_managed_graphiti(
-    stub_memory_graph_adapter: "StubMemoryGraphAdapter",
-    stub_llm_adapter: object,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    ping_urls: list[str] = []
-    sleep_calls = 0
-
-    class SchedulerManagedGraphitiClient:
-        scheduler_fallback_base_url = "http://127.0.0.1:8081/v1"
-
-    class FakeAsyncClient:
-        async def __aenter__(self) -> "FakeAsyncClient":
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb) -> None:
-            return None
-
-        async def post(self, url: str) -> object:
-            ping_urls.append(url)
-            return SimpleNamespace(status_code=200)
-
-    async def fake_sleep(_seconds: float) -> None:
-        nonlocal sleep_calls
-        sleep_calls += 1
-        if sleep_calls >= 2:
-            stop_event.set()
-
-    service = IngestService(
-        graphiti_client=SchedulerManagedGraphitiClient(),
-        graph_adapter=stub_memory_graph_adapter,
-        llm=stub_llm_adapter,
-    )
-    service._processing_heartbeat_interval_s = 60.0
-    stop_event = asyncio.Event()
-
-    monkeypatch.setattr("httpx.AsyncClient", lambda timeout=2.0: FakeAsyncClient())
-    monkeypatch.setattr("menhir.services.ingest_worker.asyncio.sleep", fake_sleep)
-
-    await service._processing_heartbeat_loop("missing-episode", stop_event)
-
-    assert ping_urls == ["http://127.0.0.1:8082/ping"]
 
 
 @pytest.mark.unit
@@ -3419,9 +3373,6 @@ async def test_run_graphiti_finalization_respects_namespace_boundary(
     release_first_finalize = asyncio.Event()
     second_extraction_started = asyncio.Event()
 
-    async def fake_emit_scheduler_task_event(**kwargs):
-        return None
-
     async def fake_add_episode_with_timeout(*args, **kwargs):
         episode_uuid = kwargs["episode_uuid"]
         if episode_uuid == "episode-b":
@@ -3437,8 +3388,6 @@ async def test_run_graphiti_finalization_respects_namespace_boundary(
         if ctx.episode_uuid == "episode-a":
             first_finalize_started.set()
             await release_first_finalize.wait()
-
-    monkeypatch.setattr(es, "emit_scheduler_task_event", fake_emit_scheduler_task_event)
     monkeypatch.setattr(es, "add_episode_with_timeout", fake_add_episode_with_timeout)
     monkeypatch.setattr(es, "stamp_and_finalize", fake_stamp_and_finalize)
     monkeypatch.setattr(es, "record_lifecycle_event", lambda **kwargs: None)

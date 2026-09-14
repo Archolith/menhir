@@ -13,7 +13,6 @@ from time import monotonic, perf_counter
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
-import httpx
 
 from menhir.domain import IngestResult, IngestStatus, MemorySession
 from menhir.domain.models import ProcessingState
@@ -32,9 +31,7 @@ from menhir.infrastructure.observability import (
     reset_llm_usage_callback,
     set_llm_usage_callback,
 )
-from menhir.infrastructure.scheduler_trace import (
-    build_episode_scheduler_task,
-)
+from menhir.infrastructure.telemetry import build_episode_task_id
 from menhir.infrastructure.telemetry import (
     record_episode_task_event,
     record_lifecycle_event,
@@ -97,9 +94,6 @@ class IngestService(IngestQueueMixin, IngestWorkerMixin, IngestIntakeMixin):
         default=12000, init=False, repr=False
     )
     _canonical_self_binding_mode: str = field(default="off", init=False, repr=False)
-    _scheduler_http_client: httpx.AsyncClient | None = field(
-        default=None, init=False, repr=False
-    )
     # M6 Phase 6 — LLM budget caps
     _session_llm_call_times: dict[str, deque[float]] = field(
         default_factory=dict, init=False, repr=False

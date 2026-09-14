@@ -17,11 +17,6 @@ from menhir.infrastructure.embedding_dimensions import (
     embedding_dimension_health,
     expected_graphiti_embedding_dimension,
 )
-from menhir.infrastructure.llama_endpoint import (
-    acquire_llama_url_sync,
-    scheduler_url_from_env,
-    should_use_scheduler,
-)
 from menhir.infrastructure.neo4j import Neo4jRepository
 from menhir.infrastructure.providers import ProviderConfig, ProviderKind
 
@@ -50,7 +45,6 @@ class RuntimeCapabilities:
     graphiti_llm_ready: bool
     embedder_ready: bool
     reranker_ready: bool
-    scheduler_required: bool
     failures: tuple[str, ...] = field(default_factory=tuple)
 
     @property
@@ -72,10 +66,6 @@ class RuntimeCapabilities:
     @property
     def enrichment_ready(self) -> bool:
         return self.neo4j_ready and self.embedder_ready and self.graphiti_llm_ready
-
-    @property
-    def scheduler_ready(self) -> bool:
-        return (not self.scheduler_required) or self.enrichment_ready
 
     @property
     def startup_mode(self) -> str:
@@ -257,29 +247,10 @@ def check_openai_provider_configuration(
     return True
 
 
-def _resolve_connectivity_base_url(
-    fallback_base_url: str,
-    *,
-    task: str | None = None,
-    acquire_scheduler_endpoint: bool,
-) -> str:
-    normalized_fallback = (fallback_base_url or "").strip()
-    if not should_use_scheduler(normalized_fallback):
-        return normalized_fallback
-    if not acquire_scheduler_endpoint:
-        return normalized_fallback
-    return acquire_llama_url_sync(
-        fallback=normalized_fallback,
-        task=task,
-        timeout_s=120.0,
-    )
-
-
 def collect_runtime_failures(
     settings: MemorySettings,
     *,
     require_venv: bool | None = None,
-    acquire_scheduler_endpoints: bool = False,
 ) -> list[str]:
     """Run runtime preflight checks and return human-readable failure messages.
 
@@ -290,7 +261,6 @@ def collect_runtime_failures(
         collect_runtime_capabilities(
             settings,
             require_venv=require_venv,
-            acquire_scheduler_endpoints=acquire_scheduler_endpoints,
         ).failures
     )
 
@@ -299,7 +269,6 @@ def collect_runtime_capabilities(
     settings: MemorySettings,
     *,
     require_venv: bool | None = None,
-    acquire_scheduler_endpoints: bool = False,
 ) -> RuntimeCapabilities:
     """Run runtime preflight checks and return a capability snapshot.
 
@@ -366,11 +335,6 @@ def collect_runtime_capabilities(
     graphiti_llm = ProviderConfig.for_graphiti_llm(settings)
     graphiti_embed = ProviderConfig.for_graphiti_embedder(settings)
     graphiti_reranker = ProviderConfig.for_graphiti_reranker(settings)
-    scheduler_required = any(
-        should_use_scheduler(base_url)
-        for base_url in (graphiti_llm.base_url, graphiti_embed.base_url, graphiti_reranker.base_url)
-        if base_url
-    )
 
     preflight_len = len(failures)
     if not graphiti_llm.supports_graphiti_openai_contract():
@@ -387,21 +351,11 @@ def collect_runtime_capabilities(
             graphiti_llm_ready=False,
             embedder_ready=False,
             reranker_ready=False,
-            scheduler_required=scheduler_required,
             failures=tuple(failures),
         )
 
-    fallback_base_url = graphiti_llm.base_url
-    llama_base_url = _resolve_connectivity_base_url(
-        fallback_base_url,
-        acquire_scheduler_endpoint=acquire_scheduler_endpoints,
-    )
-    embed_fallback_base_url = graphiti_embed.base_url
-    embed_base_url = _resolve_connectivity_base_url(
-        embed_fallback_base_url,
-        task="memory: graphiti embed bootstrap",
-        acquire_scheduler_endpoint=acquire_scheduler_endpoints,
-    )
+    llama_base_url = (graphiti_llm.base_url or "").strip()
+    embed_base_url = (graphiti_embed.base_url or "").strip()
     if graphiti_llm.kind is ProviderKind.OPENAI:
         graphiti_llm_ready = check_openai_provider_configuration(
             api_key=graphiti_llm.api_key,
@@ -418,7 +372,7 @@ def collect_runtime_capabilities(
     if not graphiti_llm_ready:
         failures.append(
             "Graphiti extraction connectivity/model check failed "
-            f"(provider={graphiti_llm.kind.value}, scheduler={scheduler_url_from_env()}, "
+            f"(provider={graphiti_llm.kind.value}, "
             f"base_url={llama_base_url}, chat={graphiti_llm.chat_model}, "
             f"embed={graphiti_embed.embed_model})."
         )
@@ -459,12 +413,7 @@ def collect_runtime_capabilities(
             f"(provider={graphiti_embed.kind.value}, embed_base_url={embed_base_url}, "
             f"embed={graphiti_embed.embed_model})."
         )
-    reranker_fallback_base_url = graphiti_reranker.base_url
-    reranker_base_url = _resolve_connectivity_base_url(
-        reranker_fallback_base_url,
-        task="memory: graphiti reranker bootstrap",
-        acquire_scheduler_endpoint=acquire_scheduler_endpoints,
-    )
+    reranker_base_url = (graphiti_reranker.base_url or "").strip()
     reranker_ready = True
     if reranker_base_url != llama_base_url:
         if graphiti_reranker.kind is ProviderKind.OPENAI:
@@ -496,6 +445,5 @@ def collect_runtime_capabilities(
         graphiti_llm_ready=graphiti_llm_ready,
         embedder_ready=embedder_ready,
         reranker_ready=reranker_ready,
-        scheduler_required=scheduler_required,
         failures=tuple(failures),
     )

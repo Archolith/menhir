@@ -31,9 +31,7 @@ from menhir.infrastructure.observability import (
     reset_llm_usage_callback,
     set_llm_usage_callback,
 )
-from menhir.infrastructure.scheduler_trace import (
-    build_episode_scheduler_task,
-)
+from menhir.infrastructure.telemetry import build_episode_task_id
 from menhir.infrastructure.telemetry import (
     record_episode_task_event,
     record_lifecycle_event,
@@ -409,9 +407,6 @@ class IngestQueueMixin:
         # is a narrow theoretical race rather than a real path, but difference_update costs
         # nothing extra and never silently drops a task this loop didn't actually await.
         self._shadow_tasks.difference_update(shadow_tasks)
-        if self._scheduler_http_client is not None:
-            await self._scheduler_http_client.aclose()
-            self._scheduler_http_client = None
         record_lifecycle_event(
             component="ingest_queue",
             event="shutdown",

@@ -11,7 +11,6 @@ from menhir.config import MemorySettings, redact_uri_credentials
 from menhir.core.reader_identity import normalize_reader_id
 from menhir.core.runtime_preflight import RuntimeCapabilities
 from menhir.domain.bootstrap_scope import bootstrap_selection
-from menhir.infrastructure.llama_endpoint import should_use_scheduler
 from menhir.infrastructure.providers import ProviderConfig
 from menhir.services import MaintenanceScheduler
 
@@ -96,40 +95,6 @@ class RuntimeContext:
 
 _state = RuntimeState()
 _init_lock = asyncio.Lock()
-
-
-def _graphiti_scheduler_probe_urls(settings: object) -> list[str]:
-    required = (
-        "graphiti_provider",
-        "graphiti_embed_provider",
-        "graphiti_reranker_provider",
-        "chat_provider",
-        "local_llm_base_url",
-        "local_llm_api_key",
-        "local_llm_chat_model",
-        "local_llm_embed_model",
-        "local_llm_embed_base_url",
-        "openai_api_key",
-        "openai_chat_model",
-        "openai_embed_model",
-        "gemini_base_url",
-        "gemini_api_key",
-        "gemini_chat_model",
-    )
-    if all(hasattr(settings, attr) for attr in required):
-        providers = (
-            ProviderConfig.for_graphiti_llm(settings),
-            ProviderConfig.for_graphiti_embedder(settings),
-            ProviderConfig.for_graphiti_reranker(settings),
-        )
-        return [provider.base_url for provider in providers if provider.base_url]
-
-    fallback_base_url = getattr(settings, "local_llm_base_url", "")
-    return [fallback_base_url] if fallback_base_url else []
-
-
-def _uses_scheduler_managed_graphiti(settings: object) -> bool:
-    return any(should_use_scheduler(base_url) for base_url in _graphiti_scheduler_probe_urls(settings))
 
 
 def _annotate_runtime_failures(failures: list[str], settings: MemorySettings) -> list[str]:
