@@ -479,7 +479,11 @@ No release-managed artifact was modified.
    the wrapper now works inside it. Left behind for Phase 4: nine plaintext
    generations under `/srv/menhir/backups/{decrypted,candidate}/` from earlier
    manual rehearsals (the wrapper deletes only its own).
-5. Delete the stale `/srv/menhir/production/deploy/` shadow tree.
+5. ~~Phase 4 host debris~~ **Done 2026-09-14** — see `PHASE4.md` (24 rows,
+   all corroborated before removal; 22 GB freed; archives pruned to policy
+   with desktop copies verified first; nothing referenced by installed code
+   was touched). Leftovers the corroborator found are listed there for a
+   next pass, uncorroborated.
 6. ~~Release 17~~ **Done 2026-09-13 20:20 UTC as menhir-prod-0.2.0-17**
    (release_sha256 `b0e95f87…`; menhir `66aa7a6`..`59dc467`). New records
    name three repositories; records 14–16 validate as the legacy four-repo

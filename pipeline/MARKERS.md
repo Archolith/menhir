@@ -103,9 +103,9 @@ the next cycle to find. Nothing refuses on them today because readers compare
 them to the current generation, but that is luck, not design. Fix: `complete`
 archives the same eight-marker set `abandon` does.
 
-**D4 — fourteen orphans and one orphan lock**, including a second copy of the
-OAuth database. None has a reader. Retention is a decision, not a default; the
-`ingress-retirement/` copies stay until release 14 lands.
+**D4 — fourteen orphans and one orphan lock** — **removed 2026-09-14 (Phase 4,
+`PHASE4.md` rows C1–C6, C9)**, the OAuth DB copy shredded, after release 16
+made the `ingress-retirement/` rollback copies moot.
 
 ## The host repair this session needs
 
