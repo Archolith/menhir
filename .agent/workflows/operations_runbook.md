@@ -145,7 +145,6 @@ Important capability flags:
 - `neo4j_ready`
 - `embedder_ready`
 - `llm_ready`
-- `scheduler_ready`
 - `reads_ready`
 - `queue_writes_ready`
 - `enrichment_ready`
