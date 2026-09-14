@@ -212,11 +212,18 @@ def check_llama_connectivity(
     chat_model: str,
     embed_model: str,
 ) -> bool:
-    """Validate llama.cpp OpenAI-compatible API and required models."""
+    """Validate an OpenAI-compatible endpoint and, where authoritative, its model list.
+
+    ``GET /models`` is authoritative for a local server (llama.cpp, Ollama, LM Studio, vLLM):
+    a model it does not list cannot be served, so a typo is caught here. Hosted gateways
+    reachable at a non-loopback URL (OpenRouter, a proxy) often do not enumerate everything
+    they route -- OpenRouter serves ``openai/text-embedding-3-small`` without listing it -- so
+    there a missing name is a warning and the first real call is the verification.
+    """
 
     import time as _time
 
-    logger.info("Checking llama.cpp endpoint at %s ...", base_url)
+    logger.info("Checking OpenAI-compatible endpoint at %s ...", base_url)
     headers = {"Content-Type": "application/json"}
     if api_key and not _should_bypass_local_auth(base_url):
         headers["Authorization"] = f"Bearer {api_key}"
@@ -240,22 +247,28 @@ def check_llama_connectivity(
                 if required and required not in available:
                     missing.append(required)
 
-            if missing:
-                logger.error("llama.cpp endpoint missing required model(s): %s", ", ".join(missing))
+            if missing and _should_bypass_local_auth(base_url):
+                logger.error("Local endpoint does not list required model(s): %s", ", ".join(missing))
                 return False
-
-            logger.info("llama.cpp connectivity and model checks passed.")
+            if missing:
+                logger.warning(
+                    "Endpoint %s does not list %s at GET /models; hosted gateways often omit models "
+                    "they still serve, so this is verified on first call.",
+                    base_url, ", ".join(missing),
+                )
+            else:
+                logger.info("Endpoint connectivity and model checks passed.")
             return True
 
         except HTTPError as exc:
             if exc.code == 503 and _time.monotonic() < deadline:
-                logger.info("llama.cpp model still loading (503), retrying in %ds...", _STARTUP_POLL_INTERVAL)
+                logger.info("Endpoint model still loading (503), retrying in %ds...", _STARTUP_POLL_INTERVAL)
                 _time.sleep(_STARTUP_POLL_INTERVAL)
                 continue
-            logger.error("llama.cpp connectivity failed: %s", exc)
+            logger.error("Endpoint connectivity failed: %s", exc)
             return False
         except (URLError, ValueError, json.JSONDecodeError) as exc:
-            logger.error("llama.cpp connectivity failed: %s", exc)
+            logger.error("Endpoint connectivity failed: %s", exc)
             return False
 
 

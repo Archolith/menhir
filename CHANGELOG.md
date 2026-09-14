@@ -1,3 +1,11 @@
+## 2026-09-14 - hosted OpenAI-compatible gateways (OpenRouter) work as the `local` provider
+
+- `GET /models` is treated as authoritative only for a loopback server. Hosted gateways route
+  models they do not enumerate (OpenRouter serves `openai/text-embedding-3-small` without
+  listing it), so a missing name there is now a warning verified on first call instead of a
+  preflight failure that forced `degraded_queue_only`. Preflight wording no longer assumes
+  llama.cpp. `.env.example` shows the OpenRouter block.
+
 ## 2026-09-14 - quieter first boot, honest MCP serverInfo
 
 - Menhir's Neo4j drivers disable the UNRECOGNIZED notification classification (Neo4j's

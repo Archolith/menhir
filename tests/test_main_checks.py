@@ -409,3 +409,32 @@ def test_no_external_scheduler_env_vars_are_read() -> None:
         for match in re.finditer(r"\bSCHEDULER_[A-Z_]+\b", text):
             offenders.append(f"{path.relative_to(src_root)}: {match.group(0)}")
     assert offenders == [], offenders
+
+
+@pytest.mark.unit
+def test_llama_connectivity_model_list_is_advisory_for_hosted_gateways(monkeypatch: pytest.MonkeyPatch) -> None:
+    """OpenRouter serves models its GET /models omits; only a loopback server's list is authoritative."""
+    import io
+    import json as _json
+
+    class _Resp(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(
+        runtime_preflight, "urlopen",
+        lambda request, timeout: _Resp(_json.dumps({"data": [{"id": "openai/gpt-4.1-nano"}]}).encode()),
+    )
+    hosted = runtime_preflight.check_llama_connectivity(
+        base_url="https://openrouter.ai/api/v1", api_key="k",
+        chat_model="openai/gpt-4.1-nano", embed_model="openai/text-embedding-3-small",
+    )
+    local = runtime_preflight.check_llama_connectivity(
+        base_url="http://127.0.0.1:8081/v1", api_key="",
+        chat_model="openai/gpt-4.1-nano", embed_model="openai/text-embedding-3-small",
+    )
+    assert hosted is True
+    assert local is False
