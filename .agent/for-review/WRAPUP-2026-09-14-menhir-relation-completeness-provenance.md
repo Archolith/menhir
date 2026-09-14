@@ -4,12 +4,12 @@
 **Agent:** Codex
 **Model:** GPT-5
 **Session:** Not exposed by this harness
-**Status:** PARTIAL — implementation and local verification are complete; PR CI, merge, and the unavailable `artifact_validate` gate remain
+**Status:** COMPLETE — merged through PR #108; pull-request and post-merge `main` CI passed
 **Plan / Ticket:** `C:\Users\thron\Documents\Codex\2026-09-13\it-i\outputs\menhir-relation-completeness-integration-plan.md`; Archolith/menhir#90; Archolith/menhir#94; Archolith/menhir#96
 **Worktree:** `C:\Users\thron\IdeaProjects\.agent\worktrees\menhir-relation-completeness-integration`
 **Branch:** `integrate/relation-completeness-provenance-20260914`
 **Commits:** `9dcdce33fe1e88cdb3b8e12d705ecc4949ace881`, `244e0123489ffab6cc264dc31b6eebdb18ad8672`, `8974ae15eedfc9221c548c40e72eaf195342c48a`, `6366817a11da457de9c825db3ac4a21b4b90d104`, `3e47ed1b1137a2c847e21dfe508c5e20894abcc5`, `f74b937c91fb755d7014073971e9aa1b80535453`
-**Verification Scope:** six commits above, based on remotely durable `origin/main` commit `6eb4237f3abdaa14836513a3888df71e85d43eea`, plus this wrapup in the named worktree
+**Verification Scope:** six commits above, merged through PR #108 as `d7d79e35b20afb1488ec10b553e407c713f17b60`; pull-request and post-merge `main` CI passed
 **Docs Updated:** `C:\Users\thron\Documents\Codex\2026-09-13\it-i\outputs\menhir-relation-completeness-integration-plan.md`; `C:\Users\thron\IdeaProjects\.agent\worktrees\menhir-relation-completeness-integration\.agent\for-review\WRAPUP-2026-09-14-menhir-relation-completeness-provenance.md`
 **Changelog Updated:** `C:\Users\thron\IdeaProjects\.agent\worktrees\menhir-relation-completeness-integration\CHANGELOG.md`
 
@@ -21,9 +21,10 @@ The plan was checked backward from its merge-ready end state. The accepted base 
 through PR #107. The five behavior commits were restacked in their preserved order, and the sixth
 commit adds only directly related diagnostic coverage, a formatting correction, and the changelog
 entry. The declared environment, affected suites, an isolated Neo4j test, a third-person three-call
-model gate, a default scalar control, and the isolated LongMemEval date smoke were run. Remaining steps are publication,
-GitHub CI, merge, issue/plan reconciliation, and remote-inclusion verification. The source
-branch/worktree remains deliberately preserved. Existing graph data was not migrated or repaired.
+model gate, a default scalar control, and the isolated LongMemEval date smoke were run. The remaining
+publication, GitHub CI, merge, issue-closure, and remote-inclusion steps were subsequently verified. PR #108 merged
+as `d7d79e35`; issues #90 and #94 closed; the merged integration and patch-equivalent source
+branches/worktrees were removed during approved cleanup. Existing graph data was not migrated or repaired.
 
 ---
 
@@ -35,7 +36,7 @@ and alias decisions. Named third parties remain typed-scalar subjects. Derived M
 removed from Graphiti's semantic dedupe candidates, preventing later relationships from corrupting
 View provenance. If an unchanged FACT refresh is refused, the diagnostic names node state,
 MENTIONS parity, contributor scope/lifecycle, and fence generation. The implementation is locally
-verified but not yet published or merged.
+verified and merged to `origin/main` through PR #108.
 
 ## Files Changed
 
@@ -67,8 +68,8 @@ verified but not yet published or merged.
 - LongMemEval supersession inspection — `PASS WITH REPRESENTATION CAVEAT` — the current `user` summary contains only the expected “about two hours each day” state. A merged `coding challenges` topic summary retains both the historical one-hour and current two-hour text, and no explicit hour-valued `RELATES_TO` fact survived. The September 10 control note did not preserve comparable entity/edge totals, so no numeric-parity claim is made.
 - `$env:SCHEDULER_URL='http://127.0.0.1:9'; .\.venv\Scripts\python.exe -m pytest -q` — `FAIL` — 9,626 passed and 380 skipped; only two tests failed because the deliberate URL override changed their asserted default from port 8082 to port 9.
 - `.\.venv\Scripts\python.exe -m pytest tests\test_llama_endpoint.py::test_acquire_llama_url_async_ensures_scheduler tests\test_services_pipeline.py::test_processing_heartbeat_loop_pings_scheduler_for_scheduler_managed_graphiti -q` — `PASS` — both override-sensitive tests passed with their normal environment.
-- `artifact_validate(artifact_type="wrapups", filename="WRAPUP-2026-09-14-menhir-relation-completeness-provenance.md")` — `NOT RUN` — no `artifact_validate` tool is exposed in this harness, so status remains below `READY FOR REVIEW`.
-- GitHub PR CI — `NOT RUN` — the integration branch has not yet been pushed and the PR has not yet been opened.
+- `.\.venv\Scripts\menhir.exe artifacts validate . --repository menhir` — `BASELINE FINDINGS ONLY` — validated 225 records and reported the same 22 inherited corpus findings; none names this wrapup.
+- GitHub PR and post-merge `main` CI — `PASS` — lint, offline tests, and online tests completed successfully for PR #108, and the subsequent `main` push workflow also passed.
 
 ## Claim Cross-Check
 
@@ -76,15 +77,15 @@ verified but not yet published or merged.
 - Files Changed checked against actual modified files: `yes`
 - Commit list checked against actual commit hashes or working-tree state: `yes`
 - Verification results copied from actual command output: `yes`
-- The wrapup itself is uncommitted until this self-check completes; implementation commits are exact.
+- The original wrapup was committed at `f364384c`; this closeout update is part of the focused artifact-reconciliation commit.
 
 ## Completion Checklist
 
-- Plan / acceptance criteria completed: `partial`
-- Docs updated as required: `partial`
+- Plan / acceptance criteria completed: `yes`
+- Docs updated as required: `yes`
 - Changelog updated as required: `yes`
-- Work committed: `yes` for implementation; this wrapup awaits its closeout commit
-- PR publication, CI, merge, issue reconciliation, final plan state, and remote inclusion remain.
+- Work committed: `yes`; the implementation merged through PR #108 and this wrapup records the closeout.
+- PR publication, CI, merge, issue reconciliation, final plan state, and remote inclusion are complete.
 
 ## Assumptions
 
@@ -93,23 +94,23 @@ verified but not yet published or merged.
 
 ## Risks / Gaps
 
-1. `artifact_validate` is unavailable, so the required mechanical wrapup gate is incomplete.
+1. Repository artifact validation still reports 22 inherited corpus findings, but none concerns this wrapup.
 2. The default stochastic scalar benchmark passed its hard invariants but committed only 3/7 expected View slots and over-perceived the money-event control; that is disclosed rather than treated as part of these five fixes.
 3. The LongMemEval control produced the correct current two-hour user summary, but the historical and current values coexist in a merged topic summary and not as an explicit hour-valued relation. This is model-output representation variance on a fixture already documented as stochastic, not evidence of a new first-person prompt regression.
 4. Existing View-to-memory contamination is not migrated or cleaned; this patch prevents new candidate selection and improves refusal diagnosis.
 5. The full local suite was not green in one invocation because isolating the active host scheduler changed two tests' literal expected URL; those exact tests passed immediately without the override. Per operator direction, the full suite will not be rerun.
-6. The original umbrella issue #90 plan still says `PROPOSED`; it must be reconciled after the accepted merge without overwriting unrelated umbrella-worktree edits.
+6. The umbrella issue #90 plan was transitioned to `IMPLEMENTED` in its metadata and archived after the accepted merge. The graph had no artifact registered for its declared UUID, so no graph lifecycle row could be transitioned.
 
 ## Follow-Up Tasks
 
-1. Push this branch, open the focused PR, and require all GitHub lint/offline/online checks to pass.
-2. Merge only after CI and diff review pass, then verify all six reviewed commits are represented on `origin/main`.
-3. Reconcile issues #90/#94/#96 and the local integration/original plans with the merge commit; leave #92/#95 untouched.
-4. Run `artifact_validate` when available and promote this wrapup only after clearing every failure.
-5. Preserve the original source branch/worktree until remote inclusion is verified; do not delete it as part of this task.
+1. Complete: PR #108 was published and all GitHub lint/offline/online checks passed.
+2. Complete: PR #108 merged as `d7d79e35`, and all reviewed commits are represented on `origin/main`.
+3. Complete: issues #90/#94/#96 closed with the merge; #92/#95 remain untouched.
+4. Complete for this artifact: repository validation ran and named no finding against this wrapup; the 22 inherited corpus findings remain separate maintenance debt.
+5. Complete: remote inclusion was verified before the original source and integration branches/worktrees were removed.
 
 ## Notes
 
 - Base PR #107 merged as `6eb4237f3abdaa14836513a3888df71e85d43eea` before the five fixes were restacked.
-- The original source worktree remains `C:\Users\thron\IdeaProjects\.agent\worktrees\menhir-alice-to-user-regression` at `cb078fe48710deaf7ccd2269bfeae5386bd5cf65`.
+- The original source worktree at `cb078fe48710deaf7ccd2269bfeae5386bd5cf65` was removed after patch-equivalence and remote inclusion were verified.
 - The integration has six commits because the sixth contains only review-requested tests, formatting, and changelog evidence; it adds no new feature behavior.
