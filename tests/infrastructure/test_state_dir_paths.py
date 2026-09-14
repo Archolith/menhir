@@ -81,3 +81,17 @@ def test_connect_telemetry_db_creates_the_state_directory(clean_env: Path) -> No
         assert target.parent.is_dir()
     finally:
         conn.close()
+
+
+@pytest.mark.unit
+def test_default_workspace_marker_follows_workspace_root(clean_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    assert paths.default_workspace_marker() is None
+    monkeypatch.setenv("WORKSPACE_ROOT", str(clean_env / "IdeaProjects"))
+    assert paths.default_workspace_marker() == "/IdeaProjects/"
+
+
+@pytest.mark.unit
+def test_default_workspace_marker_follows_workspace_root(clean_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    assert paths.default_workspace_marker() is None
+    monkeypatch.setenv("WORKSPACE_ROOT", str(clean_env / "IdeaProjects"))
+    assert paths.default_workspace_marker() == "/IdeaProjects/"

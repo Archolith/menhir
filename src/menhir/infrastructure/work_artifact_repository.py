@@ -34,6 +34,7 @@ except ModuleNotFoundError:  # pragma: no cover - import guard
 from menhir.domain.artifact_shape import ShapeReport, ShapeStatus, validate_shape
 from menhir.domain.namespace import normalize_namespace
 from menhir.domain.todo_location import parse_code_ref
+from menhir.infrastructure.paths import default_workspace_marker
 from menhir.domain.artifact_reconciliation import (
     ARTIFACT_SOURCE_SCHEMA_VERSION,
     ArtifactSourceSnapshot,
@@ -1150,6 +1151,7 @@ class WorkArtifactRepository:
             code_refs,
             structure_project=structure_project,
             known_projects=self._known_projects(),
+            workspace_marker=default_workspace_marker(),
         )
         if not locations:
             return []

@@ -10,9 +10,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlsplit
 
 
-CANONICAL_PRIMARY_ENDPOINT = "https://memory.ctharvey.me/mcp-http"
+#: The one public MCP data-plane path. The origin is deployment configuration
+#: (``MENHIR_PUBLIC_BASE_URL``); the policy's ``primary_endpoint`` must be that origin
+#: plus this path, and production startup binds it to ``MENHIR_OAUTH_RESOURCE``.
+PRIMARY_ENDPOINT_PATH = "/mcp-http"
 EXPECTED_AUTHENTICATION = {
     "protocol": "oauth-2.1",
     "grant_type": "authorization_code",
@@ -108,6 +112,21 @@ class ProductionAccessContract:
             )
 
 
+def is_canonical_primary_endpoint(value: object) -> bool:
+    """True when ``value`` is ``https://<host>/mcp-http`` with no query or fragment."""
+
+    if not isinstance(value, str) or not value:
+        return False
+    parts = urlsplit(value)
+    return (
+        parts.scheme == "https"
+        and bool(parts.netloc)
+        and parts.path == PRIMARY_ENDPOINT_PATH
+        and not parts.query
+        and not parts.fragment
+    )
+
+
 def _exact_keys(value: object, expected: set[str], label: str) -> dict[str, Any]:
     if not isinstance(value, dict) or set(value) != expected:
         raise ValueError(f"{label} must contain exactly {sorted(expected)}")
@@ -127,9 +146,10 @@ def validate_access_contract(
         {"primary_endpoint", "authentication", "products"},
         "production access contract",
     )
-    if contract["primary_endpoint"] != CANONICAL_PRIMARY_ENDPOINT:
+    if not is_canonical_primary_endpoint(contract["primary_endpoint"]):
         raise ValueError(
-            "production access contract must use the canonical /mcp-http endpoint"
+            "production access contract must use the canonical /mcp-http endpoint "
+            "on an HTTPS origin"
         )
     authentication = _exact_keys(
         contract["authentication"],
@@ -235,7 +255,8 @@ def validate_access_contract(
 __all__ = [
     "AGENT_ALLOWED_TOOLS",
     "AGENT_SCOPES",
-    "CANONICAL_PRIMARY_ENDPOINT",
+    "PRIMARY_ENDPOINT_PATH",
+    "is_canonical_primary_endpoint",
     "EXPECTED_AUTHENTICATION",
     "EXPECTED_PRODUCT_ROLES",
     "OPERATOR_DENIED_TOOLS",

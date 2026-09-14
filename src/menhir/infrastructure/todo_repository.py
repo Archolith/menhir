@@ -22,6 +22,7 @@ from menhir.domain.namespace import (
     normalize_namespace,
     stamped_namespace,
 )
+from menhir.infrastructure.paths import default_workspace_marker
 from menhir.domain.todo_location import (
     DEFAULT_TODO_NAMESPACE,
     TODO_LINK_RELATIONS,
@@ -176,6 +177,7 @@ class TodoRepository:
             code_ref,
             structure_project=structure_project,
             known_projects=self._known_projects(),
+            workspace_marker=default_workspace_marker(),
         )
         if not locations:
             return []

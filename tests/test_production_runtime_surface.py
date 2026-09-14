@@ -9,7 +9,7 @@ import pytest
 
 from menhir.api.client_policy import load_client_policy
 from menhir.access_contract import (
-    CANONICAL_PRIMARY_ENDPOINT,
+    is_canonical_primary_endpoint,
     EXPECTED_PRODUCT_ROLES,
 )
 from menhir.api.production_routes import readyz, source_fence_probe
@@ -404,7 +404,7 @@ def test_production_client_policy_is_digest_bound_and_tracks_clients() -> None:
 
     assert authority.version == 2
     assert authority.access_contract is not None
-    assert authority.access_contract.primary_endpoint == CANONICAL_PRIMARY_ENDPOINT
+    assert is_canonical_primary_endpoint(authority.access_contract.primary_endpoint)
     assert {
         product: access.role
         for product, access in authority.access_contract.products.items()

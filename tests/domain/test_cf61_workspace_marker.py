@@ -40,20 +40,21 @@ class TestCustomWorkspaceMarker:
 
 
 @pytest.mark.unit
-class TestDefaultMarkerUnchanged:
-    def test_default_is_idea_projects(self):
-        assert DEFAULT_WORKSPACE_MARKER == "/IdeaProjects/"
+class TestDefaultMarker:
+    def test_domain_default_is_no_marker(self):
+        assert DEFAULT_WORKSPACE_MARKER is None
 
-    def test_default_parses_exactly_as_before(self):
+    def test_explicit_marker_trims_the_workspace_root(self):
         loc = parse_code_ref(
-            r"C:\Users\dev\IdeaProjects\projects\archolith\menhir\src\menhir\api\routes.py"
+            r"C:\Users\dev\IdeaProjects\projects\archolith\menhir\src\menhir\api\routes.py",
+            workspace_marker="/IdeaProjects/",
         )[0]
         assert loc.resolution_status == "resolved"
         assert loc.project == "menhir"
         assert loc.path == "src/menhir/api/routes.py"
 
-    def test_path_outside_default_root_still_unresolved(self):
-        loc = parse_code_ref(r"D:\somewhere\else\file.py")[0]
+    def test_absolute_path_without_marker_is_unresolved(self):
+        loc = parse_code_ref(r"C:\Users\dev\IdeaProjects\projects\archolith\menhir\x.py")[0]
         assert loc.resolution_status == "unresolved"
         assert loc.unresolved_reason == "absolute_path_outside_workspace"
 

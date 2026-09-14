@@ -42,12 +42,11 @@ _WORKSPACE_PREFIX = re.compile(r"^projects/[^/]+/([^/]+)/(.+)$")
 #: A drive-letter absolute Windows path.
 _WINDOWS_ABSOLUTE = re.compile(r"^[A-Za-z]:[\\/]")
 
-#: Default workspace root marker used to trim a machine-specific absolute Windows
-#: path down to its portable workspace-relative remainder. This is a default, not a
-#: domain truth: the pure domain layer must not read the environment, so a caller
-#: whose checkout lives under a different root should override it via the
-#: ``workspace_marker`` keyword argument rather than editing this literal.
-DEFAULT_WORKSPACE_MARKER = "/IdeaProjects/"
+#: The pure domain layer does not know where any operator's workspace lives, so an
+#: absolute Windows path is only trimmed when the caller supplies ``workspace_marker``
+#: (see ``menhir.infrastructure.paths.default_workspace_marker``). Without one, an
+#: absolute path is rejected as ``absolute_path_outside_workspace``.
+DEFAULT_WORKSPACE_MARKER: str | None = None
 
 #: Trailing ":123", ":123-456", ":name", or "::name".
 _LINE_RANGE = re.compile(r"^(?P<path>.+?):(?P<start>\d+)-(?P<end>\d+)$")
@@ -258,10 +257,10 @@ def parse_code_ref(
     ``structure_project`` is the author's explicit declaration and takes
     precedence over any project parsed out of the path. ``known_projects``
     lets a bare ``<project>/<path>`` form be recognized without guessing.
-    ``workspace_marker`` is the workspace root used to trim an absolute Windows
-    path; it defaults to ``DEFAULT_WORKSPACE_MARKER`` and may be overridden by a
-    caller whose checkout lives under a different root. Pass an empty string or
-    None to disable workspace-root stripping entirely.
+    ``workspace_marker`` is the workspace root segment (for example ``/work/``)
+    used to trim an absolute Windows path down to its portable remainder. It is
+    ``None`` by default: the domain layer does not read the environment, so
+    infrastructure callers pass ``paths.default_workspace_marker()``.
 
     Ordering is the author's; ``ordinal`` preserves it. Exact duplicate
     normalized locations collapse to the first occurrence.

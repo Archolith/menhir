@@ -1,3 +1,13 @@
+## 2026-09-14 - remove operator-specific literals from runtime code
+
+- `access_contract` no longer hardcodes one deployment's public origin. The policy's
+  `primary_endpoint` must be `https://<origin>/mcp-http`; production startup still binds it to
+  `MENHIR_OAUTH_RESOURCE`, which is where the concrete origin lives.
+- `todo_location.parse_code_ref` no longer trims absolute Windows paths against a built-in
+  `/IdeaProjects/` marker. The domain default is "no marker"; the todo and artifact
+  repositories pass `paths.default_workspace_marker()`, derived from `WORKSPACE_ROOT`, so
+  existing workspaces behave as before and other installs reject absolute paths as before.
+
 ## 2026-09-14 - root local state in MENHIR_STATE_DIR instead of the install layout
 
 - Telemetry sidecar and embedded OAuth AS files now default to `~/.menhir` (override with

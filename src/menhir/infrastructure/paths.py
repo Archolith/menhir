@@ -51,6 +51,20 @@ def state_dir() -> Path:
     return Path.home() / DEFAULT_STATE_DIR_NAME
 
 
+def default_workspace_marker() -> str | None:
+    """Return ``"/<workspace dir name>/"`` for trimming absolute paths, or ``None``.
+
+    Feeds ``todo_location.parse_code_ref(workspace_marker=...)``: an absolute Windows path
+    that contains the legacy workspace directory is reduced to its workspace-relative
+    remainder. Without ``WORKSPACE_ROOT`` there is nothing to trim against.
+    """
+
+    root = workspace_root()
+    if root is None or not root.name:
+        return None
+    return f"/{root.name}/"
+
+
 def projects_dir() -> Path | None:
     """Return ``WORKSPACE_ROOT/projects`` when the legacy workspace layout is configured, else ``None``."""
 
