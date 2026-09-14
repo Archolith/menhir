@@ -37,15 +37,6 @@ def projects_dir() -> Path:
     return workspace_root() / "projects"
 
 
-def scheduler_project_dir() -> Path:
-    """Return the scheduler project directory.
-
-    Uses SCHEDULER_DIR_NAME env var (default: cth.mcp.scheduler).
-    """
-    scheduler_name = os.getenv("SCHEDULER_DIR_NAME", "cth.mcp.scheduler")
-    return projects_dir() / "ctharvey" / scheduler_name
-
-
 def telemetry_db_path() -> Path:
     """Return the default telemetry database path.
 

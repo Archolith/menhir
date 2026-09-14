@@ -196,7 +196,6 @@ def test_declared_self_survives_public_ingest_and_cannot_be_merged(
             env["PYTHONPATH"] = str(repo_root / "src")
         env["MENHIR_CANONICAL_SELF_BINDING_MODE"] = "enforce"
         env["MENHIR_MAX_INGEST_WORKERS"] = "1"
-        env["SCHEDULER_TRACE_DISABLED"] = "1"
         return env
 
     monkeypatch.setattr(test_server, "_shape_env", _shape_env)

@@ -17,7 +17,6 @@ from typing import Any, Callable
 import pytest
 
 from menhir.config import MemorySettings
-from menhir.infrastructure.graphiti_client import GraphitiClient
 import menhir.infrastructure.providers as providers
 from menhir.infrastructure.providers import (
     OpenAIStyleChatBackend,
@@ -143,42 +142,6 @@ async def test_reset_builds_a_fresh_client() -> None:
 
     assert calls["n"] == 2
     assert clients[1] is not clients[0], "reset did not force a fresh client"
-
-
-@pytest.mark.asyncio
-async def test_base_url_rebind_invalidates_the_cached_client() -> None:
-    """CF-161 interaction: after a base-URL rebind, the next chat completion does not reuse the
-    pre-rebind client."""
-    factory, calls, clients = _make_factory()
-    backend = _backend(factory)
-
-    assert await _call(backend) == "ok"
-    pre_rebind_client = clients[0]
-
-    # A graphiti base-URL rebind (which must invalidate the chat-client cache).
-    class _Ref:
-        client: Any
-        config: Any
-
-    ref = _Ref()
-    ref.client = object()
-    ref.config = SimpleNamespace(base_url="http://old/v1")
-    wrapper = GraphitiClient(
-        client=object(),
-        scheduler_settings=MemorySettings(),
-        scheduler_api_key="k",
-        llm_base_url="http://old/v1",
-        embed_base_url="http://old-embed/v1",
-        reranker_base_url="http://old-rerank/v1",
-        llm_client_ref=ref,
-        embedding_cache=object(),
-    )
-    wrapper._maybe_update_client_base_url(llm_base_url="http://new/v1")
-
-    assert await _call(backend) == "ok"
-
-    assert calls["n"] == 2
-    assert clients[1] is not pre_rebind_client, "rebind did not invalidate the cached chat client"
 
 
 def test_reset_function_is_named_and_public() -> None:

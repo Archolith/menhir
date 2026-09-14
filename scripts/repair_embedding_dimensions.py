@@ -17,7 +17,6 @@ from menhir.infrastructure.embedding_dimensions import (
     expected_graphiti_embedding_dimension,
     semantic_fact_edge_pattern,
 )
-from menhir.infrastructure.llama_endpoint import acquire_llama_url_sync, should_use_scheduler
 from menhir.infrastructure.neo4j import Neo4jRepository
 from menhir.infrastructure.observability import build_async_openai_client
 from menhir.infrastructure.providers import ProviderConfig
@@ -192,12 +191,6 @@ def _resolve_embed_client(settings: MemorySettings) -> tuple[Any, str, str]:
     if not provider.embed_model:
         raise RuntimeError("Current Graphiti embed model is blank.")
     base_url = provider.base_url
-    if should_use_scheduler(base_url):
-        base_url = acquire_llama_url_sync(
-            fallback=base_url,
-            task="memory: embedding repair",
-            timeout_s=120.0,
-        )
     client = build_async_openai_client(
         base_url=base_url,
         api_key=provider.api_key,

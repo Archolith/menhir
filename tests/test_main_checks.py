@@ -367,3 +367,45 @@ def test_collect_runtime_failures_default_enforces_venv_guard_for_source_checkou
     failures = runtime_preflight.collect_runtime_failures(settings)
 
     assert "menhir must run from the project .venv interpreter." in failures
+
+
+@pytest.mark.unit
+def test_runtime_capabilities_have_no_external_scheduler_fields() -> None:
+    """Menhir talks to the configured OpenAI-compatible URL directly; no scheduler mediates it."""
+    fields = set(runtime_preflight.RuntimeCapabilities.__dataclass_fields__)
+    assert not {name for name in fields if "scheduler" in name}, fields
+    assert not hasattr(runtime_preflight.RuntimeCapabilities, "scheduler_ready")
+
+
+@pytest.mark.unit
+def test_preflight_failure_text_names_only_the_configured_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = MemorySettings(
+        graphiti_provider="local",
+        local_llm_base_url="http://127.0.0.1:8081/v1",
+        local_llm_chat_model="chat-model",
+    )
+    monkeypatch.setattr(runtime_preflight, "check_graphiti_dependency", lambda: True)
+    monkeypatch.setattr(runtime_preflight, "check_neo4j_connectivity", lambda *args, **kwargs: True)
+    monkeypatch.setattr(runtime_preflight, "expected_graphiti_embedding_dimension", lambda settings: None)
+    monkeypatch.setattr(runtime_preflight, "check_llama_connectivity", lambda **kwargs: False)
+
+    failures = runtime_preflight.collect_runtime_failures(settings, require_venv=False)
+
+    llm_failures = [f for f in failures if f.startswith("Graphiti extraction connectivity")]
+    assert llm_failures, failures
+    assert "scheduler" not in llm_failures[0].lower()
+    assert "base_url=http://127.0.0.1:8081/v1" in llm_failures[0]
+
+
+@pytest.mark.unit
+def test_no_external_scheduler_env_vars_are_read() -> None:
+    """Guards the removal: no SCHEDULER_* environment variable is consulted anywhere in the package."""
+    import re
+
+    src_root = Path(runtime_preflight.__file__).resolve().parents[1]
+    offenders: list[str] = []
+    for path in src_root.rglob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        for match in re.finditer(r"\bSCHEDULER_[A-Z_]+\b", text):
+            offenders.append(f"{path.relative_to(src_root)}: {match.group(0)}")
+    assert offenders == [], offenders

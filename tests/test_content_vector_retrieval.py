@@ -47,8 +47,4 @@ async def test_embed_query_reuses_graphiti_embedder(monkeypatch: pytest.MonkeyPa
 
     client = GraphitiClient(client=object(), embedder_ref=Embedder())  # type: ignore[arg-type]
 
-    async def _alive(*, task: str) -> None:
-        assert task == "memory: content-vector query embedding"
-
-    monkeypatch.setattr(client, "_ensure_graphiti_endpoints_alive", _alive)
     assert await client.embed_query("hello") == [1.0, 2.0]

@@ -7,7 +7,7 @@ correlation id (contextvars) so nested emit sites join a unit of work without th
 through every function. Emission is best-effort and can NEVER raise into the caller, so toggling a
 channel changes only WHAT is recorded, never what the code does.
 
-Sink + reader are the telemetry ``lifecycle_events`` store already used by scheduler_trace and the
+Sink + reader are the telemetry ``lifecycle_events`` store already used by the
 consolidation audit: rows are ``component=<channel>``, the correlation id rides in the indexed
 ``episode_uuid`` column, and richer keys ride in ``details``. Read back with :meth:`AuditChannel.read`
 / :meth:`AuditChannel.read_recent`, ``scripts/inspect_audit_trail.py``, or the telemetry reader.

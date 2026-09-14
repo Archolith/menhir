@@ -72,20 +72,10 @@ def _build_llm_adapter(
 def _fake_dependencies(
     *,
     client: object | None = None,
-    acquired_url: str | None = None,
-    acquire_error: Exception | None = None,
     timeout_s: float = 1.0,
     sleep_delays: list[float] | None = None,
-    acquire_calls: list[dict[str, object]] | None = None,
     client_calls: list[dict[str, object]] | None = None,
 ) -> ProviderRuntimeDependencies:
-    async def acquire(*, fallback: str, task: str | None = None, timeout_s: float = 30.0) -> str:
-        if acquire_calls is not None:
-            acquire_calls.append({"fallback": fallback, "task": task, "timeout_s": timeout_s})
-        if acquire_error is not None:
-            raise acquire_error
-        return acquired_url or fallback
-
     def build_client(
         *,
         base_url: str,
@@ -104,7 +94,6 @@ def _fake_dependencies(
             sleep_delays.append(delay)
 
     return ProviderRuntimeDependencies(
-        scheduler_url_acquire=acquire,
         openai_client_factory=build_client,
         request_timeout_s=timeout_s,
         retry_sleep=sleep,
@@ -290,63 +279,23 @@ class TestCompressContentUnit:
         assert result == "Updated memory"
 
     @pytest.mark.asyncio
-    async def test_scheduler_acquisition_succeeds(self):
+    async def test_compress_uses_the_configured_base_url(self):
         mock_create = AsyncMock(return_value=_mock_chat_response("summary"))
-        acquire_calls: list[dict[str, object]] = []
         client_calls: list[dict[str, object]] = []
         adapter = self._adapter_for_create(
             mock_create,
-            acquired_url="http://127.0.0.1:8089/v1",
             timeout_s=0.25,
-            acquire_calls=acquire_calls,
             client_calls=client_calls,
         )
 
         result = await adapter.compress_content("some content")
 
         assert result == "summary"
-        assert acquire_calls == [
-            {
-                "fallback": "http://127.0.0.1:8081/v1",
-                "task": "memory: llm compression",
-                "timeout_s": 0.25,
-            }
-        ]
         assert client_calls[0] == {
-            "base_url": "http://127.0.0.1:8089/v1",
+            "base_url": "http://127.0.0.1:8081/v1",
             "api_key": "local",
             "timeout_s": 0.25,
         }
-
-    @pytest.mark.asyncio
-    async def test_scheduler_acquisition_timeout_falls_back(self):
-        mock_create = AsyncMock(return_value=_mock_chat_response("summary"))
-        client_calls: list[dict[str, object]] = []
-        adapter = self._adapter_for_create(
-            mock_create,
-            acquire_error=TimeoutError("scheduler timed out"),
-            client_calls=client_calls,
-        )
-
-        result = await adapter.compress_content("some content")
-
-        assert result == "summary"
-        assert client_calls[0]["base_url"] == "http://127.0.0.1:8081/v1"
-
-    @pytest.mark.asyncio
-    async def test_scheduler_acquisition_failure_falls_back(self):
-        mock_create = AsyncMock(return_value=_mock_chat_response("summary"))
-        client_calls: list[dict[str, object]] = []
-        adapter = self._adapter_for_create(
-            mock_create,
-            acquire_error=RuntimeError("scheduler unavailable"),
-            client_calls=client_calls,
-        )
-
-        result = await adapter.compress_content("some content")
-
-        assert result == "summary"
-        assert client_calls[0]["base_url"] == "http://127.0.0.1:8081/v1"
 
 def test_strip_thinking_tags_collapses_whitespace():
     assert _strip_thinking_tags("A <think>hidden</think>  summary\nhere") == "A summary here"
