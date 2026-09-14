@@ -1,0 +1,238 @@
+{
+  "schema": 1,
+  "kind": "menhir-artifact-authority",
+  "artifacts": {
+    "/etc/sudoers.d/menhir-production": {
+      "kind": "git",
+      "repository": "menhir",
+      "path": "pipeline/etc/sudoers.d/menhir-production"
+    },
+    "/etc/tmpfiles.d/menhir-production.conf": {
+      "kind": "git",
+      "repository": "menhir",
+      "path": "pipeline/etc/tmpfiles.d/menhir-production.conf"
+    },
+    "/srv/menhir/production/bin/authority_digest.py": {
+      "kind": "git",
+      "repository": "menhir",
+      "path": "deploy/lib/authority_digest.py"
+    },
+    "/srv/menhir/production/bin/backup-generation.sh": {
+      "kind": "git",
+      "repository": "menhir",
+      "path": "deploy/backup-generation.sh"
+    },
+    "/srv/menhir/production/bin/backup-status": {
+      "kind": "git",
+      "repository": "menhir",
+      "path": "pipeline/bin/backup-status"
+    },
+    "/srv/menhir/production/bin/backup_cleanup_txn.py": {
+      "kind": "git",
+      "repository": "menhir",
+      "path": "deploy/lib/backup_cleanup_txn.py"
+    },
+    "/srv/menhir/production/bin/candidate-accept.sh": {
+      "kind": "git",
+      "repository": "menhir",
+      "path": "deploy/candidate-accept.sh"
+    },
+    "/srv/menhir/production/bin/candidate-deploy.sh": {
+      "kind": "git",
+      "repository": "menhir",
+      "path": "deploy/candidate-deploy.sh"
+    },
+    "/srv/menhir/production/bin/generation-inspect": {
+      "kind": "git",
+      "repository": "menhir",
+      "path": "pipeline/bin/generation-inspect"
+    },
+    "/srv/menhir/production/bin/lib.sh": {
+      "kind": "git",
+      "repository": "menhir",
+      "path": "pipeline/bin/lib.sh"
+    },
+    "/srv/menhir/production/bin/logs": {
+      "kind": "git",
+      "repository": "menhir",
+      "path": "pipeline/bin/logs"
+    },
+    "/srv/menhir/production/bin/make_manifest.py": {
+      "kind": "git",
+      "repository": "menhir",
+      "path": "deploy/lib/make_manifest.py"
+    },
+    "/srv/menhir/production/bin/mcp_acceptance_probe.py": {
+      "kind": "git",
+      "repository": "menhir",
+      "path": "deploy/lib/mcp_acceptance_probe.py"
+    },
+    "/srv/menhir/production/bin/menhir_schema.py": {
+      "kind": "git",
+      "repository": "menhir",
+      "path": "deploy/lib/menhir_schema.py"
+    },
+    "/srv/menhir/production/bin/promote.sh": {
+      "kind": "git",
+      "repository": "menhir",
+      "path": "deploy/promote.sh"
+    },
+    "/srv/menhir/production/bin/recover": {
+      "kind": "git",
+      "repository": "menhir",
+      "path": "pipeline/bin/recover"
+    },
+    "/srv/menhir/production/bin/release-inspect": {
+      "kind": "git",
+      "repository": "menhir",
+      "path": "pipeline/bin/release-inspect"
+    },
+    "/srv/menhir/production/bin/release-lib.sh": {
+      "kind": "git",
+      "repository": "menhir",
+      "path": "deploy/release-lib.sh"
+    },
+    "/srv/menhir/production/bin/release-run.sh": {
+      "kind": "git",
+      "repository": "menhir",
+      "path": "deploy/release-run.sh"
+    },
+    "/srv/menhir/production/bin/release-validate.sh": {
+      "kind": "git",
+      "repository": "menhir",
+      "path": "deploy/release-validate.sh"
+    },
+    "/srv/menhir/production/bin/restore-generation.sh": {
+      "kind": "git",
+      "repository": "menhir",
+      "path": "deploy/restore-generation.sh"
+    },
+    "/srv/menhir/production/bin/restore_authority_txn.py": {
+      "kind": "git",
+      "repository": "menhir",
+      "path": "deploy/lib/restore_authority_txn.py"
+    },
+    "/srv/menhir/production/bin/rollback.sh": {
+      "kind": "git",
+      "repository": "menhir",
+      "path": "deploy/rollback.sh"
+    },
+    "/srv/menhir/production/bin/same-host-fence.sh": {
+      "kind": "git",
+      "repository": "menhir",
+      "path": "deploy/same-host-fence.sh"
+    },
+    "/srv/menhir/production/bin/same_host_fence.py": {
+      "kind": "git",
+      "repository": "menhir",
+      "path": "deploy/lib/same_host_fence.py"
+    },
+    "/srv/menhir/production/bin/secrets-map.sh": {
+      "kind": "git",
+      "repository": "menhir",
+      "path": "deploy/secrets-map.sh"
+    },
+    "/srv/menhir/production/bin/stage-generation.sh": {
+      "kind": "git",
+      "repository": "menhir",
+      "path": "deploy/stage-generation.sh"
+    },
+    "/srv/menhir/production/bin/stage_generation.py": {
+      "kind": "git",
+      "repository": "menhir",
+      "path": "deploy/lib/stage_generation.py"
+    },
+    "/srv/menhir/production/bin/status": {
+      "kind": "git",
+      "repository": "menhir",
+      "path": "pipeline/bin/status"
+    },
+    "/srv/menhir/production/bin/validate_durable_inventory.py": {
+      "kind": "git",
+      "repository": "menhir",
+      "path": "deploy/lib/validate_durable_inventory.py"
+    },
+    "/srv/menhir/production/bin/verify-artifacts": {
+      "kind": "git",
+      "repository": "menhir",
+      "path": "pipeline/bin/verify-artifacts"
+    },
+    "/srv/menhir/production/deploy/Dockerfile": {
+      "kind": "git",
+      "repository": "menhir",
+      "path": "deploy/Dockerfile"
+    },
+    "/srv/menhir/production/deploy/docker-compose.production.yml": {
+      "kind": "git",
+      "repository": "menhir",
+      "path": "deploy/docker-compose.production.yml"
+    },
+    "/srv/menhir/production/deploy/durable-state-inventory.json": {
+      "kind": "git",
+      "repository": "menhir",
+      "path": "deploy/durable-state-inventory.json"
+    },
+    "/srv/menhir/production/deploy/installed-artifacts.json": {
+      "kind": "git",
+      "repository": "menhir",
+      "path": "deploy/installed-artifacts.json"
+    },
+    "/srv/menhir/production/ingress/cloudflared-config.yml": {
+      "kind": "git",
+      "repository": "menhir",
+      "path": "deploy/cloudflared-config.yml"
+    },
+    "/srv/menhir/production/ingress/docker-compose.cloudflared.yml": {
+      "kind": "git",
+      "repository": "menhir",
+      "path": "deploy/docker-compose.cloudflared.yml"
+    },
+    "/srv/menhir/production/policy/client-policy.json": {
+      "kind": "git",
+      "repository": "menhir",
+      "path": "deploy/client-policy.production.json"
+    },
+    "/srv/menhir/production/release/production.env": {
+      "kind": "rendered",
+      "rendered_key": "production_env_sha256"
+    },
+    "/usr/local/sbin/menhir-backup-local": {
+      "kind": "git",
+      "repository": "menhir",
+      "path": "deploy/menhir-backup-local.sh"
+    }
+  },
+  "retired": {
+    "caddy_units": [
+      "menhir-caddy-reconcile.path",
+      "menhir-caddy-reconcile.service"
+    ],
+    "caddy_scripts": [
+      "/srv/menhir/production/bin/caddy-release.sh",
+      "/srv/menhir/production/bin/caddy-route-apply",
+      "/srv/menhir/production/bin/caddy-route-rollback"
+    ],
+    "caddy_routes": [
+      "/srv/yawn/releases/menhir-route-candidate"
+    ],
+    "gateway_units": [
+      "menhir-op@.service",
+      "menhir-oauth-operations.service"
+    ],
+    "gateway_scripts": [
+      "/srv/menhir/production/bin/verify_python_runtime.py",
+      "/etc/yawn-vps/menhir-oauth-policy.json",
+      "/etc/yawn-vps/menhir-oauth-public.pem",
+      "/etc/yawn-vps/menhir-python-runtime.sha256",
+      "/srv/menhir/production/bin/worker",
+      "/srv/menhir/production/bin/candidate-deploy",
+      "/srv/menhir/production/bin/candidate-accept",
+      "/srv/menhir/production/bin/backup",
+      "/srv/menhir/production/bin/restore-rehearsal",
+      "/srv/menhir/production/bin/restore-production",
+      "/srv/menhir/production/bin/promote",
+      "/srv/menhir/production/bin/rollback",
+      "/srv/menhir/production/bin/release-run"
+    ]
+  }
+}

@@ -3,10 +3,14 @@
 Moved byte-identical from `yawn.vps/ops/menhir/` in release 0.2.0-16 (yawn.vps
 `bc4f29e`); the operations gateway (`menhir-oauth-operations.service` and its
 `/srv/yawn/projects/yawn.vps` sources) retired in the same release and is not
-here. `pipeline/bin/verify-artifacts` is the on-host verifier; its `required`
-and `obsolete` sets are held coherent with `deploy/installed-artifacts.json`,
-`deploy/release_spec.py` and `deploy/release-install.sh` by
-`tests/test_artifact_authority_coherence.py`. `pipeline/systemd/` and
+here. `pipeline/bin/verify-artifacts` is the on-host verifier. Since release
+0.2.0-18 its `required`/`obsolete` sets, `deploy/installed-artifacts.json` and
+the installer's allowed/retired blocks are all **rendered** from the one
+authority `deploy/artifact-authority.json` by `deploy/lib/artifact_authority.py`
+(`--check` in tests, `--write` to regenerate); `release_spec.ARTIFACT_SOURCES`
+loads the same file. Edit the authority, run `--write`, commit all four.
+`pipeline/apply_modes.py` is the operator tool that restores manifest modes on
+a bundle after scp. `pipeline/systemd/` and
 `pipeline/scheduled-backup.sh` belong to the scaffold (nightly backup timer).
 The text below is the original yawn.vps README, kept for its safety model;
 paths written as `ops/menhir/...` now read `pipeline/...`.

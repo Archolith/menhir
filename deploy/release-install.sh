@@ -23,12 +23,13 @@ import sys
 
 bundle, manifest_path, plan_path = sys.argv[1:]
 release_destination = "/srv/menhir/production/release/release.json"
+# BEGIN GENERATED from deploy/artifact-authority.json -- do not edit by hand
 allowed = frozenset(line for line in """
 /etc/sudoers.d/menhir-production
 /etc/tmpfiles.d/menhir-production.conf
 /srv/menhir/production/bin/authority_digest.py
-/srv/menhir/production/bin/backup-status
 /srv/menhir/production/bin/backup-generation.sh
+/srv/menhir/production/bin/backup-status
 /srv/menhir/production/bin/backup_cleanup_txn.py
 /srv/menhir/production/bin/candidate-accept.sh
 /srv/menhir/production/bin/candidate-deploy.sh
@@ -42,14 +43,14 @@ allowed = frozenset(line for line in """
 /srv/menhir/production/bin/recover
 /srv/menhir/production/bin/release-inspect
 /srv/menhir/production/bin/release-lib.sh
-/srv/menhir/production/bin/release-validate.sh
 /srv/menhir/production/bin/release-run.sh
+/srv/menhir/production/bin/release-validate.sh
 /srv/menhir/production/bin/restore-generation.sh
 /srv/menhir/production/bin/restore_authority_txn.py
 /srv/menhir/production/bin/rollback.sh
-/srv/menhir/production/bin/secrets-map.sh
 /srv/menhir/production/bin/same-host-fence.sh
 /srv/menhir/production/bin/same_host_fence.py
+/srv/menhir/production/bin/secrets-map.sh
 /srv/menhir/production/bin/stage-generation.sh
 /srv/menhir/production/bin/stage_generation.py
 /srv/menhir/production/bin/status
@@ -65,6 +66,7 @@ allowed = frozenset(line for line in """
 /srv/menhir/production/release/production.env
 /usr/local/sbin/menhir-backup-local
 """.splitlines() if line)
+# END GENERATED
 
 def unique(pairs):
     value = {}
@@ -323,6 +325,7 @@ assert_maintenance
 # and removed through the retired-unit mechanism below and restored by the
 # same rollback path. The journal field is kept for schema stability.
 operations_was_active=0
+# BEGIN GENERATED from deploy/artifact-authority.json -- do not edit by hand
 retired_caddy_units=(
     menhir-caddy-reconcile.path
     menhir-caddy-reconcile.service
@@ -354,6 +357,7 @@ retired_gateway_scripts=(
     /srv/menhir/production/bin/rollback
     /srv/menhir/production/bin/release-run
 )
+# END GENERATED
 retired_units=("${retired_caddy_units[@]}" "${retired_gateway_units[@]}")
 retired_scripts=("${retired_caddy_scripts[@]}" "${retired_gateway_scripts[@]}")
 

@@ -19,6 +19,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
 sys.path.insert(0, str(SCRIPT_DIR / "lib"))
 
+import artifact_authority  # noqa: E402
 import menhir_schema  # noqa: E402
 import verify_wheelhouse  # noqa: E402
 import build_release_image  # noqa: E402
@@ -122,78 +123,11 @@ REVIEWED_GITHUB_ATTESTATION_TRUSTED_ROOT_SHA256 = (
 )
 
 
-def _git(repository: str, path: str) -> dict[str, str]:
-    return {"kind": "git", "repository": repository, "path": path}
-
-
-def _rendered(key: str) -> dict[str, str]:
-    return {"kind": "rendered", "rendered_key": key}
-
-
-# The sole destination-to-source authority for the installed artifact census.
-ARTIFACT_SOURCES: dict[str, dict[str, str]] = {
-    "/srv/menhir/production/release/production.env": _rendered(
-        "production_env_sha256"
-    ),
-    "/srv/menhir/production/policy/client-policy.json": _git(
-        "menhir", "deploy/client-policy.production.json"
-    ),
-    "/srv/menhir/production/deploy/Dockerfile": _git(
-        "menhir", "deploy/Dockerfile"
-    ),
-    "/srv/menhir/production/deploy/docker-compose.production.yml": _git(
-        "menhir", "deploy/docker-compose.production.yml"
-    ),
-    "/srv/menhir/production/deploy/durable-state-inventory.json": _git(
-        "menhir", "deploy/durable-state-inventory.json"
-    ),
-    "/srv/menhir/production/deploy/installed-artifacts.json": _git(
-        "menhir", "deploy/installed-artifacts.json"
-    ),
-    # The live Cloudflared ingress. Sole route to memory.ctharvey.me; previously
-    # hand-placed on the host, in no release and no backup. Sourced from deploy/
-    # rather than pipeline/ so there is exactly one blob per file.
-    "/srv/menhir/production/ingress/cloudflared-config.yml": _git(
-        "menhir", "deploy/cloudflared-config.yml"
-    ),
-    "/srv/menhir/production/ingress/docker-compose.cloudflared.yml": _git(
-        "menhir", "deploy/docker-compose.cloudflared.yml"
-    ),
-    "/usr/local/sbin/menhir-backup-local": _git(
-        "menhir", "deploy/menhir-backup-local.sh"
-    ),
-}
-for _name in (
-    "backup-status", "generation-inspect", "lib.sh", "logs", "recover",
-    "release-inspect", "status", "verify-artifacts",
-):
-    ARTIFACT_SOURCES[f"/srv/menhir/production/bin/{_name}"] = _git(
-        "menhir", f"pipeline/bin/{_name}"
-    )
-for _name in (
-    "backup-generation.sh", "candidate-accept.sh", "candidate-deploy.sh",
-    "promote.sh", "release-lib.sh", "release-run.sh", "release-validate.sh",
-    "restore-generation.sh", "rollback.sh", "same-host-fence.sh",
-    "secrets-map.sh", "stage-generation.sh",
-):
-    ARTIFACT_SOURCES[f"/srv/menhir/production/bin/{_name}"] = _git(
-        "menhir", f"deploy/{_name}"
-    )
-for _name in (
-    "authority_digest.py", "backup_cleanup_txn.py", "make_manifest.py",
-    "mcp_acceptance_probe.py", "menhir_schema.py", "restore_authority_txn.py",
-    "same_host_fence.py", "stage_generation.py",
-    "validate_durable_inventory.py",
-):
-    ARTIFACT_SOURCES[f"/srv/menhir/production/bin/{_name}"] = _git(
-        "menhir", f"deploy/lib/{_name}"
-    )
-ARTIFACT_SOURCES["/etc/sudoers.d/menhir-production"] = _git(
-    "menhir", "pipeline/etc/sudoers.d/menhir-production"
-)
-ARTIFACT_SOURCES["/etc/tmpfiles.d/menhir-production.conf"] = _git(
-    "menhir", "pipeline/etc/tmpfiles.d/menhir-production.conf"
-)
+# The sole destination-to-source authority for the installed artifact census
+# is deploy/artifact-authority.json (see deploy/lib/artifact_authority.py);
+# installed-artifacts.json, release-install.sh and verify-artifacts are
+# rendered from the same file, so they cannot disagree with this map.
+ARTIFACT_SOURCES: dict[str, dict[str, str]] = artifact_authority.sources()
 
 
 def _unique_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:

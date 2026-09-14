@@ -1,7 +1,10 @@
 """Coherence of the installed-artifact authorities.
 
-The installed artifact list is hardcoded in four places, and each enforces it
-independently with a hard failure:
+Since release 0.2.0-18 there is one authority, deploy/artifact-authority.json,
+and deploy/lib/artifact_authority.py renders three of the four consumers from
+it while release_spec loads it directly. The first test below proves the
+rendered files are current; the cross-checks that follow are belt and braces
+and document what used to be four independently hand-maintained lists:
 
   1. deploy/installed-artifacts.json    "destinations"
   2. deploy/release_spec.py             ARTIFACT_SOURCES
@@ -129,3 +132,73 @@ def test_required_and_obsolete_are_disjoint() -> None:
     )
     overlap = _brace_set(verifier, "required") & _brace_set(verifier, "obsolete")
     assert not overlap, f"paths both required and obsolete: {sorted(overlap)}"
+
+
+def _authority_module():
+    spec = importlib.util.spec_from_file_location(
+        "_artifact_authority_coherence", DEPLOY / "lib" / "artifact_authority.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_generated_targets_are_current() -> None:
+    authority = _authority_module()
+    stale = authority.drift()
+    assert not stale, (
+        "rendered files are behind deploy/artifact-authority.json; run "
+        f"deploy/lib/artifact_authority.py --write: {[p.name for p in stale]}"
+    )
+
+
+def test_release_spec_loads_the_authority() -> None:
+    authority = _authority_module()
+    assert _artifact_sources() == set(authority.destinations())
+    assert authority.sources()["/srv/menhir/production/bin/verify-artifacts"] == {
+        "kind": "git", "repository": "menhir", "path": "pipeline/bin/verify-artifacts",
+    }
+
+
+def test_editing_the_authority_moves_every_consumer_together(tmp_path: Path) -> None:
+    # Add one installed artifact and one retired path, render, and see the
+    # census, verifier and installer all change in lockstep.
+    authority = _authority_module()
+    value = authority.load()
+    value["artifacts"]["/srv/menhir/production/bin/zz-new-tool"] = {
+        "kind": "git", "repository": "menhir", "path": "pipeline/bin/zz-new-tool",
+    }
+    value["artifacts"] = dict(sorted(value["artifacts"].items()))
+    value["retired"]["gateway_scripts"].append("/srv/menhir/production/bin/zz-old-tool")
+    rendered = authority.render_all(value)
+    census = set(json.loads(rendered[authority.CENSUS])["destinations"])
+    verifier_required = _brace_set(rendered[authority.VERIFIER], "required")
+    verifier_obsolete = _brace_set(rendered[authority.VERIFIER], "obsolete")
+    installer = rendered[authority.INSTALLER]
+    allowed = {
+        line for line in re.search(
+            r'allowed = frozenset\(line for line in """(.*?)"""', installer, re.S
+        ).group(1).splitlines() if line
+    }
+    retired_scripts = _bash_array(installer, "retired_gateway_scripts")
+    new_tool = "/srv/menhir/production/bin/zz-new-tool"
+    old_tool = "/srv/menhir/production/bin/zz-old-tool"
+    assert new_tool in census and new_tool in verifier_required and new_tool in allowed
+    assert old_tool in verifier_obsolete and old_tool in retired_scripts
+    assert census == verifier_required == allowed
+    assert verifier_obsolete == authority.retired_paths(value)
+
+
+def test_authority_refuses_overlap_and_unsafe_paths(tmp_path: Path) -> None:
+    authority = _authority_module()
+    value = authority.load()
+    value["retired"]["gateway_scripts"].append(next(iter(value["artifacts"])))
+    broken = tmp_path / "authority.json"
+    broken.write_text(json.dumps(value), encoding="utf-8")
+    with pytest.raises(authority.AuthorityError, match="both installed and retired"):
+        authority.load(broken)
+    value = authority.load()
+    value["artifacts"]["../etc/evil"] = {"kind": "git", "repository": "menhir", "path": "x"}
+    broken.write_text(json.dumps(value), encoding="utf-8")
+    with pytest.raises(authority.AuthorityError, match="unsafe destination"):
+        authority.load(broken)
