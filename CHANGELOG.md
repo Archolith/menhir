@@ -7,6 +7,8 @@
 - The README's REST example is a two-entity sentence with an explicit relation, and the text
   explains that a relationless fragment is refused by design (`relationless_extraction`).
 - README's `uv` route uses `uv venv --seed` so the venv has `pip`.
+- README gains a "Smoke test, then clean up" sequence (write a marked memory with `wait=true`,
+  recall it, delete it by `episode_id`), and `menhir up` points at it before handing off to serve.
 - Graphiti's `EquivalentSchemaRuleAlreadyExists` downgrade is installed process-wide by
   `configure_logging`; the previous filter was scoped to `build_indices_and_constraints`, but
   Graphiti's constructor fires the same errors from a background task before that call.

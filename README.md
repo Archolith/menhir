@@ -473,6 +473,25 @@ things and how they relate: a fragment with a single entity and no relationship 
 `relationless_extraction` -- a deliberate, non-retryable failure that keeps the graph free of
 unlinked nodes -- and small models refuse more readily than large ones.
 
+### Smoke test, then clean up
+
+To prove the whole path without leaving test data in the graph, write a memory that is
+obviously synthetic, recall it, and delete it by the `episode_id` the write returned (the
+delete cascades to the entities and relationships that episode produced):
+
+```bash
+KEY=<your-key>   # omit the Authorization header on an open loopback bind
+EP=$(curl -fsS -X POST "http://127.0.0.1:8100/api/memory?wait=true"   -H "Authorization: Bearer $KEY" -H "Content-Type: application/json"   -d '{"episode": "SMOKE TEST: the menhir smoke check writes this sentence to verify enrichment and recall.", "source": "smoke"}'   | python -c 'import json,sys; d=json.load(sys.stdin); print(d["status"], d.get("error") or "", file=sys.stderr); print(d["episode_id"])')
+
+curl -fsS -X POST http://127.0.0.1:8100/api/recall   -H "Authorization: Bearer $KEY" -H "Content-Type: application/json"   -d '{"query": "menhir smoke check"}'
+
+curl -fsS -X DELETE "http://127.0.0.1:8100/api/memory/$EP" -H "Authorization: Bearer $KEY"
+```
+
+Expect `ready` on stderr from the first command, the smoke sentence in the recall results, and
+`{"uuid": "...", "deleted": true}` from the delete. The same check is available over MCP with
+`add_memory`, `recall_memories`, and `delete_memory`.
+
 If no credential is configured, Menhir permits open access only on a loopback bind. See
 [Security](#security-and-privacy) before exposing the service to another machine.
 
