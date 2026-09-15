@@ -1,3 +1,19 @@
+## 2026-09-15 - hooks deliver context again
+
+- `wrap_hook_response` put `additionalContext` at the top level of the hook envelope, where
+  the harness parses it, reports the hook successful, and ignores it. It must be nested under
+  `hookSpecificOutput` with the event's name. Evidence: a session transcript with 62
+  UserPromptSubmit hook firings delivered zero Menhir context, while every other hook using
+  the nested form delivered on each call. Flagged memories, TODOs, temporal reminders and
+  post-compaction recall were all being dropped.
+- Post-compaction recall moved from `PostCompact` to `SessionStart`. Compaction has no context
+  channel at all -- the harness's union has no PostCompact variant -- but SessionStart fires
+  immediately afterwards with `source="compact"`. The handler checks that source, so it still
+  runs only after a compaction and not on startup/resume/clear.
+- `menhir hook install` now registers the post-compaction command on SessionStart and prunes
+  the old PostCompact entry; uninstall still sweeps PostCompact so pre-move installs are
+  cleaned up rather than stranded.
+
 ## 2026-09-15 - smoke-test operator key, corrected
 
 - Cold-start run #5 (first run able to execute `menhir up --compose-neo4j`: a nested Docker

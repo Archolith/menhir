@@ -451,14 +451,35 @@ def format_hook_output(
 # JSON envelope
 # ---------------------------------------------------------------------------
 
+#: Hook events Menhir emits context on, mapped from its own ``--event`` names. The value is
+#: the harness's event name, which must appear in the envelope for the context to be read.
+HOOK_EVENT_NAMES = {
+    "prompt": "UserPromptSubmit",
+    "stop": "Stop",
+    # Compaction has no context channel of its own -- the harness's hookSpecificOutput union
+    # has no PostCompact variant -- but SessionStart fires again afterwards with
+    # source="compact", so that is where post-compaction recall is delivered.
+    "postcompact": "SessionStart",
+}
+
+
 def wrap_hook_response(
-    additional_context: str | None = None, *, degraded: str | None = None
+    additional_context: str | None = None,
+    *,
+    degraded: str | None = None,
+    event: str = "UserPromptSubmit",
 ) -> str:
     """Wrap output in the Claude Code hook JSON envelope.
 
     `continue` stays True unconditionally: a hook must never block its host. `degraded` is how a
     failure becomes visible without blocking -- before it existed, a crashed recall emitted the
     same two bytes as a healthy session with nothing to say (CF-40).
+
+    ``additionalContext`` must be nested under ``hookSpecificOutput`` with the event's name.
+    At the top level -- where this function put it until 2026-09-15 -- the harness parses the
+    JSON, reports the hook as successful, and silently ignores the text: a transcript of 62
+    UserPromptSubmit firings showed zero delivered memories while other hooks using the nested
+    form delivered on every call.
     """
     payload: dict = {"continue": True}
     context = additional_context or ""
@@ -466,5 +487,8 @@ def wrap_hook_response(
         notice = f"[menhir hook degraded: {degraded}]"
         context = f"{notice}\n\n{context}" if context else notice
     if context:
-        payload["additionalContext"] = context
+        payload["hookSpecificOutput"] = {
+            "hookEventName": event,
+            "additionalContext": context,
+        }
     return json.dumps(payload)

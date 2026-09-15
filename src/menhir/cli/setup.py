@@ -192,7 +192,7 @@ def _claude_hooks_installed(repo: Path, location: str) -> bool:
     except (OSError, json.JSONDecodeError):
         return False
     hooks = data.get("hooks", {}) if isinstance(data, dict) else {}
-    for event in ("UserPromptSubmit", "Stop", "PostCompact"):
+    for event in ("UserPromptSubmit", "Stop", "SessionStart"):
         entries = hooks.get(event, []) if isinstance(hooks, dict) else []
         if not any(_entry_has_menhir_hook(entry) for entry in entries):
             return False

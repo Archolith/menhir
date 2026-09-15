@@ -13,6 +13,7 @@ from typing import Annotated
 import typer
 
 from menhir.cli.output import (
+    HOOK_EVENT_NAMES,
     DEFAULT_HOOK_TOKEN_BUDGET,
     REMINDER_LIMIT,
     detect_write_signals,
@@ -84,7 +85,13 @@ def run(
         # Never crash in hook mode -- let Claude Code proceed. But a failure must not be
         # indistinguishable from an empty graph (CF-40), so it is reported in the payload too.
         print(f"menhir hook: unexpected {type(exc).__name__}, emitting empty response", file=sys.stderr)
-        print(wrap_hook_response(degraded=f"unexpected {type(exc).__name__}"), flush=True)
+        print(
+            wrap_hook_response(
+                degraded=f"unexpected {type(exc).__name__}",
+                event=HOOK_EVENT_NAMES.get(event, "UserPromptSubmit"),
+            ),
+            flush=True,
+        )
 
 
 def _parse_stdin() -> tuple[str, str]:
@@ -155,7 +162,7 @@ def _run_prompt_impl(
         print(f"menhir hook: temporal telemetry failed ({type(exc).__name__})", file=sys.stderr)
 
     if recall_gated:
-        print(wrap_hook_response(write_nudge), flush=True)
+        print(wrap_hook_response(write_nudge, event="Stop"), flush=True)
         return
 
     from menhir.cli.bootstrap import build_hook_services
@@ -212,7 +219,7 @@ def _run_prompt_impl(
         flagged, context_text, effective_query, write_nudge, temporal_line,
         todos=todos, temporal_memories=temporal_memories, max_tokens=max_tokens,
     )
-    print(wrap_hook_response(output or None), flush=True)
+    print(wrap_hook_response(output or None, event="UserPromptSubmit"), flush=True)
 
 
 # ---------------------------------------------------------------------------
@@ -220,16 +227,28 @@ def _run_prompt_impl(
 # ---------------------------------------------------------------------------
 
 def _run_postcompact_impl(*, max_tokens: int, workspace: str | None = None) -> None:
-    """PostCompact: always inject memories into the fresh context window."""
+    """Post-compaction recall, delivered on SessionStart.
+
+    Registered on SessionStart rather than PostCompact: the harness has no context channel on
+    the compaction event, but SessionStart fires immediately afterwards with source="compact".
+    SessionStart also fires on startup/resume/clear, so the source is checked to keep the
+    behaviour exactly what it was -- recall after compaction only.
+    """
     session_id = "unknown"
     compact_summary = ""
+    source = "compact"
     if not sys.stdin.isatty():
         try:
             hook_input = json.load(sys.stdin)
             session_id = hook_input.get("session_id", session_id)
             compact_summary = hook_input.get("compact_summary", "")
+            source = str(hook_input.get("source") or "compact")
         except Exception as exc:
             print(f"menhir hook: stdin parse failed ({type(exc).__name__})", file=sys.stderr)
+
+    if source != "compact":
+        print(wrap_hook_response(event="SessionStart"), flush=True)
+        return
 
     _load_env()
 
@@ -302,7 +321,7 @@ def _run_postcompact_impl(*, max_tokens: int, workspace: str | None = None) -> N
         flagged, context_text, effective_query, None, temporal_line,
         todos=todos, temporal_memories=temporal_memories, max_tokens=max_tokens,
     )
-    print(wrap_hook_response(output or None), flush=True)
+    print(wrap_hook_response(output or None, event="SessionStart"), flush=True)
 
 
 # ---------------------------------------------------------------------------
@@ -315,11 +334,11 @@ def _run_stop_impl(*, frequency: int) -> None:
     # Use a separate counter namespace so stop doesn't interfere with prompt
     counter_key = f"{session_id}__stop"
     if frequency > 0 and not should_run_this_turn(counter_key, frequency):
-        print(wrap_hook_response(), flush=True)
+        print(wrap_hook_response(event="Stop"), flush=True)
         return
 
     checkpoint = format_save_checkpoint()
-    print(wrap_hook_response(checkpoint), flush=True)
+    print(wrap_hook_response(checkpoint, event="Stop"), flush=True)
 
 
 # ---------------------------------------------------------------------------
@@ -360,7 +379,7 @@ def install(
     typer.echo(f"Installed menhir hooks to {settings_path}")
     typer.echo(f"  Recall:      {commands['recall']}")
     typer.echo(f"  Save check:  {commands['save']}")
-    typer.echo(f"  PostCompact: {commands['postcompact']}")
+    typer.echo(f"  SessionStart (post-compaction): {commands['postcompact']}")
 
 
 # ---------------------------------------------------------------------------
@@ -404,7 +423,9 @@ def uninstall(
     # Remove from all event types that might contain menhir entries
     if not isinstance(hooks, dict):
         hooks = {}
-    for event_key in ("UserPromptSubmit", "Stop", "PostCompact"):
+    # PostCompact stays in this sweep: installs predating the SessionStart move left an
+    # entry there, and an uninstall that skips it would strand a hook that still runs.
+    for event_key in ("UserPromptSubmit", "Stop", "SessionStart", "PostCompact"):
         event_hooks: list = hooks.get(event_key, [])
         if not isinstance(event_hooks, list):
             continue
@@ -523,13 +544,30 @@ def install_hooks(
     )
     _upsert_hook_entry(
         hooks,
-        "PostCompact",
+        "SessionStart",
         {"hooks": [{"type": "command", "command": commands["postcompact"]}]},
     )
+    _remove_managed_hook_entries(hooks, "PostCompact")
 
     settings_path.parent.mkdir(parents=True, exist_ok=True)
     settings_path.write_text(json.dumps(existing, indent=2) + "\n", encoding="utf-8")
     return settings_path, commands
+
+
+def _remove_managed_hook_entries(hooks: dict, event: str) -> None:
+    """Drop Menhir-owned entries for *event*, and the event itself once empty.
+
+    Needed when a registration moves: without it the old PostCompact entry survives every
+    reinstall, and an installer that only ever adds leaves the dead one running forever.
+    """
+    entries = hooks.get(event)
+    if not isinstance(entries, list):
+        return
+    remaining = [entry for entry in entries if not _entry_has_menhir_hook(entry)]
+    if remaining:
+        hooks[event] = remaining
+    else:
+        hooks.pop(event, None)
 
 
 def _format_hook_command(args: list[str]) -> str:

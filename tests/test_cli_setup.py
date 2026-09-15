@@ -127,7 +127,7 @@ def test_apply_setup_can_install_project_claude_hooks(tmp_path: Path) -> None:
 
     settings_path = repo / ".claude" / "settings.local.json"
     config = json.loads(settings_path.read_text(encoding="utf-8"))
-    assert set(config["hooks"]) >= {"UserPromptSubmit", "Stop", "PostCompact"}
+    assert set(config["hooks"]) >= {"UserPromptSubmit", "Stop", "SessionStart"}
     assert any("Claude-compatible hooks" in change for change in changes)
     assert inspect_setup(repo, check_claude_hooks=True)[-1].status == "ok"
 

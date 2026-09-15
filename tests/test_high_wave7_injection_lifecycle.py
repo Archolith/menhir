@@ -257,6 +257,7 @@ def test_cf40_a_degraded_run_is_distinguishable_from_an_empty_one() -> None:
     from menhir.cli.output import wrap_hook_response
 
     payload = json.loads(wrap_hook_response(degraded="unexpected ValueError"))
+    payload = {"continue": payload["continue"], **payload.get("hookSpecificOutput", {})}
     assert payload["continue"] is True
     assert payload["additionalContext"].startswith("[menhir hook degraded: unexpected ValueError]")
 
@@ -266,6 +267,7 @@ def test_cf40_a_degraded_run_still_delivers_whatever_it_did_recover() -> None:
     from menhir.cli.output import wrap_hook_response
 
     payload = json.loads(wrap_hook_response("## Recalled Memories\n- a", degraded="partial"))
+    payload = payload["hookSpecificOutput"]
     assert "[menhir hook degraded: partial]" in payload["additionalContext"]
     assert "## Recalled Memories" in payload["additionalContext"]
 

@@ -35,13 +35,30 @@ def test_wrap_hook_response_empty() -> None:
 @pytest.mark.unit
 def test_wrap_hook_response_with_context() -> None:
     result = json.loads(wrap_hook_response("hello"))
-    assert result == {"continue": True, "additionalContext": "hello"}
+    assert result == {
+        "continue": True,
+        "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": "hello"},
+    }
+
+
+def test_wrap_hook_response_nests_context_under_the_event_name() -> None:
+    """Top-level additionalContext is accepted by the harness and silently ignored; only the
+    nested form is read. Menhir emitted the top-level form until 2026-09-15 and delivered
+    nothing at all."""
+    for event in ("UserPromptSubmit", "Stop", "SessionStart"):
+        payload = json.loads(wrap_hook_response("x", event=event))
+        assert "additionalContext" not in payload
+        assert payload["hookSpecificOutput"] == {
+            "hookEventName": event,
+            "additionalContext": "x",
+        }
 
 
 @pytest.mark.unit
 def test_wrap_hook_response_none_context_omits_key() -> None:
     result = json.loads(wrap_hook_response(None))
     assert "additionalContext" not in result
+    assert "hookSpecificOutput" not in result
 
 
 # ---------------------------------------------------------------------------
@@ -445,7 +462,13 @@ def test_project_install_persists_explicit_workspace(tmp_path: Path, monkeypatch
     assert result.exit_code == 0
     config = json.loads(settings_file.read_text())
     prompt_command = config["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"]
-    compact_command = config["hooks"]["PostCompact"][0]["hooks"][0]["command"]
+    compact_command = next(
+        hook["command"]
+        for entry in config["hooks"]["SessionStart"]
+        for hook in entry["hooks"]
+        if "--event postcompact" in hook["command"]
+    )
+    assert "PostCompact" not in config["hooks"]
     assert shlex.split(prompt_command)[-2:] == ["--workspace", "project alpha"]
     assert shlex.split(compact_command)[-2:] == ["--workspace", "project alpha"]
 
@@ -825,7 +848,7 @@ def test_marker_change_followed_in_setup(
                 event: [
                     {"hooks": [{"type": "command", "command": "python -m custom.marker hook run"}]}
                 ]
-                for event in ("UserPromptSubmit", "Stop", "PostCompact")
+                for event in ("UserPromptSubmit", "Stop", "SessionStart")
             }
         },
     )
