@@ -1,3 +1,12 @@
+## 2026-09-15 - published to PyPI
+
+- `archolith-menhir` 0.2.0 is on PyPI. The quick start is now `pip install archolith-menhir`
+  then `menhir up` -- no clone, no build tooling, and no Git, since both first-party
+  dependencies are PyPI releases too. The clone path moves to an appendix for people working
+  on Menhir rather than installing it.
+- The smoke test locates `.env` through `MENHIR_STATE_DIR` (default `~/.menhir`) rather than
+  assuming the working directory, which only held for a checkout.
+
 ## 2026-09-15 - setup and up work without a source checkout
 
 - `menhir setup` and `menhir up` no longer require a cloned repository. Installed from a wheel

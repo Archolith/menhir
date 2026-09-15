@@ -312,18 +312,20 @@ running HTTP backend before launching it.
   the simplest route is [uv](https://docs.astral.sh/uv/): `uv python install 3.12` then
   `uv venv --seed --python 3.12 && source .venv/bin/activate` (`--seed` gives the venv a `pip`;
   uv omits it by default).
-- Git, because two first-party dependencies install from public GitHub repositories
-- Neo4j 5 with APOC (the root `docker-compose.yml` provides one)
+- Neo4j 5 with APOC. `menhir up --compose-neo4j` starts one for you; you need Docker on the
+  machine running `menhir` for that, and nothing else.
 - a local OpenAI-compatible server (llama.cpp, Ollama, LM Studio, vLLM) or OpenAI
 
 ### Install and start
 
 ```bash
-git clone https://github.com/Archolith/menhir.git
-cd menhir
-python -m pip install .
+python -m pip install archolith-menhir
 menhir up --compose-neo4j --provider openai   # Docker on this machine: bundled Neo4j
 ```
+
+No clone, no build tooling, no Git. Configuration lives in `MENHIR_STATE_DIR` (default
+`~/.menhir`): `menhir up` creates `.env` there on first run, and `--compose-neo4j` writes the
+bundled Neo4j compose file beside it.
 
 `--compose-neo4j` shells out to `docker compose`, so it needs the Docker daemon on the machine
 where `menhir` itself runs. Without Docker there, with a Neo4j you already run, or when Menhir
@@ -346,10 +348,10 @@ menhir up --compose-neo4j --provider local     # writes the block, then edit .en
 #   LOCAL_LLM_EMBED_MODEL=openai/text-embedding-3-small
 ```
 
-`menhir up` creates `.env` (writing the provider block and, with `--compose-neo4j`, the
-root-compose Neo4j credentials), starts Neo4j from `docker-compose.yml` when asked, waits for
-Bolt, prints a tier report that names the `.env` key behind anything still missing, and then
-runs `menhir serve`. On the first run paste your `OPENAI_API_KEY` (or point `LOCAL_LLM_*` at
+`menhir up` creates `.env` (writing the provider block and, with `--compose-neo4j`, the Neo4j
+credentials), starts Neo4j with `docker compose` when asked, waits for Bolt, prints a tier
+report that names the `.env` key behind anything still missing, and then runs `menhir serve`.
+Run from a source checkout it uses that checkout; otherwise `MENHIR_STATE_DIR`. On the first run paste your `OPENAI_API_KEY` (or point `LOCAL_LLM_*` at
 your model server or a hosted gateway such as OpenRouter) when the report asks, and run it
 again. `menhir up --check` does everything except start Neo4j or the server. `menhir up` ends in
 `menhir serve`, which runs in the foreground until interrupted -- background it yourself when
@@ -418,14 +420,16 @@ leaves nothing.
 
 Namespace deletion requires the operator tier, and `menhir setup` does not write an operator key
 -- `.env` has no `MENHIR_OPERATOR_KEY` line at all, only a comment naming it. Add one, then restart
-`menhir up` so the server picks it up:
+`menhir up` so the server picks it up. `.env` is in your checkout if you have one, otherwise in
+`MENHIR_STATE_DIR` (default `~/.menhir`) -- the path `menhir setup` printed:
 
 ```bash
-echo "MENHIR_OPERATOR_KEY=$(openssl rand -hex 24)" >> .env
+ENV_FILE=${MENHIR_STATE_DIR:-~/.menhir}/.env     # or ./.env in a source checkout
+echo "MENHIR_OPERATOR_KEY=$(openssl rand -hex 24)" >> "$ENV_FILE"
 ```
 
 ```bash
-KEY=$(grep '^MENHIR_OPERATOR_KEY=' .env | cut -d= -f2)
+KEY=$(grep '^MENHIR_OPERATOR_KEY=' "$ENV_FILE" | cut -d= -f2)
 EP=$(curl -fsS -X POST "http://127.0.0.1:8100/api/memory?wait=true"   -H "Authorization: Bearer $KEY" -H "Content-Type: application/json"   -d '{"episode": "Alice maintains the billing service and deploys it every Friday.", "source": "smoke", "namespace": "smoke"}'   | python -c 'import json,sys; d=json.load(sys.stdin); print(d["status"], "entities_linked=%s" % d.get("entities_linked"), d.get("error") or "", file=sys.stderr); print(d["episode_id"])')
 
 curl -fsS -X POST http://127.0.0.1:8100/api/recall   -H "Authorization: Bearer $KEY" -H "Content-Type: application/json"   -d '{"query": "who maintains the billing service", "namespace": "smoke"}'
@@ -444,13 +448,18 @@ extracted entities from every test sentence (5/5, including one prefixed "SMOKE 
 is not a reliable floor. The same check is available over MCP with `add_memory`,
 `recall_memories`, and `delete_namespace`.
 
-### Step by step (what `menhir up` does)
+### Step by step, and working from a checkout
 
-`menhir up` is the recommended path; these are the commands it runs, for operators who need
-to do one of them differently -- an existing Neo4j, a locked-down environment, or a debugging
-session.
+`menhir up` is the recommended path; these are the commands it runs, for operators who need to
+do one of them differently -- an existing Neo4j, a locked-down environment, a debugging
+session -- and for anyone working on Menhir itself rather than installing it.
 
-#### Install
+#### Install from source
+
+Only needed to change Menhir. To run it, `pip install archolith-menhir` above is the whole
+install. A checkout additionally gives you the annotated `.env.example`, the repository
+`docker-compose.yml`, and the managed Git hooks, and `menhir setup` will use them; Git is
+required for the clone but not for the dependencies, which all come from PyPI.
 
 ```bash
 git clone https://github.com/Archolith/menhir.git
@@ -467,8 +476,9 @@ python -m pip install -e . --group dev
 
 The dependency-group command requires pip 25.1 or newer.
 
-`menhir setup` is the idempotent post-install step for a source checkout. It creates `.env` only
-when missing and enables the repository-managed Git hooks without replacing a custom hooks path.
+`menhir setup` is the idempotent post-install step. It creates `.env` only when missing and,
+in a checkout, enables the repository-managed Git hooks without replacing a custom hooks path
+(outside a checkout there is no working tree, so that step reports itself skipped).
 Add `--compose-neo4j` to target the root `docker-compose.yml` Neo4j and `--provider local|openai`
 to write a consistent LLM provider block; re-running never overwrites a filled-in key.
 Run `menhir setup --check` to audit without changing anything. Runtime, MCP client, optional agent
