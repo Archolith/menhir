@@ -1,3 +1,12 @@
+## 2026-09-14 - cold-start run #4 doc fixes
+
+- Findings from cold-start run #4 (end to end in 8.8 min, smoke test matched the documented
+  output; no code changes needed). README: `--compose-neo4j` now says it needs the Docker
+  daemon where `menhir` runs and what to do when Menhir is itself in a container; the smoke
+  test says to set `MENHIR_OPERATOR_KEY` in `.env` first and how. `deploy/README.md` no longer
+  claims the release image builds from a plain clone -- `deploy/Dockerfile` installs only
+  from the pre-built wheelhouse, as the root README already said.
+
 ## 2026-09-14 - one path to a running server
 
 - `menhir setup` now ends with the same tier report `menhir up --check` prints and exactly one

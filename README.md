@@ -325,7 +325,10 @@ python -m pip install .
 menhir up --compose-neo4j --provider openai   # Docker on this machine: bundled Neo4j
 ```
 
-Without Docker, or with a Neo4j you already run, skip the flag and point `.env` at it:
+`--compose-neo4j` shells out to `docker compose`, so it needs the Docker daemon on the machine
+where `menhir` itself runs. Without Docker there, with a Neo4j you already run, or when Menhir
+is itself inside a container (start Neo4j as a sibling container instead), skip the flag and
+point `.env` at it:
 
 ```bash
 menhir up --provider openai            # creates .env; edit NEO4J_URI / NEO4J_PASSWORD, re-run
@@ -399,8 +402,12 @@ its projections but deliberately keeps the entities it produced -- they are shar
 that other memories may also cite -- so the namespace teardown is the clean-up that actually
 leaves nothing.
 
+Namespace deletion requires the operator tier. On a fresh install `.env` has `MENHIR_OPERATOR_KEY=`
+empty: set it to any random string (for example `openssl rand -hex 24`), restart `menhir up`, and
+use that value as `KEY` below.
+
 ```bash
-KEY=<an operator-tier key>   # namespace deletion requires the operator tier
+KEY=<the value of MENHIR_OPERATOR_KEY in .env>
 EP=$(curl -fsS -X POST "http://127.0.0.1:8100/api/memory?wait=true"   -H "Authorization: Bearer $KEY" -H "Content-Type: application/json"   -d '{"episode": "Alice maintains the billing service and deploys it every Friday.", "source": "smoke", "namespace": "smoke"}'   | python -c 'import json,sys; d=json.load(sys.stdin); print(d["status"], "entities_linked=%s" % d.get("entities_linked"), d.get("error") or "", file=sys.stderr); print(d["episode_id"])')
 
 curl -fsS -X POST http://127.0.0.1:8100/api/recall   -H "Authorization: Bearer $KEY" -H "Content-Type: application/json"   -d '{"query": "who maintains the billing service", "namespace": "smoke"}'

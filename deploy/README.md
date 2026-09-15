@@ -33,11 +33,12 @@ A containerized Menhir for **test deployments** — in particular, validating th
 auth/OAuth surface (including the proxied-deployment guards **CT-001** and
 **RL-001**) behind a real reverse proxy, which cannot be exercised locally.
 
-The image builds from a single `git clone` of menhir — no sibling checkout, no
-workspace layout. Menhir's two unpublished first-party dependencies
-(`archolith-mcp-framework`, `archolith-oauth`) are resolved from public GitHub in the
-Dockerfile's builder stage, which is the only stage carrying `git`; the runtime stage
-installs the resulting wheels offline.
+The image does **not** build from a plain `git clone`. `Dockerfile` performs no live git,
+PyPI, or apt resolution: it installs from a pre-built wheelhouse at `deploy/wheelhouse`
+(`pip wheel . --wheel-dir deploy/wheelhouse`, including Menhir's two unpublished first-party
+dependencies `archolith-mcp-framework` and `archolith-oauth`) on a digest-pinned base image,
+both produced by the release pipeline described below. To run Menhir in a container from
+source, use any Python 3.12 image with the pip steps in the root README.
 
 ## Contents
 
