@@ -316,7 +316,7 @@ running HTTP backend before launching it.
 - Neo4j 5 with APOC (the root `docker-compose.yml` provides one)
 - a local OpenAI-compatible server (llama.cpp, Ollama, LM Studio, vLLM) or OpenAI
 
-### One command
+### Install and start
 
 ```bash
 git clone https://github.com/Archolith/menhir.git
@@ -338,92 +338,10 @@ runs `menhir serve`. On the first run paste your `OPENAI_API_KEY` (or point `LOC
 your model server or a hosted gateway such as OpenRouter) when the report asks, and run it
 again. `menhir up --check` does everything except start Neo4j or the server.
 
-The rest of this section is the same path taken one step at a time.
-
-### Install
-
-```bash
-git clone https://github.com/Archolith/menhir.git
-cd menhir
-python -m pip install .
-menhir setup
-```
-
-For an editable development install with the PEP 735 development dependency group:
-
-```bash
-python -m pip install -e . --group dev
-```
-
-The dependency-group command requires pip 25.1 or newer.
-
-`menhir setup` is the idempotent post-install step for a source checkout. It creates `.env` only
-when missing and enables the repository-managed Git hooks without replacing a custom hooks path.
-Add `--compose-neo4j` to target the root `docker-compose.yml` Neo4j and `--provider local|openai`
-to write a consistent LLM provider block; re-running never overwrites a filled-in key.
-Run `menhir setup --check` to audit without changing anything. Runtime, MCP client, optional agent
-hook, and Windows watchdog steps are listed in [`docs/post-install.md`](docs/post-install.md).
-
-### Configure
-
-```bash
-# Edit .env for your Neo4j and LLM provider.
-# If you skipped `menhir setup`: cp .env.example .env
-```
-
-The default configuration expects Neo4j and a local OpenAI-compatible model server on
-the same machine.
-
-| Variable | Purpose | Default |
-|----------|---------|---------|
-| `NEO4J_URI` | Neo4j connection | `bolt://localhost:7687` |
-| `NEO4J_USER` | Neo4j user | `neo4j` |
-| `NEO4J_PASSWORD` | Neo4j password | empty |
-| `LLM_CHAT_PROVIDER` | Chat provider: `local` or `openai` | `local` |
-| `GRAPHITI_LLM_PROVIDER` | Graphiti extraction provider | `local` |
-| `GRAPHITI_EMBED_PROVIDER` | Optional separate embedding provider | inherits Graphiti provider |
-| `LOCAL_LLM_BASE_URL` | Local OpenAI-compatible chat endpoint | `http://127.0.0.1:8081/v1` |
-| `OPENAI_API_KEY` | Credential used when the provider is `openai` | empty |
-
-See [`.env.example`](.env.example) for model names, separate embedding endpoints, OAuth,
-telemetry, and experimental flags.
-
-### Start Neo4j
-
-The root compose file starts a local Neo4j 5 instance with APOC:
-
-```bash
-docker compose up -d
-```
-
-The root compose file uses `neo4j/password`, so set `NEO4J_PASSWORD=password` in `.env`.
-To use an existing database, configure it directly:
-
-```dotenv
-NEO4J_URI=bolt://neo4j-host:7687
-NEO4J_USER=neo4j
-NEO4J_PASSWORD=replace-me
-```
-
-### Check and run Menhir
-
-```bash
-menhir check
-menhir diagnostics
-menhir serve
-```
-
-`menhir diagnostics --json` reports the redacted local security posture without printing
-secrets or connecting to the network or database. Once the server starts, use these
-endpoints for process and dependency checks:
-
-```bash
-curl -fsS http://127.0.0.1:8100/api/health
-curl -fsS http://127.0.0.1:8100/api/ready
-```
-
-Other CLI commands include `menhir console` for an interactive shell and
-`menhir serve-watch` for a local restart watchdog.
+Running `menhir` with no arguments prints the same report and the next command; `menhir setup`
+ends with it too. Once the server is up, connect a client and run the smoke test below. The
+individual steps `up` performs are listed at the end of this section for anyone who needs to
+run them by hand.
 
 ### Connect an MCP client
 
@@ -500,6 +418,97 @@ extracted entities from every test sentence (5/5, including one prefixed "SMOKE 
 `openai/gpt-4.1-nano` returned zero entities for the same ordinary sentences 6 times out of 9 and
 is not a reliable floor. The same check is available over MCP with `add_memory`,
 `recall_memories`, and `delete_namespace`.
+
+### Step by step (what `menhir up` does)
+
+`menhir up` is the recommended path; these are the commands it runs, for operators who need
+to do one of them differently -- an existing Neo4j, a locked-down environment, or a debugging
+session.
+
+#### Install
+
+```bash
+git clone https://github.com/Archolith/menhir.git
+cd menhir
+python -m pip install .
+menhir setup
+```
+
+For an editable development install with the PEP 735 development dependency group:
+
+```bash
+python -m pip install -e . --group dev
+```
+
+The dependency-group command requires pip 25.1 or newer.
+
+`menhir setup` is the idempotent post-install step for a source checkout. It creates `.env` only
+when missing and enables the repository-managed Git hooks without replacing a custom hooks path.
+Add `--compose-neo4j` to target the root `docker-compose.yml` Neo4j and `--provider local|openai`
+to write a consistent LLM provider block; re-running never overwrites a filled-in key.
+Run `menhir setup --check` to audit without changing anything. Runtime, MCP client, optional agent
+hook, and Windows watchdog steps are listed in [`docs/post-install.md`](docs/post-install.md).
+
+#### Configure
+
+```bash
+# Edit .env for your Neo4j and LLM provider.
+# If you skipped `menhir setup`: cp .env.example .env
+```
+
+The default configuration expects Neo4j and a local OpenAI-compatible model server on
+the same machine.
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `NEO4J_URI` | Neo4j connection | `bolt://localhost:7687` |
+| `NEO4J_USER` | Neo4j user | `neo4j` |
+| `NEO4J_PASSWORD` | Neo4j password | empty |
+| `LLM_CHAT_PROVIDER` | Chat provider: `local` or `openai` | `local` |
+| `GRAPHITI_LLM_PROVIDER` | Graphiti extraction provider | `local` |
+| `GRAPHITI_EMBED_PROVIDER` | Optional separate embedding provider | inherits Graphiti provider |
+| `LOCAL_LLM_BASE_URL` | Local OpenAI-compatible chat endpoint | `http://127.0.0.1:8081/v1` |
+| `OPENAI_API_KEY` | Credential used when the provider is `openai` | empty |
+
+See [`.env.example`](.env.example) for model names, separate embedding endpoints, OAuth,
+telemetry, and experimental flags.
+
+#### Start Neo4j
+
+The root compose file starts a local Neo4j 5 instance with APOC:
+
+```bash
+docker compose up -d
+```
+
+The root compose file uses `neo4j/password`, so set `NEO4J_PASSWORD=password` in `.env`.
+To use an existing database, configure it directly:
+
+```dotenv
+NEO4J_URI=bolt://neo4j-host:7687
+NEO4J_USER=neo4j
+NEO4J_PASSWORD=replace-me
+```
+
+#### Check and run Menhir
+
+```bash
+menhir check
+menhir diagnostics
+menhir serve
+```
+
+`menhir diagnostics --json` reports the redacted local security posture without printing
+secrets or connecting to the network or database. Once the server starts, use these
+endpoints for process and dependency checks:
+
+```bash
+curl -fsS http://127.0.0.1:8100/api/health
+curl -fsS http://127.0.0.1:8100/api/ready
+```
+
+Other CLI commands include `menhir console` for an interactive shell and
+`menhir serve-watch` for a local restart watchdog.
 
 ## Docker test stack
 

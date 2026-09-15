@@ -413,6 +413,7 @@ def setup(
             _print_items(items)
             if any(item.required and item.status != "ok" for item in items):
                 raise typer.Exit(1)
+            typer.echo("Next: run 'menhir setup' to apply, then 'menhir up' to start the server.")
         else:
             changes = apply_setup(
                 checkout,
@@ -434,12 +435,17 @@ def setup(
                     typer.echo(f"[CHANGED] {change}")
             else:
                 typer.echo("[OK] already configured")
+            # End where `menhir up --check` would: the same tier report, one next command.
+            # Three cold-start evaluators read "Next: configure .env, check, serve" here and
+            # never tried `up`; showing the report removes the choice.
+            if create_env:
+                from menhir.cli.up import next_step_hint, report_readiness
 
-        typer.echo(
-            "Next: 'menhir up --check' shows what is configured and what each missing piece needs; "
-            "'menhir up' starts the server (add --compose-neo4j for the bundled Neo4j). "
-            "Then register your MCP client."
-        )
+                typer.echo("")
+                _capabilities, blocking = report_readiness(checkout)
+                typer.echo(next_step_hint(blocking))
+            else:
+                typer.echo("Next: run 'menhir up' to start the server.")
         typer.echo("Optional capture integrations: docs/post-install.md and scripts/hooks/README.md")
     except typer.Exit:
         raise

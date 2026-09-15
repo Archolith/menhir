@@ -161,6 +161,38 @@ def render_report(lines: list[TierLine], startup_mode: str) -> str:
     return f"{body}\n{tail}"
 
 
+def report_readiness(checkout: Path) -> tuple[object, bool]:
+    """Load the checkout's .env, run preflight, print the tier report.
+
+    Returns ``(capabilities, blocking)`` where ``blocking`` means the server cannot start
+    (Neo4j unreachable or the interpreter guard failed). Shared by ``menhir up`` and the end of
+    ``menhir setup`` so a newcomer sees the same picture -- and the same next command -- from
+    either entry point.
+    """
+
+    import os
+
+    from dotenv import load_dotenv
+
+    os.environ.setdefault("ENV_FILE", str(checkout / ".env"))
+    load_dotenv(os.environ["ENV_FILE"], override=False)
+
+    from menhir.config import MemorySettings
+    from menhir.core import collect_runtime_capabilities
+
+    settings = MemorySettings.from_env()
+    capabilities = collect_runtime_capabilities(settings)
+    typer.echo(render_report(tier_report(capabilities, settings), capabilities.startup_mode))
+    blocking = not capabilities.neo4j_ready or not capabilities.venv_ready
+    return capabilities, blocking
+
+
+def next_step_hint(blocking: bool) -> str:
+    if blocking:
+        return "Next: fix the MISS lines above, then run 'menhir up' to start the server."
+    return "Next: run 'menhir up' to start the server (add --compose-neo4j for the bundled Neo4j)."
+
+
 def up(
     repo: Annotated[Path | None, typer.Option(help="Menhir source checkout (default: search from cwd).")] = None,
     check: Annotated[bool, typer.Option("--check", help="Report what would start and stop; launch nothing.")] = False,
@@ -236,6 +268,7 @@ def up(
         typer.echo(render_report(tier_report(capabilities, settings), capabilities.startup_mode))
         blocking = not capabilities.neo4j_ready or not capabilities.venv_ready
         if check:
+            typer.echo(next_step_hint(blocking))
             raise typer.Exit(1 if blocking else 0)
         if blocking:
             typer.echo("menhir up: fix the MISS lines above and re-run.", err=True)
@@ -263,7 +296,9 @@ __all__ = [
     "UpError",
     "compose_neo4j_up",
     "neo4j_is_loopback",
+    "next_step_hint",
     "render_report",
+    "report_readiness",
     "tier_report",
     "up",
     "wait_for_neo4j",

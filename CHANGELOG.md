@@ -1,3 +1,14 @@
+## 2026-09-14 - one path to a running server
+
+- `menhir setup` now ends with the same tier report `menhir up --check` prints and exactly one
+  next command (`menhir up`); three cold-start evaluators read its old "configure .env, check,
+  serve" hint and never tried `up`.
+- Bare `menhir` (no subcommand) inside a checkout runs the readiness check instead of printing
+  help; outside a checkout it still prints help.
+- README quick start is a single path: prerequisites, install and start with `menhir up`,
+  connect a client, REST examples, smoke test. The manual Install / Configure / Start Neo4j /
+  Check-and-run steps move to a "Step by step (what `menhir up` does)" appendix.
+
 ## 2026-09-14 - smoke test that actually cleans up; minimum extraction model
 
 - Findings from cold-start run #3. `DELETE /api/memory/{id}` removes the episode and its

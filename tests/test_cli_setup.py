@@ -279,3 +279,50 @@ def test_check_and_diagnostics_load_the_env_file(tmp_path: Path, monkeypatch: py
     CliRunner().invoke(app, ["check"])
     assert seen["host"] == "0.0.0.0"
     assert os.environ["MENHIR_API_HOST"] == "0.0.0.0"
+
+
+@pytest.mark.unit
+def test_setup_ends_with_the_readiness_report_and_one_next_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Three cold-start evaluators never tried `menhir up`: setup's old hint listed check/serve.
+    Now setup ends where `up --check` would -- report, then exactly one next command."""
+    repo = _make_checkout(tmp_path / "menhir")
+    monkeypatch.delenv("ENV_FILE", raising=False)
+    calls: list[Path] = []
+
+    def _fake_report(checkout: Path):
+        calls.append(checkout)
+        print("[ok  ] neo4j: reachable")
+        return object(), False
+
+    monkeypatch.setattr("menhir.cli.up.report_readiness", _fake_report)
+    result = CliRunner().invoke(app, ["setup", "--repo", str(repo)])
+    assert result.exit_code == 0, result.output
+    assert calls == [repo.resolve()]
+    assert "[ok  ] neo4j: reachable" in result.output
+    assert "Next: run 'menhir up' to start the server" in result.output
+    assert "menhir check" not in result.output and "menhir serve" not in result.output
+
+
+@pytest.mark.unit
+def test_bare_menhir_runs_the_readiness_check_inside_a_checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = _make_checkout(tmp_path / "menhir")
+    monkeypatch.chdir(repo)
+    seen: dict[str, object] = {}
+
+    def _fake_up(**kwargs):
+        seen.update(kwargs)
+
+    import menhir.cli as cli_module
+
+    monkeypatch.setattr(cli_module, "up_command", _fake_up)
+    result = CliRunner().invoke(app, [])
+    assert result.exit_code == 0, result.output
+    assert seen == {"check": True}
+
+
+@pytest.mark.unit
+def test_bare_menhir_outside_a_checkout_shows_help(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(app, [])
+    assert result.exit_code == 0
+    assert "Usage:" in result.output and "up" in result.output
