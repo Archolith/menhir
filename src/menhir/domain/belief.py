@@ -230,7 +230,9 @@ class BeliefScorer:
             else:
                 rationale.append(f"{direction}{weight:.2f} {item.signal.value}")
 
-        probability = 1 / (1 + exp(-log_odds))
+        # exp(-x) overflows for x > ~709; saturate the sigmoid so terminal evidence
+        # scores to 0/1 instead of raising.
+        probability = 1 / (1 + exp(-max(-700.0, min(700.0, log_odds))))
         bucket = self.classify(
             head=head,
             probability=probability,

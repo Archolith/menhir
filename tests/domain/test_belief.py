@@ -162,3 +162,37 @@ def test_recall_packet_groups_scores_by_assertion_policy() -> None:
     assert [score.candidate.id for score in packet.safe_to_assert] == ["belief_load_order_cause"]
     assert [score.candidate.id for score in packet.conflict_set] == ["belief_patch_fixed"]
     assert [score.candidate.id for score in packet.do_not_assert] == ["belief_old_patch_fully_fixed"]
+
+
+def test_belief_scorer_saturates_instead_of_overflowing_on_extreme_evidence() -> None:
+    # Boundary probe for the sigmoid: |log_odds| beyond exp()'s ~709 overflow
+    # threshold must saturate to 0/1, not raise OverflowError.
+    scorer = BeliefScorer(signal_weights={EvidenceSignal.IS_EXPIRED: 800.0})
+    candidate = BeliefCandidate(
+        id="belief_extreme_evidence",
+        statement="The CE willow patch fixed the crash.",
+        candidate_type=BeliefCandidateType.FIX,
+    )
+
+    contradicted = scorer.score(
+        candidate,
+        [
+            BeliefEvidence(
+                EvidenceSignal.IS_EXPIRED,
+                EvidencePolarity.CONTRADICTS,
+                note="Terminal contradiction evidence drives log_odds to -800.",
+            )
+        ],
+    )
+    assert contradicted.probability < 1e-300
+
+    supported = scorer.score(
+        candidate,
+        [
+            BeliefEvidence(
+                EvidenceSignal.IS_EXPIRED,
+                note="Terminal support evidence drives log_odds to +800.",
+            )
+        ],
+    )
+    assert supported.probability >= 1 - 1e-12
