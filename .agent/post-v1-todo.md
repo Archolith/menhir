@@ -146,6 +146,19 @@ Currently fixed query templates only. Opening up to agent-authored Cypher requir
 - **Per-file mtime incremental diff**: `FileEntry.file_mtime` populated during scan. Stored on File Entity nodes. `write_project` queries stored mtimes at start, computes `changed_paths` / `deleted_paths`, passes to `_write_symbols` for selective delete+write. First scan or force = full replace; subsequent scans = only changed files' symbols are deleted and rewritten.
 - **Background error surfacing**: Fire-and-forget writes (`_do_write`, `_background_symbol_rescan`) push errors to a server-side `deque`. `routes.backend_invoke` drains and attaches as `x-yawn-bg-warnings` response header. `BackendClient._request` reads and stores in client-side `deque`. `BaseTool.execute` appends `[background-error]` lines to next MCP tool response.
 - **Actionable MCP failures**: replace generic JSON-RPC `-32603 Internal error` responses with a sanitized stable error code, the actual failing subsystem/stage (for example auth, policy, gateway, backend, or Neo4j), a correlation ID, and a concrete operator next step. Preserve secret redaction while making the real fault diagnosable from the client response and server logs.
+  - ~~Precompute escape hatch~~ FIXED (2026-09-15). `BaseTool.execute()`/`BaseJsonResource.execute()`
+    evaluated `call_payload()`/`timeout_for()` as call arguments to `track_mcp_call(...)`, outside
+    its own try/except, so a bug in either (confirmed reachable: `timeout_for` overrides doing
+    `int(timeout_s)` raise on caller-supplied `inf`/`nan`) skipped `_diagnose_failure`, telemetry,
+    and the tool/resource's `error_mapper` entirely and reached FastMCP/the MCP SDK's bare generic
+    fallback — undiagnosable by design. Both computations now run through `_safe_precompute`
+    (`src/menhir/mcp/contracts.py`), which logs the traceback and falls back to a safe default so
+    the call proceeds through the normal, protected path. See
+    `tests/mcp/test_precompute_exception_stays_diagnosable.py`.
+  - Still open: a stable machine-readable error code, a correlation ID threaded into the client
+    response (telemetry already has `started_at`/`completed_at` per row but no ID surfaced back to
+    the caller), and a documented per-subsystem "concrete operator next step" beyond the prose
+    `_diagnose_failure` already produces for SQLite-lock/Neo4j-unreachable.
 - **Fingerprint skip fixed**: `_merge_entity` ON MATCH SET now includes `n += $extra`, so `scan_fingerprint` updates after first write. `logs/` and `.server.pid` excluded from fingerprint via `.gitignore`.
 - **Heat tracking**: `hot_count` property on File Entity nodes, incremented each time a file appears in `changed_paths` during incremental write. Exposed in `query_structure("files")` output.
 
