@@ -710,3 +710,32 @@ class TestMemoryWaitReportsTerminalState:
     def test_no_wait_keeps_queue_status(self, client, fake_runtime_ctx):
         data = client.post("/api/memory", json={"episode": "x"}).json()
         assert data["status"] == "queued" and data["timed_out"] is False and data["error"] is None
+
+
+class TestMemoryWaitEntitiesLinked:
+    def test_ready_counts_entities_on_the_resolved_graphiti_episode(self, client, fake_runtime_ctx):
+        fake_runtime_ctx.built.ingest_service.wait_for_episode_processing = AsyncMock(
+            return_value={"processing_state": "READY", "resolved_episode_uuid": "graphiti-ep-9"}
+        )
+        seen: list[str] = []
+
+        def _fetch(uuid: str) -> list[str]:
+            seen.append(uuid)
+            return ["e1", "e2", "e3"]
+
+        fake_runtime_ctx.built.graph_adapter = SimpleNamespace(fetch_linked_entity_uuids_for_episode=_fetch)
+        data = client.post("/api/memory?wait=true", json={"episode": "x"}).json()
+        assert data["status"] == "ready" and data["entities_linked"] == 3
+        assert seen == ["graphiti-ep-9"], "must count on Graphiti's episode, not Menhir's anchor"
+
+    def test_ready_with_zero_entities_is_visible(self, client, fake_runtime_ctx):
+        fake_runtime_ctx.built.ingest_service.wait_for_episode_processing = AsyncMock(
+            return_value={"processing_state": "READY", "resolved_episode_uuid": "graphiti-ep-0"}
+        )
+        fake_runtime_ctx.built.graph_adapter = SimpleNamespace(fetch_linked_entity_uuids_for_episode=lambda u: [])
+        data = client.post("/api/memory?wait=true", json={"episode": "SMOKE TEST: meta"}).json()
+        assert data["status"] == "ready" and data["entities_linked"] == 0
+
+    def test_failed_or_unwaited_has_no_count(self, client, fake_runtime_ctx):
+        data = client.post("/api/memory", json={"episode": "x"}).json()
+        assert data["entities_linked"] is None

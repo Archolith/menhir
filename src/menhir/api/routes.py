@@ -378,11 +378,14 @@ async def ingest_memory(
     error: str | None = None
     retry: str | None = None
     timed_out = False
+    entities_linked: int | None = None
     if wait:
         row = await runtime_ctx.built.ingest_service.wait_for_episode_processing(
             str(result.get("episode_id") or ""), timeout_s=60.0
         )
         status, error, retry, timed_out = _terminal_status_from_row(row, fallback=status)
+        if status == "ready":
+            entities_linked = await _count_linked_entities(runtime_ctx, row, str(result.get("episode_id") or ""))
     return MemoryResponse(
         episode_id=str(result.get("episode_id") or ""),
         status=status,
@@ -392,7 +395,30 @@ async def ingest_memory(
         error=error,
         retry=retry,
         timed_out=timed_out,
+        entities_linked=entities_linked,
     )
+
+
+async def _count_linked_entities(
+    runtime_ctx: object, row: dict[str, object] | None, episode_id: str
+) -> int | None:
+    """How many entities the write is linked to, or None when it cannot be determined.
+
+    The API's ``episode_id`` is Menhir's anchor node; Graphiti stores the extracted entities
+    against its own ``:Episodic`` node, which the anchor records as ``resolved_episode_uuid``.
+    Counting against the anchor always read 0 -- verified against a graph whose entities were
+    recallable -- so resolve first and fall back to the anchor only when unresolved.
+    """
+
+    adapter = getattr(getattr(runtime_ctx, "built", None), "graph_adapter", None)
+    fetch = getattr(adapter, "fetch_linked_entity_uuids_for_episode", None)
+    target = str((row or {}).get("resolved_episode_uuid") or episode_id or "")
+    if fetch is None or not target:
+        return None
+    try:
+        return len(await asyncio.to_thread(fetch, target))
+    except Exception:  # noqa: BLE001 - advisory count; the write is already committed
+        return None
 
 
 def _terminal_status_from_row(

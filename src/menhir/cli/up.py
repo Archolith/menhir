@@ -245,9 +245,9 @@ def up(
         from menhir.cli import serve as serve_command
 
         typer.echo(
-            "[serve] starting. To verify end to end: write one SMOKE TEST memory with "
-            "POST /api/memory?wait=true, recall it, then DELETE /api/memory/<episode_id> "
-            "(README: 'Smoke test, then clean up')."
+            "[serve] starting. To verify end to end: write one SMOKE TEST memory into "
+            "namespace 'smoke' with POST /api/memory?wait=true, recall it, then "
+            "DELETE /api/namespace/smoke (README: 'Smoke test, then clean up')."
         )
         serve_command(host=host, port=port)
     except typer.Exit:

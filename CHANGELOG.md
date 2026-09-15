@@ -1,3 +1,18 @@
+## 2026-09-14 - smoke test that actually cleans up; minimum extraction model
+
+- Findings from cold-start run #3. `DELETE /api/memory/{id}` removes the episode and its
+  projections but keeps the entities it produced (shared knowledge, by design); the README's
+  smoke test wrongly claimed a cascade. It now writes into a throwaway namespace and tears it
+  down with `DELETE /api/namespace/{ns}` (operator tier, dry-run first).
+- `POST /api/memory?wait=true` reports `entities_linked` on a `ready` write, counted on the
+  Graphiti episode the anchor resolved to (counting on the anchor always read 0). `ready` with
+  `entities_linked=0` is the "model extracted nothing" case that was invisible before.
+- Minimum recommended extraction model is `gpt-4o-mini` class. Measured on OpenRouter:
+  `openai/gpt-4o-mini` extracted 5/5 test sentences (one prefixed "SMOKE TEST:");
+  `openai/gpt-4.1-nano` returned zero entities 6/9 on ordinary sentences. `.env.example`
+  defaults and the OpenRouter example now name `gpt-4o-mini`; README examples use a
+  person-plus-action sentence.
+
 ## 2026-09-14 - cold-start evaluation #2 fixes
 
 - `POST /api/memory?wait=true` now reports the terminal processing state -- `ready`, or

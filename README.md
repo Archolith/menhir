@@ -456,11 +456,11 @@ the bearer is one of the keys above, or omitted on an open loopback bind):
 ```bash
 curl -fsS -X POST "http://127.0.0.1:8100/api/memory?wait=true" \
   -H "Authorization: Bearer <your-key>" -H "Content-Type: application/json" \
-  -d '{"episode": "The release pipeline runs scripts/release.sh to publish the docs site.", "source": "curl"}'
+  -d '{"episode": "Alice maintains the billing service and deploys it every Friday.", "source": "curl"}'
 
 curl -fsS -X POST http://127.0.0.1:8100/api/recall \
   -H "Authorization: Bearer <your-key>" -H "Content-Type: application/json" \
-  -d '{"query": "where is the deploy script"}'
+  -d '{"query": "who maintains the billing service"}'
 ```
 
 Recall includes memories that are still session-scoped (freshly written, not yet promoted),
@@ -475,34 +475,31 @@ unlinked nodes -- and small models refuse more readily than large ones.
 
 ### Smoke test, then clean up
 
-To prove the whole path without leaving test data in the graph, write a memory that is
-obviously synthetic, recall it, and delete it by the `episode_id` the write returned (the
-delete cascades to the entities and relationships that episode produced):
+To prove the whole path without leaving test data behind, write into a throwaway namespace,
+recall from it, then delete that namespace. Deleting a single memory removes the episode and
+its projections but deliberately keeps the entities it produced -- they are shared knowledge
+that other memories may also cite -- so the namespace teardown is the clean-up that actually
+leaves nothing.
 
 ```bash
-KEY=<your-key>   # omit the Authorization header on an open loopback bind
-EP=$(curl -fsS -X POST "http://127.0.0.1:8100/api/memory?wait=true"   -H "Authorization: Bearer $KEY" -H "Content-Type: application/json"   -d '{"episode": "SMOKE TEST: the menhir smoke check writes this sentence to verify enrichment and recall.", "source": "smoke"}'   | python -c 'import json,sys; d=json.load(sys.stdin); print(d["status"], d.get("error") or "", file=sys.stderr); print(d["episode_id"])')
+KEY=<an operator-tier key>   # namespace deletion requires the operator tier
+EP=$(curl -fsS -X POST "http://127.0.0.1:8100/api/memory?wait=true"   -H "Authorization: Bearer $KEY" -H "Content-Type: application/json"   -d '{"episode": "Alice maintains the billing service and deploys it every Friday.", "source": "smoke", "namespace": "smoke"}'   | python -c 'import json,sys; d=json.load(sys.stdin); print(d["status"], "entities_linked=%s" % d.get("entities_linked"), d.get("error") or "", file=sys.stderr); print(d["episode_id"])')
 
-curl -fsS -X POST http://127.0.0.1:8100/api/recall   -H "Authorization: Bearer $KEY" -H "Content-Type: application/json"   -d '{"query": "menhir smoke check"}'
+curl -fsS -X POST http://127.0.0.1:8100/api/recall   -H "Authorization: Bearer $KEY" -H "Content-Type: application/json"   -d '{"query": "who maintains the billing service", "namespace": "smoke"}'
 
-curl -fsS -X DELETE "http://127.0.0.1:8100/api/memory/$EP" -H "Authorization: Bearer $KEY"
+curl -fsS -X DELETE "http://127.0.0.1:8100/api/namespace/smoke?dry_run=true" -H "Authorization: Bearer $KEY"
+curl -fsS -X DELETE "http://127.0.0.1:8100/api/namespace/smoke" -H "Authorization: Bearer $KEY"
 ```
 
-Expect `ready` on stderr from the first command, the smoke sentence in the recall results, and
-`{"uuid": "...", "deleted": true}` from the delete. The same check is available over MCP with
-`add_memory`, `recall_memories`, and `delete_memory`.
+Expect `ready entities_linked=2` (or more) on stderr from the write, the sentence in the recall
+results, a node count from the dry run, and the same count deleted.
 
-If no credential is configured, Menhir permits open access only on a loopback bind. See
-[Security](#security-and-privacy) before exposing the service to another machine.
-
-Clients may also identify themselves by name with the `X-Menhir-Client-Name` header, which
-`MENHIR_CLIENT_NAMESPACES` and `MENHIR_CLIENT_TOOLS` use to pin a client to one namespace or
-restrict it to a subset of tools. These are unset by default and most deployments need none of
-them. **Configuring the first one is a breaking change for every other client:** once any
-per-client restriction exists, an unrecognized name is refused rather than treated as
-unrestricted, so every remaining client must be listed in `MENHIR_KNOWN_CLIENTS` in the same
-edit. See [`.env.example`](.env.example) for the full rules, including which names must *not*
-be added to `MENHIR_KNOWN_CLIENTS`.
+`ready entities_linked=0` means enrichment succeeded but the model extracted nothing recallable.
+**Use at least a `gpt-4o-mini`-class extraction model.** Measured on OpenRouter: `openai/gpt-4o-mini`
+extracted entities from every test sentence (5/5, including one prefixed "SMOKE TEST:");
+`openai/gpt-4.1-nano` returned zero entities for the same ordinary sentences 6 times out of 9 and
+is not a reliable floor. The same check is available over MCP with `add_memory`,
+`recall_memories`, and `delete_namespace`.
 
 ## Docker test stack
 

@@ -351,6 +351,11 @@ class MemoryResponse(BaseModel):
     retry: str | None = None
     #: Set when ``wait`` elapsed before a terminal state.
     timed_out: bool = False
+    #: With ``wait`` and ``status: ready``: how many entities the episode is linked to. ``0`` is a
+    #: successful enrichment that extracted nothing recallable -- small models decline text that
+    #: reads as meta ("SMOKE TEST: ...") or has no named things in it. Without the count a caller
+    #: sees ``ready`` and an empty recall and cannot tell the two apart.
+    entities_linked: int | None = None
 
 
 class TurnEvidenceRequest(BaseModel):
