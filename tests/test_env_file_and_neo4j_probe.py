@@ -99,6 +99,9 @@ class _Down(Exception):
     code = ""
 
 
+_driver_kwargs: list[dict] = []
+
+
 def _driver_raising(exc: Exception):
     class _Session:
         def __enter__(self):
@@ -116,7 +119,12 @@ def _driver_raising(exc: Exception):
 
     class _GraphDatabase:
         @staticmethod
-        def driver(uri, auth):
+        def driver(uri, auth, **kwargs):
+            # Production passes DRIVER_NOTIFICATION_CONFIG here. A fixed signature made
+            # every call raise TypeError, which probe_neo4j reported as "unreachable" --
+            # so this test passed its second assertion and silently stopped exercising
+            # the first.
+            _driver_kwargs.append(kwargs)
             return _Driver()
 
     return _GraphDatabase
@@ -125,7 +133,9 @@ def _driver_raising(exc: Exception):
 def test_probe_neo4j_distinguishes_unauthorized_from_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(rp, "_NEO4J_IMPORT_ERROR", None)
     monkeypatch.setattr(rp, "GraphDatabase", _driver_raising(_AuthErr("refused")))
+    _driver_kwargs.clear()
     assert rp.probe_neo4j("bolt://x", "neo4j", "wrong") == "unauthorized"
+    assert _driver_kwargs and "notifications_disabled_classifications" in _driver_kwargs[0]
 
     monkeypatch.setattr(rp, "GraphDatabase", _driver_raising(_Down("connection refused")))
     assert rp.probe_neo4j("bolt://x", "neo4j", "pw") == "unreachable"
