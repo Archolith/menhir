@@ -93,10 +93,22 @@ def test_wait_for_neo4j_zero_timeout_is_a_single_probe() -> None:
     assert calls == [1]
 
 
-def test_compose_neo4j_up_requires_compose_file_and_docker(tmp_path: Path) -> None:
-    with pytest.raises(UpError, match="docker-compose.yml"):
-        compose_neo4j_up(tmp_path)
+def test_compose_neo4j_up_generates_a_compose_file_when_absent(tmp_path: Path) -> None:
+    """Outside a checkout there is no repository compose file; --compose-neo4j must still
+    work, so the bundled definition is written next to .env rather than failing."""
 
+    def _ok(cmd, **k):
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    compose_neo4j_up(tmp_path, run=_ok)
+    written = (tmp_path / "docker-compose.yml").read_text(encoding="utf-8")
+    assert "neo4j:5-community" in written
+    # Credentials must match what setup writes into .env, or the generated stack is unusable.
+    assert "NEO4J_AUTH: neo4j/password" in written
+    assert '"7687:7687"' in written
+
+
+def test_compose_neo4j_up_requires_docker(tmp_path: Path) -> None:
     (tmp_path / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
 
     def _missing(*a, **k):

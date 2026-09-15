@@ -18,7 +18,7 @@ from urllib.parse import urlparse
 
 import typer
 
-from menhir.cli.setup import SetupError, apply_setup, find_checkout
+from menhir.cli.setup import SetupError, apply_setup, find_home
 
 DEFAULT_WAIT_TIMEOUT_S = 60.0
 _POLL_INTERVAL_S = 2.0
@@ -39,7 +39,15 @@ def compose_neo4j_up(repo: Path, *, run: Callable[..., subprocess.CompletedProce
 
     compose_file = repo / "docker-compose.yml"
     if not compose_file.is_file():
-        raise UpError(f"--compose-neo4j needs {compose_file}, which is missing.")
+        # Outside a checkout there is no repository compose file, so write the bundled one
+        # into the same directory `.env` lives in. Its credentials are COMPOSE_NEO4J_KEYS,
+        # which setup has already written to `.env`.
+        from menhir.cli.setup import _GENERATED_COMPOSE
+
+        try:
+            compose_file.write_text(_GENERATED_COMPOSE, encoding="utf-8", newline="\n")
+        except OSError as exc:
+            raise UpError(f"--compose-neo4j needs {compose_file}, which could not be written: {exc}") from exc
     try:
         result = run(
             ["docker", "compose", "-f", str(compose_file), "up", "-d", "neo4j"],
@@ -209,7 +217,7 @@ def up(
     from dotenv import load_dotenv
 
     try:
-        checkout = find_checkout(repo or Path.cwd())
+        checkout = find_home(repo or Path.cwd(), explicit=repo is not None)
 
         # 1. env (idempotent; never overwrites a filled-in secret)
         changes = apply_setup(

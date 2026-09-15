@@ -321,8 +321,49 @@ def test_bare_menhir_runs_the_readiness_check_inside_a_checkout(tmp_path: Path, 
 
 
 @pytest.mark.unit
-def test_bare_menhir_outside_a_checkout_shows_help(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_bare_menhir_outside_a_checkout_reports_against_the_state_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A pip install has no checkout. The bare command must still say what is configured and
+    what to run next; it used to print help and leave the user to guess."""
+
+    state = tmp_path / "state"
+    monkeypatch.setenv("MENHIR_STATE_DIR", str(state))
     monkeypatch.chdir(tmp_path)
     result = CliRunner().invoke(app, [])
-    assert result.exit_code == 0
-    assert "Usage:" in result.output and "up" in result.output
+    # Exit status reflects readiness, not whether the command worked: on a machine with
+    # nothing configured the check reports MISS lines and exits non-zero by design.
+    assert result.exit_code in (0, 1), result.output
+    assert "Next:" in result.output
+    assert "startup mode:" in result.output
+    # Configuration landed in the state directory, not the working directory.
+    assert (state / ".env").is_file()
+    assert not (tmp_path / ".env").exists()
+
+
+def test_setup_outside_a_checkout_skips_git_hooks_and_generates_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from menhir.cli.setup import apply_setup, find_home, is_checkout
+
+    state = tmp_path / "state"
+    monkeypatch.setenv("MENHIR_STATE_DIR", str(state))
+    home = find_home(tmp_path)
+    assert home == state
+    assert not is_checkout(home)
+
+    changes = apply_setup(home, create_env=True, provider="openai", compose_neo4j=True)
+    env = (home / ".env").read_text(encoding="utf-8")
+    assert "NEO4J_URI=bolt://localhost:7687" in env
+    assert "OPENAI_API_KEY=" in env
+    assert any("skipped Git hooks" in change for change in changes)
+
+
+def test_explicit_repo_path_still_requires_a_checkout(tmp_path: Path) -> None:
+    """--repo is a statement about where the checkout is; a wrong path must say so rather
+    than silently configuring the state directory instead."""
+
+    from menhir.cli.setup import SetupError, find_home
+
+    with pytest.raises(SetupError, match="source checkout"):
+        find_home(tmp_path, explicit=True)

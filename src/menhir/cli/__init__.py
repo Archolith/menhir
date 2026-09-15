@@ -34,15 +34,6 @@ def _root(ctx: typer.Context) -> None:
         # The first thing a newcomer types after `pip install` is the bare command. Help text
         # lists 20 subcommands; the tier report says which one matters right now. Outside a
         # source checkout there is nothing to report on, so fall back to the help text.
-        from pathlib import Path
-
-        from menhir.cli.setup import SetupError, find_checkout
-
-        try:
-            find_checkout(Path.cwd())
-        except SetupError:
-            typer.echo(ctx.get_help())
-            raise typer.Exit(0)
         up_command(check=True)
 
 

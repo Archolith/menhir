@@ -1,3 +1,16 @@
+## 2026-09-15 - setup and up work without a source checkout
+
+- `menhir setup` and `menhir up` no longer require a cloned repository. Installed from a wheel
+  they configure `MENHIR_STATE_DIR` (default `~/.menhir`): `.env` is generated there from the
+  same key tables the checkout path uses, `--compose-neo4j` writes the bundled Neo4j compose
+  definition next to it, and the Git-hook step is reported as skipped rather than failing.
+  Until now every documented first command answered "Menhir setup requires a source checkout"
+  on a pip install, which would have made a PyPI release unusable.
+- `--repo PATH` still requires a real checkout: naming a path is a statement about where it is,
+  so a wrong one says so instead of silently configuring somewhere else.
+- Bare `menhir` outside a checkout reports readiness against the state directory instead of
+  printing help.
+
 ## 2026-09-15 - no dependency resolves from git any more
 
 - `archolith-oauth==0.3.1` replaces its `git+https` pin, published to PyPI from the tag of the
