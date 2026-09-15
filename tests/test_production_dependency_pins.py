@@ -1,64 +1,74 @@
-"""Release dependencies must use immutable, reviewed Git commits."""
+"""Release dependencies must be immutable and verifiable.
+
+Until 2026-09-15 that meant a reviewed Git commit, because neither first-party package was
+published. Both are on PyPI now, so the guarantee is stronger and this file asserts the
+stronger form: an exact version pin (never a range), resolved from the registry rather than a
+repository, and carrying hashes in the lock so the release wheelhouse can be built with
+``--require-hashes``.
+
+The property being protected has not changed -- you cannot silently swap what ships -- but a
+git+https requirement cannot carry a hash and cannot be installed without git, which is why it
+was traded for a registry pin.
+"""
 
 from pathlib import Path
 import tomllib
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-OAUTH_REPOSITORY = "https://github.com/Archolith/archolith_oauth.git"
-REVIEWED_OAUTH_COMMIT = "f77e2dbc7c7c85199aa05986b8d2126b54d1b056"
-MCP_FRAMEWORK_REPOSITORY = "https://github.com/Archolith/archolith-mcp-framework.git"
-REVIEWED_MCP_FRAMEWORK_COMMIT = "0a7c300cf50d724a2d5a8e8c1e664c7e8a5fa2eb"
+PINNED_FIRST_PARTY = {
+    "archolith-oauth": "0.3.1",
+    "archolith-mcp-framework": "0.2.0",
+}
 
 
-def test_oauth_dependency_is_pinned_to_reviewed_merge_commit() -> None:
+def _dependencies() -> list[str]:
     pyproject = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    dependencies = pyproject["project"]["dependencies"]
-    oauth_dependencies = [
-        dependency
-        for dependency in dependencies
-        if dependency.lower().startswith("archolith-oauth ")
-    ]
-    assert oauth_dependencies == [
-        f"archolith-oauth @ git+{OAUTH_REPOSITORY}@{REVIEWED_OAUTH_COMMIT}"
-    ]
+    return pyproject["project"]["dependencies"]
 
+
+def _lock_package(name: str) -> dict:
     lock = tomllib.loads((PROJECT_ROOT / "uv.lock").read_text(encoding="utf-8"))
-    oauth_packages = [
-        package for package in lock["package"] if package["name"] == "archolith-oauth"
-    ]
-    assert len(oauth_packages) == 1
-    assert oauth_packages[0]["source"] == {
-        "git": (
-            f"{OAUTH_REPOSITORY}?rev={REVIEWED_OAUTH_COMMIT}"
-            f"#{REVIEWED_OAUTH_COMMIT}"
+    packages = [package for package in lock["package"] if package["name"] == name]
+    assert len(packages) == 1, f"expected exactly one {name} entry in uv.lock, got {len(packages)}"
+    return packages[0]
+
+
+def test_first_party_dependencies_are_exact_version_pins() -> None:
+    dependencies = _dependencies()
+    for name, version in PINNED_FIRST_PARTY.items():
+        matching = [d for d in dependencies if d.lower().replace(" ", "").startswith(name)]
+        assert matching == [f"{name}=={version}"], (
+            f"{name} must be pinned exactly as {name}=={version}; found {matching}"
         )
-    }
 
 
-def test_mcp_framework_dependency_is_pinned_to_reviewed_commit() -> None:
-    pyproject = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    dependencies = pyproject["project"]["dependencies"]
-    framework_dependencies = [
-        dependency
-        for dependency in dependencies
-        if dependency.lower().startswith("archolith-mcp-framework ")
-    ]
-    assert framework_dependencies == [
-        "archolith-mcp-framework @ "
-        f"git+{MCP_FRAMEWORK_REPOSITORY}@{REVIEWED_MCP_FRAMEWORK_COMMIT}"
-    ]
-
-    lock = tomllib.loads((PROJECT_ROOT / "uv.lock").read_text(encoding="utf-8"))
-    framework_packages = [
-        package
-        for package in lock["package"]
-        if package["name"] == "archolith-mcp-framework"
-    ]
-    assert len(framework_packages) == 1
-    assert framework_packages[0]["source"] == {
-        "git": (
-            f"{MCP_FRAMEWORK_REPOSITORY}?rev={REVIEWED_MCP_FRAMEWORK_COMMIT}"
-            f"#{REVIEWED_MCP_FRAMEWORK_COMMIT}"
+def test_first_party_dependencies_resolve_from_pypi_not_a_repository() -> None:
+    for name in PINNED_FIRST_PARTY:
+        source = _lock_package(name)["source"]
+        assert source == {"registry": "https://pypi.org/simple"}, (
+            f"{name} resolves from {source}; a repository source cannot be hash-verified "
+            "and cannot be installed without git"
         )
-    }
+
+
+def test_first_party_dependencies_carry_hashes_in_the_lock() -> None:
+    """Without hashes the release wheelhouse cannot be built with --require-hashes, which is
+    what makes the shipped closure verifiable."""
+
+    for name in PINNED_FIRST_PARTY:
+        package = _lock_package(name)
+        wheels = package.get("wheels") or []
+        sdist = package.get("sdist") or {}
+        hashes = [w.get("hash") for w in wheels] + [sdist.get("hash")]
+        assert any(h and h.startswith("sha256:") for h in hashes), (
+            f"{name} has no sha256 hash in uv.lock"
+        )
+
+
+def test_no_dependency_is_resolved_from_a_repository() -> None:
+    """A single VCS requirement anywhere re-imposes git on every install and breaks
+    ``pip install archolith-menhir`` on a machine without it."""
+
+    vcs = [d for d in _dependencies() if "@" in d and "://" in d]
+    assert vcs == [], f"dependencies resolved from a repository: {vcs}"

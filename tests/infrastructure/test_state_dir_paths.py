@@ -89,9 +89,3 @@ def test_default_workspace_marker_follows_workspace_root(clean_env: Path, monkey
     monkeypatch.setenv("WORKSPACE_ROOT", str(clean_env / "IdeaProjects"))
     assert paths.default_workspace_marker() == "/IdeaProjects/"
 
-
-@pytest.mark.unit
-def test_default_workspace_marker_follows_workspace_root(clean_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    assert paths.default_workspace_marker() is None
-    monkeypatch.setenv("WORKSPACE_ROOT", str(clean_env / "IdeaProjects"))
-    assert paths.default_workspace_marker() == "/IdeaProjects/"
