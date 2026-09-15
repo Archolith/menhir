@@ -23,6 +23,7 @@ from menhir.infrastructure.episode_repository import (
     is_context_window_error_text,
     is_recoverable_context_window_error,
 )
+from menhir.infrastructure.episode_lifecycle import TRANSIENT_RETRY_CAP
 from menhir.domain.self_identity import self_uuid_for_namespace
 from menhir.infrastructure.consolidation_queries import ConsolidationRepository
 from menhir.infrastructure.correlation_queries import CorrelationRepository
@@ -469,6 +470,17 @@ class MemoryGraphAdapter:
             episode_uuid,
             retry_after_s=retry_after_s,
             worker_id=worker_id,
+        )
+
+    def count_transient_requeue(self, episode_uuid: str) -> bool:
+        """Refund one claim's attempt and bump the transient counter (#79/#70)."""
+        return self._episodes.count_transient_requeue(episode_uuid)
+
+    def fail_transient_exhausted_pending_episodes(
+        self, *, transient_max: int = TRANSIENT_RETRY_CAP
+    ) -> int:
+        return self._episodes.fail_transient_exhausted_pending_episodes(
+            transient_max=transient_max
         )
 
     def create_raw_capture_entity(

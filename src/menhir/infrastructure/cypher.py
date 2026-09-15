@@ -402,6 +402,7 @@ EPISODE_RETRY_FIELDS = (
     "n.user_flagged AS user_flagged",
     "n.bootstrap_scope AS bootstrap_scope",
     "n.processing_attempts AS processing_attempts",
+    "coalesce(toInteger(n.transient_retries), 0) AS transient_retries",
     "n.processing_error AS processing_error",
     "toString(coalesce(n.processing_completed_at, n.processing_started_at, n.queued_at, n.created_at)) AS processing_completed_at",
 )

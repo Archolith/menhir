@@ -568,6 +568,7 @@ class StubMemoryGraphAdapter:
             for uuid, row in self.pending_episode_rows.items()
             if row.get("processing_state") == ProcessingState.PENDING
             and int(row.get("processing_attempts") or 0) < max(1, int(max_attempts))
+            and int(row.get("transient_retries") or 0) < 20
         ]
         return uuids[:limit]
 
@@ -576,6 +577,7 @@ class StubMemoryGraphAdapter:
             {
                 "uuid": uuid,
                 "processing_attempts": row.get("processing_attempts"),
+                "transient_retries": int(row.get("transient_retries") or 0),
                 "processing_error": row.get("processing_error"),
                 "processing_completed_at": row.get("processing_completed_at"),
             }
@@ -809,6 +811,29 @@ class StubMemoryGraphAdapter:
             row["processing_llm_active_model"] = None
             row["processing_llm_active_endpoint"] = None
             row["processing_error"] = row.get("processing_error") or "pending_attempts_exhausted"
+            failed += 1
+        return failed
+
+    def count_transient_requeue(self, episode_uuid: str) -> bool:
+        """Refund one claim's attempt and bump the transient counter (#79/#70)."""
+        row = self.pending_episode_rows.get(episode_uuid)
+        if row is None:
+            return False
+        row["transient_retries"] = int(row.get("transient_retries") or 0) + 1
+        row["processing_attempts"] = max(int(row.get("processing_attempts") or 0) - 1, 0)
+        return True
+
+    def fail_transient_exhausted_pending_episodes(self, *, transient_max: int = 20) -> int:
+        failed = 0
+        for row in self.pending_episode_rows.values():
+            if row.get("processing_state") != ProcessingState.PENDING:
+                continue
+            if int(row.get("transient_retries") or 0) < max(1, int(transient_max)):
+                continue
+            row["processing_state"] = ProcessingState.FAILED
+            row["processing_stage"] = "failed"
+            row["processing_substage"] = "pending_transient_exhausted"
+            row["processing_error"] = row.get("processing_error") or "pending_transient_exhausted"
             failed += 1
         return failed
 

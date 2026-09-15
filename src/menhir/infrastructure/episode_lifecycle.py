@@ -53,6 +53,13 @@ _PROVIDER_CONTEXT_LIMIT_MARKERS = (
     "reduce the length of the messages",
 )
 
+#: Retries for TRANSIENT conditions (provider outage, circuit-open, backpressure) do not consume
+#: the genuine-failure budget (#79/#70): `processing_attempts` is refunded when the requeue is
+#: transient, so an outage that ends can never have parked an episode on its own. Termination
+#: instead rides this separate, much larger counter — a permanently dead provider must still stop
+#: consuming claim cycles eventually.
+TRANSIENT_RETRY_CAP = 20
+
 
 def is_recoverable_context_window_error(error: object | None) -> bool:
     """Return True for a context-window error a config change could clear.
@@ -376,6 +383,7 @@ class EpisodeLifecycleRepository:
             .where(
                 "n.processing_state = 'PENDING'",
                 "coalesce(toInteger(n.processing_attempts), 0) < $max_attempts",
+                "coalesce(toInteger(n.transient_retries), 0) < $transient_max",
                 "coalesce(properties(n)['retry_after'], datetime()) <= datetime()",
             )
             .return_raw("n.uuid AS uuid")
@@ -383,8 +391,84 @@ class EpisodeLifecycleRepository:
             .limit()
             .build()
         )
-        rows = self.neo4j.execute(query, params={"limit": safe_limit, "max_attempts": max(1, max_attempts)})
+        rows = self.neo4j.execute(
+            query,
+            params={
+                "limit": safe_limit,
+                "max_attempts": max(1, max_attempts),
+                "transient_max": TRANSIENT_RETRY_CAP,
+            },
+        )
         return [str(row["uuid"]) for row in rows if row.get("uuid")]
+
+    def count_transient_requeue(self, episode_uuid: str) -> bool:
+        """Refund one claim's attempt and record the transient requeue (#79/#70).
+
+        Called by the worker immediately after it has requeued (or failed) a row it owned,
+        so no lease guard is needed — the caller already proved ownership. Refunding keeps
+        `processing_attempts` a count of GENUINE processing failures; the transient churn
+        rides `transient_retries` and is capped by `TRANSIENT_RETRY_CAP`.
+        """
+        query = (
+            Cypher()
+            .match("(n:Episodic)")
+            .where("n.uuid = $episode_uuid")
+            .set(
+                (
+                    "n.transient_retries = coalesce(toInteger(n.transient_retries), 0) + 1",
+                    "n.processing_attempts = greatest("
+                    " coalesce(toInteger(n.processing_attempts), 1) - 1, 0)",
+                )
+            )
+            .return_raw("count(n) AS updated")
+            .build()
+        )
+        rows = self.neo4j.execute(query, params={"episode_uuid": episode_uuid})
+        return bool(rows and int(rows[0].get("updated", 0)) > 0)
+
+    def fail_transient_exhausted_pending_episodes(
+        self, *, transient_max: int = TRANSIENT_RETRY_CAP
+    ) -> int:
+        """Park PENDING episodes whose transient requeues hit the cap (#79/#70).
+
+        The genuine-failure sibling (`fail_exhausted_pending_episodes`) can never fire on a
+        purely transient history because those attempts are refunded; without this arm a
+        permanently dead provider would leave episodes bouncing PENDING forever.
+        """
+        query = (
+            Cypher()
+            .match("(n:Episodic)")
+            .where(
+                "n.processing_state = 'PENDING'",
+                "coalesce(toInteger(n.transient_retries), 0) >= $transient_max",
+            )
+            .set(
+                (
+                    "n.processing_state = 'FAILED'",
+                    "n.processing_stage = 'failed'",
+                    "n.processing_substage = 'pending_transient_exhausted'",
+                    "n.processing_substage_started_at = datetime()",
+                    "n.processing_progress = 100.0",
+                    "n.processing_steps_completed = coalesce("
+                    " toInteger(n.processing_steps_total),"
+                    " coalesce(toInteger(n.processing_steps_completed), 5))",
+                    *LLM_RESET_SET,
+                    "n.processing_owner = null",
+                    "n.processing_lease_expires_at = null",
+                    "n.processing_heartbeat_at = datetime()",
+                    "n.processing_started_at = null",
+                    "n.processing_completed_at = datetime()",
+                    "n.processing_error = CASE"
+                    " WHEN n.processing_error IS NULL OR trim(toString(n.processing_error)) = ''"
+                    " THEN 'pending_transient_exhausted'"
+                    " ELSE n.processing_error END",
+                )
+            )
+            .return_raw("count(n) AS failed")
+            .build()
+        )
+        rows = self.neo4j.execute(query, params={"transient_max": max(1, transient_max)})
+        return int(rows[0].get("failed", 0)) if rows else 0
 
     def fetch_failed_episode_retry_candidates(self, limit: int = 100) -> list[dict[str, Any]]:
         safe_limit = max(1, min(limit, 500))

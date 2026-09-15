@@ -17,6 +17,7 @@ from typing import Callable
 
 from menhir.domain.utils import source_confidence_for
 from menhir.infrastructure import consolidation_audit as _audit
+from menhir.infrastructure.episode_lifecycle import TRANSIENT_RETRY_CAP
 from menhir.infrastructure.episode_repository import is_recoverable_context_window_error
 from menhir.infrastructure.telemetry import record_failure_event
 from menhir.services.enrichment_failures import (
@@ -335,6 +336,29 @@ async def retry_process_candidate(
                 "effective_max": effective_max,
                 "decision": "not_requeued",
                 "context_window_mismatch": context_window_mismatch,
+            },
+        )
+        return "exhausted"
+
+    # Transient requeues (outage, circuit-open, backpressure) refund `processing_attempts`
+    # (#79/#70), so the genuine-failure ceiling above cannot see them. Termination for a
+    # permanently dead provider rides this separate, much larger counter instead.
+    transient_retries = int(row.get("transient_retries") or 0)
+    if classification == "retryable" and transient_retries >= TRANSIENT_RETRY_CAP:
+        record_failure_event(
+            operation="scheduler_retry_failed_enrichments",
+            episode_uuid=episode_uuid,
+            failure_stage="retry_transient_exhausted",
+            classification="exhausted",
+            retryable=False,
+            processing_attempt=processing_attempts,
+            queue_depth=queue_depth,
+            error_type="transient_retries_exhausted",
+            error=error_text or "transient retries exhausted",
+            details={
+                "transient_retries": transient_retries,
+                "transient_cap": TRANSIENT_RETRY_CAP,
+                "decision": "not_requeued",
             },
         )
         return "exhausted"

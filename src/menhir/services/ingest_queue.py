@@ -213,6 +213,9 @@ class IngestQueueMixin:
             self.graph_adapter.fail_exhausted_pending_episodes,
             max_attempts=self._max_enrichment_attempts,
         )
+        transient_exhausted = await asyncio.to_thread(
+            self.graph_adapter.fail_transient_exhausted_pending_episodes
+        )
         orphaned_resets = await asyncio.to_thread(
             self.graph_adapter.reset_orphaned_enriching_episodes,
             max_attempts=self._max_enrichment_attempts,
@@ -244,6 +247,12 @@ class IngestQueueMixin:
             logger.warning(
                 "Marked %d exhausted pending episodes failed for worker=%s",
                 exhausted_pending,
+                self._worker_id,
+            )
+        if transient_exhausted > 0:
+            logger.warning(
+                "Marked %d transient-exhausted pending episodes failed for worker=%s",
+                transient_exhausted,
                 self._worker_id,
             )
         return stale_resets + orphaned_resets, len(episode_ids)

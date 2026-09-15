@@ -12,6 +12,7 @@ import json
 import pathlib
 import sqlite3
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 
@@ -576,3 +577,245 @@ def test_cf188_empty_base_url_refuses_rather_than_defaulting_to_openai(monkeypat
         chat("system", "personal memory content")
 
 
+
+
+# ---------------------------------------------------------------------------
+# #79 / #70-2: transient outages must not burn the genuine retry budget
+# ---------------------------------------------------------------------------
+
+
+def _transient_failure_ctx(adapter, episode_uuid: str = "ep-79"):
+    from time import perf_counter
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        graph_adapter=adapter,
+        episode_uuid=episode_uuid,
+        worker_id="worker-79",
+        claimed={"source": "test", "session_id": "s-79", "user_id": "u-79"},
+        started=perf_counter(),
+        processing_attempts=1,
+        get_queue_depth=lambda: 0,
+    )
+
+
+def _seed_claimed_episode(adapter, episode_uuid: str = "ep-79") -> None:
+    adapter.create_pending_episode(
+        episode_uuid=episode_uuid,
+        name="ep-79",
+        content="the outage survivability episode",
+        session_id="s-79",
+        user_id="u-79",
+        source="test",
+        source_confidence=0.9,
+    )
+    adapter.claim_pending_episode(
+        episode_uuid,
+        max_attempts=3,
+        worker_id="worker-79",
+        lease_seconds=900,
+    )
+
+
+def _retry_row(adapter, episode_uuid: str = "ep-79", *, completed_ago_s: int = 10_000) -> dict:
+    from datetime import datetime, timedelta, timezone
+
+    row = adapter.pending_episode_rows[episode_uuid]
+    completed = datetime.now(timezone.utc) - timedelta(seconds=completed_ago_s)
+    return {
+        "uuid": episode_uuid,
+        "name": "ep-79",
+        "processing_attempts": int(row.get("processing_attempts") or 0),
+        "transient_retries": int(row.get("transient_retries") or 0),
+        "processing_error": row.get("processing_error"),
+        "processing_completed_at": completed.isoformat(),
+    }
+
+
+class _RequeueIngest:
+    def get_queue_depth(self) -> int:
+        return 0
+
+    def get_context_window_retry_attempts(self) -> int:
+        return 6
+
+    def get_llm_session_window_seconds(self) -> int:
+        return 900
+
+    async def requeue_failed_episode(self, episode_uuid: str) -> bool:
+        self.requeued.append(episode_uuid)  # type: ignore[attr-defined]
+        return True
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_three_retryable_failures_leave_the_episode_claimable_not_parked() -> None:
+    """An outage that ends must never park an episode by itself (#79/#70-2)."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from tests.conftest import StubMemoryGraphAdapter
+    from menhir.services.enrichment_steps import handle_enrichment_failure
+    from menhir.services.scheduler_tasks import retry_process_candidate
+
+    adapter = StubMemoryGraphAdapter()
+    _seed_claimed_episode(adapter)
+    ctx = _transient_failure_ctx(adapter)
+
+    for _ in range(3):
+        await handle_enrichment_failure(ctx, RuntimeError("connection refused 503"))
+        # Simulate the scheduler requeueing the retryable FAILED row.
+        adapter.pending_episode_rows["ep-79"]["processing_state"] = "PENDING"
+        adapter.claim_pending_episode(
+            "ep-79", max_attempts=3, worker_id="worker-79", lease_seconds=900
+        )
+
+    row = adapter.pending_episode_rows["ep-79"]
+    # Every transient failure refunded its claim: attempts stayed flat, the
+    # separate transient counter carried the churn.
+    assert int(row["processing_attempts"]) == 1
+    assert int(row["transient_retries"]) == 3
+    assert row["processing_state"] == "ENRICHING"
+
+    # The scheduler must requeue, never declare the budget exhausted.
+    adapter.mark_episode_failed("ep-79", "connection refused 503", worker_id="worker-79")
+    ingest = SimpleNamespace(requeued=[])
+    for name in ("get_queue_depth", "get_context_window_retry_attempts", "get_llm_session_window_seconds"):
+        setattr(ingest, name, getattr(_RequeueIngest(), name))
+    ingest.requeue_failed_episode = _RequeueIngest().requeue_failed_episode.__get__(ingest)
+    with patch("menhir.services.scheduler_tasks.record_failure_event"):
+        action = await retry_process_candidate(
+            SimpleNamespace(find_completed_episode_artifact=lambda **k: None),
+            ingest,
+            _retry_row(adapter, "ep-79"),
+            max_attempts=3,
+            now=__import__("datetime").datetime.now(__import__("datetime").timezone.utc),
+        )
+    assert action == "requeued"
+    assert ingest.requeued == ["ep-79"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_three_manual_review_failures_still_consume_attempts_and_park() -> None:
+    """Counter-case: genuine (non-transient) failures keep the old budget semantics."""
+    import json
+    from types import SimpleNamespace
+
+    from tests.conftest import StubMemoryGraphAdapter
+    from menhir.services.enrichment_steps import handle_enrichment_failure
+    from menhir.services.scheduler_tasks import retry_process_candidate
+
+    adapter = StubMemoryGraphAdapter()
+    _seed_claimed_episode(adapter)
+    ctx = _transient_failure_ctx(adapter)
+
+    for _ in range(3):
+        row = adapter.pending_episode_rows["ep-79"]
+        if row["processing_state"] != "ENRICHING":
+            assert adapter.claim_pending_episode(
+                "ep-79", max_attempts=3, worker_id="worker-79", lease_seconds=900
+            ) is not None
+        await handle_enrichment_failure(ctx, json.JSONDecodeError("expecting value", "<json>", 0))
+        # Simulate the scheduler's requeue of the FAILED row for the next cycle.
+        row["processing_state"] = "PENDING"
+
+    row = adapter.pending_episode_rows["ep-79"]
+    # Three genuine failures consumed the whole attempt budget (the third re-claim is
+    # already refused at the cap) and earned no transient refund.
+    assert int(row["processing_attempts"]) == 3
+    assert int(row.get("transient_retries") or 0) == 0
+
+    adapter.mark_episode_failed("ep-79", "expecting value", worker_id="worker-79")
+    ingest = SimpleNamespace(requeued=[])
+    for name in ("get_queue_depth", "get_context_window_retry_attempts", "get_llm_session_window_seconds"):
+        setattr(ingest, name, getattr(_RequeueIngest(), name))
+    ingest.requeue_failed_episode = _RequeueIngest().requeue_failed_episode.__get__(ingest)
+    with patch("menhir.services.scheduler_tasks.record_failure_event"):
+        action = await retry_process_candidate(
+            SimpleNamespace(find_completed_episode_artifact=lambda **k: None),
+            ingest,
+            _retry_row(adapter, "ep-79"),
+            max_attempts=3,
+            now=__import__("datetime").datetime.now(__import__("datetime").timezone.utc),
+        )
+    assert action == "terminal"
+    assert ingest.requeued == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_circuit_open_requeues_do_not_consume_attempts_and_cap_still_parks() -> None:
+    """Circuit-open x3 keeps the episode claimable; the transient cap still terminates."""
+    from tests.conftest import StubMemoryGraphAdapter
+
+    adapter = StubMemoryGraphAdapter()
+    adapter.create_pending_episode(
+        episode_uuid="ep-79",
+        name="ep-79",
+        content="the outage survivability episode",
+        session_id="s-79",
+        user_id="u-79",
+        source="test",
+        source_confidence=0.9,
+    )
+
+    # The worker's circuit-open path, once per claim: claim, requeue to PENDING,
+    # then refund that claim's attempt.
+    for _ in range(3):
+        assert adapter.claim_pending_episode(
+            "ep-79", max_attempts=3, worker_id="worker-79", lease_seconds=900
+        ) is not None
+        assert adapter.mark_episode_pending(
+            "ep-79", retry_after_s=30.0, worker_id="worker-79"
+        )
+        assert adapter.count_transient_requeue("ep-79")
+
+    row = adapter.pending_episode_rows["ep-79"]
+    assert row["processing_state"] == "PENDING"
+    assert int(row["processing_attempts"]) == 0  # the one claim, refunded
+    assert int(row["transient_retries"]) == 3
+    # The recovery loop still lists it: the episode is READY for another claim.
+    assert "ep-79" in adapter.list_pending_episode_uuids(max_attempts=3, limit=100)
+
+    # A permanently dead provider: transient requeues keep accumulating until the
+    # cap, then the recovery park terminates the bounce.
+    row["transient_retries"] = 20
+    assert "ep-79" not in adapter.list_pending_episode_uuids(max_attempts=3, limit=100)
+    row["processing_state"] = "PENDING"
+    assert adapter.fail_transient_exhausted_pending_episodes() == 1
+    assert row["processing_state"] == "FAILED"
+    assert row["processing_substage"] == "pending_transient_exhausted"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_scheduler_exhausts_on_the_transient_cap_for_retryable_rows() -> None:
+    from datetime import datetime, timedelta, timezone
+    from types import SimpleNamespace
+
+    from menhir.services.scheduler_tasks import retry_process_candidate
+
+    completed = datetime.now(timezone.utc) - timedelta(seconds=10_000)
+    row = {
+        "uuid": "ep-cap",
+        "name": "ep-cap",
+        "processing_attempts": 0,  # fully refunded: the outage consumed nothing genuine
+        "transient_retries": 20,
+        "processing_error": "connection refused 503",
+        "processing_completed_at": completed.isoformat(),
+    }
+    ingest = SimpleNamespace(requeued=[])
+    for name in ("get_queue_depth", "get_context_window_retry_attempts", "get_llm_session_window_seconds"):
+        setattr(ingest, name, getattr(_RequeueIngest(), name))
+    ingest.requeue_failed_episode = _RequeueIngest().requeue_failed_episode.__get__(ingest)
+    with patch("menhir.services.scheduler_tasks.record_failure_event"):
+        action = await retry_process_candidate(
+            SimpleNamespace(find_completed_episode_artifact=lambda **k: None),
+            ingest,
+            row,
+            max_attempts=3,
+            now=datetime.now(timezone.utc),
+        )
+    assert action == "exhausted"
+    assert ingest.requeued == []

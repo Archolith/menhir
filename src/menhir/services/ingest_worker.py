@@ -207,6 +207,12 @@ class IngestWorkerMixin:
                     retry_after_s=budget_retry,
                     worker_id=self._worker_id,
                 )
+                # Backpressure is time-bound, not a processing failure (#79/#70): refund the
+                # claim's attempt so the window rolling cannot strand a permanently
+                # attempts-exhausted episode.
+                await asyncio.to_thread(
+                    self.graph_adapter.count_transient_requeue, episode_uuid
+                )
                 record_lifecycle_event(
                     component="ingest_worker",
                     event="budget_cap_requeue",
@@ -237,6 +243,13 @@ class IngestWorkerMixin:
                 episode_uuid,
                 retry_after_s=30.0,
                 worker_id=self._worker_id,
+            )
+            # An open circuit says nothing about this episode (#79/#70): refund the claim's
+            # attempt so an outage cannot burn the genuine-failure budget. The refund bumps
+            # `transient_retries`, whose own cap (enforced by the pending-list filter and the
+            # recovery park) still terminates a permanently dead provider.
+            await asyncio.to_thread(
+                self.graph_adapter.count_transient_requeue, episode_uuid
             )
             record_lifecycle_event(
                 component="ingest_worker",

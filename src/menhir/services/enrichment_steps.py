@@ -1402,6 +1402,8 @@ async def handle_enrichment_failure(
     """
 
     duration_ms = int((perf_counter() - ctx.started) * 1000)
+    error_type = type(exc).__name__
+    classification = classify_enrichment_failure(exc, error_type=error_type)
     failed = ctx.graph_adapter.mark_episode_failed(
         ctx.episode_uuid,
         str(exc),
@@ -1415,8 +1417,14 @@ async def handle_enrichment_failure(
             exc,
         )
         return
-    error_type = type(exc).__name__
-    classification = classify_enrichment_failure(exc, error_type=error_type)
+    # A retryable provider fault says nothing about this episode (#79/#70): refund the
+    # claim's attempt so an outage cannot consume the genuine-failure budget. The refund
+    # bumps `transient_retries`, whose cap still terminates a permanently dead provider.
+    if classification == "retryable":
+        await asyncio.to_thread(
+            ctx.graph_adapter.count_transient_requeue,
+            ctx.episode_uuid,
+        )
     failure_stage = (
         "graphiti_invalid_output"
         if is_graphiti_output_parse_error(exc, error_type=error_type)
