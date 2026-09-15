@@ -117,3 +117,17 @@ def test_list_candidates_delegates_to_adapter() -> None:
     out = asyncio.run(_service(adapter, _FakeLifecycle()).list_candidates(source="painscan-friction", limit=5))
     assert out == [{"uuid": "c1"}]
     assert adapter.calls == ["list:painscan-friction:5"]
+
+
+@pytest.mark.unit
+def test_approve_carries_namespace_into_contradiction_check() -> None:
+    adapter = _FakeAdapter(
+        candidate={"uuid": "c1", "content": "x", "name": "n", "namespace": "tenant-a"}
+    )
+    lifecycle = _FakeLifecycle()
+    result = asyncio.run(_service(adapter, lifecycle).approve("c1"))
+
+    assert result["status"] == "approved"
+    assert lifecycle.batches == [
+        [{"uuid": "c1", "content": "x", "name": "n", "namespace": "tenant-a"}]
+    ]

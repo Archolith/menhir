@@ -272,6 +272,7 @@ class CandidateRepository:
                 n.name AS name,
                 n.content AS content,
                 n.source AS source,
+                coalesce(n.namespace, n.group_id) AS namespace,
                 n.candidate_cluster_id AS cluster_id,
                 n.candidate_kind AS kind,
                 n.candidate_type AS type,

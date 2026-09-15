@@ -63,14 +63,18 @@ class CandidateService:
 
         conflicts_detected = 0
         try:
+            # The contradiction check scopes semantic search by namespace. The key is set
+            # only when the fetch projection carried one, so batch shape stays stable for
+            # adapters whose candidates have no namespace.
+            batch_entry: dict[str, Any] = {
+                "uuid": uuid,
+                "content": candidate.get("content") or "",
+                "name": candidate.get("name") or "",
+            }
+            if candidate.get("namespace"):
+                batch_entry["namespace"] = candidate.get("namespace")
             conflicts_detected = await self.lifecycle_service._check_contradictions_batch(
-                [
-                    {
-                        "uuid": uuid,
-                        "content": candidate.get("content") or "",
-                        "name": candidate.get("name") or "",
-                    }
-                ]
+                [batch_entry]
             )
         except Exception:  # best-effort: never fail an approval on a check error
             logger.warning("Contradiction check failed for approved candidate=%s", uuid, exc_info=True)
