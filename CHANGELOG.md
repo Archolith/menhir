@@ -1,3 +1,9 @@
+## 2026-09-14 - point newcomers at `menhir up`
+
+- `menhir setup` now ends by recommending `menhir up --check` / `menhir up`; its previous hint
+  (configure .env, check, serve) steered a cold-start evaluator past the one-command path
+  entirely. README shows the `menhir up` variant for an existing Neo4j / no Docker.
+
 ## 2026-09-14 - cold-start evaluation fixes
 
 Findings from a fresh Sonnet agent installing Menhir on Debian from the README alone.

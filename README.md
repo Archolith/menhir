@@ -321,13 +321,20 @@ running HTTP backend before launching it.
 git clone https://github.com/Archolith/menhir.git
 cd menhir
 python -m pip install .
-menhir up --compose-neo4j --provider openai   # or --provider local
+menhir up --compose-neo4j --provider openai   # Docker on this machine: bundled Neo4j
 ```
 
-`menhir up` creates `.env` (writing the provider block and the root-compose Neo4j credentials),
-starts Neo4j from `docker-compose.yml`, waits for Bolt, prints a tier report that names the `.env`
-key behind anything still missing, and then runs `menhir serve`. On the first run paste your
-`OPENAI_API_KEY` (or point `LOCAL_LLM_*` at your model server) when the report asks, and run it
+Without Docker, or with a Neo4j you already run, skip the flag and point `.env` at it:
+
+```bash
+menhir up --provider openai            # creates .env; edit NEO4J_URI / NEO4J_PASSWORD, re-run
+```
+
+`menhir up` creates `.env` (writing the provider block and, with `--compose-neo4j`, the
+root-compose Neo4j credentials), starts Neo4j from `docker-compose.yml` when asked, waits for
+Bolt, prints a tier report that names the `.env` key behind anything still missing, and then
+runs `menhir serve`. On the first run paste your `OPENAI_API_KEY` (or point `LOCAL_LLM_*` at
+your model server or a hosted gateway such as OpenRouter) when the report asks, and run it
 again. `menhir up --check` does everything except start Neo4j or the server.
 
 The rest of this section is the same path taken one step at a time.

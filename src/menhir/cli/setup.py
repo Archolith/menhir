@@ -435,7 +435,11 @@ def setup(
             else:
                 typer.echo("[OK] already configured")
 
-        typer.echo("Next: configure .env, run 'menhir check', start 'menhir serve', then register your MCP client.")
+        typer.echo(
+            "Next: 'menhir up --check' shows what is configured and what each missing piece needs; "
+            "'menhir up' starts the server (add --compose-neo4j for the bundled Neo4j). "
+            "Then register your MCP client."
+        )
         typer.echo("Optional capture integrations: docs/post-install.md and scripts/hooks/README.md")
     except typer.Exit:
         raise
