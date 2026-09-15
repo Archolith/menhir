@@ -49,6 +49,7 @@ menhir serve
 ```
 
 `diagnostics` is an offline, redacted configuration snapshot. `check` verifies live dependencies.
+Both read `.env` from the current directory (or `ENV_FILE`), the same file `serve` uses.
 After startup, `/api/health` confirms the process is alive and `/api/ready` confirms its dependencies:
 
 ```bash

@@ -168,7 +168,7 @@ class TestRecall:
         assert data["results"][0]["uuid"] == "node-1"
         assert data["results"][0]["temporal_facts"] == []
         fake_backend.recall.assert_awaited_once_with(
-            "test query", preset="knowledge", limit=10, include_session=False,
+            "test query", preset="knowledge", limit=10, include_session=True,
             include_superseded=False, include_invalidated=False, namespace=None,
         )
 
@@ -313,7 +313,7 @@ class TestRecall:
         resp = client.post("/api/recall", json={"query": "test", "preset": "recent", "limit": 5})
         assert resp.status_code == 200
         fake_backend.recall.assert_awaited_once_with(
-            "test", preset="recent", limit=5, include_session=False,
+            "test", preset="recent", limit=5, include_session=True,
             include_superseded=False, include_invalidated=False, namespace=None,
         )
 
@@ -663,3 +663,14 @@ class TestPhase3:
         )
         resp = client.post("/api/phase3/reset", params={"namespace": "default"})
         assert resp.status_code == 400
+
+
+class TestRecallDefaults:
+    def test_rest_recall_includes_fresh_session_memories_by_default(self, client, fake_backend):
+        """Cold-start finding: write one memory, read it back over REST -> must not be empty."""
+        client.post("/api/recall", json={"query": "fresh"})
+        assert fake_backend.recall.await_args.kwargs["include_session"] is True
+
+    def test_rest_recall_can_still_ask_for_promoted_only(self, client, fake_backend):
+        client.post("/api/recall", json={"query": "fresh", "include_session": False})
+        assert fake_backend.recall.await_args.kwargs["include_session"] is False

@@ -62,3 +62,18 @@ def test_mcp_server_info_reports_menhir_version_not_the_sdk() -> None:
     _app, server = create_mcp_streamable_http_app()
     options = server._mcp_server.create_initialization_options()
     assert options.server_version == menhir.__version__
+
+
+def test_unknown_property_key_notifications_are_dropped_for_every_driver(caplog: pytest.LogCaptureFixture) -> None:
+    """Graphiti opens its own Neo4j driver; the logger-level filter covers it too."""
+    from menhir.infrastructure.logging_config import install_neo4j_notification_filter
+
+    install_neo4j_notification_filter()
+    install_neo4j_notification_filter()  # idempotent
+    target = logging.getLogger("neo4j.notifications")
+    with caplog.at_level(logging.WARNING, logger="neo4j.notifications"):
+        target.warning("Received notification from DBMS server: gql_status='01N52' ... The property `fact_embedding` does not exist.")
+        target.warning("Received notification from DBMS server: gql_status='01N00' deprecated feature used")
+    messages = [r.getMessage() for r in caplog.records]
+    assert not any("01N52" in m for m in messages)
+    assert any("deprecated feature" in m for m in messages)

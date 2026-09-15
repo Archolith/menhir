@@ -1,3 +1,19 @@
+## 2026-09-14 - cold-start evaluation fixes
+
+Findings from a fresh Sonnet agent installing Menhir on Debian from the README alone.
+
+- `menhir check` and `menhir diagnostics` now read `.env` like `serve`; the documented
+  diagnostics -> check -> serve sequence reported stale defaults after `.env` was configured.
+- `POST /api/recall` defaults `include_session` to true, matching every MCP recall tool. The
+  first-run check -- write one memory, read it back over REST -- returned nothing until the
+  evaluator found the flag in a source comment.
+- Neo4j `01N52` "property key does not exist" notifications are filtered at the
+  `neo4j.notifications` logger, so Graphiti's own driver is covered on a first write, not only
+  Menhir's drivers.
+- README: minimal images ship no `python3`; the deploy Docker stack needs a release-built
+  wheelhouse and is not a from-clone path; REST write/read curl examples; configured tier keys
+  must be distinct (also in `.env.example`); `post-install.md` notes which commands read `.env`.
+
 ## 2026-09-14 - hosted OpenAI-compatible gateways (OpenRouter) work as the `local` provider
 
 - `GET /models` is treated as authoritative only for a loopback server. Hosted gateways route

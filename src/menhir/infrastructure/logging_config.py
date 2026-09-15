@@ -170,3 +170,26 @@ def configure_logging(
     logging.config.dictConfig(
         build_logging_config(level=level, log_dir=log_dir, include_console=include_console)
     )
+    install_neo4j_notification_filter()
+
+
+class _Neo4jUnknownKeyNotificationFilter(logging.Filter):
+    """Drop Neo4j ``01N52`` "property key does not exist" notifications.
+
+    Menhir's own drivers already disable the UNRECOGNIZED classification at connection time,
+    but Graphiti opens its own driver, and on a fresh graph its first ``add_episode`` queries
+    properties that no node has yet (``entity_edges``, ``name_embedding``, ``fact_embedding``,
+    ...). Each one is logged at WARNING by the ``neo4j.notifications`` logger -- dozens of lines
+    on a first write, none actionable. Filtering on the logger covers every driver in the
+    process; every other notification (deprecations, performance hints) still passes.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        return not ("01N52" in message or "property key does not exist" in message)
+
+
+def install_neo4j_notification_filter() -> None:
+    target = logging.getLogger("neo4j.notifications")
+    if not any(isinstance(f, _Neo4jUnknownKeyNotificationFilter) for f in target.filters):
+        target.addFilter(_Neo4jUnknownKeyNotificationFilter())

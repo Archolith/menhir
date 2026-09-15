@@ -304,7 +304,8 @@ running HTTP backend before launching it.
 
 ### Prerequisites
 
-- Python 3.12 or newer. Check with `python3 --version` first: it is the default on Debian 13,
+- Python 3.12 or newer. On a full OS install check with `python3 --version` (minimal container
+  images such as `debian:bookworm` ship no Python at all). It is the default on Debian 13,
   Ubuntu 24.04, Fedora, RHEL/Alma 10, Arch, and Alpine 3.19+. **Debian 12 and Ubuntu 22.04 ship
   3.11 / 3.10 and have no 3.12 in their repositories**; RHEL/Rocky 9 (`dnf install python3.12`)
   and openSUSE Leap (`zypper install python312`) have it as an extra package. On any of these
@@ -436,7 +437,27 @@ Point an HTTP-capable MCP client at `/mcp-http`:
 
 Static credentials can be configured with `MENHIR_API_KEY`, `MENHIR_AGENT_KEY`,
 `MENHIR_OPERATOR_KEY`, or `MENHIR_READONLY_KEY`. The credential tier controls which tools
-the client may call.
+the client may call. Every configured key must be a distinct value: a shared value would
+resolve to the highest matching tier, so startup refuses it.
+
+### Or use the REST API
+
+The same write-then-read check over HTTP (`?wait=true` blocks until enrichment finishes;
+the bearer is one of the keys above, or omitted on an open loopback bind):
+
+```bash
+curl -fsS -X POST "http://127.0.0.1:8100/api/memory?wait=true" \
+  -H "Authorization: Bearer <your-key>" -H "Content-Type: application/json" \
+  -d '{"episode": "The deploy script lives in scripts/release.sh", "source": "curl"}'
+
+curl -fsS -X POST http://127.0.0.1:8100/api/recall \
+  -H "Authorization: Bearer <your-key>" -H "Content-Type: application/json" \
+  -d '{"query": "where is the deploy script"}'
+```
+
+Recall includes memories that are still session-scoped (freshly written, not yet promoted),
+so a write is readable as soon as `wait` returns. Pass `"include_session": false` to see only
+promoted knowledge.
 
 If no credential is configured, Menhir permits open access only on a loopback bind. See
 [Security](#security-and-privacy) before exposing the service to another machine.
@@ -455,6 +476,12 @@ be added to `MENHIR_KNOWN_CLIENTS`.
 The deployment compose file starts Menhir and an isolated, disposable Neo4j instance.
 It is a test stack, not a production template, and its supplied configuration uses
 OpenAI for extraction and embeddings.
+
+**It does not build from a plain clone.** `deploy/Dockerfile` installs from a pre-built
+wheelhouse and a digest-pinned base image that the release pipeline produces
+(`pip wheel . --wheel-dir deploy/wheelhouse`, see `deploy/`). To run Menhir in a container from
+source, use any Python 3.12 image with the pip steps above; the compose file below is for
+release verification.
 
 ```bash
 cp deploy/.env.deploy.example deploy/.env.deploy

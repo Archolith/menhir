@@ -309,7 +309,9 @@ def check() -> None:
     configure_logging()
     from menhir.config import MemorySettings
     from menhir.core import collect_runtime_failures
+    from menhir.env_file import load_menhir_env
 
+    load_menhir_env()
     settings = MemorySettings.from_env()
     failures = collect_runtime_failures(settings, require_venv=None)
     if failures:
@@ -328,8 +330,10 @@ def diagnostics(
     import json
 
     from menhir.config import MemorySettings
+    from menhir.env_file import load_menhir_env
     from menhir.operator_diagnostics import build_operator_diagnostics
 
+    load_menhir_env()
     settings = MemorySettings.from_env()
     snapshot = build_operator_diagnostics(settings)
 

@@ -184,11 +184,12 @@ class RecallRequest(BaseModel):
     limit: int = Field(default=10, ge=1, le=50)
     namespace: str | None = None
     # Whether to include SESSION-scoped (not-yet-promoted-to-PERSISTENT) memories.
-    # The MCP recall tools (recall_memories, recall_context_memories, resources)
-    # all pass include_session=True; the HTTP API historically did not expose it and
-    # defaulted to False, so freshly-ingested memories were unrecallable over HTTP
-    # until the scheduler promoted them -- which never happens under MENHIR_BENCHMARK_MODE.
-    include_session: bool = False
+    # True, matching every MCP recall tool. It was False here for historical reasons, which
+    # made the most basic first-run check -- write one memory, read it back over REST --
+    # return nothing until the scheduler promoted it (never, under MENHIR_BENCHMARK_MODE).
+    # A cold-start evaluator only found the fix by reading this comment. Pass false to see
+    # promoted knowledge only.
+    include_session: bool = True
     # Whether to include superseded View versions (view_current=false) — stale state kept for
     # history/provenance. Default false so they never compete with current state; set true for
     # historical/provenance/debug recall, where results carry is_superseded_view=true.

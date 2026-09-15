@@ -254,3 +254,28 @@ def test_setup_cli_accepts_provider_flags(tmp_path: Path) -> None:
     env = _env_map(repo / ".env")
     assert env["LLM_CHAT_PROVIDER"] == "local"
     assert env["NEO4J_PASSWORD"] == "password"
+
+
+@pytest.mark.unit
+def test_check_and_diagnostics_load_the_env_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Cold-start finding: only `serve` read .env, so the documented diagnostics -> check -> serve
+    sequence reported stale defaults after the operator had configured everything."""
+    import os
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("ENV_FILE", raising=False)
+    monkeypatch.delenv("MENHIR_API_HOST", raising=False)
+    (tmp_path / ".env").write_text("MENHIR_API_HOST=0.0.0.0\nMENHIR_API_KEY=k\n", encoding="utf-8")
+
+    result = CliRunner().invoke(app, ["diagnostics", "--json"])
+    assert result.exit_code == 0, result.output
+    assert '"host": "0.0.0.0"' in result.output
+
+    seen: dict[str, str] = {}
+    monkeypatch.setattr(
+        "menhir.core.collect_runtime_failures",
+        lambda settings, **kw: seen.__setitem__("host", settings.api_host) or [],
+    )
+    CliRunner().invoke(app, ["check"])
+    assert seen["host"] == "0.0.0.0"
+    assert os.environ["MENHIR_API_HOST"] == "0.0.0.0"
