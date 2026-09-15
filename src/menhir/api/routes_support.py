@@ -337,10 +337,20 @@ class MemoryRequest(BaseModel):
 
 class MemoryResponse(BaseModel):
     episode_id: str
+    #: Without ``?wait=true``: the queue result (``queued``). With it: the terminal processing
+    #: state after waiting -- ``ready``, ``failed``, or the still-pending state on timeout
+    #: (``pending`` / ``enriching``). A cold-start evaluator got ``200 queued`` for a write whose
+    #: enrichment had already failed for good, and the only trace was in the server log.
     status: str
     session_id: str
     flagged: bool = False
     bootstrap_scope: str | None = None
+    #: Set when ``status`` is ``failed``: the error text and whether Menhir will retry it on its
+    #: own (``retryable``), park it for an operator (``manual_review``), or never (``terminal``).
+    error: str | None = None
+    retry: str | None = None
+    #: Set when ``wait`` elapsed before a terminal state.
+    timed_out: bool = False
 
 
 class TurnEvidenceRequest(BaseModel):

@@ -46,13 +46,13 @@ def test_equivalent_index_errors_are_downgraded_during_index_build(caplog: pytes
                 "EquivalentSchemaRuleAlreadyExists} An equivalent index already exists"
             )
             target.error("Error executing Neo4j query: something genuinely broken")
-        # outside the context the filter is gone again
+        # The filter is process-wide now: Graphiti's constructor fires these before the
+        # build_indices_and_constraints wrapper runs, so a scoped filter missed them.
         target.error("Neo.ClientError.Schema.EquivalentSchemaRuleAlreadyExists after build")
 
     messages = [(r.levelname, r.getMessage()) for r in caplog.records]
     assert ("ERROR", "Error executing Neo4j query: something genuinely broken") in messages
-    assert not any(lvl == "ERROR" and "EquivalentSchemaRuleAlreadyExists} An equivalent" in msg for lvl, msg in messages)
-    assert any(lvl == "ERROR" and "after build" in msg for lvl, msg in messages)
+    assert not any(lvl == "ERROR" and "EquivalentSchemaRuleAlreadyExists" in msg for lvl, msg in messages)
 
 
 def test_mcp_server_info_reports_menhir_version_not_the_sdk() -> None:
@@ -77,3 +77,14 @@ def test_unknown_property_key_notifications_are_dropped_for_every_driver(caplog:
     messages = [r.getMessage() for r in caplog.records]
     assert not any("01N52" in m for m in messages)
     assert any("deprecated feature" in m for m in messages)
+
+
+def test_configure_logging_installs_the_equivalent_index_filter_process_wide(caplog: pytest.LogCaptureFixture) -> None:
+    from menhir.infrastructure.logging_config import EquivalentIndexFilter, install_neo4j_notification_filter
+
+    install_neo4j_notification_filter()  # what configure_logging calls
+    target = logging.getLogger("graphiti_core.driver.neo4j_driver")
+    assert sum(isinstance(f, EquivalentIndexFilter) for f in target.filters) == 1
+    with caplog.at_level(logging.INFO, logger="graphiti_core.driver.neo4j_driver"):
+        target.error("Error executing Neo4j query: {neo4j_code: Neo.ClientError.Schema.EquivalentSchemaRuleAlreadyExists} 'invalid_at_edge_index'")
+    assert not any(r.levelno >= logging.ERROR for r in caplog.records)

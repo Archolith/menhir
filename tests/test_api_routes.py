@@ -674,3 +674,39 @@ class TestRecallDefaults:
     def test_rest_recall_can_still_ask_for_promoted_only(self, client, fake_backend):
         client.post("/api/recall", json={"query": "fresh", "include_session": False})
         assert fake_backend.recall.await_args.kwargs["include_session"] is False
+
+
+class TestMemoryWaitReportsTerminalState:
+    """Cold-start finding: `?wait=true` said `queued` for a write whose enrichment had already
+    failed for good; the only trace was in the server log."""
+
+    def test_ready_after_wait(self, client, fake_runtime_ctx):
+        fake_runtime_ctx.built.ingest_service.wait_for_episode_processing = AsyncMock(
+            return_value={"processing_state": "READY"}
+        )
+        data = client.post("/api/memory?wait=true", json={"episode": "x"}).json()
+        assert data["status"] == "ready" and data["error"] is None and data["timed_out"] is False
+
+    def test_failed_after_wait_carries_error_and_retry_class(self, client, fake_runtime_ctx):
+        fake_runtime_ctx.built.ingest_service.wait_for_episode_processing = AsyncMock(
+            return_value={
+                "processing_state": "FAILED",
+                "processing_error": "CombinedExtractionCollapsedError: relationless_extraction",
+            }
+        )
+        data = client.post("/api/memory?wait=true", json={"episode": "x"}).json()
+        assert data["status"] == "failed"
+        assert "relationless_extraction" in data["error"]
+        assert data["retry"] in {"retryable", "manual_review", "terminal"}
+        assert data["timed_out"] is False
+
+    def test_timeout_keeps_pending_state_and_flags_it(self, client, fake_runtime_ctx):
+        fake_runtime_ctx.built.ingest_service.wait_for_episode_processing = AsyncMock(
+            return_value={"processing_state": "ENRICHING"}
+        )
+        data = client.post("/api/memory?wait=true", json={"episode": "x"}).json()
+        assert data["status"] == "enriching" and data["timed_out"] is True
+
+    def test_no_wait_keeps_queue_status(self, client, fake_runtime_ctx):
+        data = client.post("/api/memory", json={"episode": "x"}).json()
+        assert data["status"] == "queued" and data["timed_out"] is False and data["error"] is None

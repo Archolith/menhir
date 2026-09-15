@@ -193,3 +193,31 @@ def install_neo4j_notification_filter() -> None:
     target = logging.getLogger("neo4j.notifications")
     if not any(isinstance(f, _Neo4jUnknownKeyNotificationFilter) for f in target.filters):
         target.addFilter(_Neo4jUnknownKeyNotificationFilter())
+    install_graphiti_equivalent_index_filter()
+
+
+class EquivalentIndexFilter(logging.Filter):
+    """Downgrade Graphiti's ``EquivalentSchemaRuleAlreadyExists`` errors to DEBUG.
+
+    Menhir's phase-one schema and Graphiti's index build create indexes on the same
+    (label, property) pairs under different names; whichever runs second gets this error from
+    ``CREATE INDEX ... IF NOT EXISTS`` (the guard is by name, the conflict is by shape) and
+    Graphiti's driver logs it at ERROR before continuing. The index exists, so nothing is wrong.
+
+    Installed process-wide rather than around one call: Graphiti's constructor schedules its
+    own index build as a background task, which fired these before the wrapper's scoped filter
+    existed -- a second cold-start run still saw the red lines.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if "EquivalentSchemaRuleAlreadyExists" in record.getMessage():
+            record.levelno = logging.DEBUG
+            record.levelname = "DEBUG"
+            return logging.getLogger(record.name).isEnabledFor(logging.DEBUG)
+        return True
+
+
+def install_graphiti_equivalent_index_filter() -> None:
+    target = logging.getLogger("graphiti_core.driver.neo4j_driver")
+    if not any(isinstance(f, EquivalentIndexFilter) for f in target.filters):
+        target.addFilter(EquivalentIndexFilter())

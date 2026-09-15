@@ -310,7 +310,8 @@ running HTTP backend before launching it.
   3.11 / 3.10 and have no 3.12 in their repositories**; RHEL/Rocky 9 (`dnf install python3.12`)
   and openSUSE Leap (`zypper install python312`) have it as an extra package. On any of these
   the simplest route is [uv](https://docs.astral.sh/uv/): `uv python install 3.12` then
-  `uv venv --python 3.12 && source .venv/bin/activate`.
+  `uv venv --seed --python 3.12 && source .venv/bin/activate` (`--seed` gives the venv a `pip`;
+  uv omits it by default).
 - Git, because two first-party dependencies install from public GitHub repositories
 - Neo4j 5 with APOC (the root `docker-compose.yml` provides one)
 - a local OpenAI-compatible server (llama.cpp, Ollama, LM Studio, vLLM) or OpenAI
@@ -455,7 +456,7 @@ the bearer is one of the keys above, or omitted on an open loopback bind):
 ```bash
 curl -fsS -X POST "http://127.0.0.1:8100/api/memory?wait=true" \
   -H "Authorization: Bearer <your-key>" -H "Content-Type: application/json" \
-  -d '{"episode": "The deploy script lives in scripts/release.sh", "source": "curl"}'
+  -d '{"episode": "The release pipeline runs scripts/release.sh to publish the docs site.", "source": "curl"}'
 
 curl -fsS -X POST http://127.0.0.1:8100/api/recall \
   -H "Authorization: Bearer <your-key>" -H "Content-Type: application/json" \
@@ -465,6 +466,12 @@ curl -fsS -X POST http://127.0.0.1:8100/api/recall \
 Recall includes memories that are still session-scoped (freshly written, not yet promoted),
 so a write is readable as soon as `wait` returns. Pass `"include_session": false` to see only
 promoted knowledge.
+
+With `wait=true` the response reports the terminal state: `status` is `ready`, or `failed` with
+`error` and `retry` (`retryable`, `manual_review`, or `terminal`). Write sentences that name two
+things and how they relate: a fragment with a single entity and no relationship is refused as
+`relationless_extraction` -- a deliberate, non-retryable failure that keeps the graph free of
+unlinked nodes -- and small models refuse more readily than large ones.
 
 If no credential is configured, Menhir permits open access only on a loopback bind. See
 [Security](#security-and-privacy) before exposing the service to another machine.

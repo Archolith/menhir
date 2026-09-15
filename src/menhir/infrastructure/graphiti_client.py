@@ -65,34 +65,15 @@ from menhir.infrastructure.graphiti_patches import (  # noqa: E402
 __all__ = ["GraphitiClient", "_safe_to_prompt_json"]
 
 
-class _EquivalentIndexFilter(logging.Filter):
-    """Downgrade graphiti's ``EquivalentSchemaRuleAlreadyExists`` errors to DEBUG.
-
-    Menhir's phase-one schema and Graphiti's ``build_indices_and_constraints`` both create
-    indexes on the same (label, property) pairs under different names. Whichever runs second
-    gets ``Neo.ClientError.Schema.EquivalentSchemaRuleAlreadyExists`` from ``CREATE INDEX ...
-    IF NOT EXISTS`` -- the guard is by name, the conflict is by shape -- and Graphiti's driver
-    logs each one at ERROR before continuing. The index exists, so nothing is wrong; on a first
-    boot this was a wall of red for a new operator to paste into an issue.
-    """
-
-    def filter(self, record: logging.LogRecord) -> bool:
-        if "EquivalentSchemaRuleAlreadyExists" in record.getMessage():
-            record.levelno = logging.DEBUG
-            record.levelname = "DEBUG"
-            return logging.getLogger(record.name).isEnabledFor(logging.DEBUG)
-        return True
-
-
 @contextlib.contextmanager
 def _quiet_equivalent_index_errors():
-    target = logging.getLogger("graphiti_core.driver.neo4j_driver")
-    flt = _EquivalentIndexFilter()
-    target.addFilter(flt)
-    try:
-        yield
-    finally:
-        target.removeFilter(flt)
+    """Kept for callers/tests; the filter itself is now installed process-wide by
+    ``configure_logging`` (see ``logging_config.EquivalentIndexFilter``)."""
+
+    from menhir.infrastructure.logging_config import install_graphiti_equivalent_index_filter
+
+    install_graphiti_equivalent_index_filter()
+    yield
 
 
 def _is_vector_dimension_mismatch_error(exc: Exception) -> bool:

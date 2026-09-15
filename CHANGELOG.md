@@ -1,3 +1,16 @@
+## 2026-09-14 - cold-start evaluation #2 fixes
+
+- `POST /api/memory?wait=true` now reports the terminal processing state -- `ready`, or
+  `failed` with `error` and `retry` (`retryable` / `manual_review` / `terminal`) -- and
+  `timed_out` when the wait elapsed. It previously answered `queued` even when enrichment had
+  already failed for good; the only trace was in the server log.
+- The README's REST example is a two-entity sentence with an explicit relation, and the text
+  explains that a relationless fragment is refused by design (`relationless_extraction`).
+- README's `uv` route uses `uv venv --seed` so the venv has `pip`.
+- Graphiti's `EquivalentSchemaRuleAlreadyExists` downgrade is installed process-wide by
+  `configure_logging`; the previous filter was scoped to `build_indices_and_constraints`, but
+  Graphiti's constructor fires the same errors from a background task before that call.
+
 ## 2026-09-14 - point newcomers at `menhir up`
 
 - `menhir setup` now ends by recommending `menhir up --check` / `menhir up`; its previous hint

@@ -374,15 +374,49 @@ async def ingest_memory(
         turn_evidence_uuid=body.turn_evidence_uuid,
         **ingest_kwargs,
     )
+    status = str(result.get("status") or "")
+    error: str | None = None
+    retry: str | None = None
+    timed_out = False
     if wait:
-        await runtime_ctx.built.ingest_service.wait_for_episode_processing(str(result.get("episode_id") or ""), timeout_s=60.0)
+        row = await runtime_ctx.built.ingest_service.wait_for_episode_processing(
+            str(result.get("episode_id") or ""), timeout_s=60.0
+        )
+        status, error, retry, timed_out = _terminal_status_from_row(row, fallback=status)
     return MemoryResponse(
         episode_id=str(result.get("episode_id") or ""),
-        status=str(result.get("status") or ""),
+        status=status,
         session_id=session.session_id,
         flagged=body.flagged,
         bootstrap_scope=body.bootstrap_scope,
+        error=error,
+        retry=retry,
+        timed_out=timed_out,
     )
+
+
+def _terminal_status_from_row(
+    row: dict[str, object] | None, *, fallback: str
+) -> tuple[str, str | None, str | None, bool]:
+    """Turn a processing row into (status, error, retry, timed_out) for a waited write.
+
+    ``wait_for_episode_processing`` returns the row once it is READY or FAILED, or the last row
+    it saw when the timeout elapsed. A missing row means the anchor was never written; keep the
+    queue status rather than invent one.
+    """
+
+    if row is None:
+        return fallback, None, None, False
+    state = row.get("processing_state")
+    state_text = str(getattr(state, "value", state) or "").lower()
+    if state_text == "failed":
+        from menhir.services.enrichment_failures import classify_enrichment_failure
+
+        error_text = str(row.get("processing_error") or "") or None
+        return "failed", error_text, classify_enrichment_failure(error_text), False
+    if state_text == "ready":
+        return "ready", None, None, False
+    return (state_text or fallback), None, None, True
 
 
 @router.post("/turn-evidence", response_model=TurnEvidenceResponse)
