@@ -158,8 +158,17 @@ class StructureGraphWriter:
                 sorted(changed_paths)[:10],
                 sorted(deleted_paths)[:10],
             )
-            if deleted_paths:
+            # Same capacity-vs-destruction rule as the stale-role prune below: on a
+            # truncated scan, absence from scan.files is the cap's doing, not deletion.
+            if deleted_paths and not scan.partial_index:
                 self._delete_file_entities(scan.name, list(deleted_paths))
+            elif deleted_paths and scan.partial_index:
+                logger.info(
+                    "Skipping incremental file prune for project=%s: scan truncated, "
+                    "%d stored paths absent from the scan map are not evidence of deletion",
+                    scan.name,
+                    len(deleted_paths),
+                )
             if changed_paths:
                 self._increment_heat(scan.name, list(changed_paths))
         else:
@@ -213,14 +222,22 @@ class StructureGraphWriter:
 
         # 2b. Prune directories the scan no longer sees. Unlike files this is a full
         #     set-difference, not an mtime diff: directories have no mtime, and a stale one is
-        #     identified purely by absence from the current scan.
-        stale_dirs = self._delete_stale_directories(
-            scan.name, [d.rel_path for d in scan.directories]
-        )
-        if stale_dirs:
+        #     identified purely by absence from the current scan. Same capacity rule as
+        #     every other prune: a truncated scan is not evidence of absence.
+        if not scan.partial_index:
+            stale_dirs = self._delete_stale_directories(
+                scan.name, [d.rel_path for d in scan.directories]
+            )
+            if stale_dirs:
+                logger.info(
+                    "Pruned %d stale directory entities for project=%s",
+                    stale_dirs,
+                    scan.name,
+                )
+        else:
             logger.info(
-                "Pruned %d stale directory entities for project=%s",
-                stale_dirs,
+                "Skipping stale-directory pruning for project=%s: scan truncated, "
+                "absence from this scan is not evidence of deletion",
                 scan.name,
             )
 

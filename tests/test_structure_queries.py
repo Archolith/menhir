@@ -1006,3 +1006,60 @@ class TestTruncatedScanNeverPrunesFiles:
         assert "DETACH DELETE" not in q, (
             "must delete the edge only, never the child project"
         )
+
+
+class TestPartialIndexPruneGating:
+    """#97: on a capped scan, absence from the scan map is the cap's doing.
+
+    The incremental mtime-diff file prune and the stale-directory prune both
+    key on "path absent from this scan", so both must refuse to delete while
+    `partial_index` is true, like every other destructive prune.
+    """
+
+    @staticmethod
+    def _writer_with_spy_prunes(stored_mtimes: dict[str, float]):
+        neo4j = RecordingNeo4j()
+        writer = StructureGraphWriter(neo4j=neo4j)
+        writer.get_file_mtimes = lambda project_name: dict(stored_mtimes)
+        calls: dict[str, list] = {"files": [], "dirs": []}
+        writer._delete_file_entities = lambda project_name, rel_paths: calls["files"].append(list(rel_paths))
+        writer._delete_stale_directories = lambda project_name, keep: calls["dirs"].append(list(keep))
+        return writer, calls
+
+    def test_partial_scan_does_not_prune_absent_files_or_directories(self):
+        writer, calls = self._writer_with_spy_prunes(
+            {"src/gone.py": 111.0, "src/main.py": 5.0}
+        )
+        scan = _make_scan(
+            files=[FileEntry(rel_path="src/main.py", role="entrypoint", file_mtime=5.0)],
+            directories=[DirEntry(rel_path="src")],
+            files_discovered=9,
+            files_eligible=9,
+            files_indexed=1,
+        )
+
+        writer.write_project(scan, session_id="s1", user_id="u1")
+
+        assert scan.partial_index is True
+        # src/gone.py is stored but absent from the truncated scan map: the cap
+        # dropped it, so the prune must not fire and delete it.
+        assert calls["files"] == []
+        assert calls["dirs"] == []
+
+    def test_full_scan_still_prunes_absent_files_and_directories(self):
+        writer, calls = self._writer_with_spy_prunes(
+            {"src/gone.py": 111.0, "src/main.py": 5.0}
+        )
+        scan = _make_scan(
+            files=[FileEntry(rel_path="src/main.py", role="entrypoint", file_mtime=5.0)],
+            directories=[DirEntry(rel_path="src")],
+            files_discovered=1,
+            files_eligible=1,
+            files_indexed=1,
+        )
+
+        writer.write_project(scan, session_id="s1", user_id="u1")
+
+        assert scan.partial_index is False
+        assert calls["files"] == [["src/gone.py"]]
+        assert calls["dirs"] == [["src"]]
