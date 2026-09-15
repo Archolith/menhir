@@ -293,9 +293,23 @@ class TestCrossProjectRefs:
         proj_b.mkdir()
         _write(proj_b, "pyproject.toml", "[project]\nname='cth.mcp.scheduler'\n")
 
+        # _KNOWN_PORTS is empty by default: a port-to-project guess that ships with the
+        # package is wrong for everyone but the machine it was written on. With the mapping
+        # configured, the same scan attributes the reference.
+        from menhir.infrastructure import project_scanner as scanner_module
+
         result = ProjectScanner().scan(proj_a)
-        ref_targets = {r.target_project for r in result.cross_project_refs}
-        assert "cth.mcp.scheduler" in ref_targets
+        assert {r.target_project for r in result.cross_project_refs} == set()
+
+        original = dict(scanner_module._KNOWN_PORTS)
+        scanner_module._KNOWN_PORTS["8082"] = "cth.mcp.scheduler"
+        try:
+            result = ProjectScanner().scan(proj_a)
+            ref_targets = {r.target_project for r in result.cross_project_refs}
+            assert "cth.mcp.scheduler" in ref_targets
+        finally:
+            scanner_module._KNOWN_PORTS.clear()
+            scanner_module._KNOWN_PORTS.update(original)
 
 
 # ---------------------------------------------------------------------------

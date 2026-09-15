@@ -388,7 +388,7 @@ class TestBackendClientAuthHeader:
 
     @pytest.mark.unit
     def test_client_headers_sent(self):
-        """x-yawn-* headers are sent from settings."""
+        """x-menhir-* identity headers are sent from settings."""
         settings = MemorySettings(
             mcp_client_user_id="test-user",
             mcp_client_id="test-client-id",

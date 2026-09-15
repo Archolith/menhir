@@ -140,4 +140,4 @@ def test_runtime_failure_annotation_carries_no_credential() -> None:
     assert CANARY not in out[0]
     # Control: the annotation still happened and still names the endpoint.
     assert "127.0.0.1:7687" in out[0]
-    assert "Start Docker Desktop" in out[0]
+    assert "menhir-neo4j" in out[0]

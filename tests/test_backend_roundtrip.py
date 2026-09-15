@@ -444,21 +444,21 @@ class TestBackendRoundTrip:
         _push_background_error("session-a", "warning-a")
         _push_background_error("session-b", "warning-b")
 
-        headers = {"x-yawn-session-id": "session-a", "x-yawn-user-id": "user-a"}
+        headers = {"x-menhir-session-id": "session-a", "x-menhir-user-id": "user-a"}
         with TestClient(app) as client:
             resp = client.post("/api/internal/backend/get_queue_depth", json={}, headers=headers)
 
         assert resp.status_code == 200
         assert resp.headers["x-menhir-bg-warnings"] == '["warning-a"]'
-        assert resp.headers["x-yawn-bg-warnings"] == '["warning-a"]'
+        assert "x-yawn-bg-warnings" not in resp.headers
 
-        headers_b = {"x-yawn-session-id": "session-b", "x-yawn-user-id": "user-b"}
+        headers_b = {"x-menhir-session-id": "session-b", "x-menhir-user-id": "user-b"}
         with TestClient(app) as client:
             resp_b = client.post("/api/internal/backend/get_queue_depth", json={}, headers=headers_b)
 
         assert resp_b.status_code == 200
         assert resp_b.headers["x-menhir-bg-warnings"] == '["warning-b"]'
-        assert resp_b.headers["x-yawn-bg-warnings"] == '["warning-b"]'
+        assert "x-yawn-bg-warnings" not in resp_b.headers
 
     @pytest.mark.unit
     @pytest.mark.asyncio
