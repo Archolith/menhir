@@ -782,6 +782,7 @@ class MemorySettings:
             max_llm_calls_per_session_window=_parse_int(
                 _getenv("MENHIR_MAX_LLM_CALLS_PER_SESSION_WINDOW", default=str(cls.max_llm_calls_per_session_window)),
                 env_var="MENHIR_MAX_LLM_CALLS_PER_SESSION_WINDOW",
+                minimum=1,
             ),
             llm_session_window_seconds=_parse_int(
                 _getenv("MENHIR_LLM_SESSION_WINDOW_SECONDS", default=str(cls.llm_session_window_seconds)),
@@ -790,10 +791,12 @@ class MemorySettings:
             max_llm_calls_per_enrichment_job=_parse_int(
                 _getenv("MENHIR_MAX_LLM_CALLS_PER_JOB", default=str(cls.max_llm_calls_per_enrichment_job)),
                 env_var="MENHIR_MAX_LLM_CALLS_PER_JOB",
+                minimum=1,
             ),
             ingest_concurrency=_parse_int(
                 _getenv("MENHIR_INGEST_CONCURRENCY", default=str(cls.ingest_concurrency)),
                 env_var="MENHIR_INGEST_CONCURRENCY",
+                minimum=1,
             ),
             shadow_context_composition=parse_bool_env(_getenv("MENHIR_SHADOW_CONTEXT_COMPOSITION", default=str(cls.shadow_context_composition))),
             shadow_composition_timeout_s=_parse_float(
@@ -804,6 +807,7 @@ class MemorySettings:
             structure_watcher_interval_s=_parse_float(
                 _getenv("MENHIR_STRUCTURE_WATCHER_INTERVAL_S", default=str(cls.structure_watcher_interval_s)),
                 env_var="MENHIR_STRUCTURE_WATCHER_INTERVAL_S",
+                minimum=1.0,
             ),
             structure_watcher_enabled=parse_bool_env(_getenv("MENHIR_STRUCTURE_WATCHER_ENABLED", default=str(cls.structure_watcher_enabled))),
             artifact_reconcile_mode=_normalize_reconcile_mode(
@@ -818,16 +822,29 @@ class MemorySettings:
             verifier_sync_interval_s=_parse_float(
                 _getenv("MENHIR_VERIFIER_SYNC_INTERVAL_S", default=str(cls.verifier_sync_interval_s)),
                 env_var="MENHIR_VERIFIER_SYNC_INTERVAL_S",
+                minimum=1.0,
             ),
             canonical_self_binding_mode=_getenv("MENHIR_CANONICAL_SELF_BINDING_MODE", default=cls.canonical_self_binding_mode),
             personal_memory_consolidation_enabled=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_CONSOLIDATION_ENABLED", default=str(cls.personal_memory_consolidation_enabled))),
             personal_memory_consolidation_interval_s=_parse_float(
                 _getenv("MENHIR_PERSONAL_MEMORY_CONSOLIDATION_INTERVAL_S", default=str(cls.personal_memory_consolidation_interval_s)),
                 env_var="MENHIR_PERSONAL_MEMORY_CONSOLIDATION_INTERVAL_S",
+                minimum=1.0,
             ),
-            personal_memory_consolidation_k=int(_getenv("MENHIR_PERSONAL_MEMORY_CONSOLIDATION_K", default=str(cls.personal_memory_consolidation_k))),
-            personal_memory_consolidation_call_budget=int(_getenv("MENHIR_PERSONAL_MEMORY_CONSOLIDATION_CALL_BUDGET", default=str(cls.personal_memory_consolidation_call_budget))),
-            personal_memory_consolidation_max_tokens=int(_getenv("MENHIR_PERSONAL_MEMORY_CONSOLIDATION_MAX_TOKENS", default=str(cls.personal_memory_consolidation_max_tokens))),
+            personal_memory_consolidation_k=_parse_int(
+                _getenv("MENHIR_PERSONAL_MEMORY_CONSOLIDATION_K", default=str(cls.personal_memory_consolidation_k)),
+                env_var="MENHIR_PERSONAL_MEMORY_CONSOLIDATION_K",
+                minimum=1,
+            ),
+            personal_memory_consolidation_call_budget=_parse_int(
+                _getenv("MENHIR_PERSONAL_MEMORY_CONSOLIDATION_CALL_BUDGET", default=str(cls.personal_memory_consolidation_call_budget)),
+                env_var="MENHIR_PERSONAL_MEMORY_CONSOLIDATION_CALL_BUDGET",
+                minimum=1,
+            ),
+            personal_memory_consolidation_max_tokens=_parse_int(
+                _getenv("MENHIR_PERSONAL_MEMORY_CONSOLIDATION_MAX_TOKENS", default=str(cls.personal_memory_consolidation_max_tokens)),
+                env_var="MENHIR_PERSONAL_MEMORY_CONSOLIDATION_MAX_TOKENS",
+            ),
             personal_memory_consolidation_disable_reasoning=parse_bool_env(_getenv("MENHIR_PERSONAL_MEMORY_CONSOLIDATION_DISABLE_REASONING", default=str(cls.personal_memory_consolidation_disable_reasoning))),
             personal_memory_consolidation_chat_model=_getenv("MENHIR_PERSONAL_MEMORY_CHAT_MODEL", default=cls.personal_memory_consolidation_chat_model),
             personal_memory_consolidation_verify_retries=int(_getenv("MENHIR_PERSONAL_MEMORY_VERIFY_RETRIES", default=str(cls.personal_memory_consolidation_verify_retries))),
@@ -885,6 +902,7 @@ class MemorySettings:
             frontier_content_vector_k=_parse_int(
                 _getenv("MENHIR_FRONTIER_CONTENT_VECTOR_K", default=str(cls.frontier_content_vector_k)),
                 env_var="MENHIR_FRONTIER_CONTENT_VECTOR_K",
+                minimum=1,
             ),
             frontier_content_vector_weight=_parse_float(
                 _getenv("MENHIR_FRONTIER_CONTENT_VECTOR_WEIGHT", default=str(cls.frontier_content_vector_weight)),

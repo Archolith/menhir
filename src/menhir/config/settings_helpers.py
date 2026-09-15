@@ -8,22 +8,32 @@ import os
 logger = logging.getLogger(__name__)
 
 
-def _parse_int(raw: str, *, env_var: str) -> int:
+def _parse_int(raw: str, *, env_var: str, minimum: int | None = None) -> int:
     try:
-        return int(raw)
+        value = int(raw)
     except ValueError:
         raise ValueError(
             f"Environment variable {env_var}={raw!r} cannot be parsed as an integer"
         ) from None
+    if minimum is not None and value < minimum:
+        raise ValueError(
+            f"Environment variable {env_var}={raw!r} is below the minimum {minimum}"
+        )
+    return value
 
 
-def _parse_float(raw: str, *, env_var: str) -> float:
+def _parse_float(raw: str, *, env_var: str, minimum: float | None = None) -> float:
     try:
-        return float(raw)
+        value = float(raw)
     except ValueError:
         raise ValueError(
             f"Environment variable {env_var}={raw!r} cannot be parsed as a float"
         ) from None
+    if minimum is not None and value < minimum:
+        raise ValueError(
+            f"Environment variable {env_var}={raw!r} is below the minimum {minimum}"
+        )
+    return value
 
 
 def _getenv(primary: str, *aliases: str, default: str) -> str:
