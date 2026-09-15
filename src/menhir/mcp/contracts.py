@@ -11,7 +11,7 @@ from abc import ABC, abstractmethod
 from collections import deque
 from collections.abc import Mapping
 from functools import wraps
-from typing import TYPE_CHECKING, Any, Awaitable
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, TypeVar
 
 from menhir.core.backend_protocol import MemoryBackend
 from menhir.infrastructure.telemetry import record_destructive_op, record_mcp_event
@@ -31,6 +31,27 @@ if TYPE_CHECKING:
     from fastmcp import FastMCP
 
 logger = logging.getLogger(__name__)
+
+_T = TypeVar("_T")
+
+
+def _safe_precompute(label: str, name: str, fn: Callable[[], _T], fallback: _T) -> _T:
+    """Evaluate a pre-runner computation (``call_payload``/``timeout_for``) defensively.
+
+    Both run OUTSIDE ``track_mcp_call``'s try/except -- they are its own call
+    arguments, evaluated before that function is even entered -- so an exception raised
+    here used to skip ``_diagnose_failure``, telemetry recording, and the tool/resource's
+    own ``error_mapper`` entirely and reach the bare FastMCP/MCP-SDK fallback, which under
+    ``mask_error_details`` (or an exception whose ``str()`` is empty) surfaces as an
+    undiagnosable generic JSON-RPC internal error. Logging the full traceback here keeps
+    the diagnosis in server.log even though the caller falls back to *fallback* and the
+    call proceeds through the normal, protected path.
+    """
+    try:
+        return fn()
+    except Exception:
+        logger.exception("%s raised for `%s`; falling back to %r", label, name, fallback)
+        return fallback
 
 
 def _json_default(value: Any) -> Any:
@@ -399,10 +420,13 @@ class BaseJsonResource(ABC):
             payload = await self.build_payload(*args, **kwargs)
             return render_json(payload)
 
+        preview_payload = _safe_precompute(
+            "call_payload", self.uri, lambda: self.call_payload(*args, **kwargs), {}
+        )
         return await track_mcp_call(
             kind=self.kind,
             operation=self.operation,
-            payload=self.call_payload(*args, **kwargs),
+            payload=preview_payload,
             runner=_run,
             error_mapper=self.error_mapper,
             effective_payload=lambda: telemetry_effective_payload,
@@ -682,17 +706,33 @@ class BaseTool:
             telemetry_effective_payload = self.call_payload(*args, **call_kwargs)
             return await self.endpoint(*args, **call_kwargs)
 
+        preview_payload = _safe_precompute(
+            "call_payload", self.name, lambda: self.call_payload(*args, **kwargs), {}
+        )
+        call_timeout = _safe_precompute(
+            "timeout_for", self.name, lambda: self.timeout_for(*args, **kwargs), 120
+        )
         result = await track_mcp_call(
             kind="tool",
             operation=self.operation,
-            payload=self.call_payload(*args, **kwargs),
+            payload=preview_payload,
             runner=_runner,
-            timeout=self.timeout_for(*args, **kwargs),
+            timeout=call_timeout,
             error_mapper=error_mapper,
             effective_payload=lambda: telemetry_effective_payload,
         )
-        from menhir.core.backend_impl import drain_client_warnings
-        warnings = drain_client_warnings()
+        try:
+            from menhir.core.backend_impl import drain_client_warnings
+            warnings = drain_client_warnings()
+        except Exception:
+            # Runs AFTER track_mcp_call already returned a successful result -- a
+            # failure here must not turn a completed call into an undiagnosable
+            # error for the caller. Log and treat as "no background warnings".
+            logger.exception(
+                "drain_client_warnings failed after tool `%s`; omitting background warnings",
+                self.name,
+            )
+            warnings = []
         if warnings and isinstance(result, str):
             warn_block = "\n".join(f"[background-error] {w}" for w in warnings)
             result = f"{result or ''}\n\n{warn_block}"

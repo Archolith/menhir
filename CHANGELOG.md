@@ -1,3 +1,17 @@
+## 2026-09-15 - MCP tool/resource precompute failures no longer escape undiagnosed
+
+- `BaseTool.execute()` and `BaseJsonResource.execute()` evaluated `self.call_payload(...)`
+  and `self.timeout_for(...)` as call arguments to `track_mcp_call(...)`, outside its own
+  try/except. A bug in either one skipped `_diagnose_failure`, telemetry recording, and the
+  tool/resource's own `error_mapper` entirely, reaching FastMCP/the MCP SDK's generic
+  fallback -- the "-32603 Internal error, no way to diagnose" failure mode. Real, reachable
+  case: several `timeout_for` overrides (`force_reenrich`, `get_enrichment_status`,
+  `watch_enrichment`) do `int(timeout_s)` on caller-supplied input, which raises on
+  `inf`/`nan`. Both computations now run through `_safe_precompute`, which logs the full
+  traceback and falls back to a safe default so the call proceeds through the normal,
+  protected path instead of raising raw past it. See
+  `tests/mcp/test_precompute_exception_stays_diagnosable.py`.
+
 ## 2026-09-15 - published to PyPI
 
 - `archolith-menhir` 0.2.0 is on PyPI. The quick start is now `pip install archolith-menhir`
