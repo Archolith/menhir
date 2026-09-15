@@ -334,12 +334,26 @@ point `.env` at it:
 menhir up --provider openai            # creates .env; edit NEO4J_URI / NEO4J_PASSWORD, re-run
 ```
 
+For a hosted OpenAI-compatible gateway rather than OpenAI itself, start with `--provider local`
+and point the `LOCAL_LLM_*` block at it -- the `LOCAL_` prefix is compatibility, not a
+requirement that the URL be local. OpenRouter, for example:
+
+```bash
+menhir up --compose-neo4j --provider local     # writes the block, then edit .env:
+#   LOCAL_LLM_BASE_URL=https://openrouter.ai/api/v1
+#   LOCAL_LLM_API_KEY=sk-or-...
+#   LOCAL_LLM_CHAT_MODEL=openai/gpt-4o-mini
+#   LOCAL_LLM_EMBED_MODEL=openai/text-embedding-3-small
+```
+
 `menhir up` creates `.env` (writing the provider block and, with `--compose-neo4j`, the
 root-compose Neo4j credentials), starts Neo4j from `docker-compose.yml` when asked, waits for
 Bolt, prints a tier report that names the `.env` key behind anything still missing, and then
 runs `menhir serve`. On the first run paste your `OPENAI_API_KEY` (or point `LOCAL_LLM_*` at
 your model server or a hosted gateway such as OpenRouter) when the report asks, and run it
-again. `menhir up --check` does everything except start Neo4j or the server.
+again. `menhir up --check` does everything except start Neo4j or the server. `menhir up` ends in
+`menhir serve`, which runs in the foreground until interrupted -- background it yourself when
+scripting (`nohup menhir up --compose-neo4j > up.log 2>&1 &`).
 
 Running `menhir` with no arguments prints the same report and the next command; `menhir setup`
 ends with it too. Once the server is up, connect a client and run the smoke test below. The

@@ -251,7 +251,11 @@ def check_llama_connectivity(
                 logger.error("Local endpoint does not list required model(s): %s", ", ".join(missing))
                 return False
             if missing:
-                logger.warning(
+                # INFO, not WARNING: reaching here means the endpoint is NOT loopback (the
+                # loopback case errored above), and a hosted gateway omitting a model it serves
+                # is normal -- OpenRouter does it for every embedding model. Nothing is
+                # actionable, and a WARNING here reads as a fault during an otherwise clean boot.
+                logger.info(
                     "Endpoint %s does not list %s at GET /models; hosted gateways often omit models "
                     "they still serve, so this is verified on first call.",
                     base_url, ", ".join(missing),
