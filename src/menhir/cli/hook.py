@@ -53,6 +53,35 @@ def _entry_has_menhir_hook(entry: object) -> bool:
     return False
 
 
+def _strip_menhir_hook_commands(entry: object) -> tuple[int, int]:
+    """Remove menhir hook commands from one entry in place, keeping the rest.
+
+    A settings entry can co-register third-party commands alongside menhir's, so
+    removal is per command, not per entry: the entry survives while any non-menhir
+    command remains, and its caller drops it only once empty. Total on arbitrary
+    JSON (same contract as `_entry_has_menhir_hook`): malformed entries return
+    (0, 0) untouched so a bad entry cannot abort an uninstall part-way through.
+    """
+    if not isinstance(entry, dict):
+        return 0, 0
+    hook_list = entry.get("hooks")
+    if not isinstance(hook_list, list):
+        return 0, 0
+    kept = [
+        hook
+        for hook in hook_list
+        if not (
+            isinstance(hook, dict)
+            and isinstance(hook.get("command"), str)
+            and _HOOK_MARKER in hook["command"]
+        )
+    ]
+    removed = len(hook_list) - len(kept)
+    if removed:
+        entry["hooks"] = kept
+    return removed, len(kept)
+
+
 # ---------------------------------------------------------------------------
 # hook run
 # ---------------------------------------------------------------------------
@@ -419,6 +448,7 @@ def uninstall(
 
     hooks = existing.get("hooks", {})
     removed = 0
+    kept_third_party = 0
 
     # Remove from all event types that might contain menhir entries
     if not isinstance(hooks, dict):
@@ -429,13 +459,17 @@ def uninstall(
         event_hooks: list = hooks.get(event_key, [])
         if not isinstance(event_hooks, list):
             continue
-        original_len = len(event_hooks)
-        event_hooks[:] = [
-            entry
-            for entry in event_hooks
-            if not _entry_has_menhir_hook(entry)
-        ]
-        removed += original_len - len(event_hooks)
+        surviving: list = []
+        for entry in event_hooks:
+            entry_removed, entry_kept = _strip_menhir_hook_commands(entry)
+            removed += entry_removed
+            kept_third_party += entry_kept
+            # Drop the entry only when menhir commands were removed and nothing
+            # else remains. Entries that never held a menhir command (including
+            # malformed ones) pass through untouched.
+            if entry_kept or not entry_removed:
+                surviving.append(entry)
+        event_hooks[:] = surviving
         if not event_hooks:
             hooks.pop(event_key, None)
 
@@ -448,6 +482,8 @@ def uninstall(
 
     settings_path.write_text(json.dumps(existing, indent=2) + "\n")
     typer.echo(f"Removed {removed} menhir hook(s) from {settings_path}")
+    if kept_third_party:
+        typer.echo(f"Kept {kept_third_party} third-party hook(s) co-registered in menhir entries")
 
 
 # ---------------------------------------------------------------------------
@@ -555,15 +591,20 @@ def install_hooks(
 
 
 def _remove_managed_hook_entries(hooks: dict, event: str) -> None:
-    """Drop Menhir-owned entries for *event*, and the event itself once empty.
+    """Drop Menhir-owned hook commands for *event*, and the event itself once empty.
 
     Needed when a registration moves: without it the old PostCompact entry survives every
     reinstall, and an installer that only ever adds leaves the dead one running forever.
+    Third-party commands co-registered in a menhir entry survive the move.
     """
     entries = hooks.get(event)
     if not isinstance(entries, list):
         return
-    remaining = [entry for entry in entries if not _entry_has_menhir_hook(entry)]
+    remaining: list = []
+    for entry in entries:
+        removed, kept = _strip_menhir_hook_commands(entry)
+        if kept or not removed:
+            remaining.append(entry)
     if remaining:
         hooks[event] = remaining
     else:

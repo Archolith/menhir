@@ -980,3 +980,62 @@ def test_backend_context_builder_sends_namespace(
 
     body = json.loads(captured["body"])
     assert body["namespace"] == "some-ns"
+
+
+@pytest.mark.unit
+def test_uninstall_strips_menhir_command_but_keeps_coregistered_third_party(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from menhir.cli import hook as hook_module
+    from menhir.cli.hook import hook_app
+    from typer.testing import CliRunner
+
+    settings_file = tmp_path / "settings.local.json"
+    existing = {
+        "hooks": {
+            "UserPromptSubmit": [
+                {
+                    "matcher": ".*",
+                    "hooks": [
+                        {"type": "command", "command": "python -m menhir.cli hook run --frequency 5"},
+                        {"type": "command", "command": "third-party-linter --fix"},
+                    ],
+                }
+            ]
+        }
+    }
+    _write_settings(settings_file, existing)
+    monkeypatch.setattr(hook_module, "_resolve_settings_path", lambda loc: settings_file)
+
+    result = CliRunner().invoke(hook_app, ["uninstall", "--location", "user"])
+    assert result.exit_code == 0
+    assert "1 menhir hook(s)" in result.output
+    assert "1 third-party hook(s)" in result.output
+
+    config = json.loads(settings_file.read_text())
+    # The event key survives with the co-registered entry; only menhir's
+    # command inside it is gone.
+    entries = config["hooks"]["UserPromptSubmit"]
+    assert len(entries) == 1
+    assert entries[0]["matcher"] == ".*"
+    assert [h["command"] for h in entries[0]["hooks"]] == ["third-party-linter --fix"]
+
+
+@pytest.mark.unit
+def test_remove_managed_hook_entries_keeps_coregistered_third_party() -> None:
+    from menhir.cli import hook as hook_module
+
+    hooks = {
+        "PostCompact": [
+            {
+                "hooks": [
+                    {"type": "command", "command": "python -m menhir.cli hook run --event postcompact"},
+                    {"type": "command", "command": "some-other-tool"},
+                ]
+            }
+        ]
+    }
+    hook_module._remove_managed_hook_entries(hooks, "PostCompact")
+
+    # The event stays alive because a third-party command remains in the entry.
+    assert [h["command"] for h in hooks["PostCompact"][0]["hooks"]] == ["some-other-tool"]
