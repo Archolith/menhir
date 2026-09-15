@@ -402,12 +402,16 @@ its projections but deliberately keeps the entities it produced -- they are shar
 that other memories may also cite -- so the namespace teardown is the clean-up that actually
 leaves nothing.
 
-Namespace deletion requires the operator tier. On a fresh install `.env` has `MENHIR_OPERATOR_KEY=`
-empty: set it to any random string (for example `openssl rand -hex 24`), restart `menhir up`, and
-use that value as `KEY` below.
+Namespace deletion requires the operator tier, and `menhir setup` does not write an operator key
+-- `.env` has no `MENHIR_OPERATOR_KEY` line at all, only a comment naming it. Add one, then restart
+`menhir up` so the server picks it up:
 
 ```bash
-KEY=<the value of MENHIR_OPERATOR_KEY in .env>
+echo "MENHIR_OPERATOR_KEY=$(openssl rand -hex 24)" >> .env
+```
+
+```bash
+KEY=$(grep '^MENHIR_OPERATOR_KEY=' .env | cut -d= -f2)
 EP=$(curl -fsS -X POST "http://127.0.0.1:8100/api/memory?wait=true"   -H "Authorization: Bearer $KEY" -H "Content-Type: application/json"   -d '{"episode": "Alice maintains the billing service and deploys it every Friday.", "source": "smoke", "namespace": "smoke"}'   | python -c 'import json,sys; d=json.load(sys.stdin); print(d["status"], "entities_linked=%s" % d.get("entities_linked"), d.get("error") or "", file=sys.stderr); print(d["episode_id"])')
 
 curl -fsS -X POST http://127.0.0.1:8100/api/recall   -H "Authorization: Bearer $KEY" -H "Content-Type: application/json"   -d '{"query": "who maintains the billing service", "namespace": "smoke"}'

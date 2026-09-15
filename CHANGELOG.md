@@ -1,3 +1,12 @@
+## 2026-09-15 - smoke-test operator key, corrected
+
+- Cold-start run #5 (first run able to execute `menhir up --compose-neo4j`: a nested Docker
+  daemon, so the documented one-liner was finally reachable). It worked end to end, and
+  disproved a README line added the day before: `menhir setup` writes no `MENHIR_OPERATOR_KEY`
+  line at all -- `.env.example` names it only in a comment -- so "set the empty line" sent the
+  reader looking for something that does not exist. The smoke test now gives the exact append
+  command and reads the key back with `grep | cut`.
+
 ## 2026-09-14 - cold-start run #4 doc fixes
 
 - Findings from cold-start run #4 (end to end in 8.8 min, smoke test matched the documented
