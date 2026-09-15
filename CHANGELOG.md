@@ -1,3 +1,45 @@
+## 2026-09-15 - v0.2.1 release fixes (#113, #97, #83, #87, #81, #79/#70, #78, #76)
+
+Eight fixes for issues a fresh `pip install archolith-menhir` user can hit or that lose data:
+
+- **#113** `menhir hook uninstall` no longer deletes co-registered third-party hooks. Removal
+  is per command: a settings entry survives while any non-menhir command remains in it, the
+  event key only goes away when no entries are left, and uninstall reports both counts
+  ("removed N menhir hooks; kept M third-party hooks"). Same fix in the installer's
+  re-registration cleanup (`_remove_managed_hook_entries`).
+- **#97** The two ungated structure prunes -- the incremental mtime-diff file prune and the
+  stale-directory prune -- are now gated on `not scan.partial_index` like the four existing
+  destructive prunes. A scan truncated by the 2000-file cap no longer deletes every eligible
+  file the cap dropped; a skip logs at INFO.
+- **#83** The ingest allowed-root default is gone. The old default was the server's working
+  directory, so an agent-tier credential could read the server's own tree (config, logs,
+  `.env`). `agent`/`readonly` ingest now requires an explicit `MENHIR_INGEST_ALLOWED_ROOTS`
+  and is refused with the setup message when it is unset; as a second layer, dotfiles and
+  dot-directories (`.env*`, `.git`) and `logs/`/`backups/` paths are denied for every tier,
+  operator included. Zero-config local development (no keys configured) is unchanged.
+- **#87** `MemoryRequest.episode` is bounded at 48,000 chars (the default enrichment
+  preflight exactly: 12000 estimated tokens at ~4 chars/token), min 1. Oversize bodies now
+  return 422 at the API instead of being accepted and preflight-rejected later.
+- **#81** Scheduler-bound settings are validated at startup instead of silently accepted:
+  `*_INTERVAL_S` values below 1.0 and consolidation K / call budgets / ingest concurrency /
+  frontier top-K below 1 raise the named env-var error (same family as the parse errors).
+  `MENHIR_STRUCTURE_WATCHER_INTERVAL_S=-30` no longer busy-loops the scheduler gate;
+  `MENHIR_PERSONAL_MEMORY_CONSOLIDATION_K=0` no longer no-ops consolidation.
+- **#79 / #70 item 2** Transient outages no longer burn the enrichment retry budget.
+  `processing_attempts` now counts only genuine failures: a retryable provider fault, a
+  circuit-open requeue, and a backpressure requeue each refund their claim's attempt and
+  ride a separate `transient_retries` counter capped at 20 -- so an outage of any length
+  that ends can never park an episode by itself, while a permanently dead provider still
+  terminates (scheduler refuses at the cap; the pending list skips; recovery parks as
+  `pending_transient_exhausted`). `manual_review` handling is unchanged.
+- **#78** Candidate approval ran its contradiction check without a namespace, so it always
+  searched the default one. `fetch_candidate` now projects
+  `coalesce(n.namespace, n.group_id) AS namespace` and approve() carries it into the check.
+- **#76** The belief scorer's sigmoid saturates instead of raising: `log_odds` is clamped to
+  [-700, 700] so terminal evidence scores to 0/1 rather than `exp()` overflowing.
+
+Version bumped to 0.2.1.
+
 ## 2026-09-15 - operator literals and the legacy identity header removed
 
 - `yawn-neo4j` appeared in three user-facing places -- the Neo4j-unreachable message in both
