@@ -265,3 +265,56 @@ def test_up_loads_the_checkout_env_not_the_cwd_env(
     CliRunner().invoke(app, ["up", "--check", "--repo", str(repo)])
 
     assert seen and all(u == "bolt://from-checkout:7687" for u in seen), seen
+
+
+def test_embeddings_row_says_when_the_model_was_not_listed() -> None:
+    """The report must not print a bare [ok] next to a startup log saying the endpoint does
+    not list that model. Run #6 hit exactly that and had to read the log to decide it was
+    fine."""
+
+    from menhir.cli.up import tier_report
+
+    class _Caps:
+        venv_ready = True
+        graphiti_dependency_ready = True
+        neo4j_ready = True
+        graphiti_llm_ready = True
+        embedder_ready = True
+        reranker_ready = True
+        cloud_credential = "n/a"
+        neo4j_status = "ok"
+        startup_mode = "full"
+        unlisted_models = ("openai/text-embedding-3-small",)
+
+    class _Settings:
+        neo4j_uri = "bolt://localhost:7687"
+        chat_provider = "local"
+        graphiti_provider = "local"
+        graphiti_embed_provider = "local"
+        graphiti_reranker_provider = ""
+        local_llm_base_url = "https://openrouter.ai/api/v1"
+        local_llm_embed_base_url = ""
+        local_llm_api_key = "x"
+        local_llm_chat_model = "openai/gpt-4o-mini"
+        local_llm_embed_model = "openai/text-embedding-3-small"
+        openai_api_key = ""
+        openai_chat_model = ""
+        openai_embed_model = ""
+        langfuse_host = ""
+        langfuse_public_key = ""
+        langfuse_secret_key = ""
+
+    embeddings = next(
+        line for line in tier_report(_Caps(), _Settings())
+        if line.capability.startswith("llm: embeddings")
+    )
+    assert embeddings.ready is True, "readiness itself must not change -- gateways do serve these"
+    assert "not listed at /models" in embeddings.capability
+    assert "[ok  ]" in embeddings.render()
+
+    _Caps.unlisted_models = ()
+    plain = next(
+        line for line in tier_report(_Caps(), _Settings())
+        if line.capability.startswith("llm: embeddings")
+    )
+    assert "not listed" not in plain.capability

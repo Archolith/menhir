@@ -150,12 +150,28 @@ def tier_report(capabilities: object, settings: object) -> list[TierLine]:
             llm_hint,
         ),
         TierLine(
-            "llm: embeddings" + (cloud_note if embed.kind is ProviderKind.OPENAI else ""),
+            "llm: embeddings"
+            + (cloud_note if embed.kind is ProviderKind.OPENAI else "")
+            + _unlisted_note(capabilities, embed.embed_model),
             bool(getattr(capabilities, "embedder_ready", False)),
             embed_hint,
         ),
     ]
     return lines
+
+
+def _unlisted_note(capabilities: object, embed_model: str) -> str:
+    """Annotate the embeddings row when the endpoint did not list the model it will serve.
+
+    Without this the report says `[ok] llm: embeddings` while the startup log says the model
+    is absent from GET /models -- two health signals about one thing, apparently disagreeing.
+    A cold-start evaluator had to read the log carefully to decide it was not a real failure.
+    """
+
+    unlisted = tuple(getattr(capabilities, "unlisted_models", ()) or ())
+    if embed_model and embed_model in unlisted:
+        return " (not listed at /models; gateways often omit models they serve -- verified on first call)"
+    return ""
 
 
 def render_report(lines: list[TierLine], startup_mode: str) -> str:
@@ -210,7 +226,11 @@ def up(
     host: Annotated[str | None, typer.Option(help="Bind address passed to serve.")] = None,
     port: Annotated[int | None, typer.Option(help="Bind port passed to serve.")] = None,
 ) -> None:
-    """Bring Menhir up from a checkout: env, Neo4j, preflight report, serve."""
+    """Bring Menhir up: env, Neo4j, preflight report, serve.
+
+    Works from a source checkout or a plain install; without a checkout, configuration lives in
+    MENHIR_STATE_DIR (default ~/.menhir).
+    """
 
     import os
 

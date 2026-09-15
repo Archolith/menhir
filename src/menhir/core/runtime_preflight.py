@@ -53,6 +53,11 @@ class RuntimeCapabilities:
     #: Neo4j probe outcome: "ok", "unauthorized" (server reached, credentials refused),
     #: "unreachable" (no server answered), or "unknown".
     neo4j_status: str = "unknown"
+    #: Models a hosted endpoint did not list at GET /models but is expected to serve anyway.
+    #: Readiness is still True -- gateways routinely omit models they serve -- but the report
+    #: says so, because a bare [ok] next to a startup log warning about the same model reads
+    #: as two health signals disagreeing.
+    unlisted_models: tuple[str, ...] = field(default_factory=tuple)
 
     @property
     def llm_ready(self) -> bool:
@@ -206,6 +211,12 @@ def check_neo4j_connectivity(uri: str, user: str, password: str) -> bool:
     return probe_neo4j(uri, user, password) == NEO4J_OK
 
 
+#: Models the most recent :func:`check_llama_connectivity` call found absent from a hosted
+#: endpoint's GET /models. Module-level for the same reason as ``_last_neo4j_status``: the
+#: function's bool return cannot carry it, and re-probing to ask again would double the calls.
+_last_unlisted_models: tuple[str, ...] = ()
+
+
 def check_llama_connectivity(
     base_url: str,
     api_key: str,
@@ -251,6 +262,8 @@ def check_llama_connectivity(
                 logger.error("Local endpoint does not list required model(s): %s", ", ".join(missing))
                 return False
             if missing:
+                global _last_unlisted_models
+                _last_unlisted_models = tuple(missing)
                 # INFO, not WARNING: reaching here means the endpoint is NOT loopback (the
                 # loopback case errored above), and a hosted gateway omitting a model it serves
                 # is normal -- OpenRouter does it for every embedding model. Nothing is
@@ -463,6 +476,8 @@ def collect_runtime_capabilities(
             neo4j_status=neo4j_status,
         )
 
+    global _last_unlisted_models
+    _last_unlisted_models = ()
     llama_base_url = (graphiti_llm.base_url or "").strip()
     embed_base_url = (graphiti_embed.base_url or "").strip()
     cloud_credential = "n/a"
@@ -571,4 +586,5 @@ def collect_runtime_capabilities(
         failures=tuple(failures),
         cloud_credential=cloud_credential,
         neo4j_status=neo4j_status,
+        unlisted_models=_last_unlisted_models,
     )

@@ -1,3 +1,13 @@
+## 2026-09-15 - cold-start run #6 fixes
+
+- `menhir up --help` said "Bring Menhir up from a checkout", which stopped being true when the
+  state-directory fallback landed. A cold-start evaluator read it as meaning `--compose-neo4j`
+  needs a clone, then ran it from a plain `pip install` anyway and it worked.
+- The tier report's embeddings row says when the endpoint did not list the model at
+  `GET /models`, instead of printing a bare `[ok]` beside a startup log saying the opposite.
+  Readiness is unchanged -- hosted gateways do serve models they omit from that list -- but the
+  two health signals no longer appear to contradict each other.
+
 ## 2026-09-15 - MCP tool/resource precompute failures no longer escape undiagnosed
 
 - `BaseTool.execute()` and `BaseJsonResource.execute()` evaluated `self.call_payload(...)`
