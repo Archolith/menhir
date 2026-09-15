@@ -369,6 +369,22 @@ class TestIngest:
         fake_backend.queue_episode.assert_awaited_once()
         assert fake_backend.queue_episode.await_args.kwargs["user_id"] == "remote-api"
 
+    def test_ingest_rejects_episode_over_hard_char_bound(self, client, fake_backend):
+        # 48_000 chars matches the default enrichment preflight (12000 tokens * ~4 chars).
+        resp = client.post("/api/memory", json={"episode": "x" * 48_001})
+        assert resp.status_code == 422
+        fake_backend.queue_episode.assert_not_awaited()
+
+    def test_ingest_accepts_episode_at_hard_char_bound(self, client, fake_backend):
+        resp = client.post("/api/memory", json={"episode": "x" * 48_000})
+        assert resp.status_code == 200
+        fake_backend.queue_episode.assert_awaited_once()
+
+    def test_ingest_rejects_empty_episode(self, client, fake_backend):
+        resp = client.post("/api/memory", json={"episode": ""})
+        assert resp.status_code == 422
+        fake_backend.queue_episode.assert_not_awaited()
+
     def test_ingest_with_explicit_session(self, client, fake_backend):
         resp = client.post(
             "/api/memory",

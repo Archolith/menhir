@@ -319,8 +319,15 @@ class ContextResponse(BaseModel):
     preset: str
 
 
+#: Hard API bound on a single episode body. Matches the default enrichment preflight:
+#: estimate_episode_tokens() counts ~4 chars per token and
+#: graphiti_episode_max_estimated_tokens defaults to 12000, so anything accepted here is
+#: never rejected downstream on episode size alone.
+MAX_EPISODE_CHARS = 48_000
+
+
 class MemoryRequest(BaseModel):
-    episode: str
+    episode: str = Field(..., min_length=1, max_length=MAX_EPISODE_CHARS)
     source: str = "remote-api"
     session_id: str | None = None
     user_id: str | None = None
