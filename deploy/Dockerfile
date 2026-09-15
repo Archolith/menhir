@@ -9,7 +9,9 @@
 #     Dockerfile performs no live git / PyPI / apt resolution; the wheelhouse is
 #     produced once, separately, in a network-enabled CI job:
 #         pip wheel . --wheel-dir deploy/wheelhouse
-#     (that is the only step where the git+https first-party deps are resolved).
+#     Every dependency, first-party included, resolves from PyPI against hashes
+#     exported from uv.lock; nothing in the release path is fetched from a git
+#     repository.
 #   * Fixed non-root UID/GID (MENHIR_UID / MENHIR_GID, default 10001/10001).
 #   * Healthcheck probes /livez, which the production route surface serves when
 #     MENHIR_STARTUP_SCOPE=production.
@@ -63,11 +65,13 @@ ENV PYTHONUNBUFFERED=1 \
     MENHIR_OAUTH_REFRESH_RETRY_KEYRING_PATH=/run/secrets/oauth/retry-response-keyring.json \
     MENHIR_MCP_TELEMETRY_DB=/srv/menhir/state/telemetry/mcp_telemetry.db
 
-# Offline install from the pre-built wheelhouse only. --no-index --no-deps is
-# required, not an optimization: menhir's wheel metadata records the two
-# first-party deps as git+https URLs, and pip would otherwise try to re-resolve
-# them (demanding git + network). The closure was already resolved when the
-# wheelhouse was built. Fail closed if the wheelhouse is empty.
+# Offline install from the pre-built wheelhouse only. --no-index --no-deps keeps
+# the image build hermetic: the full closure was already resolved and hashed when
+# the wheelhouse was built, so pip must not reach the network to second-guess it.
+# (It was once load-bearing for a different reason -- menhir's metadata recorded
+# the two first-party deps as git+https URLs, which pip would try to re-resolve,
+# demanding git. Both are ordinary PyPI pins now.)
+# Fail closed if the wheelhouse is empty.
 COPY deploy/lib/verify_wheelhouse.py /usr/local/libexec/verify_wheelhouse.py
 COPY ${WHEELHOUSE_DIR}/ /wheelhouse/
 RUN python /usr/local/libexec/verify_wheelhouse.py \

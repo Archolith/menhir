@@ -156,8 +156,6 @@ jobs:
             --frozen \
             --no-group dev \
             --no-emit-project \
-            --no-emit-package archolith-mcp-framework \
-            --no-emit-package archolith-oauth \
             --output-file "$RUNNER_TEMP/release-requirements.txt"
           cat > "$RUNNER_TEMP/build-backend-requirements.txt" <<'EOF'
           packaging==25.0 --hash=sha256:29572ef2b1f17581046b3a2227d5c611fb25ec70ca1ba8554b24b0e69331a484
@@ -188,15 +186,11 @@ jobs:
             --require-hashes \
             --requirement "$RUNNER_TEMP/release-requirements.txt" \
             --wheel-dir deploy/wheelhouse
+          # The first-party dependencies used to be built from git here, unhashed and with
+          # PIP_NO_INDEX set, because a VCS requirement cannot carry a hash. They are PyPI
+          # releases now, so they come through the hashed export above with everything else
+          # and no step in this job resolves from a repository.
           export PIP_NO_INDEX=1
-          python -m pip wheel \
-            --disable-pip-version-check \
-            --no-cache-dir \
-            --no-deps \
-            --no-build-isolation \
-            --wheel-dir deploy/wheelhouse \
-            "git+https://github.com/Archolith/archolith-mcp-framework.git@0a7c300cf50d724a2d5a8e8c1e664c7e8a5fa2eb" \
-            "git+https://github.com/Archolith/archolith_oauth.git@f77e2dbc7c7c85199aa05986b8d2126b54d1b056"
           git archive --format=tar --output "$RUNNER_TEMP/menhir-source.tar" HEAD
           mkdir "$RUNNER_TEMP/menhir-source"
           tar -xf "$RUNNER_TEMP/menhir-source.tar" -C "$RUNNER_TEMP/menhir-source"

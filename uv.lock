@@ -96,7 +96,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "archolith-mcp-framework", specifier = "==0.2.0" },
-    { name = "archolith-oauth", git = "https://github.com/Archolith/archolith_oauth.git?rev=f77e2dbc7c7c85199aa05986b8d2126b54d1b056" },
+    { name = "archolith-oauth", specifier = "==0.3.1" },
     { name = "fastapi", specifier = ">=0.115,<1" },
     { name = "fastmcp", specifier = ">=3.2.4,<4" },
     { name = "graphiti-core", specifier = "==0.29.3" },
@@ -123,11 +123,15 @@ dev = [
 [[package]]
 name = "archolith-oauth"
 version = "0.3.1"
-source = { git = "https://github.com/Archolith/archolith_oauth.git?rev=f77e2dbc7c7c85199aa05986b8d2126b54d1b056#f77e2dbc7c7c85199aa05986b8d2126b54d1b056" }
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cryptography" },
     { name = "httpx" },
     { name = "joserfc" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c1/80/c439b592e821c898c82e2d515f5608a017b5cf2fa137f5137be1d0619c3d/archolith_oauth-0.3.1.tar.gz", hash = "sha256:f8c335fe04e5fcb52eb021d4522a094952ea72db180b46f7c063699afc034ea4", size = 53905, upload-time = "2026-09-15T03:59:16.455Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e5/dc/12a3c34baf14381888258dd45b48afe758d3135132aced20cbc34201b441/archolith_oauth-0.3.1-py3-none-any.whl", hash = "sha256:9d59592c49d7636b3001fad192d7c3e586fb31e11d334f8100616fcf4ecce4e5", size = 46796, upload-time = "2026-09-15T03:59:15.103Z" },
 ]
 
 [[package]]

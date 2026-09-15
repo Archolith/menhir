@@ -25,7 +25,7 @@ dependencies = [
     # (the wheel and that tree hash identically across all 17 modules). Upgrading past
     # 0.2.0 is a separate, tested decision -- see issue #110.
     "archolith-mcp-framework==0.2.0",
-    "archolith-oauth @ git+https://github.com/Archolith/archolith_oauth.git@f77e2dbc7c7c85199aa05986b8d2126b54d1b056",
+    "archolith-oauth==0.3.1",
     "fastmcp>=3.2.4,<4",
     "neo4j>=6.2,<7",
     "pydantic>=2.0,<3",

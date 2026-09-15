@@ -1,3 +1,16 @@
+## 2026-09-15 - no dependency resolves from git any more
+
+- `archolith-oauth==0.3.1` replaces its `git+https` pin, published to PyPI from the tag of the
+  same commit Menhir pinned. With `archolith-mcp-framework==0.2.0` already swapped, both
+  first-party dependencies are ordinary PyPI releases.
+- The release wheelhouse is now hash-verified end to end. `uv export` no longer excludes the
+  two first-party packages (a VCS requirement cannot carry a hash; a PyPI release can), and the
+  separate unhashed `pip wheel git+https://...` step is deleted -- nothing in the release job
+  fetches from a repository. Verified locally: `pip wheel --require-hashes --only-binary=:all:`
+  builds all 92 wheels, both first-party wheels included, with no VCS access.
+- `deploy/Dockerfile`'s contract comments corrected: `--no-index --no-deps` is about keeping the
+  image build hermetic, not about git URLs in metadata, which no longer exist.
+
 ## 2026-09-15 - framework installs from PyPI
 
 - `archolith-mcp-framework` is pinned as `==0.2.0` from PyPI instead of a `git+https` URL at
