@@ -1,3 +1,13 @@
+## 2026-09-15 - framework installs from PyPI
+
+- `archolith-mcp-framework` is pinned as `==0.2.0` from PyPI instead of a `git+https` URL at
+  commit `0a7c300`. Same code, verified rather than assumed: the published 0.2.0 wheel and the
+  git tree at that commit hash identically across all 17 modules, and the reinstalled package
+  carries no `direct_url.json`, so it really comes from the index. Upgrading past 0.2.0 is a
+  separate decision tracked in issue #110.
+- `archolith-oauth` still installs from git: it is not on PyPI yet. Until it is, `git` remains
+  a build requirement and the wheelhouse still resolves one dependency from GitHub.
+
 ## 2026-09-15 - hooks deliver context again
 
 - `wrap_hook_response` put `additionalContext` at the top level of the hook envelope, where

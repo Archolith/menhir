@@ -54,9 +54,13 @@ wheels = [
 [[package]]
 name = "archolith-mcp-framework"
 version = "0.2.0"
-source = { git = "https://github.com/Archolith/archolith-mcp-framework.git?rev=0a7c300cf50d724a2d5a8e8c1e664c7e8a5fa2eb#0a7c300cf50d724a2d5a8e8c1e664c7e8a5fa2eb" }
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "fastmcp" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/5a/88/1c363154e3c142ae9779aa3bc227d3f5e052a1f14a2ba88eb569427213f3/archolith_mcp_framework-0.2.0.tar.gz", hash = "sha256:654dde33c773895266a2f409e80ab13cfbdc772f395576a40e996f147282f8b1", size = 32011, upload-time = "2026-08-10T15:34:31.84Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/11/83/3ac9a74fab15319e05a609ec7e6ba2fe08b9d24d76f44a33e4876beecb96/archolith_mcp_framework-0.2.0-py3-none-any.whl", hash = "sha256:f605600181786ce45ed17b3467a212b090212665ca8a19838c91043d77685a18", size = 30296, upload-time = "2026-08-10T15:34:30.758Z" },
 ]
 
 [[package]]
@@ -91,7 +95,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "archolith-mcp-framework", git = "https://github.com/Archolith/archolith-mcp-framework.git?rev=0a7c300cf50d724a2d5a8e8c1e664c7e8a5fa2eb" },
+    { name = "archolith-mcp-framework", specifier = "==0.2.0" },
     { name = "archolith-oauth", git = "https://github.com/Archolith/archolith_oauth.git?rev=f77e2dbc7c7c85199aa05986b8d2126b54d1b056" },
     { name = "fastapi", specifier = ">=0.115,<1" },
     { name = "fastmcp", specifier = ">=3.2.4,<4" },
