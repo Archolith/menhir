@@ -207,13 +207,13 @@ _STACK_SIGNALS: list[tuple[str, str]] = [
     ("pom.xml", "java"),
 ]
 
-# Port → project name mapping for cross-project ref detection
-_KNOWN_PORTS: dict[str, str] = {
-    "8080": "yawn.rip",
-    "8082": "cth.mcp.scheduler",
-    "5173": "yawn.dashboard",
-    "8787": "menhir",
-}
+# Port -> project name mapping for cross-project ref detection.
+#
+# Empty by default: this shipped one operator's project names (and a service that no longer
+# exists) as though they were general knowledge, so every other installation got wrong
+# attributions for ports it happened to use. Populate it per deployment if that mapping is
+# wanted; nothing here can be right for everyone.
+_KNOWN_PORTS: dict[str, str] = {}
 
 # ---------------------------------------------------------------------------
 # Scanner

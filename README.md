@@ -538,10 +538,10 @@ the same machine.
 | `NEO4J_URI` | Neo4j connection | `bolt://localhost:7687` |
 | `NEO4J_USER` | Neo4j user | `neo4j` |
 | `NEO4J_PASSWORD` | Neo4j password | empty |
-| `LLM_CHAT_PROVIDER` | Chat provider: `local` or `openai` | `local` |
+| `LLM_CHAT_PROVIDER` | `local` (any OpenAI-compatible endpoint, hosted gateways included) or `openai` | `local` |
 | `GRAPHITI_LLM_PROVIDER` | Graphiti extraction provider | `local` |
 | `GRAPHITI_EMBED_PROVIDER` | Optional separate embedding provider | inherits Graphiti provider |
-| `LOCAL_LLM_BASE_URL` | Local OpenAI-compatible chat endpoint | `http://127.0.0.1:8081/v1` |
+| `LOCAL_LLM_BASE_URL` | OpenAI-compatible chat endpoint; may be remote despite the name | `http://127.0.0.1:8081/v1` |
 | `OPENAI_API_KEY` | Credential used when the provider is `openai` | empty |
 
 See [`.env.example`](.env.example) for model names, separate embedding endpoints, OAuth,

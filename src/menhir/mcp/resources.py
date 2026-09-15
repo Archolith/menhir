@@ -234,7 +234,8 @@ def _neo4j_dependency_snapshot() -> dict[str, Any]:
         "reachable": reachable,
         "hint": None
         if reachable
-        else "Neo4j is not reachable. Start Docker Desktop and the yawn-neo4j container.",
+        else "Neo4j is not reachable. Start Docker and the menhir-neo4j container "
+        "(`menhir up --compose-neo4j`).",
     }
 
 

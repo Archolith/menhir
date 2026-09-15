@@ -694,8 +694,13 @@ def test_oauth_uses_principal_client_id_as_client_id():
     assert resp.json()["client_id"] == "verified-client"
 
 
-def test_oauth_static_bearer_preserves_x_yawn_headers():
-    """Static bearer mode still trusts x-yawn-user-id and x-yawn-client-id headers."""
+def test_static_bearer_ignores_the_removed_x_yawn_headers():
+    """The deprecated x-yawn-* identity alias is no longer read.
+
+    Identity must have one spelling: while two were accepted, a caller had two ways to assert
+    who it was and every trust gate had to cover both. The headers are now inert -- not an
+    error, just ignored -- so a stale client cannot silently bind an identity it names.
+    """
     app = FastAPI()
 
     @app.get("/api/secure")
@@ -720,8 +725,8 @@ def test_oauth_static_bearer_preserves_x_yawn_headers():
 
     assert resp.status_code == 200
     data = resp.json()
-    assert data["user_id"] == "header-user"
-    assert data["client_id"] == "header-client"
+    assert data["user_id"] != "header-user"
+    assert data["client_id"] != "header-client"
 
 
 # ── Identity header rename: x-menhir-* canonical, x-yawn-* deprecated alias ────

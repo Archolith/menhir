@@ -633,7 +633,7 @@ def serve_watch(
         60.0, "--max-backoff", help="Maximum restart delay in seconds"
     ),
     neo4j_container: str = typer.Option(
-        "yawn-neo4j",
+        "menhir-neo4j",
         "--neo4j-container",
         help="Docker container name for Neo4j readiness check",
     ),

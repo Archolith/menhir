@@ -1,3 +1,23 @@
+## 2026-09-15 - operator literals and the legacy identity header removed
+
+- `yawn-neo4j` appeared in three user-facing places -- the Neo4j-unreachable message in both
+  the runtime and the MCP resource, and the `--neo4j-container` default -- naming a container
+  that exists on one machine. Menhir's own compose file calls it `menhir-neo4j`, which is what
+  they now say.
+- `_KNOWN_PORTS` shipped one operator's project names (`yawn.rip`, `yawn.dashboard`) plus
+  `cth.mcp.scheduler`, an integration removed months ago, as though they were general
+  knowledge; every other installation got wrong attributions for ports it happened to use. It
+  is empty by default now.
+- The deprecated `x-yawn-*` identity headers are no longer accepted, on either the ASGI
+  middleware or the REST path. Identity should have one spelling: two meant a caller had two
+  ways to say who it was and every trust gate had to cover both. No client config in this
+  workspace sends them.
+- The server stops emitting `x-yawn-bg-warnings`; `backend_client` still *reads* it, so a
+  current client keeps working against a server that has not been redeployed yet.
+- `ProviderKind.LOCAL` and the README env table said "local" where they meant any
+  OpenAI-compatible endpoint, hosted gateways included. The identifier stays (it is in every
+  existing `.env`); the descriptions no longer mislead.
+
 ## 2026-09-15 - the MCP path, documented from a live server
 
 - The README's MCP section showed only a config with `Authorization: Bearer <your-key>`, a key

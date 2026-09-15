@@ -351,7 +351,6 @@ async def backend_invoke_impl(
     response = JSONResponse(content=result)
     encoded_warnings = __import__("json").dumps(warnings)
     response.headers["x-menhir-bg-warnings"] = encoded_warnings
-    response.headers["x-yawn-bg-warnings"] = encoded_warnings
     return response
 
 

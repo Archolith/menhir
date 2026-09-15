@@ -102,7 +102,7 @@ def _annotate_runtime_failures(failures: list[str], settings: MemorySettings) ->
         if failure == "Neo4j connectivity check failed.":
             annotated.append(
                 f"{failure} Expected {redact_uri_credentials(settings.neo4j_uri)}. "
-                "Start Docker Desktop and the yawn-neo4j container."
+                "Start Docker and the menhir-neo4j container (`menhir up --compose-neo4j`)."
             )
             continue
         annotated.append(failure)

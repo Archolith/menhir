@@ -25,7 +25,10 @@ logger = logging.getLogger(__name__)
 
 
 class ProviderKind(StrEnum):
-    LOCAL = "local"           # local OpenAI-compatible (llama.cpp, etc.)
+    # Any OpenAI-compatible endpoint, not necessarily a local one: llama.cpp, Ollama,
+    # LM Studio, vLLM, or a hosted gateway such as OpenRouter. The name is kept for
+    # config compatibility -- LLM_CHAT_PROVIDER=local is in every existing .env.
+    LOCAL = "local"
     OPENAI = "openai"         # OpenAI API
     ANTHROPIC = "anthropic"
 

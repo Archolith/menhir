@@ -131,22 +131,19 @@ def _resolve_caller_session(request: Request, *, default_user_id: str = "remote-
 
 
 def _caller_header(request: Request, suffix: str) -> str:
-    """Read ``x-menhir-<suffix>``, falling back to the deprecated ``x-yawn-<suffix>``.
+    """Read ``x-menhir-<suffix>``.
 
-    The legacy spelling is consulted only when the canonical header is absent or
-    empty, so a client sending both cannot have the old value take precedence.
+    The deprecated ``x-yawn-<suffix>`` alias is no longer accepted: two spellings for the
+    same identity assertion is one more than a caller needs, and no client sends the old one.
     """
-    value = (request.headers.get(f"x-menhir-{suffix}") or "").strip()
-    if not value:
-        value = (request.headers.get(f"x-yawn-{suffix}") or "").strip()
-    return value
+    return (request.headers.get(f"x-menhir-{suffix}") or "").strip()
 
 
 def _resolve_namespace(request: Request, body_namespace: str | None) -> str | None:
     """Namespace precedence: server-side pin, then request body, then x-menhir-namespace header.
 
     None preserves the legacy global behavior (no isolation); an explicit value scopes
-    the operation to that silo. The deprecated x-yawn-namespace spelling is still accepted.
+    the operation to that silo.
 
     THE PIN WINS, and it is checked first. `MENHIR_CLIENT_NAMESPACES` binds a client to a
     namespace server-side, and `BaseTool._apply_pinned_namespace` documents the guarantee as

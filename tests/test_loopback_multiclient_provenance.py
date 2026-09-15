@@ -1,7 +1,7 @@
 """Tests for loopback no-auth per-client provenance capture.
 
 In loopback no-auth mode (no static keys, OAuth disabled), self-declared
-x-yawn-client-name headers and ?client_name= query params are captured for
+x-menhir-client-name headers and ?client_name= query params are captured for
 telemetry/provenance without changing access/tier behavior.
 """
 
@@ -68,12 +68,12 @@ class TestLoopbackMulticlientProvenance:
     """Per-client provenance in loopback no-auth mode."""
 
     def test_two_named_clients_get_distinct_identity(self):
-        """Two no-auth requests with different x-yawn-client-name bind distinct client_ids."""
+        """Two no-auth requests with different x-menhir-client-name bind distinct client_ids."""
         client = _build_app()
 
         resp_a = client.get(
             "/api/secure",
-            headers={"x-yawn-client-name": "alpha"},
+            headers={"x-menhir-client-name": "alpha"},
         )
         assert resp_a.status_code == 200
         data_a = resp_a.json()
@@ -81,7 +81,7 @@ class TestLoopbackMulticlientProvenance:
 
         resp_b = client.get(
             "/api/secure",
-            headers={"x-yawn-client-name": "beta"},
+            headers={"x-menhir-client-name": "beta"},
         )
         assert resp_b.status_code == 200
         data_b = resp_b.json()
@@ -117,14 +117,14 @@ class TestLoopbackMulticlientProvenance:
 
         resp1 = client.get(
             "/api/secure",
-            headers={"x-yawn-client-name": "claude-code"},
+            headers={"x-menhir-client-name": "claude-code"},
         )
         assert resp1.status_code == 200
         data1 = resp1.json()
 
         resp2 = client.get(
             "/api/secure",
-            headers={"x-yawn-client-name": "claude-code"},
+            headers={"x-menhir-client-name": "claude-code"},
         )
         assert resp2.status_code == 200
         data2 = resp2.json()
@@ -171,7 +171,7 @@ class TestLoopbackMulticlientProvenance:
         """The client_name->client_id fallback must NOT fire when identity is
         not self-declared (OAuth path: trust_identity_headers=False). An empty
         principal client_id must stay empty rather than be derived from a name."""
-        headers = {b"x-yawn-client-name": b"should-be-ignored"}
+        headers = {b"x-menhir-client-name": b"should-be-ignored"}
         _user, _session, client_id, _name = BearerAuthMiddleware._request_session_headers(
             headers,
             path="/mcp-http",

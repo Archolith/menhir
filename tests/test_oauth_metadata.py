@@ -90,9 +90,9 @@ class TestClientNameTrust:
         )
         assert derived_name == "token-derived-client"
 
-    def test_static_key_mode_honors_x_yawn_client_name(self):
+    def test_static_key_mode_honors_x_menhir_client_name(self):
         """Static-key mode (trust_identity_headers=True): header client_name is honored."""
-        headers = {b"x-yawn-client-name": b"spoof"}
+        headers = {b"x-menhir-client-name": b"spoof"}
         _, _, _, derived_name = BearerAuthMiddleware._request_session_headers(
             headers,
             path="/mcp",
@@ -101,6 +101,18 @@ class TestClientNameTrust:
             default_client_name="default",
         )
         assert derived_name == "spoof"
+
+    def test_removed_x_yawn_client_name_alias_is_ignored(self):
+        """The deprecated spelling no longer names the client; the default stands."""
+        headers = {b"x-yawn-client-name": b"spoof"}
+        _, _, _, derived_name = BearerAuthMiddleware._request_session_headers(
+            headers,
+            path="/mcp",
+            api_key="",
+            trust_identity_headers=True,
+            default_client_name="default",
+        )
+        assert derived_name == "default"
 
     def test_oauth_mode_fallback_to_default_when_no_header(self):
         """OAuth mode with no client_name header uses default_client_name."""

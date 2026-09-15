@@ -63,7 +63,7 @@ _STATUS_ERROR_LABELS = {
 _SENSITIVE_SINGLETON_HEADERS = frozenset(
     {
         b"authorization",
-        *(f"x-{prefix}-{suffix}".encode() for prefix in ("menhir", "yawn") for suffix in (
+        *(f"x-menhir-{suffix}".encode() for suffix in (
             "user-id",
             "session-id",
             "client-id",
@@ -91,18 +91,15 @@ def _duplicate_sensitive_headers(headers: Sequence[tuple[bytes, bytes]]) -> list
 
 
 def _identity_header(headers: dict[bytes, bytes], suffix: bytes) -> str:
-    """Read a caller identity header, preferring ``x-menhir-*`` over legacy ``x-yawn-*``.
+    """Read a caller identity header.
 
-    The ``x-yawn-*`` spelling predates the rename and is still sent by older client
-    configurations. It is accepted as a deprecated alias and consulted only when the
-    canonical header is absent or empty, so a client sending both cannot have the
-    legacy value silently win. Callers must apply the same trust gate to the result
-    that they would to the canonical header — this helper does no authorization.
+    ``x-menhir-*`` is the only accepted spelling. A deprecated ``x-yawn-*`` alias was
+    honoured while older client configurations still sent it; none do, and carrying a second
+    accepted spelling for caller identity means two ways to assert who you are. Callers must
+    apply the same trust gate to the result that they would to any identity header -- this
+    helper does no authorization.
     """
-    value = headers.get(b"x-menhir-" + suffix, b"").decode("latin-1").strip()
-    if not value:
-        value = headers.get(b"x-yawn-" + suffix, b"").decode("latin-1").strip()
-    return value
+    return headers.get(b"x-menhir-" + suffix, b"").decode("latin-1").strip()
 
 
 def _is_mcp_path(path: str) -> bool:
@@ -285,10 +282,9 @@ class BearerAuthMiddleware:
         ``x-menhir-session-id`` is also ignored so session derivation is
         rooted in the verified identity.
 
-        The legacy ``x-yawn-*`` spellings are still accepted as deprecated
-        aliases, and are read only when the canonical header is absent. Both
-        spellings are gated by *trust_identity_headers* identically, so the
-        alias cannot be used to bypass the OAuth-mode restriction above.
+        Only the ``x-menhir-*`` spellings are accepted. They are gated by
+        *trust_identity_headers*, so an identity header cannot be used to bypass
+        the OAuth-mode restriction above.
         """
         if trust_identity_headers:
             user_id = _identity_header(headers, b"user-id")
