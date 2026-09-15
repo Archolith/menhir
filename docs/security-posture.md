@@ -104,6 +104,14 @@ for MCP client discovery) and emits no secrets.
 via `_require_tier(...)` per route (under `APIRouter(prefix="/api")`) and on MCP HTTP
 dispatch via an explicit, test-guarded operation→tier map.
 
+**Ingest path containment** (`core/ingest_guard.py`, SEC-02): `ingest_document` and
+`scan_and_write_project` resolve the requested path (following symlinks) and confine
+`agent`/`readonly` callers to the `MENHIR_INGEST_ALLOWED_ROOTS` list. There is **no default
+root** — with the variable unset, every non-operator ingest is refused with the setup
+message (the former service-CWD default exposed the server's own tree, #83). Names are also
+denied for every tier, operator included: dotfiles/dot-directories (`.env*`, `.git`) and
+anything under `logs/` or `backups/`.
+
 ## 4. OAuth resource server (`api/oauth.py`)
 
 Menhir validates access tokens issued by an external IdP (or its own embedded AS, §5); it

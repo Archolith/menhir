@@ -68,21 +68,43 @@ def test_readonly_tier_is_also_confined(tmp_path: Path, monkeypatch: pytest.Monk
 
 
 @pytest.mark.unit
-def test_default_root_is_cwd_when_env_unset(
+def test_default_config_refuses_agent_ingest_and_names_the_env_var(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # #83: there is no default root. With MENHIR_INGEST_ALLOWED_ROOTS unset, a
+    # non-operator ingest is refused with the setup message instead of silently
+    # allowing the server's working directory.
     monkeypatch.delenv(INGEST_ALLOWED_ROOTS_ENV, raising=False)
     workdir = tmp_path / "work"
     (workdir / "sub").mkdir(parents=True)
     monkeypatch.chdir(workdir)
     inside = workdir / "sub" / "note.md"
     inside.write_text("n", encoding="utf-8")
-    assert ensure_ingest_path_allowed(str(inside), tier="agent") == inside.resolve()
+    with pytest.raises(IngestPathNotAllowedError, match=INGEST_ALLOWED_ROOTS_ENV):
+        ensure_ingest_path_allowed(str(inside), tier="agent")
 
-    outside = tmp_path / "other.md"
-    outside.write_text("o", encoding="utf-8")
-    with pytest.raises(IngestPathNotAllowedError):
-        ensure_ingest_path_allowed(str(outside), tier="agent")
+
+@pytest.mark.unit
+def test_dotfile_is_refused_for_every_tier(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # #83 second layer: .env-style dotfiles are denied by name even for the
+    # operator tier and even when the path sits inside an allowed root.
+    monkeypatch.setenv(INGEST_ALLOWED_ROOTS_ENV, str(tmp_path))
+    env_file = tmp_path / ".env"
+    for tier in ("agent", "readonly", "operator", None, ""):
+        with pytest.raises(IngestPathNotAllowedError, match="denied path pattern"):
+            ensure_ingest_path_allowed(str(env_file), tier=tier)
+
+
+@pytest.mark.unit
+def test_logs_and_backups_directories_are_denied_for_operator(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(INGEST_ALLOWED_ROOTS_ENV, str(tmp_path))
+    for rel in ("logs/run.txt", "backups/db.dump"):
+        with pytest.raises(IngestPathNotAllowedError, match="denied path pattern"):
+            ensure_ingest_path_allowed(str(tmp_path / rel), tier="operator")
 
 
 @pytest.mark.unit
