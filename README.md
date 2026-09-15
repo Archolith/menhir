@@ -364,7 +364,31 @@ run them by hand.
 
 ### Connect an MCP client
 
-Point an HTTP-capable MCP client at `/mcp-http`:
+Point an HTTP-capable MCP client at `/mcp-http`. On a fresh local install `menhir setup` writes
+no credentials at all, and with none configured Menhir binds to loopback and accepts MCP
+requests without an `Authorization` header -- so the smallest working config is:
+
+```json
+{
+  "mcpServers": {
+    "memory": {
+      "type": "http",
+      "url": "http://127.0.0.1:8100/mcp-http"
+    }
+  }
+}
+```
+
+The moment you configure any of `MENHIR_OPERATOR_KEY`, `MENHIR_AGENT_KEY`, or
+`MENHIR_READONLY_KEY`, every MCP request needs a matching bearer token and an unauthenticated
+one is refused with `401 Missing or invalid API key`. That is the right setting for anything
+beyond a single-user loopback install -- the credential tier decides which tools the client may
+call, and giving an automated client the agent key rather than the operator key is the point of
+having tiers:
+
+```bash
+echo "MENHIR_AGENT_KEY=$(openssl rand -hex 24)" >> "${MENHIR_STATE_DIR:-~/.menhir}/.env"
+```
 
 ```json
 {
@@ -372,18 +396,33 @@ Point an HTTP-capable MCP client at `/mcp-http`:
     "memory": {
       "type": "http",
       "url": "http://127.0.0.1:8100/mcp-http",
-      "headers": {
-        "Authorization": "Bearer <your-key>"
-      }
+      "headers": { "Authorization": "Bearer <the MENHIR_AGENT_KEY value>" }
     }
   }
 }
 ```
 
-Static credentials can be configured with `MENHIR_API_KEY`, `MENHIR_AGENT_KEY`,
-`MENHIR_OPERATOR_KEY`, or `MENHIR_READONLY_KEY`. The credential tier controls which tools
-the client may call. Every configured key must be a distinct value: a shared value would
-resolve to the highest matching tier, so startup refuses it.
+Each configured key must be a distinct value: `_resolve_tier` returns the first match and tries
+operator first, so a shared value would silently promote every client holding it to the highest
+tier it appears in. Startup refuses that rather than granting it.
+
+For a client that speaks stdio rather than HTTP, run `python -m menhir.mcp.server`; it bridges
+to the same runtime and needs no separate server process.
+
+**Check it without a client.** The transport is stateless Streamable HTTP -- no session id is
+issued and none is needed -- so one request lists the tools:
+
+```bash
+curl -fsS -X POST http://127.0.0.1:8100/mcp-http \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | tail -c 400
+```
+
+Expect a JSON-RPC result listing tools (40 at agent tier in 0.2.0, including `add_memory`,
+`recall_memories`, `query_structure`, and `build_context`). A `401` means a key is configured
+and the request needs `-H "Authorization: Bearer <key>"`; anything else means the server is not
+serving MCP yet -- check `/api/ready` first.
 
 ### Or use the REST API
 

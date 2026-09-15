@@ -1,3 +1,16 @@
+## 2026-09-15 - the MCP path, documented from a live server
+
+- The README's MCP section showed only a config with `Authorization: Bearer <your-key>`, a key
+  `menhir setup` never writes -- the same dead end the operator-key instruction had. Verified
+  against a running server: with no credentials configured Menhir binds to loopback and accepts
+  MCP requests with no header at all, so that is now the documented default, with the keyed
+  config beside it as the step to take for anything beyond a single-user install (and the
+  command to generate one).
+- Added an MCP check that needs no client: the transport is stateless Streamable HTTP, so a
+  single `curl` of `tools/list` lists the tools (40 at agent tier in 0.2.0). The REST path had a
+  copy-paste smoke test from the start; the MCP path had no way to prove it worked.
+- Documented the stdio bridge (`python -m menhir.mcp.server`) alongside the HTTP transport.
+
 ## 2026-09-15 - cold-start run #6 fixes
 
 - `menhir up --help` said "Bring Menhir up from a checkout", which stopped being true when the
