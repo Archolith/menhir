@@ -1,3 +1,24 @@
+## 2026-09-15 - v0.2.2 hotfix: the v0.2.1 wrapup-review findings
+
+The v0.2.1 wrapup review caught one shipping-broken fix and three same-class gaps:
+
+- **#79 was not actually fixed in v0.2.1.** The transient refund query used `greatest()`,
+  which Neo4j Cypher does not have — every call raised, so attempts were never refunded and
+  the transient counter never moved. The refund now uses `CASE WHEN`, proven by a new
+  `--run-online` test that executes the real query against a live Neo4j (the instrument gap:
+  the v0.2.1 tests ran against fakes that never compile Cypher). The three refund call sites
+  also route through a best-effort helper so a refund failure can never escalate a requeue
+  into a failure path.
+- Re-running `menhir hook install` replaced the whole settings entry when it held a menhir
+  command, dropping third-party commands co-registered with it — the install-side twin of
+  the #113 uninstall bug. Reinstall now refreshes only menhir's commands.
+- `MemoryRequest.diff` was still unbounded while `episode` was bounded in v0.2.1; diff now
+  carries the same MAX_DIFF_CHARS (50,000) bound and returns 422 above it.
+- Hook uninstall's "kept N third-party hooks" count included commands that were never at
+  risk; only commands rescued out of a stripped menhir entry count now.
+
+Version bumped to 0.2.2.
+
 ## 2026-09-15 - v0.2.1 release fixes (#113, #97, #83, #87, #81, #79/#70, #78, #76)
 
 Eight fixes for issues a fresh `pip install archolith-menhir` user can hit or that lose data:
