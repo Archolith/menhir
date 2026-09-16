@@ -18,6 +18,7 @@ from menhir.mcp.service_access import (
     get_request_session,
     get_request_tier,
 )
+from menhir.services.enrichment_steps import MAX_DIFF_CHARS
 
 logger = logging.getLogger(__name__)
 
@@ -331,7 +332,9 @@ class MemoryRequest(BaseModel):
     source: str = "remote-api"
     session_id: str | None = None
     user_id: str | None = None
-    diff: str | None = None
+    # Same bound the enrichment compose path truncates at — reject at the API instead of
+    # accepting a payload that would be silently clipped downstream.
+    diff: str | None = Field(default=None, max_length=MAX_DIFF_CHARS)
     namespace: str | None = None
     occurred_at: str | None = None
     flagged: bool = False

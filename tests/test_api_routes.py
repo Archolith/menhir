@@ -385,6 +385,18 @@ class TestIngest:
         assert resp.status_code == 422
         fake_backend.queue_episode.assert_not_awaited()
 
+    def test_ingest_rejects_diff_over_hard_char_bound(self, client, fake_backend):
+        # diff shares the episode bound's source: the compose path truncates at
+        # MAX_DIFF_CHARS (50_000), so the API refuses anything larger outright.
+        resp = client.post("/api/memory", json={"episode": "x", "diff": "d" * 50_001})
+        assert resp.status_code == 422
+        fake_backend.queue_episode.assert_not_awaited()
+
+    def test_ingest_accepts_diff_at_hard_char_bound(self, client, fake_backend):
+        resp = client.post("/api/memory", json={"episode": "x", "diff": "d" * 50_000})
+        assert resp.status_code == 200
+        fake_backend.queue_episode.assert_awaited_once()
+
     def test_ingest_with_explicit_session(self, client, fake_backend):
         resp = client.post(
             "/api/memory",
