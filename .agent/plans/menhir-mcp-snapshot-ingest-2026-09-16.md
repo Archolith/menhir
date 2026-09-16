@@ -9,8 +9,24 @@ artifact_status: IMPLEMENTING
 
 ## Execution status (2026-09-16)
 
-**P0 code half: DONE. P1: DONE. P2A staging probe receiver: AUTHORIZED NEXT. P2B durable
-receiver: BLOCKED on P2A measurements.**
+**P0 code half: DONE. P1: DONE. P2A receiver BUILT, measurement NOT RUN. P2B durable receiver:
+BLOCKED on those measurements.**
+
+P2A's code half is in: `menhir.snapshot.receive` plus four operator-tier MCP tools registered
+only while `MENHIR_SNAPSHOT_RECEIVE_MODE=staging`, so while off they are neither advertised nor
+invocable, and each endpoint re-checks the mode at call time. The receiver reaches SEALED and
+stops; a test reads the module AST and fails if it imports `zipfile` or anything graph-shaped.
+Quotas, TTL, restart-resume, orphan reclamation, replay semantics and telemetry redaction are
+tested (34 + 11 tests).
+
+**What remains for P2A's gate is the measurement itself, which is a deployment act, not a code
+one:** stand the staging instance up with the release ingress, probe 64 KiB / 256 KiB / 1 MiB /
+2 MiB, record latency, memory, retries and the largest reliably accepted call, then set
+`chunk_bytes` one rung below the largest repeatedly stable size. Until that runs, every
+`SnapshotLimits` value stays PROVISIONAL and P2B stays blocked.
+
+The env var is deliberate for P2A and temporary: P2B replaces it with the registered feature
+flag (`off`/`receive`/`shadow`/`write`) and adds commit-through-SEALED.
 
 **P0 provenance addendum: DONE (2026-09-16).** `source_head` is replaced by a `provenance` object
 carrying `base_commit`, `commit_tree` (the commit's tree OID, so a server that ever holds the

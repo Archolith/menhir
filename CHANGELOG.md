@@ -1,3 +1,42 @@
+## 2026-09-16 - P2A staging receiver: the real chunk handler, off by default
+
+The instrument the transport measurement runs against. It exercises the real
+begin/chunk/status/abort path -- same middleware, auth, parser and telemetry a release would
+use -- and stops at SEALED. No extraction, no manifest read, no graph; a test reads the module's
+AST and fails if it so much as imports `zipfile` or anything graph-shaped.
+
+- `menhir.snapshot.receive`: filesystem-backed staging. Ownership is bound at creation and
+  re-checked on every load, and a foreign or guessed id reports NOT FOUND rather than forbidden.
+  Bounds are enforced before allocation and again after decode. An exact chunk replay is a no-op;
+  the same index with a different digest fails the upload, because that is not a retry -- client
+  and server disagree about what is being uploaded.
+- Records hold ids, counts, digests and timestamps, and nothing derived from content. The chunk
+  tool overrides `call_payload` so telemetry records the upload id, index, byte count and digest
+  -- the default would have recorded the base64 of a user's source file into every row.
+- State is durable and never inferred from a directory: an upload resumes across a restart, and
+  staged bytes with no readable record are reclaimed rather than adopted.
+- Quotas are the approved pilot figures (2 per principal, 8 per project, 24h inactivity TTL, 1h
+  terminal retention, disk budget), kept out of `SnapshotLimits` because that ships to clients.
+  A begin is refused ahead of exhaustion, counting what the upload could add.
+- Four MCP tools, operator tier, registered only while `MENHIR_SNAPSHOT_RECEIVE_MODE=staging`,
+  so while off they are neither advertised nor invocable. Each endpoint re-checks the mode at
+  call time as well; anything but `staging` fails closed. P2B replaces this env read with the
+  registered feature flag and adds commit.
+
+## 2026-09-16 - risk-based test workflow for a large suite
+
+- Replaced routine local full-suite guidance with one authoritative risk-based workflow:
+  direct regression tests first, affected callers/contracts next, and subsystem expansion when
+  shared, destructive, security, concurrency, migration, or test-infrastructure risk requires it.
+- Made `affected_tests` advisory rather than sufficient. Empty or stale structural mappings must be
+  checked against callers, contracts, and existing tests before deciding that no test is needed.
+- Assigned complete offline and supported graph-backed integration coverage to required CI on the
+  exact reviewed SHA. Local full runs remain available for justified collection/fixture/foundational
+  changes, but are no longer a per-change closeout ritual.
+- Added a required verification receipt covering changed surfaces, selection basis, exact commands
+  and outcomes, unrun lanes, exact-SHA CI state, and residual risk. Updated repository agent
+  directions, maintenance routing, README guidance, and living work plans to use the policy.
+
 ## 2026-09-16 - snapshot provenance: a commit id is not a statement about bytes
 
 `snapshot.json` carried `source_head` alone, which cannot answer the question that decides
