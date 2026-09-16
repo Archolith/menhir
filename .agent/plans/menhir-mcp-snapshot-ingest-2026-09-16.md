@@ -79,11 +79,15 @@ see the files, and the local path (`menhir artifacts audit|reconcile`, which bui
 `Neo4jRepository` directly at `cli/artifacts.py:52-58`) cannot see the graph, because production
 Bolt is sealed. Either half working would close it.
 
-Two consequences for this plan. P3 builds server-side extraction and scanning of an uploaded tree;
-a document corpus needs the same machinery, so decide whether artifacts ride the snapshot path
-before building a second one. And the audit's silent-zero behaviour is the failure mode P3's
-shadow-scan gate must specifically exclude -- "scanned nothing, reported everything missing" has
-to be an error there, not a clean report.
+**Documents are deferred (owner, 2026-09-16).** Whether the artifact/document corpus eventually
+rides this snapshot path is not a question this plan answers or waits on; it is listed under
+Deferred below. Registering this plan stays manual until either half of the #111 break is closed.
+
+What does carry forward is the failure mode, because it is about the snapshot path itself: the
+audit's silent zero is exactly what P3's shadow-scan gate must exclude. "Scanned nothing, reported
+everything missing" has to be an error there, not a clean parity report -- twice now this system
+has produced a confident completeness answer from a tree it could not observe, and P3 is where a
+third one would land.
 
 One measured result worth recording: on menhir's own tree (1,738 files, 26.8 MB) a plan takes
 0.67 s and the archive is 11.2 MB in 1.3 s.
@@ -141,6 +145,11 @@ Deferred:
 - Content-addressed missing-blob negotiation; v1 always uploads one complete snapshot.
 - Hosted multi-tenant structure graphs unless structure ownership is enforced on every read and
   write. Until then the feature is eligible only for single-tenant instances.
+- Document and work-artifact corpus ingest over this path. `ingest_document` has the same
+  server-side path assumption as `ingest_project`, so plans and reviews cannot be registered from
+  a workstation either -- but code structure is the problem this plan is scoped to solve, and
+  folding a second corpus into it would widen P3 before the first one has shipped. Revisit after
+  P5, or when #111 closes the local half.
 
 ## Invariants
 

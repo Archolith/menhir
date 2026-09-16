@@ -29,6 +29,10 @@
   Git evidence base and the fact that the action is retain-with-reason rather than delete.
   The corpus has the same two-sided break as the hook in #111 -- the remote path cannot see the
   files, the local `menhir artifacts` path cannot see the sealed production graph.
+- Documents deferred (owner): the artifact/document corpus does not ride the snapshot path, and
+  this plan neither answers nor waits on that. Registering plans stays manual until #111's local
+  half closes. The snapshot-side lesson survives on its own: P3's shadow-scan gate must treat
+  "scanned nothing, reported everything missing" as an error, not a clean parity report.
 
 ## 2026-09-16 - Snapshot ingest P0/P1: wire contract frozen, local bundler shipped
 
