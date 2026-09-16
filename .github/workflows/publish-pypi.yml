@@ -44,7 +44,13 @@ jobs:
           RELEASE_REF: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || github.ref }}
         run: |
           set -euo pipefail
-          SHA=$(git ls-remote "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "${RELEASE_REF}" | cut -f1)
+          REMOTE="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          # Annotated tags resolve first to a tag object, while workflow runs are keyed by
+          # the peeled commit SHA. Prefer the peeled ref and fall back for lightweight tags.
+          SHA=$(git ls-remote "$REMOTE" "${RELEASE_REF}^{}" | cut -f1)
+          if [ -z "$SHA" ]; then
+            SHA=$(git ls-remote "$REMOTE" "${RELEASE_REF}" | cut -f1)
+          fi
           if [ -z "$SHA" ]; then
             echo "::error::Could not resolve ${RELEASE_REF} to a commit"
             exit 1
