@@ -9,7 +9,8 @@ artifact_status: IMPLEMENTING
 
 ## Execution status (2026-09-16)
 
-**P0 code half: DONE. P1: DONE. P0 measurement half: NOT RUN -- it is the gate on P2.**
+**P0 code half: DONE. P1: DONE. P2A staging probe receiver: AUTHORIZED NEXT. P2B durable
+receiver: BLOCKED on P2A measurements.**
 
 **Multi-user design correction (2026-09-16):** sources are provenance, not ownership. The receive
 protocol still produces immutable snapshots, but graph publication is now a separate promotion into
@@ -26,15 +27,35 @@ Shipped in this pass:
 - `tests/snapshot/` -- 118 tests: contract, policy, enumeration edge cases, archive determinism,
   and the P1 gate against a real repository.
 
-**P2 is blocked and must stay blocked.** The P0 gate reads "approved protocol v1 and measured
-limits", and the measurement cannot be taken from here: probing 64 KiB / 256 KiB / 1 MiB / 2 MiB
-through the real Streamable HTTP ingress needs the chunk tools that P2 itself introduces, and the
-probe hits production. Every value in `SnapshotLimits` is therefore marked PROVISIONAL in the
-source; `chunk_bytes = 256 KiB` is a placeholder for arithmetic, not an approved envelope. Open
-decision 1 is the owner's.
+The transport chicken-and-egg is resolved by splitting P2. P2A may implement the actual
+begin/chunk/status/abort path in graph-inert, unadvertised staging mode and probe it through a staging
+deployment with the same Streamable HTTP/proxy configuration. It may not extract archives or reach
+the graph. P2B remains blocked until those measurements approve the operating envelope. An
+`add_memory` padded-body probe may be used only as an early gross-envelope diagnostic; it cannot
+pass the gate because its schema validation, decoding, telemetry, and handler allocation differ
+from the chunk path. Every current `SnapshotLimits` value remains PROVISIONAL until P2A closes.
 
-Also outstanding before P4, unchanged by this pass: B2/#99 (prunes key on display name) and
-#98 (vacuous identity CAS).
+In parallel, land structure prune-key B2/#99 (not scheduler CF-99) and then #98's effective identity
+generation/CAS. They remain hard prerequisites for P4, but do not depend on P2A/P2B.
+
+`--allow-path` remains an explicit one-run approval and is never persisted per project. A
+persistent path approval would silently re-authorize whatever that path contains later; a
+hash-bound approval is the eventual answer, path-wide permission is not.
+
+**The corpus ingest was attempted and is blocked -- by this plan's own premise.** Ingesting this
+document so its `IMPLEMENTING` lifecycle is auditable requires `ingest_document`, which stats and
+reads its path **in the server process**, exactly like `ingest_project`. The configured client is
+`https://memory.ctharvey.me/mcp-http`, so a workstation path returns `not a file:
+C:\Users\thron\...` and `transition_artifact` reports the UUID as not found because nothing was
+ever registered. `artifact_status: IMPLEMENTING` therefore lives in this file's frontmatter and
+nowhere else.
+
+This is not only a bookkeeping nuisance: it means the artifact corpus, its parity audit, and the
+lifecycle vocabulary in `workflows/artifact_authoring.md` are all inoperable for a remote server,
+for the same reason the structure graph is (#104). Whatever P3 builds for extracting and scanning
+a snapshot server-side is the same machinery a document corpus would need. Worth deciding whether
+artifacts ride on the snapshot path later, rather than discovering the duplication then. The ingest
+itself has to run from the server, or wait for the feature this plan describes.
 
 One measured result worth recording: on menhir's own tree (1,738 files, 26.8 MB) a plan takes
 0.67 s and the archive is 11.2 MB in 1.3 s.
@@ -311,16 +332,15 @@ metadata; workstation paths are display-only and are not accepted from this prot
 
 ## Progressive delivery
 
-### P0 — Freeze the protocol and measure MCP transport
+### P0 — Freeze the protocol
 
 - Add contract tests/fixtures for canonical manifests, ZIP determinism, base64 expansion, and limit
   failures.
-- Probe 64 KiB, 256 KiB, 1 MiB, and 2 MiB binary chunks through the real Streamable HTTP ingress;
-  record latency, memory, telemetry footprint, retries, and the largest reliably accepted call.
-- Decide default limits and quota/TTL values from that evidence.
+- Define the 64 KiB, 256 KiB, 1 MiB, and 2 MiB decoded-chunk probe matrix and required measurements;
+  execution moves to P2A because only the real chunk handler can produce acceptance evidence.
 
-**Gate:** approved protocol v1 and measured limits; no new tools and no filesystem writes in
-production.
+**Gate:** approved protocol v1 permits P1 and a graph-inert P2A staging receiver only; it does not
+permit a production receive feature, extraction, or graph access.
 
 ### P1 — Local bundler, inspect-only
 
@@ -332,7 +352,28 @@ production.
 **Gate:** repeated runs over identical bytes produce the same tree digest; repository/index status is
 byte-identical before and after.
 
-### P2 — MCP receive substrate, feature disabled
+### P2A — Real-handler transport measurement, staging only
+
+- Implement only begin/chunk/status/abort behind an unadvertised, operator-allowlisted staging
+  mode. Use bounded temporary storage, the provisional hard ceiling, synthetic non-secret bytes,
+  and the same MCP middleware, auth, proxy, telemetry, and request parser intended for release.
+- Probe 64 KiB, 256 KiB, 1 MiB, and 2 MiB decoded chunks repeatedly through the staging
+  Streamable HTTP ingress. Record encoded call size, success/retry rate, p50/p95 latency, peak
+  process memory, staging growth, telemetry redaction, and failure behavior at the first rejected
+  rung.
+- Select the default chunk one rung below the largest repeatedly stable size, preserving at least
+  2x envelope headroom. If 2 MiB is stable, use 1 MiB; if 1 MiB is the ceiling, use 256 KiB. Do not
+  infer this result from a different MCP tool.
+- Approve quotas separately from the ingress result: pilot candidates remain 64 MiB compressed,
+  256 MiB expanded, and 20,000 files per upload, with at most two RECEIVING uploads per principal,
+  eight per project, a 24-hour inactivity TTL, and one-hour retention of terminal staged bytes.
+  Soak tests must prove the configured tenant disk budget refuses new begins before exhaustion.
+
+**Gate:** measured chunk default and hard ceiling are recorded; quota arithmetic and TTL cleanup pass
+restart/disk-pressure tests; no archive extraction or graph operation is reachable. Only then may
+the provisional marker be removed and P2B start.
+
+### P2B — Durable MCP receive substrate, feature disabled
 
 - Implement begin/chunk/status/abort and commit-through-SEALED only, behind one registered feature
   mode (`off`, `receive`, `shadow`, `write`).
@@ -450,20 +491,29 @@ and zero bundle content in telemetry.
 - Any evidence of content in logs/telemetry, cross-project mutation, quota bypass, or an
   uncompensated partial graph write returns the feature to `shadow` or `off`.
 
+## Resolved owner decisions (2026-09-16)
+
+1. Measure the real chunk handler in graph-inert staging via P2A; `add_memory` is diagnostic only.
+2. Start P2A with the bounded pilot quota/TTL candidates in that phase and approve or revise them
+   from soak and disk-pressure evidence, independently of the HTTP envelope result.
+3. Land structure prune-key B2/#99 before #98; both may proceed in parallel with P2A and gate P4.
+4. Keep `--allow-path` one-run only. Do not persist secret-risk upload approval per project.
+5. Ingest this plan after the decision update so IMPLEMENTING status is visible to corpus audits.
+
 ## Open owner decisions
 
-1. Exact measured chunk and quota defaults from P0.
+1. The measured chunk default and hard ceiling produced by P2A; this is an evidence result, not a
+   pre-measurement preference.
 2. Whether the current materialized view snapshot is retained until superseded (recommended for stable
    staleness and delta support) or deleted immediately at the cost of a new remote-staleness model.
-3. Whether v1 secret-risk overrides may be persisted per project or must be supplied every sync.
-4. Whether snapshot tools remain hidden from model-facing catalogs when only the CLI should call
+3. Whether snapshot tools remain hidden from model-facing catalogs when only the CLI should call
    them, or are advertised with strong “use `menhir sync`” guidance.
-5. Whether hosted Menhir is one tenant per instance or must block P6 on full structure-graph
+4. Whether hosted Menhir is one tenant per instance or must block P6 on full structure-graph
    namespace ownership.
-6. Canonical promotion policy: trusted CI only (recommended default), explicit maintainer publish,
+5. Canonical promotion policy: trusted CI only (recommended default), explicit maintainer publish,
    or both with separately auditable grants.
-7. Private workspace quota, inactivity TTL, and whether users may pin selected workspaces.
-8. Whether GitHub verification is required for the first hosted release or launches later while all
+6. Private workspace quota, inactivity TTL, and whether users may pin selected workspaces.
+7. Whether GitHub verification is required for the first hosted release or launches later while all
    Git checkouts initially use the safe local/unverified path.
 
 ## Docs to update

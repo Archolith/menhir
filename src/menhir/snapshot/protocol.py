@@ -143,25 +143,41 @@ class BundleFormatError(ValueError):
 class SnapshotLimits:
     """Bounds enforced before allocation and again after decode/extraction (invariant 6).
 
-    **Every value here is PROVISIONAL.** Plan P0 requires measuring the real MCP/Cloudflare path
-    (64 KiB / 256 KiB / 1 MiB / 2 MiB binary chunks) and setting `chunk_bytes`, the quota and the
-    TTL from that evidence; the plan says in as many words that 1 MiB is a test point and not an
-    unreviewed constant. These defaults exist so the contract tests have arithmetic to exercise
-    and the CLI can estimate an upload -- they are not an approved operating envelope, and P2 must
-    not ship until an owner sets them (open decision 1).
+    Two different kinds of value live here, and conflating them is how an unmeasured constant
+    becomes an operating envelope by accident:
+
+    **Owner-approved pilot candidates (2026-09-16).** `max_compressed_bytes` (64 MiB),
+    `max_total_bytes` (256 MiB expanded) and `max_file_count` (20,000) are the approved pilot
+    figures. They still have to survive P2A's soak and disk-pressure tests -- the tenant disk
+    budget must refuse a new begin before exhaustion -- but they are decisions, not guesses.
+
+    **Still unmeasured.** `chunk_bytes` is the one the whole P2 gate turns on. It may not be set
+    from arithmetic, from another MCP tool's behaviour, or from an `add_memory` padded-body probe:
+    schema validation, decoding, telemetry and handler allocation all differ from the chunk path.
+    P2A measures 64 KiB / 256 KiB / 1 MiB / 2 MiB through a staging ingress carrying the release
+    middleware, then takes **one rung below the largest repeatedly stable size**, keeping at least
+    2x envelope headroom. The 256 KiB here is a placeholder so the contract tests have arithmetic
+    and the CLI can estimate an upload. `max_chunk_bytes` and `max_file_bytes` are likewise
+    unmeasured ceilings.
+
+    Server-side quota and lifetime values are NOT in this dataclass on purpose: the client has no
+    business knowing them, and shipping them in a shared contract object invites a client that
+    assumes them. P2A implements them from the approved pilot set -- at most 2 RECEIVING uploads
+    per principal and 8 per project, a 24-hour inactivity TTL, and one-hour retention of terminal
+    staged bytes.
     """
 
-    #: Decoded bytes per chunk. The encoded call is ~4/3 of this plus envelope.
+    #: Decoded bytes per chunk. The encoded call is ~4/3 of this plus envelope. UNMEASURED: P2A.
     chunk_bytes: int = 256 * 1024
-    #: Hard ceiling on a single decoded chunk, independent of the negotiated size.
+    #: Hard ceiling on a single decoded chunk, independent of the negotiated size. UNMEASURED.
     max_chunk_bytes: int = 2 * 1024 * 1024
-    #: Files in one bundle.
+    #: Files in one bundle. Owner-approved pilot candidate.
     max_file_count: int = 20_000
     #: One file's bytes. Larger files become a declared omission rather than a silent drop.
     max_file_bytes: int = 8 * 1024 * 1024
-    #: Sum of file bytes (pre-compression).
+    #: Sum of file bytes (pre-compression). Owner-approved pilot candidate.
     max_total_bytes: int = 256 * 1024 * 1024
-    #: The uploaded archive itself.
+    #: The uploaded archive itself. Owner-approved pilot candidate.
     max_compressed_bytes: int = 64 * 1024 * 1024
     #: Zip-bomb guard: expanded bytes divided by compressed bytes, checked during extraction.
     max_expansion_ratio: float = 20.0
@@ -179,8 +195,9 @@ class SnapshotLimits:
             )
 
 
-#: The provisional envelope. Import this rather than constructing SnapshotLimits() ad hoc, so a
-#: measured update lands in one place.
+#: The current envelope: approved pilot quotas plus an unmeasured chunk size. Import this rather
+#: than constructing SnapshotLimits() ad hoc, so P2A's measured update lands in one place. The name
+#: stays PROVISIONAL until `chunk_bytes` is measured -- that is the value gating P2B.
 PROVISIONAL_LIMITS = SnapshotLimits()
 
 

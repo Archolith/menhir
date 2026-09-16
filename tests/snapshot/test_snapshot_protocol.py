@@ -351,6 +351,13 @@ def test_chunk_ceiling_is_enforced_before_allocation() -> None:
         limits.validate_chunk_bytes(1025)
 
 
+def test_owner_approved_pilot_quotas_are_pinned() -> None:
+    """Decided 2026-09-16, not derived. A silent edit here changes an approved envelope."""
+    assert PROVISIONAL_LIMITS.max_compressed_bytes == 64 * 1024 * 1024
+    assert PROVISIONAL_LIMITS.max_total_bytes == 256 * 1024 * 1024
+    assert PROVISIONAL_LIMITS.max_file_count == 20_000
+
+
 def test_provisional_limits_are_internally_consistent() -> None:
     """The negotiated default must fit inside the hard ceiling, and files inside the total."""
     limits = PROVISIONAL_LIMITS

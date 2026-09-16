@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-09-16 - Snapshot ingest: owner decisions, P2 split into P2A/P2B
+
+- P2 splits. **P2A** implements the real begin/chunk/status/abort handlers in an unadvertised,
+  operator-allowlisted, graph-inert staging mode and measures them through a staging ingress
+  carrying the release middleware; **P2B** (durable receiver) is blocked until P2A's gate passes.
+  An `add_memory` padded-body probe is an early gross-envelope diagnostic only -- it cannot
+  approve the chunk path, whose validation, decoding, telemetry and allocation all differ.
+- Pilot quotas approved: 64 MiB compressed, 256 MiB expanded, 20,000 files, 2 RECEIVING uploads
+  per principal, 8 per project, 24-hour inactivity TTL, one-hour terminal staging retention. The
+  three that belong to the wire contract are now pinned by test in `SnapshotLimits`; the
+  server-side quota and TTL values deliberately stay out of that shared dataclass. `chunk_bytes`
+  remains unmeasured and is the value gating P2B: one rung below the largest repeatedly stable
+  size, with 2x envelope headroom.
+- B2/#99 (prunes key on display name) lands first, then #98; both before P4, neither blocked by
+  P2A.
+- `--allow-path` stays a one-run approval. A persistent path approval would silently
+  re-authorize changed content later; hash-bound approval is the eventual answer.
+- Corpus ingest of the plan attempted and **blocked**: `ingest_document` stats its path
+  server-side like `ingest_project`, and the client points at `memory.ctharvey.me`, so the
+  artifact corpus and its parity audit are inoperable for a remote server for the same reason
+  the structure graph is (#104). The plan's `IMPLEMENTING` status exists only in its frontmatter.
+
 ## 2026-09-16 - Snapshot ingest P0/P1: wire contract frozen, local bundler shipped
 
 - `menhir-mcp-snapshot-ingest-2026-09-16.md` moves to `IMPLEMENTING` with an execution-status
