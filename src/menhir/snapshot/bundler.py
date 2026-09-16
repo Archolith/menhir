@@ -35,8 +35,10 @@ from menhir.snapshot.policy import Decision, SelectionPolicy
 from menhir.snapshot.protocol import (
     CONTENT_PREFIX,
     MANIFEST_NAME,
+    PROVENANCE_SELF_REPORTED,
     PROVISIONAL_LIMITS,
     FileRecord,
+    GitProvenance,
     Omission,
     OmissionReason,
     SnapshotLimits,
@@ -149,13 +151,42 @@ def resolve_repo_root(path: str | os.PathLike[str], *, runner: GitRunner | None 
     return Path(out)
 
 
-def _current_head(run: GitRunner) -> str | None:
-    """HEAD for provenance only. A repository with no commits legitimately has none."""
+def _git_text(run: GitRunner, args: list[str]) -> str | None:
+    """Run a git command for a provenance label. A missing answer is absent, never invented."""
     try:
-        head = run(["rev-parse", "HEAD"]).decode("ascii", "strict").strip()
+        out = run(args).decode("utf-8", "replace").strip()
     except BundlerError:
         return None
-    return head or None
+    return out or None
+
+
+def _collect_provenance(run: GitRunner) -> GitProvenance:
+    """Describe the source checkout: base commit, its tree, branch label, and clean/dirty.
+
+    Every field is a CLAIM about this machine -- see :class:`GitProvenance`. Each git call is
+    individually optional, because a repository with no commits has no HEAD and a detached one has
+    no branch, and neither is a reason to fail a sync.
+
+    ``--untracked-files=no`` is the load-bearing flag in the dirty check: untracked files never
+    enter the bundle, so they cannot make the bundled bytes differ from the base commit, and
+    counting them would report almost every working repository as dirty for content it did not
+    send. Staged-but-uncommitted changes DO count -- the bundler reads working-tree bytes, so they
+    are in the snapshot.
+    """
+    base_commit = _git_text(run, ["rev-parse", "HEAD"])
+    commit_tree = _git_text(run, ["rev-parse", "HEAD^{tree}"]) if base_commit else None
+    branch = _git_text(run, ["rev-parse", "--abbrev-ref", "HEAD"])
+    if branch == "HEAD":
+        # Detached: `--abbrev-ref` echoes the literal, which is not a branch label.
+        branch = None
+    status = _git_text(run, ["status", "--porcelain", "--untracked-files=no"])
+    return GitProvenance(
+        base_commit=base_commit,
+        commit_tree=commit_tree,
+        branch=branch,
+        dirty=bool(status),
+        quality=PROVENANCE_SELF_REPORTED,
+    )
 
 
 @dataclass(frozen=True)
@@ -322,7 +353,7 @@ def build_plan(
         omissions=omissions,
         project_id=project_id,
         source_id=source_id,
-        source_head=_current_head(run),
+        provenance=_collect_provenance(run),
         deleted_count=len(deleted),
     )
     return BundlePlan(

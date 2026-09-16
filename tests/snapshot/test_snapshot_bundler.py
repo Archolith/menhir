@@ -46,15 +46,21 @@ pytestmark = pytest.mark.unit
 
 _FAKE_SHA = "0" * 40
 _FAKE_HEAD = "a" * 40
+_FAKE_TREE = "b" * 40
 
 
 class FakeGit:
     """Minimal `git -C <root>` stand-in: repository root, HEAD, and a scripted index."""
 
-    def __init__(self, root: Path, entries: Sequence[tuple[str, str]], *, stage: str = "0") -> None:
+    def __init__(
+        self, root: Path, entries: Sequence[tuple[str, str]], *, stage: str = "0",
+        branch: str = "main", status: str = "",
+    ) -> None:
         self.root = root
         self.entries = entries
         self.stage = stage
+        self.branch = branch
+        self.status = status
         self.calls: list[tuple[str, ...]] = []
 
     def __call__(self, args: Sequence[str]) -> bytes:
@@ -63,6 +69,12 @@ class FakeGit:
             return str(self.root).encode("utf-8")
         if args[0] == "rev-parse" and args[1] == "HEAD":
             return _FAKE_HEAD.encode("ascii")
+        if args[0] == "rev-parse" and args[1] == "HEAD^{tree}":
+            return _FAKE_TREE.encode("ascii")
+        if args[0] == "rev-parse" and args[1] == "--abbrev-ref":
+            return self.branch.encode("ascii")
+        if args[0] == "status":
+            return self.status.encode("utf-8")
         if args[0] == "ls-files":
             out = b""
             for mode, path in self.entries:
@@ -148,7 +160,7 @@ def test_tracked_file_is_bundled_from_working_tree_bytes(tmp_path: Path) -> None
     plan = _plan(tmp_path, [("100644", "src/main.py")])
     assert [r.path for r in plan.manifest.files] == ["src/main.py"]
     assert plan.manifest.files[0].size == len(b"dirty edit\n")
-    assert plan.manifest.source_head == _FAKE_HEAD
+    assert plan.manifest.provenance.base_commit == _FAKE_HEAD
 
 
 def test_executable_bit_comes_from_the_index_not_the_filesystem(tmp_path: Path) -> None:

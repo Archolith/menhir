@@ -1,3 +1,24 @@
+## 2026-09-16 - snapshot provenance: a commit id is not a statement about bytes
+
+`snapshot.json` carried `source_head` alone, which cannot answer the question that decides
+whether a code memory is grounded: were these the bytes at that commit, or bytes someone was
+still editing? A commit id reads as the former and is frequently the latter.
+
+- Replaced by a `provenance` object: `base_commit`, `commit_tree` (the commit's tree OID, so a
+  server holding the commit's objects can compare them against what arrived), `branch` (absent
+  when detached), `dirty`, and `quality`.
+- `quality` is always `self_reported` from a client and is forced back to it on parse. A client
+  claiming `trusted_automation` is precisely the claim the field exists to refuse; only the
+  server may raise it, from forge or CI evidence.
+- `dirty` describes the source checkout, not the bundle, and is computed with
+  `--untracked-files=no`: untracked files never enter the bundle, so counting them would mark
+  nearly every working repository dirty for content it did not send. Staged changes do count.
+  `dirty=false` still does not mean the bundle equals the commit -- excluded paths and deletions
+  are declared separately and a reader must consult them.
+- `tree_digest` is unchanged and stays independent of every label. It remains the only statement
+  in the manifest about the bytes actually uploaded.
+- `menhir sync --check` now prints the base commit, branch, and a plain-language clean/dirty line.
+
 ## 2026-09-16 - structure prunes address the identity they were authorised for (#99)
 
 Every structure prune matched `structure_project` -- the caller-supplied display name -- while

@@ -33,6 +33,7 @@ from menhir.snapshot.protocol import (
     BundleFormatError,
     BundlePathError,
     FileRecord,
+    GitProvenance,
     Omission,
     OmissionReason,
     SnapshotLimits,
@@ -160,7 +161,7 @@ def test_tree_digest_ignores_name_ids_and_head() -> None:
         files=files,
         project_id="proj-1",
         source_id="src-1",
-        source_head="deadbeef" * 5,
+        provenance=GitProvenance(base_commit="deadbeef" * 5, dirty=True),
     )
     assert plain.tree_digest == labelled.tree_digest
 

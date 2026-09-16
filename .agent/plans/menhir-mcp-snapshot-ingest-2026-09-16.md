@@ -12,6 +12,23 @@ artifact_status: IMPLEMENTING
 **P0 code half: DONE. P1: DONE. P2A staging probe receiver: AUTHORIZED NEXT. P2B durable
 receiver: BLOCKED on P2A measurements.**
 
+**P0 provenance addendum: DONE (2026-09-16).** `source_head` is replaced by a `provenance` object
+carrying `base_commit`, `commit_tree` (the commit's tree OID, so a server that ever holds the
+commit's objects can compare them against what arrived), `branch` (None when detached), `dirty`,
+and `quality`. `quality` is forced to `self_reported` on parse -- a client claiming
+`trusted_automation` is exactly the claim the field exists to refuse. `tree_digest` is unchanged
+and remains independent of every label; a test pins that clean and dirty provenance over the same
+bytes digest identically.
+
+`dirty` describes the SOURCE, not the bundle: it is true when tracked working-tree bytes differ
+from `base_commit`, computed with `--untracked-files=no` because untracked files never enter the
+bundle and counting them would report nearly every working repository as dirty for content it did
+not send. Staged-but-uncommitted changes do count, since the bundler reads working-tree bytes.
+**`dirty=false` still does not mean the bundle equals the commit** -- the selection policy drops
+excluded and oversized paths and deletions appear separately, so a reader must consult `omissions`
+and `deleted_count` too. That is stated in the dataclass rather than left for a server author to
+work out.
+
 **Multi-user design correction (2026-09-16):** sources are provenance, not ownership. The receive
 protocol still produces immutable snapshots, but graph publication is now a separate promotion into
 a server-owned view. This preserves the completed P0/P1 bundle work while removing the designated
@@ -179,6 +196,12 @@ Deferred:
 12. A committed snapshot is immutable. Graph mutation occurs only by advancing a view from an
     expected snapshot to that committed snapshot; upload completion alone never changes another
     user's query context or the canonical project.
+13. Every code-derived memory assertion is grounded to an immutable server-accepted `snapshot_id`
+    and verified `tree_digest`. A mutable `view_id`, branch label, or caller-reported commit is never
+    its sole historical anchor.
+14. Snapshot provenance belongs to the episode/assertion/fact edge that observed it, not as one
+    coalesced scalar on a mergeable semantic entity. Multiple observations may support the same
+    entity from different snapshots without erasing one another.
 
 ## Product and bundle contract
 
@@ -189,10 +212,12 @@ paths represent deletions. Submodules and nested repositories are omissions repo
 manifest, not recursively copied.
 
 The ZIP contains `snapshot.json` plus `content/<normalized-path>`. `snapshot.json` carries protocol
-version, project/source identifiers when known, display name, bundle policy version, optional source
-HEAD for provenance, file count and total bytes, and per-file path, size, SHA-256, and executable
-bit. A canonical hash over the ordered file records is `tree_digest`; a second SHA-256 covers the
-complete ZIP. ZIP timestamps do not decide change detection.
+version, project/source identifiers when known, display name, bundle policy version, optional Git
+base commit and commit-tree OID, branch label, clean/dirty state, file count and total bytes, and
+per-file path, size, SHA-256, and executable bit. A canonical hash over the actual ordered file
+records is `tree_digest`; a second SHA-256 covers the complete ZIP. Git and branch fields are
+provenance claims until verified by trusted forge/CI evidence, while `tree_digest` is recomputed
+from the uploaded bytes. ZIP timestamps do not decide change detection.
 
 Always exclude `.git`, ignored files, build/cache outputs already excluded by the scanner, and local
 Menhir identity/source receipts. Secret-risk paths such as real `.env` files and private keys block
@@ -339,6 +364,54 @@ kind, active `snapshot_id`, tree digest, promotion/sync time, and whether proven
 or trusted automation. This makes the selected version visible rather than an invisible server
 default.
 
+### Code-memory provenance and applicability
+
+A workspace view is a mutable cursor used to select current code. It is not the historical identity
+of a memory. Every episode, assertion, or fact derived from code records a provenance receipt with:
+
+- authoritative snapshot evidence: `project_id`, `snapshot_id`, verified `tree_digest`, and
+  observation time;
+- context-only provenance: `view_id_at_ingest` and `source_id`;
+- Git lineage when available: `base_commit_sha`, commit-tree OID, branch label, `dirty`, and
+  provenance quality (`self_reported` or `trusted_automation`); and
+- anchor evidence for referenced code: normalized path, manifest file SHA-256, durable `file_id`
+  when settled, and symbol identity/body digest when available.
+
+For a clean verified CI/forge snapshot, `base_commit_sha` may be a trusted commit mapping. For a
+local clean clone it remains self-reported unless independently verified. For dirty code, the exact
+identity is `base_commit_sha + tree_digest + dirty=true`; the commit names the base while the digest
+names the bytes actually observed. For non-Git code, `snapshot_id + tree_digest` is sufficient.
+
+The existing best-effort `belief_commit` property is retained only as a compatibility projection.
+It cannot be authoritative for remote code because it flattens multiple observations onto a
+mergeable entity, cannot represent dirty bytes, and may point to a rebased or vanished commit. New
+code-memory currentness reads assertion-level snapshot provenance instead.
+
+Recall compares a memory's immutable anchor receipt with the selected view's active manifest:
+
+1. `EXACT_SNAPSHOT` — the selected snapshot is the memory's snapshot.
+2. `UNCHANGED_ANCHORS` — the view advanced, but every anchored file/symbol digest is unchanged; the
+   memory may carry forward as currently applicable.
+3. `CHANGED_ANCHORS` — at least one anchored digest changed; return as stale/needs verification,
+   not as unqualified current truth.
+4. `REMOVED_ANCHORS` — referenced code disappeared; preserve for historical/postmortem recall but
+   gate it from current-code answers.
+5. `INDETERMINATE` — omission, partial indexing, missing receipt, or unresolved identity prevents a
+   safe comparison; never infer currentness from absence.
+
+Ephemeral-state memories therefore still have value: they preserve failed approaches, debugging
+observations, test results, and decisions made against uncommitted code. They begin workspace/session
+scoped. Promotion to persistent current-project knowledge requires exact/unchanged validation
+against canonical or a deliberate human assertion. Expiring a workspace may delete materialized
+bytes, but it retains the snapshot receipt, manifest file digests, and memory provenance needed to
+explain historical applicability.
+
+A code-specific memory submitted without an authorized snapshot context is marked
+`UNVERSIONED_CODE_CONTEXT`. It may remain session evidence, but it cannot automatically become a
+current persistent code belief. The local integration should sync at session boundaries and before
+persisting a code conclusion after tracked bytes change; the server verifies that the supplied
+snapshot receipt exists and is accessible rather than trusting raw IDs from the caller.
+
 Hosted multi-tenant release has an additional hard gate: every structural entity, edge, query,
 identity candidate, project listing, watcher action, and prune must enforce tenant ownership. Upload
 isolation alone is insufficient because the current structure graph is shared. Until that gate
@@ -358,8 +431,9 @@ Extend the canonical ingest path rather than create a raw graph writer:
 4. Invoke the existing project scan/write service against the promoted view. Refactor its background write
    so the snapshot coordinator receives durable completion instead of guessing from an early
    response.
-5. On success, record tree/bundle digests, source id, scanner version, counts, partial-index state,
-   and `last_synced_at`; then remove the ZIP and apply the previous-snapshot retention policy.
+5. On success, record tree/bundle digests, source/Git provenance, scanner version, counts,
+   partial-index state, and `last_synced_at`; retain the immutable snapshot receipt and manifest
+   file digests even when bundle/materialized bytes expire, then apply the byte-retention policy.
 6. On failure after swap, restore `previous` and scan/write it as compensation. Block the project
    if compensation does not complete.
 
@@ -373,6 +447,9 @@ metadata; workstation paths are display-only and are not accepted from this prot
 
 - Add contract tests/fixtures for canonical manifests, ZIP determinism, base64 expansion, and limit
   failures.
+- Before P2B, replace the ambiguous `source_head`-only provenance with base commit, commit-tree OID,
+  branch label, clean/dirty state, and provenance-quality semantics. Keep `tree_digest` independent
+  of these labels and authoritative for uploaded bytes.
 - Define the 64 KiB, 256 KiB, 1 MiB, and 2 MiB decoded-chunk probe matrix and required measurements;
   execution moves to P2A because only the real chunk handler can produce acceptance evidence.
 
@@ -385,6 +462,8 @@ permit a production receive feature, extraction, or graph access.
   refusal list without creating a durable archive or making a network call.
 - Add deterministic bundler tests across Windows/Linux path rules, dirty tracked files, deletion,
   case collisions, ignored files, secrets, nested repos, and oversized files.
+- Capture Git lineage without mutating the index; prove that a clean checkout and dirty checkout at
+  the same HEAD have different `tree_digest` identities while sharing the same base commit.
 
 **Gate:** repeated runs over identical bytes produce the same tree digest; repository/index status is
 byte-identical before and after.
@@ -459,9 +538,14 @@ outcomes; the old project graph can be restored from `previous`; no name-keyed p
   proving that identical paths in two views cannot cross-read, cross-anchor, or cross-prune.
 - Add receipt issue/rotation/revocation and context-resolution tests for zero, one, and many
   workspaces per principal. No-context queries must remain canonical in every case.
+- Stamp code-derived assertion/fact provenance with immutable snapshot receipts; retain
+  assertion-level multiplicity when semantic entities merge. Add manifest-digest comparison for
+  `EXACT_SNAPSHOT`, `UNCHANGED_ANCHORS`, `CHANGED_ANCHORS`, `REMOVED_ANCHORS`, and `INDETERMINATE`.
 
 **Gate:** two users can sync divergent complete trees concurrently, each reads their own structure,
-canonical remains unchanged, and deleting either workspace leaves the other two views intact.
+canonical remains unchanged, deleting either workspace leaves the other two views intact, and a
+memory from one workspace cannot appear as unqualified current truth in another after its anchors
+change.
 
 ### P6 — Product release
 
@@ -473,10 +557,15 @@ canonical remains unchanged, and deleting either workspace leaves the other two 
   or snapshot contract is GitHub-specific.
 - Roll out `write` mode by allowlisted client/project, then instance-wide after a clean observation
   window. Keep legacy local-path `ingest_project` for local deployments; deprecate remote use of it.
+- Surface the resolved snapshot/commit and applicability verdict in code-memory recall. Require an
+  authorized snapshot context before automatic promotion of a code-specific memory to persistent
+  current-project knowledge.
 
 **Gate:** install-to-first-sync succeeds from a clean PyPI environment; release documentation states
 what is uploaded and retained; production metrics show bounded staging, scan latency, failure rate,
-and zero bundle content in telemetry.
+and zero bundle content in telemetry; clean, dirty, rebased/vanished-commit, changed-file,
+renamed-file, removed-file, partial-scan, and non-Git memory fixtures all produce conservative,
+explainable applicability verdicts.
 
 ### P7 — Scale and broader sources
 

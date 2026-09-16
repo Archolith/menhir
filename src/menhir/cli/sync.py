@@ -46,7 +46,15 @@ def _report(plan: BundlePlan, *, limits=PROVISIONAL_LIMITS) -> None:
 
     echo(f"repository      {plan.root}")
     echo(f"project name    {manifest.display_name}")
-    echo(f"source HEAD     {manifest.source_head or '(no commits)'}")
+    prov = manifest.provenance
+    echo(f"base commit     {prov.base_commit or '(no commits)'}")
+    echo(f"branch          {prov.branch or '(detached)'}")
+    # Said plainly, because it is the question the stamp exists to answer: a commit id on its own
+    # reads as "these were the bytes at that commit" and frequently is not.
+    if prov.dirty:
+        echo("working tree    DIRTY -- bundled bytes are not the bytes at that commit")
+    else:
+        echo("working tree    clean (tracked files match the base commit)")
     echo(f"policy version  {manifest.policy_version} (protocol v{manifest.protocol_version})")
     echo("")
     echo(f"files to upload {manifest.file_count}")

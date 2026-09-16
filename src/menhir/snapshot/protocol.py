@@ -41,11 +41,14 @@ __all__ = [
     "BUNDLE_POLICY_VERSION",
     "CONTENT_PREFIX",
     "MANIFEST_NAME",
+    "PROVENANCE_SELF_REPORTED",
+    "PROVENANCE_TRUSTED_AUTOMATION",
     "PROVISIONAL_LIMITS",
     "SNAPSHOT_PROTOCOL_VERSION",
     "BundleFormatError",
     "BundlePathError",
     "FileRecord",
+    "GitProvenance",
     "Omission",
     "OmissionReason",
     "SnapshotLimits",
@@ -199,6 +202,89 @@ class SnapshotLimits:
 #: than constructing SnapshotLimits() ad hoc, so P2A's measured update lands in one place. The name
 #: stays PROVISIONAL until `chunk_bytes` is measured -- that is the value gating P2B.
 PROVISIONAL_LIMITS = SnapshotLimits()
+
+
+#: Provenance quality. The client may only ever assert the first: it is describing its own
+#: machine, and nothing it says about a commit can be checked from inside the bundle (the bundle
+#: has no `.git`). The server assigns the second from trusted forge or CI evidence -- never from
+#: anything a caller sent. A remote URL, repository name, branch or commit string is a claim, and
+#: a claim is never authorization (plan: "Source classes and project identity").
+PROVENANCE_SELF_REPORTED = "self_reported"
+PROVENANCE_TRUSTED_AUTOMATION = "trusted_automation"
+
+
+@dataclass(frozen=True)
+class GitProvenance:
+    """Where the bundled bytes came from, as a CLAIM about the source checkout.
+
+    Replaces the single `source_head` field, which could not answer the question that matters for
+    grounding a code memory: *were these the bytes at that commit, or bytes someone was still
+    editing?* A commit id alone reads as the former and is frequently the latter.
+
+    What each field is for:
+
+    ``base_commit``
+        The commit HEAD pointed at. A label, not an anchor -- plan invariant 13 forbids a
+        caller-reported commit from being the sole historical anchor of anything.
+    ``commit_tree``
+        The tree OID of that commit. Present so a server that ever gains the commit's objects can
+        compare them against what arrived; `base_commit` alone cannot be checked against content.
+    ``branch``
+        The branch label, or None when detached. Display metadata: durable isolation uses
+        `view_id`, so renames, detached heads and duplicate branch names do not collide.
+    ``dirty``
+        True when tracked working-tree bytes differ from ``base_commit``. This describes the
+        SOURCE, not the bundle. Untracked files are excluded from the comparison because they
+        never enter the bundle, so they cannot make it differ from the commit.
+    ``quality``
+        Always :data:`PROVENANCE_SELF_REPORTED` from a client.
+
+    **`dirty=False` does not mean the bundle equals the commit.** The selection policy drops
+    scanner-skipped directories, oversized files and refused paths, and tracked-but-deleted files
+    appear as deletions. Those are declared separately (`omissions`, `deleted_count`) and a reader
+    must consult them; only a clean tree with neither would claim to be the commit's tracked
+    content, and even then no one inside this system can verify it. `tree_digest` is the
+    authoritative statement about the uploaded bytes; everything here is provenance.
+    """
+
+    base_commit: str | None = None
+    commit_tree: str | None = None
+    branch: str | None = None
+    dirty: bool = False
+    quality: str = PROVENANCE_SELF_REPORTED
+
+    def as_json(self) -> dict[str, Any]:
+        return {
+            "base_commit": self.base_commit,
+            "commit_tree": self.commit_tree,
+            "branch": self.branch,
+            "dirty": self.dirty,
+            "quality": self.quality,
+        }
+
+    @classmethod
+    def from_mapping(cls, raw: Mapping[str, Any] | None) -> GitProvenance:
+        """Parse untrusted provenance. Unparseable values become absent, never invented.
+
+        `quality` is forced back to self-reported: a client claiming to be trusted automation is
+        exactly the claim this field exists to refuse. Only the server may raise it.
+        """
+        if not isinstance(raw, Mapping):
+            return cls()
+        return cls(
+            base_commit=_optional_str(raw.get("base_commit")),
+            commit_tree=_optional_str(raw.get("commit_tree")),
+            branch=_optional_str(raw.get("branch")),
+            dirty=bool(raw.get("dirty", False)),
+            quality=PROVENANCE_SELF_REPORTED,
+        )
+
+
+def _optional_str(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 class OmissionReason:
@@ -363,7 +449,7 @@ class SnapshotManifest:
     omissions: tuple[Omission, ...] = ()
     project_id: str | None = None
     source_id: str | None = None
-    source_head: str | None = None
+    provenance: GitProvenance = field(default_factory=GitProvenance)
     protocol_version: int = SNAPSHOT_PROTOCOL_VERSION
     policy_version: int = BUNDLE_POLICY_VERSION
     deleted_count: int = 0
@@ -390,7 +476,7 @@ class SnapshotManifest:
         omissions: Iterable[Omission] = (),
         project_id: str | None = None,
         source_id: str | None = None,
-        source_head: str | None = None,
+        provenance: GitProvenance | None = None,
         deleted_count: int = 0,
     ) -> SnapshotManifest:
         """Sort, validate and digest in one step. The only supported way to make a manifest."""
@@ -402,7 +488,7 @@ class SnapshotManifest:
             omissions=tuple(sorted(omissions, key=lambda o: (o.reason, o.path))),
             project_id=project_id,
             source_id=source_id,
-            source_head=source_head,
+            provenance=provenance or GitProvenance(),
             deleted_count=deleted_count,
             _tree_digest=compute_tree_digest(ordered),
         )
@@ -414,7 +500,7 @@ class SnapshotManifest:
             "display_name": self.display_name,
             "project_id": self.project_id,
             "source_id": self.source_id,
-            "source_head": self.source_head,
+            "provenance": self.provenance.as_json(),
             "file_count": self.file_count,
             "total_bytes": self.total_bytes,
             "tree_digest": self.tree_digest,
@@ -508,7 +594,7 @@ class SnapshotManifest:
             omissions=omissions,
             project_id=(str(raw["project_id"]) if raw.get("project_id") else None),
             source_id=(str(raw["source_id"]) if raw.get("source_id") else None),
-            source_head=(str(raw["source_head"]) if raw.get("source_head") else None),
+            provenance=GitProvenance.from_mapping(raw.get("provenance")),
             protocol_version=protocol_version,
             policy_version=policy_version,
             deleted_count=int(raw.get("deleted_count") or 0),
