@@ -65,7 +65,7 @@ def repo():
 
     from neo4j import GraphDatabase
 
-    uri = os.getenv("MENHIR_TEST_NEO4J_URI", "bolt://localhost:7688")
+    uri = os.getenv("MENHIR_TEST_NEO4J_URI", "bolt://127.0.0.1:7688")
     user = os.getenv("MENHIR_TEST_NEO4J_USER", "neo4j")
     password = os.getenv("MENHIR_TEST_NEO4J_PASSWORD", "testpassword")
     driver = GraphDatabase.driver(uri, auth=(user, password))
@@ -763,7 +763,7 @@ def test_admission_reads_the_claim_under_a_lock_a_transfer_must_wait_for(repo, p
     claim = _claim_for(binding, root, host)
 
     driver = GraphDatabase.driver(
-        os.getenv("MENHIR_TEST_NEO4J_URI", "bolt://localhost:7688"),
+        os.getenv("MENHIR_TEST_NEO4J_URI", "bolt://127.0.0.1:7688"),
         auth=(
             os.getenv("MENHIR_TEST_NEO4J_USER", "neo4j"),
             os.getenv("MENHIR_TEST_NEO4J_PASSWORD", "testpassword"),

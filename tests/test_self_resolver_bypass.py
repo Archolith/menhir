@@ -526,7 +526,7 @@ async def test_existing_canonical_node_round_trips_through_real_bulk_persistence
 
     canonical = self_uuid_for_namespace("default")
     driver = Neo4jDriver(
-        os.getenv("MENHIR_TEST_NEO4J_URI", "bolt://localhost:7688"),
+        os.getenv("MENHIR_TEST_NEO4J_URI", "bolt://127.0.0.1:7688"),
         os.getenv("MENHIR_TEST_NEO4J_USER", "neo4j"),
         os.getenv("MENHIR_TEST_NEO4J_PASSWORD", "testpassword"),
         database=os.getenv("MENHIR_TEST_NEO4J_DATABASE", "neo4j"),

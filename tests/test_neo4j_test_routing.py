@@ -23,7 +23,7 @@ from menhir.config import MemorySettings
 def test_from_env_never_resolves_to_prod_neo4j() -> None:
     """Under the autouse redirect, from_env() must point at the test instance, not prod."""
     resolved = MemorySettings.from_env().neo4j_uri
-    expected_test_uri = os.getenv("MENHIR_TEST_NEO4J_URI", "bolt://localhost:7688")
+    expected_test_uri = os.getenv("MENHIR_TEST_NEO4J_URI", "bolt://127.0.0.1:7688")
 
     assert resolved == expected_test_uri, (
         f"from_env() resolved to {resolved!r}, not the test instance {expected_test_uri!r} -- "

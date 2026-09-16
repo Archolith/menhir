@@ -124,7 +124,7 @@ def live_settings():
 
     settings = MemorySettings.from_env()
 
-    test_uri = os.getenv("MENHIR_TEST_NEO4J_URI", "bolt://localhost:7688")
+    test_uri = os.getenv("MENHIR_TEST_NEO4J_URI", "bolt://127.0.0.1:7688")
     assert settings.neo4j_uri == test_uri, (
         f"REFUSING TO RUN: settings resolve to {settings.neo4j_uri}, not the disposable test "
         f"instance {test_uri}. This suite performs destructive writes."

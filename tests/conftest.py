@@ -57,7 +57,7 @@ def pytest_configure(config: pytest.Config) -> None:
         os.environ.get("MENHIR_PROD_NEO4J_URI_SNAPSHOT")
         or MemorySettings.from_env().neo4j_uri
     )
-    test_uri = os.getenv("MENHIR_TEST_NEO4J_URI", "bolt://localhost:7688")
+    test_uri = os.getenv("MENHIR_TEST_NEO4J_URI", "bolt://127.0.0.1:7688")
     test_user = os.getenv("MENHIR_TEST_NEO4J_USER", "neo4j")
     test_password = os.getenv("MENHIR_TEST_NEO4J_PASSWORD", "testpassword")
     test_database = os.getenv("MENHIR_TEST_NEO4J_DATABASE", "neo4j")
@@ -143,7 +143,7 @@ def force_all_tests_onto_test_neo4j():
     import os
 
     real_prod_uri = os.environ.get("MENHIR_PROD_NEO4J_URI_SNAPSHOT", "")
-    test_uri = os.getenv("MENHIR_TEST_NEO4J_URI", "bolt://localhost:7688")
+    test_uri = os.getenv("MENHIR_TEST_NEO4J_URI", "bolt://127.0.0.1:7688")
     test_user = os.getenv("MENHIR_TEST_NEO4J_USER", "neo4j")
     test_password = os.getenv("MENHIR_TEST_NEO4J_PASSWORD", "testpassword")
 
@@ -221,10 +221,12 @@ def test_neo4j_repo(isolated_telemetry_db):
     from menhir.config import MemorySettings
     from menhir.infrastructure.neo4j import Neo4jRepository
 
-    # Default: the throwaway instance published on localhost:7688 by
+    # Default: the throwaway instance published on 127.0.0.1:7688 by
     # docker-compose.test.yml, a separate Neo4j from any real graph. Tests run destructive, unscoped
     # queries, so they MUST hit their own instance, never prod's database.
-    uri = os.getenv("MENHIR_TEST_NEO4J_URI", "bolt://localhost:7688")
+    # 127.0.0.1, not localhost: the container publishes on IPv4 only, and on Windows every
+    # connect to `localhost` waits out a ~21s [::1] timeout first -- 20s per online test.
+    uri = os.getenv("MENHIR_TEST_NEO4J_URI", "bolt://127.0.0.1:7688")
     user = os.getenv("MENHIR_TEST_NEO4J_USER", "neo4j")
     password = os.getenv("MENHIR_TEST_NEO4J_PASSWORD", "testpassword")
     database = os.getenv("MENHIR_TEST_NEO4J_DATABASE", "neo4j")

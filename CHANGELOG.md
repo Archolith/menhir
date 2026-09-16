@@ -1,3 +1,11 @@
+## 2026-09-15 - test Neo4j default is 127.0.0.1, not localhost
+
+- `tests/conftest.py` and the five test modules that repeat the default: `MENHIR_TEST_NEO4J_URI`
+  now defaults to `bolt://127.0.0.1:7688`. The throwaway container publishes on IPv4 only, so
+  on Windows every driver connect to `localhost` waited out a ~21s `[::1]` timeout before
+  falling back -- about 20s per online test, a two-hour lane instead of three minutes.
+  Explicit `MENHIR_TEST_NEO4J_URI` values are unaffected.
+
 ## 2026-09-15 - release gate script
 
 - `scripts/release.py`: the workstation half of the release gate. Check-only by default;
