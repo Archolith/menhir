@@ -174,9 +174,15 @@ class SnapshotLimits:
     overhead dominates small bodies. The old 256 KiB default was spending roughly four fifths of
     the available throughput on the path that matters.
 
-    `max_chunk_bytes` and `max_file_bytes` remain UNMEASURED ceilings, and the class stays
-    PROVISIONAL: the rest of P2A's gate -- soak, disk-pressure, p95 latency, peak memory -- has not
-    run. One measured value does not close it.
+    **P2A closed 2026-09-16** (owner sign-off) with latency, memory, staging growth and telemetry
+    redaction also recorded. `max_chunk_bytes` is measured in the sense that matters -- 2 MiB was
+    accepted 3/3 on both paths and 3 MiB is refused by the ceiling above -- so it is a bound with
+    evidence, not a guess.
+
+    The name `PROVISIONAL_LIMITS` is kept deliberately. `max_file_bytes` is still a policy choice
+    nobody has tested against real repositories, the quota figures are pilot candidates that have
+    only met a unit-test disk budget, and no upload has yet raced another. Renaming the constant
+    would announce more confidence than three of these values have earned.
 
     Server-side quota and lifetime values are NOT in this dataclass on purpose: the client has no
     business knowing them, and shipping them in a shared contract object invites a client that

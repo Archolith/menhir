@@ -9,8 +9,8 @@ artifact_status: IMPLEMENTING
 
 ## Execution status (2026-09-16)
 
-**P0 code half: DONE. P1: DONE. P2A receiver BUILT, measurement NOT RUN. P2B durable receiver:
-BLOCKED on those measurements.**
+**P0 code half: DONE. P1: DONE. P2A: DONE — measurement run and gate closed (owner sign-off
+2026-09-16). P2B durable receiver: UNBLOCKED, not started.**
 
 P2A's code half is in: `menhir.snapshot.receive` plus four operator-tier MCP tools registered
 only while `MENHIR_SNAPSHOT_RECEIVE_MODE=staging`, so while off they are neither advertised nor
@@ -19,11 +19,25 @@ stops; a test reads the module AST and fails if it imports `zipfile` or anything
 Quotas, TTL, restart-resume, orphan reclamation, replay semantics and telemetry redaction are
 tested (34 + 11 tests).
 
-**What remains for P2A's gate is the measurement itself, which is a deployment act, not a code
-one:** stand the staging instance up with the release ingress, probe 64 KiB / 256 KiB / 1 MiB /
-2 MiB, record latency, memory, retries and the largest reliably accepted call, then set
-`chunk_bytes` one rung below the largest repeatedly stable size. Until that runs, every
-`SnapshotLimits` value stays PROVISIONAL and P2B stays blocked.
+**The measurement ran** against the local stack and through a real Cloudflare ingress (a throwaway
+tunnel, created and deleted for the runs). Full record:
+`.agent/reports/menhir-p2a-transport-measurement-2026-09-16.md`.
+
+- **Hard ceiling: a 4 MiB request body, and it is ours** — `RequestBodyLimitMiddleware` in the MCP
+  SDK, a default Menhir never overrides. 3.83 MiB on the wire passes, 4.00 MiB returns 413.
+  Cloudflare imposed nothing lower, so the limit travels with the server, not the deployment.
+- **`chunk_bytes` = 1 MiB**, one rung below the 2 MiB that was stable 3/3 on both paths.
+- **Tail latency** p95 0.086s local / 0.347s through the edge, 0 failures in 128 chunk calls.
+- **Memory bounded by chunk size, not bundle size** — settled by the code plus a five-round
+  counterexample, after two sparsely-sampled answers that were both wrong. Read the report's
+  memory section before re-running: it records which numbers are quotable.
+- **Telemetry carries no content** under real load: 256 chunk rows, sizes only, verified against
+  the rows the run produced. `graph_operations` held 0 rows after 16 completed uploads.
+
+**Knowingly NOT covered by this closure**, and carried into P2B rather than pretended away: disk
+budget refusal under real pressure (unit-tested with a 32-byte budget and a fake clock), restart
+mid-upload against a running stack, and concurrency — every upload measured was sequential, so the
+per-principal cap of 2 and per-project cap of 8 have never actually raced.
 
 The env var is deliberate for P2A and temporary: P2B replaces it with the registered feature
 flag (`off`/`receive`/`shadow`/`write`) and adds commit-through-SEALED.
@@ -287,6 +301,8 @@ All responses are compact JSON (`BaseJsonTool`) with stable machine-readable err
 | `get_project_snapshot_status` | OBJECT, readonly | Return state, received/missing chunks, bounded progress, result counts, partial-index status, and sanitized failure code. Long polling is out of scope. |
 | `list_project_views` | NAMESPACED, readonly | Return canonical plus only the caller-owned or explicitly shared views, including kind, display label, active snapshot, provenance quality, and freshness. Never enumerate another user's private workspace. |
 | `abort_project_snapshot` | OBJECT, agent write | Cancel an uncommitted upload and remove staged bytes idempotently. A WRITING job cannot be aborted; it must complete or compensate. |
+| existing `add_memory` / `add_memory_and_track` extension | NAMESPACED, agent write | Accept an optional typed `code_context` object in the same call as the memory. Resolve its signed snapshot context and bounded anchors server-side; do not accept arbitrary metadata or treat inline code as verified merely because it arrived beside a memory. |
+| `get_memory_code_evidence` | OBJECT, readonly | Return the authorized immutable receipt and, when requested and retained, bounded cited snippets or patch hunks. Normal recall returns only the evidence summary and applicability verdict so raw code is not injected into every answer. |
 
 Upload state is durable in a dedicated SQLite store under the Menhir state root; bytes live under a
 separate bounded staging root. States are `RECEIVING`, `SEALED`, `EXTRACTING`, `VALIDATED`,
@@ -428,6 +444,70 @@ current persistent code belief. The local integration should sync at session bou
 persisting a code conclusion after tracked bytes change; the server verifies that the supplied
 snapshot receipt exists and is accessible rather than trusting raw IDs from the caller.
 
+### Bounded code-evidence capsules
+
+Snapshot provenance answers which tree a memory observed, but a manifest digest alone cannot
+reconstruct the cited code after a private workspace or full archive expires. Add a first-class,
+immutable code-evidence capsule to the existing memory-write call. This is a typed protocol object,
+not a generic custom-metadata map and not a copy of the repository inside every memory.
+
+The client supplies the signed workspace context plus only the anchors it used:
+
+```json
+{
+  "context_handle": "opaque-signed-handle",
+  "anchors": [
+    {
+      "path": "src/example.py",
+      "symbol": "Example.run",
+      "start_line": 41,
+      "end_line": 66,
+      "expected_file_sha256": "...",
+      "expected_body_digest": "..."
+    }
+  ],
+  "inline_fallback": null
+}
+```
+
+The MCP client obtains this automatically from the active checkout receipt and the files/ranges the
+agent actually inspected. A person should not have to create a workspace, find a commit, paste a
+diff, or choose retention settings for ordinary use.
+
+On ingest, the server resolves the authorized handle to `project_id`, `view_id`, `snapshot_id`, and
+verified `tree_digest`; verifies every anchor against that immutable snapshot manifest; then copies
+only the cited ranges or patch hunks into a content-addressed evidence store. The durable capsule
+contains an `evidence_id`, snapshot receipt, observation time, normalized anchors, per-file and
+per-snippet digests, provenance quality, verification status, and blob references. The episode or
+assertion links to that capsule rather than copying nested data onto mergeable entity properties.
+Identical snippets deduplicate by digest. Evidence-blob retention follows the memory that references
+it and is independent of workspace/archive TTL, so exact cited bytes remain retrievable after the
+workspace disappears.
+
+Raw inline content is a bounded fallback only when no accepted snapshot contains the observed bytes,
+principally a dirty edit made after the last sync. It carries normalized path, base snapshot, range,
+content digest, and either the exact snippet or unified patch hunk. It remains `self_reported` until
+a later snapshot verifies the same bytes. Start conservatively with at most five anchors and 32 KiB
+decoded evidence per memory; make both server-negotiated limits so production measurements can tune
+them without changing the wire shape. Reject overflow rather than silently truncating evidence.
+
+The existing `diff` argument remains a compatibility input for enrichment and structural anchoring,
+but it is not the durable evidence contract: Menhir currently stores it on the pending episode,
+flattens it into the Graphiti body, and may truncate it. New clients use `code_context`; the server
+may derive a bounded enrichment diff from a verified capsule, but recall and audit read the capsule.
+
+Recall returns the memory, capsule summary, selected code context, and applicability verdict. It does
+not return raw code by default. An authorized `get_memory_code_evidence` expansion retrieves the
+exact retained slice or hunk and reports whether it was snapshot-verified, later-verified, or still
+self-reported. If policy removed raw bytes, Menhir still returns the receipt and digests with
+`CONTENT_EXPIRED`; it never implies the code was reconstructed from a commit string.
+
+This complements rather than replaces project snapshots: snapshots provide whole-tree structure,
+cross-file search, and currentness comparison; capsules preserve the small amount of code that made
+a particular memory true. For a trusted, clean, durably retrievable forge snapshot the capsule may
+store references only. For local, dirty, unpushed, or retention-limited code it stores the bounded
+content-addressed slice automatically.
+
 Hosted multi-tenant release has an additional hard gate: every structural entity, edge, query,
 identity candidate, project listing, watcher action, and prune must enforce tenant ownership. Upload
 isolation alone is insufficient because the current structure graph is shared. Until that gate
@@ -505,10 +585,28 @@ byte-identical before and after.
 restart/disk-pressure tests; no archive extraction or graph operation is reachable. Only then may
 the provisional marker be removed and P2B start.
 
+**CLOSED 2026-09-16 on the gate as written.** Chunk default and ceiling recorded; quota, TTL,
+restart-resume, orphan reclamation and redaction tests pass; graph-inertness holds by AST test and
+was confirmed live (`graph_operations` empty after 16 uploads). Closure was taken with three items
+covered only by unit tests rather than by a real soak — they are carried into P2B below, not
+treated as done.
+
 ### P2B — Durable MCP receive substrate, feature disabled
 
 - Implement begin/chunk/status/abort and commit-through-SEALED only, behind one registered feature
   mode (`off`, `receive`, `shadow`, `write`).
+- **Inherited from P2A's closure, and each is a counterexample to construct rather than a test to
+  pass:**
+  - *Disk budget under real pressure.* Covered today by a 32-byte budget and a fake clock. The
+    case that matters is a begin arriving as the budget is crossed by a concurrent upload's
+    writes, not a begin against an already-full budget.
+  - *Restart mid-upload against a running stack.* `test_an_upload_resumes_across_a_restart` covers
+    the receiver's logic; no process has actually been killed between two chunks of one bundle.
+  - *Concurrency.* Every upload measured in P2A was sequential, so the per-principal cap of 2 and
+    per-project cap of 8 have never raced. Two begins arriving together at the cap boundary is the
+    interleaving to force.
+- **Decide the telemetry allowlist** (open decision 7) before the receive path ships: chunk rows
+  currently cannot be joined into an upload because `upload_id` is redacted with everything else.
 - Add durable upload records, staging quotas, expiry cleanup, restart recovery, exact-replay tests,
   conflicting-replay refusal, and telemetry/log redaction tests.
 - Register the tools, metadata, OAuth scopes, tenancy declarations, allowlists, endpoint catalog,
@@ -557,6 +655,12 @@ outcomes; the old project graph can be restored from `previous`; no name-keyed p
 - Stamp code-derived assertion/fact provenance with immutable snapshot receipts; retain
   assertion-level multiplicity when semantic entities merge. Add manifest-digest comparison for
   `EXACT_SNAPSHOT`, `UNCHANGED_ANCHORS`, `CHANGED_ANCHORS`, `REMOVED_ANCHORS`, and `INDETERMINATE`.
+- Extend both memory-write siblings with the same optional typed `code_context` contract. Seal and
+  link a bounded evidence capsule before enrichment, derive enrichment context from it, and keep
+  raw code out of graph entity properties and telemetry. Use a retryable outbox/repair path so a
+  capsule and episode cannot remain half-linked across the snapshot store/graph boundary.
+- Add authorized evidence expansion, blob reference counting, memory-coupled retention, and later
+  verification of self-reported inline fallbacks against newly accepted snapshots.
 
 **Gate:** two users can sync divergent complete trees concurrently, each reads their own structure,
 canonical remains unchanged, deleting either workspace leaves the other two views intact, and a
@@ -576,12 +680,15 @@ change.
 - Surface the resolved snapshot/commit and applicability verdict in code-memory recall. Require an
   authorized snapshot context before automatic promotion of a code-specific memory to persistent
   current-project knowledge.
+- Teach local integrations to attach checkout context and observed file/range anchors automatically;
+  fetch raw evidence only on an explicit drill-down, never in routine recall payloads.
 
 **Gate:** install-to-first-sync succeeds from a clean PyPI environment; release documentation states
 what is uploaded and retained; production metrics show bounded staging, scan latency, failure rate,
-and zero bundle content in telemetry; clean, dirty, rebased/vanished-commit, changed-file,
+and zero bundle/evidence content in telemetry; clean, dirty, rebased/vanished-commit, changed-file,
 renamed-file, removed-file, partial-scan, and non-Git memory fixtures all produce conservative,
-explainable applicability verdicts.
+explainable applicability verdicts; capsule fixtures prove exact retrieval after workspace expiry,
+deduplication, authorization isolation, overflow rejection, and honest `CONTENT_EXPIRED` behavior.
 
 ### P7 — Scale and broader sources
 
@@ -641,22 +748,30 @@ explainable applicability verdicts.
 3. Land structure prune-key B2/#99 before #98; both may proceed in parallel with P2A and gate P4.
 4. Keep `--allow-path` one-run only. Do not persist secret-risk upload approval per project.
 5. Ingest this plan after the decision update so IMPLEMENTING status is visible to corpus audits.
+6. **P2A closed on the gate as written (2026-09-16).** The measured chunk default is 1 MiB and the
+   hard ceiling is a 4 MiB request body owned by the MCP SDK. Closure was taken with the three
+   uncovered items above stated rather than resolved; they move to P2B.
 
 ## Open owner decisions
 
-1. The measured chunk default and hard ceiling produced by P2A; this is an evidence result, not a
-   pre-measurement preference.
-2. Whether the current materialized view snapshot is retained until superseded (recommended for stable
+1. Whether the current materialized view snapshot is retained until superseded (recommended for stable
    staleness and delta support) or deleted immediately at the cost of a new remote-staleness model.
-3. Whether snapshot tools remain hidden from model-facing catalogs when only the CLI should call
+2. Whether snapshot tools remain hidden from model-facing catalogs when only the CLI should call
    them, or are advertised with strong “use `menhir sync`” guidance.
-4. Whether hosted Menhir is one tenant per instance or must block P6 on full structure-graph
+3. Whether hosted Menhir is one tenant per instance or must block P6 on full structure-graph
    namespace ownership.
-5. Canonical promotion policy: trusted CI only (recommended default), explicit maintainer publish,
+4. Canonical promotion policy: trusted CI only (recommended default), explicit maintainer publish,
    or both with separately auditable grants.
-6. Private workspace quota, inactivity TTL, and whether users may pin selected workspaces.
-7. Whether GitHub verification is required for the first hosted release or launches later while all
+5. Private workspace quota, inactivity TTL, and whether users may pin selected workspaces.
+6. Whether GitHub verification is required for the first hosted release or launches later while all
    Git checkouts initially use the safe local/unverified path.
+7. **Telemetry correlation for snapshot uploads.** `_preview_of` masks any string that is not
+   allowlisted AND identifier-shaped, so `upload_id` and `digest` are redacted from chunk rows
+   along with everything else. That is stricter than `call_payload` intends and means **telemetry
+   cannot correlate the rows belonging to one upload** — confirmed against real rows in the P2A
+   soak. Allowlisting `upload_id` (a server-minted opaque id, not user content) would restore
+   correlation without weakening invariant 5; doing nothing means the first upload incident is
+   debugged without a join key. Decide in P2B design, not during the incident.
 
 ## Docs to update
 

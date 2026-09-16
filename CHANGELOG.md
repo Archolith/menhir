@@ -1,3 +1,28 @@
+## 2026-09-16 - P2A closed, P2B unblocked
+
+Owner sign-off on the gate as written: chunk default and hard ceiling recorded, quota/TTL/restart
+and redaction tests passing, graph-inertness held by AST test and confirmed live. The plan's status
+header said "measurement NOT RUN, P2B BLOCKED" and is now accurate.
+
+Closed with three things stated rather than resolved, each carried into P2B as a counterexample to
+construct rather than a test to pass:
+
+- **Disk budget under real pressure.** Today's coverage is a 32-byte budget and a fake clock. The
+  case that matters is a begin arriving as a concurrent upload's writes cross the budget.
+- **Restart mid-upload.** The receiver's resume logic is tested; no process has been killed between
+  two chunks of one bundle.
+- **Concurrency.** Every P2A upload was sequential, so the caps of 2 per principal and 8 per project
+  have never actually raced.
+
+Open decision added: **telemetry cannot correlate an upload's rows**, because `_preview_of` redacts
+`upload_id` along with everything not allowlisted AND identifier-shaped. Allowlisting a
+server-minted opaque id would restore the join key without weakening invariant 5. Decided in P2B
+design, not during the first incident.
+
+`PROVISIONAL_LIMITS` keeps its name. `max_file_bytes` is untested against real repositories and the
+quota figures have met only a unit-test disk budget; renaming would claim more confidence than
+those values have earned.
+
 ## 2026-09-16 - the P2A soak: the receiver streams, and telemetry stays clean under load
 
 `scripts/probe/p2a_soak.py` answers what the size probe structurally could not. The probe finds a
