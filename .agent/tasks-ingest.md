@@ -21,6 +21,24 @@ Use this file when the work is about how memories enter the system, move through
   - [architecture.md](architecture.md)
   - [data_models.md](data_models.md)
 
+### Ingest a project the server cannot see (remote code)
+
+`ingest_project` stats and scans its path **in the server process**, so a hosted Menhir cannot
+reach code on a workstation. The replacement is a client-built, sanitized snapshot uploaded over
+MCP; the design and phase gates are in
+[`plans/menhir-mcp-snapshot-ingest-2026-09-16.md`](plans/menhir-mcp-snapshot-ingest-2026-09-16.md).
+
+What exists today is the local half only:
+
+- `menhir sync --check` reports what a sync would upload. No network call, no archive written.
+- `menhir.snapshot.protocol` is the wire contract; treat it as API, not as a helper module.
+- Uploading is phase P2 and is gated on measuring the real transport (plan open decision 1).
+
+Two rules to keep in mind before touching this code: the client never states completeness
+(`partial_index` is the server's finding, derived from the bytes it extracted), and an omission is
+not a deletion -- anything deliberately left out is declared in the manifest, because structure
+writes prune.
+
 ### Understand memory scope or stamping
 - read first:
   - `memory.policy.scope`

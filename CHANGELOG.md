@@ -1,3 +1,31 @@
+## 2026-09-16 - `menhir sync --check`: see what a remote structure sync would upload
+
+First two phases of MCP-bundled snapshot ingest
+(`.agent/plans/menhir-mcp-snapshot-ingest-2026-09-16.md`). Nothing uploads yet; this is the
+local half.
+
+- `menhir sync --check` reports what a sync would send from a git repository: file count,
+  content bytes, an archive upper bound and chunk count, the `tree_digest`, deletions, declared
+  omissions, and refusals. It makes no network call and writes no archive. Plain `menhir sync`
+  refuses with an explanation -- the MCP upload tools are a later phase, gated on measuring the
+  real transport.
+- `menhir.snapshot.protocol`: the frozen wire contract. Canonical manifest, `tree_digest` over
+  the ordered file records, path rules (relative POSIX only; absolute, `..`, drive/UNC,
+  backslash, control characters and Windows-reserved names are refused, never repaired), and
+  stable error codes. Rejected paths never appear in an exception message, so a server logging a
+  refusal cannot thereby log a source path.
+- `menhir.snapshot.policy`: include / omit / refuse. Directories the structure scanner skips are
+  imported from it rather than restated, so the two cannot drift. Real `.env` files and private
+  key material block a sync until overridden per run with `--allow-path`; `.env.example` and
+  friends are fine.
+- `menhir.snapshot.bundler`: tracked paths and file modes from the index, bytes from the working
+  tree -- so uncommitted edits to tracked files are visible and the repository is never written
+  to. Submodules, symlinks, oversized files and scanner-skipped paths become *declared*
+  omissions: the server cannot tell "never uploaded" from "deleted upstream" by looking at the
+  extracted tree, and structure writes prune.
+- Archives are byte-reproducible: fixed entry order, pinned timestamp and deflate level, modes
+  from the manifest.
+
 ## 2026-09-15 - test Neo4j default is 127.0.0.1, not localhost
 
 - `tests/conftest.py` and the five test modules that repeat the default: `MENHIR_TEST_NEO4J_URI`

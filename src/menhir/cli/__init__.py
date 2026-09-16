@@ -9,6 +9,7 @@ import typer
 from menhir.cli.artifacts import artifacts_app
 from menhir.cli.hook import hook_app
 from menhir.cli.setup import setup as setup_command
+from menhir.cli.sync import sync as sync_command
 from menhir.cli.up import up as up_command
 from menhir.infrastructure.text_io import read_text_utf8
 from menhir.infrastructure.logging_config import (
@@ -40,6 +41,7 @@ def _root(ctx: typer.Context) -> None:
 app.add_typer(hook_app)
 app.add_typer(artifacts_app)
 app.command("setup")(setup_command)
+app.command("sync")(sync_command)
 app.command("up")(up_command)
 
 

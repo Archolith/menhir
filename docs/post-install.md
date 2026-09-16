@@ -122,6 +122,28 @@ because it changes login-time behavior. Inspect it with:
 
 Remove it with `.\scripts\start-server.ps1 uninstall-task`.
 
+## 5b. Preview a remote structure sync (code the server cannot see)
+
+`ingest_project` scans its path in the server process, so it only works when the code and the
+server are on the same machine. If your Menhir runs elsewhere, `menhir sync` is the path being
+built for that -- a sanitized snapshot of your repository, uploaded over MCP.
+
+The local half works today:
+
+```powershell
+menhir sync . --check
+```
+
+It reports what a sync would upload -- file count, content bytes, an archive size bound, the tree
+digest, deletions, what is deliberately omitted, and anything refused -- and it makes no network
+call and writes no archive. Only files git tracks are considered, taken from your working tree, so
+uncommitted edits show up and ignored files never do.
+
+Real `.env` files and private keys block the preview rather than being quietly skipped. If one is
+genuinely safe to send, add `--allow-path <path>`; the override applies to that run only.
+
+Uploading is not available yet: plain `menhir sync` refuses and says why.
+
 ## 6. Give agents the operating contract
 
 Use [`agent-usage.md`](agent-usage.md) as the explanation and copy

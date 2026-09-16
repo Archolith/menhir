@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-09-16 - Snapshot ingest P0/P1: wire contract frozen, local bundler shipped
+
+- `menhir-mcp-snapshot-ingest-2026-09-16.md` moves to `IMPLEMENTING` with an execution-status
+  section recording what shipped and what is still gated. The artifact is not registered in the
+  corpus, so the status was set in frontmatter rather than through `transition_artifact`.
+- P0's code half and all of P1 are done: protocol, policy, bundler, `menhir sync --check`, and
+  118 tests including the P1 gate (stable `tree_digest` across runs; `git status`, HEAD and the
+  index byte-identical after a sync).
+- P0's measurement half is NOT run and is the gate on P2: the chunk probe needs the tools P2
+  introduces and would hit production. Every `SnapshotLimits` value is marked PROVISIONAL in the
+  source; open decision 1 remains the owner's.
+
 ## 2026-09-08 - Replace the rejected architecture draft with a bounded recovery plan
 
 - Rewrite the active deployment plan as one concise current-status record: `NOT READY`, six open P1
