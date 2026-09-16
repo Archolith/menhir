@@ -17,11 +17,11 @@ Policy (secure-by-default, operator bypass):
   exposed the server's own tree (config, logs, ``.env``) to agent credentials. When the
   variable is unset, every non-operator ingest is refused with the setup message.
 
-Denied by name (#83, second layer): dotfiles and dot-directories (covers ``.env*`` and
-``.git``) and anything under a ``logs/`` or ``backups/`` directory. For confined tiers the
-check runs on the components below the matched root; for the operator/empty tier, which has
-no configured anchor, it runs on the ingested artifact itself — its filename and immediate
-parent — so a checkout that merely lives under a dot-directory stays ingestable.
+Denied by name (#83, second layer): ``logs/``, ``backups/``, and ``.git/`` anywhere
+in the resolved path, regardless of tier or configured root. Other dotfiles/directories are
+checked at the artifact and its immediate parent for operator/no-auth, and at the configured
+root, its immediate parent, and the path below it for confined tiers. This keeps a checkout
+under an incidental hidden ancestor ingestable while refusing hidden artifacts within it.
 """
 
 from __future__ import annotations
@@ -70,6 +70,10 @@ def _has_denied_component(parts: tuple[str, ...]) -> bool:
     return any(part.startswith(".") or part.lower() in _DENIED_DIR_NAMES for part in parts)
 
 
+def _has_denied_named_ancestor(parts: tuple[str, ...]) -> bool:
+    return any(part.lower() in _DENIED_DIR_NAMES or part.lower() == ".git" for part in parts)
+
+
 def ensure_ingest_path_allowed(path: str, *, tier: str | None) -> Path:
     """Resolve *path* (following symlinks) and enforce the containment policy.
 
@@ -78,6 +82,8 @@ def ensure_ingest_path_allowed(path: str, *, tier: str | None) -> Path:
     caller, sits outside the configured allowed roots.
     """
     resolved = Path(path).resolve()
+    if _has_denied_named_ancestor(resolved.parts):
+        raise IngestPathNotAllowedError(_DENIED_MESSAGE.format(resolved=resolved))
     if not tier or tier == "operator":
         if _has_denied_component(resolved.parts[-2:]):
             raise IngestPathNotAllowedError(_DENIED_MESSAGE.format(resolved=resolved))
@@ -86,7 +92,9 @@ def ensure_ingest_path_allowed(path: str, *, tier: str | None) -> Path:
     for root in roots:
         if not _is_within(resolved, root):
             continue
-        if resolved != root and _has_denied_component(resolved.relative_to(root).parts):
+        if _has_denied_component(root.parts[-2:]) or (
+            resolved != root and _has_denied_component(resolved.relative_to(root).parts)
+        ):
             raise IngestPathNotAllowedError(_DENIED_MESSAGE.format(resolved=resolved))
         return resolved
     raise IngestPathNotAllowedError(

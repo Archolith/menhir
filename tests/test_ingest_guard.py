@@ -108,6 +108,54 @@ def test_logs_and_backups_directories_are_denied_for_operator(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("tier", ["agent", "readonly", "operator", None, ""])
+@pytest.mark.parametrize(
+    "rel",
+    ("logs/2026/sept/run.txt", "backups/old/db.dump", ".git/objects/pack/file"),
+)
+def test_nested_denied_directories_are_refused_for_every_tier(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tier: str | None, rel: str
+) -> None:
+    monkeypatch.setenv(INGEST_ALLOWED_ROOTS_ENV, str(tmp_path))
+    target = tmp_path / rel
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("synthetic", encoding="utf-8")
+    with pytest.raises(IngestPathNotAllowedError, match="denied path pattern"):
+        ensure_ingest_path_allowed(str(target), tier=tier)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("rel", ("logs/2026", "backups/snapshots", ".git/objects"))
+def test_configured_root_cannot_exempt_its_denied_ancestor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rel: str
+) -> None:
+    root = tmp_path / rel
+    root.mkdir(parents=True)
+    monkeypatch.setenv(INGEST_ALLOWED_ROOTS_ENV, str(root))
+    for path in (root, root / "note.txt"):
+        with pytest.raises(IngestPathNotAllowedError, match="denied path pattern"):
+            ensure_ingest_path_allowed(str(path), tier="agent")
+
+
+@pytest.mark.unit
+def test_symlink_into_nested_logs_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "logs" / "2026" / "run.txt"
+    target.parent.mkdir(parents=True)
+    target.write_text("synthetic", encoding="utf-8")
+    link = tmp_path / "shortcut.txt"
+    try:
+        link.symlink_to(target)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks not supported in this environment")
+    monkeypatch.setenv(INGEST_ALLOWED_ROOTS_ENV, str(tmp_path))
+    for tier in ("agent", "operator", None):
+        with pytest.raises(IngestPathNotAllowedError, match="denied path pattern"):
+            ensure_ingest_path_allowed(str(link), tier=tier)
+
+
+@pytest.mark.unit
 def test_symlink_escape_is_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root = tmp_path / "allowed"
     root.mkdir()

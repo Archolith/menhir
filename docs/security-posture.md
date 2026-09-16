@@ -109,8 +109,11 @@ dispatch via an explicit, test-guarded operation→tier map.
 `agent`/`readonly` callers to the `MENHIR_INGEST_ALLOWED_ROOTS` list. There is **no default
 root** — with the variable unset, every non-operator ingest is refused with the setup
 message (the former service-CWD default exposed the server's own tree, #83). Names are also
-denied for every tier, operator included: dotfiles/dot-directories (`.env*`, `.git`) and
-anything under `logs/` or `backups/`.
+denied for every tier, operator included: anything under `logs/`, `backups/`, or `.git/`
+anywhere in the resolved path. Other dotfiles/dot-directories (`.env*`) are refused at
+the artifact and immediate parent for operator/no-auth, and at the configured root,
+its immediate parent, and below it for confined tiers. An incidental hidden ancestor
+of a checkout does not itself bar ingest.
 
 ## 4. OAuth resource server (`api/oauth.py`)
 
