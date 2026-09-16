@@ -416,8 +416,11 @@ class EpisodeLifecycleRepository:
             .set(
                 (
                     "n.transient_retries = coalesce(toInteger(n.transient_retries), 0) + 1",
-                    "n.processing_attempts = greatest("
-                    " coalesce(toInteger(n.processing_attempts), 1) - 1, 0)",
+                    # CASE, not greatest(): Neo4j Cypher has no greatest() function, and the
+                    # bad first cut made every refund raise (v0.2.1, caught in wrapup review).
+                    "n.processing_attempts = CASE"
+                    " WHEN coalesce(toInteger(n.processing_attempts), 0) > 0"
+                    " THEN toInteger(n.processing_attempts) - 1 ELSE 0 END",
                 )
             )
             .return_raw("count(n) AS updated")

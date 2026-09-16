@@ -1391,6 +1391,24 @@ async def stamp_and_finalize(
 # Pipeline step 5 — handle enrichment failure
 # ---------------------------------------------------------------------------
 
+async def refund_transient_requeue_safely(graph_adapter: Any, episode_uuid: str) -> None:
+    """Best-effort #79/#70 attempt refund after a transient requeue or retryable failure.
+
+    The refund must never escalate the path it runs on: a backpressure or circuit-open
+    requeue that raises inside its own handler would land in `handle_enrichment_failure`
+    and FAIL an episode for a bookkeeping error. Log at WARNING and continue — a skipped
+    refund only leaves the attempt counted (the pre-#79 behaviour), never inflates budgets.
+    """
+    try:
+        await asyncio.to_thread(graph_adapter.count_transient_requeue, episode_uuid)
+    except Exception:
+        logger.warning(
+            "Transient attempt refund failed for episode %s — attempt stays counted",
+            episode_uuid,
+            exc_info=True,
+        )
+
+
 async def handle_enrichment_failure(
     ctx: EnrichmentContext,
     exc: BaseException,
@@ -1421,10 +1439,7 @@ async def handle_enrichment_failure(
     # claim's attempt so an outage cannot consume the genuine-failure budget. The refund
     # bumps `transient_retries`, whose cap still terminates a permanently dead provider.
     if classification == "retryable":
-        await asyncio.to_thread(
-            ctx.graph_adapter.count_transient_requeue,
-            ctx.episode_uuid,
-        )
+        await refund_transient_requeue_safely(ctx.graph_adapter, ctx.episode_uuid)
     failure_stage = (
         "graphiti_invalid_output"
         if is_graphiti_output_parse_error(exc, error_type=error_type)

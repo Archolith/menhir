@@ -45,6 +45,7 @@ from menhir.services.enrichment_steps import (
     add_episode_with_timeout,
     build_episode_preflight_rejection,
     handle_enrichment_failure,
+    refund_transient_requeue_safely,
     run_graphiti_extraction,
     run_preflight_rejection,
     try_reconcile_existing,
@@ -210,9 +211,7 @@ class IngestWorkerMixin:
                 # Backpressure is time-bound, not a processing failure (#79/#70): refund the
                 # claim's attempt so the window rolling cannot strand a permanently
                 # attempts-exhausted episode.
-                await asyncio.to_thread(
-                    self.graph_adapter.count_transient_requeue, episode_uuid
-                )
+                await refund_transient_requeue_safely(self.graph_adapter, episode_uuid)
                 record_lifecycle_event(
                     component="ingest_worker",
                     event="budget_cap_requeue",
@@ -248,9 +247,7 @@ class IngestWorkerMixin:
             # attempt so an outage cannot burn the genuine-failure budget. The refund bumps
             # `transient_retries`, whose own cap (enforced by the pending-list filter and the
             # recovery park) still terminates a permanently dead provider.
-            await asyncio.to_thread(
-                self.graph_adapter.count_transient_requeue, episode_uuid
-            )
+            await refund_transient_requeue_safely(self.graph_adapter, episode_uuid)
             record_lifecycle_event(
                 component="ingest_worker",
                 event="circuit_breaker_requeue",
