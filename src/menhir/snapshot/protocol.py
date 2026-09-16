@@ -154,14 +154,29 @@ class SnapshotLimits:
     figures. They still have to survive P2A's soak and disk-pressure tests -- the tenant disk
     budget must refuse a new begin before exhaustion -- but they are decisions, not guesses.
 
-    **Still unmeasured.** `chunk_bytes` is the one the whole P2 gate turns on. It may not be set
-    from arithmetic, from another MCP tool's behaviour, or from an `add_memory` padded-body probe:
-    schema validation, decoding, telemetry and handler allocation all differ from the chunk path.
-    P2A measures 64 KiB / 256 KiB / 1 MiB / 2 MiB through a staging ingress carrying the release
-    middleware, then takes **one rung below the largest repeatedly stable size**, keeping at least
-    2x envelope headroom. The 256 KiB here is a placeholder so the contract tests have arithmetic
-    and the CLI can estimate an upload. `max_chunk_bytes` and `max_file_bytes` are likewise
-    unmeasured ceilings.
+    **Measured (2026-09-16).** `chunk_bytes` is the one the whole P2 gate turns on, and it is now
+    an evidence result rather than a guess. P2A ran the real chunk handler behind the release
+    middleware, twice: against a local stack, and through a genuine Cloudflare ingress. Both paths
+    agreed to the byte. 2 MiB was accepted 3/3 on each, so the rule -- one rung below the largest
+    repeatedly stable size, keeping at least 2x envelope headroom -- selects **1 MiB**: 1.33 MiB on
+    the wire against a 4 MiB ceiling, 3x headroom. Full run:
+    `.agent/reports/menhir-p2a-transport-measurement-2026-09-16.md`.
+
+    That ceiling is worth naming, because it is not the ingress's and not ours by choice:
+    `RequestBodyLimitMiddleware` in the MCP SDK defaults `max_request_body_size` to 4 MiB and
+    Menhir does not override it. 3.83 MiB on the wire passes; 4.00 MiB returns 413. Cloudflare
+    imposed nothing lower. So `max_chunk_bytes` (2 MiB -> 2.67 MiB encoded) clears the real limit
+    by 1.33 MiB, which was luck rather than design: **raising it to 3 MiB would 413 every chunk**,
+    and an SDK upgrade can move that ceiling with no change here.
+
+    Size also buys throughput, and buys more of it the further away the server is: through the
+    edge, 256 KiB chunks moved 1.3 MiB/s against 1 MiB chunks at 6.7 MiB/s, because per-request
+    overhead dominates small bodies. The old 256 KiB default was spending roughly four fifths of
+    the available throughput on the path that matters.
+
+    `max_chunk_bytes` and `max_file_bytes` remain UNMEASURED ceilings, and the class stays
+    PROVISIONAL: the rest of P2A's gate -- soak, disk-pressure, p95 latency, peak memory -- has not
+    run. One measured value does not close it.
 
     Server-side quota and lifetime values are NOT in this dataclass on purpose: the client has no
     business knowing them, and shipping them in a shared contract object invites a client that
@@ -170,8 +185,9 @@ class SnapshotLimits:
     staged bytes.
     """
 
-    #: Decoded bytes per chunk. The encoded call is ~4/3 of this plus envelope. UNMEASURED: P2A.
-    chunk_bytes: int = 256 * 1024
+    #: Decoded bytes per chunk. The encoded call is ~4/3 of this plus envelope, so 1 MiB here is
+    #: ~1.33 MiB on the wire against the 4 MiB request-body ceiling. MEASURED: P2A, 2026-09-16.
+    chunk_bytes: int = 1024 * 1024
     #: Hard ceiling on a single decoded chunk, independent of the negotiated size. UNMEASURED.
     max_chunk_bytes: int = 2 * 1024 * 1024
     #: Files in one bundle. Owner-approved pilot candidate.

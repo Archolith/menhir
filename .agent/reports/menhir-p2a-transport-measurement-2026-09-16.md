@@ -74,8 +74,17 @@ For a 64 MiB bundle at the pilot quota, through the tunnel: ~256 requests at 256
 1 MiB. The current 256 KiB default is using roughly a fifth of the available throughput on the
 path that matters.
 
-**Not yet applied.** `SnapshotLimits.chunk_bytes` is unchanged pending sign-off, because it is a
-frozen-protocol constant and the plan gates the provisional marker on this record existing.
+**Applied 2026-09-16** (owner sign-off): `SnapshotLimits.chunk_bytes` is now 1 MiB, with the
+measurement recorded as its basis in the dataclass docstring and pinned by
+`test_measured_chunk_default_is_pinned`.
+
+`test_a_max_size_chunk_still_fits_the_request_body_ceiling` pins the finding rather than the
+number: it fails if `max_chunk_bytes` is raised to 3 MiB (the measured 413 case) and also if it is
+raised to 2.5 MiB, which clears the hard ceiling but leaves no headroom. That guard was verified
+against both counterexamples, not just asserted.
+
+**The PROVISIONAL marker stays.** One measured value does not close the P2A gate; see the section
+below for what is still unrun.
 
 ## Finding: some agents are refused at the edge before reaching the origin — but not Menhir's
 

@@ -1,3 +1,25 @@
+## 2026-09-16 - the snapshot chunk default is now a measurement, not a guess
+
+`SnapshotLimits.chunk_bytes` goes from 256 KiB to **1 MiB**, the value P2A's rule selects: 2 MiB was
+accepted 3/3 both locally and through a real Cloudflare ingress, and the rule is one rung below the
+largest repeatedly stable size. 1 MiB is 1.33 MiB on the wire against a 4 MiB ceiling -- 3x
+headroom. Through the edge that is 6.7 MiB/s against 1.3 MiB/s at the old default, because
+per-request overhead dominates small bodies and dominates harder the further away the server is.
+
+- The dataclass docstring now carries the evidence and names the ceiling's real owner:
+  `RequestBodyLimitMiddleware` in the MCP SDK, defaulting `max_request_body_size` to 4 MiB, which
+  Menhir does not override. 3.83 MiB on the wire passes, 4.00 MiB returns 413.
+- `test_measured_chunk_default_is_pinned` pins the value, because it is evidence now -- changing it
+  means re-running the measurement, not editing a guess.
+- `test_a_max_size_chunk_still_fits_the_request_body_ceiling` pins the finding instead of the
+  number. It fails if `max_chunk_bytes` is raised to 3 MiB (the measured 413) and also at 2.5 MiB,
+  which clears the ceiling but keeps no headroom. Both counterexamples were checked, not assumed.
+  The ceiling is invisible from the snapshot layer and is a dependency DEFAULT, so an SDK upgrade
+  can move it with no change here; this test is where that would surface.
+- **PROVISIONAL stays.** `max_chunk_bytes` and `max_file_bytes` are still unmeasured, and P2A's
+  soak, disk-pressure, p95 and peak-memory checks have not run. One measured value does not close
+  the gate.
+
 ## 2026-09-16 - the backend client names itself
 
 `BackendClient` sent no `User-Agent`, leaving httpx's default. Measured against a Cloudflare zone

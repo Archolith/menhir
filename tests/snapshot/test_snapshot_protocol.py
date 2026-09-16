@@ -9,6 +9,7 @@ not a test fix.
 from __future__ import annotations
 
 import json
+import math
 
 import pytest
 
@@ -366,3 +367,34 @@ def test_provisional_limits_are_internally_consistent() -> None:
     assert limits.max_file_bytes <= limits.max_total_bytes
     assert limits.max_compressed_bytes <= limits.max_total_bytes
     assert limits.max_segment_bytes <= limits.max_path_bytes
+
+
+def test_measured_chunk_default_is_pinned() -> None:
+    """Measured by P2A on 2026-09-16, not chosen. See the report named in `SnapshotLimits`.
+
+    2 MiB was accepted 3/3 both locally and through a real Cloudflare ingress, and the rule is one
+    rung below the largest repeatedly stable size. Pinned because it is now evidence: changing it
+    means re-running the measurement, not editing a guess.
+    """
+    assert PROVISIONAL_LIMITS.chunk_bytes == 1024 * 1024
+
+
+def test_a_max_size_chunk_still_fits_the_request_body_ceiling() -> None:
+    """The ceiling is the MCP SDK's 4 MiB request-body limit, which Menhir does not override.
+
+    This is the assertion that matters, because the ceiling is invisible from here: it lives in
+    `RequestBodyLimitMiddleware`, it is a DEFAULT rather than a considered choice, and 2 MiB clears
+    it by luck. Measured: 3.83 MiB on the wire passes, 4.00 MiB returns 413.
+
+    So the failure this guards is concrete -- raise `max_chunk_bytes` to 3 MiB and every chunk 413s
+    at a layer no snapshot test touches, with nothing here to say why. Base64 is 4/3 with padding,
+    plus the JSON envelope and headers.
+    """
+    sdk_request_body_ceiling = 4 * 1024 * 1024
+    encoded = math.ceil(PROVISIONAL_LIMITS.max_chunk_bytes / 3) * 4
+    envelope_allowance = 4096  # JSON keys, upload id, digest hex, headers
+
+    assert encoded + envelope_allowance < sdk_request_body_ceiling
+    # Keep real headroom rather than merely fitting: an SDK upgrade may lower this, and a chunk
+    # sized to just fit would then fail in the field instead of here.
+    assert encoded + envelope_allowance < sdk_request_body_ceiling * 0.8
