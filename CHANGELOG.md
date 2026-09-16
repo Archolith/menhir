@@ -1,3 +1,28 @@
+## 2026-09-16 - the snapshot chunk ceiling is ours, not the ingress's
+
+P2A's transport measurement ran, against the local stack and through a real Cloudflare ingress
+(a throwaway tunnel, created and deleted for the run). Both paths give the same ceiling:
+**a 4 MiB request body**, enforced by `DEFAULT_MAX_REQUEST_BODY_SIZE` in the MCP SDK's
+`RequestBodyLimitMiddleware`, which Menhir never overrides. 3.83 MiB on the wire passes and
+4.00 MiB returns 413. Cloudflare imposed nothing lower.
+
+- `max_chunk_bytes = 2 MiB` (2.67 MiB encoded) clears that by 1.33 MiB -- safe, but by accident.
+  Raising it to 3 MiB would 413 every chunk.
+- 2 MiB chunks were stable 3/3 on both paths, so the plan's own rule selects **1 MiB** as the
+  default, up from the guessed 256 KiB. Through the edge that is 6.7 MiB/s against 1.3 MiB/s:
+  per-request overhead dominates small chunks, and dominates harder the further away the server
+  is. Not yet applied -- it changes a frozen-protocol constant.
+- A request carrying urllib's default `Python-urllib/3.12` agent is refused at the Cloudflare edge
+  with a 403 (error 1010) and **never reaches the origin**, which from the client looks exactly
+  like the server being down. Any `menhir sync` shipped against a Cloudflare-fronted deployment
+  needs a named `User-Agent`.
+
+`scripts/probe/p2a_transport_probe.py` takes a base URL as its only path-dependent input, so one
+script measures any two paths. It classifies each body by who answered -- a structured MCP reply,
+success or refusal, proves the bytes crossed the ingress; an HTTP status or reset proves they did
+not. Full results and what the run does NOT establish (p95, peak memory, staging soak, telemetry
+under load): `.agent/reports/menhir-p2a-transport-measurement-2026-09-16.md`.
+
 ## 2026-09-16 - a first install with no AI provider could not start, and a harness that finds that
 
 `prepare_memory_runtime` skips Graphiti's index build when there is no usable LLM or embedder, so
