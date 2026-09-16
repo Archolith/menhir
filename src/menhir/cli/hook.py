@@ -491,16 +491,30 @@ def uninstall(
 # ---------------------------------------------------------------------------
 
 def _upsert_hook_entry(hooks: dict, event_key: str, entry: dict) -> None:
-    """Insert or replace a menhir hook entry in the given event key."""
+    """Insert or refresh the menhir hook entry in the given event key."""
     event_hooks: list = hooks.setdefault(event_key, [])
     if not isinstance(event_hooks, list):
         raise ValueError(f"Expected hooks.{event_key} to be a JSON array")
+    new_commands = entry.get("hooks")
     for i, existing_entry in enumerate(event_hooks):
         if not isinstance(existing_entry, dict):
             continue
-        if _entry_has_menhir_hook(existing_entry):
+        if not _entry_has_menhir_hook(existing_entry):
+            continue
+        if not isinstance(new_commands, list):
+            # Malformed installer input: fall back to the old whole-entry replace.
             event_hooks[i] = entry
             return
+        # Same granularity rule as uninstall (#113): a reinstall refreshes only
+        # menhir's commands; third-party commands co-registered in the same entry
+        # survive it.
+        _strip_menhir_hook_commands(existing_entry)
+        refreshed = existing_entry.get("hooks")
+        if not isinstance(refreshed, list):
+            refreshed = []
+            existing_entry["hooks"] = refreshed
+        refreshed.extend(new_commands)
+        return
     event_hooks.append(entry)
 
 

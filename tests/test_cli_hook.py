@@ -1039,3 +1039,44 @@ def test_remove_managed_hook_entries_keeps_coregistered_third_party() -> None:
 
     # The event stays alive because a third-party command remains in the entry.
     assert [h["command"] for h in hooks["PostCompact"][0]["hooks"]] == ["some-other-tool"]
+
+
+@pytest.mark.unit
+def test_reinstall_over_coregistered_entry_keeps_third_party_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from menhir.cli import hook as hook_module
+    from menhir.cli.hook import hook_app
+    from typer.testing import CliRunner
+
+    settings_file = tmp_path / "settings.local.json"
+    existing = {
+        "hooks": {
+            "UserPromptSubmit": [
+                {
+                    "matcher": ".*",
+                    "hooks": [
+                        {"type": "command", "command": "python -m menhir.cli hook run --frequency 5"},
+                        {"type": "command", "command": "third-party-linter --fix"},
+                    ],
+                }
+            ]
+        }
+    }
+    _write_settings(settings_file, existing)
+    monkeypatch.setattr(hook_module, "_resolve_settings_path", lambda loc: settings_file)
+
+    result = CliRunner().invoke(hook_app, ["install", "--location", "user", "--frequency", "10"])
+    assert result.exit_code == 0
+
+    config = json.loads(settings_file.read_text())
+    entries = config["hooks"]["UserPromptSubmit"]
+    assert len(entries) == 1
+    assert entries[0]["matcher"] == ".*"
+    commands = [h["command"] for h in entries[0]["hooks"]]
+    # The old menhir command was refreshed and the co-registered third-party
+    # command survived the reinstall.
+    assert "third-party-linter --fix" in commands
+    menhir_commands = [c for c in commands if "menhir.cli" in c]
+    assert len(menhir_commands) == 1
+    assert "--frequency 10" in menhir_commands[0]
