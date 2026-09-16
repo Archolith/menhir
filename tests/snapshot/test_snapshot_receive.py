@@ -450,3 +450,116 @@ def test_a_refusal_message_never_echoes_the_payload(receiver: StagingReceiver) -
 
     assert "SECRET" not in str(excinfo.value)
     assert base64.b64encode(secret).decode() not in str(excinfo.value)
+
+
+# --- concurrency: two processes on one staging root ----------------------------------------------
+#
+# Everything above drives ONE receiver. That is the single-event-loop deployment, where `begin`
+# runs start to finish without interleaving and the caps hold trivially. These force the case the
+# P2A soak never produced: two receivers over the same root, which is what a second uvicorn worker,
+# a second replica, or a future threadpool dispatch actually is.
+#
+# `begin` is a check-then-act -- scan the directory, count RECEIVING records against the caps, then
+# write a new one -- with nothing reserved in between. The interleaving is forced deterministically
+# by pausing the first receiver at that seam rather than by threads and sleeps, so these tests
+# either describe real behaviour or fail; they never flake.
+
+
+def _pause_before_write(receiver: StagingReceiver, during):
+    """Run `during()` in the window between the quota check and the record write.
+
+    That window is the whole defect if there is one: both callers have passed their checks and
+    neither has written yet.
+    """
+    original = receiver._write_record
+    fired = False
+
+    def patched(record):
+        nonlocal fired
+        if not fired:
+            fired = True
+            during()
+        return original(record)
+
+    receiver._write_record = patched  # type: ignore[method-assign]
+    return lambda: fired
+
+
+def test_two_processes_cannot_exceed_the_per_principal_cap(tmp_path: Path, clock: FakeClock) -> None:
+    """Two concurrent begins at the cap boundary must not both be admitted."""
+    root = tmp_path / "staging"
+    quotas = StagingQuotas(max_receiving_per_principal=2)
+    a = StagingReceiver(root, limits=_LIMITS, quotas=quotas, clock=clock)
+    b = StagingReceiver(root, limits=_LIMITS, quotas=quotas, clock=clock)
+
+    _begin(a)  # one slot used; one remains
+
+    # Receiver B slips a full begin into A's check-then-act window. Both saw one active upload and
+    # both believed a slot was free.
+    fired = _pause_before_write(a, lambda: _begin(b))
+
+    try:
+        _begin(a)
+    except ReceiveError as exc:
+        assert exc.code == ERR_TOO_MANY_PER_PRINCIPAL
+    assert fired(), "the interleaving never happened; this test proved nothing"
+
+    active = [r for r in a._all_records() if r.state is UploadState.RECEIVING]
+    assert len(active) <= quotas.max_receiving_per_principal, (
+        f"{len(active)} concurrent uploads admitted for one principal, cap is "
+        f"{quotas.max_receiving_per_principal}"
+    )
+
+
+def test_two_processes_cannot_exceed_the_per_project_cap(tmp_path: Path, clock: FakeClock) -> None:
+    """The project cap spans principals, so the racing callers here are different people."""
+    root = tmp_path / "staging"
+    quotas = StagingQuotas(max_receiving_per_principal=8, max_receiving_per_project=2)
+    a = StagingReceiver(root, limits=_LIMITS, quotas=quotas, clock=clock)
+    b = StagingReceiver(root, limits=_LIMITS, quotas=quotas, clock=clock)
+
+    _begin(a, principal="alice", project="shared")
+
+    fired = _pause_before_write(a, lambda: _begin(b, principal="bob", project="shared"))
+    try:
+        _begin(a, principal="carol", project="shared")
+    except ReceiveError as exc:
+        assert exc.code == ERR_TOO_MANY_PER_PROJECT
+    assert fired(), "the interleaving never happened; this test proved nothing"
+
+    active = [
+        r for r in a._all_records()
+        if r.state is UploadState.RECEIVING and r.project_key == "shared"
+    ]
+    assert len(active) <= quotas.max_receiving_per_project, (
+        f"{len(active)} concurrent uploads admitted for one project, cap is "
+        f"{quotas.max_receiving_per_project}"
+    )
+
+
+def test_two_processes_cannot_overcommit_the_disk_budget(tmp_path: Path, clock: FakeClock) -> None:
+    """The budget must bound what is admitted, not merely what was already present.
+
+    This is the case the existing budget test cannot reach: it refuses a begin against an
+    already-full budget, whereas the dangerous one is two begins that each fit alone and together
+    do not.
+    """
+    root = tmp_path / "staging"
+    # Room for one 512-byte upload, not two.
+    quotas = StagingQuotas(disk_budget_bytes=900)
+    a = StagingReceiver(root, limits=_LIMITS, quotas=quotas, clock=clock)
+    b = StagingReceiver(root, limits=_LIMITS, quotas=quotas, clock=clock)
+
+    fired = _pause_before_write(a, lambda: _begin(b, principal="bob", size=512))
+    try:
+        _begin(a, principal="alice", size=512)
+    except ReceiveError as exc:
+        assert exc.code == ERR_DISK_BUDGET
+    assert fired(), "the interleaving never happened; this test proved nothing"
+
+    committed = sum(
+        r.declared_bytes for r in a._all_records() if r.state is UploadState.RECEIVING
+    )
+    assert committed <= quotas.disk_budget_bytes, (
+        f"{committed} bytes admitted against a {quotas.disk_budget_bytes} byte budget"
+    )

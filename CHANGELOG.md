@@ -1,3 +1,36 @@
+## 2026-09-16 - every staging quota was advisory under concurrency
+
+P2B opens with the counterexamples P2A's closure deferred, and the first one found a real defect.
+`begin` scanned the staging directory, counted RECEIVING records against the caps, then wrote a new
+record -- a check-then-act with nothing reserved in between. Two processes on one staging root both
+read "a slot is free" and both take it.
+
+Three tests force that window deterministically, by pausing one receiver between its check and its
+write rather than with threads and sleeps, so they describe real behaviour and cannot flake. Before
+the fix all three failed: both caps exceeded, and **1024 bytes admitted against a 900-byte disk
+budget**.
+
+Not reachable in today's deployment -- tool calls are not dispatched to threads, so one event loop
+serialises `begin` -- which is exactly the problem. The safety rested on deployment shape rather
+than on the receiver, and a second uvicorn worker, a second replica, or a future threadpool
+dispatch would have removed it silently. P2B is the durable multi-tenant receiver, so this sat
+directly under everything it will build.
+
+- `begin` now **reserves first and verifies after**: the record is written, making the reservation
+  durable and visible to every other process, and only then are the quotas checked. A caller that
+  finds itself over quota removes its own record and refuses.
+- No lock file. A crashed lock holder would block every future `begin` until someone noticed,
+  whereas a reserver that dies between the write and the verification leaves a RECEIVING record
+  that the inactivity TTL already reclaims -- the same path as any abandoned upload, no new class
+  of leak.
+- `_verify_reservation` counts EVERY active reservation, not a prefix. A first attempt ordered
+  records by `(created_at, upload_id)` so exactly one of two racers would keep the slot; the
+  project-cap test caught it, because tied timestamps let an earlier-admitted record sort after
+  the new one and escape the count. Ordering cannot substitute for admission order without a
+  sequence number that does not exist here. Counting everything means both racers may back off and
+  lose a free slot -- retriable, cheap, and self-correcting, which is the right trade against a
+  disk budget that does not bound anything.
+
 ## 2026-09-16 - P2A closed, P2B unblocked
 
 Owner sign-off on the gate as written: chunk default and hard ceiling recorded, quota/TTL/restart

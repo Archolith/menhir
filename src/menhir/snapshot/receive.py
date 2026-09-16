@@ -288,20 +288,12 @@ class StagingReceiver:
                 ERR_SIZE, f"chunk size must be between 1 and {self.limits.max_chunk_bytes} bytes"
             )
 
-        active = [r for r in self._all_records() if r.state is UploadState.RECEIVING]
-        if sum(1 for r in active if r.principal == principal) >= self.quotas.max_receiving_per_principal:
-            raise ReceiveError(
-                ERR_TOO_MANY_PER_PRINCIPAL,
-                f"at most {self.quotas.max_receiving_per_principal} concurrent uploads per caller",
-            )
-        if sum(1 for r in active if r.project_key == project_key) >= self.quotas.max_receiving_per_project:
-            raise ReceiveError(
-                ERR_TOO_MANY_PER_PROJECT,
-                f"at most {self.quotas.max_receiving_per_project} concurrent uploads per project",
-            )
         # Refuse ahead of exhaustion, counting what this upload could add rather than only what
         # is already there: admitting it and discovering the wall mid-transfer wastes the whole
-        # upload and leaves the staging area full.
+        # upload and leaves the staging area full. This pre-check is an optimisation -- it keeps
+        # an obviously impossible upload from ever touching the disk -- and NOT the enforcement.
+        # Enforcement is `_verify_reservation` below, because a check performed before the write
+        # cannot bind a concurrent writer that has not written yet.
         if self.staged_bytes() + declared_bytes > self.quotas.disk_budget_bytes:
             raise ReceiveError(ERR_DISK_BUDGET, "staging disk budget exhausted; retry later")
 
@@ -316,9 +308,62 @@ class StagingReceiver:
             created_at=now,
             updated_at=now,
         )
+        # Reserve FIRST, then verify. Counting the directory and then writing is a check-then-act:
+        # two processes on one staging root -- a second uvicorn worker, a second replica, or a
+        # future threadpool dispatch -- both read "one slot free" and both take it, and every quota
+        # here becomes advisory. Writing first makes the reservation durable and visible to every
+        # other process before this one decides whether it may keep it.
         self._write_record(record)
         (self._dir(record.upload_id) / "blob").touch()
+        try:
+            self._verify_reservation(record)
+        except ReceiveError:
+            # Back out our own reservation only. A racer that crashes between the write and this
+            # verification leaves a RECEIVING record, which the inactivity TTL already reclaims --
+            # the same path as any abandoned upload, so this adds no new class of leak. That is
+            # the reason for reserve-then-verify rather than a lock file: a crashed lock holder
+            # would block every future begin until someone noticed.
+            self._remove(record.upload_id)
+            raise
         return record
+
+    def _verify_reservation(self, record: UploadRecord) -> None:
+        """Confirm the quotas still hold with this reservation counted, and back off if not.
+
+        Counts EVERY active reservation, this one included. An earlier attempt counted only the
+        records ordered before this one -- by `(created_at, upload_id)` -- so that two racers for
+        one slot would reach opposite conclusions and exactly one would keep it. That is wrong,
+        and the project-cap test caught it: `created_at` ties (a coarse clock, or a fake one), so a
+        record admitted earlier in real time can sort AFTER this one, fall outside the prefix, and
+        go uncounted. Ordering cannot stand in for admission order without a sequence number that
+        does not exist here.
+
+        Counting everything costs liveness and buys safety: under contention BOTH racers can see
+        the same over-quota total and both back off, losing a slot that one of them could have
+        had. For a quota that is the right trade -- the error is retriable and `begin` is cheap,
+        whereas over-admitting means a disk budget that does not bound anything. It is also
+        self-correcting: once both have withdrawn, the slot is free and either retry succeeds.
+        """
+        active = [r for r in self._all_records() if r.state is UploadState.RECEIVING]
+
+        if (
+            sum(1 for r in active if r.principal == record.principal)
+            > self.quotas.max_receiving_per_principal
+        ):
+            raise ReceiveError(
+                ERR_TOO_MANY_PER_PRINCIPAL,
+                f"at most {self.quotas.max_receiving_per_principal} concurrent uploads per caller",
+            )
+        if (
+            sum(1 for r in active if r.project_key == record.project_key)
+            > self.quotas.max_receiving_per_project
+        ):
+            raise ReceiveError(
+                ERR_TOO_MANY_PER_PROJECT,
+                f"at most {self.quotas.max_receiving_per_project} concurrent uploads per project",
+            )
+        if sum(r.declared_bytes for r in active) > self.quotas.disk_budget_bytes:
+            raise ReceiveError(ERR_DISK_BUDGET, "staging disk budget exhausted; retry later")
 
     def put_chunk(
         self, *, upload_id: str, principal: str, index: int, data_b64: str,
