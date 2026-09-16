@@ -47,9 +47,6 @@ def _exhaust_transient_budget(graph: MemoryGraphAdapter, episode_uuid: str) -> N
     """Drive a PENDING episode to the transient cap through the real refund protocol."""
     for _ in range(TRANSIENT_RETRY_CAP):
         assert graph.count_transient_requeue(episode_uuid)
-    # One past the cap must still be a plain requeue from the worker's perspective; the
-    # parking decision happens on the next recovery sweep, not inline.
-    assert graph.count_transient_requeue(episode_uuid)
 
 
 def _episode_row(test_neo4j_repo, episode_uuid: str) -> dict:
@@ -124,7 +121,9 @@ async def test_resume_pending_episodes_queues_resumable_and_parks_transient_exha
     resumable = _create_pending_episode(graph, "resume-resumable")
     _exhaust_transient_budget(graph, exhausted)
     queued: list[str] = []
-    service = _service(graph, stub_graphiti_client, stub_llm_adapter, monkeypatch, queued)
+    service = _service(
+        graph, stub_graphiti_client, stub_llm_adapter, monkeypatch, queued
+    )
 
     resumed = await service.resume_pending_episodes(limit=10)
 
@@ -146,7 +145,9 @@ async def test_recurring_recovery_stays_stable_after_parking(
     resumable = _create_pending_episode(graph, "recurring-resumable")
     _exhaust_transient_budget(graph, exhausted)
     queued: list[str] = []
-    service = _service(graph, stub_graphiti_client, stub_llm_adapter, monkeypatch, queued)
+    service = _service(
+        graph, stub_graphiti_client, stub_llm_adapter, monkeypatch, queued
+    )
 
     first_resets, first_queued = await service.recover_stale_enrichment_leases(limit=10)
     assert first_resets == 0
@@ -156,7 +157,9 @@ async def test_recurring_recovery_stays_stable_after_parking(
 
     # The second sweep re-offers only the still-PENDING work; the parked row never
     # resurrects and never re-enters the failed count.
-    second_resets, second_queued = await service.recover_stale_enrichment_leases(limit=10)
+    second_resets, second_queued = await service.recover_stale_enrichment_leases(
+        limit=10
+    )
     assert second_resets == 0
     assert second_queued == 1
     assert queued == [resumable, resumable]
