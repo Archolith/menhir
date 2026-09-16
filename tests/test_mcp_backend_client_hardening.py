@@ -403,6 +403,25 @@ class TestBackendClientAuthHeader:
         assert headers["x-menhir-client-id"] == "test-client-id"
         assert headers["x-menhir-client-name"] == "test-client"
 
+    @pytest.mark.unit
+    def test_user_agent_is_always_sent_even_with_no_settings(self):
+        """A named User-Agent goes out unconditionally.
+
+        A Cloudflare zone with Browser Integrity Check on refuses a request carrying NO
+        User-Agent at the edge with a 403 (error 1010), before the origin sees it -- which from
+        the caller is indistinguishable from the server being down. The unconfigured client is
+        exactly the one that would send nothing, so that is the case pinned here.
+        """
+        from menhir.core.backend_impl import BackendClient
+
+        client = BackendClient("http://test", settings=MemorySettings())
+
+        headers = client._default_headers()
+        assert headers["User-Agent"].startswith("menhir/")
+        assert headers["User-Agent"].strip() == headers["User-Agent"]
+        # Not urllib's signature and not empty: the two forms measured as refused.
+        assert "urllib" not in headers["User-Agent"].lower()
+
 
 # ===================================================================
 # TestFailureMessageSafety

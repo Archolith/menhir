@@ -1,3 +1,25 @@
+## 2026-09-16 - the backend client names itself
+
+`BackendClient` sent no `User-Agent`, leaving httpx's default. Measured against a Cloudflare zone
+with Browser Integrity Check on: httpx's default passes, but `Python-urllib/3.12` and **a request
+with no agent at all** are both refused at the edge with a 403 (error 1010) before the origin sees
+them -- a failure indistinguishable from the server being down.
+
+So this is insurance, not a bug fix; nothing is broken today. It is worth the two lines because the
+blocked-signature list is Cloudflare's to change without notice, and the empty-agent case is
+already refused -- which is the one a future refactor could reintroduce for free.
+
+- `client_user_agent()` returns `menhir/<version>`, and `_default_headers` seeds the dict with it
+  unconditionally. Every other header there is conditional on configuration; an agent that appears
+  only when some setting happens to be set is exactly the case that gets refused.
+- `deploy/remote_sim_healthcheck.py` uses urllib and now names itself too. Latent while that stack
+  is loopback-only, which is why it would be missed the first time it went behind a hostname: the
+  symptom is a container reporting unhealthy forever against a healthy server.
+- `test_backend_client_reuses_owned_async_client_across_requests` asserted headers were exactly
+  empty for an unconfigured client. It now pins paths and payloads (its actual subject) and
+  separately asserts the agent is present on every request, so a regression to "no agent" still
+  fails there.
+
 ## 2026-09-16 - the snapshot chunk ceiling is ours, not the ingress's
 
 P2A's transport measurement ran, against the local stack and through a real Cloudflare ingress

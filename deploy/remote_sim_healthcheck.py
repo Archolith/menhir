@@ -29,6 +29,12 @@ def main() -> int:
             "Content-Type": "application/json",
             "Accept": "application/json, text/event-stream",
             "Authorization": f"Bearer {OPERATOR_KEY}",
+            # urllib's default `Python-urllib/x.y` is refused at the edge by a Cloudflare zone
+            # with Browser Integrity Check on (403, error 1010), before the origin is reached.
+            # Irrelevant while this stack is loopback-only -- which is exactly why it would be
+            # missed the first time someone put it behind a hostname, and the symptom would be a
+            # container that reports unhealthy forever against a perfectly healthy server.
+            "User-Agent": "menhir-remote-sim-healthcheck",
         },
         method="POST",
     )

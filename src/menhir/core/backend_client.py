@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from functools import lru_cache
 from typing import Any
 
 import httpx
@@ -14,6 +15,31 @@ from menhir.domain.recall import InvalidQueryPresetError
 
 from .backend_client_ops import BackendClientOpsMixin
 from .backend_shared import _push_client_warning
+
+
+@lru_cache(maxsize=1)
+def client_user_agent() -> str:
+    """The agent this client identifies itself as.
+
+    Not cosmetic, and not for analytics. A Cloudflare zone with Browser Integrity Check enabled
+    refuses some HTTP client signatures at the edge with a 403 (error 1010) -- the request never
+    reaches the origin, so the failure is indistinguishable from the server being down. Measured
+    against a BIC-enabled zone: `Python-urllib/3.12` is refused and **so is a request with no
+    User-Agent header at all**; `python-httpx/...` (httpx's default, which this client sent
+    before) currently passes.
+
+    So this is insurance, not a bug fix. The default works today, but the blocked-signature list
+    belongs to Cloudflare and can change without notice, and the empty case is already blocked --
+    which is the one a future refactor could reintroduce for free. Naming ourselves costs nothing
+    and removes the whole class of silent edge rejection.
+
+    Imported inside the function, matching `api/mcp_remote.py`: `menhir/__init__` resolves the
+    version through package metadata, and a module-level import here would pull that into every
+    importer of the client.
+    """
+    from menhir import __version__
+
+    return f"menhir/{__version__}"
 
 
 class BackendClient(BackendClientOpsMixin, MemoryBackend):
@@ -45,7 +71,9 @@ class BackendClient(BackendClientOpsMixin, MemoryBackend):
         return self._client
 
     def _default_headers(self) -> dict[str, str]:
-        headers: dict[str, str] = {}
+        # Unconditional: every other header here is conditional on configuration, and an agent
+        # that appears only when some setting happens to be set is the case that gets refused.
+        headers: dict[str, str] = {"User-Agent": client_user_agent()}
         key = resolve_backend_auth_key(self._settings)
         if key:
             headers["Authorization"] = f"Bearer {key}"

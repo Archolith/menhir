@@ -405,10 +405,20 @@ class TestBackendRoundTrip:
             assert first == {"ok": True}
             assert second == {"ok": True}
             assert len(created_clients) == 1
-            assert created_clients[0].post_calls == [
-                ("/api/internal/backend/op-one", {"a": 1}, {}),
-                ("/api/internal/backend/op-two", {"b": 2}, {}),
+            # Paths and payloads are what this test is about, alongside the single reused client.
+            assert [(path, body) for path, body, _headers in created_clients[0].post_calls] == [
+                ("/api/internal/backend/op-one", {"a": 1}),
+                ("/api/internal/backend/op-two", {"b": 2}),
             ]
+            # Headers used to be asserted as exactly empty for a client with nothing configured.
+            # A named User-Agent is now sent unconditionally -- deliberately, because a request
+            # with no agent is refused at a Cloudflare edge with BIC on before the origin sees
+            # it. Pin that it is present on EVERY request rather than dropping the header
+            # assertion, so a regression to "no agent" still fails here.
+            for _path, _body, headers in created_clients[0].post_calls:
+                assert headers is not None
+                assert headers["User-Agent"].startswith("menhir/")
+                assert set(headers) == {"User-Agent"}
 
             await client.aclose()
             assert created_clients[0].closed is True
