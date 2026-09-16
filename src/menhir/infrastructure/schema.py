@@ -44,6 +44,18 @@ def get_artifact_reconciliation_schema_queries() -> list[str]:
         "FOR (n:ArtifactReconciliationCursor) REQUIRE n.repository IS UNIQUE",
     ]
 
+#: The three phase-one indexes GRAPHITI creates, not Menhir. Nothing in
+#: `get_phase1_bootstrap_queries` emits them -- they come from
+#: `graphiti_client.build_indices_and_constraints`, which `prepare_memory_runtime` skips when
+#: there is no usable LLM/embedder.
+#:
+#: Named separately because requiring them unconditionally made the documented "start against
+#: Neo4j alone" path impossible: the call that creates them was skipped, the readiness check
+#: demanded them anyway, and startup was refused. A fresh install with no AI provider could not
+#: start. They remain required whenever Graphiti IS available -- see
+#: `phase_one_schema_ready(require_graphiti=...)`.
+GRAPHITI_OWNED_INDEXES = frozenset({"episode_uuid", "episode_group_id", "episode_content"})
+
 PHASE_ONE_REQUIRED_INDEXES = (
     "entity_type_idx",
     "entity_scope_idx",

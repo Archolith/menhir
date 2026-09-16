@@ -30,6 +30,7 @@ from menhir.infrastructure.correlation_queries import CorrelationRepository
 from menhir.infrastructure.neo4j import Neo4jRepository
 from menhir.infrastructure.schema import (
     PHASE_ONE_REQUIRED_CONSTRAINTS,
+    GRAPHITI_OWNED_INDEXES,
     PHASE_ONE_REQUIRED_INDEXES,
     SCALAR_STATE_REQUIRED_INDEXES,
     get_phase1_bootstrap_queries,
@@ -106,19 +107,39 @@ class MemoryGraphAdapter:
     # Schema bootstrap (stays here — uses SHOW INDEXES admin query)
     # -------------------------------------------------------------------------
 
-    def phase_one_schema_ready(self) -> bool:
-        """Return True when the core phase-one indexes already exist and are online."""
+    def phase_one_schema_ready(self, *, require_graphiti: bool = True) -> bool:
+        """Return True when the core phase-one indexes already exist and are online.
 
+        ``require_graphiti=False`` drops the three indexes Graphiti creates
+        (:data:`GRAPHITI_OWNED_INDEXES`) from the requirement. Callers pass it when they have
+        already established that the Graphiti client is unavailable.
+
+        Why the parameter exists: `prepare_memory_runtime` deliberately skips Graphiti's
+        `build_indices_and_constraints` when there is no usable LLM/embedder, so the server can
+        "start against Neo4j alone (graph adapter works; Graphiti features degrade) instead of
+        crashing" -- its words. But this check then required the very indexes that skipped call
+        creates, and nothing else creates them, so the degraded path raised at startup every time
+        and was unreachable. A first install with no AI provider could not start at all.
+
+        The default stays strict. Nothing is relaxed for an instance that HAS Graphiti: a missing
+        Graphiti index there still refuses the writer, because there it means the build failed
+        rather than never ran.
+        """
+        required = [
+            name
+            for name in PHASE_ONE_REQUIRED_INDEXES
+            if require_graphiti or name not in GRAPHITI_OWNED_INDEXES
+        ]
         rows = self.neo4j.execute(
             """
             SHOW INDEXES YIELD name, state
             WHERE name IN $names AND state = 'ONLINE'
             RETURN collect(name) AS names
             """,
-            params={"names": list(PHASE_ONE_REQUIRED_INDEXES)},
+            params={"names": required},
         )
         online = {str(name) for name in (rows[0].get("names", []) if rows else [])}
-        if not all(name in online for name in PHASE_ONE_REQUIRED_INDEXES):
+        if not all(name in online for name in required):
             return False
 
         required_constraints = {

@@ -276,9 +276,16 @@ async def prepare_memory_runtime(
     # against Neo4j alone (graph adapter works; Graphiti features degrade)
     # instead of crashing. When a real client is present this is unchanged.
     graphiti_client_available = getattr(artifacts.graphiti_client, "available", True)
-    if graphiti_ready and graphiti_client_available:
+    # One decision, used twice: whether Graphiti's index build runs AND whether its indexes are
+    # then required. Deriving the requirement from anything else is how the degraded path came to
+    # demand indexes whose only creator had just been skipped -- so the server refused to start
+    # in exactly the configuration this branch exists to support.
+    graphiti_in_play = bool(graphiti_ready and graphiti_client_available)
+    if graphiti_in_play:
         await artifacts.graphiti_client.build_indices_and_constraints(force=force_graphiti)
-    schema_ready = await asyncio.to_thread(artifacts.graph_adapter.phase_one_schema_ready)
+    schema_ready = await asyncio.to_thread(
+        artifacts.graph_adapter.phase_one_schema_ready, require_graphiti=graphiti_in_play
+    )
 
     if schema_ready:
         schema = {
@@ -294,7 +301,9 @@ async def prepare_memory_runtime(
         # not proof that the required schema exists: Neo4j's IF NOT EXISTS can no-op when a
         # same-named ordinary index or wrong-shaped constraint occupies the name. Re-read the
         # exact semantic contract after the repair attempt and fail before any writer starts.
-        schema_ready = await asyncio.to_thread(artifacts.graph_adapter.phase_one_schema_ready)
+        schema_ready = await asyncio.to_thread(
+            artifacts.graph_adapter.phase_one_schema_ready, require_graphiti=graphiti_in_play
+        )
         if not schema_ready:
             failure_detail = "; ".join(str(item) for item in bootstrap_result.failures)
             suffix = f" Bootstrap failures: {failure_detail}" if failure_detail else ""

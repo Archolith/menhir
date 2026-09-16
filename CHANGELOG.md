@@ -1,3 +1,33 @@
+## 2026-09-16 - a first install with no AI provider could not start, and a harness that finds that
+
+`prepare_memory_runtime` skips Graphiti's index build when there is no usable LLM or embedder, so
+the server can "start against Neo4j alone (graph adapter works; Graphiti features degrade)
+instead of crashing" -- its own comment. The readiness check then required three indexes that
+skipped call is the only creator of. The degraded branch raised at startup every time and could
+never be taken: a fresh install with no AI key could not start at all, which is exactly the
+install-and-run scenario the snapshot plan's release gate requires.
+
+- `phase_one_schema_ready(require_graphiti=...)` drops the three Graphiti-owned indexes from the
+  requirement only when the caller has already established that Graphiti is unavailable. The
+  default stays strict, and an instance that HAS Graphiti still refuses on a missing index --
+  there it means the build failed rather than never ran. Indexes Menhir creates itself are
+  required unconditionally in both modes.
+- `bootstrap` derives the build decision once and passes the same value to both readiness calls.
+  Deriving them separately is how they came to disagree.
+
+Found by `tests/remote_sim`: a Docker stack running Menhir with its own throwaway graph and NO
+host mount, driven over HTTP, brought up and torn down by the test itself
+(`pytest --run-remote-sim tests/remote_sim`, skipped by default, needs Docker). It is the first
+test of any kind against a Menhir that cannot see the files it is being asked about -- which is
+the premise of the whole snapshot feature and had never been exercised. The bug needed an empty
+graph AND no AI provider at once; every existing test had one of those covered.
+
+The smoke proves the server cannot see the host's files, that a bundle built by the real bundler
+survives the round trip byte-intact, and that the receiver's refusals (conflicting replay, unknown
+upload) hold over the wire. **It is not the P2A transport measurement:** it carries no CDN, TLS
+termination, proxy body limit or WAN latency, and the chunk ceiling P2A must measure is a property
+of that path.
+
 ## 2026-09-16 - the stale-identity check on the payload path actually checks something (#98)
 
 `write_project_structure` re-read the project's identity binding and overwrote the caller's

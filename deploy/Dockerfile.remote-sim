@@ -1,0 +1,35 @@
+# Local "remote Menhir" for tests. NOT a release artifact.
+#
+# `deploy/Dockerfile` is the release image and is deliberately strict: digest-pinned base, a
+# pre-built offline wheelhouse, no live resolution. That is right for something that reaches a
+# registry and wrong for a smoke test, which needs to build from the working tree in seconds on a
+# developer's machine.
+#
+# Kept as a separate file rather than a flag on the release image so nothing here can drift into
+# the release path: this one installs from source over the network and pins nothing.
+#
+# What it exists to prove: a Menhir process that CANNOT see the host's filesystem. That is the
+# whole point of the snapshot work, and until now it was only ever tested against a server running
+# on the same machine as the code it was indexing.
+
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    MENHIR_ALLOW_SYSTEM_PYTHON=1
+
+WORKDIR /app
+
+# Dependency layer first so edits to src/ do not re-resolve the world on every rebuild.
+COPY pyproject.toml README.md /app/
+RUN python -m pip install --no-cache-dir "."
+
+# Then the source. The image owns its own copy; no host path is mounted anywhere in the compose
+# file, which is what makes "the server cannot see your files" true rather than asserted.
+COPY src /app/src
+COPY deploy/remote_sim_healthcheck.py /app/remote_sim_healthcheck.py
+RUN python -m pip install --no-cache-dir --no-deps .
+
+EXPOSE 8099
+
+CMD ["menhir", "serve"]

@@ -1,0 +1,93 @@
+# A Menhir that cannot see your files, on your own machine.
+#
+# Every test we have runs against a server that shares a filesystem with the code it indexes --
+# which is exactly the assumption the snapshot work exists to remove. This stack stands up the
+# opposite: a Menhir in a container with NO host mount, reachable only over HTTP, holding its own
+# throwaway graph.
+#
+#   Up:   docker compose -f docker-compose.remote-sim.yml up -d --build
+#   Down: docker compose -f docker-compose.remote-sim.yml down -v
+#
+# Normally you do not run those by hand -- `pytest --run-remote-sim tests/remote_sim` brings the
+# stack up and tears it down around the smoke test.
+#
+# Ports are deliberately a third set, clear of production (7474/7687/8090) AND of the online test
+# instance (7475/7688), so all three can coexist and none can be mistaken for another.
+#
+# **This is not the P2A transport measurement.** It exercises the real handler, middleware, auth
+# and parser over a real socket, which catches handler-side problems. It does NOT carry the
+# production ingress: no Cloudflare, no TLS termination, no proxy body limits, no WAN latency.
+# The chunk-size ceiling P2A must measure is a property of that path, so a number measured here
+# is an upper bound on what the code can do and says nothing about what the ingress permits.
+
+name: menhir-remote-sim
+
+services:
+  neo4j:
+    image: neo4j:5-community
+    container_name: menhir-remote-sim-neo4j
+    environment:
+      NEO4J_AUTH: neo4j/simpassword
+      NEO4J_server_memory_heap_max__size: 512m
+    ports:
+      - "7476:7474"   # Browser UI
+      - "7689:7687"   # Bolt
+    tmpfs:
+      # Ephemeral by construction: nothing survives the container, so a run can never accumulate
+      # state or be confused with a real graph.
+      - /data
+      - /logs
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p simpassword 'RETURN 1' >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+      start_period: 20s
+
+  menhir:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.remote-sim
+    container_name: menhir-remote-sim-app
+    # A first start against a BRAND-NEW graph can lose a race: bootstrap creates the phase-one
+    # indexes, then immediately requires them to be ONLINE, and Neo4j populates them
+    # asynchronously. The next attempt finds them online and starts. Production never sees this
+    # because its graph is already initialised -- which is why nothing caught it until a test
+    # stood up an empty one. Tracked as a finding; this restart is the harness working around it,
+    # not a fix.
+    restart: on-failure
+    depends_on:
+      neo4j:
+        condition: service_healthy
+    environment:
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: simpassword
+      NEO4J_DATABASE: neo4j
+      MENHIR_API_HOST: 0.0.0.0
+      MENHIR_API_PORT: "8099"
+      MENHIR_ALLOW_SYSTEM_PYTHON: "1"
+      # Operator tier by API key rather than OAuth: this is a transport and reachability
+      # harness, and standing up an OAuth authorization server would test that instead.
+      MENHIR_API_KEY: sim-agent-key
+      MENHIR_OPERATOR_KEY: sim-operator-key
+      # The surface under test. Off everywhere else by default; on here because this stack
+      # exists to exercise it.
+      MENHIR_SNAPSHOT_RECEIVE_MODE: staging
+      MENHIR_STATE_DIR: /app/state
+      # No LLM in this stack. Enrichment is not what is being tested and an unreachable
+      # endpoint would otherwise sit in retry/backoff during the smoke.
+      MENHIR_SCHEDULER_ENABLED: "false"
+    ports:
+      - "8099:8099"
+    healthcheck:
+      # NOT /livez. The health routes are part of the production route surface and only exist
+      # when MENHIR_STARTUP_SCOPE=production, which this stack deliberately is not -- so probing
+      # them reports a healthy server as unhealthy forever. Probing the MCP endpoint is also the
+      # better signal: it proves the transport, the auth and the tool registry, which is what a
+      # test against this stack is about to use.
+      test: ["CMD", "python", "/app/remote_sim_healthcheck.py"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+      start_period: 15s
