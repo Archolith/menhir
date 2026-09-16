@@ -14,8 +14,11 @@ P2A's transport measurement ran, against the local stack and through a real Clou
   is. Not yet applied -- it changes a frozen-protocol constant.
 - A request carrying urllib's default `Python-urllib/3.12` agent is refused at the Cloudflare edge
   with a 403 (error 1010) and **never reaches the origin**, which from the client looks exactly
-  like the server being down. Any `menhir sync` shipped against a Cloudflare-fronted deployment
-  needs a named `User-Agent`.
+  like the server being down. Sending no agent at all is refused the same way. `httpx`, which is
+  what `BackendClient` actually uses, is NOT refused -- so production and the shipping client are
+  unaffected. The exposure is ad-hoc urllib tooling (including
+  `deploy/remote_sim_healthcheck.py`, latent while that stack stays local) and any client that
+  sends no agent.
 
 `scripts/probe/p2a_transport_probe.py` takes a base URL as its only path-dependent input, so one
 script measures any two paths. It classifies each body by who answered -- a structured MCP reply,

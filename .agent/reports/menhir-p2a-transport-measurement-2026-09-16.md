@@ -77,22 +77,45 @@ path that matters.
 **Not yet applied.** `SnapshotLimits.chunk_bytes` is unchanged pending sign-off, because it is a
 frozen-protocol constant and the plan gates the provisional marker on this record existing.
 
-## Finding: the default Python client is refused at the edge before reaching the origin
+## Finding: some agents are refused at the edge before reaching the origin — but not Menhir's
 
-Reproduced deliberately as a control, twice:
+Reproduced deliberately as a control, twice, during the tunnel run:
 
 ```
 control: HTTP 403 - cloudflare error 1010 ("browser signature banned")
 ```
 
 A request carrying urllib's default `Python-urllib/3.12` agent is rejected at the Cloudflare edge
-with a 403. **Zero bytes reach the origin**, and from the client side this is indistinguishable
-from the server being down. Sending an honest product agent clears it; the probe now sends one.
+with a 403. **Zero bytes reach the origin**, and from the client side that is indistinguishable
+from the server being down.
 
-This is a product finding, not a probe detail. Any `menhir sync` shipped against a Cloudflare-
-fronted deployment with default zone settings will fail this way for every user until the client
-sends a named `User-Agent`. That is a one-line fix in the client and should not be left to a zone
-exception, which every self-hosting operator would then have to discover independently.
+**An earlier draft of this report claimed every `menhir sync` against a Cloudflare-fronted
+deployment would fail this way. That was wrong,** and it was wrong because the probe's client was
+taken as representative of Menhir's. It is not: `BackendClient` uses `httpx`, not `urllib`. The
+four-way check against a proxied hostname on a Browser-Integrity-Check zone:
+
+| agent sent | result |
+| --- | --- |
+| `Python-urllib/3.12` (what the probe sent) | **403, blocked at edge** |
+| `python-httpx/0.27.0` (what `BackendClient` sends) | 200, reaches origin |
+| a named product agent | 200, reaches origin |
+| no `User-Agent` header at all | **403, blocked at edge** |
+
+So the real exposure is narrower and worth stating exactly:
+
+- **Production is not affected.** `memory.ctharvey.me` is on `ctharvey.me`, which has Browser
+  Integrity Check ON and no custom firewall rule exempting it — but its clients send httpx's
+  agent, which passes.
+- **What is affected** is anything speaking to a Cloudflare-fronted Menhir with urllib, or with no
+  agent header: ad-hoc operator scripts, `curl -H` invocations that drop the default, and
+  `deploy/remote_sim_healthcheck.py`, which uses urllib and would fail if that stack were ever put
+  behind a zone (it is local-only today, so this is latent, not live).
+
+Setting an explicit agent on the client is still worth doing, for a reason that survives the
+correction: **the empty-agent case is blocked too**, BIC's signature list is Cloudflare's to change
+without notice, and the failure mode is a silent 403 that looks like an outage. It is cheap
+insurance against a class of failure nobody would diagnose quickly. It is not, as previously
+written, a live bug blocking installs.
 
 ## What this does NOT establish
 
