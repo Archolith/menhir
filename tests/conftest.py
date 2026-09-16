@@ -1496,7 +1496,7 @@ class StubMemoryGraphAdapter:
 
     # --- Missing stubs (filled 2026-03-21) ---
 
-    def phase_one_schema_ready(self) -> bool:
+    def phase_one_schema_ready(self, **_kwargs) -> bool:
         return True
 
     def fetch_memory_overview(self, namespace=None) -> dict[str, object]:

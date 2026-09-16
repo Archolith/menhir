@@ -332,12 +332,13 @@ async def prepare_memory_runtime(
         edge_count_sync = 0
         edge_count_sync_error = str(exc)
     return {
-        # CF-141: reports BOTH conjuncts of the gate above. It previously read
+        # CF-141: reports the SAME decision as the gate. It previously read
         # `"ok" if graphiti_ready else "skipped"`, so an Unavailable client -- indices not
-        # built -- still reported "ok". Latent only because the sole production caller
-        # (`core/runtime.py`) discards this dict; it is consumed by tests, which is exactly
-        # where a wrong status is most misleading.
-        "graphiti": "ok" if (graphiti_ready and graphiti_client_available) else "skipped",
+        # built -- still reported "ok", and the repair was to repeat both conjuncts here.
+        # Repeating them was still two expressions that had to be kept in agreement by hand;
+        # now the build gate, both readiness calls and this status all read one flag, so
+        # disagreement is unrepresentable rather than merely currently-absent.
+        "graphiti": "ok" if graphiti_in_play else "skipped",
         "schema": schema,
         "edge_count_sync": edge_count_sync,
         "edge_count_sync_error": edge_count_sync_error,

@@ -371,7 +371,7 @@ def _artifacts_with_edge_sync(side_effect=None, value=7):
     graph_adapter on the path under test."""
     readiness = iter([False, True])
     adapter = SimpleNamespace(
-        phase_one_schema_ready=lambda: next(readiness),  # bootstrap, then exact post-check
+        phase_one_schema_ready=lambda **_: next(readiness),  # bootstrap, then exact post-check
         bootstrap_phase_one=lambda: SimpleNamespace(
             success=True, queries_executed=1, failures=[]
         ),

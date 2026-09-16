@@ -41,18 +41,28 @@ def test_the_graphiti_status_reports_both_conjuncts_of_its_own_gate() -> None:
 
     Asserted structurally because reaching the return needs a full artifacts bundle, a live graph
     adapter and two `asyncio.to_thread` hops -- a test that elaborate would be pinning the mocks.
-    The claim is narrow and local: the status expression must test the same two names the gate does.
+
+    The claim has since become stronger than "both expressions test the same two names". The two
+    conjuncts are now derived ONCE into `graphiti_in_play`, and the build gate, both schema
+    readiness calls and this status all read that flag -- so they cannot disagree, rather than
+    merely happening to agree today. (They did diverge once more after CF-141: the readiness check
+    began requiring Graphiti's indexes on the very path that had just skipped creating them, and a
+    first install with no AI provider could not start.)
     """
     tree = ast.parse(BOOTSTRAP.read_text(encoding="utf-8"))
 
-    gates = [
+    derivations = [
         node for node in ast.walk(tree)
-        if isinstance(node, ast.If)
-        and isinstance(node.test, ast.BoolOp)
-        and {n.id for n in ast.walk(node.test) if isinstance(n, ast.Name)}
+        if isinstance(node, ast.Assign)
+        and any(getattr(t, "id", None) == "graphiti_in_play" for t in node.targets)
+        # `bool` is a Name node too, so the comparison allows the bool() wrapper and nothing
+        # else: the flag must be derived from those two conjuncts and no third input.
+        and {n.id for n in ast.walk(node.value) if isinstance(n, ast.Name)} - {"bool"}
         == {"graphiti_ready", "graphiti_client_available"}
     ]
-    assert len(gates) == 1, "expected exactly one two-conjunct graphiti gate"
+    assert len(derivations) == 1, (
+        "expected exactly one derivation of graphiti_in_play from both conjuncts"
+    )
 
     status_exprs = [
         node for node in ast.walk(tree)
@@ -65,9 +75,15 @@ def test_the_graphiti_status_reports_both_conjuncts_of_its_own_gate() -> None:
     assert len(status_exprs) == 1, "expected exactly one ok/skipped graphiti status expression"
 
     tested = {n.id for n in ast.walk(status_exprs[0].test) if isinstance(n, ast.Name)}
-    assert tested == {"graphiti_ready", "graphiti_client_available"}, (
-        f"status tests {tested}, but the gate that decides whether indices are built tests both"
+    assert tested == {"graphiti_in_play"}, (
+        f"status tests {tested}, but the gate that decides whether indices are built reads "
+        "graphiti_in_play -- they must be the same decision, not two copies of it"
     )
+
+    source = BOOTSTRAP.read_text(encoding="utf-8")
+    assert source.count("phase_one_schema_ready") == source.count(
+        "require_graphiti=graphiti_in_play"
+    ), "every readiness call must be pinned to the same decision as the build"
 
 
 # ---------------------------------------------------------------------------
