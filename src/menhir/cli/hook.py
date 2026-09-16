@@ -463,7 +463,10 @@ def uninstall(
         for entry in event_hooks:
             entry_removed, entry_kept = _strip_menhir_hook_commands(entry)
             removed += entry_removed
-            kept_third_party += entry_kept
+            # Only commands preserved OUT of a menhir entry count as co-registered;
+            # entries that never held a menhir command were never at risk (#113 P3).
+            if entry_removed:
+                kept_third_party += entry_kept
             # Drop the entry only when menhir commands were removed and nothing
             # else remains. Entries that never held a menhir command (including
             # malformed ones) pass through untouched.

@@ -1080,3 +1080,41 @@ def test_reinstall_over_coregistered_entry_keeps_third_party_command(
     menhir_commands = [c for c in commands if "menhir.cli" in c]
     assert len(menhir_commands) == 1
     assert "--frequency 10" in menhir_commands[0]
+
+
+@pytest.mark.unit
+def test_uninstall_kept_count_excludes_entries_that_were_never_at_risk(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from menhir.cli import hook as hook_module
+    from menhir.cli.hook import hook_app
+    from typer.testing import CliRunner
+
+    settings_file = tmp_path / "settings.local.json"
+    existing = {
+        "hooks": {
+            "UserPromptSubmit": [
+                {
+                    "hooks": [
+                        {"type": "command", "command": "python -m menhir.cli hook run --frequency 5"},
+                        {"type": "command", "command": "third-party-linter --fix"},
+                    ]
+                },
+                {"hooks": [{"type": "command", "command": "always-was-third-party"}]},
+            ]
+        }
+    }
+    _write_settings(settings_file, existing)
+    monkeypatch.setattr(hook_module, "_resolve_settings_path", lambda loc: settings_file)
+
+    result = CliRunner().invoke(hook_app, ["uninstall", "--location", "user"])
+    assert result.exit_code == 0
+    # The standalone third-party entry was never co-registered; it must not
+    # inflate the "kept" count.
+    assert "1 third-party hook(s)" in result.output
+
+    config = json.loads(settings_file.read_text())
+    entries = config["hooks"]["UserPromptSubmit"]
+    assert len(entries) == 2
+    assert [h["command"] for h in entries[0]["hooks"]] == ["third-party-linter --fix"]
+    assert entries[1]["hooks"][0]["command"] == "always-was-third-party"
