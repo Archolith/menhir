@@ -16,15 +16,20 @@ Three things are sampled, and two of them cannot be read from the client:
 
 * **Latency per chunk**, client-side. Reported as p50/p95/p99 and max. p95 is the number the gate
   wants: a median hides the stall that makes a 64-chunk upload feel broken.
-* **Peak container memory**, via ``docker stats``. A receiver that buffers a whole bundle rather
-  than streaming it looks identical from the client until the bundle is big enough to kill it.
+* **Peak container memory**, read from the cgroup counter. A receiver that buffers a whole bundle
+  rather than streaming it looks identical from the client until the bundle is big enough to kill
+  it.
 * **Staging bytes on disk**, via ``du`` inside the container. The question is not the peak but
   whether it RETURNS: bytes that survive a completed upload are the leak that fills a disk weeks
   later, and no client-side assertion can see them.
 
 Sampling runs on a thread rather than between requests, so a stall shows up in the samples instead
-of being stepped over. Both samplers shell out to docker and are best-effort: a failure there
-records a gap and never fails the soak, because the latency data is the expensive part.
+of being stepped over, and it is best-effort: a failed reading records a gap and never fails the
+soak, because the latency data is the expensive part.
+
+**Every peak is reported with the number of samples behind it**, because a peak from too few
+readings is not a small peak -- it is an unsampled window, and the two are indistinguishable in the
+output. See ``_sample_once`` for how the first version of this script got that wrong.
 """
 
 from __future__ import annotations
@@ -52,6 +57,9 @@ DEFAULT_USER_AGENT = "menhir-p2a-soak/0.1 (+snapshot transport measurement)"
 DEFAULT_CHUNK_BYTES = 1 * MIB
 DEFAULT_BUNDLE_BYTES = 16 * MIB
 DEFAULT_BUNDLES = 4
+
+#: Below this many samples, a reported peak says more about the sampling than the server.
+_MIN_TRUSTWORTHY_SAMPLES = 10
 
 
 @dataclass
@@ -90,10 +98,18 @@ class _ResourceSampler(threading.Thread):
 
     A thread, not a between-requests hook: the interesting moment is a stall, and a sampler that
     only runs between requests is precisely the one that cannot see one.
+
+    **The interval bounds what a peak means.** At 2s a short run took a single sample and reported
+    a staging peak of 1.2 KB for 8 MiB of uploads -- not an error, an unsampled window, and it
+    reads exactly like a real measurement. 0.5s plus the sample count in the output is the fix:
+    the count makes a thin sample visible instead of leaving it to be trusted. A peak is still a
+    floor on the true peak, never the true peak; a spike between two samples is invisible at any
+    interval, which is why the memory conclusion rests on the shape across a long run rather than
+    on one maximum.
     """
 
     def __init__(
-        self, container: str, staging_path: str, interval_s: float = 2.0
+        self, container: str, staging_path: str, interval_s: float = 0.5
     ) -> None:
         super().__init__(daemon=True)
         self.container = container
@@ -109,13 +125,9 @@ class _ResourceSampler(threading.Thread):
         while not self._stop_event.is_set():
             mem, staging, note = None, None, ""
             try:
-                mem = _container_mem_bytes(self.container)
+                mem, staging = _sample_once(self.container, self.staging_path)
             except Exception as exc:  # noqa: BLE001 -- diagnostic only; never fail the soak
-                note = f"mem: {type(exc).__name__}"
-            try:
-                staging = _staging_bytes(self.container, self.staging_path)
-            except Exception as exc:  # noqa: BLE001
-                note = (note + f" staging: {type(exc).__name__}").strip()
+                note = f"{type(exc).__name__}"
             self.samples.append(Sample(time.time(), mem, staging, note))
             self._stop_event.wait(self.interval_s)
 
@@ -130,45 +142,33 @@ def _run(args: list[str], timeout: float = 20.0) -> str:
     return out.stdout.strip()
 
 
-def _container_mem_bytes(container: str) -> int:
-    raw = _run(
-        ["docker", "stats", "--no-stream", "--format", "{{.MemUsage}}", container]
+def _sample_once(container: str, path: str) -> tuple[int | None, int | None]:
+    """Read memory and staging size in ONE exec, from the kernel counter.
+
+    The obvious implementation -- `docker stats --no-stream` for memory, a second `docker exec`
+    for disk -- is what the first version did, and it is wrong in a way that hides itself.
+    `docker stats --no-stream` takes 1-2 seconds on its own, so the sampler's period ends up set
+    by the cost of sampling rather than by `interval_s`: a 30-second soak asking for 0.5s samples
+    collected THREE. The reported peak was then a floor from three readings while looking exactly
+    like a real maximum.
+
+    Reading `memory.current` (cgroup v2, with the v1 path as fallback) inside the same shell that
+    runs `du` costs one exec of a few milliseconds, so the interval is honoured and the peak means
+    something. This is why `mem_samples` is reported alongside every peak.
+    """
+    script = (
+        "cat /sys/fs/cgroup/memory.current 2>/dev/null "
+        "|| cat /sys/fs/cgroup/memory/memory.usage_in_bytes 2>/dev/null "
+        "|| echo 0; "
+        # `du -sb` exits non-zero on a missing directory; the receiver creates it lazily, so a
+        # fresh stack legitimately has none and that reads as zero rather than as an error.
+        f"du -sb {path} 2>/dev/null | cut -f1 || echo 0"
     )
-    used = raw.split("/")[0].strip()
-    return _parse_size(used)
-
-
-def _staging_bytes(container: str, path: str) -> int:
-    # `du -sb` on a missing directory exits non-zero; the receiver creates it lazily, so a fresh
-    # stack legitimately has none and that reads as zero rather than as an error.
-    raw = _run(
-        [
-            "docker",
-            "exec",
-            container,
-            "sh",
-            "-lc",
-            f"du -sb {path} 2>/dev/null | cut -f1 || echo 0",
-        ]
-    )
-    return int(raw.strip() or 0)
-
-
-def _parse_size(text: str) -> int:
-    units = {
-        "B": 1,
-        "KIB": 1024,
-        "MIB": MIB,
-        "GIB": 1024 * MIB,
-        "KB": 1000,
-        "MB": 10**6,
-        "GB": 10**9,
-    }
-    text = text.strip().upper()
-    for suffix, mult in sorted(units.items(), key=lambda kv: -len(kv[0])):
-        if text.endswith(suffix):
-            return int(float(text[: -len(suffix)]) * mult)
-    return int(float(text))
+    raw = _run(["docker", "exec", container, "sh", "-lc", script], timeout=10.0)
+    lines = [line.strip() for line in raw.splitlines() if line.strip()]
+    mem = int(lines[0]) if lines and lines[0].isdigit() else None
+    staging = int(lines[1]) if len(lines) > 1 and lines[1].isdigit() else 0
+    return (mem or None), staging
 
 
 class SoakClient:
@@ -250,7 +250,7 @@ def run_soak(
 
     result = SoakResult(label, base_url, chunk_bytes, bundle_bytes, bundles)
     try:
-        result.staging_baseline_bytes = _staging_bytes(container, staging_path)
+        result.staging_baseline_bytes = _sample_once(container, staging_path)[1]
     except Exception:  # noqa: BLE001
         result.staging_baseline_bytes = None
 
@@ -314,7 +314,7 @@ def run_soak(
 
     time.sleep(2)  # let the abort's unlink land before the final reading
     try:
-        result.staging_after_cleanup_bytes = _staging_bytes(container, staging_path)
+        result.staging_after_cleanup_bytes = _sample_once(container, staging_path)[1]
     except Exception:  # noqa: BLE001
         result.staging_after_cleanup_bytes = None
     return result
@@ -374,6 +374,15 @@ def summarize(result: SoakResult) -> dict[str, Any]:
         f" -> peak {summary['peak_staging_bytes']}"
         f" -> after cleanup {result.staging_after_cleanup_bytes}"
     )
+    # A peak is only as good as the sampling behind it. Say so loudly rather than letting a thin
+    # sample be read as a real measurement -- an unsampled window looks identical to a low peak.
+    if summary["mem_samples"] < _MIN_TRUSTWORTHY_SAMPLES:
+        print(
+            f"\n    WARNING: only {summary['mem_samples']} resource samples."
+            f" Peaks below are a FLOOR, not a measurement -- the run was too short to sample."
+            f" Raise --bundles or --bundle-bytes before quoting these numbers."
+        )
+    summary["sampling_trustworthy"] = summary["mem_samples"] >= _MIN_TRUSTWORTHY_SAMPLES
     return summary
 
 

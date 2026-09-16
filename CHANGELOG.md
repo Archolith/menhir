@@ -8,9 +8,15 @@ Cloudflare ingress, 128 chunk calls, **zero failures**.
 - **Tail latency.** p95 0.086s local, **0.347s through the edge**; p99 0.098s / 0.641s. The edge
   widens the tail from 1.5x the median to 2.9x. Relevant if chunking is ever made concurrent: the
   0.64s worst case sets the timeout floor.
-- **Memory does not scale with bundle size.** 212 MiB idle, 251 MiB peak, identical on both paths.
-  A receiver buffering bundles in memory would climb per concurrent upload and would have hurt at
-  the pilot's 64 MiB quota rather than at 16 MiB. It streams to disk.
+- **Memory is bounded and transient** -- established by trend, not by a peak, after two wrong
+  answers. The sampler first used `docker stats --no-stream`, which costs 1-2s per call, so a
+  30-second soak collected THREE samples and its "peak" was a floor dressed as a maximum. With
+  sampling fixed (cgroup counter, one exec), five consecutive 32 MiB uploads read anon 140 -> 190
+  -> 236 -> 224 -> 193 -> 181 MiB: it rises, then comes back down. Retention would climb
+  monotonically toward +160 MiB. `put_chunk` also demonstrably writes each chunk straight to the
+  blob at its offset, so nothing accumulates. Page cache was ruled out separately (`file` 164 KiB
+  -> 68 KiB). Peaks from a default soak are NOT quotable: it collects 4-8 samples, and the script
+  now says so.
 - **Staging bytes return.** Peak 16.8 MB -- one bundle, so uploads do not accumulate -- settling to
   24 KB of `record.json` files with no payload bytes. That is the one-hour terminal retention
   holding records, confirmed by listing the directory rather than inferred from a byte total.

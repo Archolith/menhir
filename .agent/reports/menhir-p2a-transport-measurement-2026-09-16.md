@@ -144,12 +144,39 @@ and the worst chunk took 0.64s against a 0.22s median. For a 64 MiB bundle that 
 slow chunks in ~64 requests, not a stall — but it is the number to watch if chunking is ever made
 concurrent, because a 0.64s tail sets the timeout floor.
 
-**Memory does not scale with bundle size.** Idle 212 MiB, peak during the soak 251 MiB — about
-39 MiB of headroom consumed while 16 MiB bundles streamed through, and identical on both paths.
-A receiver that buffered a bundle in memory would have shown ~16 MiB per concurrent upload on top
-of that and would climb with the pilot's 64 MiB quota; this one does not, so it is streaming to
-disk as intended. That is the finding the gate wanted, and it is the one that would have bitten at
-the 64 MiB quota rather than at 16 MiB.
+**Memory: bounded and transient, established by trend rather than by a peak.**
+
+This one took three attempts to measure honestly, and the first two answers were wrong. The record
+matters more than the number, because the same mistakes are available to anyone re-running this:
+
+1. *"Idle 212 MiB, peak 251 MiB, so it streams."* Wrong evidence. The sampler shelled out to
+   `docker stats --no-stream`, which costs 1–2s per call, so a 30-second soak collected **three
+   samples**. The peak was a floor from three readings that looked exactly like a maximum.
+2. *"Peak memory tracks bundle size ~1:1, so it buffers."* Also wrong. With sampling fixed
+   (cgroup counter, one exec), arms at constant total bytes read 194 / 211 / 226 MiB for 4 / 16 /
+   32 MiB bundles — but those are high-water marks from 5–7 samples across separate runs, which is
+   not enough to attribute a 30 MiB spread to bundle size.
+3. The question was then settled two ways that agree.
+
+**The code:** `put_chunk` decodes one chunk, seeks to `index * chunk_bytes` in the blob file, and
+writes it. Nothing accumulates; the only in-memory copy is the chunk in flight.
+
+**The counterexample run:** five consecutive 32 MiB uploads against one container, reading `anon`
+from `memory.stat` between each:
+
+| after | idle | 1 | 2 | 3 | 4 | 5 |
+| --- | --- | --- | --- | --- | --- | --- |
+| anon (MiB) | 140.1 | 190.3 | 235.6 | 223.7 | 192.6 | 180.5 |
+
+A receiver retaining bundles would climb monotonically toward +160 MiB. This rises, peaks at
+round 2, and **comes back down** — allocator high-water and GC, in a band roughly 40–95 MiB above
+idle, ending 40 MiB above it and trending down. Page cache is not the explanation either and was
+checked: `file` went 164 KiB → 68 KiB across a 32 MiB upload, i.e. nothing.
+
+So the conclusion the gate wanted holds — memory is bounded by chunk size and concurrency, not by
+bundle size — but it rests on the code plus the five-round trend, **not** on any single peak
+figure. Peaks from these runs should not be quoted: the default soak collects 4–8 samples and the
+script now prints a warning saying so.
 
 **Staging bytes come back.** Peak 16.8 MB — one bundle, not four, confirming uploads do not
 accumulate — settling to 24 KB afterwards. That residue is 16 `record.json` files of ~1,508 bytes
