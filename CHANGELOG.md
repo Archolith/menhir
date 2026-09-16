@@ -1,3 +1,30 @@
+## 2026-09-15 - v0.2.3 hotfix: recovery sweep NameError, release test gate, ingest denylist
+
+**Upgrade from 0.2.1/0.2.2 promptly.** Both earlier releases shipped a `NameError`:
+
+- **The enrichment worker died on its first idle poll in 0.2.1 and 0.2.2.**
+  `fail_transient_exhausted_pending_episodes` referenced `LLM_RESET_SET` without importing
+  it, so every lease-recovery sweep raised before reaching the database. The sweep runs from
+  the worker's idle-timeout path with no enclosing handler, so the worker task died (it was
+  restarted on the next ingest, which is why ingestion appeared to work). Stale-lease
+  recovery, orphan reset, and transient-exhausted parking never ran, startup resume failed
+  with a warning, and the scheduler's recovery job errored every tick. Fixed by importing the
+  name; `tests/test_transient_exhausted_recovery_live.py` now exercises the real adapter path
+  (repository method, startup resume, recurring sweep) against a live Neo4j.
+- **Publication is now gated on green tests for the exact tagged commit.** `tests.yml` was
+  red on both v0.2.1 and v0.2.2 (its `ruff --select F821` lint caught the undefined name) and
+  `publish-pypi.yml` published anyway. A `test-gate` job now resolves the tag to its peeled
+  commit (annotated tags resolve to a tag object first) and refuses to build unless every
+  `tests` run for that SHA is completed and green.
+- **Ingest denylist hardening.** `src/menhir/core/ingest_guard.py` refuses `logs/`,
+  `backups/`, and `.git/` anywhere in the resolved path for every tier, including a
+  configured root inside one of those trees. Other dotfiles are checked at the artifact and
+  its immediate parent (operator/no-auth) or at and below the configured root (confined
+  tiers), so a checkout under an incidental hidden ancestor stays ingestable.
+  `docs/security-posture.md` and `.env.example` updated to match.
+
+Version bumped to 0.2.3.
+
 ## 2026-09-15 - v0.2.2 hotfix: the v0.2.1 wrapup-review findings
 
 The v0.2.1 wrapup review caught one shipping-broken fix and three same-class gaps:
