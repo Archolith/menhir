@@ -1,3 +1,30 @@
+## 2026-09-16 - structure prunes address the identity they were authorised for (#99)
+
+Every structure prune matched `structure_project` -- the caller-supplied display name -- while
+the identity gate validated `project_id`, `root_key`, generation and host. The gate guarded the
+front door and the deletes used a different address, so nothing established that the rows about
+to be DETACH DELETEd were the rows the gate authorised. Two projects sharing a display name
+pruned each other; a negative control against the old predicate deletes both projects' rows where
+the fix deletes one.
+
+- All prunes, plus the mtime read-back, now match on identity: rows stamped with this
+  `structure_project_id`, plus rows carrying no stamp at all under this display name (written
+  before CF-257). A row bearing a *different* project's id is unreachable by either arm. Two
+  indexed lookups rather than one `OR`, which would plan as a label scan over every `:Entity`.
+- **Renames work.** `get_file_mtimes` was name-keyed, so a renamed project read back zero mtimes,
+  took the first-scan branch, and orphaned every entity under its old name while the name-keyed
+  prunes matched nothing.
+- **Two more instances the issue did not list**, both in `_write_symbols`: the incremental symbol
+  delete, and a full-replace symbol delete carrying no path filter at all -- keyed on the name
+  alone, any forced or first scan emptied every same-named project's symbols. A sweep of `src/`
+  for the same pattern now finds none.
+- An id-less scan keeps the old name-only behaviour. It never passed an identity gate, so there
+  is no validated identity to diverge from; that is the residual, and it closes when `project_id`
+  becomes mandatory on the write path.
+- Consequence worth knowing: `identity_action="new"` no longer prunes the superseded silo, since
+  those rows belong to an identity the scan was not authorised to touch. `adopt` remains the way
+  to continue a project.
+
 ## 2026-09-16 - `menhir sync --check`: see what a remote structure sync would upload
 
 First two phases of MCP-bundled snapshot ingest

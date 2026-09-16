@@ -854,7 +854,10 @@ class TestStalePruning:
         writer._delete_stale_role_entities("p", "endpoint", [])
 
         q, params = neo.calls[-1]
-        assert "WHERE NOT n.structure_path IN $keep" in q
+        # #99 moved the project key from the MATCH map into the WHERE, so the path predicate is
+        # now a conjunct rather than the first clause. The contract under test is unchanged: an
+        # empty keep-list reaches the query instead of short-circuiting.
+        assert "NOT n.structure_path IN $keep" in q
         assert params["keep"] == []
         assert params["role"] == "endpoint"
 
@@ -1020,10 +1023,12 @@ class TestPartialIndexPruneGating:
     def _writer_with_spy_prunes(stored_mtimes: dict[str, float]):
         neo4j = RecordingNeo4j()
         writer = StructureGraphWriter(neo4j=neo4j)
-        writer.get_file_mtimes = lambda project_name: dict(stored_mtimes)
+        # `*_` absorbs the identity argument #99 threads through every read-back and prune; these
+        # spies assert WHICH paths are pruned, which that change does not touch.
+        writer.get_file_mtimes = lambda project_name, *_: dict(stored_mtimes)
         calls: dict[str, list] = {"files": [], "dirs": []}
-        writer._delete_file_entities = lambda project_name, rel_paths: calls["files"].append(list(rel_paths))
-        writer._delete_stale_directories = lambda project_name, keep: calls["dirs"].append(list(keep))
+        writer._delete_file_entities = lambda project_name, rel_paths, *_: calls["files"].append(list(rel_paths))
+        writer._delete_stale_directories = lambda project_name, keep, *_: calls["dirs"].append(list(keep))
         return writer, calls
 
     def test_partial_scan_does_not_prune_absent_files_or_directories(self):

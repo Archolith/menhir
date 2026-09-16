@@ -139,10 +139,14 @@ class StructureGraphWriter:
         now = datetime.now(timezone.utc).isoformat()
         entity_count = 0
         edge_count = 0
+        # #99. Read once and thread it through every read-back and every prune below, so the rows
+        # this scan deletes are the rows the identity gate authorised it to write -- rather than
+        # whatever currently answers to the same display name.
+        project_id = getattr(scan, "project_id", None)
 
         # 0. Incremental diff — compare stored file mtimes to determine which
         #    files actually changed so we can skip symbol rewrites for the rest.
-        stored_mtimes = self.get_file_mtimes(scan.name)
+        stored_mtimes = self.get_file_mtimes(scan.name, project_id)
         scan_mtime_map = {f.rel_path: f.file_mtime for f in scan.files}
 
         if stored_mtimes:
@@ -161,7 +165,7 @@ class StructureGraphWriter:
             # Same capacity-vs-destruction rule as the stale-role prune below: on a
             # truncated scan, absence from scan.files is the cap's doing, not deletion.
             if deleted_paths and not scan.partial_index:
-                self._delete_file_entities(scan.name, list(deleted_paths))
+                self._delete_file_entities(scan.name, list(deleted_paths), project_id)
             elif deleted_paths and scan.partial_index:
                 logger.info(
                     "Skipping incremental file prune for project=%s: scan truncated, "
@@ -226,7 +230,7 @@ class StructureGraphWriter:
         #     every other prune: a truncated scan is not evidence of absence.
         if not scan.partial_index:
             stale_dirs = self._delete_stale_directories(
-                scan.name, [d.rel_path for d in scan.directories]
+                scan.name, [d.rel_path for d in scan.directories], project_id
             )
             if stale_dirs:
                 logger.info(
@@ -279,6 +283,7 @@ class StructureGraphWriter:
                 scan.name,
                 ["file", "entrypoint", "config", "test"],
                 [f.rel_path for f in scan.files],
+                project_id,
             )
             if stale_files:
                 logger.info(
@@ -320,7 +325,8 @@ class StructureGraphWriter:
         #     scanned tree, so a truncated scan can under-report them.
         if not scan.partial_index:
             stale_deps = self._delete_stale_role_entities(
-                scan.name, "dependency", [f"dep:{dep}" for dep in scan.dependencies]
+                scan.name, "dependency", [f"dep:{dep}" for dep in scan.dependencies],
+                project_id,
             )
             if stale_deps:
                 logger.info(
@@ -358,7 +364,8 @@ class StructureGraphWriter:
         # boundaries dropped its own endpoint count to zero and the guard read that as failure.
         if not scan.partial_index:
             stale_eps = self._delete_stale_role_entities(
-                scan.name, "endpoint", [f"endpoint:{ep.name}" for ep in scan.endpoints]
+                scan.name, "endpoint", [f"endpoint:{ep.name}" for ep in scan.endpoints],
+                project_id,
             )
             if stale_eps:
                 logger.info(
@@ -418,7 +425,7 @@ class StructureGraphWriter:
         #      directory traversal, but a partial scan is not a claim about what is absent.
         if not scan.partial_index:
             stale_repos = self._delete_stale_contains_repo_edges(
-                scan.name, [n.rel_path for n in nested_repos]
+                scan.name, [n.rel_path for n in nested_repos], project_id
             )
             if stale_repos:
                 logger.info(
@@ -600,38 +607,105 @@ class StructureGraphWriter:
             return str(rows[0]["root_path"])
         return None
 
-    def get_file_mtimes(self, project_name: str) -> dict[str, float]:
+    def _owner_arms(
+        self, alias: str, project_id: str | None
+    ) -> tuple[str, ...]:
+        """WHERE fragments that together address exactly the rows this scan owns (#99).
+
+        Every prune below used to match `{structure_project: $project}` -- the caller-supplied
+        DISPLAY NAME -- while the identity gate validated `project_id`, `root_key`, generation and
+        host. The gate guarded the front door and the deletes used a different address, so nothing
+        proved that the rows about to be DETACH DELETEd were the rows the gate authorised. Renaming
+        a project made the same gap visible from the other side: `get_file_mtimes(new_name)`
+        returned nothing, the writer took the first-scan branch, and every entity under the old
+        name was orphaned while the name-keyed prunes matched nothing at all.
+
+        Two arms rather than one `OR`, because each is a separate indexed lookup -- the composite
+        constraint `(structure_project_id, structure_path)` backs the first and
+        `entity_structure_project_path_idx` the second. An `OR` across both would plan as a label
+        scan over every :Entity in the graph, six times per scan.
+
+        The arms are disjoint by construction, so a row is never deleted twice:
+
+        1. rows stamped with THIS identity, whatever they are currently called;
+        2. rows with NO identity stamp that carry this display name -- written before CF-257
+           existed. They are matched only while unstamped: a row bearing ANOTHER project's id can
+           never be reached by either arm, which is the property the old predicate lacked.
+
+        **When `project_id` is absent this degrades to the old name-only behaviour** rather than
+        refusing. An id-less scan never passed an identity gate, so there is no validated identity
+        to diverge from and nothing here can invent one; making it refuse would change behaviour
+        on a path CF-257 is separately closing. That remains the residual hole in #99 and it shuts
+        when `project_id` becomes mandatory on the write path.
+
+        **Consequence worth stating: `identity_action="new"` no longer prunes the old silo.** Rows
+        stamped with a superseded id are matched by neither arm, so minting a fresh identity at a
+        root that already had one leaves the previous project's rows in place instead of deleting
+        them under the shared name. That is the intended direction -- those rows belong to an
+        identity this scan was not authorised to touch, which is the whole point -- but it means
+        `adopt` remains the way to continue a project, and a deliberate `new` leaves a silo behind
+        for the operator to remove explicitly.
+        """
+        if not project_id:
+            return (f"{alias}.structure_project = $project",)
+        return (
+            f"{alias}.structure_project_id = $project_id",
+            f"{alias}.structure_project_id IS NULL AND {alias}.structure_project = $project",
+        )
+
+    def _owner_params(self, project_name: str, project_id: str | None) -> dict[str, Any]:
+        """The parameters both arms read. Values stay parameterised; only the predicate is spliced."""
+        return {"project": project_name, "project_id": project_id}
+
+    def get_file_mtimes(
+        self, project_name: str, project_id: str | None = None
+    ) -> dict[str, float]:
         """Return stored file mtimes keyed by rel_path for a project.
 
         Only returns rows where ``file_mtime`` is set and non-zero — i.e.
         file/entrypoint/config/test entities written with scanner v2+.
         Returns empty dict for first-ever scan.
-        """
-        rows = self.neo4j.execute(
-            """
-            MATCH (n:Entity {structure_project: $name})
-            WHERE n.structure_role IN ['file', 'entrypoint', 'config', 'test']
-              AND n.file_mtime IS NOT NULL AND n.file_mtime > 0
-            RETURN n.structure_path AS path, n.file_mtime AS mtime
-            """,
-            {"name": project_name},
-        )
-        return {str(r["path"]): float(r["mtime"]) for r in rows if r.get("path")}
 
-    def _delete_file_entities(self, project_name: str, rel_paths: list[str]) -> None:
+        Keyed on identity (see `_owner_arms`): addressing this by name meant a renamed project
+        read back zero mtimes and was treated as a first-ever scan, which is how the rename
+        orphaned its own file entities (#99).
+        """
+        mtimes: dict[str, float] = {}
+        for owner in self._owner_arms("n", project_id):
+            rows = self.neo4j.execute(
+                f"""
+                MATCH (n:Entity)
+                WHERE {owner}
+                  AND n.structure_role IN ['file', 'entrypoint', 'config', 'test']
+                  AND n.file_mtime IS NOT NULL AND n.file_mtime > 0
+                RETURN n.structure_path AS path, n.file_mtime AS mtime
+                """,
+                self._owner_params(project_name, project_id),
+            )
+            for r in rows:
+                if r.get("path"):
+                    mtimes[str(r["path"])] = float(r["mtime"])
+        return mtimes
+
+    def _delete_file_entities(
+        self, project_name: str, rel_paths: list[str], project_id: str | None = None
+    ) -> None:
         """Delete file Entity nodes (and their Symbol children) for files removed from the project."""
-        self.neo4j.execute(
-            """
-            UNWIND $paths AS path
-            MATCH (f:Entity {structure_project: $project, structure_path: path})
-            OPTIONAL MATCH (f)-[:DEFINES]->(sym:Entity {structure_role: 'symbol'})
-            DETACH DELETE f, sym
-            """,
-            {"project": project_name, "paths": rel_paths},
-        )
+        for owner in self._owner_arms("f", project_id):
+            self.neo4j.execute(
+                f"""
+                UNWIND $paths AS path
+                MATCH (f:Entity {{structure_path: path}})
+                WHERE {owner}
+                OPTIONAL MATCH (f)-[:DEFINES]->(sym:Entity {{structure_role: 'symbol'}})
+                DETACH DELETE f, sym
+                """,
+                {**self._owner_params(project_name, project_id), "paths": rel_paths},
+            )
 
     def _delete_stale_role_entities(
-        self, project_name: str, role: str, keep_paths: list[str]
+        self, project_name: str, role: str, keep_paths: list[str],
+        project_id: str | None = None,
     ) -> int:
         """Delete entities of *role* whose `structure_path` is absent from the current scan.
 
@@ -641,19 +715,28 @@ class StructureGraphWriter:
         that stopped exposing anything. Guarding on emptiness instead made zero permanently
         unreachable -- see the archolith endpoint accumulation in `write_project` step 5b.
         """
-        rows = self.neo4j.execute(
-            """
-            MATCH (n:Entity {structure_project: $project, structure_role: $role})
-            WHERE NOT n.structure_path IN $keep
-            DETACH DELETE n
-            RETURN count(*) AS deleted
-            """,
-            {"project": project_name, "role": role, "keep": keep_paths},
-        )
-        return int(rows[0].get("deleted", 0)) if rows else 0
+        deleted = 0
+        for owner in self._owner_arms("n", project_id):
+            rows = self.neo4j.execute(
+                f"""
+                MATCH (n:Entity {{structure_role: $role}})
+                WHERE {owner}
+                  AND NOT n.structure_path IN $keep
+                DETACH DELETE n
+                RETURN count(*) AS deleted
+                """,
+                {
+                    **self._owner_params(project_name, project_id),
+                    "role": role,
+                    "keep": keep_paths,
+                },
+            )
+            deleted += int(rows[0].get("deleted", 0)) if rows else 0
+        return deleted
 
     def _delete_stale_role_entities_multi(
-        self, project_name: str, roles: list[str], keep_paths: list[str]
+        self, project_name: str, roles: list[str], keep_paths: list[str],
+        project_id: str | None = None,
     ) -> int:
         """Delete entities across several roles whose path is absent from the current scan.
 
@@ -666,21 +749,30 @@ class StructureGraphWriter:
         """
         if not keep_paths:
             return 0
-        rows = self.neo4j.execute(
-            """
-            MATCH (n:Entity {structure_project: $project})
-            WHERE n.structure_role IN $roles
-              AND NOT n.structure_path IN $keep
-            OPTIONAL MATCH (n)-[:DEFINES]->(sym:Entity {structure_role: 'symbol'})
-            DETACH DELETE n, sym
-            RETURN count(*) AS deleted
-            """,
-            {"project": project_name, "roles": roles, "keep": keep_paths},
-        )
-        return int(rows[0].get("deleted", 0)) if rows else 0
+        deleted = 0
+        for owner in self._owner_arms("n", project_id):
+            rows = self.neo4j.execute(
+                f"""
+                MATCH (n:Entity)
+                WHERE {owner}
+                  AND n.structure_role IN $roles
+                  AND NOT n.structure_path IN $keep
+                OPTIONAL MATCH (n)-[:DEFINES]->(sym:Entity {{structure_role: 'symbol'}})
+                DETACH DELETE n, sym
+                RETURN count(*) AS deleted
+                """,
+                {
+                    **self._owner_params(project_name, project_id),
+                    "roles": roles,
+                    "keep": keep_paths,
+                },
+            )
+            deleted += int(rows[0].get("deleted", 0)) if rows else 0
+        return deleted
 
     def _delete_stale_contains_repo_edges(
-        self, project_name: str, keep_rel_paths: list[str]
+        self, project_name: str, keep_rel_paths: list[str],
+        project_id: str | None = None,
     ) -> int:
         """Delete CONTAINS_REPO edges whose `rel_path` is absent from the current scan.
 
@@ -689,20 +781,25 @@ class StructureGraphWriter:
         about whether it still exists. An empty keep-list is meaningful on a complete scan --
         an umbrella whose sub-repos were all removed contains none.
         """
-        rows = self.neo4j.execute(
-            """
-            MATCH (p:Entity {structure_project: $project, structure_path: '.',
-                             structure_role: 'project'})-[r:CONTAINS_REPO]->()
-            WHERE NOT coalesce(r.rel_path, '') IN $keep
-            DELETE r
-            RETURN count(*) AS deleted
-            """,
-            {"project": project_name, "keep": keep_rel_paths},
-        )
-        return int(rows[0].get("deleted", 0)) if rows else 0
+        deleted = 0
+        for owner in self._owner_arms("p", project_id):
+            rows = self.neo4j.execute(
+                f"""
+                MATCH (p:Entity {{structure_path: '.', structure_role: 'project'}})
+                      -[r:CONTAINS_REPO]->()
+                WHERE {owner}
+                  AND NOT coalesce(r.rel_path, '') IN $keep
+                DELETE r
+                RETURN count(*) AS deleted
+                """,
+                {**self._owner_params(project_name, project_id), "keep": keep_rel_paths},
+            )
+            deleted += int(rows[0].get("deleted", 0)) if rows else 0
+        return deleted
 
     def _delete_stale_directories(
-        self, project_name: str, keep_paths: list[str]
+        self, project_name: str, keep_paths: list[str],
+        project_id: str | None = None,
     ) -> int:
         """Delete directory entities no longer present in the scan.
 
@@ -719,17 +816,21 @@ class StructureGraphWriter:
         """
         if not keep_paths:
             return 0
-        rows = self.neo4j.execute(
-            """
-            MATCH (d:Entity {structure_project: $project, structure_role: 'directory'})
-            WHERE NOT d.structure_path IN $keep
-            WITH d, count(*) AS _
-            DETACH DELETE d
-            RETURN count(*) AS deleted
-            """,
-            {"project": project_name, "keep": keep_paths},
-        )
-        return int(rows[0].get("deleted", 0)) if rows else 0
+        deleted = 0
+        for owner in self._owner_arms("d", project_id):
+            rows = self.neo4j.execute(
+                f"""
+                MATCH (d:Entity {{structure_role: 'directory'}})
+                WHERE {owner}
+                  AND NOT d.structure_path IN $keep
+                WITH d, count(*) AS _
+                DETACH DELETE d
+                RETURN count(*) AS deleted
+                """,
+                {**self._owner_params(project_name, project_id), "keep": keep_paths},
+            )
+            deleted += int(rows[0].get("deleted", 0)) if rows else 0
+        return deleted
 
     def _increment_heat(self, project_name: str, rel_paths: list[str]) -> None:
         """Increment hot_count on file entities that changed in this scan."""
@@ -1697,28 +1798,41 @@ class StructureGraphWriter:
         )
 
         if changed_paths is None:
-            # Full replace — delete all existing symbols for the project
-            self.neo4j.execute(
-                """
-                MATCH (sym:Entity {structure_project: $project, structure_role: 'symbol'})
-                DETACH DELETE sym
-                """,
-                {"project": project_name},
-            )
+            # Full replace — delete all existing symbols for the project.
+            #
+            # #99 applies here too, and this is the sharpest instance of it in the file: the
+            # statement carries no path filter, so keyed on the display name alone a first scan
+            # (or any `force`) deleted every symbol row answering to that name, whichever identity
+            # owned it. The issue enumerated six helpers and missed this one and its incremental
+            # sibling below; the invariant is what binds, not the list.
+            for owner in self._owner_arms("sym", project_id):
+                self.neo4j.execute(
+                    f"""
+                    MATCH (sym:Entity {{structure_role: 'symbol'}})
+                    WHERE {owner}
+                    DETACH DELETE sym
+                    """,
+                    self._owner_params(project_name, project_id),
+                )
             symbols_to_write = symbols
             truncated_to_mark = truncated_files
         else:
             # Incremental — only delete symbols for files that changed
             if changed_paths:
-                self.neo4j.execute(
-                    """
-                    UNWIND $paths AS path
-                    MATCH (f:Entity {structure_project: $project, structure_path: path})
-                    MATCH (f)-[:DEFINES]->(sym:Entity {structure_role: 'symbol'})
-                    DETACH DELETE sym
-                    """,
-                    {"project": project_name, "paths": list(changed_paths)},
-                )
+                for owner in self._owner_arms("f", project_id):
+                    self.neo4j.execute(
+                        f"""
+                        UNWIND $paths AS path
+                        MATCH (f:Entity {{structure_path: path}})
+                        WHERE {owner}
+                        MATCH (f)-[:DEFINES]->(sym:Entity {{structure_role: 'symbol'}})
+                        DETACH DELETE sym
+                        """,
+                        {
+                            **self._owner_params(project_name, project_id),
+                            "paths": list(changed_paths),
+                        },
+                    )
             symbols_to_write = [s for s in symbols if s.file_path in changed_paths]
             truncated_to_mark = [t for t in truncated_files if t in changed_paths]
 
