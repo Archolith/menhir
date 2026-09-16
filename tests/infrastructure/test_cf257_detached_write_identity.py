@@ -366,6 +366,12 @@ def _payload(root, **extra):
         "directories": [], "files": [], "dependencies": [], "endpoints": [],
         "imports": [], "test_edges": [], "cross_project_refs": [],
         "symbols": [], "call_edges": [], "scan_fingerprint": "fp",
+        # #98: the caller must now present the claim generation it settled under -- the handler
+        # used to fill this in from the binding it was about to be checked against, which made
+        # the compare-and-set compare a value with itself. These cases are about ID resolution,
+        # so they carry a generation to get past the new precondition and assert what they
+        # always asserted.
+        "identity_generation": 1,
     }
     base.update(extra)
     return base

@@ -817,21 +817,37 @@ class RuntimeProviderDataOpsMixin:
                 f"{scan_obj.root_path!r}, which is bound to {bound_id!r} on this host. A supplied "
                 f"identity must match the authoritative binding for the directory it claims."
             )
-        # Re-bind the id we just read. Idempotent for an already-correct binding, and it is what
-        # yields the CLAIM GENERATION this write must present -- the same rule every other writer
-        # crosses, rather than a second way of establishing identity. It also stamps `root_key` on
-        # a binding written before that property existed, which is what lets the write boundary
-        # match on it at all.
+        # Re-bind the id we just read. Idempotent for an already-correct binding (the MERGE sets
+        # `claim_generation` only ON CREATE), and it stamps `root_key` on a binding written before
+        # that property existed, which is what lets the write boundary match on it at all.
+        #
+        # #98. It must NOT supply the claim generation. This used to overwrite
+        # `scan_obj.identity_generation` with the value read back here, microseconds before the
+        # fence compared that field against the same row -- so the compare-and-set compared a
+        # number with itself and could never fail. The race the generation exists to catch (the
+        # caller settles, time passes, the identity transfers to another checkout, the caller
+        # writes anyway) was wide open on this path, which is the one path where the caller is
+        # furthest away in time from its own scan.
+        #
+        # The generation therefore comes from the CALLER and is passed through untouched. This
+        # call may reject; it may not supply.
         from menhir.infrastructure.project_identity_binding import bind_project_identity
 
-        binding = await _asyncio.to_thread(
+        if scan_obj.identity_generation is None:
+            raise ProjectIdentityRefused(
+                "write_project_structure requires the identity_generation the caller settled its "
+                "scan under. Without it there is nothing to compare the current binding against, "
+                "and a write admitted on a generation the server filled in for itself is not "
+                "checked at all. Re-scan and resubmit, or use scan_and_write_project."
+            )
+
+        await _asyncio.to_thread(
             bind_project_identity,
             self.built.graph_adapter.neo4j,
             project_id=bound_id,
             root_path=scan_obj.root_path,
         )
         scan_obj.project_id = bound_id
-        scan_obj.identity_generation = binding.claim_generation
         ensure_scan_root_owns_identity(
             topology=await _asyncio.to_thread(classify_root, scan_obj.root_path),
             project_name=scan_obj.name,

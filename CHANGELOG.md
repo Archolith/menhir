@@ -1,3 +1,23 @@
+## 2026-09-16 - the stale-identity check on the payload path actually checks something (#98)
+
+`write_project_structure` re-read the project's identity binding and overwrote the caller's
+claim with what it had just read, microseconds before the write boundary compared that value
+against the same row. The comparison compared a number with itself, so it could never fail --
+the safeguard was present, ran on every call, and was incapable of refusing anything.
+
+- The claim generation now comes from the caller and is passed through untouched. The binding
+  lookup may reject a write; it may not supply the value it is checked against.
+- A payload carrying no claim is refused with a message naming `scan_and_write_project`, rather
+  than being handed a freshly-minted generation. Nothing to compare means nothing was checked.
+- `bind_project_identity` is still called for its other effect (stamping `root_key` on bindings
+  written before that property existed); only its return value is no longer used.
+
+The race this restores protection against: a caller settles an identity, time passes, the
+directory transfers to another checkout, and the caller writes anyway -- landing one project's
+files in another's silo, with the stale prune deleting whatever the first does not have. This
+was the path where a caller is furthest in time from its own scan, so it was the one that needed
+the check most.
+
 ## 2026-09-16 - P2A staging receiver: the real chunk handler, off by default
 
 The instrument the transport measurement runs against. It exercises the real
