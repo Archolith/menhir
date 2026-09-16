@@ -126,22 +126,74 @@ without notice, and the failure mode is a silent 403 that looks like an outage. 
 insurance against a class of failure nobody would diagnose quickly. It is not, as previously
 written, a live bug blocking installs.
 
-## What this does NOT establish
+## The soak: sustained cost, tail latency, and what grows
 
-The P2A gate asks for more than a size ceiling. Measured here: encoded call size, success rate at
-each rung, median latency, and failure behaviour at the first rejected rung. **Not measured:**
+`scripts/probe/p2a_soak.py`, run against both paths at the newly-set 1 MiB chunk: 4 bundles of
+16 MiB each, 64 chunk calls per path, 128 in total. **Zero failures on either path.**
 
-- **p95 latency** — three trials per rung gives a median, not a tail.
-- **Peak process memory** under sustained chunking.
-- **Staging growth and TTL/disk-budget behaviour** — the soak the gate requires, including the
-  restart and disk-pressure tests.
-- **Telemetry redaction under real load** — `call_payload` is overridden and unit-tested, but was
-  not re-verified against rows produced by this run.
-- **Any deployed environment.** The origin was a local container. A production zone may carry WAF
-  rules, a proxy, or a body limit this throwaway hostname did not.
+| | local | through the edge |
+| --- | --- | --- |
+| p50 | 0.066s | 0.222s |
+| **p95** | 0.086s | **0.347s** |
+| p99 | 0.098s | 0.641s |
+| max | 0.098s | 0.641s |
+| failures | 0 / 64 | 0 / 64 |
 
-The chunk-size question is answered. The rest of the P2A gate is not, and the provisional marker
-on `SnapshotLimits` should stay until it is.
+The tail is where the edge shows up. Locally p99 is 1.5x the median; through the edge it is 2.9x,
+and the worst chunk took 0.64s against a 0.22s median. For a 64 MiB bundle that is a handful of
+slow chunks in ~64 requests, not a stall — but it is the number to watch if chunking is ever made
+concurrent, because a 0.64s tail sets the timeout floor.
+
+**Memory does not scale with bundle size.** Idle 212 MiB, peak during the soak 251 MiB — about
+39 MiB of headroom consumed while 16 MiB bundles streamed through, and identical on both paths.
+A receiver that buffered a bundle in memory would have shown ~16 MiB per concurrent upload on top
+of that and would climb with the pilot's 64 MiB quota; this one does not, so it is streaming to
+disk as intended. That is the finding the gate wanted, and it is the one that would have bitten at
+the 64 MiB quota rather than at 16 MiB.
+
+**Staging bytes come back.** Peak 16.8 MB — one bundle, not four, confirming uploads do not
+accumulate — settling to 24 KB afterwards. That residue is 16 `record.json` files of ~1,508 bytes
+each, one per upload, and **no payload bytes at all**: the one-hour terminal retention holding
+records, exactly as designed, not a leak. The distinction was checked by listing the directory
+rather than inferred from the byte count.
+
+## Telemetry redaction, verified against this run's own rows
+
+304 snapshot-tool rows were produced (256 of them chunk calls). Every chunk row's preview:
+
+```json
+{"declared_len": 1048576, "digest": "[redacted]", "index": 0, "upload_id": "[redacted]"}
+```
+
+A scan of **all 609 rows** for any 200+ character base64-like run found **zero**. Sizes and the
+chunk index are in the clear; everything else is masked. Invariant 5 holds under real load, not
+just in unit tests.
+
+Two things worth noting from that output:
+
+- `upload_id` and `digest` are redacted too, which is stricter than the tool's `call_payload`
+  intends — `_preview_of` masks any string that is not allowlisted AND identifier-shaped. The
+  consequence is operational, not a defect: **telemetry cannot correlate rows belonging to one
+  upload.** Worth a deliberate allowlist decision in P2B rather than discovering it during an
+  incident.
+- `graph_operations` held **0 rows** after 16 completed uploads. The graph-inertness of the
+  staging path is pinned by an AST test; this is the same claim confirmed from live evidence.
+
+## What this still does NOT establish
+
+- **Disk-budget refusal under real pressure.** `test_a_begin_is_refused_before_the_disk_budget_is_exhausted`
+  covers it with a 32-byte budget and a fake clock. Nothing has filled a real disk.
+- **Restart mid-upload against a real stack.** `test_an_upload_resumes_across_a_restart` covers the
+  receiver's logic; the container was never killed mid-bundle.
+- **Concurrency.** Every upload here was sequential. The per-principal cap of 2 and per-project cap
+  of 8 are unit-tested, but no two uploads have ever actually raced.
+- **Any deployed environment.** The origin was a local container throughout. A production zone may
+  carry WAF rules, a proxy, or a body limit this throwaway hostname did not.
+- **Sustained duration.** The soak is ~30 seconds per path. It says nothing about an hour.
+
+The measurement items the gate names are now recorded. The `PROVISIONAL` marker is a separate
+judgement — see the gate line in the plan — and the list above is what an honest reading of
+"soak tests" still leaves open.
 
 ## Reproducing
 

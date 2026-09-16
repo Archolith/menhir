@@ -1,3 +1,33 @@
+## 2026-09-16 - the P2A soak: the receiver streams, and telemetry stays clean under load
+
+`scripts/probe/p2a_soak.py` answers what the size probe structurally could not. The probe finds a
+ceiling with one request; tail latency, memory behaviour and whether staging bytes come back need
+sustained traffic. 4 bundles x 16 MiB at the new 1 MiB chunk, both locally and through a real
+Cloudflare ingress, 128 chunk calls, **zero failures**.
+
+- **Tail latency.** p95 0.086s local, **0.347s through the edge**; p99 0.098s / 0.641s. The edge
+  widens the tail from 1.5x the median to 2.9x. Relevant if chunking is ever made concurrent: the
+  0.64s worst case sets the timeout floor.
+- **Memory does not scale with bundle size.** 212 MiB idle, 251 MiB peak, identical on both paths.
+  A receiver buffering bundles in memory would climb per concurrent upload and would have hurt at
+  the pilot's 64 MiB quota rather than at 16 MiB. It streams to disk.
+- **Staging bytes return.** Peak 16.8 MB -- one bundle, so uploads do not accumulate -- settling to
+  24 KB of `record.json` files with no payload bytes. That is the one-hour terminal retention
+  holding records, confirmed by listing the directory rather than inferred from a byte total.
+- **Redaction verified against this run's rows.** All 256 chunk rows preview as
+  `{"declared_len": ..., "digest": "[redacted]", "index": N, "upload_id": "[redacted]"}`, and a
+  scan of all 609 rows found no 200+ char base64 run. `graph_operations` held 0 rows after 16
+  completed uploads -- the graph-inertness the AST test pins, confirmed live.
+
+Noted for P2B, not fixed here: `upload_id` and `digest` are redacted too, so **telemetry cannot
+correlate rows belonging to one upload**. That is `_preview_of` masking anything not allowlisted
+AND identifier-shaped. It wants a deliberate allowlist decision rather than being discovered during
+an incident.
+
+Still open despite the soak: disk-budget refusal under real pressure (unit-tested with a 32-byte
+budget), restart mid-upload against a real stack, and concurrency -- every upload here was
+sequential, so no two have actually raced.
+
 ## 2026-09-16 - the snapshot chunk default is now a measurement, not a guess
 
 `SnapshotLimits.chunk_bytes` goes from 256 KiB to **1 MiB**, the value P2A's rule selects: 2 MiB was
