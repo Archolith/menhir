@@ -1,3 +1,14 @@
+## 2026-09-15 - release gate script
+
+- `scripts/release.py`: the workstation half of the release gate. Check-only by default;
+  `--tag` creates and pushes the annotated tag only after all nine checks pass in the same
+  run (clean tree, `main` in sync with origin, pyproject version == tag and tag unused and
+  newest, CHANGELOG heading, no VCS dependencies, the exact two `ruff` commands from
+  `tests.yml`, offline suite, online suite with an unreachable test Neo4j counted as failure,
+  and `tests.yml` green on HEAD's SHA), then watches `Publish to PyPI` through its `test-gate`
+  and confirms the version on PyPI. No flag skips a check and still allows `--tag`.
+- `docs/runbooks/release.md`: the release procedure and why the gate has two halves.
+
 ## 2026-09-15 - v0.2.3 hotfix: recovery sweep NameError, release test gate, ingest denylist
 
 **Upgrade from 0.2.1/0.2.2 promptly.** Both earlier releases shipped a `NameError`:
