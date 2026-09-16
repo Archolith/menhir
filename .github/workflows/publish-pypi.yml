@@ -7,12 +7,12 @@ name: Publish to PyPI
 # (project archolith-menhir, workflow publish-pypi.yml, environment pypi) and a `pypi`
 # environment on the repo.
 #
-# The test suite is NOT re-run here. tests.yml gates every push to main -- including the
-# commit a release tag points at -- and it needs a Neo4j service container for its
-# integration job. Duplicating that in the release path buys nothing and gives a release two
-# ways to fail. What this workflow does verify is the thing tests.yml cannot see: that the
-# built artifacts are installable, correctly versioned, and expose the entry points users
-# depend on.
+# The test suite is NOT re-run here. Instead, the `test-gate` job polls the `tests`
+# workflow's verdicts for the EXACT commit the tag resolves to and refuses to build unless
+# every run is completed and green -- a green package build does not substitute for green
+# tests (the v0.2.2 incident: PyPI published a tag whose tests.yml was red on the same SHA).
+# What this workflow additionally verifies is the thing tests.yml cannot see: that the built
+# artifacts are installable, correctly versioned, and expose the entry points users depend on.
 
 on:
   push:
@@ -29,9 +29,55 @@ permissions:
   contents: read
 
 jobs:
+  # Enforceable exact-SHA test gate -- see the file header and the incident note below.
+  test-gate:
+    name: require green tests on the exact tagged commit
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Require every tests.yml run for this exact SHA to be completed and green
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_REF: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || github.ref }}
+        run: |
+          set -euo pipefail
+          SHA=$(git ls-remote "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "${RELEASE_REF}" | cut -f1)
+          if [ -z "$SHA" ]; then
+            echo "::error::Could not resolve ${RELEASE_REF} to a commit"
+            exit 1
+          fi
+          echo "Tagged commit: $SHA"
+          for attempt in $(seq 1 60); do
+            pending=$(gh run list --repo "$GITHUB_REPOSITORY" --commit "$SHA" --workflow tests --json status --jq '[.[] | select(.status != "completed")] | length')
+            total=$(gh run list --repo "$GITHUB_REPOSITORY" --commit "$SHA" --workflow tests --json status --jq 'length')
+            if [ "$total" -eq 0 ]; then
+              echo "::error::No tests.yml run exists for commit $SHA. The tag must point at a commit whose tests workflow has run and passed."
+              exit 1
+            fi
+            if [ "$pending" -gt 0 ]; then
+              echo "tests.yml still running on $SHA ($pending of $total pending), waiting (attempt $attempt/60)..."
+              sleep 30
+              continue
+            fi
+            failed=$(gh run list --repo "$GITHUB_REPOSITORY" --commit "$SHA" --workflow tests --json conclusion --jq '[.[] | select(.conclusion != "success")] | length')
+            if [ "$failed" -gt 0 ]; then
+              echo "::error::tests.yml is not green on $SHA ($failed of $total run(s) failed). Refusing to publish."
+              gh run list --repo "$GITHUB_REPOSITORY" --commit "$SHA" --workflow tests
+              exit 1
+            fi
+            echo "tests.yml green on $SHA."
+            exit 0
+          done
+          echo "::error::Timed out waiting for tests.yml to complete on $SHA"
+          exit 1
+
   build:
     name: verify release artifacts
     runs-on: ubuntu-latest
+    needs: test-gate
     timeout-minutes: 20
     steps:
       - name: Check out tagged source

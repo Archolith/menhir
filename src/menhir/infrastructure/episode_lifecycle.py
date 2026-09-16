@@ -19,6 +19,7 @@ from menhir.infrastructure.cypher import (
     Cypher,
     EPISODE_PROCESSING_FIELDS,
     EPISODE_RETRY_FIELDS,
+    LLM_RESET_SET,
     MEMORY_RETURN_FIELDS,
     non_derived_view_cypher,
 )
