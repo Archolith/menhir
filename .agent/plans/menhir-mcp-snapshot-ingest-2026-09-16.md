@@ -50,12 +50,40 @@ C:\Users\thron\...` and `transition_artifact` reports the UUID as not found beca
 ever registered. `artifact_status: IMPLEMENTING` therefore lives in this file's frontmatter and
 nowhere else.
 
-This is not only a bookkeeping nuisance: it means the artifact corpus, its parity audit, and the
-lifecycle vocabulary in `workflows/artifact_authoring.md` are all inoperable for a remote server,
-for the same reason the structure graph is (#104). Whatever P3 builds for extracting and scanning
-a snapshot server-side is the same machinery a document corpus would need. Worth deciding whether
-artifacts ride on the snapshot path later, rather than discovering the duplication then. The ingest
-itself has to run from the server, or wait for the feature this plan describes.
+**Investigated 2026-09-16; an earlier version of this note overstated it.** The corpus is not
+inoperable -- `list_artifacts` returns 12 registered plans and every graph-side read, transition,
+supersede and link works normally on an artifact that is registered. What is broken is narrower
+and, in one place, worse than a loud failure:
+
+- **Registration fails loudly.** `mcp/tools/ingest/ingest_document.py:82` is
+  `os.path.isfile(path)` in the server process -- the same shape as `ingest_project`'s `isdir`.
+  A workstation path can never register, which is also why `transition_artifact` reports the UUID
+  as unknown: the transition did not fail, the registration never happened.
+- **The parity audit fails silently, which is the real finding.** `audit_artifact_corpus` against
+  the same unreachable path returns no error: `entries 0 / sources 202`,
+  `actions {MARK_SOURCE_UNRESOLVED: 190}`, commit `unknown`, `evidence valid False`. It scanned a
+  directory it cannot see, found nothing, and concluded that 190 of 202 known sources are absent
+  from the corpus. That is #104's shape exactly -- a completeness answer derived from a tree the
+  server cannot observe -- and it is the second time this system has produced one.
+- **There is a startup path that would write those marks.** `core/runtime.py:104-128` runs the
+  audit and then `apply()` when the reconcile mode is `safe_apply`. The default is `audit`
+  (`config/settings_model.py:197-198`), so this needs an operator to opt in. Two things stop it
+  from doing damage today, and neither is that someone checked: apply refuses while the Git
+  evidence base is invalid (`runtime.py:100-103`, and the live audit reports exactly that), and
+  `MARK_SOURCE_UNRESOLVED` is retain-with-a-reason, never delete
+  (`domain/artifact_reconciliation.py:1552-1570`). Both are worth keeping deliberately rather
+  than by luck.
+
+The corpus therefore has the **same two-sided break as the hook in #111**: the remote path cannot
+see the files, and the local path (`menhir artifacts audit|reconcile`, which builds a
+`Neo4jRepository` directly at `cli/artifacts.py:52-58`) cannot see the graph, because production
+Bolt is sealed. Either half working would close it.
+
+Two consequences for this plan. P3 builds server-side extraction and scanning of an uploaded tree;
+a document corpus needs the same machinery, so decide whether artifacts ride the snapshot path
+before building a second one. And the audit's silent-zero behaviour is the failure mode P3's
+shadow-scan gate must specifically exclude -- "scanned nothing, reported everything missing" has
+to be an error there, not a clean report.
 
 One measured result worth recording: on menhir's own tree (1,738 files, 26.8 MB) a plan takes
 0.67 s and the archive is 11.2 MB in 1.3 s.

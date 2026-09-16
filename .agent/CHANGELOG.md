@@ -18,9 +18,17 @@
 - `--allow-path` stays a one-run approval. A persistent path approval would silently
   re-authorize changed content later; hash-bound approval is the eventual answer.
 - Corpus ingest of the plan attempted and **blocked**: `ingest_document` stats its path
-  server-side like `ingest_project`, and the client points at `memory.ctharvey.me`, so the
-  artifact corpus and its parity audit are inoperable for a remote server for the same reason
-  the structure graph is (#104). The plan's `IMPLEMENTING` status exists only in its frontmatter.
+  server-side (`ingest_document.py:82`) like `ingest_project`, and the client points at
+  `memory.ctharvey.me`. The plan's `IMPLEMENTING` status exists only in its frontmatter, and
+  `transition_artifact` reports its UUID as unknown because registration never happened.
+- Investigating that turned up something sharper, recorded in the plan: `audit_artifact_corpus`
+  against an unreachable repository does not fail. It returns `entries 0 / sources 202` and
+  plans `MARK_SOURCE_UNRESOLVED` for 190 of them -- a completeness answer derived from a tree
+  the server cannot see, the same shape as #104. `core/runtime.py:104-128` would write those
+  marks at startup under the non-default `safe_apply` mode; what stops it today is an invalid
+  Git evidence base and the fact that the action is retain-with-reason rather than delete.
+  The corpus has the same two-sided break as the hook in #111 -- the remote path cannot see the
+  files, the local `menhir artifacts` path cannot see the sealed production graph.
 
 ## 2026-09-16 - Snapshot ingest P0/P1: wire contract frozen, local bundler shipped
 
