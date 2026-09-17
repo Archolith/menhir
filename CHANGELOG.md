@@ -1,3 +1,31 @@
+## 2026-09-17 - the extraction writer: bytes land, or nothing does
+
+The half of P3 with consequences outside the process. `archive_plan` decides what may be written
+and touches no disk; `extraction_lease` decides who may write it; this decides whether the bytes
+actually land. Every rule is enforced again here rather than assumed from upstream.
+
+- **The root is a boundary checked at the last line before `open()`.** Every joined path is
+  re-resolved and proven inside the root, duplicating a check `plan_archive` already does. The
+  duplication is the point: a containment check that lives only upstream is one refactor, one
+  second caller, or one plan built elsewhere away from not existing.
+- **Bytes are counted, never believed.** `declared_size` is metadata an attacker wrote, useful for
+  refusing early and worthless as a promise. The limit is enforced against what has actually
+  reached the disk, in 64 KiB blocks so a lying header cannot overshoot by a buffer's worth.
+- **The lease is re-checked as work proceeds**, because an extraction can outrun its own authority.
+- **A failure leaves no root**, including on `KeyboardInterrupt`. A half-written extraction that
+  survives is indistinguishable from a complete one to whatever finds it next.
+- **An existing root is refused, not reused and not deleted.** Adopting it would merge two
+  extractions; deleting it would destroy evidence this function does not own. Reclaiming it is the
+  sweep's job.
+
+Verified by negative control rather than by the tests passing: with `_safe_target` replaced by a
+naive join, the forged entry really is written outside the root; with the cleanup removed, the
+partial root really does survive. Both guards are load-bearing, which is the thing a green test run
+does not tell you.
+
+Still to come in P3: the subprocess wrapper this writer will run inside (decision 1), and the
+shadow scan.
+
 ## 2026-09-17 - the extraction lease, written counterexamples first
 
 P3 decision 4: the lease binds snapshot, owner and generation, never a project name alone. The
