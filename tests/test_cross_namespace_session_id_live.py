@@ -19,10 +19,12 @@ from uuid import uuid4
 
 import pytest
 
-# Reuse the acceptance gate's guarded disposable-stack fixtures and real-client helper rather than
-# creating a second subtly different live harness.  Import the fixtures themselves so pytest makes
-# them visible in this module too; ``stack`` depends on ``live_settings``.
-from tests.test_consumer_session_e2e import Client, live_settings, stack  # noqa: F401
+# Reuse the acceptance gate's guarded disposable-stack fixtures as a pytest plugin rather than
+# importing fixture symbols into this module.  Importing ``stack`` directly makes any helper/test
+# parameter named ``stack`` look like an F811 redefinition even though pytest is supplying it.
+pytest_plugins = ("tests.test_consumer_session_e2e",)
+
+from tests.test_consumer_session_e2e import Client
 
 pytestmark = [pytest.mark.online, pytest.mark.needs_llm]
 
