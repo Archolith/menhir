@@ -25,13 +25,72 @@ context instead of asking Menhir to guess them.
 
 - Store durable facts, decisions, corrections, verified failures, and reusable operator knowledge.
 - Do not store secrets, raw credentials, transient progress narration, or facts that have not been checked.
-- `add_memory` returning `PENDING` means the write was accepted and enrichment continues asynchronously.
-  Do not submit the same memory again. Use `add_memory_and_track` only when the current task truly needs to
-  wait for enrichment.
+- For a recall-critical semantic write in the local-stdio MVP, choose `add_memory_and_track` as the
+  original write. Plain `add_memory` is fire-and-forget and provides no immediate-recall guarantee.
+- `add_memory` returning `PENDING` means the write was accepted, not that it will certainly finish.
+  Keep the returned episode ID. Never call `add_memory_and_track` afterward to wait on that write:
+  it takes new text, not an existing episode ID, and would queue another write.
 - Use `TEMPORAL` with `valid_at` for time-bound reminders. Use workspace/namespace fields explicitly; a
   workspace bootstrap key, a semantic namespace, and a structural project key are different identifiers.
 - Destructive and administrative tools require stronger authority than recall. Use the least-privileged
   client tier that can perform the task.
+
+## Local-stdio tracked-write workflow
+
+Make one original call, with the intended authorized namespace:
+
+```text
+add_memory_and_track(
+    text="The billing service uses PostgreSQL 16.",
+    namespace="billing",
+    timeout_s=60.0,
+    poll_interval_s=1.0
+)
+```
+
+The tool returns a text summary and observed transitions; it is not a streaming subscription.
+Its supported options are `text`, `source`, `timeout_s`, `poll_interval_s`, `diff`,
+`turn_evidence_uuid`, and `namespace`. It does not accept an existing episode ID, `type`,
+`valid_at`, `flagged`, or `bootstrap_scope`. Do not invent those parameters.
+
+Preserve the returned `episode_id`. The status tools call that argument `episode_uuid`:
+
+```text
+get_enrichment_status(
+    episode_uuid="<returned episode_id>",
+    namespace="billing",
+    wait=True,
+    timeout_s=60.0,
+    poll_interval_s=1.0
+)
+```
+
+Use the same authorized namespace and client. This is an observation of the existing write,
+not a second write. `watch_enrichment` is another observation tool when available. A restricted
+client may not expose either tool: follow its actual tool list, scope, and allowlist, report that
+completion is unverified, and do not switch identities or expand permissions to work around it.
+
+Interpret the observed result, not an assumed outcome:
+
+| Result | Meaning and next action |
+| --- | --- |
+| `PENDING` | Queued work was observed; completion and worker health are not established. |
+| `ENRICHING` | The stored state records a claimed job; this is not proof a worker is alive. |
+| `READY` | Enrichment reports completion; verify the needed fact through recall/context separately. A query is not guaranteed to retrieve it. |
+| `FAILED` | Enrichment reports a failed attempt/state, not deletion or necessarily permanent failure. Inspect the existing episode and use authorized repair/retry, not duplicate ingestion. |
+| `timed_out: True` | The observation window expired; it did not cancel the queued write or prove it failed. Continue observing the same episode. |
+| `not_found`, `UNKNOWN`, or tracking unavailable | Completion is unverified. A missing/failed status read does not prove the accepted write failed. Preserve its receipt; do not resubmit based only on this observation. |
+
+An empty immediate recall after plain `add_memory` is not evidence that the write failed or that
+no memory exists. Likewise, a status read is not a relevance test. Do not claim recall succeeded
+until the needed fact actually appears in an authorized recall/context result.
+
+When the write requires options supported only by `add_memory`, use that original write followed
+by status observation of its returned episode ID, subject to the supported feature contract and
+client permissions. `add_memory(type="TEMPORAL", valid_at="YYYY-MM-DD")` is different: it writes
+a time-bound memory directly and bypasses graph enrichment. Do not require a queued episode or
+an enrichment `READY` transition for that path. Retention/flag semantics remain governed by the
+separate MVP retention work; this workflow does not certify them.
 
 ## Failure behavior
 

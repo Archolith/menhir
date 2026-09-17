@@ -14,8 +14,11 @@ knowledge, and structural code analysis.
 5. Treat stale anchors and incomplete indexes as warnings to inspect current code. Never turn "not indexed"
    or an empty result into "no impact."
 6. After using recall output, call `rate_recall` with an honest usefulness rating.
-7. Store only durable, verified lessons with `add_memory`; attach a bounded Git diff when it helps anchoring.
-   A `PENDING` result is already accepted, so do not submit it again. Never store secrets.
+7. Store only durable, verified lessons; never secrets. Use `add_memory_and_track` as the original write
+   when immediate use matters; otherwise use `add_memory`. Attach a bounded Git diff when useful.
+   Preserve the returned episode ID. After `PENDING` or timeout, observe that same ID with an available,
+   authorized status tool (`get_enrichment_status` uses `episode_uuid`), not another write. `READY` is
+   enrichment state, not guaranteed retrieval. Do not broaden client permissions to obtain status.
 8. If Menhir fails, report that memory/structure context was unavailable. Continue only when current local
    evidence is sufficient for the task.
 
