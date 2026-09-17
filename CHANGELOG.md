@@ -1,3 +1,31 @@
+## 2026-09-17 - the shadow scan: structural parity, and the copy does not survive it
+
+The last P3 piece, and the only one that produces a result rather than a refusal. Its correctness
+question is different in kind: not "was the attack stopped" but "does scanning a snapshot remotely
+give the same answer as scanning the repository locally".
+
+**It calls the existing `ProjectScanner` rather than reimplementing one.** Parity is then true by
+construction and a surviving difference is a real one -- something the bundle dropped or the
+extraction changed -- instead of a disagreement between two scanners.
+
+**Local scanning is untouched, and that is asserted rather than claimed.**
+`project_scanner.py` is not modified; a test checks it against git, and the 196 pre-existing tests
+covering it pass unchanged.
+
+- The fingerprint excludes `root_path` (absolute), `file_mtime` (extraction writes new files),
+  `name` (the root is named for an upload) and the identity/self-fingerprint fields. Including any
+  would make every parity check fail for a reason unrelated to the snapshot -- worse than not
+  checking, because it trains a reader to ignore the result.
+- Every list is sorted. `os.scandir` promises no order and differs between filesystems, so an
+  unsorted fingerprint would differ between two scans of identical content.
+- **A test proves the exclusions did not make it blind**: dropping one source file still changes
+  the fingerprint. A digest that ignores enough to always match reports parity it never checked.
+- The materialised root is deleted after the report, including when the scan raises. A root that
+  outlives its report is an unattributed copy of somebody's repository sitting on a disk.
+- The report carries the three coverage counts and does NOT carry `partial_index` (invariant 4):
+  the counts are the source of truth and the derivation belongs to whoever can see the whole
+  picture.
+
 ## 2026-09-17 - extraction runs in a child process (P3 decision 1)
 
 `extraction_writer` holds the rules; this holds the blast radius. A malformed archive that hangs or
