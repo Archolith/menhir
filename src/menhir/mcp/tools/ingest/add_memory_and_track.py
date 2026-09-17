@@ -2,10 +2,19 @@
 
 from __future__ import annotations
 
-from menhir.mcp.formatters import _collect_episode_status, _format_episode_status, _queue_summary
+import logging
+
+from menhir.mcp.contracts import ToolScope
+from menhir.mcp.formatters import (
+    _collect_episode_status,
+    _episode_status_guidance,
+    _format_episode_status,
+    _queue_summary,
+)
 from menhir.mcp.service_access import get_mcp_session
 from menhir.mcp.tools.base import BaseTextTool
-from menhir.mcp.contracts import ToolScope
+
+logger = logging.getLogger(__name__)
 
 
 async def add_memory_and_track(
@@ -17,7 +26,11 @@ async def add_memory_and_track(
     turn_evidence_uuid: str | None = None,
     namespace: str = "",
 ) -> str:
-    """Queue one memory and return enrichment status updates until READY/FAILED/timeout.
+    """Queue a NEW memory and return a status summary after READY/FAILED/timeout.
+
+    Use this instead of add_memory for a recall-critical write, not after add_memory.
+    Timeout does not cancel enrichment; continue observing the returned episode ID.
+    READY reports enrichment state and does not guarantee retrieval for a query.
 
     Args:
         text: Memory content to ingest.
@@ -50,7 +63,10 @@ class AddMemoryAndTrackTool(BaseTextTool):
     read_only_hint = False
     destructive_hint = False
     open_world_hint = True
-    description = "Queue one memory and track enrichment until completion."
+    description = (
+        "Queue a new memory and observe enrichment until READY, FAILED, or timeout. "
+        "To continue observing an existing write, use its episode ID with status tools instead."
+    )
 
     def timeout_for(
         self,
@@ -74,7 +90,11 @@ class AddMemoryAndTrackTool(BaseTextTool):
         turn_evidence_uuid: str | None = None,
         namespace: str = "",
     ) -> str:
-        """Queue one memory and return enrichment status updates until READY/FAILED/timeout.
+        """Queue a NEW memory and return a status summary after READY/FAILED/timeout.
+
+        Use this instead of add_memory for a recall-critical write, not after add_memory.
+        Timeout does not cancel enrichment; continue observing the returned episode ID.
+        READY reports enrichment state and does not guarantee retrieval for a query.
 
         Args:
             text: Memory content to ingest.
@@ -107,16 +127,35 @@ class AddMemoryAndTrackTool(BaseTextTool):
         if str(queued.get("status") or "") == "failed":
             return "Failed to queue memory."
         episode_uuid = str(queued.get("episode_id") or "")
-        row, history, timed_out = await _collect_episode_status(
-            backend,
-            episode_uuid,
-            timeout_s=timeout_s,
-            poll_interval_s=poll_interval_s,
-        )
-        episode_status = _format_episode_status(
-            episode_uuid=episode_uuid,
-            row=row,
-            history=history,
-            timed_out=timed_out,
-        )
-        return f"queued_summary: {await _queue_summary(backend)}\n{episode_status}"
+        try:
+            row, history, timed_out = await _collect_episode_status(
+                backend,
+                episode_uuid,
+                timeout_s=timeout_s,
+                poll_interval_s=poll_interval_s,
+            )
+            episode_status = _format_episode_status(
+                episode_uuid=episode_uuid,
+                row=row,
+                history=history,
+                timed_out=timed_out,
+            )
+        except Exception as exc:  # noqa: BLE001 - the write is already accepted
+            # A diagnostic failure must not hide the receipt or encourage duplicate writes.
+            # Do not render exception text: provider/backend errors can contain credentials.
+            # CancelledError is a BaseException and deliberately continues to propagate.
+            logger.warning("Enrichment tracking unavailable after accepted write (%s)", type(exc).__name__)
+            guidance = _episode_status_guidance(state="UNKNOWN", timed_out=False)
+            return (
+                f"episode_id: {episode_uuid}\n"
+                "write_status: accepted\n"
+                "status: UNKNOWN\n"
+                "tracking_status: UNAVAILABLE\n"
+                f"{guidance}"
+            )
+        try:
+            queue_summary = await _queue_summary(backend)
+        except Exception as exc:  # noqa: BLE001 - optional diagnostics cannot hide the receipt
+            logger.warning("Queue diagnostics unavailable after accepted write (%s)", type(exc).__name__)
+            queue_summary = "queue_status: UNAVAILABLE (accepted write; queue diagnostics unavailable)"
+        return f"queued_summary: {queue_summary}\n{episode_status}"

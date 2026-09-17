@@ -422,6 +422,46 @@ async def _collect_episode_status(
 # episode output formatters
 # ---------------------------------------------------------------------------
 
+def _episode_status_guidance(*, state: str | None, timed_out: bool) -> str:
+    """Explain an observation without promising completion or recommending another write."""
+    normalized = (state or "").upper()
+    if state is None:
+        return (
+            "guidance: no processing status was found in the current authorized scope. "
+            "This does not establish that a write failed or that its source text was deleted. "
+            "Check the existing episode_id and authorized namespace; do not submit it again "
+            "based only on this observation."
+        )
+    if normalized == "READY":
+        return (
+            "guidance: READY is the observed enrichment state, not a guarantee that a "
+            "recall query will return this memory. Verify retrieval separately."
+        )
+    if normalized == "FAILED":
+        return (
+            "guidance: FAILED is the observed enrichment state, not proof that the source "
+            "text was deleted or every retry is exhausted. Inspect this episode's error "
+            "and use only authorized retry/repair on the existing episode, not a new write."
+        )
+
+    if normalized in {"PENDING", "QUEUED"}:
+        observation = "the recorded state indicates queued work; completion is not guaranteed. "
+    elif normalized == "ENRICHING":
+        observation = "ENRICHING records a claimed job, not proof its worker is alive. "
+    else:
+        observation = "no recognized terminal enrichment state was observed. "
+    timeout_note = (
+        "the tracking wait expired; this does not cancel the queued write. " if timed_out else ""
+    )
+    return (
+        f"guidance: {timeout_note}{observation}"
+        "Do not submit this memory again. If available to this client, continue with "
+        "get_enrichment_status(episode_uuid=<episode_id>, wait=True) or watch_enrichment "
+        "on the same episode and namespace. Otherwise report that completion is unverified; "
+        "do not broaden permissions."
+    )
+
+
 def _format_episode_status(
     *,
     episode_uuid: str,
@@ -432,6 +472,7 @@ def _format_episode_status(
     lines = [f"episode_id: {episode_uuid}"]
     if row is None:
         lines.append("status: not_found")
+        lines.append(_episode_status_guidance(state=None, timed_out=timed_out))
         return "\n".join(lines)
 
     lines.extend(
@@ -449,23 +490,11 @@ def _format_episode_status(
             f"updates: {len(history)}",
         ]
     )
-    if timed_out:
-        state = str(row.get("processing_state") or "").upper()
-        if state in ("ENRICHING", "PENDING", "QUEUED", ""):
-            # The episode is still being enriched in the background — it is NOT lost.
-            # Tell the agent not to re-add (a retry duplicates work and lands on the
-            # in-progress enrichment). Enrichment commonly takes 20-50s.
-            lines.append(
-                "guidance: still enriching in the background — the memory IS queued and "
-                "will finish on its own. Do NOT call add_memory again for this; if you "
-                "need to confirm completion, poll get_enrichment_status or call "
-                "add_memory_and_track with a larger timeout_s (enrichment p95 ~50s)."
-            )
-        elif state == "FAILED":
-            lines.append(
-                "guidance: enrichment FAILED (see error above) — safe to retry once; "
-                "if it fails again, report the error rather than looping."
-            )
+    lines.append(
+        _episode_status_guidance(
+            state=str(row.get("processing_state") or "UNKNOWN"), timed_out=timed_out,
+        )
+    )
     if history:
         lines.append("history:")
         for idx, entry in enumerate(history, 1):
@@ -603,6 +632,7 @@ def _format_episode_watch(
     lines = [f"episode_id: {episode_uuid}"]
     if row is None:
         lines.append("status: not_found")
+        lines.append(_episode_status_guidance(state=None, timed_out=timed_out))
         return "\n".join(lines)
 
     lines.extend(
@@ -632,4 +662,9 @@ def _format_episode_watch(
                 f"llm_active_endpoint={entry.get('llm_active_endpoint') or '(none)'} "
                 f"heartbeat_at={entry.get('heartbeat_at') or '(none)'}"
             )
+    lines.append(
+        _episode_status_guidance(
+            state=str(row.get("processing_state") or "UNKNOWN"), timed_out=timed_out,
+        )
+    )
     return "\n".join(lines)
