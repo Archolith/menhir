@@ -50,7 +50,7 @@ async def test_shared_session_id_does_not_collapse_second_namespace(stack) -> No
 
     await prepare_memory_runtime(stack)
 
-    # The imported stack fixture is hard-pinned to the disposable :7688 graph.  Start from an empty
+    # The shared stack fixture is hard-pinned to the disposable :7688 graph.  Start from an empty
     # corpus so any candidate/dedupe hit necessarily came from this reproducer.
     stack.neo4j.execute("MATCH (n) DETACH DELETE n")
 
