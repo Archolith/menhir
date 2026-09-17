@@ -313,9 +313,16 @@ class LLMAdapter:
         if not existing_content.strip() or not new_context.strip():
             return None
 
+        # Keep the long-standing human-readable labels for model/test continuity, but place them
+        # inside structural containers and escape only the caller-controlled values.  This gives
+        # the model the familiar cue without letting stored text close a field or create another.
         user_prompt = (
-            f"{_tagged_prompt_data('existing_memory', existing_content)}\n"
-            f"{_tagged_prompt_data('new_context', new_context)}"
+            "<existing_memory>\n"
+            f"Existing memory: {_escape_prompt_data(existing_content)}\n"
+            "</existing_memory>\n"
+            "<new_context>\n"
+            f"New context: {_escape_prompt_data(new_context)}\n"
+            "</new_context>"
         )
         return await self._chat_text(
             system_prompt=_REHYDRATE_SYSTEM_PROMPT,
