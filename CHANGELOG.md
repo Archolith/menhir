@@ -12,6 +12,33 @@
   regression cases. Live stdio E2E-2 and exact-commit repository CI remain release gates.
 - Keep the newest ten dated entries per `.agent/maintenance.md`; older entries remain in Git history.
 
+## 2026-09-16 - a crash between an upload's two writes returned a 500
+
+P2B's second inherited counterexample. Every write in the receiver is two steps -- `begin` writes
+the record then creates the blob, `put_chunk` writes the blob then updates the record, `abort`
+writes the record then drops the blob -- and a crash in any of those windows leaves durable state
+no caller ever produced. Four tests force each window directly instead of hoping a killed container
+lands there.
+
+Three of the four passed, which is worth recording: unrecorded bytes are correctly reported missing
+and the resend is an ordinary first delivery (the write ordering in `put_chunk` is the safe one); a
+half-written record with only a temp file is reclaimed as garbage rather than resumed; and an abort
+that died before dropping its bytes still frees them at the retention boundary.
+
+The fourth failed. A record whose blob never existed -- a crash between `begin`'s record write and
+its blob creation -- made `put_chunk` raise an uncaught `FileNotFoundError`, which reaches the
+client as a 500. From the caller, an upload id that produces a 500 is indistinguishable from the
+server being broken.
+
+- New stable code `snapshot.upload.staged_bytes_lost`, and the upload is marked FAILED durably, so
+  `status` tells the truth and later chunks are refused by the state check rather than re-running
+  the same path.
+- **The blob is not recreated.** That looks like recovery and is corruption whenever `received` is
+  non-empty: those indices would become zero-filled while the record still claims them, and the
+  upload would SEAL over a bundle whose chunk digests were never re-checked.
+- The guard covers the write as well as the open, deliberately. A partly-written chunk leaves the
+  blob in a state no digest in the record describes -- the same disagreement by a different route.
+
 ## 2026-09-16 - every staging quota was advisory under concurrency
 
 P2B opens with the counterexamples P2A's closure deferred, and the first one found a real defect.

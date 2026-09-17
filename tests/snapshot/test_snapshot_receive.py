@@ -26,6 +26,7 @@ from menhir.snapshot.receive import (
     ERR_DISK_BUDGET,
     ERR_NOT_FOUND,
     ERR_SIZE,
+    ERR_STAGING_LOST,
     ERR_TOO_MANY_PER_PRINCIPAL,
     ERR_TOO_MANY_PER_PROJECT,
     ERR_WRONG_STATE,
@@ -563,3 +564,115 @@ def test_two_processes_cannot_overcommit_the_disk_budget(tmp_path: Path, clock: 
     assert committed <= quotas.disk_budget_bytes, (
         f"{committed} bytes admitted against a {quotas.disk_budget_bytes} byte budget"
     )
+
+
+# --- crash-torn states: what a real kill leaves behind -------------------------------------------
+#
+# `test_an_upload_resumes_across_a_restart` builds a second receiver over the same root, which
+# tests the resume LOGIC but not the states a kill actually leaves. Every write here is two steps,
+# and the interesting moment is between them:
+#
+#   begin      writes the record, THEN creates the blob
+#   put_chunk  writes the blob, THEN updates the record
+#   abort      writes the record, THEN drops the blob
+#
+# A crash in any of those windows leaves durable state that no caller ever produced. These force
+# each one directly rather than hoping a killed container lands there.
+
+
+def test_a_chunk_written_but_not_recorded_is_simply_missing(receiver: StagingReceiver) -> None:
+    """Crash between the blob write and the record update.
+
+    The bytes are on disk and the record does not know. This ordering is the safe one -- the
+    chunk reports missing, the client resends, and the resend is an ordinary first delivery -- so
+    the test pins the ordering rather than the recovery.
+    """
+    record = _begin(receiver, size=16)
+    blob = receiver.root / record.upload_id / "blob"
+    with open(blob, "r+b") as handle:  # what put_chunk would have written
+        handle.seek(0)
+        handle.write(b"AAAAAAAA")
+
+    resumed = StagingReceiver(receiver.root, limits=_LIMITS, clock=receiver._clock)
+    status = resumed.status(upload_id=record.upload_id, principal="alice")
+    assert 0 in status.missing, "unrecorded bytes must not be mistaken for a received chunk"
+
+    # The resend is accepted normally and is not treated as a conflicting replay.
+    updated = _chunk(resumed, record, 0, b"AAAAAAAA")
+    assert 0 in updated.received
+
+
+def test_a_record_whose_blob_never_existed_refuses_cleanly(receiver: StagingReceiver) -> None:
+    """Crash between `begin`'s record write and its blob creation.
+
+    The record is durable and the blob is not. A caller resuming against it must get a refusal
+    carrying a code, not an unhandled OSError escaping the receiver -- an upload id that produces
+    a 500 is indistinguishable, from the client, from the server being broken.
+    """
+    record = _begin(receiver, size=16)
+    (receiver.root / record.upload_id / "blob").unlink()
+
+    resumed = StagingReceiver(receiver.root, limits=_LIMITS, clock=receiver._clock)
+    with pytest.raises(ReceiveError) as excinfo:
+        _chunk(resumed, record, 0, b"AAAAAAAA")
+    assert excinfo.value.code == ERR_STAGING_LOST
+
+    # Durable, not merely raised: the upload is FAILED, so `status` tells the truth and a client
+    # that keeps sending chunks is refused by the state check rather than re-running this path.
+    after = resumed.status(upload_id=record.upload_id, principal="alice")
+    assert after.state is UploadState.FAILED
+    assert after.failure_code == ERR_STAGING_LOST
+
+    # And it must never silently recover by recreating the blob: that would zero-fill indices the
+    # record still claims and SEAL over a bundle whose digests were never re-checked.
+    assert not (receiver.root / record.upload_id / "blob").exists()
+
+
+def test_a_half_written_record_is_not_adopted_as_state(tmp_path: Path, clock: FakeClock) -> None:
+    """Crash during `begin`'s very first record write, leaving only the temp file.
+
+    Invariant 11: a directory's existence is not state. The half-written upload must be reclaimed
+    as garbage, not resumed -- bytes that cannot be attributed to an owner still occupy the disk
+    budget.
+    """
+    root = tmp_path / "staging"
+    root.mkdir(parents=True)
+    torn = root / ("a" * 32)
+    torn.mkdir()
+    (torn / "record.json.tmp").write_text('{"upload_id": "incomp', encoding="utf-8")
+
+    receiver = StagingReceiver(root, limits=_LIMITS, clock=clock)
+    receiver.sweep()
+
+    assert not torn.exists(), "a half-written upload was kept as if it were state"
+
+
+def test_an_abort_that_crashed_before_dropping_bytes_still_frees_them(
+    receiver: StagingReceiver, clock: FakeClock
+) -> None:
+    """Crash between `abort`'s record write and its blob drop.
+
+    The upload is terminal but its bytes are still on disk, occupying the disk budget. Retention
+    is allowed to hold the RECORD; it is not allowed to hold the payload forever.
+    """
+    record = _begin(receiver, size=16)
+    _chunk(receiver, record, 0, b"AAAAAAAA")
+    aborted = replace_state_to_aborted(receiver, record)
+    assert (receiver.root / aborted.upload_id / "blob").exists(), "test setup did not leave bytes"
+
+    clock.advance(receiver.quotas.terminal_retention_s + 1)
+    receiver.sweep()
+
+    blob = receiver.root / aborted.upload_id / "blob"
+    assert not blob.exists(), "payload bytes outlived the terminal retention window"
+
+
+def replace_state_to_aborted(receiver: StagingReceiver, record):
+    """Abort without dropping the blob -- i.e. exactly where a crash mid-abort leaves things."""
+    from dataclasses import replace as _replace
+
+    from menhir.snapshot.receive import UploadState as _State
+
+    aborted = _replace(record, state=_State.ABORTED, updated_at=receiver._clock())
+    receiver._write_record(aborted)
+    return aborted

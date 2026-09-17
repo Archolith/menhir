@@ -75,6 +75,10 @@ ERR_CHUNK_ENCODING = "snapshot.upload.chunk_not_base64"
 ERR_TOO_MANY_PER_PRINCIPAL = "snapshot.upload.too_many_for_principal"
 ERR_TOO_MANY_PER_PROJECT = "snapshot.upload.too_many_for_project"
 ERR_DISK_BUDGET = "snapshot.upload.staging_disk_budget"
+#: The record survived but its staged bytes did not -- a crash between `begin`'s record write and
+#: its blob creation, a deletion, or a disk fault. Distinct from `wrong_state` because the upload
+#: is not in a state the caller can reason about or retry into; it must start a new one.
+ERR_STAGING_LOST = "snapshot.upload.staged_bytes_lost"
 ERR_SIZE = "snapshot.upload.declared_size_rejected"
 
 
@@ -421,9 +425,37 @@ class StagingReceiver:
             )
 
         blob = self._dir(upload_id) / "blob"
-        with open(blob, "r+b") as handle:
-            handle.seek(index * record.chunk_bytes)
-            handle.write(data)
+        try:
+            with open(blob, "r+b") as handle:
+                handle.seek(index * record.chunk_bytes)
+                handle.write(data)
+        except OSError:
+            # The record survived but its bytes are not writable. `begin` writes the record and
+            # THEN creates the blob, so a crash between those two leaves exactly this; deletion or
+            # a full disk produces it too. Both terminal states that drop bytes -- ABORTED and
+            # EXPIRED -- are already refused by the state check above, so reaching here means the
+            # record and its bytes genuinely disagree.
+            #
+            # FAILED rather than recreating the blob. Recreating looks like recovery and is
+            # corruption when `received` is non-empty: those indices would become zero-filled
+            # while the record still claims them, and the upload would SEAL over a bundle whose
+            # chunk digests were never re-checked. Failing is durable, so `status` tells the truth
+            # instead of every later chunk raising the same error again.
+            #
+            # The catch covers the write as well as the open deliberately: a chunk that was only
+            # partly written leaves the blob in a state no digest in the record describes, which
+            # is the same disagreement arriving by a different route.
+            failed = replace(
+                record,
+                state=UploadState.FAILED,
+                failure_code=ERR_STAGING_LOST,
+                updated_at=self._clock(),
+            )
+            self._write_record(failed)
+            raise ReceiveError(
+                ERR_STAGING_LOST,
+                "staged bytes for this upload are gone; begin a new upload",
+            ) from None
 
         updated = replace(
             record,
