@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import ast
 import copy
+import os
 import subprocess
 import sys
 import time
@@ -148,6 +149,24 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     repo = Path(__file__).resolve().parents[2]
+
+    # One run at a time, enforced with the same primitive the lease uses, and for the same reason.
+    # Two concurrent runs each mutate and restore the SAME files: they overwrite each other's
+    # "original", and whichever finishes second restores a mutant. That happened -- a second run
+    # was started while the first was still going, and `archive_plan.py` was left with 120 lines
+    # deleted. The clean-tree check caught it and nothing reached a commit, but the tool had no
+    # business allowing it.
+    lock = repo / ".mutation-probe.lock"
+    try:
+        handle = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        print(
+            f"  another mutation run holds {lock.name}. Two runs mutate the same files and will\n"
+            "  restore each other's mutants. Wait for it, or delete the lock if it is stale."
+        )
+        return 2
+    os.close(handle)
+
     survivors: list[Mutation] = []
     killed = 0
     started = time.perf_counter()
@@ -185,6 +204,8 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"  SURVIVED  {name}:{mutation.line}  {mutation.kind}  {mutation.detail}")
             else:
                 killed += 1
+
+    lock.unlink(missing_ok=True)
 
     total = killed + len(survivors)
     elapsed = time.perf_counter() - started
