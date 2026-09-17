@@ -101,9 +101,22 @@ Specifically:
 
 ## Open decisions for the owner
 
-1. **How many `previous` roots, retained how long?** One is enough to undo the last promotion and
-   not enough to undo a bad one discovered a week later. The cost is graph size, which is the
-   thing P4 is adding.
+1. ~~How many `previous` roots, retained how long?~~ **DECIDED 2026-09-17: exactly one, replaced
+   at the next promotion.** Undo always works for the most recent promotion, and the cost is
+   bounded — roughly 2x structure size per project, never growing.
+
+   The trade accepted with it: a bad promotion discovered AFTER a later good one is no longer
+   reversible in place. That is the right default because it keeps the cost a constant rather than
+   a function of promotion frequency, and because a promotion that is wrong is usually wrong on
+   the next query rather than a week later.
+
+   Two consequences to build in rather than discover:
+   - **The retention rule is the gate's escape hatch**, so `restore from previous` must be tested
+     against the state where a second promotion has already replaced it — the case where restore
+     correctly REFUSES. An escape hatch that silently restores the wrong generation is worse than
+     one that says no.
+   - Anyone who needs a longer window needs an explicit export before promoting, not a deeper
+     retention setting. Worth stating in the operator docs when P4 ships.
 2. **Does a degraded view refuse reads, or serve with a warning?** The parent plan says
    "degraded-view blocking" in the gate and "reads carry a warning" in the invariants. Those are
    different products: one stops a caller, the other trusts them to notice.
