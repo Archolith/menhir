@@ -1,3 +1,29 @@
+## 2026-09-17 - Beacon generation from indexed project knowledge (#120)
+
+- `src/menhir/services/beacon_generation.py`: conservative source-grounded manifest
+  generation from StructureQueries evidence — intact-index/root-match/coverage/
+  fingerprint gating, indexed description and canonical documents only, no synthesized
+  purpose/commands/guardrails, fail closed on missing evidence.
+- `src/menhir/services/beacon_compat.py`: version-pinned subprocess boundary to a
+  separately installed Beacon 0.1.0 interpreter (framework dependency isolation); the
+  raw manifest is parsed and validated by Beacon's own loader/validator before any
+  bytes are published. No schema logic is copied into Menhir.
+- `src/menhir/services/beacon_publication.py`: staged, digest-gated publication to the
+  fixed sidecar `beacon.generated.yaml`; refuses overwriting initial outputs, foreign
+  or hand-edited artifacts, symlinked paths, and concurrent writers (advisory lock);
+  validates staged candidates before atomic replace; preserves mtime on zero diff.
+- `src/menhir/cli/beacon.py` (+ registration): `menhir beacon generate PROJECT --repo
+  --beacon-python [--refresh --expected-sha256]` local operator command.
+- `docs/agent-usage.md`: command, sidecar/refresh policy, dependency isolation, and
+  validation workflow.
+- `tests/test_beacon_publication.py` (7) and `tests/test_beacon_generation.py` (10):
+  publication safety, fail-closed evidence gating, real-Beacon round trips through the
+  actual parser/validator, `beacon validate` CLI acceptance, deterministic refresh with
+  zero semantic diff, and wrong-digest no-clobber. 17/17 pass locally; full offline and
+  graph-backed CI on the exact SHA remain release gates. Live-Neo4j ingest→generate E2E-6
+  and Beacon stdio tool-query acceptance are NOT RUN and stay with the MVP release lane.
+- Keep the newest ten dated entries per `.agent/maintenance.md`; older entries remain in Git history.
+
 ## 2026-09-16 - local MVP tracked-write receipts and observation guidance
 
 - `src/menhir/mcp/formatters.py`: status/watch observations direct continuation to the

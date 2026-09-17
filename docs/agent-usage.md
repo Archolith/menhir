@@ -92,6 +92,25 @@ a time-bound memory directly and bypasses graph enrichment. Do not require a que
 an enrichment `READY` transition for that path. Retention/flag semantics remain governed by the
 separate MVP retention work; this workflow does not certify them.
 
+## Beacon generation (issue #120)
+
+`menhir beacon generate PROJECT --repo ABSOLUTE_ROOT --beacon-python PATH` generates
+`beacon.generated.yaml` in the repository root from Menhir-held indexed project knowledge.
+Generation is conservative and fails closed: it requires an intact, complete index whose
+recorded root matches the requested repository, a scan fingerprint, an indexed project
+description, and at least one indexed canonical document. It never invents purpose, commands,
+guardrails, or concepts to fill schema fields.
+
+- The output is always the sidecar `beacon.generated.yaml`, never a hand-authored `beacon.yaml`.
+- Initial generation refuses an existing output. Refresh requires `--refresh` plus
+  `--expected-sha256` matching the existing generated file; foreign or hand-edited outputs are refused.
+- The Beacon package lives in a separate interpreter (`--beacon-python`, currently pinned to Beacon
+  0.1.0) because Menhir and Beacon require incompatible `archolith-mcp-framework` versions.
+  Menhir never imports Beacon directly; every artifact is serialized and validated by Beacon's own
+  parser and validator before publication.
+- The published manifest passes `beacon validate` with zero errors and serves through Beacon's stdio
+  server (`BEACON_MANIFEST_PATH=<path> beacon`).
+
 ## Failure behavior
 
 - If Menhir is unavailable, do not pretend its history or structural graph was checked. Continue only when
