@@ -2,7 +2,7 @@
 artifact_schema: 1
 artifact_uuid: dbde430c-9be1-4131-aa85-871a8e99e5ef
 artifact_type: plan
-artifact_status: PROPOSED
+artifact_status: APPROVED
 ---
 
 # Menhir local-stdio MVP release plan
