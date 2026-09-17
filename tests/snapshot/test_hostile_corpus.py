@@ -8,10 +8,14 @@ Two jobs, and keeping them apart is the point:
    asserted here against a real archive rather than a string. `normalize_bundle_path` has always
    been tested with hostile strings; nothing had ever handed the system a ZIP whose central
    directory contains `../../etc/passwd`.
-2. **State what is not, without pretending.** Duplicates, case collisions, bombs and count
-   exhaustion need the extractor P3 will build. Those cases are asserted to be well-formed and to
-   name a real refusal code -- never to be refused, because nothing refuses them yet. A test that
-   reported those as protected would be worse than no test.
+2. **Prove the validator refuses all twelve**, including the four no path rule could reach:
+   duplicates, case collisions, bombs and count exhaustion. `plan_archive` decides what an
+   extractor would be allowed to write and creates nothing, so the defence is exercised without a
+   managed root, a lease or a worker existing.
+
+The file briefly held a third job -- declaring those four as undefended -- and that wording is
+gone rather than softened, because it is no longer true. `NEEDS_EXTRACTOR` still names them, but it
+now means "not refusable by a path rule alone", not "not refused".
 """
 
 from __future__ import annotations
@@ -22,7 +26,12 @@ import zipfile
 import pytest
 
 from menhir.snapshot import protocol
-from menhir.snapshot.protocol import BundlePathError, normalize_bundle_path
+from menhir.snapshot.protocol import (
+    PROVISIONAL_LIMITS,
+    BundleFormatError,
+    BundlePathError,
+    normalize_bundle_path,
+)
 from tests.snapshot.hostile_corpus import (
     CORPUS,
     NEEDS_EXTRACTOR,
@@ -80,11 +89,12 @@ def test_a_refusal_never_echoes_the_hostile_path(case) -> None:
 
 @pytest.mark.parametrize("case", NEEDS_EXTRACTOR, ids=lambda c: c.name)
 def test_an_extractor_bound_attack_is_well_formed_and_names_a_real_code(case) -> None:
-    """These are NOT yet defended, and this test does not claim they are.
+    """The corpus entry is well-formed and names a code the protocol already defines.
 
-    It asserts only that the corpus entry is usable the day the extractor exists: the archive
-    builds, it carries the shape the attack needs, and its expected refusal is a code the frozen
-    protocol already defines rather than one this corpus invented.
+    Separate from the refusal test on purpose. This one asserts the ATTACK is real -- that the
+    archive still exhibits the shape its name claims -- because a corpus entry that quietly stopped
+    being hostile would pass a refusal test only by accident, or stop passing it for the right
+    reason and be "fixed" in the wrong place.
     """
     blob = case.build()
     stored = _names(blob)
@@ -170,6 +180,83 @@ def test_every_path_carried_attack_is_refused_and_the_rest_are_declared_pending(
         case.expected_code for case in CORPUS if case.expected_code
     }, "every corpus entry must declare a refusal code"
     assert len(NEEDS_EXTRACTOR) == 4, (
-        "four attacks still have no defence: duplicate entry, case collision, decompression bomb, "
-        "entry-count exhaustion. Update this number when P3 defends one, deliberately."
+        "four attacks are structural rather than path-carried: duplicate entry, case collision, "
+        "decompression bomb, entry-count exhaustion. All four ARE refused -- by `plan_archive`, "
+        "not by a path rule -- so this number tracks the split, not a gap in the defence."
     )
+
+
+# --- the validator: the decision half of extraction ----------------------------------------------
+
+
+@pytest.mark.parametrize("case", CORPUS, ids=lambda c: c.name)
+def test_the_validator_refuses_every_corpus_attack(case) -> None:
+    """All twelve, including the four no path rule could catch.
+
+    `plan_archive` reads the central directory and returns what an extractor would be ALLOWED to
+    write. It creates nothing, so this is the whole defence being exercised without a managed root,
+    a lease or a worker existing yet -- those depend on design questions still open, and none of
+    them are needed to decide that a bundle is hostile.
+    """
+    from dataclasses import replace
+
+    from menhir.snapshot.archive_plan import plan_archive
+
+    # The count limit is tightened for the test rather than the corpus being grown to 20,001
+    # entries. The first run exposed the alternative: a 5,000-entry archive is comfortably UNDER
+    # the pilot limit, so the validator correctly did not refuse it and the test was asserting a
+    # rule it had not actually exercised. Every other limit stays at the shipping value, so each
+    # attack still trips the rule it is named for -- in particular the bomb's 8 MiB entry must stay
+    # within `max_file_bytes` or it would be refused for size before the ratio is ever considered.
+    limits = replace(PROVISIONAL_LIMITS, max_file_count=100)
+
+    with pytest.raises(BundleFormatError) as excinfo:
+        plan_archive(case.build(), limits)
+
+    allowed = expected_codes(case)
+    assert excinfo.value.code in allowed, (
+        f"{case.name} ({case.attack}) was refused as {excinfo.value.code}, "
+        f"expected one of {sorted(allowed)}"
+    )
+
+
+def test_the_validator_accepts_an_ordinary_bundle() -> None:
+    """The corpus proves refusals; this proves the validator is not simply refusing everything.
+
+    A guard that rejects all input passes every hostile test and is useless, so the positive case
+    belongs beside them rather than in a separate file someone reads later.
+    """
+    from menhir.snapshot.archive_plan import plan_archive
+    from tests.snapshot.hostile_corpus import _zip
+
+    planned = plan_archive(_zip([("src/main.py", b"print('hi')\n"), ("README.md", b"# ok\n")]))
+
+    assert [entry.path for entry in planned] == ["src/main.py", "README.md"]
+    assert all(entry.declared_size > 0 for entry in planned)
+
+
+def test_the_validator_refuses_bytes_that_are_not_an_archive() -> None:
+    """A caller can upload anything; `SEALED` means the bytes arrived, not that they are a ZIP."""
+    from menhir.snapshot.archive_plan import ERR_ARCHIVE_UNREADABLE, plan_archive
+
+    with pytest.raises(BundleFormatError) as excinfo:
+        plan_archive(b"this is not a zip file, it is just some bytes")
+
+    assert excinfo.value.code == ERR_ARCHIVE_UNREADABLE
+
+
+def test_a_validator_refusal_never_echoes_the_archive_path() -> None:
+    """Invariant 5 across the new boundary.
+
+    `plan_archive` sees attacker-chosen names and raises `BundleFormatError`, which a server may
+    log. The name must not travel with it.
+    """
+    from menhir.snapshot.archive_plan import plan_archive
+
+    case = next(c for c in CORPUS if c.name == "control_character")
+    with pytest.raises(BundleFormatError) as excinfo:
+        plan_archive(case.build())
+
+    rendered = str(excinfo.value)
+    assert "\x1b" not in rendered
+    assert "il.py" not in rendered
