@@ -1,3 +1,31 @@
+## 2026-09-17 - the extraction lease, written counterexamples first
+
+P3 decision 4: the lease binds snapshot, owner and generation, never a project name alone. The
+failures were written before the implementation -- the order that found both P2B bugs -- and it
+found one here too.
+
+- **The generation is the mechanism.** A claim is an exclusive file create (`O_CREAT|O_EXCL`) of
+  `<generation>.json`, so two workers that both read "the last lease expired" both compute the same
+  next generation and the filesystem lets exactly one win. A real compare-and-swap, because reading
+  state and then writing it is the check-then-act the P2B quota bug was.
+- **Supersession is judged before expiry.** The store is the authority on time, not the holder, so
+  a worker that was paused or has a wrong clock is refused for the right reason instead of
+  concluding from its own expiry that it is fine.
+- **A stale holder cannot release the current holder's lease.** The dangerous one: expiry is
+  obvious and everyone implements it, whereas a release keyed on the project name hands the next
+  holder's lease to whoever crashed last, mid-extraction.
+- **A crashed holder does not block the project.** An abandoned lease expires; there is no lock to
+  be left held. That is the argument against a lock file, asserted rather than argued.
+- **No process identity is recorded**, and a test asserts the field cannot be added quietly. A PID
+  is reused, and a PID in another namespace is a different process -- "the holder must be dead by
+  now" is an inference dressed as a fact.
+
+The bug the counterexamples found: `release` first deleted the lease file, so the store saw no
+history and the next claim reused generation 1. A generation that can be reused is not a version --
+a stale lease from the previous turn would match the new one on generation, leaving only the owner
+field between it and authority. Release now leaves an expired tombstone, keeping generations
+monotonic for the life of the project.
+
 ## 2026-09-17 - Beacon generation from indexed project knowledge (#120)
 
 - `src/menhir/services/beacon_generation.py`: conservative source-grounded manifest
