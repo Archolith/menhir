@@ -25,7 +25,7 @@ def _reader() -> Any:
 
     from menhir.config.settings_model import MemorySettings
     from menhir.infrastructure.neo4j import Neo4jRepository
-    from menhir.infrastructure.structure_queries import StructureQueries
+    from menhir.infrastructure.structure_queries import StructureGraphWriter
 
     load_menhir_env()
     settings = MemorySettings.from_env()
@@ -35,7 +35,7 @@ def _reader() -> Any:
         password=settings.neo4j_password,
         database=settings.neo4j_database,
     )
-    return StructureQueries(neo4j=neo4j), neo4j
+    return StructureGraphWriter(neo4j=neo4j), neo4j
 
 
 @beacon_app.command()
