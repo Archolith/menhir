@@ -1,13 +1,15 @@
 ---
 artifact_schema: 1
 artifact_type: plan
-artifact_status: PROPOSED
+artifact_status: APPROVED
 ---
 
 # P3 extraction: threat model and mechanism
 
 Parent plan: `.agent/plans/menhir-mcp-snapshot-ingest-2026-09-16.md` (P3)
-Status: **PROPOSED — not approved, not implemented.**
+Status: **APPROVED 2026-09-17. Four decisions taken; see "Decisions" below.**
+Implemented so far: the validator (`menhir.snapshot.archive_plan`), which refuses all twelve
+corpus attacks and writes nothing. The writing half is not built.
 
 ## Why this document exists before any code
 
@@ -76,28 +78,56 @@ written counterexamples — holder A attested dead then B claims and A resumes; 
 mid-extraction; two workers on one project with different snapshots — in the way the P2B
 counterexamples were written first and found two real bugs.
 
-## Open questions for the owner
+## Decisions (owner, 2026-09-17)
 
-1. **Subprocess or in-process?** A subprocess bounds memory and survives a parser crash, and costs
-   startup time per extraction plus a way to report failure back. In-process is simpler and makes a
-   `zipfile` hang the server's problem. My inclination is subprocess, and it is a real cost, so it
-   should be chosen rather than assumed.
-2. **Where does the managed root live?** Under `MENHIR_STATE_DIR` alongside staging is the obvious
-   answer, and it means extraction and staging share a disk budget that was measured for staging
-   alone. The 64 MiB compressed / 256 MiB expanded pilot quota was approved for bytes on the wire;
-   a materialised copy is a second, larger, simultaneous cost.
-3. **What does `shadow` report?** The plan says counts, fingerprint and partial status. The
-   fingerprint's definition matters: if it is `tree_digest`, it is verifiable against the manifest
-   and worth little as a scan result; if it is over scan OUTPUT, it is the thing that makes the
-   comparison with a direct local scan meaningful.
-4. **Does P3 need the bundle to have come from our bundler?** Nothing today proves it did. Every
-   rule above is applied to the archive as received, which is the right posture — but it is worth
-   being explicit that "the bundler would never emit that" is not a defence P3 may rely on.
+1. **Extraction runs in a separate process.** A malformed archive that crashes or hangs the parser
+   becomes a failed job rather than a server outage, and memory is bounded by a ceiling rather than
+   by the whole process. The cost — startup per extraction, and a failure path that has to cross
+   the boundary — is accepted. Note what this does NOT buy: a subprocess bounds blast radius, it
+   does not make the parser safe, so every validator rule still applies inside it.
+2. **Extraction gets its own disk budget, separate from staging.** The pilot figures were approved
+   for bytes on the wire; a materialised copy is roughly 4x that and simultaneous. Sharing one
+   budget would have made the approved number silently mean something else. Needs one figure chosen
+   and its own sweep, and the sweep must reclaim a root whose job is gone — invariant 11 again: a
+   directory's existence is not state.
+3. **The shadow fingerprint is computed over scan OUTPUT**, not over `tree_digest`. A fingerprint
+   of the input proves delivery, which the manifest already proves; the gate asks for structural
+   parity against a direct local scan, and only a fingerprint of what the scanner found can answer
+   that. Requires a stable serialisation of scan results — stable across machines and Python
+   versions, or the parity check fails for reasons that have nothing to do with the snapshot.
+4. **The lease binds snapshot + owner + generation**, never a project name alone. Evidence is bound
+   to the entity, version and holder it proves, so a fact about owner A cannot silently become a
+   fact about owner B.
 
-## What I would build first
+**On decision 4, the counterexamples are not optional.** The third option offered was to write them
+before settling the design; the design is now settled, which changes when they are written, not
+whether. They are written FIRST and the implementation follows them: holder attested dead then
+resumes; lease expiring mid-extraction; two workers on one project with different snapshots; a
+holder that crashes and must not block the phase forever. Every bug found in P2B was found this
+way, and a lease is the component in this phase most likely to be subtly wrong.
 
-Not the extractor. The counterexample corpus: a directory of small, deliberately hostile archives —
-traversal, symlink, bomb, duplicate, collision, manifest mismatch, malformed — with a test that
-asserts each is refused with a specific stable code. That corpus is what makes the extractor
-reviewable, and it is the artifact P2B's experience argues for most strongly: both bugs found this
-phase were found by writing the adversarial case first.
+## Resolved — the remaining open question
+
+**P3 may not assume the bundle came from our bundler.** This was listed as a question and is not
+one; it is a posture, stated here so nobody relies on the opposite. Nothing proves a bundle was
+built by our code, so every rule above is applied to the archive as received and "the bundler would
+never emit that" is not a defence available to this phase. `archive_plan` already works this way:
+it re-applies `normalize_bundle_path` to the archive's own entry names rather than trusting that
+bundle-time validation happened.
+
+## Build order
+
+**Done.** The hostile corpus — twelve archives, each declaring its refusal — and the validator that
+refuses all twelve. `plan_archive` reads the central directory and returns what an extractor would
+be allowed to write; it creates nothing, so the entire decision layer was built and adversarially
+tested before any of the four decisions above were taken. Verified on Linux CI, which matters: the
+corpus produced one finding that was true only on Windows, and CI disproved it.
+
+**Next, in order:**
+
+1. **Lease counterexamples**, written before the lease. Decision 4 settled what it binds to, not
+   that the failures are understood.
+2. **The extraction worker** — subprocess, its own disk budget, a per-upload root reclaimed by a
+   sweep that never adopts a directory as state.
+3. **The shadow scan and its fingerprint**, over scan output, with a serialisation stable enough
+   that a parity failure means a real difference rather than a machine difference.
