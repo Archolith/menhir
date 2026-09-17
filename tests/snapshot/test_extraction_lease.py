@@ -298,3 +298,57 @@ def test_a_released_holder_cannot_act_on_its_old_lease(store: LeaseStore) -> Non
         store.check(lease)
     with pytest.raises(LeaseError):
         store.release(lease)
+
+
+# --- found by mutation testing: two guards nothing was holding ------------------------------------
+
+
+def test_losing_the_exclusive_create_race_is_a_refusal_not_a_silent_steal(
+    tmp_path: Path, clock: FakeClock
+) -> None:
+    """The `O_CREAT|O_EXCL` guard, which is the entire concurrency control.
+
+    Deleting its raise survived the suite: every other test arranges ONE claimant, so the branch
+    where two workers compute the same next generation and the filesystem picks a winner was never
+    reached. Here the loser's file is already there when it tries.
+
+    Without the raise, the loser would return a lease it does not hold and both workers would
+    proceed -- the exact interleaving the generation exists to prevent.
+    """
+    store = LeaseStore(tmp_path / "leases", ttl_s=_TTL, clock=clock)
+    first = _acquire(store, owner="worker-a", upload="snap-1")
+    clock.advance(_TTL + 1)  # first lapses, so the project looks free to both
+
+    # Stand in for the racer that got there microseconds earlier: generation 2 already exists.
+    directory = store._project_dir("proj")
+    (directory / f"{first.generation + 1:012d}.json").write_text(
+        '{"upload_id": "snap-9", "owner": "worker-z", "generation": 2, "expires_at": 1e12}',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(LeaseError) as excinfo:
+        _acquire(store, owner="worker-b", upload="snap-2")
+    assert excinfo.value.code == "snapshot.lease.held"
+
+
+def test_a_lease_is_expired_exactly_at_its_deadline_not_a_moment_after(
+    store: LeaseStore, clock: FakeClock
+) -> None:
+    """The expiry comparison, at the boundary rather than well past it.
+
+    Every other expiry test advances the clock by TTL+1, so `>=` and `>` behave identically and
+    flipping one survived. The moment that decides it is `now == expires_at`: at the deadline the
+    lease is gone, and one tick before it is still held.
+
+    Off by one here means two workers each believe they hold the project for one clock tick, which
+    is precisely long enough to both start writing.
+    """
+    lease = _acquire(store, owner="worker-a", upload="snap-1")
+
+    clock.now = lease.expires_at - 1
+    store.check(lease)  # one tick before: still ours
+
+    clock.now = lease.expires_at
+    with pytest.raises(LeaseError) as excinfo:
+        store.check(lease)
+    assert excinfo.value.code == "snapshot.lease.expired"

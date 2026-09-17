@@ -29,6 +29,7 @@ import zipfile
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from menhir.snapshot.archive_plan import ERR_ARCHIVE_ENTRY_NOT_REGULAR
 from menhir.snapshot.protocol import (
     ERR_LIMIT_EXPANSION_RATIO,
     ERR_LIMIT_FILE_COUNT,
@@ -104,6 +105,26 @@ def _zip_verbatim_name(name: str) -> bytes:
     return buffer.getvalue()
 
 
+def _zip_symlink(name: str, link_target: str) -> bytes:
+    """An entry stored as a SYMLINK, which is threat #2 in the P3 design.
+
+    A ZIP records the Unix file type in the high half of `external_attr`, so a symlink is
+    `S_IFLNK | 0777` there with the link target as the entry's content. Extracted naively it
+    becomes a link the NEXT write follows out of the root -- zip-slip with an extra step, and
+    invisible to every path rule because the name itself is perfectly ordinary.
+
+    This attack was named in the design, the guard was written, and until now nothing built the
+    archive: mutation testing found the guard could be deleted with no test noticing.
+    """
+    info = zipfile.ZipInfo(name)
+    info.create_system = 3  # Unix, so the mode bits below are meaningful
+    info.external_attr = (0o120777 << 16) | 0o120000
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(info, link_target)
+    return buffer.getvalue()
+
+
 CORPUS: tuple[HostileArchive, ...] = (
     # --- carried by a path: the frozen contract already refuses these ---------------------------
     HostileArchive(
@@ -166,6 +187,13 @@ CORPUS: tuple[HostileArchive, ...] = (
         _one("src/main.py."),
     ),
     # --- structural: no single path is at fault, and only the extractor can refuse them ---------
+    HostileArchive(
+        "symlink_escape",
+        "a symlink entry the next write follows out of the root -- zip-slip with an extra step",
+        ERR_ARCHIVE_ENTRY_NOT_REGULAR,
+        None,
+        lambda: _zip_symlink("src/innocent.py", "../../../../etc/passwd"),
+    ),
     HostileArchive(
         "duplicate_entry",
         "the same path twice, where readers disagree about which one wins",

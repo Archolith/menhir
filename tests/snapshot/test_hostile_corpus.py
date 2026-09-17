@@ -25,7 +25,7 @@ import zipfile
 
 import pytest
 
-from menhir.snapshot import protocol
+from menhir.snapshot import archive_plan, protocol
 from menhir.snapshot.protocol import (
     PROVISIONAL_LIMITS,
     BundleFormatError,
@@ -100,10 +100,17 @@ def test_an_extractor_bound_attack_is_well_formed_and_names_a_real_code(case) ->
     stored = _names(blob)
     assert stored, f"{case.name}: the archive has no entries"
 
+    # Codes come from two modules now. `protocol` froze paths, manifests and limits in P0;
+    # `archive_plan` added two for cases that are none of those -- an unreadable archive and an
+    # entry that is not a regular file. Both are stable contracts, so both count.
     frozen_codes = {
         value
         for name, value in vars(protocol).items()
         if name.startswith(("ERR_PATH", "ERR_MANIFEST", "ERR_LIMIT")) and isinstance(value, str)
+    } | {
+        value
+        for name, value in vars(archive_plan).items()
+        if name.startswith("ERR_ARCHIVE") and isinstance(value, str)
     }
     assert case.expected_code in frozen_codes, (
         f"{case.name} expects {case.expected_code}, which is not a code the protocol defines"
@@ -121,6 +128,13 @@ def test_an_extractor_bound_attack_is_well_formed_and_names_a_real_code(case) ->
             assert info.file_size / max(info.compress_size, 1) > 100
     elif case.name == "entry_count_exhaustion":
         assert len(stored) >= 1000
+    elif case.name == "symlink_escape":
+        # The attack is carried by the MODE BITS, not the name, so the shape check has to look
+        # there: an ordinary-looking `src/innocent.py` whose type nibble says S_IFLNK.
+        with zipfile.ZipFile(io.BytesIO(blob)) as archive:
+            info = archive.infolist()[0]
+            assert info.create_system == 3, "not marked as Unix; the mode bits would be ignored"
+            assert (info.external_attr >> 16) & 0o170000 == 0o120000, "not stored as a symlink"
 
 
 def test_the_backslash_refusal_depends_on_the_platform_reading_it() -> None:
@@ -179,10 +193,12 @@ def test_every_path_carried_attack_is_refused_and_the_rest_are_declared_pending(
     assert {case.expected_code for case in CORPUS} == {
         case.expected_code for case in CORPUS if case.expected_code
     }, "every corpus entry must declare a refusal code"
-    assert len(NEEDS_EXTRACTOR) == 4, (
-        "four attacks are structural rather than path-carried: duplicate entry, case collision, "
-        "decompression bomb, entry-count exhaustion. All four ARE refused -- by `plan_archive`, "
-        "not by a path rule -- so this number tracks the split, not a gap in the defence."
+    assert len(NEEDS_EXTRACTOR) == 5, (
+        "five attacks are structural rather than path-carried: symlink escape, duplicate entry, "
+        "case collision, decompression bomb, entry-count exhaustion. All five ARE refused -- by "
+        "`plan_archive`, not by a path rule -- so this number tracks the split, not a gap in the "
+        "defence. symlink_escape was added after mutation testing found its guard could be "
+        "deleted with no test noticing."
     )
 
 
