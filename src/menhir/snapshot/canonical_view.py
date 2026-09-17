@@ -1,0 +1,226 @@
+"""The pointer that decides which snapshot a project's graph currently answers from.
+
+Plan: `.agent/plans/menhir-mcp-snapshot-ingest-2026-09-16.md` (P4).
+Design: `.agent/plans/menhir-snapshot-p4-graph-write-design-2026-09-17.md`.
+
+P4 is the first phase that writes to the graph, and it differs from every phase before it in one
+way that shapes this module. The extraction writer deletes its root on any failure and a test
+proves nothing survives, because a half-written directory can be removed in one call. **A
+half-written graph cannot be.** There is no `rmtree` for nodes already visible to readers, and a
+compensating delete is itself a write that can fail halfway.
+
+So the strategy inverts. P3's rule was "a failure leaves nothing". P4's is **"a failure may leave
+plenty, and none of it may be readable as complete"** -- and this pointer is the whole mechanism
+for the second half. Writes build a new root that nothing reads; one atomic move publishes it.
+Before that move a partial write is invisible and a sweep reclaims it. After it, `previous_root`
+is the escape hatch, so compensation is another move rather than an inverse write.
+
+**The check and the act are ONE statement, and that is not a style preference.**
+`structure_write_fence.admit_structure_writer` documents why the hard way: validating a claim in a
+statement of its own lets a transfer land between the validation and the write. The same applies
+here -- a build takes minutes, ownership can change inside that window, and a flip authorised by a
+generation read earlier is authorised by a fact that may no longer be true. `publish_root` reads,
+decides and writes in a single Cypher statement; a caller that finds no row has lost, and must not
+re-read and retry into the winner's state.
+
+**Retention is exactly one previous root** (owner decision, 2026-09-17). Undo always works for the
+most recent promotion, and the cost stays bounded rather than growing with how often a project
+syncs. The accepted consequence: a bad promotion discovered after a later good one is not
+reversible in place, and `restore_previous` refuses rather than silently restoring the wrong
+generation. An escape hatch that opens onto the wrong room is worse than one that says no.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any
+
+__all__ = [
+    "CANONICAL_VIEW_CONSTRAINTS",
+    "ERR_VIEW_DEGRADED",
+    "ERR_VIEW_NO_PREVIOUS",
+    "ERR_VIEW_SUPERSEDED",
+    "ViewError",
+    "ViewPointer",
+    "mark_degraded",
+    "publish_root",
+    "read_view",
+    "restore_previous",
+]
+
+ERR_VIEW_SUPERSEDED = "snapshot.view.superseded"
+ERR_VIEW_DEGRADED = "snapshot.view.degraded"
+ERR_VIEW_NO_PREVIOUS = "snapshot.view.no_previous"
+
+#: Real DDL, shipped with the module so a test can apply the SAME constraint the bootstrap does.
+#: A test that creates its own copy proves nothing about the one production runs.
+CANONICAL_VIEW_CONSTRAINTS = [
+    (
+        "CREATE CONSTRAINT canonical_view_identity IF NOT EXISTS "
+        "FOR (v:CanonicalView) REQUIRE (v.project_id, v.view_key) IS UNIQUE"
+    ),
+]
+
+
+class ViewError(RuntimeError):
+    """A refusal carrying a stable code. Never carries a root id or a project path."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+@dataclass(frozen=True)
+class ViewPointer:
+    """Which root a view answers from, and whether it can be trusted."""
+
+    project_id: str
+    view_key: str
+    generation: int
+    current_root: str | None
+    #: Exactly one, replaced at each publish. `None` before the second publish.
+    previous_root: str | None
+    degraded: bool
+    degraded_reason: str = ""
+
+
+def _pointer(row: Any, project_id: str, view_key: str) -> ViewPointer:
+    return ViewPointer(
+        project_id=project_id,
+        view_key=view_key,
+        generation=int(row.get("generation") or 0),
+        current_root=row.get("current_root"),
+        previous_root=row.get("previous_root"),
+        degraded=bool(row.get("degraded") or False),
+        degraded_reason=str(row.get("degraded_reason") or ""),
+    )
+
+
+_RETURN = (
+    "RETURN v.generation AS generation, v.current_root AS current_root, "
+    "v.previous_root AS previous_root, coalesce(v.degraded, false) AS degraded, "
+    "coalesce(v.degraded_reason, '') AS degraded_reason"
+)
+
+
+def read_view(neo4j: Any, *, project_id: str, view_key: str) -> ViewPointer | None:
+    """Return the view, or None when the project has never been promoted.
+
+    Reads are ALWAYS served, including for a degraded view. The plan is explicit: a degraded view
+    is fail-closed in the sense that nothing may be promoted INTO it, and reads carry the status
+    rather than being refused. Blocking reads would take a project's memory away over a fault in
+    the write path.
+    """
+    rows = neo4j.execute(
+        f"MATCH (v:CanonicalView {{project_id: $pid, view_key: $vk}}) {_RETURN}",
+        {"pid": project_id, "vk": view_key},
+    )
+    rows = list(rows)
+    return _pointer(rows[0], project_id, view_key) if rows else None
+
+
+def publish_root(
+    neo4j: Any,
+    *,
+    project_id: str,
+    view_key: str,
+    root_id: str,
+    expected_generation: int,
+) -> ViewPointer:
+    """Make `root_id` the view's current root, or refuse.
+
+    ONE statement. The generation check, the degraded check and the pointer move happen together,
+    so a transfer or a competing promotion cannot land between the decision and the act -- the
+    failure `admit_structure_writer` exists to prevent, in a different costume.
+
+    A caller that loses gets `ERR_VIEW_SUPERSEDED` and must NOT re-read and retry: the generation
+    it would read back belongs to the winner, and publishing against it would overwrite a
+    promotion that legitimately happened.
+    """
+    rows = list(
+        neo4j.execute(
+            "MERGE (v:CanonicalView {project_id: $pid, view_key: $vk}) "
+            "ON CREATE SET v.generation = 0, v.degraded = false "
+            "WITH v WHERE coalesce(v.generation, 0) = $expected "
+            "AND coalesce(v.degraded, false) = false "
+            "SET v.previous_root = v.current_root, "
+            "    v.current_root = $root, "
+            "    v.generation = coalesce(v.generation, 0) + 1 "
+            f"{_RETURN}",
+            {
+                "pid": project_id,
+                "vk": view_key,
+                "root": root_id,
+                "expected": expected_generation,
+            },
+        )
+    )
+    if rows:
+        return _pointer(rows[0], project_id, view_key)
+
+    # No row means the guard did not match. Re-read ONLY to report which reason -- never to retry.
+    current = read_view(neo4j, project_id=project_id, view_key=view_key)
+    if current is not None and current.degraded:
+        raise ViewError(
+            ERR_VIEW_DEGRADED, "this view is degraded and cannot be promoted into"
+        )
+    raise ViewError(
+        ERR_VIEW_SUPERSEDED, "this view moved on while the promotion was being built"
+    )
+
+
+def restore_previous(
+    neo4j: Any, *, project_id: str, view_key: str, expected_generation: int
+) -> ViewPointer:
+    """Flip back to `previous_root`, or refuse.
+
+    Compensation is a pointer move, not an inverse write, which is what keeps "the undo also
+    failed" a tractable case rather than a traversal that can die halfway.
+
+    Refuses when there is no previous root. With a retention of exactly one, that covers both the
+    never-promoted-twice case and the already-restored case, and refusing is the whole point:
+    restoring a generation the operator did not mean would be worse than telling them no.
+    """
+    rows = list(
+        neo4j.execute(
+            "MATCH (v:CanonicalView {project_id: $pid, view_key: $vk}) "
+            "WHERE coalesce(v.generation, 0) = $expected AND v.previous_root IS NOT NULL "
+            "SET v.current_root = v.previous_root, "
+            "    v.previous_root = NULL, "
+            "    v.generation = coalesce(v.generation, 0) + 1 "
+            f"{_RETURN}",
+            {"pid": project_id, "vk": view_key, "expected": expected_generation},
+        )
+    )
+    if rows:
+        return _pointer(rows[0], project_id, view_key)
+
+    current = read_view(neo4j, project_id=project_id, view_key=view_key)
+    if current is None or current.previous_root is None:
+        raise ViewError(
+            ERR_VIEW_NO_PREVIOUS,
+            "no previous root is retained for this view; retention is one generation",
+        )
+    raise ViewError(ERR_VIEW_SUPERSEDED, "this view moved on before the restore")
+
+
+def mark_degraded(
+    neo4j: Any, *, project_id: str, view_key: str, reason: str
+) -> ViewPointer:
+    """Record durably that this view cannot be trusted, and block promotion into it.
+
+    Deliberately NOT conditional on a generation. A view is marked degraded when compensation has
+    already failed, which means the state is one no code path intended -- refusing to record that
+    because the generation moved would leave the fault invisible, which is the opposite of what
+    this is for.
+    """
+    rows = list(
+        neo4j.execute(
+            "MERGE (v:CanonicalView {project_id: $pid, view_key: $vk}) "
+            "ON CREATE SET v.generation = 0 "
+            "SET v.degraded = true, v.degraded_reason = $reason "
+            f"{_RETURN}",
+            {"pid": project_id, "vk": view_key, "reason": reason},
+        )
+    )
+    return _pointer(rows[0], project_id, view_key)
