@@ -282,3 +282,50 @@ async def test_one_principal_cannot_read_anothers_upload(
 
     assert result["ok"] is False
     assert result["error"]["code"] == "snapshot.upload.not_found"
+
+
+def test_telemetry_keeps_the_upload_id_and_still_masks_the_content() -> None:
+    """Owner decision (2026-09-16): `upload_id` is allowlisted, its siblings are not.
+
+    Without it, a failed upload writes one telemetry row per chunk with nothing to group them by,
+    which is the single question an upload incident asks. The id is server-minted hex the receiver
+    refuses unless it is hex, so it cannot carry caller prose.
+
+    `digest` is deliberately still redacted even though it is equally identifier-shaped: it is
+    derived from user bytes, so retaining it would let telemetry confirm whether a particular file
+    had been uploaded. That distinction is the whole point of the decision and is asserted here
+    rather than left to the allowlist's ordering.
+    """
+    from menhir.infrastructure.telemetry.helpers import _preview_of
+
+    payload = PutProjectSnapshotChunkTool().call_payload(
+        upload_id="a3f19c0b4d5e6f708192a3b4c5d6e7f8",
+        index=7,
+        declared_len=1048576,
+        digest="9" * 64,
+    )
+    rendered = _preview_of(payload)
+
+    assert "a3f19c0b4d5e6f708192a3b4c5d6e7f8" in rendered, "an upload's rows cannot be joined"
+    assert "1048576" in rendered and '"index": 7' in rendered
+    assert "9" * 64 not in rendered, "a content-derived digest must stay redacted"
+
+
+def test_a_chunk_of_real_content_never_reaches_telemetry() -> None:
+    """The invariant the allowlist must not have widened.
+
+    `call_payload` drops `data_b64` by construction, so this asserts the belt as well as the
+    braces: even handed the argument dict a caller actually sent, the preview carries no payload.
+    """
+    import base64
+
+    from menhir.infrastructure.telemetry.helpers import _preview_of
+
+    secret = base64.b64encode(b"SECRET-SOURCE-CODE" * 8).decode()
+    rendered = _preview_of(
+        {"upload_id": "b" * 32, "index": 0, "declared_len": 144, "data_b64": secret}
+    )
+
+    assert secret not in rendered
+    assert "SECRET" not in rendered
+    assert "b" * 32 in rendered

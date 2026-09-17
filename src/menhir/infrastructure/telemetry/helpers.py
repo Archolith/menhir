@@ -11,8 +11,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from menhir.infrastructure.paths import telemetry_db_path
+# `_utc_now_iso` is re-exported, not used here: other telemetry modules import it from this
+# module. `ruff --fix` deletes it as unused on sight, which breaks every importer at collection
+# time -- so it is named in `__all__`, which is both the honest declaration and what stops the
+# autofix removing it again.
 from menhir.clock import utc_now_iso as _utc_now_iso
+from menhir.infrastructure.paths import telemetry_db_path
+
+__all__ = ["_utc_now_iso", "connect_telemetry_db", "default_telemetry_db_path", "timezone"]
 
 logger = logging.getLogger(__name__)
 
@@ -164,6 +170,13 @@ _SAFE_TELEMETRY_STRING_KEYS = frozenset(
         "trigger",
         "turn_evidence_uuid",
         "type",
+        # Server-minted hex, never caller-supplied: `begin_project_snapshot` generates it and the
+        # receiver refuses any id that is not hex. Retained because without it a snapshot upload's
+        # rows cannot be joined -- a failed upload produces a row per chunk with no way to group
+        # them, which is the one question an upload incident asks. Its sibling `digest` is NOT
+        # here on purpose: a chunk digest is derived from user bytes and would confirm whether a
+        # given file was uploaded.
+        "upload_id",
         "user_id",
         "uuid",
         "valid_at",

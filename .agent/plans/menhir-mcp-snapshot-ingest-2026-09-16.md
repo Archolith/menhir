@@ -756,8 +756,13 @@ deduplication, authorization isolation, overflow rejection, and honest `CONTENT_
 
 1. Whether the current materialized view snapshot is retained until superseded (recommended for stable
    staleness and delta support) or deleted immediately at the cost of a new remote-staleness model.
-2. Whether snapshot tools remain hidden from model-facing catalogs when only the CLI should call
-   them, or are advertised with strong “use `menhir sync`” guidance.
+2. ~~Whether snapshot tools remain hidden from model-facing catalogs~~ **RESOLVED 2026-09-16:
+   advertised.** Agents need to sync as part of their workflow, so the tools are visible and the
+   descriptions guide rather than forbid -- prefer `menhir sync`, call the tools directly when it
+   is not available, never synthesize chunk bytes. **Follow-on not resolved:** `required_tier` is
+   still `operator`, so an agent-key client now SEES these tools and is refused on use.
+   Advertising a tool the caller cannot invoke is its own failure mode; lowering the tier is an
+   authorization decision, not a visibility one, and is listed separately below.
 3. Whether hosted Menhir is one tenant per instance or must block P6 on full structure-graph
    namespace ownership.
 4. Canonical promotion policy: trusted CI only (recommended default), explicit maintainer publish,
@@ -765,13 +770,17 @@ deduplication, authorization isolation, overflow rejection, and honest `CONTENT_
 5. Private workspace quota, inactivity TTL, and whether users may pin selected workspaces.
 6. Whether GitHub verification is required for the first hosted release or launches later while all
    Git checkouts initially use the safe local/unverified path.
-7. **Telemetry correlation for snapshot uploads.** `_preview_of` masks any string that is not
-   allowlisted AND identifier-shaped, so `upload_id` and `digest` are redacted from chunk rows
-   along with everything else. That is stricter than `call_payload` intends and means **telemetry
-   cannot correlate the rows belonging to one upload** — confirmed against real rows in the P2A
-   soak. Allowlisting `upload_id` (a server-minted opaque id, not user content) would restore
-   correlation without weakening invariant 5; doing nothing means the first upload incident is
-   debugged without a join key. Decide in P2B design, not during the incident.
+7. ~~**Telemetry correlation for snapshot uploads.**~~ **RESOLVED 2026-09-16: `upload_id` is
+   allowlisted.** It is server-minted hex the receiver refuses unless it is hex, so it cannot
+   carry caller prose. `digest` stays redacted on purpose: it is derived from user bytes, and
+   retaining it would let telemetry confirm whether a particular file had been uploaded.
+
+8. **Snapshot tool tier.** Decision 2 made the receive tools visible to agents while
+   `required_tier` remains `operator`, so an agent-key client sees them and is refused on use.
+   Either lower the tier (an authorization change: an agent key could then open uploads against a
+   project's quota), keep operator and accept that agents must run `menhir sync` with an operator
+   key, or gate visibility on the caller's tier so a client only sees what it can invoke. The
+   third is the most work and the only one with no bad edge.
 
 ## Docs to update
 

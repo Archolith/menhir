@@ -17,8 +17,14 @@ surface nobody meant to expose:
    refused.
 3. Operator tier. The mode being on is an operator's decision, and so is using it.
 
-Whether these tools stay hidden from model-facing catalogs once P2B ships, or are advertised with
-"use `menhir sync`" guidance, is the plan's open decision 4 and is deliberately not settled here.
+**Owner decision (2026-09-16): these are advertised, not hidden.** Agents need to sync as part of
+their workflow, so the descriptions guide rather than forbid: prefer `menhir sync`, call the tools
+directly when it is not available, and never invent chunk bytes.
+
+One consequence is deliberately left standing rather than quietly resolved: `required_tier` is
+still `operator`, so a client holding only an agent key sees these tools and is refused when it
+calls them. Advertising a tool the caller cannot use is its own kind of bad, and lowering the tier
+is an authorization change rather than a visibility one -- it needs deciding on its own terms.
 
 **Telemetry carries no content.** `call_payload` is overridden on the chunk tool to emit the
 upload id, index, byte count and digest only. The default would record the arguments -- which on
@@ -139,9 +145,11 @@ class BeginProjectSnapshotTool(_StagingTool):
     scope = ToolScope.NAMESPACED
     title = "Begin Project Snapshot"
     description = (
-        "Reserve a staging upload for a project snapshot bundle. Transport measurement only: "
-        "nothing is extracted, scanned, or written to the graph. Models should not call this; "
-        "it is driven by `menhir sync`."
+        "Reserve an upload for a project snapshot bundle. Returns the upload id and the chunk "
+        "size to use -- send chunks at THAT size, not a size of your own choosing. The snapshot "
+        "is inert: nothing is extracted, scanned, or written to the graph, so a completed upload "
+        "does not make the project searchable. Prefer running `menhir sync`, which builds the "
+        "bundle and drives this; call these tools directly only when that is not available."
     )
 
     def timeout_for(self, **_unused: object) -> int:
@@ -181,8 +189,10 @@ class PutProjectSnapshotChunkTool(_StagingTool):
     scope = ToolScope.OBJECT
     title = "Put Project Snapshot Chunk"
     description = (
-        "Upload one base64 chunk of a snapshot bundle. Models must not synthesize chunk "
-        "content; this is driven by `menhir sync`."
+        "Upload one base64 chunk of a snapshot bundle, at the chunk size `begin_project_snapshot` "
+        "returned and at its zero-based index. **Never synthesize chunk content.** Every byte must "
+        "come from a bundle built by the bundler: invented bytes produce a snapshot that does not "
+        "correspond to any real repository, and the server cannot tell the difference."
     )
 
     def timeout_for(self, **_unused: object) -> int:
