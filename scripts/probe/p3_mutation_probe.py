@@ -75,29 +75,44 @@ def _mutants(tree: ast.AST) -> list[tuple[ast.AST, Mutation]]:
     """Every single-node mutation of `tree`, each as a fresh copy."""
     out: list[tuple[ast.AST, Mutation]] = []
 
-    targets: list[tuple[str, int, str]] = []
+    # Keyed by (line, col), not line alone. `x < 0 or x > limit` holds TWO comparisons on one
+    # line, and selecting by line number mutated the FIRST one both times -- so the same mutation
+    # ran twice, was reported as two survivors, and the second comparison was never mutated at
+    # all. The probe was overstating its own coverage AND its own findings.
+    targets: list[tuple[str, int, int, str]] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Raise):
-            targets.append(("raise-removed", node.lineno, "guard deleted"))
+            targets.append(
+                ("raise-removed", node.lineno, node.col_offset, "guard deleted")
+            )
         elif isinstance(node, ast.Compare) and node.ops and type(node.ops[0]) in _FLIP:
             op = type(node.ops[0])
             targets.append(
-                ("compare-flipped", node.lineno, f"{op.__name__} -> {_FLIP[op].__name__}")
+                (
+                    "compare-flipped",
+                    node.lineno,
+                    node.col_offset,
+                    f"{op.__name__} -> {_FLIP[op].__name__}",
+                )
             )
 
-    for kind, line, detail in targets:
+    for kind, line, col, detail in targets:
         clone = copy.deepcopy(tree)
         applied = False
         for node in ast.walk(clone):
             if applied:
                 break
-            if kind == "raise-removed" and isinstance(node, ast.Raise) and node.lineno == line:
+            at_node = (
+                getattr(node, "lineno", None) == line
+                and getattr(node, "col_offset", None) == col
+            )
+            if kind == "raise-removed" and isinstance(node, ast.Raise) and at_node:
                 _replace_raise(clone, node)
                 applied = True
             elif (
                 kind == "compare-flipped"
                 and isinstance(node, ast.Compare)
-                and node.lineno == line
+                and at_node
                 and node.ops
                 and type(node.ops[0]) in _FLIP
             ):
@@ -201,7 +216,9 @@ def main(argv: list[str] | None = None) -> int:
 
             if survived:
                 survivors.append(mutation)
-                print(f"  SURVIVED  {name}:{mutation.line}  {mutation.kind}  {mutation.detail}")
+                print(
+                    f"  SURVIVED  {name}:{mutation.line}  {mutation.kind}  {mutation.detail}"
+                )
             else:
                 killed += 1
 
@@ -210,7 +227,9 @@ def main(argv: list[str] | None = None) -> int:
     total = killed + len(survivors)
     elapsed = time.perf_counter() - started
     print()
-    print(f"  {total} mutations in {elapsed:.0f}s: {killed} killed, {len(survivors)} survived")
+    print(
+        f"  {total} mutations in {elapsed:.0f}s: {killed} killed, {len(survivors)} survived"
+    )
     if survivors:
         print("\n  Survivors are lines no test is holding:")
         for m in survivors:
