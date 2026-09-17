@@ -2,11 +2,13 @@
 
 Plan: ``.agent/plans/menhir-mcp-snapshot-ingest-2026-09-16.md``.
 
-Only ``--check`` works today, by design. It runs entirely locally -- it reads the repository,
-applies the selection policy, and prints what a sync WOULD upload -- and makes no network call and
-writes no archive. The upload half is plan phase P2 and is gated on P0's measured transport
-limits, so an unqualified ``menhir sync`` refuses with that explanation rather than appearing to
-work.
+``--check`` runs entirely locally: it reads the repository, applies the selection policy, and
+prints what a sync WOULD upload, making no network call and writing no archive. Without it the
+same plan is built and then uploaded, which became possible once P2A measured the transport and
+P2B built the client.
+
+**A refusal stops a send, structurally.** The blocked check runs before the upload branch rather
+than inside it, so while a secret-risk path stands there is no code path that reaches the network.
 
 The report deliberately prints full paths for refusals and omissions. That is safe precisely
 because it never leaves the user's machine; the same strings are forbidden in anything the server
@@ -15,19 +17,23 @@ logs or emits (plan invariant 5).
 
 from __future__ import annotations
 
+import tempfile
 from pathlib import Path
 from typing import Annotated
 
 import typer
 
+from menhir.config import MemorySettings
 from menhir.snapshot.bundler import (
     BundlePlan,
     BundlerError,
     build_plan,
     estimate_archive_upper_bound,
+    write_bundle,
 )
 from menhir.snapshot.policy import SelectionPolicy
 from menhir.snapshot.protocol import PROVISIONAL_LIMITS, chunk_count
+from menhir.snapshot.upload_client import SnapshotUploader, SnapshotUploadError
 
 #: Grouped omission headings, in the order a reader most likely cares about.
 _OMISSION_LABELS = {
@@ -101,6 +107,86 @@ def _report(plan: BundlePlan, *, limits=PROVISIONAL_LIMITS) -> None:
         echo("An override applies to the run you type it on; it is not remembered.")
 
 
+def _remote_target(settings: MemorySettings) -> tuple[str, str]:
+    """Resolve the remote URL and the key that can actually drive the snapshot tools.
+
+    Deliberately NOT `resolve_backend_auth_key`: that returns the agent key, and the receive tools
+    are operator-tier. Sending an agent key produces a permission refusal that says nothing about
+    tiers, so the caller would go looking for a broken server instead of a wrong key.
+    """
+    url = (settings.backend_url or "").strip()
+    if not url:
+        typer.echo(
+            "menhir sync needs a remote Menhir to send to, and MENHIR_BACKEND_URL is not set.\n"
+            "Run `menhir sync --check` to see what a sync would send, without a network call."
+        )
+        raise typer.Exit(code=2)
+
+    key = (settings.operator_key or "").strip()
+    if not key:
+        typer.echo(
+            "menhir sync needs MENHIR_OPERATOR_KEY.\n"
+            "The snapshot receive tools are operator-tier, so an agent or readonly key is refused\n"
+            "by the server with a message about permissions rather than about the key you set."
+        )
+        raise typer.Exit(code=2)
+    return url, key
+
+
+def _upload(plan: BundlePlan, *, settings: MemorySettings) -> None:
+    """Write the bundle to a temporary file and send it.
+
+    A file, not memory: the pilot quota admits 64 MiB compressed and the uploader streams from
+    disk a chunk at a time, so holding the whole archive in the client would be the only place
+    the bundle size mattered.
+    """
+    url, key = _remote_target(settings)
+    echo = typer.echo
+
+    with tempfile.TemporaryDirectory(prefix="menhir-sync-") as workspace:
+        archive = Path(workspace) / "bundle.zip"
+        with archive.open("wb") as handle:
+            write_bundle(plan, handle)
+
+        size = archive.stat().st_size
+        echo("")
+        echo(f"archive         {size} bytes")
+        echo(f"sending to      {url}")
+
+        def progress(sent: int, total: int) -> None:
+            # Rewritten in place rather than one line per chunk: a 64 MiB bundle is ~64 chunks and
+            # a scrolling log buries the result.
+            typer.echo(f"\r  chunk {sent}/{total}", nl=False)
+
+        try:
+            outcome = SnapshotUploader(url, auth_key=key).upload(
+                archive,
+                project_key=plan.manifest.display_name,
+                progress=progress,
+            )
+        except SnapshotUploadError as exc:
+            echo("")
+            echo(f"upload failed   {exc}")
+            echo(f"                ({exc.code})")
+            raise typer.Exit(code=1) from exc
+
+    echo("")
+    echo(f"upload          {outcome.state}")
+    echo(
+        f"                {outcome.sent_chunks} chunk(s) of {outcome.chunk_bytes} bytes, "
+        f"{outcome.bytes_sent} bytes sent"
+    )
+    if outcome.state != "SEALED":
+        # Every chunk was accepted and the upload still is not whole. Not a transport failure, so
+        # it must not read like success -- a partial upload nobody notices is the worst outcome
+        # here, because the server holds it until the inactivity TTL.
+        echo("                the server does not consider this upload complete")
+        raise typer.Exit(code=1)
+    echo("")
+    echo("The snapshot is staged on the server. Nothing has been extracted or written to the")
+    echo("graph: that arrives with later phases of the snapshot plan.")
+
+
 def sync(
     path: Annotated[
         Path | None, typer.Argument(help="Project directory (default: current directory).")
@@ -122,20 +208,12 @@ def sync(
         ),
     ] = None,
 ) -> None:
-    """Report what a remote structure sync would upload from this repository.
+    """Send this repository's structure to a remote Menhir, or report what would be sent.
 
-    Uploading is not available yet: it arrives with the MCP snapshot tools, whose transport
-    limits must be measured first.
+    `--check` is local only: it reads the repository, applies the selection policy and prints the
+    plan, making no network call and writing no archive. Without it, the same plan is built and
+    then actually uploaded.
     """
-    if not check:
-        typer.echo(
-            "menhir sync can only run with --check right now.\n"
-            "The upload path (MCP snapshot tools) is not implemented yet, and its chunk and quota\n"
-            "limits have to be measured through a real Streamable HTTP ingress before it ships.\n"
-            "Run `menhir sync --check` to see exactly what a sync would send."
-        )
-        raise typer.Exit(code=2)
-
     policy = SelectionPolicy(
         max_file_bytes=PROVISIONAL_LIMITS.max_file_bytes,
         allowed_secret_paths=frozenset(allow_path or ()),
@@ -152,5 +230,11 @@ def sync(
         raise typer.Exit(code=1) from exc
 
     _report(plan)
+    # Checked before the upload branch and not inside it: a refusal must stop a send, and the
+    # cheapest way to guarantee that is for the send to be unreachable while one stands.
     if plan.blocked:
         raise typer.Exit(code=1)
+    if check:
+        return
+
+    _upload(plan, settings=MemorySettings.from_env())

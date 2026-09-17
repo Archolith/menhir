@@ -260,3 +260,29 @@ def test_the_client_explains_an_endpoint_that_does_not_serve_the_tools(remote_me
 
     assert excinfo.value.code == "sync.server.tool_unavailable"
     assert "backend-first proxy" in str(excinfo.value)
+
+
+def test_menhir_sync_uploads_from_the_command_line(
+    remote_menhir: str, sample_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The whole product path: `menhir sync` against a server that cannot see the repository.
+
+    Everything else in this file drives the protocol or the client directly. This runs the command
+    a user runs, reading the same environment they set, so the wiring between CLI, bundler and
+    uploader is exercised rather than assumed.
+    """
+    from typer.testing import CliRunner
+
+    from menhir.cli import app
+
+    monkeypatch.setenv("MENHIR_BACKEND_URL", remote_menhir)
+    monkeypatch.setenv("MENHIR_OPERATOR_KEY", OPERATOR_KEY)
+
+    result = CliRunner().invoke(app, ["sync", str(sample_repo)])
+
+    assert result.exit_code == 0, result.output
+    assert "SEALED" in result.output
+    assert "Nothing has been extracted" in result.output, (
+        "the CLI must say the snapshot is inert; a user who reads 'uploaded' and assumes it was "
+        "indexed has been misled about what this phase does"
+    )

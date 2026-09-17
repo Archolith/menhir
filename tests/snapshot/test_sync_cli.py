@@ -94,11 +94,70 @@ def test_name_override_is_used(repo: Path) -> None:
     assert "project name    other-name" in result.output
 
 
-def test_upload_without_check_refuses_and_says_why(repo: Path) -> None:
+def test_upload_without_a_remote_says_which_setting_is_missing(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P2B replaced the blanket refusal. This pins the message that took its place.
+
+    The old test asserted `menhir sync` refuses because the upload path does not exist and the
+    limits are unmeasured. Both became false, so it could not stay -- but the useful half of it
+    can: an unqualified sync that cannot proceed must say exactly which setting is missing.
+    """
+    monkeypatch.delenv("MENHIR_BACKEND_URL", raising=False)
+
     result = runner.invoke(app, ["sync", str(repo)])
+
     assert result.exit_code == 2
-    assert "only run with --check" in result.output
-    assert "measured" in result.output
+    assert "MENHIR_BACKEND_URL" in result.output
+    assert "--check" in result.output, "the local alternative should be offered"
+
+
+def test_upload_with_a_non_operator_key_names_the_tier(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The receive tools are operator-tier.
+
+    Sending an agent key gets a permission refusal from the server that says nothing about tiers,
+    so the caller goes looking for a broken server instead of a wrong key. Catch it locally and
+    name the tier.
+    """
+    monkeypatch.setenv("MENHIR_BACKEND_URL", "https://example.invalid")
+    monkeypatch.delenv("MENHIR_OPERATOR_KEY", raising=False)
+    monkeypatch.setenv("MENHIR_AGENT_KEY", "an-agent-key")
+
+    result = runner.invoke(app, ["sync", str(repo)])
+
+    assert result.exit_code == 2
+    assert "MENHIR_OPERATOR_KEY" in result.output
+    assert "operator-tier" in result.output
+
+
+def test_a_secret_refusal_blocks_the_upload_before_any_network_call(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The safety property of the whole command, asserted without `--check`.
+
+    Every other refusal test runs in `--check`, where nothing could be sent anyway. This one
+    configures a complete, valid remote and proves the send is unreachable while a refusal stands
+    -- by making any attempt to construct an uploader fail the test outright.
+    """
+    # `-f` because the file must be TRACKED to enter the plan at all -- an untracked .env is
+    # never enumerated, so it can neither be refused nor sent, and a test that skipped this would
+    # pass while proving nothing.
+    (repo / ".env").write_bytes(b"TOKEN=live\n")
+    _git(repo, "add", "-f", ".env")
+    monkeypatch.setenv("MENHIR_BACKEND_URL", "https://example.invalid")
+    monkeypatch.setenv("MENHIR_OPERATOR_KEY", "an-operator-key")
+
+    def explode(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("a blocked plan reached the network")
+
+    monkeypatch.setattr("menhir.cli.sync.SnapshotUploader", explode)
+
+    result = runner.invoke(app, ["sync", str(repo)])
+
+    assert result.exit_code == 1
+    assert "REFUSED" in result.output
 
 
 def test_outside_a_repository_fails_cleanly(tmp_path: Path) -> None:
