@@ -393,7 +393,10 @@ class TestEligibility:
         assert is_eligible_file(rel_path, role) is True
 
     @pytest.mark.parametrize("rel_path", [
-        ".agent/README.md", "docs/guide.rst", "notes.txt", "server.log",
+        # .agent/README.md was REMOVED 2026-09-17 (A0, Beacon v2 design): the bounded
+        # agent-orientation doc set is now indexed as document-role entities and its
+        # True-eligibility is pinned by tests/test_scanner_agent_docs.py.
+        "docs/guide.rst", "notes.txt", "server.log",
         "assets/logo.png", "data/cache.sqlite3", "dist/wheel.whl",
     ])
     def test_documentation_and_binaries_excluded(self, rel_path):

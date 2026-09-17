@@ -171,7 +171,7 @@ _MAX_FILE_BYTES = 2 * 1024 * 1024  # 2 MB — skip files larger than this to avo
 # fingerprint so a rules change invalidates every stored fingerprint and forces a re-scan --
 # otherwise the path+mtime fingerprint is unchanged, ingest skips as "unchanged", and existing
 # graphs keep their truncated state forever.
-SCANNER_SCHEMA_VERSION = 5
+SCANNER_SCHEMA_VERSION = 6  # v6: A0 agent-orientation docs join the eligible set
 
 # --- Eligibility: an ordered deny-list. First match wins. ---------------------------------
 # Step 2 (preserve) runs BEFORE step 3 (extension exclusions) so that structural manifests are
@@ -446,6 +446,12 @@ def _classify_file_role(rel_path: str) -> str:
     name = os.path.basename(rel_path)
     parts = rel_path.replace("\\", "/").split("/")
 
+    # A0: bounded agent-orientation docs (Beacon v2 design, §A0). Classified
+    # before entrypoint/config checks so `.agent/README.md` is a document, not
+    # an entrypoint, and before the tests rule so `.agent/*` is never a test.
+    if len(parts) == 2 and parts[0] == ".agent" and name in _AGENT_ORIENTATION_DOCS:
+        return "document"
+
     # Entrypoints
     if name in _ENTRYPOINT_NAMES:
         return "entrypoint"
@@ -474,6 +480,14 @@ def _is_root_level(parts: list[str]) -> bool:
     return len(parts) <= 2
 
 
+#: A0 (Beacon v2 design): the only `.agent/` markdown files the scanner promotes
+#: to document-role entities. Orientation for any agent; contributor process docs
+#: (workflows, plans, file-index, maintenance) stay out of the document set.
+_AGENT_ORIENTATION_DOCS: frozenset[str] = frozenset(
+    {"README.md", "architecture.md", "data_models.md", "endpoints.md", "CHANGELOG.md"}
+)
+
+
 def _infer_description(rel_path: str, role: str) -> str:
     name = os.path.basename(rel_path)
     if role == "entrypoint":
@@ -482,6 +496,8 @@ def _infer_description(rel_path: str, role: str) -> str:
         return f"Configuration: {name}"
     if role == "test":
         return f"Test file: {name}"
+    if role == "document":
+        return f"Agent orientation doc: {name}"
     return ""
 
 
@@ -999,6 +1015,11 @@ def is_eligible_file(rel_path: str, role: str) -> bool:
     if role in ("config", "entrypoint"):
         return True
     if _MANIFEST_PATTERN.match(name):
+        return True
+
+    # Step 2b -- A0: the bounded agent-orientation doc set is structural evidence
+    # (Beacon v2 design); other markdown remains excluded documentation.
+    if role == "document":
         return True
 
     # Step 3 -- exclude documentation and binaries by extension.
