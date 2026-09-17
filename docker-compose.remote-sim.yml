@@ -72,8 +72,10 @@ services:
       MENHIR_API_KEY: sim-agent-key
       MENHIR_OPERATOR_KEY: sim-operator-key
       # The surface under test. Off everywhere else by default; on here because this stack
-      # exists to exercise it.
-      MENHIR_SNAPSHOT_RECEIVE_MODE: staging
+      # exists to exercise it. `receive` is P2B's spelling: uploads are accepted, nothing is
+      # extracted and no graph is touched. P2A's `staging` still resolves to this, but the stack
+      # names the real mode so the alias is not the only thing exercising it.
+      MENHIR_SNAPSHOT_RECEIVE_MODE: receive
       MENHIR_STATE_DIR: /app/state
       # No LLM in this stack. Enrichment is not what is being tested and an unreachable
       # endpoint would otherwise sit in retry/backoff during the smoke.

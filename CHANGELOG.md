@@ -12,6 +12,31 @@
   regression cases. Live stdio E2E-2 and exact-commit repository CI remain release gates.
 - Keep the newest ten dated entries per `.agent/maintenance.md`; older entries remain in Git history.
 
+## 2026-09-16 - the snapshot receive mode is declared once instead of compared everywhere
+
+P2A read `MENHIR_SNAPSHOT_RECEIVE_MODE` with `os.getenv` inside the tool module and compared it to
+a string literal. Correct for one phase with one surface, and it does not survive three more modes:
+`shadow` extracts an archive and scans it, `write` also reaches the graph, and a string compared in
+each place that cares is how `receive` ends up extracting something.
+
+`menhir.config.snapshot_mode` now declares the ladder once, beside `auth_mode` and for the same
+reason -- "what is this server allowed to do?" should have one answer every caller reads.
+
+- `SnapshotReceiveMode` exposes `accepts_uploads`, `extracts_archives` and `writes_graph`, so
+  callers ask for the capability rather than comparing to a name. `mode == WRITE` in an extraction
+  guard is correct until `shadow` exists and silently wrong afterwards.
+- `extracts_archives` and `writes_graph` have no implementation -- P3 and P4 own those -- but are
+  pinned by test now, because the guards that will consult them get written against this contract.
+- **Unknown values resolve to OFF and do not raise.** A typo must not enable a receive surface, and
+  a snapshot mode nobody set is not a reason to refuse to boot.
+- P2A's `staging` still resolves, to `receive`. Silently becoming OFF after an upgrade would look
+  like the tools vanishing with nothing obviously wrong in the config. The remote-sim stack now
+  names `receive` so the alias is not the only thing exercised.
+
+`test_the_mode_is_off_unless_it_is_explicitly_staging` asserted that `receive` did NOT enable the
+tools. That was the phase's behaviour, not a safety property, so it was rewritten to pin the
+property that still holds: anything not naming a mode resolves to OFF.
+
 ## 2026-09-16 - a crash between an upload's two writes returned a 500
 
 P2B's second inherited counterexample. Every write in the receiver is two steps -- `begin` writes

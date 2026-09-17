@@ -28,9 +28,13 @@ what plan invariant 5 forbids.
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
+from menhir.config.snapshot_mode import (
+    SNAPSHOT_RECEIVE_MODE_ENV,
+    SnapshotReceiveMode,
+    snapshot_receive_mode,
+)
 from menhir.mcp.contracts import ToolScope
 from menhir.mcp.service_access import get_mcp_session
 from menhir.mcp.tools.base import BaseJsonTool
@@ -46,25 +50,27 @@ __all__ = [
     "staging_enabled",
 ]
 
-SNAPSHOT_RECEIVE_MODE_ENV = "MENHIR_SNAPSHOT_RECEIVE_MODE"
-
-#: P2A knows two modes. P2B introduces `receive`/`shadow`/`write` as a registered feature flag;
-#: until then anything other than `staging` means off, so a typo fails closed.
-MODE_OFF = "off"
-MODE_STAGING = "staging"
+#: P2B: the mode is declared in `menhir.config.snapshot_mode`, not parsed here. This module used
+#: to own the env read and compare it to a literal; that is exactly the shape that lets `receive`
+#: drift into doing something `shadow` should. Re-exported so existing callers and tests keep
+#: their import site.
+MODE_OFF = SnapshotReceiveMode.OFF.value
+MODE_STAGING = SnapshotReceiveMode.RECEIVE.value
 
 _DISABLED_MESSAGE = (
-    "snapshot staging receive is disabled. It is a transport-measurement surface (plan P2A), "
-    f"enabled only by setting {SNAPSHOT_RECEIVE_MODE_ENV}=staging on an operator instance."
+    "snapshot receive is disabled. It is an operator surface (plan P2A/P2B), enabled only by "
+    f"setting {SNAPSHOT_RECEIVE_MODE_ENV}=receive on an operator instance."
 )
 
 
-def snapshot_receive_mode() -> str:
-    return os.getenv(SNAPSHOT_RECEIVE_MODE_ENV, MODE_OFF).strip().lower() or MODE_OFF
-
-
 def staging_enabled() -> bool:
-    return snapshot_receive_mode() == MODE_STAGING
+    """Whether the receive tools may be registered and invoked.
+
+    Asks the mode for the capability rather than comparing it to a name: every mode above OFF
+    accepts uploads, and `shadow`/`write` must not have to be remembered here when P3 and P4
+    introduce them.
+    """
+    return snapshot_receive_mode().accepts_uploads
 
 
 def _staging_root():

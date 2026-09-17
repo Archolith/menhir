@@ -16,6 +16,10 @@ from pathlib import Path
 
 import pytest
 
+from menhir.config.snapshot_mode import (
+    SnapshotReceiveMode,
+    resolve_snapshot_receive_mode,
+)
 from menhir.mcp.contracts import assert_tool_scopes_declared, validate_tool_metadata
 from menhir.mcp.tools import ALL_TOOLS, registered_tools
 from menhir.mcp.tools.ingest.snapshot_staging import (
@@ -52,14 +56,54 @@ def session(monkeypatch: pytest.MonkeyPatch):
 # --- off by default -----------------------------------------------------------------------------
 
 
-def test_the_mode_is_off_unless_it_is_explicitly_staging(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_mode_is_off_unless_it_names_a_real_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    """P2B widened this contract on purpose.
+
+    In P2A only the literal `staging` enabled the tools, and this test asserted that `receive`
+    did NOT. `receive` is now a real mode, so that assertion had to change -- the behaviour it
+    pinned was the phase's, not a safety property. What it must still pin is the safety property:
+    anything that does not name a mode resolves to OFF rather than failing open.
+    """
     monkeypatch.delenv(SNAPSHOT_RECEIVE_MODE_ENV, raising=False)
     assert staging_enabled() is False
 
-    for value in ("", "on", "yes", "STAGING ", "receive", "true", "1"):
+    enabling = {"receive", "shadow", "write", "staging", "  Receive ", "WRITE"}
+    for value in ("", "on", "yes", "true", "1", "off", "recieve", "receive-all", *enabling):
         monkeypatch.setenv(SNAPSHOT_RECEIVE_MODE_ENV, value)
-        expected = value.strip().lower() == "staging"
-        assert staging_enabled() is expected, f"{value!r} must not fail open"
+        expected = value in enabling
+        assert staging_enabled() is expected, f"{value!r} resolved the wrong way"
+
+
+def test_every_mode_above_off_accepts_uploads_and_only_write_reaches_the_graph() -> None:
+    """The ladder, pinned where it is declared rather than at each call site.
+
+    `extracts_archives` and `writes_graph` have no implementation yet -- P3 and P4 own those. They
+    are asserted now because the guards that will consult them get written against this contract,
+    and a mode whose capabilities are decided later is how `receive` acquires one by accident.
+    """
+    assert SnapshotReceiveMode.OFF.accepts_uploads is False
+    assert all(
+        m.accepts_uploads
+        for m in (SnapshotReceiveMode.RECEIVE, SnapshotReceiveMode.SHADOW, SnapshotReceiveMode.WRITE)
+    )
+
+    assert SnapshotReceiveMode.RECEIVE.extracts_archives is False
+    assert SnapshotReceiveMode.SHADOW.extracts_archives is True
+    assert SnapshotReceiveMode.WRITE.extracts_archives is True
+
+    assert [m for m in SnapshotReceiveMode if m.writes_graph] == [SnapshotReceiveMode.WRITE]
+
+
+def test_the_legacy_staging_spelling_still_resolves(monkeypatch: pytest.MonkeyPatch) -> None:
+    """P2A's value must not silently become OFF.
+
+    An operator instance or a compose file written against P2A sets `staging`. Resolving that to
+    OFF would look like the tools vanishing after an upgrade, with nothing in the config obviously
+    wrong -- the worst kind of failure to diagnose.
+    """
+    assert resolve_snapshot_receive_mode("staging") is SnapshotReceiveMode.RECEIVE
+    monkeypatch.setenv(SNAPSHOT_RECEIVE_MODE_ENV, "staging")
+    assert staging_enabled() is True
 
 
 def test_the_tools_are_not_registered_while_the_mode_is_off(monkeypatch: pytest.MonkeyPatch) -> None:
