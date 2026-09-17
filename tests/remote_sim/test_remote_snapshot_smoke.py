@@ -28,12 +28,20 @@ import pytest
 
 from menhir.snapshot.bundler import build_plan, write_bundle
 from menhir.snapshot.protocol import sha256_hex
-from tests.remote_sim.conftest import call_mcp
+from menhir.snapshot.upload_client import SnapshotUploader, SnapshotUploadError
+from tests.remote_sim.conftest import OPERATOR_KEY, call_mcp
 
 #: The session fixture builds an image and starts two containers, and pytest-timeout's
 #: 60s default covers fixture setup too -- without this the stack is killed mid-boot and
 #: teardown never runs, leaving containers holding the ports.
 pytestmark = [pytest.mark.remote_sim, pytest.mark.timeout(900)]
+
+
+def _write_archive(repo: Path, target: Path) -> Path:
+    """Build the real bundle on disk, which is what the CLI hands the uploader."""
+    with target.open("wb") as handle:
+        write_bundle(build_plan(repo), handle)
+    return target
 
 _CHUNK = 8 * 1024
 
@@ -185,3 +193,70 @@ def test_aborting_drops_the_upload(remote_menhir: str) -> None:
     )
 
     assert aborted["state"] == "ABORTED"
+
+
+def test_the_upload_client_sends_a_real_bundle(
+    remote_menhir: str, sample_repo: Path, tmp_path: Path
+) -> None:
+    """`SnapshotUploader` against a server that cannot see the repository it is receiving.
+
+    `test_a_real_bundle_survives_the_round_trip` drives the tools by hand, which proves the
+    protocol. This proves the CLIENT -- the code `menhir sync` will actually run -- including the
+    part no hand-driven test exercises: that it chunks to the size the SERVER negotiated rather
+    than to its own default.
+    """
+    archive = _write_archive(sample_repo, tmp_path / "bundle.zip")
+
+    seen: list[tuple[int, int]] = []
+    uploader = SnapshotUploader(remote_menhir, auth_key=OPERATOR_KEY)
+    outcome = uploader.upload(
+        archive,
+        project_key="client-e2e",
+        progress=lambda sent, total: seen.append((sent, total)),
+    )
+
+    assert outcome.state == "SEALED"
+    assert outcome.sent_chunks == outcome.total_chunks
+    assert outcome.bytes_sent == archive.stat().st_size
+    assert seen and seen[-1][0] == outcome.sent_chunks
+
+
+def test_the_client_chunks_to_the_servers_size_not_its_own(
+    remote_menhir: str, sample_repo: Path, tmp_path: Path
+) -> None:
+    """Ask for a chunk size the server will not grant, and finish anyway on the server's terms.
+
+    The receiver places bytes at `index * chunk_bytes` using ITS number. A client that asked for
+    one size and then cut to another would write every chunk at the wrong offset, and each chunk's
+    digest would still verify -- a bundle that passes every per-chunk check and is silently wrong.
+
+    This test was written expecting the server to CLAMP an over-ceiling request. It does not: it
+    refuses the begin outright. So the property worth having is the client's, not the server's --
+    a caller must not be turned away over a chunk size preference it has no reason to hold, and
+    must then use what the server actually granted.
+    """
+    archive = _write_archive(sample_repo, tmp_path / "bundle-2.zip")
+
+    uploader = SnapshotUploader(remote_menhir, auth_key=OPERATOR_KEY)
+    outcome = uploader.upload(
+        archive, project_key="client-negotiation", chunk_bytes=64 * 1024 * 1024
+    )
+
+    assert outcome.state == "SEALED", "the server's chunk plan was not followed"
+    assert outcome.chunk_bytes <= 2 * 1024 * 1024, "the server granted more than its own ceiling"
+    assert outcome.bytes_sent == archive.stat().st_size
+
+
+def test_the_client_explains_an_endpoint_that_does_not_serve_the_tools(remote_menhir: str) -> None:
+    """The likeliest misconfiguration must not surface as a raw 404 or JSON-RPC error.
+
+    A URL that reaches a server but not the snapshot tools -- receive mode off, an older Menhir, or
+    a backend-first proxy that does not forward MCP -- is the error a user will actually hit, so it
+    has to name those possibilities rather than make them guess.
+    """
+    uploader = SnapshotUploader(remote_menhir, auth_key=OPERATOR_KEY)
+    with pytest.raises(SnapshotUploadError) as excinfo:
+        uploader._call("no_such_snapshot_tool", {})
+
+    assert excinfo.value.code == "sync.server.tool_unavailable"
+    assert "backend-first proxy" in str(excinfo.value)
