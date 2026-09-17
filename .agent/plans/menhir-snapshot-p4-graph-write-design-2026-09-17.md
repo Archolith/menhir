@@ -122,8 +122,23 @@ Specifically:
    different products: one stops a caller, the other trusts them to notice.
 3. **Is promotion operator-only for the whole pilot, or does trusted CI promote?** Open decision 5
    in the parent plan. It decides whether the first graph write can happen unattended.
-4. **The omission behaviour (threat 4).** Flagged and characterised by test today; it must be
-   settled before the first write, because the failure is silent data loss rather than an error.
+4. ~~The omission behaviour (threat 4).~~ **DECIDED 2026-09-17: refuse the bundle.** A manifest
+   whose own declarations do not parse is one the server cannot reason about, so it fails at
+   upload, before any graph write.
+
+   The reason it has to be strict is in how deletion is signalled: **the manifest carries a
+   deletion COUNT, not the deleted paths** — those stay client-side in `BundlePlan.deleted`. So
+   the server infers deletion from absence, and a dropped omission is indistinguishable from a
+   deleted file. Leniency here is not "ignore a bad field", it is "prune a file the client
+   explicitly said it was keeping".
+
+   Cost accepted: a client bug blocks syncing until it is fixed. That is the point — the
+   alternative fails silently and takes data with it.
+
+   **This is a change to `protocol.py`, which is P0-frozen.** It is additive in the sense that no
+   existing code changes meaning, but a bundle that parsed yesterday may be refused tomorrow, so
+   it lands with the P4 work rather than as a drive-by. `test_a_malformed_omission_is_silently_dropped_which_is_worth_knowing`
+   characterises today's behaviour and is where the change registers.
 
 ## Build order, and why the backup restore now earns its place
 
