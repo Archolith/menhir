@@ -1,24 +1,27 @@
 """Generation-path tests for #120: evidence gating, compat boundary, determinism.
 
-The Beacon side of the compat boundary is exercised through a stubbed
-subprocess unless the real Beacon package is importable; when it is, the same
-tests round-trip through Beacon's actual parser/validator instead of a copy.
+The graph side is a fake in-memory reader; the Beacon side runs the real,
+isolated Beacon package in a subprocess (its own parser/validator) rather than a
+stub. These tests require MENHIR_TEST_BEACON_PYTHON to point at an absolute path
+to a Python interpreter with the Beacon package installed; there is no stub or
+skip fallback.
 """
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+from menhir.services.beacon_compat import BeaconCompatError, beacon_python_is_usable
 from menhir.services.beacon_generation import (
     BeaconGenerationError,
     build_raw_manifest,
     generate_beacon,
 )
-from menhir.services.beacon_compat import BeaconCompatError, beacon_python_is_usable
 
 
 def _reader(
@@ -63,6 +66,34 @@ def _fixture_repo(tmp_path: Path) -> Path:
     return tmp_path
 
 
+@pytest.fixture
+def beacon_python() -> str:
+    """Absolute path to a real Python interpreter with the Beacon package installed.
+
+    Required via MENHIR_TEST_BEACON_PYTHON; these tests run the real Beacon package
+    in an isolated subprocess, so there is no stub or skip fallback.
+    """
+    raw = os.environ.get("MENHIR_TEST_BEACON_PYTHON", "").strip()
+    if not raw:
+        pytest.fail(
+            "MENHIR_TEST_BEACON_PYTHON is not set: these tests run the real Beacon "
+            "package in a subprocess. Set it to the absolute path of a Python "
+            "interpreter with Beacon installed, e.g. "
+            "MENHIR_TEST_BEACON_PYTHON=/opt/beacon-venv/bin/python"
+        )
+    interpreter = Path(raw)
+    if not interpreter.is_absolute():
+        pytest.fail(
+            f"MENHIR_TEST_BEACON_PYTHON must be an absolute path, got {raw!r}"
+        )
+    if not interpreter.is_file():
+        pytest.fail(
+            "MENHIR_TEST_BEACON_PYTHON does not point at an existing interpreter "
+            f"file: {raw!r}"
+        )
+    return str(interpreter)
+
+
 def test_unindexed_project_fails_closed(tmp_path: Path) -> None:
     with pytest.raises(BeaconGenerationError, match="not indexed"):
         build_raw_manifest(_reader(root=None), "fixture", tmp_path)
@@ -94,8 +125,8 @@ def test_manifest_grounding_and_determinism(tmp_path: Path) -> None:
     assert concept["sources"] and concept["sources"][0]["type"] == "manifest"
 
 
-def test_usable_beacon_python_accepts_real_package() -> None:
-    beacon_python_is_usable("py")  # system python has beacon 0.1.0; fails closed otherwise
+def test_usable_beacon_python_accepts_real_package(beacon_python: str) -> None:
+    beacon_python_is_usable(beacon_python)  # real interpreter; fails closed otherwise
 
 
 def test_unusable_interpreter_fails(tmp_path: Path) -> None:
@@ -103,12 +134,12 @@ def test_unusable_interpreter_fails(tmp_path: Path) -> None:
         beacon_python_is_usable(str(tmp_path / "no-such-python.exe"))
 
 
-def test_real_beacon_round_trip(tmp_path: Path) -> None:
+def test_real_beacon_round_trip(tmp_path: Path, beacon_python: str) -> None:
     """Build through the real Beacon package, then validate the on-disk manifest."""
     repo = _fixture_repo(tmp_path)
     reader = _reader(root=str(repo))
     outcome = generate_beacon(
-        reader, "fixture", repo, beacon_python="py", refresh=False
+        reader, "fixture", repo, beacon_python=beacon_python, refresh=False
     )
     target = repo / "beacon.generated.yaml"
     assert outcome.created and target.is_file()
@@ -117,18 +148,18 @@ def test_real_beacon_round_trip(tmp_path: Path) -> None:
     assert "project:" in text and "canonical_docs:" in text
     # Refresh with wrong digest must not clobber.
     with pytest.raises(BeaconGenerationError):
-        generate_beacon(reader, "fixture", repo, beacon_python="py",
+        generate_beacon(reader, "fixture", repo, beacon_python=beacon_python,
                         refresh=True, expected_sha256="0" * 64)
     assert target.read_text(encoding="utf-8") == text
 
 
-def test_beacon_validate_cli_accepts_generated_output(tmp_path: Path) -> None:
+def test_beacon_validate_cli_accepts_generated_output(tmp_path: Path, beacon_python: str) -> None:
     repo = _fixture_repo(tmp_path)
     reader = _reader(root=str(repo))
-    generate_beacon(reader, "fixture", repo, beacon_python="py")
+    generate_beacon(reader, "fixture", repo, beacon_python=beacon_python)
     completed = subprocess.run(
-        ["beacon", "validate", str(repo / "beacon.generated.yaml")],
-        capture_output=True, timeout=60,
+        [beacon_python, "-m", "beacon", "validate", str(repo / "beacon.generated.yaml")],
+        capture_output=True, timeout=60, check=False,
     )
     assert completed.returncode == 0, completed.stdout + completed.stderr
 
@@ -141,10 +172,10 @@ def test_staleness_guard(tmp_path: Path) -> None:
         build_raw_manifest(reader, "fixture", tmp_path)
 
 
-def test_refresh_deterministic_round_trip(tmp_path: Path) -> None:
+def test_refresh_deterministic_round_trip(tmp_path: Path, beacon_python: str) -> None:
     repo = _fixture_repo(tmp_path)
     reader = _reader(root=str(repo))
-    first = generate_beacon(reader, "fixture", repo, beacon_python="py")
-    refreshed = generate_beacon(reader, "fixture", repo, beacon_python="py",
+    first = generate_beacon(reader, "fixture", repo, beacon_python=beacon_python)
+    refreshed = generate_beacon(reader, "fixture", repo, beacon_python=beacon_python,
                                 refresh=True, expected_sha256=first.sha256)
     assert refreshed.sha256 == first.sha256  # zero semantic diff on unchanged inputs
